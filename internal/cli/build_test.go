@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	buildpkg "github.com/harumiWeb/xlflow/internal/build"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
 )
@@ -41,12 +42,18 @@ func TestCapabilitiesPublishesBuildCoordinationPolicy(t *testing.T) {
 	capabilities := cliObjectMap(env.Capabilities)
 	commands := cliObjectMap(capabilities["commands"])
 	build := cliObjectMap(commands["build"])
-	if build["resource_scope"] != "none" || build["operation_kind"] != "read" || build["parallel_safe"] != true || build["retryable_when_busy"] != false || build["recovery_behavior"] != "not_applicable" {
+	if build["resource_scope"] != "workbook" || build["operation_kind"] != "mutate" || build["parallel_safe"] != false || build["retryable_when_busy"] != true || build["recovery_behavior"] != "block" {
 		t.Fatalf("build capability = %#v", build)
 	}
 	buildCommand, _, err := root.Find([]string{"build"})
-	if err != nil || shouldDelegateCommand(buildCommand, topLevelCommandName(buildCommand)) {
-		t.Fatalf("build dry-run must stay local: command=%#v, err=%v", buildCommand, err)
+	if err != nil || !shouldDelegateCommand(buildCommand, topLevelCommandName(buildCommand)) {
+		t.Fatalf("build must delegate to the Excel bridge: command=%#v, err=%v", buildCommand, err)
+	}
+	if err := buildCommand.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if shouldDelegateCommand(buildCommand, topLevelCommandName(buildCommand)) {
+		t.Fatal("build --dry-run must remain local")
 	}
 }
 
@@ -118,7 +125,6 @@ func TestBuildValidationAndNonDryRunBoundary(t *testing.T) {
 		{name: "extension mismatch", args: []string{"--json", "build", "--dry-run", "--out", "dist/Book.xlam"}, want: "build_args_invalid", code: output.ExitConfig},
 		{name: "same file", args: []string{"--json", "build", "--dry-run", "--out", "build/Book.xlsm"}, want: "build_plan_invalid", code: output.ExitConfig},
 		{name: "missing base", args: []string{"--json", "build", "--dry-run", "--base", "missing.xlsm"}, want: "build_args_invalid", code: output.ExitConfig},
-		{name: "pipeline pending", args: []string{"--json", "build"}, want: "build_not_implemented", code: output.ExitEnvironment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, err := runBuildCommandForTest(dir, tc.args...)
@@ -129,6 +135,35 @@ func TestBuildValidationAndNonDryRunBoundary(t *testing.T) {
 				t.Fatalf("code=%q, want %q: %s", got, tc.want, stdout)
 			}
 		})
+	}
+}
+
+func TestMergeBuildPayloadPreservesPlanAndBridgeFields(t *testing.T) {
+	plan := map[string]any{"base": "build/Book.xlsm", "warnings": []string{"unmatched"}}
+	merged := mergeBuildPayload(plan, map[string]any{"vbe_compile": "passed", "workbook_saved": true})
+	if merged["base"] != "build/Book.xlsm" || merged["vbe_compile"] != "passed" || merged["workbook_saved"] != true {
+		t.Fatalf("merged build payload = %#v", merged)
+	}
+}
+
+func TestValidateBuildPathsRejectsOutputThroughExternalSymlink(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	for _, dir := range []string{"build", "src/modules", "src/classes", "src/forms", "src/workbook"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "build", "Book.xlsm"), []byte("workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(external, link); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	plan := buildpkg.BuildPlan{BaseWorkbook: "build/Book.xlsm", OutputPath: "link/Product.xlsm"}
+	if err := validateBuildPaths(root, plan); err == nil || !strings.Contains(err.Error(), "resolves outside") {
+		t.Fatalf("validateBuildPaths error = %v", err)
 	}
 }
 

@@ -17,6 +17,7 @@ public sealed class BuildCommandTests
             Assert.Equal("build", request.Command);
             Assert.Equal(@"C:\work", args.ProjectRoot);
             Assert.Equal(@"C:\work\Book.xlsm", args.BaseWorkbookPath);
+            Assert.Equal(@"C:\work\Release.xlsm", args.OutputWorkbookPath);
             Assert.Equal(@"C:\work\.xlflow\tmp\build-1", args.TemporaryDirectory);
             Assert.Equal(encodedPlan, args.PlanJson64);
             Assert.Equal("sidecar", args.CodeSource);
@@ -29,7 +30,7 @@ public sealed class BuildCommandTests
             RequestId = "req-build",
             Command = "build",
             Payload = JsonDocument.Parse($$"""
-                { "ProjectRoot": "C:\\work", "BaseWorkbookPath": "C:\\work\\Book.xlsm", "TemporaryDirectory": "C:\\work\\.xlflow\\tmp\\build-1", "PlanJson64": "{{encodedPlan}}", "CodeSource": "sidecar", "Visible": "false" }
+                { "ProjectRoot": "C:\\work", "BaseWorkbookPath": "C:\\work\\Book.xlsm", "OutputWorkbookPath": "C:\\work\\Release.xlsm", "TemporaryDirectory": "C:\\work\\.xlflow\\tmp\\build-1", "PlanJson64": "{{encodedPlan}}", "CodeSource": "sidecar", "Visible": "false" }
                 """).RootElement.Clone(),
         };
 
@@ -63,10 +64,11 @@ public sealed class BuildCommandTests
             var response = new ExcelBuildService().Execute(request, new BuildCommandArguments(
                 root,
                 Path.Combine(root, "Book.xlsm"),
+                Path.Combine(root, "Release.xlsm"),
                 Path.Combine(root, "temporary"),
                 "not-base64",
                 "sidecar",
-                false), CancellationToken.None);
+                false, "", ""), CancellationToken.None);
 
             Assert.Equal(BridgeStatus.Failed, response.Status);
             Assert.Equal("build_reconstruct_failed", response.Error?.Code);
@@ -92,7 +94,7 @@ public sealed class BuildCommandTests
             Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
             File.WriteAllText(sourcePath, "Attribute VB_Name = \"Main\"");
             var response = new ExcelBuildService().Execute(new BridgeRequest { ProtocolVersion = ProtocolVersion.Current, RequestId = "req-build-plan", Command = "build" }, new BuildCommandArguments(
-                root, Path.Combine(root, "Book.xlsm"), Path.Combine(root, "temporary"), plan, "sidecar", false), CancellationToken.None);
+                root, Path.Combine(root, "Book.xlsm"), Path.Combine(root, "Release.xlsm"), Path.Combine(root, "temporary"), plan, "sidecar", false, "", ""), CancellationToken.None);
 
             Assert.Equal(BridgeStatus.Failed, response.Status);
             Assert.Contains("base workbook does not exist", response.Error?.Message);
@@ -125,7 +127,7 @@ public sealed class BuildCommandTests
             File.WriteAllText(sentinel, "caller-owned");
 
             var response = new ExcelBuildService().Execute(new BridgeRequest { ProtocolVersion = ProtocolVersion.Current, RequestId = "req-build-temp-owner", Command = "build" }, new BuildCommandArguments(
-                root, baseWorkbook, tempParent, plan, "sidecar", false), CancellationToken.None);
+                root, baseWorkbook, Path.Combine(root, "Release.xlsm"), tempParent, plan, "sidecar", false, "", ""), CancellationToken.None);
 
             Assert.Equal(BridgeStatus.Failed, response.Status);
             Assert.True(File.Exists(sentinel));
@@ -133,7 +135,10 @@ public sealed class BuildCommandTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
         }
     }
 

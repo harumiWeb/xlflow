@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,13 +12,11 @@ import (
 	"github.com/spf13/cobra"
 
 	buildpkg "github.com/harumiWeb/xlflow/internal/build"
+	"github.com/harumiWeb/xlflow/internal/coordination"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/workbookformat"
 )
 
-// buildCommand currently owns the stable planning contract only. The Excel
-// mutation pipeline intentionally remains separate so planning cannot modify a
-// development workbook or publish a partial release artifact.
 func (a *app) buildCommand() *cobra.Command {
 	var basePath, outPath string
 	var dryRun bool
@@ -45,13 +45,20 @@ func (a *app) buildCommand() *cobra.Command {
 				env.Logs = []string{"build plan resolved without opening Excel or writing an artifact"}
 				return a.write(env, output.ExitSuccess)
 			}
-			env := output.Failure("build", output.Error{
-				Code:    "build_not_implemented",
-				Message: "The Excel-backed build pipeline is not implemented yet. Use --dry-run to inspect the validated build plan.",
-				Source:  "xlflow",
-			})
-			env.Build = payload
-			return a.write(env, output.ExitEnvironment)
+			planJSON, err := json.Marshal(plan)
+			if err != nil {
+				return a.writeFailure("build", output.ExitEnvironment, "build_plan_encode_failed", err)
+			}
+			base := workbookArgPath(a.cwd, plan.BaseWorkbook)
+			out := workbookArgPath(a.cwd, plan.OutputPath)
+			env, code, err := a.excelRunnerForConfig(cfg).Build(cfg, base64.StdEncoding.EncodeToString(planJSON), base, out, buildCommandOptions(a.stderrWriter()))
+			if err != nil {
+				return err
+			}
+			if env.Status == output.StatusOK {
+				env.Build = mergeBuildPayload(payload, env.Build)
+			}
+			return a.write(env, code)
 		},
 	}
 	cmd.Flags().StringVar(&basePath, "base", "", "base workbook path (defaults to [excel].path)")
@@ -87,7 +94,32 @@ func validateBuildPaths(root string, plan buildpkg.BuildPlan) error {
 	if _, err := existingOutputAncestor(outputPath); err != nil {
 		return err
 	}
+	rootIdentity, err := coordination.NewWorkbookIdentity(root, root)
+	if err != nil {
+		return fmt.Errorf("resolve project root identity: %w", err)
+	}
+	outputIdentity, err := coordination.NewWorkbookIdentity(root, outputPath)
+	if err != nil {
+		return fmt.Errorf("resolve output identity: %w", err)
+	}
+	relative, err := filepath.Rel(rootIdentity.CanonicalPath, outputIdentity.CanonicalPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return fmt.Errorf("output workbook resolves outside the project root: %s", plan.OutputPath)
+	}
 	return nil
+}
+
+func mergeBuildPayload(plan map[string]any, bridge any) map[string]any {
+	merged := make(map[string]any, len(plan)+4)
+	for key, value := range plan {
+		merged[key] = value
+	}
+	if fields, ok := bridge.(map[string]any); ok {
+		for key, value := range fields {
+			merged[key] = value
+		}
+	}
+	return merged
 }
 
 func existingOutputAncestor(path string) (string, error) {

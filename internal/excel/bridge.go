@@ -423,6 +423,7 @@ type ScriptResult struct {
 	PushDiagnostic  any             `json:"push_diagnostic,omitempty"`
 	Target          any             `json:"target,omitempty"`
 	Output          any             `json:"output,omitempty"`
+	Build           any             `json:"build,omitempty"`
 	Debug           any             `json:"debug,omitempty"`
 	Spec            any             `json:"spec,omitempty"`
 	Edit            any             `json:"edit,omitempty"`
@@ -595,6 +596,26 @@ func (r Runner) PushWithOptions(cfg config.Config, opts PushOptions) (output.Env
 		"NoSave":                  strconv.FormatBool(opts.NoSave),
 		"MetadataPath":            filepath.Join(r.RootDir, ".xlflow", "session.json"),
 	}, opts.Keepalive)
+}
+
+// Build delegates a previously resolved source plan to the Excel bridge.
+func (r Runner) Build(cfg config.Config, planJSON64, baseWorkbook, outputWorkbook string, opts ...CommandOptions) (output.Envelope, int, error) {
+	keepalive := CommandOptions{}
+	if len(opts) > 0 {
+		keepalive = opts[0]
+	}
+	return r.run("build", map[string]string{
+		"ProjectRoot":         r.RootDir,
+		"WorkbookPath":        baseWorkbook,
+		"BaseWorkbookPath":    baseWorkbook,
+		"OutputWorkbookPath":  outputWorkbook,
+		"TemporaryDirectory":  filepath.Join(r.RootDir, ".xlflow", "tmp"),
+		"PlanJson64":          planJSON64,
+		"CodeSource":          cfg.UserForm.CodeSource,
+		"Visible":             strconv.FormatBool(cfg.Excel.Visible),
+		"MetadataPath":        filepath.Join(r.RootDir, ".xlflow", "session.json"),
+		"SessionWorkbookPath": workbookPath(r.RootDir, cfg.Excel.Path),
+	}, keepalive)
 }
 
 func buildPullScriptArgs(root string, cfg config.Config, opts SessionCommandOptions) map[string]string {
@@ -1836,6 +1857,7 @@ func (r Runner) runWithOptions(commandName string, args map[string]string, opts 
 	env.PushDiagnostic = result.PushDiagnostic
 	env.Target = result.Target
 	env.Output = result.Output
+	env.Build = result.Build
 	if debugStreamErr != nil {
 		env.Logs = append(env.Logs, "Debug stream closed with an error: "+debugStreamErr.Error())
 	}

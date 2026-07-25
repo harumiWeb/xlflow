@@ -87,6 +87,9 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 		}
 		original := command.RunE
 		command.RunE = func(cmd *cobra.Command, args []string) error {
+			if descriptor.ID == "build" && buildDryRun(cmd) {
+				return original(cmd, args)
+			}
 			targets, resolved := a.coordinationTargets(cmd, args, descriptor.ID)
 			if !resolved {
 				return original(cmd, args)
@@ -97,6 +100,14 @@ func (a *app) wrapCoordinatedLeaves(root *cobra.Command) {
 		}
 	}
 	walk(root)
+}
+
+func buildDryRun(cmd *cobra.Command) bool {
+	if cmd == nil || cmd.Flags().Lookup("dry-run") == nil {
+		return false
+	}
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	return err == nil && dryRun
 }
 
 func requiresWorkbookLease(policy coordination.Policy) bool {
@@ -121,6 +132,20 @@ func commandRecoveryIntent(cmd *cobra.Command, commandID coordination.CommandID)
 
 func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID coordination.CommandID) ([]string, bool) {
 	switch commandID {
+	case "build":
+		cfg, ok := a.coordinationConfig()
+		if !ok {
+			return nil, false
+		}
+		base := cfg.Excel.Path
+		if value, exists := commandFlagString(cmd, "base"); exists && value != "" {
+			base = value
+		}
+		out := filepath.Join("build", "Release", filepath.Base(base))
+		if value, exists := commandFlagString(cmd, "out"); exists && value != "" {
+			out = value
+		}
+		return []string{workbookArgPath(a.cwd, cfg.Excel.Path), workbookArgPath(a.cwd, base), workbookArgPath(a.cwd, out)}, true
 	case "new":
 		name := ""
 		if len(args) > 0 {

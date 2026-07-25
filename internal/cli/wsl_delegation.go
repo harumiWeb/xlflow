@@ -101,6 +101,9 @@ func shouldDelegateTopLevelCommand(name string) bool {
 }
 
 func shouldDelegateCommand(cmd *cobra.Command, topLevel string) bool {
+	if topLevel == "build" && buildDryRun(cmd) {
+		return false
+	}
 	if cmd != nil {
 		if descriptor, err := coordination.LookupCLI(cmd.CommandPath()); err == nil &&
 			descriptor.Policy.ResourceScope == coordination.ResourceWorkbook &&

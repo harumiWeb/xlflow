@@ -69,6 +69,7 @@
 - Windows coordination wait tests need a generous gap between scheduled owner release and the waiter deadline; a one-second budget can expire before timer delivery or owner metadata publication on hosted runners.
 - Treat caller-supplied temporary directories as ownership boundaries: create and clean up only a unique child directory created by the operation, never recursively delete the supplied root.
 - Preserve source-plan path contracts across process boundaries. When a planner publishes project-root-relative paths, the receiving bridge must resolve them against an explicit project root rather than requiring callers to rewrite the plan ad hoc.
+- For destructive output paths, lexical project-root containment is insufficient: resolve the nearest existing ancestor and reject paths whose canonical identity escapes through a symlink or junction.
 
 # DialogWatcher
 
