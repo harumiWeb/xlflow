@@ -1,3 +1,4 @@
+using System.Text;
 using Xlflow.ExcelBridge.Services;
 
 namespace Xlflow.ExcelBridge.Tests;
@@ -5,13 +6,51 @@ namespace Xlflow.ExcelBridge.Tests;
 public sealed class VbaSourceHelperTests
 {
     [Fact]
-    public void ReadExportedTextAsUtf8_DecodesCp932Source()
+    public void GetVbaInteropEncoding_UsesSystemAnsiCodePage()
     {
+        var helperEncoding = VbaSourceHelper.GetVbaInteropEncoding();
+
+        // Determine the expected code page independently of the helper's selection
+        // logic: the Windows system ANSI code page (ACP) on Windows, UTF-8 off it.
+        var expectedCodePage = OperatingSystem.IsWindows()
+            ? VbaSourceHelper.GetSystemAnsiCodePage()
+            : new UTF8Encoding(false).CodePage;
+
+        Assert.Equal(expectedCodePage, helperEncoding.CodePage);
+    }
+
+    [Fact]
+    public void ReadExportedTextAsUtf8_RoundTripsBytesInSystemCodePage()
+    {
+        // GetVbaInteropEncoding() registers the code-pages provider as a side
+        // effect; call it first so Encoding.GetEncoding(<acp>) resolves below.
+        var helperEncoding = VbaSourceHelper.GetVbaInteropEncoding();
+
+        // Build the expected encoding independently of the helper's selection, so
+        // a mismatch between the selected code page and the OS ACP fails the test
+        // (unlike a test that uses the helper's encoding for both write and read).
+        var expectedEncoding = OperatingSystem.IsWindows()
+            ? Encoding.GetEncoding(VbaSourceHelper.GetSystemAnsiCodePage())
+            : new UTF8Encoding(false);
+
+        Assert.Equal(expectedEncoding.CodePage, helperEncoding.CodePage);
+
+        // A non-ASCII sample representable in whatever code page this machine uses
+        // (umlauts on 1252, kanji on 932, everything on UTF-8), so the round-trip
+        // holds regardless of locale.
+        var candidates = new[] { 'ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'ß', '日', '本' };
+        var sample = new string(candidates.Where(c => IsRepresentable(expectedEncoding, c)).ToArray());
+        if (sample.Length == 0)
+        {
+            sample = "ASCII";
+        }
+
+        var exported = $"Attribute VB_Name = \"Module1\"\r\nSub Hello()\r\n    MsgBox \"{sample}\"\r\nEnd Sub\r\n";
         var tempFile = Path.Combine(Path.GetTempPath(), $"xlflow-vba-export-{Guid.NewGuid():N}.bas");
         try
         {
-            var exported = "Attribute VB_Name = \"Module1\"\r\nSub Hello()\r\n    MsgBox \"日本語テスト\"\r\nEnd Sub\r\n";
-            File.WriteAllText(tempFile, exported, VbaSourceHelper.GetVbaInteropEncoding());
+            // Write bytes with the independently-selected encoding, read via the helper.
+            File.WriteAllText(tempFile, exported, expectedEncoding);
 
             var content = VbaSourceHelper.ReadExportedTextAsUtf8(tempFile);
 
@@ -24,6 +63,12 @@ public sealed class VbaSourceHelperTests
                 File.Delete(tempFile);
             }
         }
+    }
+
+    private static bool IsRepresentable(Encoding encoding, char c)
+    {
+        var s = c.ToString();
+        return encoding.GetString(encoding.GetBytes(s)) == s;
     }
 
     [Fact]
