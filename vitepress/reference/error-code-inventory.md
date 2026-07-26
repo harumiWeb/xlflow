@@ -58,7 +58,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `build_settings`
 - `build_temporary_artifact_missing`
 - `build_temporary_cleanup_failed`
-- `build_temporary_cleanup_recovery`
 - `builtin_casing`
 - `builtin_like`
 - `button_not_found`

@@ -12,6 +12,7 @@ Generated from diagnostic IDs in `internal/`. Run `pnpm docs:generate-reference`
 - `VB005`
 - `VB006`
 - `VB007`
+- `VB014`
 - `VB018`
 - `VB019`
 - `VB020`
