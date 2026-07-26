@@ -88,3 +88,4 @@
 - When replacing repeated scans with a lazy index, treat index construction as fallible at every caller. Check both the returned status and pointer before lookup, and retain a safe declared-type fallback where one already exists.
 - When adding procedure-name filters or staged execution errors, preserve VBA modifier/casing variants and scope filters to the component kinds where they are semantic. Keep timeout and dialog outcomes ahead of inferred runner-stage classifications.
 - For user documentation, do not treat accurate command syntax as sufficient onboarding. Explain the user's goal, the state that each step reads or changes, a visible success condition, and the next safe action before relying on command references for detail.
+- When updating a Go module version, update `THIRD_PARTY_LICENCES.md` (including version-pinned licence URLs) in the same change and run `scripts/dev/check-third-party-licences.ps1` before finalizing.

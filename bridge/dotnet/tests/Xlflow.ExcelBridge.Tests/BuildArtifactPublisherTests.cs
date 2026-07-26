@@ -106,6 +106,41 @@ public sealed class BuildArtifactPublisherTests
     }
 
     [Fact]
+    public void PublishManifestWritesCompanionBesidePublishedArtifact()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var output = Path.Combine(workspace.Path, "Release.xlsm");
+        var stage = Path.Combine(workspace.Path, ".xlflow-build-test");
+        Directory.CreateDirectory(stage);
+
+        var result = new BuildArtifactPublisher().PublishManifest(stage, output, new Dictionary<string, object?> { ["schema_version"] = 1 });
+
+        Assert.True(result.Published);
+        Assert.Equal(output + ".build.json", result.Path);
+        Assert.Contains("\"schema_version\":1", File.ReadAllText(result.Path));
+    }
+
+    [Fact]
+    public void PublishManifestFailureDoesNotThrowOrReplaceArtifact()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var output = Path.Combine(workspace.Path, "Release.xlsm");
+        var manifest = output + ".build.json";
+        var stage = Path.Combine(workspace.Path, ".xlflow-build-test");
+        Directory.CreateDirectory(stage);
+        File.WriteAllText(output, "published workbook");
+        File.WriteAllText(manifest, "previous manifest");
+        var publisher = new BuildArtifactPublisher(atomicReplace: (_, _) => new IOException("simulated manifest replacement failure"));
+
+        var result = publisher.PublishManifest(stage, output, new Dictionary<string, object?> { ["schema_version"] = 1 });
+
+        Assert.False(result.Published);
+        Assert.Equal("published workbook", File.ReadAllText(output));
+        Assert.Equal("previous manifest", File.ReadAllText(manifest));
+        Assert.Contains("simulated manifest", result.Error);
+    }
+
+    [Fact]
     public void CleanupReportsResidueWhenOwnedStageCannotBeDeleted()
     {
         using var workspace = new TemporaryWorkspace();

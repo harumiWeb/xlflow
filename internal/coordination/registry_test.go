@@ -188,7 +188,8 @@ func TestPublicCapabilitiesProjectEveryDescriptorWithoutBridgeMetadata(t *testin
 			capability.ParallelSafe != descriptor.Policy.ParallelSafe ||
 			capability.RetryableWhenBusy != descriptor.Policy.RetryableWhenBusy ||
 			capability.DefaultWaitPolicy != descriptor.Policy.DefaultWaitPolicy ||
-			capability.RecoveryBehavior != descriptor.Policy.RecoveryBehavior {
+			capability.RecoveryBehavior != descriptor.Policy.RecoveryBehavior ||
+			capability.RequiresExcel != descriptor.RequiresExcel {
 			t.Errorf("capability %q does not match descriptor policy: %#v vs %#v", descriptor.ID, capability, descriptor.Policy)
 		}
 		wantPaths := make([]string, 0, len(descriptor.CLI))
@@ -226,9 +227,26 @@ func TestPublicCapabilitiesV1StableFields(t *testing.T) {
 		RetryableWhenBusy: true,
 		DefaultWaitPolicy: WaitFail,
 		RecoveryBehavior:  RecoveryBlock,
+		RequiresExcel:     true,
 	}
 	if !reflect.DeepEqual(push, want) {
 		t.Fatalf("push capability = %#v, want %#v", push, want)
+	}
+}
+
+func TestCLIOrchestratedExcelCommandsPublishExcelRequirement(t *testing.T) {
+	for _, id := range []CommandID{"check", "form.migrate.sidecar", "form.snapshot", "type.db.refresh"} {
+		descriptor, err := Lookup(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !descriptor.RequiresExcel {
+			t.Errorf("%s RequiresExcel = false, want true", id)
+		}
+		capability := PublicCapabilities().Commands[id]
+		if !capability.RequiresExcel {
+			t.Errorf("%s public requires_excel = false, want true", id)
+		}
 	}
 }
 

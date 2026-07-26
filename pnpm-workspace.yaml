@@ -1,6 +1,11 @@
 allowBuilds:
   esbuild: false
 
+overrides:
+  esbuild@<=0.24.2: ">=0.25.0"
+  postcss: 8.5.18
+  vite@<=6.4.1: ">=6.4.3"
+
 ignoredBuiltDependencies:
   - esbuild
 

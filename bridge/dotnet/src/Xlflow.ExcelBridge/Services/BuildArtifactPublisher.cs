@@ -93,6 +93,35 @@ internal sealed class BuildArtifactPublisher
         }
     }
 
+    // A build manifest is secondary evidence for an already-published workbook.
+    // Its failure must never invalidate or roll back the workbook artifact.
+    internal BuildManifestPublication PublishManifest(string stagingDirectory, string outputPath, object manifest)
+    {
+        var manifestPath = outputPath + ".build.json";
+        var temporaryManifest = Path.Combine(stagingDirectory, Path.GetFileName(manifestPath));
+        try
+        {
+            File.WriteAllText(temporaryManifest, System.Text.Json.JsonSerializer.Serialize(manifest) + Environment.NewLine);
+            if (!File.Exists(manifestPath))
+            {
+                File.Move(temporaryManifest, manifestPath, overwrite: false);
+            }
+            else
+            {
+                var replaceError = _atomicReplace(temporaryManifest, manifestPath);
+                if (replaceError is not null)
+                {
+                    throw replaceError;
+                }
+            }
+            return new BuildManifestPublication(true, manifestPath, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException or NotSupportedException)
+        {
+            return new BuildManifestPublication(false, manifestPath, ex.Message);
+        }
+    }
+
     internal BuildArtifactCleanup Cleanup(string stagingDirectory)
     {
         var error = _deleteDirectory(stagingDirectory);
@@ -157,6 +186,8 @@ internal sealed class BuildArtifactPublisher
 internal sealed record BuildArtifactStage(string Directory, string TemporaryWorkbookPath);
 
 internal sealed record BuildArtifactPublication(bool ReplacedExisting, string Publication);
+
+internal sealed record BuildManifestPublication(bool Published, string Path, string? Error);
 
 internal sealed record BuildArtifactCleanup(bool Succeeded, string? ResidualPath, string? Error);
 
