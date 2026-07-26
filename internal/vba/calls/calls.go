@@ -2,7 +2,9 @@ package calls
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -39,15 +41,42 @@ type ResultSummary struct {
 	MissingNodes int `json:"missingNodes"`
 }
 
-type Call struct {
-	File       string               `json:"file"`
-	Module     string               `json:"module"`
-	Caller     *Caller              `json:"caller,omitempty"`
-	Callee     Callee               `json:"callee"`
-	Arguments  Arguments            `json:"arguments"`
-	Range      vbaast.Range         `json:"range"`
+// SourceOptions configures syntax-local call-site extraction from one VBA
+// source document.
+type SourceOptions struct {
+	RootDir    string
+	Path       string
+	ModuleKind string
+}
+
+// FileResult contains syntax-local call sites extracted from one VBA source
+// document. It remains useful for files with no calls because Parse records the
+// document's recovery state.
+type FileResult struct {
+	Path       string               `json:"path"`
+	ModuleName string               `json:"moduleName"`
+	ModuleKind string               `json:"moduleKind"`
 	Parse      symbols.ParseSummary `json:"parse"`
-	Resolution Resolution           `json:"resolution"`
+	CallSites  []CallSite           `json:"callSites"`
+}
+
+// CallSite contains only facts available from one parsed VBA document. It does
+// not depend on project symbols and never retains tree-sitter nodes.
+type CallSite struct {
+	File      string               `json:"file"`
+	Module    string               `json:"module"`
+	Caller    *Caller              `json:"caller,omitempty"`
+	Callee    Callee               `json:"callee"`
+	Arguments Arguments            `json:"arguments"`
+	Range     vbaast.Range         `json:"range"`
+	Parse     symbols.ParseSummary `json:"parse"`
+}
+
+// Call is a syntax-local CallSite resolved against project symbols. Embedding
+// keeps the existing flat JSON representation backward compatible.
+type Call struct {
+	CallSite
+	Resolution Resolution `json:"resolution"`
 }
 
 type Caller struct {
@@ -91,11 +120,12 @@ type extractor struct {
 	moduleName string
 	parse      symbols.ParseSummary
 	current    *Caller
-	resolver   resolver
-	calls      []Call
+	callSites  []CallSite
 }
 
-type resolver struct {
+// Resolver resolves raw call sites against a snapshot of project procedure
+// symbols. A Resolver can be replaced without re-extracting unchanged sites.
+type Resolver struct {
 	byName map[string][]Candidate
 }
 
@@ -130,6 +160,8 @@ var externalLikeReceivers = map[string]bool{
 	"application": true, "debug": true, "excel": true, "worksheetfunction": true,
 }
 
+var moduleNameAttributeRe = regexp.MustCompile(`(?i)^\s*Attribute\s+VB_Name\s*=\s*(.*)\s*$`)
+
 func Inspect(opts Options) (*Result, error) {
 	rootDir := opts.RootDir
 	if rootDir == "" {
@@ -139,7 +171,8 @@ func Inspect(opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	symbolResult, err := symbols.Inspect(symbols.Options{
+
+	files, err := symbols.DiscoverSourceFiles(symbols.Options{
 		RootDir:        absRoot,
 		Config:         opts.Config,
 		Path:           opts.Path,
@@ -149,47 +182,62 @@ func Inspect(opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	res := buildResolver(symbolResult)
-	parser, err := vbaast.NewParser()
-	if err != nil {
-		return nil, err
-	}
-	defer parser.Close()
 
-	result := &Result{Root: symbolResult.Root, Calls: []Call{}}
-	for _, file := range symbolResult.Files {
-		path := resolveDisplayPath(absRoot, file.Path)
-		parsed, err := parser.ParseFile(path)
+	displayRoot := opts.Path
+	if strings.TrimSpace(displayRoot) == "" {
+		displayRoot = "src"
+	}
+	result := &Result{Root: filepath.ToSlash(displayRoot), Calls: []Call{}}
+	allSymbols := make([]symbols.Symbol, 0)
+	allSites := make([]CallSite, 0)
+	for _, file := range files {
+		source, err := os.ReadFile(file.Path)
 		if err != nil {
 			return nil, err
 		}
-		ext := extractor{
-			source:     parsed.Source,
-			file:       file.Path,
-			moduleName: file.ModuleName,
-			parse: symbols.ParseSummary{
-				HasError:   parsed.HasError,
-				HasMissing: parsed.HasMissing,
-			},
-			resolver: res,
+		doc, err := vbaast.ParseDocument(file.Path, source)
+		if err != nil {
+			return nil, err
 		}
-		ext.visit(parsed.Root)
-		parsed.Close()
-		for _, call := range ext.calls {
-			if !matchesFrom(call, opts.From) || !matchesTo(call, opts.To) {
-				continue
-			}
-			result.Calls = append(result.Calls, call)
-			addResolutionSummary(&result.Summary, call.Resolution.Status)
+		symbolFile, err := symbols.InspectParsed(symbols.SourceOptions{
+			RootDir:        absRoot,
+			Path:           file.Path,
+			ModuleKind:     file.ModuleKind,
+			IncludePrivate: true,
+			IncludeLabels:  false,
+		}, doc)
+		if err != nil {
+			doc.Close()
+			return nil, err
 		}
-		if ext.parse.HasError {
+		callFile, err := ExtractParsed(SourceOptions{
+			RootDir:    absRoot,
+			Path:       file.Path,
+			ModuleKind: file.ModuleKind,
+		}, doc)
+		doc.Close()
+		if err != nil {
+			return nil, err
+		}
+		allSymbols = append(allSymbols, symbolFile.Symbols...)
+		allSites = append(allSites, callFile.CallSites...)
+		if callFile.Parse.HasError {
 			result.Summary.ParseErrors++
 		}
-		if ext.parse.HasMissing {
+		if callFile.Parse.HasMissing {
 			result.Summary.MissingNodes++
 		}
 	}
-	result.Summary.Files = len(symbolResult.Files)
+	resolver := NewResolver(allSymbols)
+	for _, site := range allSites {
+		call := resolver.Resolve(site)
+		if !matchesFrom(call, opts.From) || !matchesTo(call, opts.To) {
+			continue
+		}
+		result.Calls = append(result.Calls, call)
+		addResolutionSummary(&result.Summary, call.Resolution.Status)
+	}
+	result.Summary.Files = len(files)
 	result.Summary.Calls = len(result.Calls)
 	sort.SliceStable(result.Calls, func(i, j int) bool {
 		a, b := result.Calls[i], result.Calls[j]
@@ -204,25 +252,92 @@ func Inspect(opts Options) (*Result, error) {
 	return result, nil
 }
 
-func buildResolver(result *symbols.Result) resolver {
-	res := resolver{byName: map[string][]Candidate{}}
-	if result == nil {
-		return res
+// ExtractSource parses source, extracts raw call sites, and closes the parsed
+// document before returning.
+func ExtractSource(opts SourceOptions, source []byte) (FileResult, error) {
+	path := opts.Path
+	if strings.TrimSpace(path) == "" {
+		path = "Untitled.bas"
 	}
-	for _, file := range result.Files {
-		for _, sym := range file.Symbols {
-			if !procedureKinds[sym.Kind] || sym.Name == "" {
-				continue
-			}
-			candidate := Candidate{
-				QualifiedName: sym.Module + "." + sym.Name,
-				Kind:          sym.Kind,
-				File:          sym.File,
-				Line:          sym.StartLine,
-			}
-			key := strings.ToLower(sym.Name)
-			res.byName[key] = append(res.byName[key], candidate)
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		return FileResult{}, err
+	}
+	defer doc.Close()
+	return ExtractParsed(opts, doc)
+}
+
+// ExtractParsed extracts raw call sites from a caller-owned parsed VBA
+// document. It does not close doc or retain tree-sitter nodes after Read
+// returns.
+func ExtractParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
+	rootDir := opts.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+	rootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return FileResult{}, err
+	}
+	var result FileResult
+	err = doc.Read(func(view vbaast.ParsedView) error {
+		path := opts.Path
+		if strings.TrimSpace(path) == "" {
+			path = view.Path
 		}
+		if strings.TrimSpace(path) == "" {
+			path = "Untitled.bas"
+		}
+		rel := displayPath(rootDir, path)
+		if !filepath.IsAbs(path) {
+			rel = filepath.ToSlash(path)
+		}
+		moduleName := moduleNameFromSource(path, view.Source)
+		moduleKind := opts.ModuleKind
+		if moduleKind == "" {
+			moduleKind = moduleKindFromPath(path)
+		}
+		parse := symbols.ParseSummary{
+			HasError:   view.HasError,
+			HasMissing: view.HasMissing,
+		}
+		ext := extractor{
+			source:     view.Source,
+			file:       rel,
+			moduleName: moduleName,
+			parse:      parse,
+		}
+		ext.visit(view.Root)
+		result = FileResult{
+			Path:       rel,
+			ModuleName: moduleName,
+			ModuleKind: moduleKind,
+			Parse:      parse,
+			CallSites:  ext.callSites,
+		}
+		if result.CallSites == nil {
+			result.CallSites = []CallSite{}
+		}
+		return nil
+	})
+	return result, err
+}
+
+// NewResolver creates a deterministic project-symbol resolver.
+func NewResolver(projectSymbols []symbols.Symbol) Resolver {
+	res := Resolver{byName: map[string][]Candidate{}}
+	for _, sym := range projectSymbols {
+		if !procedureKinds[sym.Kind] || sym.Name == "" {
+			continue
+		}
+		candidate := Candidate{
+			QualifiedName: sym.Module + "." + sym.Name,
+			Kind:          sym.Kind,
+			File:          sym.File,
+			Line:          sym.StartLine,
+		}
+		key := strings.ToLower(sym.Name)
+		res.byName[key] = append(res.byName[key], candidate)
 	}
 	for key := range res.byName {
 		sort.Slice(res.byName[key], func(i, j int) bool {
@@ -230,6 +345,15 @@ func buildResolver(result *symbols.Result) resolver {
 		})
 	}
 	return res
+}
+
+// Resolve attaches the resolution derived from this Resolver without mutating
+// the raw call site.
+func (r Resolver) Resolve(site CallSite) Call {
+	return Call{
+		CallSite:   cloneCallSite(site),
+		Resolution: r.resolveCallee(site.Callee),
+	}
 }
 
 func (e *extractor) visit(node *tree_sitter.Node) {
@@ -309,16 +433,14 @@ func (e *extractor) addCallFromNode(node *tree_sitter.Node, field string) {
 		return
 	}
 	args := argumentsFromCallNode(callNode, argumentSource, e.source)
-	resolution := e.resolver.resolve(callee)
-	e.calls = append(e.calls, Call{
-		File:       e.file,
-		Module:     e.moduleName,
-		Caller:     cloneCaller(e.current),
-		Callee:     callee,
-		Arguments:  args,
-		Range:      vbaast.NodeRange(callNode),
-		Parse:      e.parse,
-		Resolution: resolution,
+	e.callSites = append(e.callSites, CallSite{
+		File:      e.file,
+		Module:    e.moduleName,
+		Caller:    cloneCaller(e.current),
+		Callee:    callee,
+		Arguments: args,
+		Range:     vbaast.NodeRange(callNode),
+		Parse:     e.parse,
 	})
 }
 
@@ -338,15 +460,14 @@ func (e *extractor) addNewExpression(node *tree_sitter.Node) {
 		callee.Member = callee.BaseName
 	}
 	callee.Text = "New " + callee.Text
-	e.calls = append(e.calls, Call{
-		File:       e.file,
-		Module:     e.moduleName,
-		Caller:     cloneCaller(e.current),
-		Callee:     callee,
-		Arguments:  Arguments{Named: []NamedArgument{}},
-		Range:      vbaast.NodeRange(node),
-		Parse:      e.parse,
-		Resolution: e.resolver.resolve(callee),
+	e.callSites = append(e.callSites, CallSite{
+		File:      e.file,
+		Module:    e.moduleName,
+		Caller:    cloneCaller(e.current),
+		Callee:    callee,
+		Arguments: Arguments{Named: []NamedArgument{}},
+		Range:     vbaast.NodeRange(node),
+		Parse:     e.parse,
 	})
 }
 
@@ -486,7 +607,7 @@ func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {
 	return NamedArgument{Name: name, ValueText: value}
 }
 
-func (r resolver) resolve(callee Callee) Resolution {
+func (r Resolver) resolveCallee(callee Callee) Resolution {
 	base := strings.TrimPrefix(callee.BaseName, "New ")
 	base = cleanIdentifier(base)
 	candidates := r.byName[strings.ToLower(base)]
@@ -506,10 +627,10 @@ func (r resolver) resolve(callee Callee) Resolution {
 	}
 	if base != "" {
 		if len(candidates) == 1 {
-			return Resolution{Status: "matched", Candidates: candidates}
+			return Resolution{Status: "matched", Candidates: cloneCandidates(candidates)}
 		}
 		if len(candidates) > 1 {
-			return Resolution{Status: "ambiguous", Candidates: candidates}
+			return Resolution{Status: "ambiguous", Candidates: cloneCandidates(candidates)}
 		}
 	}
 	textKey := strings.ToLower(strings.TrimPrefix(callee.Text, "New "))
@@ -586,11 +707,44 @@ func matchesTo(call Call, filter string) bool {
 		strings.EqualFold(call.Callee.Text, filter)
 }
 
-func resolveDisplayPath(root, path string) string {
-	if filepath.IsAbs(path) {
-		return path
+func moduleNameFromSource(path string, source []byte) string {
+	for _, line := range strings.Split(string(source), "\n") {
+		match := moduleNameAttributeRe.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		value := strings.Trim(strings.TrimSpace(match[1]), `"`)
+		if value != "" {
+			return value
+		}
 	}
-	return filepath.Join(root, filepath.FromSlash(path))
+	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+}
+
+func moduleKindFromPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cls":
+		return "class"
+	case ".frm":
+		return "form"
+	default:
+		return "standard"
+	}
+}
+
+func cloneCandidates(candidates []Candidate) []Candidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	return append([]Candidate(nil), candidates...)
+}
+
+func displayPath(rootDir, path string) string {
+	rel, err := filepath.Rel(rootDir, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
 }
 
 func firstNamedChild(node *tree_sitter.Node) *tree_sitter.Node {
@@ -615,6 +769,20 @@ func cloneCaller(caller *Caller) *Caller {
 	}
 	clone := *caller
 	return &clone
+}
+
+func cloneCallSite(site CallSite) CallSite {
+	clone := site
+	clone.Caller = cloneCaller(site.Caller)
+	if site.Callee.Receiver != nil {
+		receiver := *site.Callee.Receiver
+		clone.Callee.Receiver = &receiver
+	}
+	if site.Arguments.Named != nil {
+		clone.Arguments.Named = make([]NamedArgument, len(site.Arguments.Named))
+		copy(clone.Arguments.Named, site.Arguments.Named)
+	}
+	return clone
 }
 
 func lastNamePart(text string) string {

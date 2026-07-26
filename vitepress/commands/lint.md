@@ -32,36 +32,36 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 
 ## Rules
 
-| Code    | Severity | Description                                                                                                                |
-| ------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `VB001` | error    | Missing `Option Explicit`.                                                                                                 |
-| `VB002` | warning  | `Select` member access such as `Range("A1").Select`.                                                                       |
-| `VB003` | warning  | `Activate` member access such as `ActiveCell.Activate`.                                                                    |
-| `VB004` | warning  | Broad `On Error Resume Next`.                                                                                              |
-| `VB005` | warning  | Possible implicit `Variant`, including individual untyped declarators in one `Dim` statement.                              |
-| `VB006` | warning  | Module-level `Public` variable.                                                                                            |
-| `VB007` | warning  | Automation-hostile GUI boundary such as raw dialogs, file pickers, UserForms, message pumps, or external process launches. |
-| `VB008` | error    | Typographic quote character that can trigger VBE compile dialogs.                                                          |
-| `VB009` | error    | Likely C-style quote escape in a VBA string literal.                                                                       |
-| `VB010` | error    | Unterminated `Sub`, `Function`, or `Property` procedure.                                                                   |
-| `VB011` | error    | Unexpected `End Sub`, `End Function`, or `End Property`.                                                                   |
-| `VB012` | error    | Mismatched procedure end statement.                                                                                        |
-| `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                  |
+| Code    | Severity | Description                                                                                                                          |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `VB001` | error    | Missing `Option Explicit`.                                                                                                           |
+| `VB002` | warning  | `Select` member access such as `Range("A1").Select`.                                                                                 |
+| `VB003` | warning  | `Activate` member access such as `ActiveCell.Activate`.                                                                              |
+| `VB004` | warning  | Broad `On Error Resume Next`.                                                                                                        |
+| `VB005` | warning  | Possible implicit `Variant`, including individual untyped declarators in one `Dim` statement.                                        |
+| `VB006` | warning  | Module-level `Public` variable.                                                                                                      |
+| `VB007` | warning  | Automation-hostile GUI boundary such as raw dialogs, file pickers, UserForms, message pumps, or external process launches.           |
+| `VB008` | error    | Typographic quote character that can trigger VBE compile dialogs.                                                                    |
+| `VB009` | error    | Likely C-style quote escape in a VBA string literal.                                                                                 |
+| `VB010` | error    | Unterminated `Sub`, `Function`, or `Property` procedure.                                                                             |
+| `VB011` | error    | Unexpected `End Sub`, `End Function`, or `End Property`.                                                                             |
+| `VB012` | error    | Mismatched procedure end statement.                                                                                                  |
+| `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                            |
 | `VB014` | error    | `tree-sitter-vba` recovered with an `ERROR` or `MISSING` node; this is a parser-compatibility signal, not proof that VBA is invalid. |
-| `VB015` | error    | A VBA logical line uses more than 24 line-continuation characters.                                                         |
-| `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                   |
-| `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                              |
-| `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                 |
-| `VB021` | warning  | Private procedure is not called from parsed source.                                                                        |
-| `VB022` | warning  | Confusing parenthesized call syntax such as `Foo (bar)`.                                                                   |
-| `VB023` | warning  | `For Each` control variable is undeclared or obviously incompatible.                                                       |
-| `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                   |
-| `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                             |
-| `VB028` | error    | Bare `MsgBox` or `InputBox` appears while `XlflowUI.bas` is present; use `XlflowUI` or explicit `VBA.Interaction`.         |
-| `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                            |
-| `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                     |
-| `VB032` | error    | Repeated `?` Debug.Print shorthand such as `?? "hoge"`.                                                                    |
-| `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                               |
+| `VB015` | error    | A VBA logical line uses more than 24 line-continuation characters.                                                                   |
+| `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                             |
+| `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                                        |
+| `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                           |
+| `VB021` | warning  | Private procedure is not called from parsed source.                                                                                  |
+| `VB022` | warning  | Confusing parenthesized call syntax such as `Foo (bar)`.                                                                             |
+| `VB023` | warning  | `For Each` control variable is undeclared or obviously incompatible.                                                                 |
+| `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                             |
+| `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                                       |
+| `VB028` | error    | Bare `MsgBox` or `InputBox` appears while `XlflowUI.bas` is present; use `XlflowUI` or explicit `VBA.Interaction`.                   |
+| `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                                      |
+| `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                               |
+| `VB032` | error    | Repeated `?` Debug.Print shorthand such as `?? "hoge"`.                                                                              |
+| `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                                         |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 

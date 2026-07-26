@@ -5105,6 +5105,34 @@ func TestInspectCallsTextPathAndFilters(t *testing.T) {
 	}
 }
 
+func TestInspectCallsMarkdownRemainsGroupedByFileAndCaller(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"inspect", "calls", "--format", "markdown", "--from", "Main.Run", "--to", "BuildReport"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("inspect calls markdown error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"Source: src",
+		"### `src/modules/Main.bas`",
+		"#### `Main.Run`",
+		"- `BuildReport` at `src/modules/Main.bas:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inspect calls markdown missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Debug.Print") {
+		t.Fatalf("inspect calls markdown filter included Debug.Print:\n%s", got)
+	}
+}
+
 func writeInspectSymbolsFixture(t *testing.T, dir, sourceDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, sourceDir), 0o755); err != nil {

@@ -1,12 +1,262 @@
 package calls
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
+
+func TestExtractParsedReturnsRawCallSitesAndKeepsDocumentOpen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    BuildReport 1, 2
+    Call SaveReport(Verbose:=True)
+    result = CalculateTotal(1, 2)
+    obj.DoSomething result
+    Set item = New Customer
+    CommandButton1_Click
+End Sub
+`)
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parsedResult, err := ExtractParsed(SourceOptions{
+		RootDir:    dir,
+		Path:       path,
+		ModuleKind: "standard",
+	}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsedResult.Path != "Main.bas" || parsedResult.ModuleName != "Main" || parsedResult.ModuleKind != "standard" {
+		t.Fatalf("unexpected file metadata: %+v", parsedResult)
+	}
+	for _, want := range []string{
+		"BuildReport",
+		"SaveReport",
+		"CalculateTotal",
+		"obj.DoSomething",
+		"New Customer",
+		"CommandButton1_Click",
+	} {
+		assertCallSite(t, parsedResult.CallSites, want)
+	}
+	save := assertCallSite(t, parsedResult.CallSites, "SaveReport")
+	if save.Arguments.Count != 1 || len(save.Arguments.Named) != 1 ||
+		save.Arguments.Named[0].Name != "Verbose" || save.Arguments.Named[0].ValueText != "True" {
+		t.Fatalf("unexpected named arguments: %+v", save.Arguments)
+	}
+	if err := doc.Read(func(view vbaast.ParsedView) error {
+		if view.Path != path || len(view.Source) == 0 || view.Root == nil {
+			t.Fatalf("unexpected caller-owned document view: %+v", view)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("ExtractParsed closed caller-owned document: %v", err)
+	}
+
+	sourceResult, err := ExtractSource(SourceOptions{
+		RootDir:    dir,
+		Path:       path,
+		ModuleKind: "standard",
+	}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(parsedResult, sourceResult) {
+		t.Fatalf("ExtractParsed and ExtractSource differ:\nparsed=%+v\nsource=%+v", parsedResult, sourceResult)
+	}
+
+	doc.Close()
+	if parsedResult.CallSites[0].File != "Main.bas" || parsedResult.CallSites[0].Range.StartLine == 0 {
+		t.Fatalf("extracted values changed after document close: %+v", parsedResult.CallSites[0])
+	}
+}
+
+func TestResolverCanReResolveUnchangedCallSite(t *testing.T) {
+	site := CallSite{
+		File:      "src/modules/Main.bas",
+		Module:    "Main",
+		Callee:    Callee{Text: "Target", BaseName: "Target", Member: "Target"},
+		Arguments: Arguments{Named: []NamedArgument{}},
+	}
+
+	unresolved := NewResolver(nil).Resolve(site)
+	if unresolved.Resolution.Status != "unresolved" {
+		t.Fatalf("empty resolver status = %q, want unresolved", unresolved.Resolution.Status)
+	}
+
+	one := []symbols.Symbol{
+		{Name: "Target", Module: "Zeta", Kind: "sub", File: "src/modules/Zeta.bas", StartLine: 10},
+	}
+	oneResolver := NewResolver(one)
+	matched := oneResolver.Resolve(site)
+	if matched.Resolution.Status != "matched" || len(matched.Resolution.Candidates) != 1 ||
+		matched.Resolution.Candidates[0].QualifiedName != "Zeta.Target" {
+		t.Fatalf("single candidate resolution = %+v", matched.Resolution)
+	}
+	matched.Resolution.Candidates[0].QualifiedName = "mutated"
+	matchedAgain := oneResolver.Resolve(site)
+	if matchedAgain.Resolution.Candidates[0].QualifiedName != "Zeta.Target" {
+		t.Fatalf("resolved candidates share mutable state: %+v", matchedAgain.Resolution.Candidates)
+	}
+
+	two := append(one, symbols.Symbol{
+		Name: "Target", Module: "Alpha", Kind: "function", File: "src/modules/Alpha.bas", StartLine: 5,
+	})
+	ambiguous := NewResolver(two).Resolve(site)
+	if ambiguous.Resolution.Status != "ambiguous" || len(ambiguous.Resolution.Candidates) != 2 {
+		t.Fatalf("multiple candidate resolution = %+v", ambiguous.Resolution)
+	}
+	if ambiguous.Resolution.Candidates[0].QualifiedName != "Alpha.Target" ||
+		ambiguous.Resolution.Candidates[1].QualifiedName != "Zeta.Target" {
+		t.Fatalf("candidate order = %+v", ambiguous.Resolution.Candidates)
+	}
+	if site.Callee.Text != "Target" {
+		t.Fatalf("resolver mutated raw site: %+v", site)
+	}
+}
+
+func TestResolverDoesNotAliasRawCallSite(t *testing.T) {
+	site := CallSite{
+		Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+		Callee: Callee{
+			Text:     "obj.Target",
+			BaseName: "Target",
+			Receiver: stringPointer("obj"),
+			Member:   "Target",
+		},
+		Arguments: Arguments{
+			Count: 1,
+			Named: []NamedArgument{{Name: "Value", ValueText: "1"}},
+		},
+	}
+	call := NewResolver(nil).Resolve(site)
+	call.Caller.Name = "Changed"
+	*call.Callee.Receiver = "changed"
+	call.Arguments.Named[0].Name = "Changed"
+
+	if site.Caller.Name != "Run" || *site.Callee.Receiver != "obj" || site.Arguments.Named[0].Name != "Value" {
+		t.Fatalf("resolved call aliases raw site: %+v", site)
+	}
+}
+
+func TestResolverPreservesCallClassificationPrecedence(t *testing.T) {
+	projectSymbols := []symbols.Symbol{
+		{Name: "Print", Module: "Main", Kind: "sub", File: "src/modules/Main.bas", StartLine: 2},
+		{Name: "RunCore", Module: "App", Kind: "sub", File: "src/modules/App.bas", StartLine: 2},
+		{Name: "Len", Module: "Helpers", Kind: "function", File: "src/modules/Helpers.bas", StartLine: 2},
+	}
+	resolver := NewResolver(projectSymbols)
+	cases := []struct {
+		name   string
+		callee Callee
+		status string
+	}{
+		{
+			name:   "external receiver wins over bare project name",
+			callee: Callee{Text: "Debug.Print", BaseName: "Print", Receiver: stringPointer("Debug"), Member: "Print"},
+			status: "external",
+		},
+		{
+			name:   "unknown receiver stays conservative",
+			callee: Callee{Text: "obj.RunCore", BaseName: "RunCore", Receiver: stringPointer("obj"), Member: "RunCore"},
+			status: "member_call",
+		},
+		{
+			name:   "qualified receiver matches project procedure",
+			callee: Callee{Text: "App.RunCore", BaseName: "RunCore", Receiver: stringPointer("App"), Member: "RunCore"},
+			status: "matched",
+		},
+		{
+			name:   "project procedure wins over builtin classification",
+			callee: Callee{Text: "Len", BaseName: "Len", Member: "Len"},
+			status: "matched",
+		},
+		{
+			name:   "bare builtin without project symbol",
+			callee: Callee{Text: "Trim", BaseName: "Trim", Member: "Trim"},
+			status: "builtin_like",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolver.Resolve(CallSite{Callee: tc.callee, Arguments: Arguments{Named: []NamedArgument{}}})
+			if got.Resolution.Status != tc.status {
+				t.Fatalf("status = %q, want %q: %+v", got.Resolution.Status, tc.status, got.Resolution)
+			}
+		})
+	}
+}
+
+func TestExtractParsedReportsRecoveryForFileWithoutCalls(t *testing.T) {
+	result, err := ExtractSource(SourceOptions{Path: "Broken.bas"}, []byte(`Attribute VB_Name = "Broken"
+Option Explicit
+Public Sub Broken(ByVal value As String
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.CallSites) != 0 {
+		t.Fatalf("call sites = %+v, want empty", result.CallSites)
+	}
+	if !result.Parse.HasError || !result.Parse.HasMissing {
+		t.Fatalf("parse recovery = %+v, want error and missing", result.Parse)
+	}
+	if result.CallSites == nil {
+		t.Fatal("empty call sites must serialize as [] rather than null")
+	}
+	if result.ModuleKind != "standard" {
+		t.Fatalf("module kind = %q, want standard fallback", result.ModuleKind)
+	}
+}
+
+func TestResolvedCallJSONRemainsFlat(t *testing.T) {
+	call := NewResolver(nil).Resolve(CallSite{
+		File:      "src/modules/Main.bas",
+		Module:    "Main",
+		Caller:    &Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+		Callee:    Callee{Text: "Missing", BaseName: "Missing", Member: "Missing"},
+		Arguments: Arguments{Named: []NamedArgument{}},
+	})
+	data, err := json.Marshal(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"file", "module", "caller", "callee", "arguments", "range", "parse", "resolution"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("resolved call JSON missing %q: %s", key, data)
+		}
+	}
+	if _, nested := got["CallSite"]; nested {
+		t.Fatalf("resolved call JSON contains nested CallSite: %s", data)
+	}
+	var args struct {
+		Named []NamedArgument `json:"named"`
+	}
+	if err := json.Unmarshal(got["arguments"], &args); err != nil {
+		t.Fatal(err)
+	}
+	if args.Named == nil {
+		t.Fatalf("named arguments serialized as null: %s", data)
+	}
+}
 
 func TestInspectExtractsRepresentativeCallSites(t *testing.T) {
 	dir := t.TempDir()
@@ -196,6 +446,65 @@ End Function
 	}
 }
 
+func TestInspectUsesConfiguredSourceDiscoveryIncludingFormSidecars(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	paths := map[string]string{
+		filepath.Join(dir, cfg.Src.Modules, "Main.bas"): `Attribute VB_Name = "Main"
+Public Sub Run()
+    ModuleTarget
+End Sub
+`,
+		filepath.Join(dir, cfg.Src.Classes, "Service.cls"): `VERSION 1.0 CLASS
+Attribute VB_Name = "Service"
+Public Sub Execute()
+    ClassTarget
+End Sub
+`,
+		filepath.Join(dir, cfg.Src.Workbook, "ThisWorkbook.cls"): `VERSION 1.0 CLASS
+Attribute VB_Name = "ThisWorkbook"
+Private Sub Workbook_Open()
+    WorkbookTarget
+End Sub
+`,
+		filepath.Join(dir, cfg.Src.Forms, "UserForm1.frm"): `VERSION 5.00
+Begin {00000000-0000-0000-0000-000000000000} UserForm1
+End
+Attribute VB_Name = "UserForm1"
+Public Sub StaleFrmCode()
+    StaleTarget
+End Sub
+`,
+		filepath.Join(dir, cfg.Src.Forms, "code", "UserForm1.bas"): `Attribute VB_Name = "UserForm1"
+Private Sub UserForm_Initialize()
+    FormTarget
+End Sub
+`,
+	}
+	for path, body := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mustWrite(t, path, body)
+	}
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary.Files != 4 {
+		t.Fatalf("files = %d, want standard/class/document/form sidecar: %+v", result.Summary.Files, result)
+	}
+	for _, callee := range []string{"ModuleTarget", "ClassTarget", "WorkbookTarget", "FormTarget"} {
+		assertCall(t, result.Calls, callee, "unresolved", 0)
+	}
+	for _, call := range result.Calls {
+		if call.Callee.Text == "StaleTarget" {
+			t.Fatalf("tracked .frm code must be skipped when sidecar exists: %+v", call)
+		}
+	}
+}
+
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -218,4 +527,22 @@ func assertCall(t *testing.T, calls []Call, text, status string, argCount int) C
 	}
 	t.Fatalf("missing call %q in %+v", text, calls)
 	return Call{}
+}
+
+func assertCallSite(t *testing.T, callSites []CallSite, text string) CallSite {
+	t.Helper()
+	for _, site := range callSites {
+		if site.Callee.Text == text {
+			if site.Range.StartLine == 0 || site.File == "" || site.Module == "" {
+				t.Fatalf("call site %s missing location context: %+v", text, site)
+			}
+			return site
+		}
+	}
+	t.Fatalf("missing raw call site %q in %+v", text, callSites)
+	return CallSite{}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
