@@ -26,6 +26,12 @@ type Result struct {
 	Root    string        `json:"root"`
 	Calls   []Call        `json:"calls"`
 	Summary ResultSummary `json:"summary"`
+	// Symbols is the complete, private-inclusive project symbol snapshot used to
+	// resolve Calls. It is intentionally not part of inspect calls JSON, but lets
+	// higher-level analyses reuse this parsed project snapshot without a second
+	// source walk.
+	Symbols     []symbols.Symbol  `json:"-"`
+	ModuleKinds map[string]string `json:"-"`
 }
 
 type ResultSummary struct {
@@ -201,7 +207,7 @@ func Inspect(opts Options) (*Result, error) {
 	if strings.TrimSpace(displayRoot) == "" {
 		displayRoot = "src"
 	}
-	result := &Result{Root: filepath.ToSlash(displayRoot), Calls: []Call{}}
+	result := &Result{Root: filepath.ToSlash(displayRoot), Calls: []Call{}, Symbols: []symbols.Symbol{}, ModuleKinds: map[string]string{}}
 	allSymbols := make([]symbols.Symbol, 0)
 	allSites := make([]CallSite, 0)
 	for _, file := range files {
@@ -234,6 +240,11 @@ func Inspect(opts Options) (*Result, error) {
 			return nil, err
 		}
 		allSymbols = append(allSymbols, symbolFile.Symbols...)
+		for _, sym := range symbolFile.Symbols {
+			if sym.Kind == "module" {
+				result.ModuleKinds[sym.File] = file.ModuleKind
+			}
+		}
 		allSites = append(allSites, callFile.CallSites...)
 		if callFile.Parse.HasError {
 			result.Summary.ParseErrors++
@@ -243,6 +254,7 @@ func Inspect(opts Options) (*Result, error) {
 		}
 	}
 	resolver := NewResolver(allSymbols)
+	result.Symbols = append(result.Symbols, allSymbols...)
 	for _, site := range allSites {
 		call := resolver.Resolve(site)
 		if !matchesFrom(call, opts.From) || !matchesTo(call, opts.To) {

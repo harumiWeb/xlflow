@@ -5,6 +5,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `access_denied`
 - `active_sheet`
 - `active_workbook_mismatch`
+- `affected_modules`
 - `ambiguous_test_name`
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
@@ -168,6 +169,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dialog_id`
 - `diff_args_invalid`
 - `diff_failed`
+- `direct_callees`
+- `direct_callers`
 - `disabled_rules`
 - `disabled_rules_precedence`
 - `discard_required`
@@ -182,6 +185,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dotnet_missing`
 - `dotnet_runtime`
 - `dotnet_runtime_missing`
+- `downstream_callees`
 - `dry_run`
 - `duplicate_case_id`
 - `duplicate_module_name`
@@ -197,6 +201,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enable_events_after`
 - `enable_events_before`
 - `enable_vba_object_model_access`
+- `end_column`
 - `end_line`
 - `enum_declaration`
 - `enum_group`
@@ -308,6 +313,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `html_url`
 - `if_statement`
 - `image_capture_failed`
+- `impact_args_invalid`
+- `impact_failed`
+- `impact_target_ambiguous`
+- `impact_target_not_found`
 - `implements_statement`
 - `implicit_intersection`
 - `implicit_member_expression`
@@ -405,6 +414,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_already_exists`
 - `module_ambiguous`
 - `module_install_failed`
+- `module_kind`
 - `module_mutation_failed`
 - `module_name_invalid`
 - `module_new_args_invalid`
@@ -619,6 +629,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `src_paths`
 - `stack_trace`
 - `stale_index`
+- `start_column`
+- `start_line`
 - `started_at`
 - `static_modifier`
 - `status_hint`
@@ -692,6 +704,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `update_available`
 - `update_check`
 - `update_check_failed`
+- `upstream_callers`
 - `use_interactive`
 - `used_range`
 - `user_form`

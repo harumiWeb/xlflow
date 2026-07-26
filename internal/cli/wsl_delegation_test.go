@@ -27,7 +27,7 @@ func TestDelegatedTopLevelCommands(t *testing.T) {
 		"recovery", "run", "runner", "save", "session", "status", "test", "type", "ui",
 	}
 	local := []string{
-		"backup", "completion", "diff", "fmt", "generate", "inspect-gui", "lint",
+		"backup", "completion", "diff", "fmt", "generate", "impact", "inspect-gui", "lint",
 		"inspect", "lsp", "module", "skill", "version",
 	}
 	for _, name := range delegated {
