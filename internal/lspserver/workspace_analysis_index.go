@@ -51,12 +51,13 @@ type workspaceAnalysisIndex struct {
 }
 
 type indexedFileAnalysis struct {
-	path       string
-	version    string
-	moduleKind string
-	source     string
-	symbols    []intel.Symbol
-	callSites  []calls.CallSite
+	path           string
+	version        string
+	moduleKind     string
+	source         string
+	symbols        []intel.Symbol
+	callSites      []calls.CallSite
+	typeReferences []calls.TypeReference
 }
 
 type symbolRef struct {
@@ -366,11 +367,15 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 	}
 	x.mu.RLock()
 	sites := make([]calls.CallSite, 0, len(x.allCalls))
+	typeReferences := make([]calls.TypeReference, 0)
 	for _, ref := range x.allCalls {
 		site, ok := x.callForRefLocked(ref)
 		if ok {
 			sites = append(sites, calls.CloneCallSite(site))
 		}
+	}
+	for _, entry := range x.effective {
+		typeReferences = append(typeReferences, entry.typeReferences...)
 	}
 	resolverSymbols := make([]calls.ResolverSymbol, 0, len(x.all))
 	graphSymbols := make([]callgraph.Symbol, 0, len(x.all))
@@ -381,8 +386,12 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 		}
 		entry := x.effective[ref.path]
 		file := workspaceDisplayPath(x.root, entry.path)
-		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{Name: sym.Name, Module: sym.Module, Kind: sym.Kind, File: file, Line: sym.Range.Start.Line + 1})
-		graphSymbols = append(graphSymbols, callgraph.Symbol{Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file, Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1})
+		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{Name: sym.Name, Module: sym.Module, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1})
+		graphSymbols = append(graphSymbols, callgraph.Symbol{
+			Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
+			Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1, EndLine: sym.Range.End.Line + 1, EndColumn: sym.Range.End.Character + 1,
+			Parent: sym.Parent, Visibility: sym.Visibility, ReturnType: sym.ReturnType, Signature: sym.Detail,
+		})
 	}
 	x.mu.RUnlock()
 	resolver := calls.NewResolverFromSymbols(resolverSymbols)
@@ -391,7 +400,16 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 		resolved[i] = resolver.Resolve(site)
 	}
 	sort.SliceStable(resolved, func(i, j int) bool { return callSiteLess(resolved[i].CallSite, resolved[j].CallSite) })
-	return callgraph.Snapshot{Symbols: graphSymbols, Calls: resolved}, nil
+	sort.SliceStable(typeReferences, func(i, j int) bool {
+		if typeReferences[i].File != typeReferences[j].File {
+			return typeReferences[i].File < typeReferences[j].File
+		}
+		if typeReferences[i].Range.StartLine != typeReferences[j].Range.StartLine {
+			return typeReferences[i].Range.StartLine < typeReferences[j].Range.StartLine
+		}
+		return typeReferences[i].Range.StartColumn < typeReferences[j].Range.StartColumn
+	})
+	return callgraph.Snapshot{Symbols: graphSymbols, Calls: resolved, TypeReferences: typeReferences}, nil
 }
 
 func (x *workspaceAnalysisIndex) replaceEffectiveLocked(key string, entry indexedFileAnalysis) {

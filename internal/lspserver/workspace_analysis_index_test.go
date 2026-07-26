@@ -94,6 +94,67 @@ func TestWorkspaceAnalysisIndexParsesOnceAndUpdatesOnlyChangedFile(t *testing.T)
 	}
 }
 
+func TestCallGraphSnapshotUsesEffectiveTypeReferenceFacts(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(moduleDir, "Main.bas")
+	if err := os.WriteFile(path, []byte("DiskType"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+		name := strings.TrimSpace(string(source))
+		return indexedFileAnalysis{
+			path: file.Path, moduleKind: file.ModuleKind,
+			typeReferences: []calls.TypeReference{{Kind: "uses_type", File: "src/modules/Main.bas", Module: "Main", Target: name}},
+		}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	first, err := index.callGraphSnapshot()
+	if err != nil || len(first.TypeReferences) != 1 || first.TypeReferences[0].Target != "DiskType" {
+		t.Fatalf("disk snapshot = %+v, %v", first, err)
+	}
+	doc := intel.Document{Path: path, Source: "OverlayType", ModuleKind: "standard", Version: 1}
+	index.setOverlay(doc, indexedFileAnalysis{typeReferences: []calls.TypeReference{{Kind: "constructs", File: "src/modules/Main.bas", Module: "Main", Target: "OverlayType"}}})
+	overlay, err := index.callGraphSnapshot()
+	if err != nil || len(overlay.TypeReferences) != 1 || overlay.TypeReferences[0].Kind != "constructs" || overlay.TypeReferences[0].Target != "OverlayType" {
+		t.Fatalf("overlay snapshot = %+v, %v", overlay, err)
+	}
+}
+
+func TestCallGraphSnapshotPreservesPrivateProcedureVisibility(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"A.bas", "B.bas"} {
+		if err := os.WriteFile(filepath.Join(moduleDir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parse := func(file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		entry := indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Kind: "module", Module: name, ModuleKind: "standard", File: file.Path}, {Name: map[string]string{"A": "Run", "B": "Work"}[name], Kind: "sub", Module: name, ModuleKind: "standard", File: file.Path, Range: intel.Range{Start: intel.Position{Line: 1}}}}}
+		if name == "A" {
+			entry.callSites = []calls.CallSite{{File: "src/modules/A.bas", Module: "A", Caller: &calls.Caller{Name: "Run", Kind: "sub", QualifiedName: "A.Run"}, Callee: calls.Callee{Text: "Work", BaseName: "Work"}}}
+		} else {
+			entry.symbols[1].Visibility = "private"
+		}
+		return entry, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	snapshot, err := index.callGraphSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Calls) != 1 || snapshot.Calls[0].Resolution.Status != "unresolved" {
+		t.Fatalf("private cross-module call was resolved: %+v", snapshot.Calls)
+	}
+}
+
 func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	root := t.TempDir()
 	moduleDir := filepath.Join(root, "src", "modules")

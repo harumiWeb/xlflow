@@ -32,6 +32,9 @@ type Result struct {
 	// source walk.
 	Symbols     []symbols.Symbol  `json:"-"`
 	ModuleKinds map[string]string `json:"-"`
+	// TypeReferences are syntax-local project-type facts retained for higher
+	// level projections without changing inspect calls JSON.
+	TypeReferences []TypeReference `json:"-"`
 }
 
 type ResultSummary struct {
@@ -59,11 +62,12 @@ type SourceOptions struct {
 // document. It remains useful for files with no calls because Parse records the
 // document's recovery state.
 type FileResult struct {
-	Path       string               `json:"path"`
-	ModuleName string               `json:"moduleName"`
-	ModuleKind string               `json:"moduleKind"`
-	Parse      symbols.ParseSummary `json:"parse"`
-	CallSites  []CallSite           `json:"callSites"`
+	Path           string               `json:"path"`
+	ModuleName     string               `json:"moduleName"`
+	ModuleKind     string               `json:"moduleKind"`
+	Parse          symbols.ParseSummary `json:"parse"`
+	CallSites      []CallSite           `json:"callSites"`
+	TypeReferences []TypeReference      `json:"-"`
 }
 
 // CallSite contains only facts available from one parsed VBA document. It does
@@ -76,6 +80,18 @@ type CallSite struct {
 	Arguments Arguments            `json:"arguments"`
 	Range     vbaast.Range         `json:"range"`
 	Parse     symbols.ParseSummary `json:"parse"`
+}
+
+// TypeReference records an explicit VBA type context from one parsed document.
+// Kind is uses_type, constructs, or implements.
+type TypeReference struct {
+	Kind   string               `json:"kind"`
+	File   string               `json:"file"`
+	Module string               `json:"module"`
+	Caller *Caller              `json:"caller,omitempty"`
+	Target string               `json:"target"`
+	Range  vbaast.Range         `json:"range"`
+	Parse  symbols.ParseSummary `json:"parse"`
 }
 
 // Call is a syntax-local CallSite resolved against project symbols. Embedding
@@ -141,6 +157,7 @@ type extractor struct {
 	parse      symbols.ParseSummary
 	current    *Caller
 	callSites  []CallSite
+	typeRefs   []TypeReference
 }
 
 // Resolver resolves raw call sites against a snapshot of project procedure
@@ -246,6 +263,7 @@ func Inspect(opts Options) (*Result, error) {
 			}
 		}
 		allSites = append(allSites, callFile.CallSites...)
+		result.TypeReferences = append(result.TypeReferences, callFile.TypeReferences...)
 		if callFile.Parse.HasError {
 			result.Summary.ParseErrors++
 		}
@@ -335,14 +353,18 @@ func ExtractParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, 
 		}
 		ext.visit(view.Root)
 		result = FileResult{
-			Path:       rel,
-			ModuleName: moduleName,
-			ModuleKind: moduleKind,
-			Parse:      parse,
-			CallSites:  ext.callSites,
+			Path:           rel,
+			ModuleName:     moduleName,
+			ModuleKind:     moduleKind,
+			Parse:          parse,
+			CallSites:      ext.callSites,
+			TypeReferences: ext.typeRefs,
 		}
 		if result.CallSites == nil {
 			result.CallSites = []CallSite{}
+		}
+		if result.TypeReferences == nil {
+			result.TypeReferences = []TypeReference{}
 		}
 		return nil
 	})
@@ -426,10 +448,42 @@ func (e *extractor) visit(node *tree_sitter.Node) {
 		return
 	case "new_expression":
 		e.addNewExpression(node)
+		e.addTypeReference("constructs", node, "type")
+	case "as_type_clause":
+		e.addTypeReference("uses_type", node, "type")
+		if containsKeyword(node.Utf8Text(e.source), "New") {
+			e.addTypeReference("constructs", node, "type")
+		}
+	case "implements_statement":
+		e.addTypeReference("implements", node, "name")
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		e.visit(node.NamedChild(i))
 	}
+}
+
+func (e *extractor) addTypeReference(kind string, node *tree_sitter.Node, field string) {
+	target := node.ChildByFieldName(field)
+	if target == nil {
+		return
+	}
+	text := strings.TrimSpace(target.Utf8Text(e.source))
+	if text == "" {
+		return
+	}
+	e.typeRefs = append(e.typeRefs, TypeReference{
+		Kind: kind, File: e.file, Module: e.moduleName, Caller: cloneCaller(e.current),
+		Target: text, Range: vbaast.NodeRange(target), Parse: e.parse,
+	})
+}
+
+func containsKeyword(text, keyword string) bool {
+	for _, part := range strings.Fields(text) {
+		if strings.EqualFold(part, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *extractor) visitCallStatementChildren(node *tree_sitter.Node) {
@@ -872,6 +926,13 @@ func CloneFileResult(result FileResult) FileResult {
 		clone.CallSites = make([]CallSite, len(result.CallSites))
 		for i := range result.CallSites {
 			clone.CallSites[i] = CloneCallSite(result.CallSites[i])
+		}
+	}
+	if result.TypeReferences != nil {
+		clone.TypeReferences = make([]TypeReference, len(result.TypeReferences))
+		for i := range result.TypeReferences {
+			clone.TypeReferences[i] = result.TypeReferences[i]
+			clone.TypeReferences[i].Caller = cloneCaller(result.TypeReferences[i].Caller)
 		}
 	}
 	return clone

@@ -110,14 +110,21 @@ type Symbol struct {
 	File       string
 	Line       int
 	Column     int
+	EndLine    int
+	EndColumn  int
+	Parent     string
+	Visibility string
+	ReturnType string
+	Signature  string
 }
 
 // Snapshot is one coherent set of declarations and resolved call sites. Both
 // CLI batch inspection and the LSP's incremental workspace index can produce
 // this value without exposing their storage implementation to graph traversal.
 type Snapshot struct {
-	Symbols []Symbol
-	Calls   []calls.Call
+	Symbols        []Symbol
+	Calls          []calls.Call
+	TypeReferences []calls.TypeReference
 }
 
 // AmbiguousTargetError gives callers the exact stable candidates rather than
@@ -138,15 +145,23 @@ func Analyze(input *calls.Result, request Request) (Result, error) {
 	if input == nil {
 		return Result{}, errors.New("call graph input is nil")
 	}
-	snapshot := Snapshot{Calls: input.Calls, Symbols: make([]Symbol, 0, len(input.Symbols))}
+	return AnalyzeSnapshot(snapshotFromResult(input), request)
+}
+
+func snapshotFromResult(input *calls.Result) Snapshot {
+	snapshot := Snapshot{Calls: input.Calls, TypeReferences: input.TypeReferences, Symbols: make([]Symbol, 0, len(input.Symbols))}
 	for _, sym := range input.Symbols {
 		kind := input.ModuleKinds[sym.File]
 		if kind == "" {
 			kind = moduleKindForFile(sym.File)
 		}
-		snapshot.Symbols = append(snapshot.Symbols, Symbol{Name: sym.Name, Kind: sym.Kind, Module: sym.Module, File: sym.File, Line: sym.StartLine, Column: sym.StartColumn, ModuleKind: kind})
+		snapshot.Symbols = append(snapshot.Symbols, Symbol{
+			Name: sym.Name, Kind: sym.Kind, Module: sym.Module, File: sym.File,
+			Line: sym.StartLine, Column: sym.StartColumn, EndLine: sym.EndLine, EndColumn: sym.EndColumn,
+			ModuleKind: kind, Parent: sym.Parent, Visibility: sym.Visibility, ReturnType: sym.ReturnType, Signature: sym.Signature,
+		})
 	}
-	return AnalyzeSnapshot(snapshot, request)
+	return snapshot
 }
 
 func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {

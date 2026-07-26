@@ -225,6 +225,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.diffCommand(),
 		a.inspectCommand(),
 		a.impactCommand(),
+		a.graphCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
 		a.lspCommand(),
@@ -5139,6 +5140,48 @@ func (a *app) impactCommand() *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", "", "source directory or file to analyze (default: configured source tree)")
 	cmd.Flags().StringVar(&direction, "direction", callgraph.DirectionBoth, "traversal direction: callers, callees, or both")
 	cmd.Flags().IntVar(&depth, "depth", 1, "maximum call-edge depth (0 includes only the target)")
+	return cmd
+}
+
+func (a *app) graphCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "graph",
+		Short: "Inspect project-local VBA graph projections",
+		Args:  cobra.NoArgs,
+	}
+	cmd.AddCommand(a.graphDependenciesCommand())
+	return cmd
+}
+
+func (a *app) graphDependenciesCommand() *cobra.Command {
+	var path string
+	var module string
+	cmd := &cobra.Command{
+		Use:   "dependencies",
+		Short: "Report confirmed VBA procedure, module, and type dependencies",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := a.loadConfig("graph dependencies")
+			if err != nil {
+				return err
+			}
+			snapshot, err := calls.Inspect(calls.Options{RootDir: a.cwd, Config: cfg, Path: path})
+			if err != nil {
+				return a.writeFailure("graph dependencies", output.ExitEnvironment, "graph_dependencies_failed", err)
+			}
+			result, err := callgraph.DependenciesFromResult(snapshot, callgraph.DependencyRequest{Module: module})
+			if err != nil {
+				return a.writeFailure("graph dependencies", output.ExitEnvironment, "graph_dependencies_failed", err)
+			}
+			env := output.New("graph dependencies")
+			env.Target = map[string]any{"kind": "source", "path": snapshot.Root, "description": "VBA source files"}
+			env.Graph = result
+			env.Logs = []string{fmt.Sprintf("Dependency graph: %d nodes, %d confirmed edges, %d uncertain edges", len(result.Nodes), len(result.Edges), len(result.UncertainEdges))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "source directory or file to analyze (default: configured source tree)")
+	cmd.Flags().StringVar(&module, "module", "", "case-insensitive exact source module filter")
 	return cmd
 }
 

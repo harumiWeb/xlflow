@@ -77,6 +77,7 @@ func buildDescriptors() []Descriptor {
 		cli("inspect.calls", "inspect calls", sourceRead),
 		cli("inspect.symbols", "inspect symbols", sourceRead),
 		cli("impact", "impact", sourceRead),
+		cli("graph.dependencies", "graph dependencies", sourceRead),
 		both("inspect.workbook", "inspect workbook", workbookRead, bridgeArgs("inspect", "Target", "workbook")),
 		both("inspect.sheets", "inspect sheets", workbookRead, bridgeArgs("inspect", "Target", "sheets")),
 		both("inspect.form", "inspect form", workbookDesigner, bridge("inspect-form")),

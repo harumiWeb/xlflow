@@ -17,46 +17,47 @@ xlflow [command] --wait --wait-timeout 45s
 
 Use command pages for workflow guidance and the canonical CLI contract in [JSON Output](../reference/json-output).
 
-| Command                        | Purpose                                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------------ |
-| [new](./new)                   | Create a new xlflow project and macro-enabled workbook or add-in.                          |
-| [init](./init)                 | Initialize an xlflow project from an existing workbook or add-in.                          |
-| [capabilities](./capabilities) | Show machine-readable command safety metadata.                                             |
-| [doctor](./doctor)             | Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.                  |
-| [attach](./attach)             | Validate that the active Excel workbook matches the configured workbook.                   |
-| [backup](./backup)             | List rollback-capable workbook backups for the configured workbook.                        |
-| [list](./list)                 | List workbook resources. The public subcommand is `list forms`.                            |
-| [form](./form)                 | Manage UserForms through source scaffolds, snapshot, build, and image export.              |
-| [formulas](./formulas)         | Extract worksheet formulas into region-based JSONL snapshots without Excel.                |
-| [pull](./pull)                 | Export workbook VBA components into configured source directories.                         |
-| [push](./push)                 | Import edited source files back into the configured workbook.                              |
-| [build](./build)               | Build a validated Excel-backed release workbook without changing the development workbook. |
-| [pack](./pack)                 | Build a release `.xlsm` artifact from source and a workbook template.                      |
-| [rollback](./rollback)         | Restore the configured workbook from an xlflow-managed backup.                             |
-| [status](./status)             | Show project, source, workbook, and session state in one read-only command.                |
-| [session](./session)           | Keep Excel and the configured workbook open across repeated commands.                      |
-| [save](./save)                 | Save the workbook held by the managed xlflow session.                                      |
-| [recovery](./recovery)         | Verify and clear workbook recovery-required state.                                         |
-| [runner](./runner)             | Manage the persistent xlflow runner marker module.                                         |
-| [run](./run)                   | Run a workbook macro from the CLI.                                                         |
-| [export-image](./export-image) | Export a worksheet range as a PNG image through Excel COM.                                 |
-| [edit](./edit)                 | Mutate a live session workbook for setup and visual tuning.                                |
-| [macros](./macros)             | Discover runnable public workbook macro entrypoints without executing user code.           |
-| [ui](./ui)                     | Manage xlflow-owned worksheet buttons.                                                     |
-| [test](./test)                 | Discover and run workbook VBA test procedures.                                             |
-| [type db](./type-db)           | Manage generated TypeLib databases for LSP type intelligence.                              |
-| [diff](./diff)                 | Compare workbook files and optionally exported VBA source trees.                           |
-| [inspect](./inspect)           | Inspect saved workbook state or UserForm state.                                            |
-| [impact](./impact)             | Show the confirmed VBA caller/callee blast radius for one procedure.                       |
-| [inspect-gui](./inspect-gui)   | Scan source for automation-hostile GUI boundaries without opening Excel.                   |
-| [lint](./lint)                 | Lint VBA source files for agent-hostile and compile-dialog-prone patterns.                 |
-| [lsp](./lsp)                   | Start the reusable VBA language server for editor integrations.                            |
-| [fmt](./fmt)                   | Format VBA source files with a conservative, non-destructive formatter.                    |
-| [analyze](./analyze)           | Analyze VBA source for runtime-risk patterns without Excel COM.                            |
-| [check](./check)               | Run lint, analyze, and doctor as a combined preflight.                                     |
-| [module](./module)             | Create module source files and install bundled xlflow helper modules.                      |
-| [completion](./completion)     | Generate shell completion scripts through Cobra.                                           |
-| [process](./process)           | List and manage local Excel processes.                                                     |
-| [skill](./skill)               | Install the bundled xlflow skill for AI agent tools.                                       |
-| [version](./version)           | Show xlflow build metadata.                                                                |
-| [update](./update)             | Check whether a newer xlflow release is available.                                         |
+| Command                                    | Purpose                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| [new](./new)                               | Create a new xlflow project and macro-enabled workbook or add-in.                          |
+| [init](./init)                             | Initialize an xlflow project from an existing workbook or add-in.                          |
+| [capabilities](./capabilities)             | Show machine-readable command safety metadata.                                             |
+| [doctor](./doctor)                         | Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.                  |
+| [attach](./attach)                         | Validate that the active Excel workbook matches the configured workbook.                   |
+| [backup](./backup)                         | List rollback-capable workbook backups for the configured workbook.                        |
+| [list](./list)                             | List workbook resources. The public subcommand is `list forms`.                            |
+| [form](./form)                             | Manage UserForms through source scaffolds, snapshot, build, and image export.              |
+| [formulas](./formulas)                     | Extract worksheet formulas into region-based JSONL snapshots without Excel.                |
+| [pull](./pull)                             | Export workbook VBA components into configured source directories.                         |
+| [push](./push)                             | Import edited source files back into the configured workbook.                              |
+| [build](./build)                           | Build a validated Excel-backed release workbook without changing the development workbook. |
+| [pack](./pack)                             | Build a release `.xlsm` artifact from source and a workbook template.                      |
+| [rollback](./rollback)                     | Restore the configured workbook from an xlflow-managed backup.                             |
+| [status](./status)                         | Show project, source, workbook, and session state in one read-only command.                |
+| [session](./session)                       | Keep Excel and the configured workbook open across repeated commands.                      |
+| [save](./save)                             | Save the workbook held by the managed xlflow session.                                      |
+| [recovery](./recovery)                     | Verify and clear workbook recovery-required state.                                         |
+| [runner](./runner)                         | Manage the persistent xlflow runner marker module.                                         |
+| [run](./run)                               | Run a workbook macro from the CLI.                                                         |
+| [export-image](./export-image)             | Export a worksheet range as a PNG image through Excel COM.                                 |
+| [edit](./edit)                             | Mutate a live session workbook for setup and visual tuning.                                |
+| [macros](./macros)                         | Discover runnable public workbook macro entrypoints without executing user code.           |
+| [ui](./ui)                                 | Manage xlflow-owned worksheet buttons.                                                     |
+| [test](./test)                             | Discover and run workbook VBA test procedures.                                             |
+| [type db](./type-db)                       | Manage generated TypeLib databases for LSP type intelligence.                              |
+| [diff](./diff)                             | Compare workbook files and optionally exported VBA source trees.                           |
+| [inspect](./inspect)                       | Inspect saved workbook state or UserForm state.                                            |
+| [impact](./impact)                         | Show the confirmed VBA caller/callee blast radius for one procedure.                       |
+| [graph dependencies](./graph-dependencies) | Show confirmed procedure, module, and project-type dependency projections.                 |
+| [inspect-gui](./inspect-gui)               | Scan source for automation-hostile GUI boundaries without opening Excel.                   |
+| [lint](./lint)                             | Lint VBA source files for agent-hostile and compile-dialog-prone patterns.                 |
+| [lsp](./lsp)                               | Start the reusable VBA language server for editor integrations.                            |
+| [fmt](./fmt)                               | Format VBA source files with a conservative, non-destructive formatter.                    |
+| [analyze](./analyze)                       | Analyze VBA source for runtime-risk patterns without Excel COM.                            |
+| [check](./check)                           | Run lint, analyze, and doctor as a combined preflight.                                     |
+| [module](./module)                         | Create module source files and install bundled xlflow helper modules.                      |
+| [completion](./completion)                 | Generate shell completion scripts through Cobra.                                           |
+| [process](./process)                       | List and manage local Excel processes.                                                     |
+| [skill](./skill)                           | Install the bundled xlflow skill for AI agent tools.                                       |
+| [version](./version)                       | Show xlflow build metadata.                                                                |
+| [update](./update)                         | Check whether a newer xlflow release is available.                                         |

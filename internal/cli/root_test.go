@@ -5212,6 +5212,52 @@ func TestImpactTargetAndArgumentFailuresAreStructured(t *testing.T) {
 	}
 }
 
+func TestGraphDependenciesJSONTextAndModuleFilter(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "graph", "dependencies", "--module", "main"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("graph dependencies json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Graph   struct {
+			Target string `json:"target"`
+			Nodes  []struct {
+				ID string `json:"id"`
+			} `json:"nodes"`
+			Edges []struct {
+				Kind string `json:"kind"`
+			} `json:"edges"`
+			UncertainEdges []json.RawMessage `json:"uncertain_edges"`
+		} `json:"graph"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("parse graph dependencies JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Command != "graph dependencies" || got.Graph.Target != "dependencies" || len(got.Graph.Nodes) == 0 || len(got.Graph.Edges) != 2 {
+		t.Fatalf("graph dependencies envelope = %+v", got)
+	}
+
+	stdout.Reset()
+	a = &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root = a.rootCommand()
+	root.SetArgs([]string{"graph", "dependencies"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("graph dependencies text error = %v", err)
+	}
+	for _, want := range []string{"Nodes:", "Confirmed edges:", "calls:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("graph dependencies text missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestInspectCallsMarkdownRemainsGroupedByFileAndCaller(t *testing.T) {
 	dir := t.TempDir()
 	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))

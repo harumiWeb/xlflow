@@ -31,6 +31,7 @@ const requiredCommandPages = [
   "type-db",
   "diff",
   "inspect",
+  "graph-dependencies",
   "inspect-gui",
   "lint",
   "lsp",
