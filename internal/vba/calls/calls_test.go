@@ -224,6 +224,37 @@ func TestNewResolverFromSymbolsNormalizesAndDeterministicallyOrdersCandidates(t 
 	}
 }
 
+func TestResolverRespectsPrivateProcedureVisibility(t *testing.T) {
+	resolver := NewResolverFromSymbols([]ResolverSymbol{
+		{Name: "Hidden", Module: "PrivateModule", Kind: "sub", Visibility: "Private", File: "src/modules/PrivateModule.bas", Line: 2},
+		{Name: "PublicTarget", Module: "PrivateModule", Kind: "sub", Visibility: "Public", File: "src/modules/PrivateModule.bas", Line: 6},
+	})
+
+	sameModule := resolver.Resolve(CallSite{
+		Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "PrivateModule.Run"},
+		Callee: Callee{Text: "Hidden", BaseName: "Hidden", Member: "Hidden"},
+	})
+	if sameModule.Resolution.Status != "matched" {
+		t.Fatalf("same-module private call = %+v", sameModule.Resolution)
+	}
+
+	crossModule := resolver.Resolve(CallSite{
+		Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "Other.Run"},
+		Callee: Callee{Text: "Hidden", BaseName: "Hidden", Member: "Hidden"},
+	})
+	if crossModule.Resolution.Status != "unresolved" {
+		t.Fatalf("cross-module private call = %+v", crossModule.Resolution)
+	}
+
+	public := resolver.Resolve(CallSite{
+		Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "Other.Run"},
+		Callee: Callee{Text: "PublicTarget", BaseName: "PublicTarget", Member: "PublicTarget"},
+	})
+	if public.Resolution.Status != "matched" {
+		t.Fatalf("cross-module public call = %+v", public.Resolution)
+	}
+}
+
 func TestNewResolverPreservesLegacySymbolAdapter(t *testing.T) {
 	legacy := NewResolver([]symbols.Symbol{{
 		Name:      "Target",

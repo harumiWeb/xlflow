@@ -53,6 +53,7 @@ type indexedFileAnalysis struct {
 	path       string
 	version    string
 	moduleKind string
+	source     string
 	symbols    []intel.Symbol
 	callSites  []calls.CallSite
 }
@@ -71,6 +72,7 @@ type callRef struct {
 // posting. An empty query selects every effective workspace call.
 type workspaceCallQuery struct {
 	Caller     string
+	CallerKind string
 	CalleeBase string
 	CalleeText string
 }
@@ -309,6 +311,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 	}
 
 	caller := normalizeCallQuery(query.Caller)
+	callerKind := normalizeCallQuery(query.CallerKind)
 	baseName := normalizeCallQuery(query.CalleeBase)
 	calleeText := normalizeCallText(query.CalleeText)
 
@@ -317,7 +320,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 	sites := make([]calls.CallSite, 0, len(refs))
 	for _, ref := range refs {
 		site, ok := x.callForRefLocked(ref)
-		if !ok || !matchesCallQuery(site, caller, baseName, calleeText) {
+		if !ok || !matchesCallQuery(site, caller, callerKind, baseName, calleeText) {
 			continue
 		}
 		sites = append(sites, calls.CloneCallSite(site))
@@ -330,11 +333,12 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 		}
 		entry := x.effective[ref.path]
 		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{
-			Name:   sym.Name,
-			Module: sym.Module,
-			Kind:   sym.Kind,
-			File:   workspaceDisplayPath(x.root, entry.path),
-			Line:   sym.Range.Start.Line + 1,
+			Name:       sym.Name,
+			Module:     sym.Module,
+			Kind:       sym.Kind,
+			Visibility: sym.Visibility,
+			File:       workspaceDisplayPath(x.root, entry.path),
+			Line:       sym.Range.Start.Line + 1,
 		})
 	}
 	x.mu.RUnlock()
@@ -562,14 +566,26 @@ func workspaceDisplayPath(root, path string) string {
 	return filepath.ToSlash(path)
 }
 
-func matchesCallQuery(site calls.CallSite, caller, baseName, calleeText string) bool {
+func matchesCallQuery(site calls.CallSite, caller, callerKind, baseName, calleeText string) bool {
 	if caller != "" && (site.Caller == nil || normalizeCallQuery(site.Caller.QualifiedName) != caller) {
+		return false
+	}
+	if callerKind != "" && (site.Caller == nil || !matchingCallProcedureKinds(site.Caller.Kind, callerKind)) {
 		return false
 	}
 	if baseName != "" && normalizeCallQuery(site.Callee.BaseName) != baseName {
 		return false
 	}
 	return calleeText == "" || normalizeCallText(site.Callee.Text) == calleeText
+}
+
+func matchingCallProcedureKinds(actual, requested string) bool {
+	actual = normalizeCallQuery(actual)
+	requested = normalizeCallQuery(requested)
+	if actual == requested {
+		return true
+	}
+	return actual == "property" && (requested == "property_get" || requested == "property_let" || requested == "property_set")
 }
 
 func callSiteLess(a, b calls.CallSite) bool {
