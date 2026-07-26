@@ -54,6 +54,7 @@ type Envelope struct {
 	TestRun        any `json:"test_run,omitempty"`
 	Diff           any `json:"diff,omitempty"`
 	Inspect        any `json:"inspect,omitempty"`
+	Impact         any `json:"impact,omitempty"`
 	Runtime        any `json:"runtime,omitempty"`
 	GUIBoundaries  any `json:"gui_boundaries,omitempty"`
 	Debug          any `json:"debug,omitempty"`

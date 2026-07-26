@@ -12,6 +12,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -375,6 +376,14 @@ func TestWorkspaceAnalysisIndexReresolvesCallsWithoutReparsingCaller(t *testing.
 	}
 	if candidate := got[0].Resolution.Candidates[0]; candidate.File != "src/modules/B.bas" || candidate.Line != 3 {
 		t.Fatalf("candidate = %+v", candidate)
+	}
+	snapshot, err := index.callGraphSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	impact, err := callgraph.AnalyzeSnapshot(snapshot, callgraph.Request{Target: "A.Main", Direction: callgraph.DirectionCallees, Depth: 1})
+	if err != nil || len(impact.DirectCallees) != 1 || impact.DirectCallees[0].ID.QualifiedName != "B.Foo" {
+		t.Fatalf("incremental impact snapshot = %+v, %v", impact, err)
 	}
 	if err := os.Remove(b); err != nil {
 		t.Fatal(err)

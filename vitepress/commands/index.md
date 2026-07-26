@@ -47,6 +47,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [type db](./type-db)           | Manage generated TypeLib databases for LSP type intelligence.                              |
 | [diff](./diff)                 | Compare workbook files and optionally exported VBA source trees.                           |
 | [inspect](./inspect)           | Inspect saved workbook state or UserForm state.                                            |
+| [impact](./impact)             | Show the confirmed VBA caller/callee blast radius for one procedure.                       |
 | [inspect-gui](./inspect-gui)   | Scan source for automation-hostile GUI boundaries without opening Excel.                   |
 | [lint](./lint)                 | Lint VBA source files for agent-hostile and compile-dialog-prone patterns.                 |
 | [lsp](./lsp)                   | Start the reusable VBA language server for editor integrations.                            |

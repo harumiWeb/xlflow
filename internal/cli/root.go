@@ -43,6 +43,7 @@ import (
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/testdiscover"
@@ -223,6 +224,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.typeCommand(),
 		a.diffCommand(),
 		a.inspectCommand(),
+		a.impactCommand(),
 		a.inspectGUICommand(),
 		a.lintCommand(),
 		a.lspCommand(),
@@ -5082,6 +5084,83 @@ func (a *app) inspectCallsCommand(flags *inspectSharedFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&includeMembers, "include-members", false, "compatibility no-op; member calls are included by default")
 	cmd.Flags().BoolVar(&includeBuiltins, "include-builtins", false, "compatibility no-op; built-in-looking calls are included by default")
 	return cmd
+}
+
+func (a *app) impactCommand() *cobra.Command {
+	var path string
+	var direction string
+	var depth int
+	cmd := &cobra.Command{
+		Use:   "impact <Module.Procedure>",
+		Short: "Report confirmed VBA caller and callee impact",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 || !validImpactTarget(args[0]) {
+				return a.writeFailure("impact", output.ExitConfig, "impact_args_invalid", errors.New("exactly one Module.Procedure target is required"))
+			}
+			if depth < 0 {
+				return a.writeFailure("impact", output.ExitConfig, "impact_args_invalid", errors.New("--depth must be greater than or equal to 0"))
+			}
+			cfg, err := a.loadConfig("impact")
+			if err != nil {
+				return err
+			}
+			snapshot, err := calls.Inspect(calls.Options{RootDir: a.cwd, Config: cfg, Path: path})
+			if err != nil {
+				return a.writeFailure("impact", output.ExitEnvironment, "impact_failed", err)
+			}
+			result, err := callgraph.Analyze(snapshot, callgraph.Request{Target: args[0], Direction: direction, Depth: depth})
+			if errors.Is(err, callgraph.ErrTargetNotFound) {
+				return a.writeImpactFailure("impact_target_not_found", fmt.Sprintf("no project-local procedure matches %q", args[0]), nil, output.ExitValidation)
+			}
+			var ambiguous *callgraph.AmbiguousTargetError
+			if errors.As(err, &ambiguous) {
+				return a.writeImpactFailure("impact_target_ambiguous", fmt.Sprintf("impact target %q matches %d procedures", args[0], len(ambiguous.Candidates)), ambiguous.Candidates, output.ExitValidation)
+			}
+			if err != nil {
+				return a.writeFailure("impact", output.ExitConfig, "impact_args_invalid", err)
+			}
+			env := output.New("impact")
+			env.Target = map[string]any{"kind": "source", "path": snapshot.Root, "description": "VBA source files"}
+			env.Impact = result
+			env.Logs = []string{
+				fmt.Sprintf("Impact: %s", result.Target.ID.QualifiedName),
+				fmt.Sprintf("Traversal: %s, depth %d", result.Traversal.Direction, result.Traversal.Depth),
+				fmt.Sprintf("Confirmed: %d node(s), %d edge(s); direct callers: %d; direct callees: %d", len(result.Nodes), len(result.Edges), len(result.DirectCallers), len(result.DirectCallees)),
+				"Direct callers: " + formatImpactNodes(result.DirectCallers),
+				"Direct callees: " + formatImpactNodes(result.DirectCallees),
+				"Transitive upstream callers: " + formatImpactNodes(result.UpstreamCallers),
+				"Transitive downstream callees: " + formatImpactNodes(result.DownstreamCallees),
+				fmt.Sprintf("Cycles: %d", len(result.Cycles)),
+				fmt.Sprintf("Uncertainty: ambiguous=%d unresolved=%d external=%d builtin_like=%d member_call=%d", result.Uncertainty.Ambiguous, result.Uncertainty.Unresolved, result.Uncertainty.External, result.Uncertainty.BuiltinLike, result.Uncertainty.MemberCall),
+			}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "source directory or file to analyze (default: configured source tree)")
+	cmd.Flags().StringVar(&direction, "direction", callgraph.DirectionBoth, "traversal direction: callers, callees, or both")
+	cmd.Flags().IntVar(&depth, "depth", 1, "maximum call-edge depth (0 includes only the target)")
+	return cmd
+}
+
+func validImpactTarget(target string) bool {
+	parts := strings.Split(strings.TrimSpace(target), ".")
+	return len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
+}
+
+func formatImpactNodes(nodes []callgraph.Node) string {
+	if len(nodes) == 0 {
+		return "none"
+	}
+	items := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		items = append(items, fmt.Sprintf("%s (%s:%d)", node.ID.QualifiedName, node.ID.File, node.ID.Line))
+	}
+	return strings.Join(items, ", ")
+}
+
+func (a *app) writeImpactFailure(code, message string, details any, exitCode int) error {
+	env := output.Failure("impact", output.Error{Code: code, Message: message, Details: details})
+	return a.write(env, exitCode)
 }
 
 func (a *app) inspectSymbolsCommand(flags *inspectSharedFlags) *cobra.Command {

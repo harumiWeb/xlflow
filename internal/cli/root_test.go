@@ -5105,6 +5105,113 @@ func TestInspectCallsTextPathAndFilters(t *testing.T) {
 	}
 }
 
+func TestImpactJSONAndText(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))
+
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "impact", "Main.Run"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("impact json error = %v, exit = %d", err, output.ExitCode(err))
+	}
+	var got struct {
+		Status  string `json:"status"`
+		Command string `json:"command"`
+		Impact  struct {
+			Traversal struct {
+				Direction string `json:"direction"`
+				Depth     int    `json:"depth"`
+			} `json:"traversal"`
+			Target struct {
+				ID struct {
+					QualifiedName string `json:"qualified_name"`
+				} `json:"id"`
+			} `json:"target"`
+			DirectCallees []struct {
+				ID struct {
+					QualifiedName string `json:"qualified_name"`
+				} `json:"id"`
+			} `json:"direct_callees"`
+		} `json:"impact"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("parse impact JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Status != output.StatusOK || got.Command != "impact" || got.Impact.Target.ID.QualifiedName != "Main.Run" || got.Impact.Traversal.Direction != "both" || got.Impact.Traversal.Depth != 1 {
+		t.Fatalf("impact envelope = %+v", got)
+	}
+	if len(got.Impact.DirectCallees) != 1 || got.Impact.DirectCallees[0].ID.QualifiedName != "Main.BuildReport" {
+		t.Fatalf("direct callees = %+v", got.Impact.DirectCallees)
+	}
+
+	stdout.Reset()
+	a = &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root = a.rootCommand()
+	root.SetArgs([]string{"impact", "Main.Run", "--path", filepath.Join("src", "modules")})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("impact text error = %v", err)
+	}
+	for _, want := range []string{"Impact: Main.Run", "Traversal: both, depth 1", "direct callees: 1", "Direct callees: Main.BuildReport"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("impact text missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestImpactTargetAndArgumentFailuresAreStructured(t *testing.T) {
+	dir := t.TempDir()
+	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))
+	for _, tt := range []struct {
+		args []string
+		code string
+		exit int
+	}{
+		{[]string{"--json", "impact", "Missing.Run"}, "impact_target_not_found", output.ExitValidation},
+		{[]string{"--json", "impact", "Run"}, "impact_args_invalid", output.ExitConfig},
+		{[]string{"--json", "impact", "Main.Run", "--direction", "sideways"}, "impact_args_invalid", output.ExitConfig},
+		{[]string{"--json", "impact", "Main.Run", "--depth", "-1"}, "impact_args_invalid", output.ExitConfig},
+	} {
+		var stdout bytes.Buffer
+		a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+		root := a.rootCommand()
+		root.SetArgs(tt.args)
+		err := root.Execute()
+		if err == nil || output.ExitCode(err) != tt.exit {
+			t.Fatalf("args %v: err=%v exit=%d", tt.args, err, output.ExitCode(err))
+		}
+		var payload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if unmarshalErr := json.Unmarshal(stdout.Bytes(), &payload); unmarshalErr != nil || payload.Error.Code != tt.code {
+			t.Fatalf("args %v: payload=%s error=%v", tt.args, stdout.String(), unmarshalErr)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "modules", "Main.cls"), []byte("VERSION 1.0 CLASS\nAttribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "impact", "Main.Run"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("ambiguous target error=%v exit=%d", err, output.ExitCode(err))
+	}
+	var ambiguous struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Details []json.RawMessage `json:"details"`
+		} `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(stdout.Bytes(), &ambiguous); unmarshalErr != nil || ambiguous.Error.Code != "impact_target_ambiguous" || len(ambiguous.Error.Details) != 2 {
+		t.Fatalf("ambiguous payload=%s error=%v", stdout.String(), unmarshalErr)
+	}
+}
+
 func TestInspectCallsMarkdownRemainsGroupedByFileAndCaller(t *testing.T) {
 	dir := t.TempDir()
 	writeInspectCallsFixture(t, dir, filepath.Join("src", "modules"))

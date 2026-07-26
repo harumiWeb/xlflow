@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `xlflow impact <Module.Procedure>` for deterministic, AI-friendly VBA call impact analysis. It reports confirmed direct/transitive callers and callees, cycles, affected modules, source locations, and explicit conservative-resolution uncertainty without opening Excel.
 - Extended LSP `VB030` argument diagnostics to flag known project-local arrays passed to non-array `Object` parameters, including both `ByVal` and `ByRef` calls, before Excel can surface a runtime type mismatch.
 - Added `VB014` parser-compatibility guidance to the bundled Agent Skill so agents distinguish tree-sitter recovery from Excel/VBE compile failures, preserve valid idiomatic VBA, and report compatibility limits without bypassing preflight.
 - Added a versioned `xlflow build` manifest to JSON output and as a companion `<output>.build.json` artifact. Build now reports resolved included/excluded components and validation evidence; if only companion publication fails, the validated workbook remains successful with `build_manifest_publish_failed`. `capabilities --json` now also reports whether the normal command path requires Excel.

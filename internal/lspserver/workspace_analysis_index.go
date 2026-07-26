@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -348,6 +349,45 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 		return callSiteLess(resolved[i].CallSite, resolved[j].CallSite)
 	})
 	return resolved, nil
+}
+
+// callGraphSnapshot returns a coherent resolved view of the effective
+// workspace. It is intentionally protocol-neutral so graph clients can reuse
+// LSP overlays and incremental indexing without triggering another source
+// parse. Call hierarchy currently uses queryResolvedCalls directly; impact and
+// future graph features can consume this snapshot.
+func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error) {
+	if err := x.waitReady(); err != nil {
+		return callgraph.Snapshot{}, err
+	}
+	x.mu.RLock()
+	sites := make([]calls.CallSite, 0, len(x.allCalls))
+	for _, ref := range x.allCalls {
+		site, ok := x.callForRefLocked(ref)
+		if ok {
+			sites = append(sites, calls.CloneCallSite(site))
+		}
+	}
+	resolverSymbols := make([]calls.ResolverSymbol, 0, len(x.all))
+	graphSymbols := make([]callgraph.Symbol, 0, len(x.all))
+	for _, ref := range x.all {
+		sym, ok := x.symbolForRefLocked(ref)
+		if !ok {
+			continue
+		}
+		entry := x.effective[ref.path]
+		file := workspaceDisplayPath(x.root, entry.path)
+		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{Name: sym.Name, Module: sym.Module, Kind: sym.Kind, File: file, Line: sym.Range.Start.Line + 1})
+		graphSymbols = append(graphSymbols, callgraph.Symbol{Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file, Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1})
+	}
+	x.mu.RUnlock()
+	resolver := calls.NewResolverFromSymbols(resolverSymbols)
+	resolved := make([]calls.Call, len(sites))
+	for i, site := range sites {
+		resolved[i] = resolver.Resolve(site)
+	}
+	sort.SliceStable(resolved, func(i, j int) bool { return callSiteLess(resolved[i].CallSite, resolved[j].CallSite) })
+	return callgraph.Snapshot{Symbols: graphSymbols, Calls: resolved}, nil
 }
 
 func (x *workspaceAnalysisIndex) replaceEffectiveLocked(key string, entry indexedFileAnalysis) {
