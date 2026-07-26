@@ -18,10 +18,11 @@ type BridgeSelector struct {
 }
 
 type Descriptor struct {
-	ID     CommandID        `json:"id"`
-	Policy Policy           `json:"policy"`
-	CLI    []CLISelector    `json:"cli,omitempty"`
-	Bridge []BridgeSelector `json:"bridge,omitempty"`
+	ID            CommandID        `json:"id"`
+	Policy        Policy           `json:"policy"`
+	RequiresExcel bool             `json:"requires_excel"`
+	CLI           []CLISelector    `json:"cli,omitempty"`
+	Bridge        []BridgeSelector `json:"bridge,omitempty"`
 }
 
 // CapabilityVersion is the current version of the public command capability
@@ -47,6 +48,7 @@ type CommandCapability struct {
 	RetryableWhenBusy bool             `json:"retryable_when_busy"`
 	DefaultWaitPolicy WaitPolicy       `json:"default_wait_policy"`
 	RecoveryBehavior  RecoveryBehavior `json:"recovery_behavior"`
+	RequiresExcel     bool             `json:"requires_excel"`
 }
 
 var descriptors = buildDescriptors()
@@ -133,6 +135,7 @@ func PublicCapabilities() Capabilities {
 			RetryableWhenBusy: descriptor.Policy.RetryableWhenBusy,
 			DefaultWaitPolicy: descriptor.Policy.DefaultWaitPolicy,
 			RecoveryBehavior:  descriptor.Policy.RecoveryBehavior,
+			RequiresExcel:     descriptor.RequiresExcel,
 		}
 	}
 	return result

@@ -42,7 +42,7 @@ func TestCapabilitiesPublishesBuildCoordinationPolicy(t *testing.T) {
 	capabilities := cliObjectMap(env.Capabilities)
 	commands := cliObjectMap(capabilities["commands"])
 	build := cliObjectMap(commands["build"])
-	if build["resource_scope"] != "workbook" || build["operation_kind"] != "mutate" || build["parallel_safe"] != false || build["retryable_when_busy"] != true || build["recovery_behavior"] != "block" {
+	if build["resource_scope"] != "workbook" || build["operation_kind"] != "mutate" || build["parallel_safe"] != false || build["retryable_when_busy"] != true || build["recovery_behavior"] != "block" || build["requires_excel"] != true {
 		t.Fatalf("build capability = %#v", build)
 	}
 	buildCommand, _, err := root.Find([]string{"build"})
@@ -72,8 +72,17 @@ func TestBuildDryRunReportsPlanWithoutWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	build := cliObjectMap(env.Build)
-	if build["dry_run"] != true || build["base"] != "build/Book.xlsm" || build["output"] != "build/Release/Book.xlsm" {
+	if build["schema_version"] != float64(1) || build["command"] != "build" || build["backend"] != "excel" || build["dry_run"] != true || build["base"] != "build/Book.xlsm" || build["output"] != "build/Release/Book.xlsm" {
 		t.Fatalf("build payload = %#v", build)
+	}
+	validation := cliObjectMap(build["validation"])
+	if validation["source_applied"] != false || validation["vbe_compile"] != "not_run" || validation["workbook_saved"] != false || validation["workbook_closed"] != false {
+		t.Fatalf("dry-run validation = %#v", validation)
+	}
+	publication := cliObjectMap(build["publication"])
+	manifest := cliObjectMap(build["manifest"])
+	if publication["method"] != "not_run" || manifest["path"] != "build/Release/Book.xlsm.build.json" || manifest["published"] != false {
+		t.Fatalf("dry-run publication = %#v, manifest = %#v", publication, manifest)
 	}
 	included, ok := build["included"].([]any)
 	if !ok || len(included) != 1 {
@@ -141,7 +150,8 @@ func TestBuildValidationAndNonDryRunBoundary(t *testing.T) {
 func TestMergeBuildPayloadPreservesPlanAndBridgeFields(t *testing.T) {
 	plan := map[string]any{"base": "build/Book.xlsm", "warnings": []string{"unmatched"}}
 	merged := mergeBuildPayload(plan, map[string]any{"vbe_compile": "passed", "workbook_saved": true})
-	if merged["base"] != "build/Book.xlsm" || merged["vbe_compile"] != "passed" || merged["workbook_saved"] != true {
+	validation := cliObjectMap(merged["validation"])
+	if merged["base"] != "build/Book.xlsm" || merged["vbe_compile"] != "passed" || merged["workbook_saved"] != true || validation["vbe_compile"] != "passed" || validation["workbook_saved"] != true {
 		t.Fatalf("merged build payload = %#v", merged)
 	}
 }
