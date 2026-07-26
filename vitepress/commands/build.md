@@ -58,11 +58,12 @@ available); `output.temporary_cleanup.status` is `failed`.
 
 ## Build manifest
 
-Every successful non-dry build writes a versioned companion manifest at
-`<output>.build.json` (for example `build/Release/Book.xlsm.build.json`). The
-same v1 fields appear under `build` in `--json`: resolved base/output paths,
-included and excluded components, VBE/save/close validation, and publication
-metadata. `build.schema_version` is the contract version for integrations.
+After successful workbook publication, a non-dry build attempts to publish a
+versioned companion manifest at `<output>.build.json` (for example
+`build/Release/Book.xlsm.build.json`). The same v1 fields appear under `build`
+in `--json`: project-relative base/output paths, included and excluded
+components, VBE/save/close validation, and publication metadata.
+`build.schema_version` is the contract version for integrations.
 
 The workbook artifact remains authoritative. If only the manifest cannot be
 published after the workbook was safely published, build succeeds with warning

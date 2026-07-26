@@ -22,11 +22,11 @@ func buildDescriptors() []Descriptor {
 		cli("backup.prune", "backup prune", sourceMutate),
 		cli("backup.delete", "backup delete", sourceMutate),
 		cli("rollback", "rollback", workbookMutate),
-		cli("form.migrate.sidecar", "form migrate sidecar", workbookDesigner),
+		cliExcel("form.migrate.sidecar", "form migrate sidecar", workbookDesigner),
 		cli("formulas.pull", "formulas pull", workbookRead),
 		cli("formulas.inspect", "formulas inspect", sourceRead),
 		cli("form.new", "form new", sourceMutate),
-		cli("form.snapshot", "form snapshot", workbookDesigner),
+		cliExcel("form.snapshot", "form snapshot", workbookDesigner),
 		both("form.build", "form build", workbookDesigner, bridgeArgs("form-write", "Action", "build")),
 		both("form.apply", "form apply", workbookDesigner, bridgeArgs("form-write", "Action", "apply")),
 		both("form.export-image", "form export-image", workbookDesigner, bridge("form-export-image")),
@@ -68,7 +68,7 @@ func buildDescriptors() []Descriptor {
 		cli("test.list", "test list", sourceRead),
 		cli("type.db.status", "type db status", sourceRead),
 		both("type.db.init", "type db init", excelRead, bridge("type-db-import")),
-		cli("type.db.refresh", "type db refresh", excelRead),
+		cliExcel("type.db.refresh", "type db refresh", excelRead),
 		cli("type.db.clean", "type db clean", sourceMutate),
 		both("process.list", "process list", withRecovery(excelRead, RecoveryObserve), bridgeArgs("process", "Action", "list")),
 		both("process.cleanup", "process cleanup", withRecovery(excelMutate, RecoveryRecover), bridgeArgs("process", "Action", "cleanup")),
@@ -86,7 +86,7 @@ func buildDescriptors() []Descriptor {
 		cli("lint", "lint", sourceRead),
 		cli("lsp", "lsp", sourceRead),
 		cli("analyze", "analyze", sourceRead),
-		cli("check", "check", excelRead),
+		cliExcel("check", "check", excelRead),
 		cli("inspect-gui", "inspect-gui", sourceRead),
 		cli("skill.install", "skill install", sourceMutate),
 	}
@@ -101,9 +101,16 @@ func cli(id CommandID, path string, policy Policy) Descriptor {
 	return Descriptor{ID: id, Policy: policy, CLI: []CLISelector{{Path: path}}}
 }
 
-func both(id CommandID, path string, policy Policy, selector BridgeSelector) Descriptor {
+// cliExcel marks a CLI-orchestrated command whose normal execution invokes
+// Excel automation even though it has no direct bridge request selector.
+func cliExcel(id CommandID, path string, policy Policy) Descriptor {
 	descriptor := cli(id, path, policy)
 	descriptor.RequiresExcel = true
+	return descriptor
+}
+
+func both(id CommandID, path string, policy Policy, selector BridgeSelector) Descriptor {
+	descriptor := cliExcel(id, path, policy)
 	descriptor.Bridge = []BridgeSelector{selector}
 	return descriptor
 }

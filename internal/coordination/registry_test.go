@@ -234,6 +234,22 @@ func TestPublicCapabilitiesV1StableFields(t *testing.T) {
 	}
 }
 
+func TestCLIOrchestratedExcelCommandsPublishExcelRequirement(t *testing.T) {
+	for _, id := range []CommandID{"check", "form.migrate.sidecar", "form.snapshot", "type.db.refresh"} {
+		descriptor, err := Lookup(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !descriptor.RequiresExcel {
+			t.Errorf("%s RequiresExcel = false, want true", id)
+		}
+		capability := PublicCapabilities().Commands[id]
+		if !capability.RequiresExcel {
+			t.Errorf("%s public requires_excel = false, want true", id)
+		}
+	}
+}
+
 func TestPublicCapabilitiesReturnsFreshValues(t *testing.T) {
 	first := PublicCapabilities()
 	first.Commands["push"] = CommandCapability{CLIPaths: []string{"changed"}}

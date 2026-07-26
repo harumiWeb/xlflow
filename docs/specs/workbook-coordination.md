@@ -81,7 +81,8 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
         "parallel_safe": false,
         "retryable_when_busy": true,
         "default_wait_policy": "fail",
-        "recovery_behavior": "block"
+        "recovery_behavior": "block",
+        "requires_excel": true
       }
     }
   }

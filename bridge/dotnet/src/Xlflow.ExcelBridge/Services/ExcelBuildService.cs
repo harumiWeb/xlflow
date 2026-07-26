@@ -32,8 +32,9 @@ public sealed class ExcelBuildService : IBuildService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var plan = DecodePlan(args.PlanJson64);
-            ValidatePlan(plan, args.ProjectRoot);
+            var manifestPlan = DecodePlan(args.PlanJson64);
+            var executionPlan = CreateExecutionPlan(manifestPlan);
+            ValidatePlan(executionPlan, args.ProjectRoot);
             stage = "validate_paths";
             var basePath = ExcelBridgeSupport.NormalizePath(args.BaseWorkbookPath);
             var outputPath = ExcelBridgeSupport.NormalizePath(args.OutputWorkbookPath);
@@ -70,7 +71,7 @@ public sealed class ExcelBuildService : IBuildService
             workbook = attachment.Workbook;
             excelProcessId = ExcelBridgeSupport.GetExcelProcessId(excel);
             stage = "source_applied";
-            var applied = Reconstruct(workbook, plan, args.CodeSource, stagingDirectory, cancellationToken);
+            var applied = Reconstruct(workbook, executionPlan, args.CodeSource, stagingDirectory, cancellationToken);
             var excelHwnd = ExcelBridgeSupport.GetExcelMainHwnd(excel);
             if (excelProcessId <= 0)
             {
@@ -103,7 +104,7 @@ public sealed class ExcelBuildService : IBuildService
             stage = "publish";
             BuildArtifactPublisher.ValidateTemporaryArtifact(temporaryWorkbook);
             var publication = _artifactPublisher.Publish(temporaryWorkbook, outputPath);
-            var manifest = CreateManifest(plan, basePath, outputPath, publication, applied);
+            var manifest = CreateManifest(manifestPlan, publication, applied);
             var manifestPublication = _artifactPublisher.PublishManifest(stagingDirectory!, outputPath, manifest);
             stagingCleanup = _artifactPublisher.Cleanup(stagingDirectory);
             return BuildSuccess(request, outputPath, publication, manifestPublication, stagingCleanup, applied);
@@ -303,13 +304,13 @@ public sealed class ExcelBuildService : IBuildService
         ["error"] = manifest.Error,
     };
 
-    private static Dictionary<string, object?> CreateManifest(BuildPlanPayload plan, string basePath, string outputPath, BuildArtifactPublication publication, int applied) => new()
+    private static Dictionary<string, object?> CreateManifest(BuildPlanPayload plan, BuildArtifactPublication publication, int applied) => new()
     {
         ["schema_version"] = 1,
         ["command"] = "build",
         ["backend"] = "excel",
-        ["base"] = basePath,
-        ["output"] = outputPath,
+        ["base"] = plan.BaseWorkbook,
+        ["output"] = plan.OutputPath,
         ["included_components"] = plan.Included,
         ["excluded_components"] = plan.Excluded,
         ["validation"] = new Dictionary<string, object?>
@@ -520,6 +521,23 @@ public sealed class ExcelBuildService : IBuildService
             }
         }
     }
+
+    // The manifest has a portable, project-relative path contract. Resolve a
+    // private copy for COM/file operations so validation never rewrites the
+    // planner paths serialized beside the published workbook.
+    private static BuildPlanPayload CreateExecutionPlan(BuildPlanPayload plan) => new()
+    {
+        BaseWorkbook = plan.BaseWorkbook,
+        OutputPath = plan.OutputPath,
+        Included = plan.Included.Select(component => new BuildComponentPayload
+        {
+            SourcePath = component.SourcePath,
+            Name = component.Name,
+            Type = component.Type,
+            RelatedPaths = [.. component.RelatedPaths],
+        }).ToList(),
+        Excluded = plan.Excluded,
+    };
 
     private static string ResolvePlannerPath(string projectRoot, string path)
     {
