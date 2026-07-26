@@ -887,6 +887,103 @@ End Sub
 	}
 }
 
+func TestAnalyzerDictionaryIterationValueUsageFindsKnownAndInferredDictionaries(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim earlyBound As Scripting.Dictionary
+  Dim lateBound As Object
+  Dim replacement As Object
+  Dim item As Variant
+  Set lateBound = CreateObject("Scripting.Dictionary")
+  Set replacement = New Scripting.Dictionary
+  For Each item In earlyBound
+    Debug.Print item.Name
+  Next item
+  For Each item In lateBound
+    Debug.Print item.Caption
+  Next item
+  For Each item In replacement
+    Debug.Print item.Value
+  Next item
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectDictionaryIterationValueUsage = true
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA213")
+	if len(got) != 3 {
+		t.Fatalf("VBA213 findings = %+v, want three direct dictionary iteration findings", got)
+	}
+	for _, finding := range got {
+		if !containsAll(finding.Reason, "Dictionary iteration yields keys") ||
+			!containsAll(finding.Suggestion, ".Items", "(") {
+			t.Fatalf("unexpected VBA213 finding: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerDictionaryIterationValueUsageFindsObjectAssignmentAndIgnoresKeyUsage(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim dict As Dictionary
+  Dim key As Variant
+  Dim value As Object
+  For Each key In dict
+    Debug.Print key, dict(key)
+  Next key
+  For Each key In dict.Items
+    Debug.Print key.Name
+  Next key
+  For Each key In dict
+    For Each value In dict.Items
+      Debug.Print value.Name
+    Next value
+    Set value = key
+  Next key
+  Debug.Print key.Name
+  ' Debug.Print key.Name
+  Debug.Print "key.Name"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectDictionaryIterationValueUsage = true
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA213")
+	if len(got) != 1 || got[0].Line != 16 || !strings.Contains(got[0].Message, "key") {
+		t.Fatalf("VBA213 findings = %+v, want only Set value = key on line 16", got)
+	}
+}
+
+func TestAnalyzerDictionaryIterationValueUsageIsOptInAndInvalidatesInference(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim dict As Object
+  Dim item As Variant
+  Set dict = CreateObject("Scripting.Dictionary")
+  Set dict = CreateObject("Scripting.FileSystemObject")
+  For Each item In dict
+    Debug.Print item.Name
+  Next item
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA213"); len(got) != 0 {
+		t.Fatalf("VBA213 should be opt-in and ignore invalidated inference: %+v", got)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRulesIgnoreCommentsAndStrings(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

@@ -96,7 +96,7 @@ exclude = ["src/modules/Tests/**"]
 		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
 	}
 	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
-		cfg.Analyze.DetectFunctionReturnPath {
+		cfg.Analyze.DetectFunctionReturnPath || cfg.Analyze.DetectDictionaryIterationValueUsage {
 		t.Fatalf("expected false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
 	}
 }
@@ -368,7 +368,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA212", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -386,11 +386,69 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA201"]
 	if cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		t.Fatal("expected VBA212/detect_non_short_circuit_object_guard to be disabled")
 	}
+	if cfg.Analyze.DetectDictionaryIterationValueUsage {
+		t.Fatal("expected VBA213/detect_dictionary_iteration_value_usage to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213", got)
+	}
+}
+
+func TestLoadEnablesDictionaryIterationValueUsageLegacyOptIn(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_dictionary_iteration_value_usage = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Analyze.DetectDictionaryIterationValueUsage {
+		t.Fatal("expected VBA213 legacy opt-in to be honored")
+	}
+	if !hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA213", "compatibility opt-in") {
+		t.Fatalf("expected VBA213 opt-in deprecation warning, got %+v", cfg.Warnings)
+	}
+}
+
+func TestLoadDictionaryIterationValueUsageDisabledRulesTakePrecedence(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_dictionary_iteration_value_usage = true
+disabled_rules = ["VBA213"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Analyze.DetectDictionaryIterationValueUsage {
+		t.Fatal("disabled_rules must take precedence over the VBA213 legacy opt-in")
+	}
+	if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", "VBA213") ||
+		!hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA213") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA213") {
+		t.Fatalf("expected VBA213 deprecation and conflict warnings, got %+v", cfg.Warnings)
 	}
 }
 
@@ -811,6 +869,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.UserForm.CodeSource = "frm"
 	cfg.Lint.ForbidInteractiveInput = false
 	cfg.Analyze.ForbidUnqualifiedExcelObjects = false
+	cfg.Analyze.DetectDictionaryIterationValueUsage = true
 
 	p := filepath.Join(dir, FileName)
 	if err := Write(p, cfg); err != nil {
@@ -832,6 +891,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if strings.Contains(text, "forbid_unqualified_excel_objects = false") || strings.Contains(text, "detect_range_find_nothing_check = true") {
 		t.Fatalf("generated config should prefer disabled_rules over legacy analyze booleans:\n%s", text)
+	}
+	if !strings.Contains(text, "detect_dictionary_iteration_value_usage = true") {
+		t.Fatalf("generated config should include the enabled VBA213 opt-in:\n%s", text)
 	}
 	if !strings.Contains(text, "[fmt]") ||
 		!strings.Contains(text, "operator_spacing = true") ||
@@ -909,6 +971,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected forbid_unqualified_excel_objects=false")
+	}
+	if !loaded.Analyze.DetectDictionaryIterationValueUsage {
+		t.Fatal("expected detect_dictionary_iteration_value_usage=true after Write/Load")
 	}
 }
 

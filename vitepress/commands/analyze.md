@@ -52,6 +52,7 @@ Use `analyze` for fast source-level feedback before opening Excel.
 | `VBA210` | warning  | Function may exit without assigning its return value.                        |
 | `VBA211` | error    | Expanded known Excel object/member mismatch.                                 |
 | `VBA212` | warning  | Object `Nothing` guard and dereference share a non-short-circuit expression. |
+| `VBA213` | warning  | Direct Dictionary iteration key is used as an object or value.               |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -73,7 +74,7 @@ Cells(1, 1).Value = 2 ' xlflow:disable-line VBA205
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match an analyzer diagnostic are reported as warnings.
 
-Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, and `VBA212` are enabled by default. Rules `VBA206`, `VBA207`, and `VBA210` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. Diagnostics `VBA101` through `VBA106` are always enabled.
+Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, and `VBA212` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration is not reported. Diagnostics `VBA101` through `VBA106` are always enabled.
 
 ## JSON Output Example
 
