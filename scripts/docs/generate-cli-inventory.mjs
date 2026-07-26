@@ -56,7 +56,24 @@ if (missing.length) {
   process.exitCode = 1;
 }
 
-const content = `# CLI command inventory\n\nGenerated from the Cobra command registrations in \`internal/cli/root.go\`. Run \`pnpm docs:generate-cli\` after adding a command.\n\n| Command | Documentation |\n| --- | --- |\n${commands.map(([name]) => `| \`xlflow ${name}\` | [command guide](../commands/${name.replace(" ", "-")}) |`).join("\n")}\n`;
+const tableRows = [
+  ["Command", "Documentation"],
+  ...commands.map(([name]) => [
+    `\`xlflow ${name}\``,
+    `[command guide](../commands/${name.replace(" ", "-")})`,
+  ]),
+];
+const tableWidths = tableRows[0].map((_, column) =>
+  Math.max(...tableRows.map((row) => row[column].length)),
+);
+const formatTableRow = (row) =>
+  `| ${row.map((cell, column) => cell.padEnd(tableWidths[column])).join(" | ")} |`;
+const table = [
+  formatTableRow(tableRows[0]),
+  formatTableRow(tableWidths.map((width) => "-".repeat(width))),
+  ...tableRows.slice(1).map(formatTableRow),
+].join("\n");
+const content = `# CLI command inventory\n\nGenerated from the Cobra command registrations in \`internal/cli/root.go\`. Run \`pnpm docs:generate-cli\` after adding a command.\n\n${table}\n`;
 const output = path.join(repo, "vitepress/reference/cli-command-inventory.md");
 if (check) {
   if (!fs.existsSync(output) || fs.readFileSync(output, "utf8") !== content) {
