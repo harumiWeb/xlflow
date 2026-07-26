@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
@@ -58,6 +59,41 @@ func TestDiagnosticsHandlesMalformedSourceAndJapaneseText(t *testing.T) {
 		if diag.Range.Start.Character < 0 || diag.Range.End.Character < 0 {
 			t.Fatalf("negative range in diagnostic: %+v", diag)
 		}
+	}
+}
+
+func TestDiagnosticsExposeParserRecoveryContext(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Main(
+    Range("A1").Value = 1
+End Sub
+`,
+	}
+
+	recovery := diagnosticsByCode(analyzer.Diagnostics(doc), "VB014")
+	if len(recovery) != 1 {
+		t.Fatalf("VB014 diagnostics = %+v, want one parser recovery diagnostic", recovery)
+	}
+	if recovery[0].Range.Start.Line < 0 || recovery[0].Range.Start.Character < 0 {
+		t.Fatalf("VB014 range = %+v, want a concrete recovery location", recovery[0].Range)
+	}
+	if !strings.Contains(recovery[0].Message, "Parser recovery:") || !strings.Contains(recovery[0].Message, "context") {
+		t.Fatalf("VB014 message = %q, want parser node and source context", recovery[0].Message)
+	}
+}
+
+func TestLintDiagnosticMessagePreservesRecoveryMetadataWithoutContext(t *testing.T) {
+	message := lintDiagnosticMessage(lint.Issue{
+		Code:        "VB014",
+		Message:     "VBA parser recovery detected.",
+		ParserNode:  "MISSING",
+		ParserToken: ")",
+	})
+	if !strings.Contains(message, "Parser recovery: MISSING") || !strings.Contains(message, `near ")"`) {
+		t.Fatalf("parser recovery metadata was dropped without context: %q", message)
 	}
 }
 

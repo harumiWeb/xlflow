@@ -47,7 +47,7 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 | `VB011` | error    | Unexpected `End Sub`, `End Function`, or `End Property`.                                                                   |
 | `VB012` | error    | Mismatched procedure end statement.                                                                                        |
 | `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                  |
-| `VB014` | error    | `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes.                                             |
+| `VB014` | error    | `tree-sitter-vba` recovered with an `ERROR` or `MISSING` node; this is a parser-compatibility signal, not proof that VBA is invalid. |
 | `VB015` | error    | A VBA logical line uses more than 24 line-continuation characters.                                                         |
 | `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                   |
 | `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                              |
@@ -87,6 +87,8 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 
 Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
+`VB014` is fail-closed for `push` and `run`, but parser recovery alone does not prove that Excel will reject the VBA. Its JSON issue may include `parser_node` (`ERROR` or `MISSING`), `parser_token`, and a short source-line `context`; human output shows the same recovery detail at `file:line:column`. Inspect that context and validate the source in the target host before changing otherwise-valid VBA merely to satisfy parser compatibility.
+
 Rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are enabled by default. Disable `VB020` with `disabled_rules = ["VB020"]` when a project intentionally keeps scratch locals. Heavier project-wide rules such as `detect_unused_private_procedures = true` (`VB021`) stay conservative opt-ins; new `xlflow.toml` files include commented examples. Use [`analyze`](./analyze) for semantic runtime-risk checks such as unqualified Excel access, error-handler fallthrough, Application state leaks, `Range.Find` `Nothing` guards, and object `Nothing` guards combined with dereferences in non-short-circuit boolean expressions.
 
 To keep runtime-error diagnostics useful after procedure renames, opt into `VB044` with a local constant convention:
@@ -122,6 +124,23 @@ Failed `--json` output uses the xlflow envelope plus command-specific fields.
       "message": "Declare an explicit type with As <Type>."
     }
   ]
+}
+```
+
+For `VB014`, the optional recovery metadata identifies the first concrete recovery node:
+
+```json
+{
+  "code": "VB014",
+  "severity": "error",
+  "file": "src/modules/Main.bas",
+  "line": 7,
+  "column": 12,
+  "kind": "parser_recovery",
+  "parser_node": "MISSING",
+  "parser_token": "End Sub",
+  "context": "Public Sub Main()",
+  "message": "VBA parser recovery detected; inspect the reported source context before pushing to Excel."
 }
 ```
 

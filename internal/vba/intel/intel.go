@@ -203,7 +203,7 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 			Code:     issue.Code,
 			Severity: issue.Severity,
 			Source:   "xlflow",
-			Message:  issue.Message,
+			Message:  lintDiagnosticMessage(issue),
 			Range:    issueRange(doc.Source, issue.Line, issue.Column),
 		})
 	}
@@ -253,6 +253,33 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 		return nil
 	}
 	return out
+}
+
+func lintDiagnosticMessage(issue lint.Issue) string {
+	if issue.Code != "VB014" {
+		return issue.Message
+	}
+	node := strings.TrimSpace(issue.ParserNode)
+	token := strings.TrimSpace(issue.ParserToken)
+	context := strings.TrimSpace(issue.Context)
+	if node == "" && token == "" && context == "" {
+		return issue.Message
+	}
+	parts := make([]string, 0, 2)
+	if node != "" || token != "" {
+		detail := "Parser recovery"
+		if node != "" {
+			detail += ": " + node
+		}
+		if token != "" {
+			detail += " near " + fmt.Sprintf("%q", token)
+		}
+		parts = append(parts, detail)
+	}
+	if context != "" {
+		parts = append(parts, "context "+fmt.Sprintf("%q", context))
+	}
+	return issue.Message + " " + strings.Join(parts, "; ") + "."
 }
 
 func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {

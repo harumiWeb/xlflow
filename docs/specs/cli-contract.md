@@ -779,7 +779,7 @@ End Sub
 
 ## Lint Rules
 
-Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings.
+Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
 
 Core declaration, member-access, error-handling, Excel object, and procedure-scope rules use `tree-sitter-vba` so comments, string literals, procedure scope, and individual declarators are handled structurally.
 
@@ -797,7 +797,7 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB012`: mismatched procedure end statement
 - `VB028`: bare `MsgBox` or `InputBox` calls are present while `XlflowUI.bas` is in the source tree. These calls can bind to `XlflowUI.MsgBox` / `XlflowUI.InputBox` instead of the VBA built-ins and fail at compile time. Use `XlflowUI` wrappers for xlflow-managed dialogs, or explicitly call `VBA.Interaction.MsgBox` / `VBA.Interaction.InputBox` for intentional native dialogs.
 - `VB013`: missing whitespace before a line-continuation underscore
-- `VB014`: `tree-sitter-vba` parser recovery found syntax errors or missing syntax nodes
+- `VB014`: `tree-sitter-vba` parser recovery found an `ERROR` or `MISSING` node. It is a fail-closed parser-compatibility diagnostic for `push` and `run`, not by itself a claim that Excel/VBA rejects the source. Consumers should use its recovery metadata to investigate and should not rewrite otherwise-valid VBA solely to satisfy parser compatibility.
 - `VB015`: a VBA logical line uses more than 24 line-continuation characters; the diagnostic identifies procedure declarations and calls when that source shape is unambiguous
 - `VB018`: local declarations or parameters shadow module-level names, procedure names, or same-scope declarations
 - `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`

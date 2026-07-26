@@ -1582,20 +1582,55 @@ func (r renderer) renderLint(env Envelope) string {
 	b.WriteString(r.kvRows(kvRow{"Issues", fmt.Sprintf("%d", len(issues))}))
 	rows := make([][]string, 0, len(issues))
 	for _, issue := range issues {
-		loc := stringValue(issue, "file")
-		if n, ok := numberValue(issue, "line"); ok && n > 0 {
-			loc = fmt.Sprintf("%s:%d", loc, int(n))
-		}
 		rows = append(rows, []string{
 			r.severityBadge(stringValue(issue, "severity")),
 			stringValue(issue, "code"),
-			loc,
-			stringValue(issue, "message"),
+			lintIssueLocation(issue),
+			lintIssueMessage(issue),
 		})
 	}
 	b.WriteString(r.table([]string{"Severity", "Code", "Location", "Message"}, rows))
 	b.WriteString(r.renderWarningsAndHints(env))
 	return b.String()
+}
+
+func lintIssueLocation(issue map[string]any) string {
+	loc := stringValue(issue, "file")
+	if n, ok := numberValue(issue, "line"); ok && n > 0 {
+		loc = fmt.Sprintf("%s:%d", loc, int(n))
+	}
+	if n, ok := numberValue(issue, "column"); ok && n > 0 {
+		loc = fmt.Sprintf("%s:%d", loc, int(n))
+	}
+	return loc
+}
+
+func lintIssueMessage(issue map[string]any) string {
+	message := stringValue(issue, "message")
+	if stringValue(issue, "code") == "VB014" {
+		details := make([]string, 0, 2)
+		if node := stringValue(issue, "parser_node"); node != "" {
+			detail := "Parser recovery: " + node
+			if token := stringValue(issue, "parser_token"); token != "" {
+				detail += " near " + formatLintSourceExcerpt(token)
+			}
+			details = append(details, detail+".")
+		}
+		if context := stringValue(issue, "context"); context != "" {
+			details = append(details, "Context: "+formatLintSourceExcerpt(context))
+		}
+		if len(details) > 0 {
+			message = strings.TrimSpace(message + " " + strings.Join(details, " "))
+		}
+	}
+	if suggestion := stringValue(issue, "suggestion"); suggestion != "" {
+		message = strings.TrimSpace(message + " Suggestion: " + suggestion)
+	}
+	return message
+}
+
+func formatLintSourceExcerpt(value string) string {
+	return fmt.Sprintf("%q", value)
 }
 
 func (r renderer) renderAnalysis(env Envelope) string {

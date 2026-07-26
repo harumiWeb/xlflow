@@ -1000,6 +1000,108 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 	t.Fatalf("VB030 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
 }
 
+func TestDocumentDiagnosticsIncludesParserRecoveryContext(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	uri := pathToFileURI(filepath.Join(root, "src", "modules", "Main.bas"))
+	doc, err := s.docs.open(uri, "Option Explicit\nSub Main(\n    Range(\"A1\").Value = 1\nEnd Sub\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var recovery intel.Diagnostic
+	found := false
+	for _, diagnostic := range s.documentDiagnostics(context.Background(), doc) {
+		if diagnostic.Code == "VB014" {
+			recovery = diagnostic
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("VB014 diagnostic was not published for parser recovery")
+	}
+	if recovery.Range.Start.Line < 0 || recovery.Range.Start.Character < 0 {
+		t.Fatalf("VB014 range = %+v, want a concrete recovery location", recovery.Range)
+	}
+	if !strings.Contains(recovery.Message, "Parser recovery:") || !strings.Contains(recovery.Message, "context") {
+		t.Fatalf("VB014 message = %q, want recovery node and context", recovery.Message)
+	}
+}
+
+func TestJSONRPCPublishesParserRecoveryContextAndRange(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler})
+	defer func() { _ = serverConn.Close() }()
+	recorder := &rpcRecorder{}
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), recorder)
+	defer func() { _ = clientConn.Close() }()
+
+	var initResult protocol.InitializeResult
+	if err := clientConn.Call(ctx, string(protocol.MethodInitialize), protocol.InitializeParams{}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	source := "Option Explicit\nSub Main(\n    Range(\"A1\").Value = 1\nEnd Sub\n"
+	var expected intel.Diagnostic
+	for _, diagnostic := range s.analyzer.Diagnostics(intel.Document{URI: uri, Path: path, Source: source}) {
+		if diagnostic.Code == "VB014" {
+			expected = diagnostic
+			break
+		}
+	}
+	if expected.Code == "" {
+		t.Fatal("expected analyzer VB014 diagnostic")
+	}
+
+	if err := clientConn.Notify(ctx, string(protocol.MethodTextDocumentDidOpen), protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        protocol.DocumentUri(uri),
+			LanguageID: "vba",
+			Version:    1,
+			Text:       source,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, params := range recorder.publishDiagnostics() {
+			for _, diagnostic := range params.Diagnostics {
+				if diagnostic.Message != expected.Message {
+					continue
+				}
+				if int(diagnostic.Range.Start.Line) != expected.Range.Start.Line ||
+					int(diagnostic.Range.Start.Character) != expected.Range.Start.Character ||
+					int(diagnostic.Range.End.Line) != expected.Range.End.Line ||
+					int(diagnostic.Range.End.Character) != expected.Range.End.Character {
+					t.Fatalf("published VB014 = %+v, want message and range from %+v", diagnostic, expected)
+				}
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("VB014 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
+}
+
 func TestJSONRPCPublishesProcedureNameConstantDiagnostics(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

@@ -28,6 +28,9 @@ type Issue struct {
 	Kind             string `json:"kind,omitempty"`
 	Symbol           string `json:"symbol,omitempty"`
 	Suggestion       string `json:"suggestion,omitempty"`
+	ParserNode       string `json:"parser_node,omitempty"`
+	ParserToken      string `json:"parser_token,omitempty"`
+	Context          string `json:"context,omitempty"`
 	parserRecoveryOK bool   `json:"-"`
 }
 
@@ -70,6 +73,10 @@ const (
 	vb007DisableHint                   = "If this project intentionally uses dialogs or UserForms, set [lint].forbid_interactive_input = false in xlflow.toml to suppress VB007 for that project. Do this only for genuinely human-only workflows; for dialogs, prefer XlflowUI wrappers with stable dialog ids."
 	maxVBAContinuationLines            = 24
 	lineContinuationOverflowSuggestion = "Reduce the number of continuations by making constituent lines longer or splitting the work into separate statements."
+	parserRecoveryMessage              = "VBA parser recovery detected; inspect the reported source context before pushing to Excel."
+	parserRecoverySuggestion           = "The source may be valid VBA that the parser could not fully understand. Review the reported context; do not rewrite valid VBA solely to satisfy parser recovery."
+	maxParserRecoveryTokenRunes        = 80
+	maxParserRecoveryContextRunes      = 160
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -556,11 +563,14 @@ func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inPro
 }
 
 func (c *astLintContext) parseIssue(root *tree_sitter.Node) Issue {
-	r := vbaast.Range{StartLine: 1, StartColumn: 1}
-	if node := firstParseProblem(root); node != nil {
-		r = vbaast.NodeRange(node)
-	}
-	return c.linter.issueAt(c.path, r, "VB014", "error", "VBA parser recovered from syntax errors; inspect this source before pushing to Excel.")
+	detail := parserRecoveryDetailFor(root, c.source)
+	issue := c.linter.issueAt(c.path, detail.rangeAt(), "VB014", "error", parserRecoveryMessage)
+	issue.Kind = "parser_recovery"
+	issue.Suggestion = parserRecoverySuggestion
+	issue.ParserNode = detail.node
+	issue.ParserToken = detail.token
+	issue.Context = detail.context
+	return issue
 }
 
 func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) []Issue {
@@ -1069,6 +1079,67 @@ func isExcelObjectAccessName(name string) bool {
 	default:
 		return false
 	}
+}
+
+type parserRecoveryDetail struct {
+	range_  vbaast.Range
+	node    string
+	token   string
+	context string
+}
+
+func (d parserRecoveryDetail) rangeAt() vbaast.Range {
+	if d.range_.StartLine == 0 {
+		return vbaast.Range{StartLine: 1, StartColumn: 1}
+	}
+	return d.range_
+}
+
+// parserRecoveryDetailFor returns the first concrete tree-sitter recovery
+// node in source order. VB014 is deliberately fail-closed, but its detail is
+// diagnostic evidence rather than a claim that VBA itself is invalid.
+func parserRecoveryDetailFor(root *tree_sitter.Node, source []byte) parserRecoveryDetail {
+	detail := parserRecoveryDetail{}
+	node := firstParseProblem(root)
+	if node == nil {
+		return detail
+	}
+
+	detail.range_ = vbaast.NodeRange(node)
+	if node.IsMissing() {
+		detail.node = "MISSING"
+	} else {
+		detail.node = "ERROR"
+	}
+	detail.token = truncateParserRecoveryText(normalizedNodeText(node, source), maxParserRecoveryTokenRunes)
+	if detail.token == "" {
+		detail.token = node.Kind()
+	}
+	detail.context = parserRecoveryContext(source, detail.range_.StartLine)
+	return detail
+}
+
+func parserRecoveryContext(source []byte, lineNo int) string {
+	lines := normalizedSourceLines(string(source))
+	if lineNo < 1 || lineNo > len(lines) {
+		return ""
+	}
+	return truncateParserRecoveryText(strings.TrimSpace(lines[lineNo-1]), maxParserRecoveryContextRunes)
+}
+
+func truncateParserRecoveryText(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	if maxRunes <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(text) <= maxRunes {
+		return text
+	}
+	if maxRunes == 1 {
+		return "…"
+	}
+	runes := []rune(text)
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {

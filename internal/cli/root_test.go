@@ -6651,6 +6651,91 @@ func TestLintAndPushRejectVBAContinuationOverflowBeforeExcel(t *testing.T) {
 	}
 }
 
+func TestLintAndPushPropagateParserRecoveryMetadata(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run(\n    Range(\"A1\").Value = 1\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	type parserRecoveryIssue struct {
+		Code        string `json:"code"`
+		Kind        string `json:"kind"`
+		ParserNode  string `json:"parser_node"`
+		ParserToken string `json:"parser_token"`
+		Context     string `json:"context"`
+	}
+	findRecovery := func(issues []parserRecoveryIssue) (parserRecoveryIssue, bool) {
+		for _, issue := range issues {
+			if issue.Code == "VB014" {
+				return issue, true
+			}
+		}
+		return parserRecoveryIssue{}, false
+	}
+	assertRecovery := func(t *testing.T, issue parserRecoveryIssue) {
+		t.Helper()
+		if issue.Kind != "parser_recovery" || issue.ParserNode == "" || issue.ParserToken == "" || issue.Context == "" {
+			t.Fatalf("unexpected VB014 metadata: %+v", issue)
+		}
+	}
+
+	var lintStdout bytes.Buffer
+	lintApp := &app{cwd: dir, stdout: &lintStdout, stderr: &bytes.Buffer{}}
+	lintRoot := lintApp.rootCommand()
+	lintRoot.SetArgs([]string{"--json", "lint"})
+	err := lintRoot.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected lint validation failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var lintResult struct {
+		Issues []parserRecoveryIssue `json:"issues"`
+	}
+	if err := json.Unmarshal(lintStdout.Bytes(), &lintResult); err != nil {
+		t.Fatal(err)
+	}
+	issue, ok := findRecovery(lintResult.Issues)
+	if !ok {
+		t.Fatalf("VB014 missing from lint JSON: %+v", lintResult)
+	}
+	assertRecovery(t, issue)
+
+	var pushStdout bytes.Buffer
+	pushApp := &app{cwd: dir, stdout: &pushStdout, stderr: &bytes.Buffer{}}
+	pushRoot := pushApp.rootCommand()
+	pushRoot.SetArgs([]string{"--json", "push"})
+	err = pushRoot.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("expected push preflight failure, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	var pushResult struct {
+		Error struct {
+			Code  string `json:"code"`
+			Phase string `json:"phase"`
+		} `json:"error"`
+		Issues []parserRecoveryIssue `json:"issues"`
+	}
+	if err := json.Unmarshal(pushStdout.Bytes(), &pushResult); err != nil {
+		t.Fatal(err)
+	}
+	if pushResult.Error.Code != "lint_failed" || pushResult.Error.Phase != "preflight" {
+		t.Fatalf("unexpected push preflight result: %+v", pushResult)
+	}
+	issue, ok = findRecovery(pushResult.Issues)
+	if !ok {
+		t.Fatalf("VB014 missing from push preflight JSON: %+v", pushResult)
+	}
+	assertRecovery(t, issue)
+}
+
 func TestPushDoesNotSuppressBlockingLintDiagnosticsInline(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
