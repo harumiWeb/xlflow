@@ -1897,6 +1897,64 @@ func TestWriteWithOptionsRendersLintIssues(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersVB014RecoveryDetails(t *testing.T) {
+	env := Failure("lint", Error{Code: "lint_failed", Message: "1 lint issue(s) found"})
+	env.Issues = []map[string]any{{
+		"code":         "VB014",
+		"severity":     "error",
+		"file":         "src/modules/Main.bas",
+		"line":         7,
+		"column":       12,
+		"message":      "The VBA parser recovered at this location.",
+		"parser_node":  "MISSING",
+		"parser_token": "End Sub",
+		"context":      "Public Sub Main()",
+		"suggestion":   "Review the recovery context before changing otherwise-valid VBA.",
+	}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"src/modules/Main.bas:7:12",
+		`Parser recovery: MISSING near "End Sub".`,
+		`Context: "Public Sub Main()"`,
+		"Suggestion: Review the recovery context before changing",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("VB014 lint output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsEscapesVB014SourceExcerpts(t *testing.T) {
+	env := Failure("lint", Error{Code: "lint_failed", Message: "1 lint issue(s) found"})
+	env.Issues = []map[string]any{{
+		"code":         "VB014",
+		"severity":     "error",
+		"file":         "src/modules/Main.bas",
+		"line":         7,
+		"message":      "VBA parser recovery detected.",
+		"parser_node":  "ERROR",
+		"parser_token": "unexpected\x1b[31m",
+		"context":      "Debug.Print\tvalue",
+	}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{`"unexpected\x1b[31m"`, `"Debug.Print\tvalue"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("escaped VB014 lint output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Fatalf("VB014 source excerpt should not emit a raw ANSI escape:\n%s", got)
+	}
+}
+
 func TestWriteWithOptionsRichHumanOutputNoColorHasNoANSI(t *testing.T) {
 	env := New("run")
 	env.Macro = map[string]any{"name": "Main.Run", "duration_ms": 42}

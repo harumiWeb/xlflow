@@ -1,12 +1,14 @@
 package lint
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -435,13 +437,72 @@ End Sub
 		t.Fatal(err)
 	}
 	vb014 := issuesByCode(issues, "VB014")
-	if len(vb014) == 0 {
-		t.Fatalf("expected parser recovery issue, got %+v", issues)
+	if len(vb014) != 1 {
+		t.Fatalf("expected one parser recovery issue, got %+v", issues)
 	}
-	if vb014[0].Line == 0 || vb014[0].Column == 0 {
-		t.Fatalf("expected parser recovery issue to include line and column, got %+v", vb014[0])
+	issue := vb014[0]
+	if issue.Line == 0 || issue.Column == 0 {
+		t.Fatalf("expected parser recovery issue to include line and column, got %+v", issue)
 	}
-	assertIssue(t, PushBlockingIssues(issues), "VB014", vb014[0].Line)
+	if issue.Kind != "parser_recovery" || issue.ParserNode != "ERROR" || issue.ParserToken == "" || issue.Context == "" {
+		t.Fatalf("expected ERROR recovery context, got %+v", issue)
+	}
+	if issue.Message != parserRecoveryMessage || issue.Suggestion != parserRecoverySuggestion || strings.Contains(strings.ToLower(issue.Message), "syntax error") {
+		t.Fatalf("expected neutral parser recovery guidance, got %+v", issue)
+	}
+	encoded, err := json.Marshal(issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]string{
+		"parser_node":  issue.ParserNode,
+		"parser_token": issue.ParserToken,
+		"context":      issue.Context,
+	} {
+		if got, ok := payload[field].(string); !ok || got != want {
+			t.Fatalf("JSON %s = %#v, want %q", field, payload[field], want)
+		}
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB014", issue.Line)
+}
+
+func TestLinterReportsMissingParserRecoveryContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Sub Main()
+  Debug.Print (1
+End Sub
+`)
+
+	issues, err := (Linter{RootDir: dir, Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) != 1 {
+		t.Fatalf("expected one parser recovery issue, got %+v", issues)
+	}
+	issue := vb014[0]
+	if issue.Kind != "parser_recovery" || issue.ParserNode != "MISSING" || issue.ParserToken == "" {
+		t.Fatalf("expected MISSING recovery detail, got %+v", issue)
+	}
+	if issue.Context != "Debug.Print (1" || issue.Line != 3 || issue.Column == 0 {
+		t.Fatalf("expected missing recovery location and source context, got %+v", issue)
+	}
+	assertIssue(t, PushBlockingIssues(issues), "VB014", issue.Line)
+}
+
+func TestParserRecoveryDetailBoundsUnicodeText(t *testing.T) {
+	text := strings.Repeat("あ", maxParserRecoveryContextRunes+1)
+	got := truncateParserRecoveryText(text, maxParserRecoveryContextRunes)
+	if utf8.RuneCountInString(got) != maxParserRecoveryContextRunes || !strings.HasSuffix(got, "…") {
+		t.Fatalf("unexpected bounded text %q", got)
+	}
 }
 
 func TestLinterHandlesImplicitVariantsInsideUDTs(t *testing.T) {

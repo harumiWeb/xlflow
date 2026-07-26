@@ -61,6 +61,29 @@ func TestDiagnosticsHandlesMalformedSourceAndJapaneseText(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsExposeParserRecoveryContext(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Main(
+    Range("A1").Value = 1
+End Sub
+`,
+	}
+
+	recovery := diagnosticsByCode(analyzer.Diagnostics(doc), "VB014")
+	if len(recovery) != 1 {
+		t.Fatalf("VB014 diagnostics = %+v, want one parser recovery diagnostic", recovery)
+	}
+	if recovery[0].Range.Start.Line < 0 || recovery[0].Range.Start.Character < 0 {
+		t.Fatalf("VB014 range = %+v, want a concrete recovery location", recovery[0].Range)
+	}
+	if !strings.Contains(recovery[0].Message, "Parser recovery:") || !strings.Contains(recovery[0].Message, "context") {
+		t.Fatalf("VB014 message = %q, want parser node and source context", recovery[0].Message)
+	}
+}
+
 func TestDiagnosticsUseSharedLintRulesForUnsavedContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
