@@ -66,6 +66,7 @@ type Symbol struct {
 	Attributes    []Attribute                      `json:"attributes,omitempty"`
 	Static        bool                             `json:"static,omitempty"`
 	ReturnType    string                           `json:"returnType,omitempty"`
+	IsArray       bool                             `json:"is_array,omitempty"`
 	Parameters    []Parameter                      `json:"parameters,omitempty"`
 	Documentation *doccomments.SymbolDocumentation `json:"documentation,omitempty"`
 	DocStartLine  int                              `json:"docStartLine,omitempty"`
@@ -79,6 +80,7 @@ type Attribute struct {
 type Parameter struct {
 	Name       string  `json:"name"`
 	Type       string  `json:"type,omitempty"`
+	IsArray    bool    `json:"is_array,omitempty"`
 	Passing    string  `json:"passing,omitempty"`
 	Optional   bool    `json:"optional,omitempty"`
 	ParamArray bool    `json:"param_array,omitempty"`
@@ -707,6 +709,7 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 		sym.Visibility = visibilityText(node, e.source)
 		sym.Signature = firstLine(node.Utf8Text(e.source))
 		sym.ReturnType = typeText(child, e.source)
+		sym.IsArray = isArrayDeclarator(child, e.source)
 		sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 		if hasField(node, "with_events_modifier") || hasWord(sym.Signature, "WithEvents") {
 			sym.Kind = "withevents_field"
@@ -961,7 +964,7 @@ func parameters(node *tree_sitter.Node, source []byte) []Parameter {
 		if child == nil || child.Kind() != "parameter" {
 			continue
 		}
-		param := Parameter{Name: nodeName(child, source), Type: typeText(child, source)}
+		param := Parameter{Name: nodeName(child, source), Type: typeText(child, source), IsArray: isArrayDeclarator(child, source)}
 		if passing := child.ChildByFieldName("passing_mode"); passing != nil {
 			param.Passing = modifierKeyword(passing)
 		} else {
@@ -985,6 +988,24 @@ func parameters(node *tree_sitter.Node, source []byte) []Parameter {
 		params = append(params, param)
 	}
 	return params
+}
+
+func isArrayDeclarator(node *tree_sitter.Node, source []byte) bool {
+	if node == nil {
+		return false
+	}
+	name := node.ChildByFieldName("name")
+	if name == nil {
+		name = firstNamedChildKind(node, "identifier")
+	}
+	if name == nil {
+		return false
+	}
+	end := int(name.EndByte())
+	if end < 0 || end > len(source) {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(source[end:])), "(")
 }
 
 func hasField(node *tree_sitter.Node, field string) bool {

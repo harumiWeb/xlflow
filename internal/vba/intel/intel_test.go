@@ -819,6 +819,65 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsReportProjectArrayObjectMismatch(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	if err := analyzer.DB.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Test.ExternalHost",
+    "library": "Test",
+    "kind": "interface",
+    "methods": [{ "name": "Process", "parameters": [{ "name": "target", "type": "Object" }] }]
+  }],
+  "global_values": { "ExternalHost": "Test.ExternalHost" }
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	source := `Option Explicit
+Public Sub TakeByValue(ByVal target As Object)
+End Sub
+
+Public Sub TakeByReference(ByRef target As Object)
+End Sub
+
+Public Sub TakeNamed(ByVal namedTarget As Object)
+End Sub
+
+Public Sub TakeArray(ByVal target() As Variant)
+End Sub
+
+Public Sub Test()
+    Dim values() As Variant
+    Dim widgets() As Widget
+    Dim scalar As Variant
+    TakeByValue values
+    TakeByReference widgets
+    TakeNamed namedTarget:=values
+    TakeByValue scalar
+    TakeArray values
+    ExternalHost.Process values
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	if len(diagnostics) != 3 {
+		t.Fatalf("VB030 diagnostics = %+v, want three project array/Object mismatches", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `values` has type Variant(), but parameter `target` expects Object.") {
+		t.Fatalf("missing ByVal array/Object mismatch: %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `widgets` has type Widget(), but parameter `target` expects Object.") {
+		t.Fatalf("missing ByRef array/Object mismatch: %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `values` has type Variant(), but parameter `namedTarget` expects Object.") {
+		t.Fatalf("missing named array/Object mismatch: %+v", diagnostics)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Range.Start.Line != lineIndex(source, "    TakeByValue values") && diagnostic.Range.Start.Line != lineIndex(source, "    TakeByReference widgets") && diagnostic.Range.Start.Line != lineIndex(source, "    TakeNamed namedTarget:=values") {
+			t.Fatalf("array/Object diagnostic range = %+v, want call range", diagnostic.Range)
+		}
+	}
+}
+
 func TestArgumentDiagnosticsAcceptLineContinuedParenlessCalls(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

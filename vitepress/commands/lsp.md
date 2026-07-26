@@ -48,7 +48,7 @@ Hovering a UserForm YAML field, built-in control type, or built-in ProgID shows 
 
 For an enabled `VB044` procedure-name constant mismatch, diagnostics are published for the current editor buffer on open and after edits. `textDocument/codeAction` offers a `quickfix` that replaces only the direct string literal with the enclosing procedure name. This does not add missing constants or change procedure rename behavior.
 
-The LSP also publishes editor-first argument diagnostics such as `VB030` for missing required arguments, excessive arguments, and unknown named arguments when the target signature is known from project symbols or the built-in VBA/COM database. These diagnostics are intentionally LSP-only for now and are not yet part of the `xlflow lint` CLI contract.
+The LSP also publishes editor-first argument diagnostics such as `VB030` for missing required arguments, excessive arguments, and unknown named arguments when the target signature is known from project symbols or the built-in VBA/COM database. For project-local procedures, it also reports a known array passed to a non-array `Object` parameter; this applies to both `ByVal` and `ByRef` parameters, while external TypeDB APIs and broader element-type compatibility checks remain out of scope. These diagnostics are intentionally LSP-only for now and are not yet part of the `xlflow lint` CLI contract.
 
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
