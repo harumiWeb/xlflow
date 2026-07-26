@@ -710,6 +710,9 @@ func (e *extractor) variableSymbols(node *tree_sitter.Node, parentProc string) {
 		sym.Signature = firstLine(node.Utf8Text(e.source))
 		sym.ReturnType = typeText(child, e.source)
 		sym.IsArray = isArrayDeclarator(child, e.source)
+		if sym.IsArray && sym.ReturnType == "" {
+			sym.ReturnType = "Variant"
+		}
 		sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 		if hasField(node, "with_events_modifier") || hasWord(sym.Signature, "WithEvents") {
 			sym.Kind = "withevents_field"
@@ -765,7 +768,7 @@ func (e *extractor) parameterSymbol(node *tree_sitter.Node, parentProc string) S
 		r = vbaast.NodeRange(nameNode)
 	}
 	name := nodeName(node, e.source)
-	return Symbol{
+	sym := Symbol{
 		Name:        name,
 		Kind:        "parameter",
 		Visibility:  "",
@@ -780,7 +783,12 @@ func (e *extractor) parameterSymbol(node *tree_sitter.Node, parentProc string) S
 		EndByte:     r.EndByte,
 		Signature:   firstLine(node.Utf8Text(e.source)),
 		ReturnType:  typeText(node, e.source),
+		IsArray:     isArrayDeclarator(node, e.source),
 	}
+	if sym.IsArray && sym.ReturnType == "" {
+		sym.ReturnType = "Variant"
+	}
+	return sym
 }
 
 func (e *extractor) implementsSymbol(node *tree_sitter.Node) Symbol {
@@ -965,6 +973,9 @@ func parameters(node *tree_sitter.Node, source []byte) []Parameter {
 			continue
 		}
 		param := Parameter{Name: nodeName(child, source), Type: typeText(child, source), IsArray: isArrayDeclarator(child, source)}
+		if param.IsArray && param.Type == "" {
+			param.Type = "Variant"
+		}
 		if passing := child.ChildByFieldName("passing_mode"); passing != nil {
 			param.Passing = modifierKeyword(passing)
 		} else {
@@ -1002,10 +1013,11 @@ func isArrayDeclarator(node *tree_sitter.Node, source []byte) bool {
 		return false
 	}
 	end := int(name.EndByte())
-	if end < 0 || end > len(source) {
+	nodeEnd := int(node.EndByte())
+	if end < 0 || nodeEnd < end || nodeEnd > len(source) {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(string(source[end:])), "(")
+	return strings.HasPrefix(strings.TrimSpace(string(source[end:nodeEnd])), "(")
 }
 
 func hasField(node *tree_sitter.Node, field string) bool {

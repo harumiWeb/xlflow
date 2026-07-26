@@ -63,6 +63,7 @@ Start:
 End Function
 Public Sub UseValues(ByVal values() As Variant, ByRef target As Object)
 End Sub
+Dim implicitValues()
 Private Sub Hidden()
 End Sub
 `
@@ -114,10 +115,18 @@ End Sub
 	if counts.ReturnType != "Long" || !counts.IsArray {
 		t.Fatalf("counts return type = %q, want Long", counts.ReturnType)
 	}
+	implicitValues := assertSymbol(t, privateFile.Symbols, "implicitValues", "module_variable")
+	if implicitValues.ReturnType != "Variant" || !implicitValues.IsArray {
+		t.Fatalf("implicitValues = %+v, want Variant array", implicitValues)
+	}
 	assertSymbol(t, privateFile.Symbols, "title", "module_variable")
 	useValues := assertSymbol(t, privateFile.Symbols, "UseValues", "sub")
 	if len(useValues.Parameters) != 2 || !useValues.Parameters[0].IsArray || useValues.Parameters[0].Type != "Variant" || useValues.Parameters[1].IsArray || useValues.Parameters[1].Type != "Object" {
 		t.Fatalf("unexpected array parameter metadata: %+v", useValues.Parameters)
+	}
+	values := assertSymbol(t, privateFile.Symbols, "values", "parameter")
+	if values.Parent != "UseValues" || values.ReturnType != "Variant" || !values.IsArray {
+		t.Fatalf("values parameter = %+v, want Variant array parameter", values)
 	}
 	localValue := assertSymbol(t, privateFile.Symbols, "localValue", "local_variable")
 	if localValue.ReturnType != "Long" {

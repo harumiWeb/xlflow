@@ -878,6 +878,34 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsReportArrayObjectMismatchForArrayParametersAndImplicitVariantArrays(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeObject(ByVal target As Object)
+End Sub
+
+Public Sub Forward(values() As Variant)
+    TakeObject values
+End Sub
+
+Public Sub Test()
+    Dim implicitValues()
+    TakeObject implicitValues
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	if len(diagnostics) != 2 {
+		t.Fatalf("VB030 diagnostics = %+v, want two array/Object mismatches", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `values` has type Variant(), but parameter `target` expects Object.") {
+		t.Fatalf("missing array parameter/Object mismatch: %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `implicitValues` has type Variant(), but parameter `target` expects Object.") {
+		t.Fatalf("missing implicit Variant array/Object mismatch: %+v", diagnostics)
+	}
+}
+
 func TestArgumentDiagnosticsAcceptLineContinuedParenlessCalls(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{
