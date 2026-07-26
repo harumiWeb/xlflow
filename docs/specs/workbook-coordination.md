@@ -26,6 +26,7 @@ The policy vocabulary is:
 | `retryable_when_busy` | boolean                                         | Whether a future caller may opt into retrying after resource contention.       |
 | `default_wait_policy` | `fail`, `wait`                                  | Whether acquisition should fail immediately or wait by default.                |
 | `recovery_behavior`   | `not_applicable`, `block`, `observe`, `recover` | How the command behaves when workbook recovery is required.                    |
+| `requires_excel`      | boolean                                         | Whether normal command execution depends on Excel automation.                  |
 
 All policies use `default_wait_policy: fail`. Callers may opt into bounded
 waiting through the public CLI contract below. A resource operation is retryable only when it is non-parallel-safe
@@ -80,7 +81,8 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
         "parallel_safe": false,
         "retryable_when_busy": true,
         "default_wait_policy": "fail",
-        "recovery_behavior": "block"
+        "recovery_behavior": "block",
+        "requires_excel": true
       }
     }
   }
@@ -90,8 +92,13 @@ normal JSON envelope. It does not require a project, workbook, Excel, or bridge.
 `capability_version` is an integer schema version. Version 1 stabilizes the
 command-map keys (command IDs), each command's `cli_paths`, and the meanings and
 vocabularies of `resource_scope`, `operation_kind`, `parallel_safe`,
-`retryable_when_busy`, `default_wait_policy`, and `recovery_behavior`. The
+`retryable_when_busy`, `default_wait_policy`, `recovery_behavior`, and
+`requires_excel`. The
 `capabilities` command itself is included with ID and path `capabilities`.
+
+`requires_excel` is an additive advisory field. `build` reports `true` for its
+normal mutating path; `build --dry-run` is explicitly documented as a local,
+Excel-free planning variant.
 
 This endpoint exposes only the public projection above. It does not expose
 bridge command/action selectors, lock IDs, workbook paths, or other internal
