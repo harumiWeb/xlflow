@@ -256,14 +256,29 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 }
 
 func lintDiagnosticMessage(issue lint.Issue) string {
-	if issue.Code != "VB014" || strings.TrimSpace(issue.Context) == "" {
+	if issue.Code != "VB014" {
 		return issue.Message
 	}
-	parts := []string{"Parser recovery: " + issue.ParserNode}
-	if token := strings.TrimSpace(issue.ParserToken); token != "" {
-		parts = append(parts, "near "+fmt.Sprintf("%q", token))
+	node := strings.TrimSpace(issue.ParserNode)
+	token := strings.TrimSpace(issue.ParserToken)
+	context := strings.TrimSpace(issue.Context)
+	if node == "" && token == "" && context == "" {
+		return issue.Message
 	}
-	parts = append(parts, "context "+fmt.Sprintf("%q", issue.Context))
+	parts := make([]string, 0, 2)
+	if node != "" || token != "" {
+		detail := "Parser recovery"
+		if node != "" {
+			detail += ": " + node
+		}
+		if token != "" {
+			detail += " near " + fmt.Sprintf("%q", token)
+		}
+		parts = append(parts, detail)
+	}
+	if context != "" {
+		parts = append(parts, "context "+fmt.Sprintf("%q", context))
+	}
 	return issue.Message + " " + strings.Join(parts, "; ") + "."
 }
 

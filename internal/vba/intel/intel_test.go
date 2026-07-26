@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
@@ -81,6 +82,18 @@ End Sub
 	}
 	if !strings.Contains(recovery[0].Message, "Parser recovery:") || !strings.Contains(recovery[0].Message, "context") {
 		t.Fatalf("VB014 message = %q, want parser node and source context", recovery[0].Message)
+	}
+}
+
+func TestLintDiagnosticMessagePreservesRecoveryMetadataWithoutContext(t *testing.T) {
+	message := lintDiagnosticMessage(lint.Issue{
+		Code:        "VB014",
+		Message:     "VBA parser recovery detected.",
+		ParserNode:  "MISSING",
+		ParserToken: ")",
+	})
+	if !strings.Contains(message, "Parser recovery: MISSING") || !strings.Contains(message, `near ")"`) {
+		t.Fatalf("parser recovery metadata was dropped without context: %q", message)
 	}
 }
 
