@@ -984,6 +984,35 @@ End Sub
 	}
 }
 
+func TestAnalyzerDictionaryIterationValueUsageRecognizesWithAndAllowsReboundValues(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim dict As Dictionary
+  Dim item As Variant
+  For Each item In dict
+    With item
+      Debug.Print .Name
+    End With
+  Next item
+  For Each item In dict
+    Set item = dict(item)
+    Debug.Print item.Name
+  Next item
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectDictionaryIterationValueUsage = true
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA213")
+	if len(got) != 1 || got[0].Line != 6 || !strings.Contains(got[0].Message, "item") {
+		t.Fatalf("VBA213 findings = %+v, want only With item on line 6", got)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRulesIgnoreCommentsAndStrings(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

@@ -1014,6 +1014,11 @@ func (a Analyzer) dictionaryIterationValueUsageFindings(file parsedFile, proc so
 
 		if m := setAssignRe.FindStringSubmatch(stmt); len(m) > 0 {
 			target := strings.ToLower(m[1])
+			for _, loop := range loops {
+				if loop.item != "" && strings.EqualFold(loop.item, m[1]) {
+					loop.item = ""
+				}
+			}
 			rhs := strings.TrimSpace(rawStmt[strings.Index(rawStmt, "=")+1:])
 			if dictionaryCreateRe.MatchString(rhs) || dictionaryNewRe.MatchString(rhs) {
 				inferredDictionaries[target] = true
@@ -1052,6 +1057,9 @@ func isDictionaryType(typ string) bool {
 }
 
 func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDeclaration) bool {
+	if match := withRe.FindStringSubmatch(stmt); len(match) > 1 && strings.EqualFold(cleanIdentifier(match[1]), item) {
+		return true
+	}
 	itemKey := strings.ToLower(item)
 	for _, match := range memberRe.FindAllStringSubmatch(stmt, -1) {
 		if len(match) > 1 && strings.EqualFold(match[1], item) {
