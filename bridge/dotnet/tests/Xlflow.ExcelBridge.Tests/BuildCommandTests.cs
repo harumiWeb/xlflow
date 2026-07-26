@@ -133,6 +133,84 @@ public sealed class BuildCommandTests
         }
     }
 
+    [Fact]
+    public void HasLiveMatchingSession_IgnoresStaleOutputMetadataWhenExcelIsGone()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-build-session-test-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(root, "Release.xlsm");
+        var metadataPath = Path.Combine(root, "session.json");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["hwnd"] = 123L,
+                ["pid"] = 456,
+                ["workbook_path"] = outputPath,
+            }));
+
+            var attachedWorkbook = false;
+            var live = ExcelBuildService.HasLiveMatchingSession(
+                metadataPath,
+                outputPath,
+                _ => null,
+                (_, _) =>
+                {
+                    attachedWorkbook = true;
+                    return new object();
+                });
+
+            Assert.False(live);
+            Assert.False(attachedWorkbook);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void HasLiveMatchingSession_BlocksOnlyAfterAttachingToTheMatchingOutputWorkbook()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-build-session-test-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(root, "Release.xlsm");
+        var metadataPath = Path.Combine(root, "session.json");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["hwnd"] = 123L,
+                ["pid"] = 456,
+                ["workbook_path"] = outputPath,
+            }));
+            var excel = new object();
+
+            var live = ExcelBuildService.HasLiveMatchingSession(
+                metadataPath,
+                outputPath,
+                _ => excel,
+                (attachedExcel, attachedWorkbookPath) =>
+                {
+                    Assert.Same(excel, attachedExcel);
+                    Assert.Equal(outputPath, attachedWorkbookPath);
+                    return new object();
+                });
+
+            Assert.True(live);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
     private sealed class FakeBuildService(Func<BridgeRequest, BuildCommandArguments, BridgeResponse> handler) : IBuildService
     {
         public BridgeResponse Execute(BridgeRequest request, BuildCommandArguments args, CancellationToken cancellationToken)

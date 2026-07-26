@@ -189,8 +189,46 @@ public sealed class ExcelBuildService : IBuildService
 
     private static bool HasMatchingSession(BuildCommandArguments args, string workbookPath)
     {
-        return !string.IsNullOrWhiteSpace(args.MetadataPath) && File.Exists(args.MetadataPath) &&
-            ExcelBridgeSupport.SessionMetadataMatchesWorkbook(args.MetadataPath, workbookPath);
+        return HasLiveMatchingSession(args.MetadataPath, workbookPath, ExcelBridgeSupport.GetSessionExcel, ExcelBridgeSupport.GetOpenWorkbook);
+    }
+
+    // Metadata is not ownership proof: Excel can crash after writing it.  Only
+    // block publication after reattaching to the recorded Excel session and
+    // finding this exact workbook still open.
+    internal static bool HasLiveMatchingSession(
+        string metadataPath,
+        string workbookPath,
+        Func<string, object?> getSessionExcel,
+        Func<object, string, object> getOpenWorkbook)
+    {
+        if (string.IsNullOrWhiteSpace(metadataPath) || !File.Exists(metadataPath) ||
+            !ExcelBridgeSupport.SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
+        {
+            return false;
+        }
+
+        object? excel = null;
+        object? workbook = null;
+        try
+        {
+            excel = getSessionExcel(metadataPath);
+            if (excel is null)
+            {
+                return false;
+            }
+
+            workbook = getOpenWorkbook(excel, workbookPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(workbook);
+            ExcelBridgeSupport.ReleaseComObject(excel);
+        }
     }
 
     private static BridgeResponse BuildSuccess(BridgeRequest request, string outputPath, BuildArtifactPublication publication, BuildArtifactCleanup cleanup, int applied)
