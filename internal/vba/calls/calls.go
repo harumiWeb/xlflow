@@ -112,16 +112,20 @@ type Candidate struct {
 	Kind          string `json:"kind"`
 	File          string `json:"file"`
 	Line          int    `json:"line"`
+
+	module     string
+	visibility string
 }
 
 // ResolverSymbol is the protocol-neutral symbol shape needed to resolve call
 // sites. Line is the 1-based declaration line reported in resolved candidates.
 type ResolverSymbol struct {
-	Name   string
-	Module string
-	Kind   string
-	File   string
-	Line   int
+	Name       string
+	Module     string
+	Kind       string
+	Visibility string
+	File       string
+	Line       int
 }
 
 type extractor struct {
@@ -338,11 +342,12 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 	resolverSymbols := make([]ResolverSymbol, 0, len(projectSymbols))
 	for _, sym := range projectSymbols {
 		resolverSymbols = append(resolverSymbols, ResolverSymbol{
-			Name:   sym.Name,
-			Module: sym.Module,
-			Kind:   sym.Kind,
-			File:   sym.File,
-			Line:   sym.StartLine,
+			Name:       sym.Name,
+			Module:     sym.Module,
+			Kind:       sym.Kind,
+			Visibility: sym.Visibility,
+			File:       sym.File,
+			Line:       sym.StartLine,
 		})
 	}
 	return NewResolverFromSymbols(resolverSymbols)
@@ -362,6 +367,10 @@ func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 			File:          normalizeCandidateFile(sym.File),
 			Line:          sym.Line,
 		}
+		if strings.EqualFold(sym.Visibility, "private") {
+			candidate.module = sym.Module
+			candidate.visibility = sym.Visibility
+		}
 		key := strings.ToLower(sym.Name)
 		res.byName[key] = append(res.byName[key], candidate)
 	}
@@ -378,7 +387,7 @@ func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 func (r Resolver) Resolve(site CallSite) Call {
 	return Call{
 		CallSite:   CloneCallSite(site),
-		Resolution: r.resolveCallee(site.Callee),
+		Resolution: r.resolveCallee(site),
 	}
 }
 
@@ -633,10 +642,11 @@ func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {
 	return NamedArgument{Name: name, ValueText: value}
 }
 
-func (r Resolver) resolveCallee(callee Callee) Resolution {
+func (r Resolver) resolveCallee(site CallSite) Resolution {
+	callee := site.Callee
 	base := strings.TrimPrefix(callee.BaseName, "New ")
 	base = cleanIdentifier(base)
-	candidates := r.byName[strings.ToLower(base)]
+	candidates := visibleCandidates(r.byName[strings.ToLower(base)], site.Caller)
 	if callee.Receiver != nil {
 		receiver := cleanQualifiedName(*callee.Receiver)
 		if isExternalLikeReceiver(receiver) {
@@ -664,6 +674,35 @@ func (r Resolver) resolveCallee(callee Callee) Resolution {
 		return Resolution{Status: "builtin_like"}
 	}
 	return Resolution{Status: "unresolved"}
+}
+
+// visibleCandidates excludes private procedures outside the caller's module.
+// A module-level call has no procedure caller, so it cannot target a private
+// procedure either.
+func visibleCandidates(candidates []Candidate, caller *Caller) []Candidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	visible := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if strings.EqualFold(candidate.visibility, "private") &&
+			(caller == nil || !strings.EqualFold(candidate.module, callerModule(caller))) {
+			continue
+		}
+		visible = append(visible, candidate)
+	}
+	return visible
+}
+
+func callerModule(caller *Caller) string {
+	if caller == nil {
+		return ""
+	}
+	qualified := strings.TrimSpace(caller.QualifiedName)
+	if index := strings.LastIndex(qualified, "."); index > 0 {
+		return qualified[:index]
+	}
+	return ""
 }
 
 func candidatesForReceiver(candidates []Candidate, receiver, base string) []Candidate {
