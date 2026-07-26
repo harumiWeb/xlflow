@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -45,6 +46,10 @@ type AnalysisSnapshot struct {
 	symbolsOnce sync.Once
 	symbols     []Symbol
 	symbolsErr  error
+
+	callSitesOnce sync.Once
+	callSites     calls.FileResult
+	callSitesErr  error
 
 	indexOnce sync.Once
 	index     *documentIndex
@@ -240,6 +245,25 @@ func (s *AnalysisSnapshot) SourceSymbols(load DocumentSymbolLoader) ([]Symbol, b
 		s.symbolsErr = err
 	})
 	return cloneAnalysisSymbols(s.symbols), initialized, s.symbolsErr
+}
+
+// RawCallSites returns snapshot-scoped syntax-local call sites and whether the
+// lazy value was already initialized. Both successful results and extraction
+// errors are cached for this immutable revision. The returned result is a deep
+// copy and can be modified by the caller.
+func (s *AnalysisSnapshot) RawCallSites(load func() (calls.FileResult, error)) (calls.FileResult, bool, error) {
+	if s == nil {
+		result, err := load()
+		return calls.CloneFileResult(result), false, err
+	}
+	initialized := true
+	s.callSitesOnce.Do(func() {
+		initialized = false
+		result, err := load()
+		s.callSites = calls.CloneFileResult(result)
+		s.callSitesErr = err
+	})
+	return calls.CloneFileResult(s.callSites), initialized, s.callSitesErr
 }
 
 // documentIndex returns the immutable lookup index for this snapshot. The

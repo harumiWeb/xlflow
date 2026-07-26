@@ -5,34 +5,36 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
-// workspaceSymbolIndex keeps the on-disk workspace and open-document state as
+// workspaceAnalysisIndex keeps the on-disk workspace and open-document state as
 // independent layers. Only the effective layer participates in postings.
 //
 // All mutation is path-scoped: replacing a file removes and re-adds only that
 // file's references. The index never reparses unaffected source files.
-type workspaceSymbolIndex struct {
+type workspaceAnalysisIndex struct {
 	root   string
 	config config.Config
-	parse  func(symbols.SourceFile, []byte) (indexedFileSymbols, error)
+	parse  func(symbols.SourceFile, []byte) (indexedFileAnalysis, error)
 	log    func(fileCount int, started time.Time, err error)
 
 	mu         sync.RWMutex
 	startOnce  sync.Once
 	ready      chan struct{}
 	readyErr   error
-	disk       map[string]indexedFileSymbols
-	overlays   map[string]indexedFileSymbols
-	effective  map[string]indexedFileSymbols
+	disk       map[string]indexedFileAnalysis
+	overlays   map[string]indexedFileAnalysis
+	effective  map[string]indexedFileAnalysis
 	generation map[string]uint64
 	exactName  map[string][]symbolRef
 	qualified  map[string][]symbolRef
@@ -41,13 +43,18 @@ type workspaceSymbolIndex struct {
 	exactKeys  []string
 	qualKeys   []string
 	all        []symbolRef
+	allCalls   []callRef
+	byCaller   map[string][]callRef
+	byBaseName map[string][]callRef
+	byText     map[string][]callRef
 }
 
-type indexedFileSymbols struct {
+type indexedFileAnalysis struct {
 	path       string
 	version    string
 	moduleKind string
 	symbols    []intel.Symbol
+	callSites  []calls.CallSite
 }
 
 type symbolRef struct {
@@ -55,19 +62,33 @@ type symbolRef struct {
 	index int
 }
 
-func newWorkspaceSymbolIndex(root string, cfg config.Config, parse func(symbols.SourceFile, []byte) (indexedFileSymbols, error), logInitial func(int, time.Time, error)) *workspaceSymbolIndex {
-	return &workspaceSymbolIndex{
+type callRef struct {
+	path  string
+	index int
+}
+
+// workspaceCallQuery selects raw call sites through one optional secondary
+// posting. An empty query selects every effective workspace call.
+type workspaceCallQuery struct {
+	Caller     string
+	CalleeBase string
+	CalleeText string
+}
+
+func newWorkspaceAnalysisIndex(root string, cfg config.Config, parse func(symbols.SourceFile, []byte) (indexedFileAnalysis, error), logInitial func(int, time.Time, error)) *workspaceAnalysisIndex {
+	return &workspaceAnalysisIndex{
 		root: root, config: cfg, parse: parse, log: logInitial, ready: make(chan struct{}),
-		disk: map[string]indexedFileSymbols{}, overlays: map[string]indexedFileSymbols{}, effective: map[string]indexedFileSymbols{},
+		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, effective: map[string]indexedFileAnalysis{},
 		generation: map[string]uint64{}, exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{}, moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
+		byCaller: map[string][]callRef{}, byBaseName: map[string][]callRef{}, byText: map[string][]callRef{},
 	}
 }
 
-func (x *workspaceSymbolIndex) start() {
+func (x *workspaceAnalysisIndex) start() {
 	x.startOnce.Do(func() { go x.buildInitial() })
 }
 
-func (x *workspaceSymbolIndex) waitReady() error {
+func (x *workspaceAnalysisIndex) waitReady() error {
 	x.start()
 	<-x.ready
 	x.mu.RLock()
@@ -76,7 +97,7 @@ func (x *workspaceSymbolIndex) waitReady() error {
 	return err
 }
 
-func (x *workspaceSymbolIndex) buildInitial() {
+func (x *workspaceAnalysisIndex) buildInitial() {
 	started := time.Now()
 	files, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: x.root, Config: x.config})
 	if err == nil {
@@ -98,7 +119,7 @@ func (x *workspaceSymbolIndex) buildInitial() {
 // updatePath accepts either a watcher create/change/delete notification. The
 // current filesystem state wins over the notification kind, making duplicate
 // and out-of-order notifications safe.
-func (x *workspaceSymbolIndex) updatePath(path string) error {
+func (x *workspaceAnalysisIndex) updatePath(path string) error {
 	file, included, err := symbols.SourceFileForPath(x.root, x.config, path)
 	if err != nil {
 		return err
@@ -109,7 +130,7 @@ func (x *workspaceSymbolIndex) updatePath(path string) error {
 	return x.upsertDisk(file, false)
 }
 
-func (x *workspaceSymbolIndex) upsertDisk(file symbols.SourceFile, initial bool) error {
+func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial bool) error {
 	key := symbolFileKey(file.Path)
 	if key == "" {
 		return nil
@@ -154,7 +175,7 @@ func (x *workspaceSymbolIndex) upsertDisk(file symbols.SourceFile, initial bool)
 	return nil
 }
 
-func (x *workspaceSymbolIndex) removePath(path string) error {
+func (x *workspaceAnalysisIndex) removePath(path string) error {
 	key := symbolFileKey(path)
 	if key == "" {
 		return nil
@@ -169,22 +190,24 @@ func (x *workspaceSymbolIndex) removePath(path string) error {
 	return nil
 }
 
-func (x *workspaceSymbolIndex) setOverlay(doc intel.Document, symbols []intel.Symbol) {
+func (x *workspaceAnalysisIndex) setOverlay(doc intel.Document, analysis indexedFileAnalysis) {
 	key := documentSymbolKey(doc)
 	if key == "" {
 		return
 	}
-	entry := indexedFileSymbols{path: doc.Path, version: documentVersion(doc), moduleKind: doc.ModuleKind, symbols: symbols}
+	analysis.path = doc.Path
+	analysis.version = documentVersion(doc)
+	analysis.moduleKind = doc.ModuleKind
 	x.mu.Lock()
 	x.generation[key]++
-	x.overlays[key] = entry
-	x.replaceEffectiveLocked(key, entry)
+	x.overlays[key] = analysis
+	x.replaceEffectiveLocked(key, analysis)
 	x.mu.Unlock()
 }
 
 // clearOverlay restores a freshly read disk entry. Reloading instead of merely
 // exposing the last watcher value closes editor/watcher ordering races.
-func (x *workspaceSymbolIndex) clearOverlay(path string) error {
+func (x *workspaceAnalysisIndex) clearOverlay(path string) error {
 	key := symbolFileKey(path)
 	if key == "" {
 		return nil
@@ -201,7 +224,7 @@ func (x *workspaceSymbolIndex) clearOverlay(path string) error {
 	return x.updatePath(path)
 }
 
-func (x *workspaceSymbolIndex) searchContains(query string) ([]intel.Symbol, error) {
+func (x *workspaceAnalysisIndex) searchContains(query string) ([]intel.Symbol, error) {
 	if err := x.waitReady(); err != nil {
 		return nil, err
 	}
@@ -222,7 +245,7 @@ func (x *workspaceSymbolIndex) searchContains(query string) ([]intel.Symbol, err
 	return out, nil
 }
 
-func (x *workspaceSymbolIndex) searchExact(name string) ([]intel.Symbol, error) {
+func (x *workspaceAnalysisIndex) searchExact(name string) ([]intel.Symbol, error) {
 	if err := x.waitReady(); err != nil {
 		return nil, err
 	}
@@ -231,7 +254,7 @@ func (x *workspaceSymbolIndex) searchExact(name string) ([]intel.Symbol, error) 
 	return x.symbolsForRefsLocked(x.exactName[normalizeSymbolQuery(name)]), nil
 }
 
-func (x *workspaceSymbolIndex) searchPrefix(prefix string) ([]intel.Symbol, error) {
+func (x *workspaceAnalysisIndex) searchPrefix(prefix string) ([]intel.Symbol, error) {
 	if err := x.waitReady(); err != nil {
 		return nil, err
 	}
@@ -249,7 +272,7 @@ func (x *workspaceSymbolIndex) searchPrefix(prefix string) ([]intel.Symbol, erro
 	return x.mergePostingBucketsLocked(buckets), nil
 }
 
-func (x *workspaceSymbolIndex) searchQualified(name string) ([]intel.Symbol, error) {
+func (x *workspaceAnalysisIndex) searchQualified(name string) ([]intel.Symbol, error) {
 	if err := x.waitReady(); err != nil {
 		return nil, err
 	}
@@ -258,7 +281,7 @@ func (x *workspaceSymbolIndex) searchQualified(name string) ([]intel.Symbol, err
 	return x.symbolsForRefsLocked(x.qualified[normalizeSymbolQuery(name)]), nil
 }
 
-func (x *workspaceSymbolIndex) searchModule(name string) ([]intel.Symbol, error) {
+func (x *workspaceAnalysisIndex) searchModule(name string) ([]intel.Symbol, error) {
 	if err := x.waitReady(); err != nil {
 		return nil, err
 	}
@@ -267,7 +290,7 @@ func (x *workspaceSymbolIndex) searchModule(name string) ([]intel.Symbol, error)
 	return x.symbolsForRefsLocked(x.moduleName[normalizeSymbolQuery(name)]), nil
 }
 
-func (x *workspaceSymbolIndex) searchKind(kind string) ([]intel.Symbol, error) {
+func (x *workspaceAnalysisIndex) searchKind(kind string) ([]intel.Symbol, error) {
 	if err := x.waitReady(); err != nil {
 		return nil, err
 	}
@@ -276,7 +299,58 @@ func (x *workspaceSymbolIndex) searchKind(kind string) ([]intel.Symbol, error) {
 	return x.symbolsForRefsLocked(x.symbolKind[normalizeSymbolQuery(kind)]), nil
 }
 
-func (x *workspaceSymbolIndex) replaceEffectiveLocked(key string, entry indexedFileSymbols) {
+// queryResolvedCalls snapshots both raw sites and the effective symbol set
+// under one read lock, then performs resolution without holding the index.
+// This guarantees each result observes one workspace revision while keeping
+// potentially expensive resolution out of mutation critical sections.
+func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([]calls.Call, error) {
+	if err := x.waitReady(); err != nil {
+		return nil, err
+	}
+
+	caller := normalizeCallQuery(query.Caller)
+	baseName := normalizeCallQuery(query.CalleeBase)
+	calleeText := normalizeCallText(query.CalleeText)
+
+	x.mu.RLock()
+	refs := x.callRefsForQueryLocked(caller, baseName, calleeText)
+	sites := make([]calls.CallSite, 0, len(refs))
+	for _, ref := range refs {
+		site, ok := x.callForRefLocked(ref)
+		if !ok || !matchesCallQuery(site, caller, baseName, calleeText) {
+			continue
+		}
+		sites = append(sites, calls.CloneCallSite(site))
+	}
+	resolverSymbols := make([]calls.ResolverSymbol, 0, len(x.all))
+	for _, ref := range x.all {
+		sym, ok := x.symbolForRefLocked(ref)
+		if !ok {
+			continue
+		}
+		entry := x.effective[ref.path]
+		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{
+			Name:   sym.Name,
+			Module: sym.Module,
+			Kind:   sym.Kind,
+			File:   workspaceDisplayPath(x.root, entry.path),
+			Line:   sym.Range.Start.Line + 1,
+		})
+	}
+	x.mu.RUnlock()
+
+	resolver := calls.NewResolverFromSymbols(resolverSymbols)
+	resolved := make([]calls.Call, len(sites))
+	for i, site := range sites {
+		resolved[i] = resolver.Resolve(site)
+	}
+	sort.SliceStable(resolved, func(i, j int) bool {
+		return callSiteLess(resolved[i].CallSite, resolved[j].CallSite)
+	})
+	return resolved, nil
+}
+
+func (x *workspaceAnalysisIndex) replaceEffectiveLocked(key string, entry indexedFileAnalysis) {
 	x.removeEffectiveLocked(key)
 	x.effective[key] = entry
 	for i, sym := range entry.symbols {
@@ -287,9 +361,18 @@ func (x *workspaceSymbolIndex) replaceEffectiveLocked(key string, entry indexedF
 		x.addPostingLocked(x.symbolKind, nil, normalizeSymbolQuery(sym.Kind), ref)
 		x.all = insertSortedRef(x.all, ref, x.refLessLocked)
 	}
+	for i, site := range entry.callSites {
+		ref := callRef{path: key, index: i}
+		x.allCalls = insertSortedCallRef(x.allCalls, ref, x.callRefLessLocked)
+		if site.Caller != nil {
+			x.addCallPostingLocked(x.byCaller, normalizeCallQuery(site.Caller.QualifiedName), ref)
+		}
+		x.addCallPostingLocked(x.byBaseName, normalizeCallQuery(site.Callee.BaseName), ref)
+		x.addCallPostingLocked(x.byText, normalizeCallText(site.Callee.Text), ref)
+	}
 }
 
-func (x *workspaceSymbolIndex) removeEffectiveLocked(key string) {
+func (x *workspaceAnalysisIndex) removeEffectiveLocked(key string) {
 	old, ok := x.effective[key]
 	if !ok {
 		return
@@ -302,10 +385,80 @@ func (x *workspaceSymbolIndex) removeEffectiveLocked(key string) {
 		x.removePostingLocked(x.symbolKind, nil, normalizeSymbolQuery(sym.Kind), ref)
 		x.all = removeRef(x.all, ref)
 	}
+	for i, site := range old.callSites {
+		ref := callRef{path: key, index: i}
+		x.allCalls = removeCallRef(x.allCalls, ref)
+		if site.Caller != nil {
+			x.removeCallPostingLocked(x.byCaller, normalizeCallQuery(site.Caller.QualifiedName), ref)
+		}
+		x.removeCallPostingLocked(x.byBaseName, normalizeCallQuery(site.Callee.BaseName), ref)
+		x.removeCallPostingLocked(x.byText, normalizeCallText(site.Callee.Text), ref)
+	}
 	delete(x.effective, key)
 }
 
-func (x *workspaceSymbolIndex) addPostingLocked(postings map[string][]symbolRef, keys *[]string, key string, ref symbolRef) {
+func (x *workspaceAnalysisIndex) addCallPostingLocked(postings map[string][]callRef, key string, ref callRef) {
+	if key == "" {
+		return
+	}
+	postings[key] = insertSortedCallRef(postings[key], ref, x.callRefLessLocked)
+}
+
+func (x *workspaceAnalysisIndex) removeCallPostingLocked(postings map[string][]callRef, key string, ref callRef) {
+	if key == "" {
+		return
+	}
+	refs := removeCallRef(postings[key], ref)
+	if len(refs) == 0 {
+		delete(postings, key)
+		return
+	}
+	postings[key] = refs
+}
+
+func (x *workspaceAnalysisIndex) callRefsForQueryLocked(caller, baseName, calleeText string) []callRef {
+	switch {
+	case caller != "":
+		return x.byCaller[caller]
+	case baseName != "":
+		return x.byBaseName[baseName]
+	case calleeText != "":
+		return x.byText[calleeText]
+	default:
+		return x.allCalls
+	}
+}
+
+func (x *workspaceAnalysisIndex) callForRefLocked(ref callRef) (calls.CallSite, bool) {
+	entry, ok := x.effective[ref.path]
+	if !ok || ref.index < 0 || ref.index >= len(entry.callSites) {
+		return calls.CallSite{}, false
+	}
+	return entry.callSites[ref.index], true
+}
+
+func (x *workspaceAnalysisIndex) callRefLessLocked(left, right callRef) bool {
+	a, aok := x.callForRefLocked(left)
+	b, bok := x.callForRefLocked(right)
+	if !aok || !bok {
+		if left.path != right.path {
+			return left.path < right.path
+		}
+		return left.index < right.index
+	}
+	if callSiteLess(a, b) {
+		return true
+	}
+	if callSiteLess(b, a) {
+		return false
+	}
+	if left.path != right.path {
+		return left.path < right.path
+	}
+	return left.index < right.index
+}
+
+func (x *workspaceAnalysisIndex) addPostingLocked(postings map[string][]symbolRef, keys *[]string, key string, ref symbolRef) {
 	if key == "" {
 		return
 	}
@@ -315,7 +468,7 @@ func (x *workspaceSymbolIndex) addPostingLocked(postings map[string][]symbolRef,
 	postings[key] = insertSortedRef(postings[key], ref, x.refLessLocked)
 }
 
-func (x *workspaceSymbolIndex) removePostingLocked(postings map[string][]symbolRef, keys *[]string, key string, ref symbolRef) {
+func (x *workspaceAnalysisIndex) removePostingLocked(postings map[string][]symbolRef, keys *[]string, key string, ref symbolRef) {
 	if key == "" {
 		return
 	}
@@ -330,7 +483,7 @@ func (x *workspaceSymbolIndex) removePostingLocked(postings map[string][]symbolR
 	postings[key] = refs
 }
 
-func (x *workspaceSymbolIndex) symbolsForRefsLocked(refs []symbolRef) []intel.Symbol {
+func (x *workspaceAnalysisIndex) symbolsForRefsLocked(refs []symbolRef) []intel.Symbol {
 	out := make([]intel.Symbol, 0, len(refs))
 	for _, ref := range refs {
 		if sym, ok := x.symbolForRefLocked(ref); ok {
@@ -340,7 +493,7 @@ func (x *workspaceSymbolIndex) symbolsForRefsLocked(refs []symbolRef) []intel.Sy
 	return out
 }
 
-func (x *workspaceSymbolIndex) mergePostingBucketsLocked(buckets [][]symbolRef) []intel.Symbol {
+func (x *workspaceAnalysisIndex) mergePostingBucketsLocked(buckets [][]symbolRef) []intel.Symbol {
 	positions := make([]int, len(buckets))
 	out := make([]intel.Symbol, 0)
 	for {
@@ -364,7 +517,7 @@ func (x *workspaceSymbolIndex) mergePostingBucketsLocked(buckets [][]symbolRef) 
 	}
 }
 
-func (x *workspaceSymbolIndex) symbolForRefLocked(ref symbolRef) (intel.Symbol, bool) {
+func (x *workspaceAnalysisIndex) symbolForRefLocked(ref symbolRef) (intel.Symbol, bool) {
 	entry, ok := x.effective[ref.path]
 	if !ok || ref.index < 0 || ref.index >= len(entry.symbols) {
 		return intel.Symbol{}, false
@@ -372,7 +525,7 @@ func (x *workspaceSymbolIndex) symbolForRefLocked(ref symbolRef) (intel.Symbol, 
 	return entry.symbols[ref.index], true
 }
 
-func (x *workspaceSymbolIndex) refLessLocked(left, right symbolRef) bool {
+func (x *workspaceAnalysisIndex) refLessLocked(left, right symbolRef) bool {
 	a, aok := x.symbolForRefLocked(left)
 	b, bok := x.symbolForRefLocked(right)
 	if !aok || !bok {
@@ -394,6 +547,53 @@ func (x *workspaceSymbolIndex) refLessLocked(left, right symbolRef) bool {
 }
 
 func normalizeSymbolQuery(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
+
+func normalizeCallQuery(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
+
+func normalizeCallText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), " "))
+}
+
+func workspaceDisplayPath(root, path string) string {
+	relative, err := filepath.Rel(root, path)
+	if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(relative)
+	}
+	return filepath.ToSlash(path)
+}
+
+func matchesCallQuery(site calls.CallSite, caller, baseName, calleeText string) bool {
+	if caller != "" && (site.Caller == nil || normalizeCallQuery(site.Caller.QualifiedName) != caller) {
+		return false
+	}
+	if baseName != "" && normalizeCallQuery(site.Callee.BaseName) != baseName {
+		return false
+	}
+	return calleeText == "" || normalizeCallText(site.Callee.Text) == calleeText
+}
+
+func callSiteLess(a, b calls.CallSite) bool {
+	if a.File != b.File {
+		return a.File < b.File
+	}
+	if a.Range.StartLine != b.Range.StartLine {
+		return a.Range.StartLine < b.Range.StartLine
+	}
+	if a.Range.StartColumn != b.Range.StartColumn {
+		return a.Range.StartColumn < b.Range.StartColumn
+	}
+	if a.Callee.Text != b.Callee.Text {
+		return a.Callee.Text < b.Callee.Text
+	}
+	aCaller, bCaller := "", ""
+	if a.Caller != nil {
+		aCaller = a.Caller.QualifiedName
+	}
+	if b.Caller != nil {
+		bCaller = b.Caller.QualifiedName
+	}
+	return aCaller < bCaller
+}
 
 func qualifiedSymbolName(sym intel.Symbol) string {
 	if strings.TrimSpace(sym.Module) == "" {
@@ -420,6 +620,24 @@ func insertSortedRef(refs []symbolRef, ref symbolRef, less func(symbolRef, symbo
 }
 
 func removeRef(refs []symbolRef, ref symbolRef) []symbolRef {
+	for i, candidate := range refs {
+		if candidate == ref {
+			copy(refs[i:], refs[i+1:])
+			return refs[:len(refs)-1]
+		}
+	}
+	return refs
+}
+
+func insertSortedCallRef(refs []callRef, ref callRef, less func(callRef, callRef) bool) []callRef {
+	i := sort.Search(len(refs), func(i int) bool { return !less(refs[i], ref) })
+	refs = append(refs, callRef{})
+	copy(refs[i+1:], refs[i:])
+	refs[i] = ref
+	return refs
+}
+
+func removeCallRef(refs []callRef, ref callRef) []callRef {
 	for i, candidate := range refs {
 		if candidate == ref {
 			copy(refs[i:], refs[i+1:])

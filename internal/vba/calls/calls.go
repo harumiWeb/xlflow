@@ -114,6 +114,16 @@ type Candidate struct {
 	Line          int    `json:"line"`
 }
 
+// ResolverSymbol is the protocol-neutral symbol shape needed to resolve call
+// sites. Line is the 1-based declaration line reported in resolved candidates.
+type ResolverSymbol struct {
+	Name   string
+	Module string
+	Kind   string
+	File   string
+	Line   int
+}
+
 type extractor struct {
 	source     []byte
 	file       string
@@ -325,6 +335,22 @@ func ExtractParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, 
 
 // NewResolver creates a deterministic project-symbol resolver.
 func NewResolver(projectSymbols []symbols.Symbol) Resolver {
+	resolverSymbols := make([]ResolverSymbol, 0, len(projectSymbols))
+	for _, sym := range projectSymbols {
+		resolverSymbols = append(resolverSymbols, ResolverSymbol{
+			Name:   sym.Name,
+			Module: sym.Module,
+			Kind:   sym.Kind,
+			File:   sym.File,
+			Line:   sym.StartLine,
+		})
+	}
+	return NewResolverFromSymbols(resolverSymbols)
+}
+
+// NewResolverFromSymbols creates a deterministic resolver from the
+// protocol-neutral symbol shape.
+func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 	res := Resolver{byName: map[string][]Candidate{}}
 	for _, sym := range projectSymbols {
 		if !procedureKinds[sym.Kind] || sym.Name == "" {
@@ -333,15 +359,15 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 		candidate := Candidate{
 			QualifiedName: sym.Module + "." + sym.Name,
 			Kind:          sym.Kind,
-			File:          sym.File,
-			Line:          sym.StartLine,
+			File:          normalizeCandidateFile(sym.File),
+			Line:          sym.Line,
 		}
 		key := strings.ToLower(sym.Name)
 		res.byName[key] = append(res.byName[key], candidate)
 	}
 	for key := range res.byName {
 		sort.Slice(res.byName[key], func(i, j int) bool {
-			return res.byName[key][i].QualifiedName < res.byName[key][j].QualifiedName
+			return candidateLess(res.byName[key][i], res.byName[key][j])
 		})
 	}
 	return res
@@ -351,7 +377,7 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 // the raw call site.
 func (r Resolver) Resolve(site CallSite) Call {
 	return Call{
-		CallSite:   cloneCallSite(site),
+		CallSite:   CloneCallSite(site),
 		Resolution: r.resolveCallee(site.Callee),
 	}
 }
@@ -771,7 +797,9 @@ func cloneCaller(caller *Caller) *Caller {
 	return &clone
 }
 
-func cloneCallSite(site CallSite) CallSite {
+// CloneCallSite returns a deep copy suitable for use across cache and resolver
+// boundaries.
+func CloneCallSite(site CallSite) CallSite {
 	clone := site
 	clone.Caller = cloneCaller(site.Caller)
 	if site.Callee.Receiver != nil {
@@ -783,6 +811,39 @@ func cloneCallSite(site CallSite) CallSite {
 		copy(clone.Arguments.Named, site.Arguments.Named)
 	}
 	return clone
+}
+
+// CloneFileResult returns a deep copy suitable for storing in or returning
+// from a cache without exposing mutable call-site state.
+func CloneFileResult(result FileResult) FileResult {
+	clone := result
+	if result.CallSites != nil {
+		clone.CallSites = make([]CallSite, len(result.CallSites))
+		for i := range result.CallSites {
+			clone.CallSites[i] = CloneCallSite(result.CallSites[i])
+		}
+	}
+	return clone
+}
+
+func normalizeCandidateFile(file string) string {
+	if strings.TrimSpace(file) == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(file))
+}
+
+func candidateLess(a, b Candidate) bool {
+	if a.QualifiedName != b.QualifiedName {
+		return a.QualifiedName < b.QualifiedName
+	}
+	if a.Kind != b.Kind {
+		return a.Kind < b.Kind
+	}
+	if a.File != b.File {
+		return a.File < b.File
+	}
+	return a.Line < b.Line
 }
 
 func lastNamePart(text string) string {
