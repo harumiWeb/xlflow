@@ -95,7 +95,8 @@ func TestInstallSupportsAllProviders(t *testing.T) {
 			for _, want := range []string{
 				"## Parser compatibility failures",
 				"`VB014` means `tree-sitter-vba` required parser recovery.",
-				"`code`, `file`, `line`,\n`column`, and `message`",
+				"`code`, `file`, `line`",
+				"`column`, and `message`",
 				"not proof that Excel/VBE rejects the VBA",
 				"Do not rewrite otherwise valid-looking, idiomatic VBA merely to satisfy the parser.",
 				"If Excel accepts the original construct, preserve it and clearly report the `tree-sitter-vba` compatibility limitation.",
