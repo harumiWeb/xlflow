@@ -110,6 +110,38 @@ func TestScriptResultAcceptsScalarLogString(t *testing.T) {
 	}
 }
 
+func TestRunnerBuildOmitsCallerOwnedTemporaryDirectory(t *testing.T) {
+	root := t.TempDir()
+	manager, err := coordination.NewManager(filepath.Join(t.TempDir(), "coordination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requests []excelbridge.Request
+	original := bridgeProviderForMode
+	t.Cleanup(func() { bridgeProviderForMode = original })
+	bridgeProviderForMode = func(string, excelbridge.Mode) excelbridge.Provider {
+		return trackingBridgeProvider{
+			name:     string(excelbridge.ModeDotNet),
+			supports: true,
+			requests: &requests,
+			response: excelbridge.Response{Stdout: []byte(`{"protocol_version":1,"status":"ok","command":"build","logs":[]}`)},
+		}
+	}
+
+	env, code, err := (Runner{RootDir: root, BridgeMode: "dotnet", Coordination: manager}).Build(
+		config.Default(), "plan-json", filepath.Join(root, "Base.xlsm"), filepath.Join(root, "dist", "Product.xlsm"),
+	)
+	if err != nil || code != output.ExitSuccess || env.Status != output.StatusOK {
+		t.Fatalf("Build() = env=%+v, code=%d, err=%v", env, code, err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("bridge requests = %#v", requests)
+	}
+	if _, exists := requests[0].Args["TemporaryDirectory"]; exists {
+		t.Fatalf("build bridge request still contains caller-owned TemporaryDirectory: %#v", requests[0].Args)
+	}
+}
+
 func TestRunnerPublishesStructuredRecoveryOutcomeBeforeReturning(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows recovery coordination")
@@ -2358,6 +2390,20 @@ func TestDuplicateModuleNameIsValidationFailure(t *testing.T) {
 
 func TestVbaComponentReplacementFailuresAreEnvironmentFailures(t *testing.T) {
 	for _, code := range []string{"vba_component_remove_failed", "vba_component_import_name_mismatch", "vba_component_replacement_failed"} {
+		t.Run(code, func(t *testing.T) {
+			result := ScriptResult{
+				Status: output.StatusFailed,
+				Error:  &output.Error{Code: code, Message: code},
+			}
+			if got := exitCodeForScriptResult(result); got != output.ExitEnvironment {
+				t.Fatalf("exitCodeForScriptResult(%s) = %d, want %d", code, got, output.ExitEnvironment)
+			}
+		})
+	}
+}
+
+func TestBuildPublicationFailuresAreEnvironmentFailures(t *testing.T) {
+	for _, code := range []string{"build_output_busy", "build_output_directory_failed", "build_temporary_artifact_missing", "build_output_replace_failed"} {
 		t.Run(code, func(t *testing.T) {
 			result := ScriptResult{
 				Status: output.StatusFailed,

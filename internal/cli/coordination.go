@@ -145,7 +145,10 @@ func (a *app) coordinationTargets(cmd *cobra.Command, args []string, commandID c
 		if value, exists := commandFlagString(cmd, "out"); exists && value != "" {
 			out = value
 		}
-		return []string{workbookArgPath(a.cwd, cfg.Excel.Path), workbookArgPath(a.cwd, base), workbookArgPath(a.cwd, out)}, true
+		// A build reads the selected base workbook and atomically publishes to
+		// the output workbook. Lock exactly those two resources: the configured
+		// workbook may be unrelated when --base overrides it.
+		return []string{workbookArgPath(a.cwd, base), workbookArgPath(a.cwd, out)}, true
 	case "new":
 		name := ""
 		if len(args) > 0 {

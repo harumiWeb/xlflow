@@ -167,6 +167,33 @@ func TestValidateBuildPathsRejectsOutputThroughExternalSymlink(t *testing.T) {
 	}
 }
 
+func TestBuildCoordinationTargetsLockBaseAndOutputOnly(t *testing.T) {
+	dir := writeBuildProject(t, "Book.xlsm")
+	if err := os.WriteFile(filepath.Join(dir, "templates", "Override.xlsm"), []byte("workbook"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{cwd: dir}
+	cmd := a.buildCommand()
+	if err := cmd.Flags().Set("base", "templates/Override.xlsm"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("out", "dist/Product.xlsm"); err != nil {
+		t.Fatal(err)
+	}
+
+	targets, ok := a.coordinationTargets(cmd, nil, "build")
+	if !ok {
+		t.Fatal("build coordination targets were not resolved")
+	}
+	want := []string{
+		filepath.Join(dir, "templates", "Override.xlsm"),
+		filepath.Join(dir, "dist", "Product.xlsm"),
+	}
+	if !reflect.DeepEqual(targets, want) {
+		t.Fatalf("build coordination targets = %#v, want %#v", targets, want)
+	}
+}
+
 func runBuildCommandForTest(dir string, args ...string) (string, error) {
 	stdout := new(bytes.Buffer)
 	a := &app{cwd: dir, stdout: stdout, stderr: new(bytes.Buffer), stdoutTerminal: func() bool { return false }}
