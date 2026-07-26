@@ -140,7 +140,11 @@ func Analyze(input *calls.Result, request Request) (Result, error) {
 	}
 	snapshot := Snapshot{Calls: input.Calls, Symbols: make([]Symbol, 0, len(input.Symbols))}
 	for _, sym := range input.Symbols {
-		snapshot.Symbols = append(snapshot.Symbols, Symbol{Name: sym.Name, Kind: sym.Kind, Module: sym.Module, File: sym.File, Line: sym.StartLine, Column: sym.StartColumn, ModuleKind: moduleKindForFile(sym.File)})
+		kind := input.ModuleKinds[sym.File]
+		if kind == "" {
+			kind = moduleKindForFile(sym.File)
+		}
+		snapshot.Symbols = append(snapshot.Symbols, Symbol{Name: sym.Name, Kind: sym.Kind, Module: sym.Module, File: sym.File, Line: sym.StartLine, Column: sym.StartColumn, ModuleKind: kind})
 	}
 	return AnalyzeSnapshot(snapshot, request)
 }
@@ -195,15 +199,16 @@ func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {
 	for _, edge := range edges {
 		result.Edges = append(result.Edges, edge)
 	}
+	sort.Slice(result.Edges, func(i, j int) bool { return edgeKey(result.Edges[i]) < edgeKey(result.Edges[j]) })
 	if request.Depth > 0 {
 		if direction == DirectionCallers || direction == DirectionBoth {
 			for _, edge := range g.in[targetKey] {
-				result.DirectCallers = append(result.DirectCallers, g.nodes[edge.Caller.String()])
+				result.DirectCallers = appendUniqueNode(result.DirectCallers, g.nodes[edge.Caller.String()])
 			}
 		}
 		if direction == DirectionCallees || direction == DirectionBoth {
 			for _, edge := range g.out[targetKey] {
-				result.DirectCallees = append(result.DirectCallees, g.nodes[edge.Callee.String()])
+				result.DirectCallees = appendUniqueNode(result.DirectCallees, g.nodes[edge.Callee.String()])
 			}
 		}
 	}
@@ -225,7 +230,6 @@ func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {
 	sortNodes(result.DirectCallees)
 	sortNodes(result.UpstreamCallers)
 	sortNodes(result.DownstreamCallees)
-	sort.Slice(result.Edges, func(i, j int) bool { return edgeKey(result.Edges[i]) < edgeKey(result.Edges[j]) })
 	return result, nil
 }
 
@@ -243,6 +247,9 @@ func build(input Snapshot) graph {
 		}
 		kind := moduleKinds[sym.Module]
 		if kind == "" {
+			kind = sym.ModuleKind
+		}
+		if kind == "" {
 			kind = moduleKindForFile(sym.File)
 		}
 		node := nodeFromSymbol(sym, kind)
@@ -258,11 +265,10 @@ func build(input Snapshot) graph {
 		if call.Caller == nil {
 			continue
 		}
-		callerKeys := g.byQualified[strings.ToLower(call.Caller.QualifiedName)]
-		if len(callerKeys) != 1 {
+		callerKey, ok := g.callerKey(call)
+		if !ok {
 			continue
 		}
-		callerKey := callerKeys[0]
 		if call.Resolution.Status != "matched" || len(call.Resolution.Candidates) != 1 {
 			g.uncertain[callerKey] = append(g.uncertain[callerKey], call)
 			continue
@@ -293,6 +299,19 @@ func build(input Snapshot) graph {
 		sort.Slice(g.in[key], func(i, j int) bool { return edgeKey(g.in[key][i]) < edgeKey(g.in[key][j]) })
 	}
 	return g
+}
+
+func (g graph) callerKey(call calls.Call) (string, bool) {
+	if call.Caller == nil {
+		return "", false
+	}
+	for _, key := range g.byQualified[strings.ToLower(call.Caller.QualifiedName)] {
+		node := g.nodes[key]
+		if node.ID.Kind == call.Caller.Kind && node.ID.File == call.File {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func (g graph) walk(root string, downstream bool, maxDepth int) (map[string]int, map[string]Edge) {
@@ -385,6 +404,14 @@ func nodesForKeys(g graph, keys []string) []Node {
 	sortNodes(result)
 	return result
 }
+func appendUniqueNode(nodes []Node, node Node) []Node {
+	for _, existing := range nodes {
+		if existing.ID == node.ID {
+			return nodes
+		}
+	}
+	return append(nodes, node)
+}
 func sortNodes(nodes []Node) {
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID.String() < nodes[j].ID.String() })
 }
@@ -403,11 +430,16 @@ func modulesFor(nodes []Node) []Module {
 }
 func cyclesFor(visited map[string]bool, edges []Edge) []Cycle {
 	adjacency := map[string][]string{}
-	for _, edge := range edges {
+	sortedEdges := append([]Edge(nil), edges...)
+	sort.Slice(sortedEdges, func(i, j int) bool { return edgeKey(sortedEdges[i]) < edgeKey(sortedEdges[j]) })
+	for _, edge := range sortedEdges {
 		a, b := edge.Caller.String(), edge.Callee.String()
 		if visited[a] && visited[b] {
 			adjacency[a] = append(adjacency[a], b)
 		}
+	}
+	for node := range adjacency {
+		sort.Strings(adjacency[node])
 	}
 	seen, stack, onStack := map[string]bool{}, []string{}, map[string]int{}
 	unique := map[string]Cycle{}

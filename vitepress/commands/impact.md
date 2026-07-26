@@ -17,12 +17,12 @@ xlflow impact Module.Procedure --path src/modules --json
 
 The default `--direction both --depth 1` shows the immediate callers and callees. Use `--depth 0` to identify the target only, or a larger depth to inspect a wider blast radius.
 
-| Option                 | Description                                         | Default                 |
-| ---------------------- | --------------------------------------------------- | ----------------------- | --------------------------------------- | ------ |
-| `<Module.Procedure>`   | Exact project-local procedure target.               | required                |
-| `--direction callers   | callees                                             | both`                   | Traverse upstream, downstream, or both. | `both` |
-| `--depth <n>`          | Maximum number of confirmed call edges to traverse. | `1`                     |
-| `--path <dir-or-file>` | Restrict source analysis to a directory or file.    | configured source roots |
+| Option | Description | Default |
+| --- | --- | --- |
+| `<Module.Procedure>` | Exact project-local procedure target. | required |
+| `--direction callers \| callees \| both` | Traverse upstream, downstream, or both. | `both` |
+| `--depth <n>` | Maximum number of confirmed call edges to traverse. | `1` |
+| `--path <dir-or-file>` | Restrict source analysis to a directory or file. | configured source roots |
 
 ## AI and scripting workflow
 

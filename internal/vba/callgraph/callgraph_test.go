@@ -2,6 +2,7 @@ package callgraph
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -88,11 +89,71 @@ func TestAnalyzeDeduplicatesDiamondAndExcludesDisconnectedSymbols(t *testing.T) 
 	}
 }
 
+func TestAnalyzeKeepsAccessorCallersAndDeduplicatesDirectNodes(t *testing.T) {
+	input := &calls.Result{
+		Symbols: []symbols.Symbol{
+			{Name: "Value", Kind: "property_get", Module: "Thing", File: "Thing.cls", StartLine: 1, StartColumn: 1},
+			{Name: "Value", Kind: "property_let", Module: "Thing", File: "Thing.cls", StartLine: 5, StartColumn: 1},
+			symbol("Thing", "Thing.cls", "Helper", 9),
+		},
+		Calls: []calls.Call{
+			matchedKind("Thing", "Thing.cls", "Value", "property_get", "Thing", "Thing.cls", "Helper", "sub", 9, 2),
+			matchedKind("Thing", "Thing.cls", "Value", "property_get", "Thing", "Thing.cls", "Helper", "sub", 9, 3),
+		},
+	}
+	got, err := Analyze(input, Request{Target: "Thing.Helper", Direction: DirectionCallers, Depth: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.DirectCallers) != 1 || got.DirectCallers[0].ID.Kind != "property_get" || len(got.Edges) != 2 {
+		t.Fatalf("accessor caller impact = %#v", got)
+	}
+}
+
+func TestAnalyzeUsesConfiguredModuleKindsAndStableCycles(t *testing.T) {
+	input := &calls.Result{
+		ModuleKinds: map[string]string{"Sheet1.cls": "document", "FormCode.bas": "form"},
+		Symbols: []symbols.Symbol{
+			symbol("A", "A.bas", "Run", 1), symbol("B", "B.bas", "Work", 1), symbol("C", "C.bas", "Finish", 1),
+			symbol("Sheet1", "Sheet1.cls", "Changed", 1), symbol("FormCode", "FormCode.bas", "Submit", 1),
+		},
+		Calls: []calls.Call{
+			matched("A", "A.bas", "Run", "B", "B.bas", "Work", 1, 2), matched("B", "B.bas", "Work", "C", "C.bas", "Finish", 1, 2),
+			matched("C", "C.bas", "Finish", "A", "A.bas", "Run", 1, 2), matched("A", "A.bas", "Run", "C", "C.bas", "Finish", 1, 3),
+			matched("A", "A.bas", "Run", "Sheet1", "Sheet1.cls", "Changed", 1, 4), matched("Sheet1", "Sheet1.cls", "Changed", "FormCode", "FormCode.bas", "Submit", 1, 2),
+		},
+	}
+	first, err := Analyze(input, Request{Target: "A.Run", Direction: DirectionCallees, Depth: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct{ name, kind string }{{"Sheet1.Changed", "document"}, {"FormCode.Submit", "form"}} {
+		found := false
+		for _, node := range first.Nodes {
+			if node.ID.QualifiedName == want.name && node.ModuleKind == want.kind {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("configured module kind %s=%s missing from %#v", want.name, want.kind, first.Nodes)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		again, err := Analyze(input, Request{Target: "A.Run", Direction: DirectionCallees, Depth: 3})
+		if err != nil || !reflect.DeepEqual(first.Cycles, again.Cycles) {
+			t.Fatalf("cycle output changed on run %d: first=%#v again=%#v err=%v", i, first.Cycles, again.Cycles, err)
+		}
+	}
+}
+
 func symbol(module, file, name string, line int) symbols.Symbol {
 	return symbols.Symbol{Name: name, Kind: "sub", Module: module, File: file, StartLine: line, StartColumn: 1}
 }
 func matched(callerModule, callerFile, callerName, calleeModule, calleeFile, calleeName string, calleeLine, callLine int) calls.Call {
-	return calls.Call{CallSite: calls.CallSite{File: callerFile, Module: callerModule, Caller: &calls.Caller{Name: callerName, Kind: "sub", QualifiedName: callerModule + "." + callerName}, Range: vbaast.Range{StartLine: callLine, StartColumn: 1, EndLine: callLine, EndColumn: 8}}, Resolution: calls.Resolution{Status: "matched", Candidates: []calls.Candidate{{QualifiedName: calleeModule + "." + calleeName, Kind: "sub", File: calleeFile, Line: calleeLine}}}}
+	return matchedKind(callerModule, callerFile, callerName, "sub", calleeModule, calleeFile, calleeName, "sub", calleeLine, callLine)
+}
+func matchedKind(callerModule, callerFile, callerName, callerKind, calleeModule, calleeFile, calleeName, calleeKind string, calleeLine, callLine int) calls.Call {
+	return calls.Call{CallSite: calls.CallSite{File: callerFile, Module: callerModule, Caller: &calls.Caller{Name: callerName, Kind: callerKind, QualifiedName: callerModule + "." + callerName}, Range: vbaast.Range{StartLine: callLine, StartColumn: 1, EndLine: callLine, EndColumn: 8}}, Resolution: calls.Resolution{Status: "matched", Candidates: []calls.Candidate{{QualifiedName: calleeModule + "." + calleeName, Kind: calleeKind, File: calleeFile, Line: calleeLine}}}}
 }
 func unresolved(module, file, name string, callLine int) calls.Call {
 	return calls.Call{CallSite: calls.CallSite{File: file, Module: module, Caller: &calls.Caller{Name: name, Kind: "sub", QualifiedName: module + "." + name}, Range: vbaast.Range{StartLine: callLine, StartColumn: 1}}, Resolution: calls.Resolution{Status: "unresolved"}}
