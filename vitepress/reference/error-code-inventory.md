@@ -302,6 +302,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version`
 - `generator_version_changed`
 - `global_values`
+- `graph_dependencies_failed`
 - `gui_boundaries`
 - `gui_boundary_detected`
 - `gui_preflight_failed`
@@ -680,6 +681,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ui_button_args_invalid`
 - `ui_dialog`
 - `ui_stream_init_failed`
+- `uncertain_edges`
 - `undeclared_variable`
 - `unexpected_helper_mode`
 - `unknown_command`
@@ -719,6 +721,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userform_unsaved_session_state`
 - `userforms_known`
 - `userforms_present`
+- `uses_type`
 - `variable_declaration`
 - `variable_declarator`
 - `vba_compile_failed`

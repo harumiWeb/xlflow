@@ -55,6 +55,7 @@ type Envelope struct {
 	Diff           any `json:"diff,omitempty"`
 	Inspect        any `json:"inspect,omitempty"`
 	Impact         any `json:"impact,omitempty"`
+	Graph          any `json:"graph,omitempty"`
 	Runtime        any `json:"runtime,omitempty"`
 	GUIBoundaries  any `json:"gui_boundaries,omitempty"`
 	Debug          any `json:"debug,omitempty"`
@@ -478,6 +479,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderFormulaInspect(env))
 	case "inspect":
 		b.WriteString(r.renderInspect(env))
+	case "graph dependencies":
+		b.WriteString(r.renderGraphDependencies(env))
 	case "process list":
 		b.WriteString(r.renderProcessList(env))
 	case "process cleanup":
@@ -489,6 +492,22 @@ func renderHuman(env Envelope, opts Options) string {
 	}
 	out := strings.TrimRight(b.String(), "\n")
 	return out + "\n"
+}
+
+func (r renderer) renderGraphDependencies(env Envelope) string {
+	graph := objectMap(env.Graph)
+	if len(graph) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(kv("Nodes", fmt.Sprintf("%d", len(listOfObjects(graph["nodes"])))))
+	b.WriteString(kv("Confirmed edges", fmt.Sprintf("%d", len(listOfObjects(graph["edges"])))))
+	b.WriteString(kv("Uncertain edges", fmt.Sprintf("%d", len(listOfObjects(graph["uncertain_edges"])))))
+	for _, edge := range listOfObjects(graph["edges"]) {
+		fmt.Fprintf(&b, "- %s: %s -> %s\n", stringValue(edge, "kind"), stringValue(edge, "from"), stringValue(edge, "to"))
+	}
+	return b.String()
 }
 
 func (r renderer) renderGUIBoundaries(env Envelope) string {

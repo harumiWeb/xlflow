@@ -32,6 +32,7 @@ const commands = [
   ["type db", "type"],
   ["diff", "diff"],
   ["inspect", "inspect"],
+  ["graph dependencies", "graph"],
   ["inspect-gui", "inspect-gui"],
   ["lint", "lint"],
   ["lsp", "lsp"],

@@ -1292,12 +1292,13 @@ func (s *Server) analyzeIndexedDocument(doc intel.Document) (indexedFileAnalysis
 		return indexedFileAnalysis{}, err
 	}
 	return indexedFileAnalysis{
-		path:       doc.Path,
-		version:    documentVersion(doc),
-		moduleKind: doc.ModuleKind,
-		source:     doc.Source,
-		symbols:    syms,
-		callSites:  rawCalls.CallSites,
+		path:           doc.Path,
+		version:        documentVersion(doc),
+		moduleKind:     doc.ModuleKind,
+		source:         doc.Source,
+		symbols:        syms,
+		callSites:      rawCalls.CallSites,
+		typeReferences: rawCalls.TypeReferences,
 	}, nil
 }
 
