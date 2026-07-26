@@ -19,19 +19,17 @@ public sealed class BuildCommand : ICommandHandler
     {
         var projectRoot = BridgePayload.GetString(request.Payload, "ProjectRoot") ?? "";
         var baseWorkbookPath = BridgePayload.GetString(request.Payload, "BaseWorkbookPath") ?? "";
-        var temporaryDirectory = BridgePayload.GetString(request.Payload, "TemporaryDirectory") ?? "";
         var planJson64 = BridgePayload.GetString(request.Payload, "PlanJson64") ?? "";
         var outputWorkbookPath = BridgePayload.GetString(request.Payload, "OutputWorkbookPath") ?? "";
-        if (string.IsNullOrWhiteSpace(projectRoot) || string.IsNullOrWhiteSpace(baseWorkbookPath) || string.IsNullOrWhiteSpace(outputWorkbookPath) || string.IsNullOrWhiteSpace(temporaryDirectory) || string.IsNullOrWhiteSpace(planJson64))
+        if (string.IsNullOrWhiteSpace(projectRoot) || string.IsNullOrWhiteSpace(baseWorkbookPath) || string.IsNullOrWhiteSpace(outputWorkbookPath) || string.IsNullOrWhiteSpace(planJson64))
         {
-            return BridgeResponse.Failed(request, new BridgeError("build_args_invalid", "ProjectRoot, BaseWorkbookPath, OutputWorkbookPath, TemporaryDirectory, and PlanJson64 are required", "build", "xlflow-excel-bridge"));
+            return BridgeResponse.Failed(request, new BridgeError("build_args_invalid", "ProjectRoot, BaseWorkbookPath, OutputWorkbookPath, and PlanJson64 are required", "build", "xlflow-excel-bridge"));
         }
 
         return _service.Execute(request, new BuildCommandArguments(
             projectRoot,
             baseWorkbookPath,
             outputWorkbookPath,
-            temporaryDirectory,
             planJson64,
             BridgePayload.GetString(request.Payload, "CodeSource") ?? "",
             BridgePayload.GetBool(request.Payload, "Visible"),

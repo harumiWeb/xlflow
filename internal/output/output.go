@@ -448,6 +448,7 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderExportImage(env))
 	case "build":
 		b.WriteString(r.renderBuild(env))
+		b.WriteString(r.renderWarningsAndHints(env))
 	case "form export-image":
 		b.WriteString(r.renderFormExportImage(env))
 	case "form snapshot":

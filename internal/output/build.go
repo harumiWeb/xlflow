@@ -6,9 +6,14 @@ import (
 	"strings"
 )
 
+// BuildTemporaryCleanupFailedCode is emitted by the Excel bridge when the
+// artifact was published but its bridge-owned staging directory remains.
+const BuildTemporaryCleanupFailedCode = "build_temporary_cleanup_failed"
+
 func (r renderer) renderBuild(env Envelope) string {
 	build := objectMap(env.Build)
-	if len(build) == 0 {
+	outputPayload := objectMap(env.Output)
+	if len(build) == 0 && len(outputPayload) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -17,6 +22,26 @@ func (r renderer) renderBuild(env Envelope) string {
 	}
 	if outputPath := stringValue(build, "output"); outputPath != "" {
 		fmt.Fprintf(&b, "Output:\n  %s\n\n", outputPath)
+	}
+	if outputPath := stringValue(outputPayload, "path"); outputPath != "" {
+		fmt.Fprintf(&b, "Published output:\n  %s\n\n", outputPath)
+	}
+	if publication := stringValue(outputPayload, "publication"); publication != "" {
+		fmt.Fprintf(&b, "Publication:\n  %s\n\n", publication)
+	}
+	if replaced, ok := boolValueOK(outputPayload, "replaced_existing"); ok {
+		fmt.Fprintf(&b, "Replaced existing:\n  %t\n\n", replaced)
+	}
+	if cleanup := objectMap(outputPayload["temporary_cleanup"]); len(cleanup) > 0 {
+		if status := stringValue(cleanup, "status"); status != "" {
+			fmt.Fprintf(&b, "Temporary cleanup:\n  %s\n\n", status)
+		}
+		if residualPath := stringValue(cleanup, "residual_path"); residualPath != "" {
+			fmt.Fprintf(&b, "Temporary residual:\n  %s\n\n", residualPath)
+		}
+	} else if cleanup := stringValue(outputPayload, "temporary_cleanup"); cleanup != "" {
+		// Accept the compact string representation used by early bridge builds.
+		fmt.Fprintf(&b, "Temporary cleanup:\n  %s\n\n", cleanup)
 	}
 	r.renderBuildComponents(&b, "Included", build["included"])
 	r.renderBuildComponents(&b, "Excluded", build["excluded"])

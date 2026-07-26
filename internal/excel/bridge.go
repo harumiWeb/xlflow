@@ -609,7 +609,6 @@ func (r Runner) Build(cfg config.Config, planJSON64, baseWorkbook, outputWorkboo
 		"WorkbookPath":        baseWorkbook,
 		"BaseWorkbookPath":    baseWorkbook,
 		"OutputWorkbookPath":  outputWorkbook,
-		"TemporaryDirectory":  filepath.Join(r.RootDir, ".xlflow", "tmp"),
 		"PlanJson64":          planJSON64,
 		"CodeSource":          cfg.UserForm.CodeSource,
 		"Visible":             strconv.FormatBool(cfg.Excel.Visible),
@@ -2240,7 +2239,7 @@ func exitCodeForScriptResult(result ScriptResult) int {
 		return output.ExitValidation
 	case "process_args_invalid", "process_not_found":
 		return output.ExitConfig
-	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed", "vba_component_remove_failed", "vba_component_import_name_mismatch", "vba_component_replacement_failed":
+	case "process_enumeration_failed", "process_termination_failed", "process_cleanup_failed", "vba_component_remove_failed", "vba_component_import_name_mismatch", "vba_component_replacement_failed", "build_output_busy", "build_output_directory_failed", "build_temporary_artifact_missing", "build_output_replace_failed":
 		return output.ExitEnvironment
 	case "pull_args_invalid", "push_args_invalid", "run_args_invalid", "session_args_invalid", "runner_args_invalid", "export_image_args_invalid", "edit_args_invalid", "list_args_invalid", "inspect_args_invalid", "inspect_form_args_invalid", "form_export_image_args_invalid", "form_build_args_invalid", "form_apply_args_invalid", "test_args_invalid":
 		return output.ExitConfig

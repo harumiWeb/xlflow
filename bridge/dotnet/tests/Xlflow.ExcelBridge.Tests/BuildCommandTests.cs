@@ -18,7 +18,6 @@ public sealed class BuildCommandTests
             Assert.Equal(@"C:\work", args.ProjectRoot);
             Assert.Equal(@"C:\work\Book.xlsm", args.BaseWorkbookPath);
             Assert.Equal(@"C:\work\Release.xlsm", args.OutputWorkbookPath);
-            Assert.Equal(@"C:\work\.xlflow\tmp\build-1", args.TemporaryDirectory);
             Assert.Equal(encodedPlan, args.PlanJson64);
             Assert.Equal("sidecar", args.CodeSource);
             Assert.False(args.Visible);
@@ -30,7 +29,7 @@ public sealed class BuildCommandTests
             RequestId = "req-build",
             Command = "build",
             Payload = JsonDocument.Parse($$"""
-                { "ProjectRoot": "C:\\work", "BaseWorkbookPath": "C:\\work\\Book.xlsm", "OutputWorkbookPath": "C:\\work\\Release.xlsm", "TemporaryDirectory": "C:\\work\\.xlflow\\tmp\\build-1", "PlanJson64": "{{encodedPlan}}", "CodeSource": "sidecar", "Visible": "false" }
+                { "ProjectRoot": "C:\\work", "BaseWorkbookPath": "C:\\work\\Book.xlsm", "OutputWorkbookPath": "C:\\work\\Release.xlsm", "PlanJson64": "{{encodedPlan}}", "CodeSource": "sidecar", "Visible": "false" }
                 """).RootElement.Clone(),
         };
 
@@ -65,14 +64,12 @@ public sealed class BuildCommandTests
                 root,
                 Path.Combine(root, "Book.xlsm"),
                 Path.Combine(root, "Release.xlsm"),
-                Path.Combine(root, "temporary"),
                 "not-base64",
                 "sidecar",
                 false, "", ""), CancellationToken.None);
 
             Assert.Equal(BridgeStatus.Failed, response.Status);
             Assert.Equal("build_reconstruct_failed", response.Error?.Code);
-            Assert.False(Directory.Exists(Path.Combine(root, "temporary")));
         }
         finally
         {
@@ -94,11 +91,10 @@ public sealed class BuildCommandTests
             Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
             File.WriteAllText(sourcePath, "Attribute VB_Name = \"Main\"");
             var response = new ExcelBuildService().Execute(new BridgeRequest { ProtocolVersion = ProtocolVersion.Current, RequestId = "req-build-plan", Command = "build" }, new BuildCommandArguments(
-                root, Path.Combine(root, "Book.xlsm"), Path.Combine(root, "Release.xlsm"), Path.Combine(root, "temporary"), plan, "sidecar", false, "", ""), CancellationToken.None);
+                root, Path.Combine(root, "Book.xlsm"), Path.Combine(root, "Release.xlsm"), plan, "sidecar", false, "", ""), CancellationToken.None);
 
             Assert.Equal(BridgeStatus.Failed, response.Status);
             Assert.Contains("base workbook does not exist", response.Error?.Message);
-            Assert.False(Directory.Exists(Path.Combine(root, "temporary")));
         }
         finally
         {
@@ -110,28 +106,101 @@ public sealed class BuildCommandTests
     }
 
     [Fact]
-    public void ServiceKeepsCallerOwnedTemporaryParentWhenCopyOrOpenFails()
+    public void ServiceOwnsStagingBesideOutputWhenCopyOrOpenFails()
     {
         var root = Path.Combine(Path.GetTempPath(), "xlflow-build-temp-owner-test-" + Guid.NewGuid().ToString("N"));
         var sourcePath = Path.Combine(root, "src", "modules", "Main.bas");
-        var tempParent = Path.Combine(root, "caller-temp");
-        var sentinel = Path.Combine(tempParent, "keep.txt");
         var baseWorkbook = Path.Combine(root, "Book.txt");
         var plan = Convert.ToBase64String(Encoding.UTF8.GetBytes("""{"included":[{"source_path":"src/modules/Main.bas","name":"Main","type":"standard"}]}"""));
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
-            Directory.CreateDirectory(tempParent);
             File.WriteAllText(sourcePath, "Attribute VB_Name = \"Main\"");
             File.WriteAllText(baseWorkbook, "not a workbook");
-            File.WriteAllText(sentinel, "caller-owned");
 
             var response = new ExcelBuildService().Execute(new BridgeRequest { ProtocolVersion = ProtocolVersion.Current, RequestId = "req-build-temp-owner", Command = "build" }, new BuildCommandArguments(
-                root, baseWorkbook, Path.Combine(root, "Release.xlsm"), tempParent, plan, "sidecar", false, "", ""), CancellationToken.None);
+                root, baseWorkbook, Path.Combine(root, "Release.xlsm"), plan, "sidecar", false, "", ""), CancellationToken.None);
 
             Assert.Equal(BridgeStatus.Failed, response.Status);
-            Assert.True(File.Exists(sentinel));
-            Assert.Empty(Directory.GetDirectories(tempParent, "xlflow-build-*"));
+            Assert.Empty(Directory.GetDirectories(root, ".xlflow-build-*"));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void HasLiveMatchingSession_IgnoresStaleOutputMetadataWhenExcelIsGone()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-build-session-test-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(root, "Release.xlsm");
+        var metadataPath = Path.Combine(root, "session.json");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["hwnd"] = 123L,
+                ["pid"] = 456,
+                ["workbook_path"] = outputPath,
+            }));
+
+            var attachedWorkbook = false;
+            var live = ExcelBuildService.HasLiveMatchingSession(
+                metadataPath,
+                outputPath,
+                _ => null,
+                (_, _) =>
+                {
+                    attachedWorkbook = true;
+                    return new object();
+                });
+
+            Assert.False(live);
+            Assert.False(attachedWorkbook);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void HasLiveMatchingSession_BlocksOnlyAfterAttachingToTheMatchingOutputWorkbook()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-build-session-test-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(root, "Release.xlsm");
+        var metadataPath = Path.Combine(root, "session.json");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["hwnd"] = 123L,
+                ["pid"] = 456,
+                ["workbook_path"] = outputPath,
+            }));
+            var excel = new object();
+
+            var live = ExcelBuildService.HasLiveMatchingSession(
+                metadataPath,
+                outputPath,
+                _ => excel,
+                (attachedExcel, attachedWorkbookPath) =>
+                {
+                    Assert.Same(excel, attachedExcel);
+                    Assert.Equal(outputPath, attachedWorkbookPath);
+                    return new object();
+                });
+
+            Assert.True(live);
         }
         finally
         {

@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Hardened `xlflow build` publication: Excel now builds only in a bridge-owned staging directory beside the requested output, verifies the saved staged artifact after Excel exits, and then uses atomic create or replace publication. Existing artifacts remain untouched on pre-publication failure; unsafe output locks, staging/output-directory failures, and non-atomic replacement fail with structured build errors. Staging cleanup failures preserve the published artifact and report a warning plus cleanup metadata.
+
 ## v0.26.1
 
 - Fixed VBA source encoding to use the Windows system ANSI code page (`GetACP()`) instead of a hard-coded `932` when reading exported components and preparing components for import. Non-ASCII source (for example German umlauts and em dashes on a `1252` machine) now round-trips through `pull`/`push` without corruption on non-Japanese locales, while Japanese (`932`) environments are unaffected.

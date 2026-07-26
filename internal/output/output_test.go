@@ -36,6 +36,83 @@ func TestWriteJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestWriteBuildJSONIncludesPublicationMetadata(t *testing.T) {
+	env := New("build")
+	env.Build = map[string]any{"base": "build/Base.xlsm", "output": "dist/Product.xlsm"}
+	env.Output = map[string]any{
+		"path":              "dist/Product.xlsm",
+		"replaced_existing": true,
+		"publication":       "atomic_replace",
+		"temporary_cleanup": map[string]any{"status": "clean"},
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, env, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	result := objectMap(decoded["output"])
+	cleanup := objectMap(result["temporary_cleanup"])
+	if result["path"] != "dist/Product.xlsm" || result["publication"] != "atomic_replace" || result["replaced_existing"] != true || cleanup["status"] != "clean" {
+		t.Fatalf("build output metadata = %#v", result)
+	}
+}
+
+func TestWriteWithOptionsRendersBuildPublicationMetadata(t *testing.T) {
+	env := New("build")
+	env.Build = map[string]any{"base": "build/Base.xlsm", "output": "dist/Product.xlsm"}
+	env.Output = map[string]any{
+		"path":              "dist/Product.xlsm",
+		"replaced_existing": false,
+		"publication":       "atomic_create",
+		"temporary_cleanup": map[string]any{"status": "clean"},
+	}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"Published output:", "dist/Product.xlsm", "Publication:", "atomic_create", "Replaced existing:", "false", "Temporary cleanup:", "clean"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("build publication output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteWithOptionsRendersBuildTemporaryCleanupWarning(t *testing.T) {
+	env := New("build")
+	env.Output = map[string]any{
+		"path":              "dist/Product.xlsm",
+		"publication":       "atomic_create",
+		"temporary_cleanup": map[string]any{"status": "failed", "residual_path": "dist/.xlflow-build-staging-123"},
+	}
+	env.Warnings = []map[string]any{{
+		"code":    BuildTemporaryCleanupFailedCode,
+		"message": "Published output, but staging cleanup failed.",
+	}}
+	env.Hints = []map[string]any{{
+		"code":    "build_temporary_cleanup_recovery",
+		"message": "Remove the residual staging directory when it is no longer needed.",
+	}}
+
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Temporary cleanup:", "failed",
+		"[" + BuildTemporaryCleanupFailedCode + "]", "Published output, but staging cleanup failed.",
+		"[build_temporary_cleanup_recovery]", "Remove the residual staging directory when it is no longer needed.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("build cleanup warning output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesTests(t *testing.T) {
 	env := New("test")
 	env.Tests = []map[string]any{

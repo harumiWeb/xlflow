@@ -12,12 +12,21 @@ public sealed class ExcelBuildService : IBuildService
     private const int ComponentTypeDocument = 100;
     private const int ComponentTypeForm = 3;
     private static readonly JsonSerializerOptions PlanJsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly BuildArtifactPublisher _artifactPublisher;
+
+    public ExcelBuildService() : this(new BuildArtifactPublisher()) { }
+
+    internal ExcelBuildService(BuildArtifactPublisher artifactPublisher)
+    {
+        _artifactPublisher = artifactPublisher;
+    }
 
     public BridgeResponse Execute(BridgeRequest request, BuildCommandArguments args, CancellationToken cancellationToken)
     {
         object? excel = null;
         object? workbook = null;
         string? stagingDirectory = null;
+        BuildArtifactCleanup? stagingCleanup = null;
         var stage = "validate";
         var excelProcessId = 0;
         try
@@ -40,16 +49,18 @@ public sealed class ExcelBuildService : IBuildService
             {
                 return BridgeResponse.Failed(request, new BridgeError("build_session_dirty", "A live xlflow session has unsaved changes. Run `xlflow save --session` before building.", "session", "xlflow-excel-bridge"));
             }
+            if (HasMatchingSession(args, outputPath))
+            {
+                return BridgeResponse.Failed(request, new BridgeError("build_output_busy", "The output workbook is owned by a live xlflow session.", "output_busy", "xlflow-excel-bridge"));
+            }
 
             // Stage beside the final output so the final replacement is a
             // same-volume atomic move. Never touch the previous artifact until
             // Excel has saved, closed, and exited cleanly.
             stage = "stage_prepare";
-            var outputParent = Path.GetDirectoryName(outputPath) ?? throw new InvalidOperationException("output workbook parent is required");
-            Directory.CreateDirectory(outputParent);
-            stagingDirectory = Path.Combine(outputParent, ".xlflow-build-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(stagingDirectory);
-            var temporaryWorkbook = Path.Combine(stagingDirectory, Path.GetFileName(outputPath));
+            var artifactStage = BuildArtifactPublisher.CreateStage(outputPath);
+            stagingDirectory = artifactStage.Directory;
+            var temporaryWorkbook = artifactStage.TemporaryWorkbookPath;
 
             File.Copy(basePath, temporaryWorkbook);
 
@@ -85,46 +96,43 @@ public sealed class ExcelBuildService : IBuildService
             excel = null;
             if (!cleanupConfirmed)
             {
-                return BuildFailure(request, "build_excel_cleanup_unconfirmed", "Excel did not exit cleanly after saving the staged workbook.", "excel_cleanup", excelProcessId, 0, true, null);
+                throw new BuildOperationException("build_excel_cleanup_unconfirmed", "Excel did not exit cleanly after saving the staged workbook.", "excel_cleanup", 0, true, null);
             }
             stage = "publish";
-            var replaced = File.Exists(outputPath);
-            File.Move(temporaryWorkbook, outputPath, true);
-
-            return BridgeResponse.Ok(request, new Dictionary<string, object?>
-            {
-                ["output"] = new Dictionary<string, object?> { ["path"] = outputPath, ["replaced_existing"] = replaced },
-                ["build"] = new Dictionary<string, object?>
-                {
-                    ["backend"] = "excel",
-                    ["source_applied"] = true,
-                    ["components_applied"] = applied,
-                    ["vbe_compile"] = "passed",
-                    ["workbook_saved"] = true,
-                    ["workbook_closed"] = true,
-                    ["excel_cleanup"] = "clean",
-                },
-            });
+            BuildArtifactPublisher.ValidateTemporaryArtifact(temporaryWorkbook);
+            var publication = _artifactPublisher.Publish(temporaryWorkbook, outputPath);
+            stagingCleanup = _artifactPublisher.Cleanup(stagingDirectory);
+            return BuildSuccess(request, outputPath, publication, stagingCleanup, applied);
         }
         catch (BuildOperationException failure)
         {
             var cleanupConfirmed = CloseAndConfirm(ref workbook, ref excel, excelProcessId);
-            return BuildFailure(request, failure.Code, failure.Message, failure.Stage, excelProcessId, failure.WorkerProcessId, failure.Uncertain || !cleanupConfirmed, failure.Location);
+            stagingCleanup ??= CleanupStage(stagingDirectory);
+            return BuildFailure(request, failure.Code, failure.Message, failure.Stage, excelProcessId, failure.WorkerProcessId, failure.Uncertain || !cleanupConfirmed, failure.Location, stagingCleanup);
+        }
+        catch (BuildArtifactException failure)
+        {
+            var cleanupConfirmed = CloseAndConfirm(ref workbook, ref excel, excelProcessId);
+            stagingCleanup ??= CleanupStage(stagingDirectory);
+            return BuildFailure(request, failure.Code, failure.Message, failure.Stage, excelProcessId, 0, !cleanupConfirmed, null, stagingCleanup);
         }
         catch (Exception ex)
         {
             var cleanupConfirmed = CloseAndConfirm(ref workbook, ref excel, excelProcessId);
-            return BuildFailure(request, Classify(ex), ExcelBridgeSupport.FormatExceptionDetail(ex), stage, excelProcessId, 0, !cleanupConfirmed, null);
+            stagingCleanup ??= CleanupStage(stagingDirectory);
+            return BuildFailure(request, Classify(ex), ExcelBridgeSupport.FormatExceptionDetail(ex), stage, excelProcessId, 0, !cleanupConfirmed, null, stagingCleanup);
         }
         finally
         {
             CloseDedicated(workbook, excel);
-            if (stagingDirectory is not null && Directory.Exists(stagingDirectory))
+            if (stagingCleanup is null && stagingDirectory is not null)
             {
-                try { Directory.Delete(stagingDirectory, true); } catch { }
+                _ = CleanupStage(stagingDirectory);
             }
         }
     }
+
+    private BuildArtifactCleanup? CleanupStage(string? stagingDirectory) => stagingDirectory is null ? null : _artifactPublisher.Cleanup(stagingDirectory);
 
     private static bool CloseAndConfirm(ref object? workbook, ref object? excel, int excelProcessId)
     {
@@ -179,12 +187,97 @@ public sealed class ExcelBuildService : IBuildService
         }
     }
 
-    private static BridgeResponse BuildFailure(BridgeRequest request, string code, string message, string stage, int excelPid, int workerPid, bool uncertain, object? location)
+    private static bool HasMatchingSession(BuildCommandArguments args, string workbookPath)
+    {
+        return HasLiveMatchingSession(args.MetadataPath, workbookPath, ExcelBridgeSupport.GetSessionExcel, ExcelBridgeSupport.GetOpenWorkbook);
+    }
+
+    // Metadata is not ownership proof: Excel can crash after writing it.  Only
+    // block publication after reattaching to the recorded Excel session and
+    // finding this exact workbook still open.
+    internal static bool HasLiveMatchingSession(
+        string metadataPath,
+        string workbookPath,
+        Func<string, object?> getSessionExcel,
+        Func<object, string, object> getOpenWorkbook)
+    {
+        if (string.IsNullOrWhiteSpace(metadataPath) || !File.Exists(metadataPath) ||
+            !ExcelBridgeSupport.SessionMetadataMatchesWorkbook(metadataPath, workbookPath))
+        {
+            return false;
+        }
+
+        object? excel = null;
+        object? workbook = null;
+        try
+        {
+            excel = getSessionExcel(metadataPath);
+            if (excel is null)
+            {
+                return false;
+            }
+
+            workbook = getOpenWorkbook(excel, workbookPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(workbook);
+            ExcelBridgeSupport.ReleaseComObject(excel);
+        }
+    }
+
+    private static BridgeResponse BuildSuccess(BridgeRequest request, string outputPath, BuildArtifactPublication publication, BuildArtifactCleanup cleanup, int applied)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["output"] = new Dictionary<string, object?>
+            {
+                ["path"] = outputPath,
+                ["replaced_existing"] = publication.ReplacedExisting,
+                ["publication"] = publication.Publication,
+                ["temporary_cleanup"] = CleanupDetails(cleanup),
+            },
+            ["build"] = new Dictionary<string, object?>
+            {
+                ["backend"] = "excel",
+                ["source_applied"] = true,
+                ["components_applied"] = applied,
+                ["vbe_compile"] = "passed",
+                ["workbook_saved"] = true,
+                ["workbook_closed"] = true,
+                ["excel_cleanup"] = "clean",
+            },
+        };
+        if (!cleanup.Succeeded)
+        {
+            extensions["warnings"] = new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["code"] = "build_temporary_cleanup_failed",
+                    ["message"] = "The build output was published, but its temporary staging directory could not be removed.",
+                    ["path"] = cleanup.ResidualPath,
+                },
+            };
+        }
+        return BridgeResponse.Ok(request, extensions);
+    }
+
+    private static BridgeResponse BuildFailure(BridgeRequest request, string code, string message, string stage, int excelPid, int workerPid, bool uncertain, object? location, BuildArtifactCleanup? cleanup)
     {
         var details = new Dictionary<string, object?> { ["stage"] = stage };
         if (location is not null)
         {
             details["location"] = location;
+        }
+        if (cleanup is not null)
+        {
+            details["temporary_cleanup"] = CleanupDetails(cleanup);
         }
 
         return new BridgeResponse
@@ -196,6 +289,13 @@ public sealed class ExcelBuildService : IBuildService
             Recovery = uncertain ? new BridgeRecovery { Required = true, Reason = "excel_cleanup_unconfirmed", Operation = "build", ExcelProcessId = excelPid > 0 ? excelPid : null, WorkerProcessId = workerPid > 0 ? workerPid : null, CleanupConfirmed = false } : null,
         };
     }
+
+    private static Dictionary<string, object?> CleanupDetails(BuildArtifactCleanup cleanup) => new()
+    {
+        ["status"] = cleanup.Succeeded ? "clean" : "failed",
+        ["residual_path"] = cleanup.ResidualPath,
+        ["error"] = cleanup.Error,
+    };
 
     private static int Reconstruct(object workbook, BuildPlanPayload plan, string codeSource, string tempRoot, CancellationToken cancellationToken)
     {

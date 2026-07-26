@@ -13,6 +13,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `as_type_clause`
 - `assignable_to`
 - `assignment_statement`
+- `atomic_create`
+- `atomic_replace`
 - `attach_active_deprecated`
 - `attach_args_invalid`
 - `attempted_operation`
@@ -48,9 +50,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `bridge_terminated_during_excel_operation`
 - `build_args_invalid`
 - `build_exclude_unmatched`
-- `build_not_implemented`
+- `build_output_busy`
+- `build_output_directory_failed`
+- `build_output_replace_failed`
+- `build_plan_encode_failed`
 - `build_plan_invalid`
 - `build_settings`
+- `build_temporary_artifact_missing`
+- `build_temporary_cleanup_failed`
 - `builtin_casing`
 - `builtin_like`
 - `button_not_found`
@@ -511,11 +518,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `recovery_metadata_invalid`
 - `recovery_required`
 - `refers_to`
+- `replaced_existing`
 - `request_id`
 - `requested_bridge`
 - `require_option_explicit`
 - `requires_push`
 - `reset_excel_session`
+- `residual_path`
 - `resolved_result`
 - `resolved_value`
 - `resource_scope`
@@ -616,6 +625,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `target_info`
 - `target_line`
 - `target_state`
+- `temporary_cleanup`
 - `temporary_copy`
 - `temporary_object_cleanup_failed`
 - `temporary_workbook`
@@ -697,6 +707,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `vba_line_number_safety_failed`
 - `vba_may_still_be_running`
 - `vba_object_model_access_disabled`
+- `vbe_compile`
 - `vbe_validation`
 - `vbe_validation_skipped`
 - `vbide_access`
