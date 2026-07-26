@@ -118,6 +118,14 @@ func mergeBuildPayload(plan map[string]any, bridge any) map[string]any {
 		for key, value := range fields {
 			merged[key] = value
 		}
+		merged["validation"] = map[string]any{
+			"source_applied":     fields["source_applied"],
+			"components_applied": fields["components_applied"],
+			"vbe_compile":        fields["vbe_compile"],
+			"workbook_saved":     fields["workbook_saved"],
+			"workbook_closed":    fields["workbook_closed"],
+			"excel_cleanup":      fields["excel_cleanup"],
+		}
 	}
 	return merged
 }
@@ -155,9 +163,31 @@ func buildPayload(plan buildpkg.BuildPlan, dryRun bool) map[string]any {
 		warnings = []buildpkg.BuildWarning{}
 	}
 	return map[string]any{
-		"dry_run":  dryRun,
-		"base":     plan.BaseWorkbook,
-		"output":   plan.OutputPath,
+		"schema_version":      1,
+		"command":             "build",
+		"backend":             "excel",
+		"dry_run":             dryRun,
+		"base":                plan.BaseWorkbook,
+		"output":              plan.OutputPath,
+		"included_components": included,
+		"excluded_components": excluded,
+		"validation": map[string]any{
+			"source_applied":  false,
+			"vbe_compile":     "not_run",
+			"workbook_saved":  false,
+			"workbook_closed": false,
+		},
+		"publication": map[string]any{
+			"replaced_existing": false,
+			"method":            "not_run",
+		},
+		"manifest": map[string]any{
+			"path":      plan.OutputPath + ".build.json",
+			"published": false,
+			"error":     nil,
+		},
+		// Retain the original field names during the v1 transition. They remain
+		// convenient for current human renderers and older integrations.
 		"included": included,
 		"excluded": excluded,
 		"warnings": warnings,

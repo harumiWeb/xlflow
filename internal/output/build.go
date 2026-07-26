@@ -43,8 +43,27 @@ func (r renderer) renderBuild(env Envelope) string {
 		// Accept the compact string representation used by early bridge builds.
 		fmt.Fprintf(&b, "Temporary cleanup:\n  %s\n\n", cleanup)
 	}
-	r.renderBuildComponents(&b, "Included", build["included"])
-	r.renderBuildComponents(&b, "Excluded", build["excluded"])
+	if manifest := objectMap(build["manifest"]); len(manifest) > 0 {
+		if path := stringValue(manifest, "path"); path != "" {
+			fmt.Fprintf(&b, "Manifest:\n  %s\n\n", path)
+		}
+		if published, ok := boolValueOK(manifest, "published"); ok {
+			fmt.Fprintf(&b, "Manifest published:\n  %t\n\n", published)
+		}
+		if message := stringValue(manifest, "error"); message != "" {
+			fmt.Fprintf(&b, "Manifest error:\n  %s\n\n", message)
+		}
+	}
+	included := build["included_components"]
+	if included == nil {
+		included = build["included"]
+	}
+	excluded := build["excluded_components"]
+	if excluded == nil {
+		excluded = build["excluded"]
+	}
+	r.renderBuildComponents(&b, "Included", included)
+	r.renderBuildComponents(&b, "Excluded", excluded)
 	if warnings := buildComponentMaps(build["warnings"]); len(warnings) > 0 {
 		b.WriteString("Warnings:\n")
 		for _, warning := range warnings {

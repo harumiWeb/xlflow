@@ -112,9 +112,46 @@ Command-specific fields are top-level fields such as `issues`, `analysis`,
 `macro`, `macros`, `tests`, `diff`, `inspect`, `ui`, `debug`, `backups`,
 `backup_prune`, `rollback`, `target`, `session`, `coordination`, `recovery`,
 `warnings`, `hints`, `output`, `forms`, `edit`, `runner`, `version`, and
-`capabilities`.
+`capabilities`, and `build`.
 `output` carries `fmt` result summaries, `export-image` output paths, and `form`
 command artifacts.
+
+## Build manifest
+
+`build --json` returns a versioned `build` manifest. Non-dry successful builds
+also persist the same build evidence beside the artifact as
+`<output>.build.json`.
+
+```json
+{
+  "build": {
+    "schema_version": 1,
+    "command": "build",
+    "backend": "excel",
+    "base": "build/Book.xlsm",
+    "output": "build/Release/Book.xlsm",
+    "included_components": [
+      { "name": "Main", "type": "standard", "source_path": "src/modules/Main.bas" }
+    ],
+    "excluded_components": [],
+    "validation": {
+      "source_applied": true,
+      "vbe_compile": "passed",
+      "workbook_saved": true,
+      "workbook_closed": true
+    },
+    "publication": { "replaced_existing": false, "method": "atomic_create" },
+    "manifest": { "path": "build/Release/Book.xlsm.build.json", "published": true, "error": null }
+  }
+}
+```
+
+`build.publication` describes artifact creation or replacement, while
+`build.manifest.path` and `build.manifest.published` describe sidecar
+publication. Dry-run uses `publication.method="not_run"` and
+`manifest.published=false`. A `build_manifest_publish_failed` warning leaves
+the workbook artifact successful and reports the manifest failure without
+weakening the artifact replacement guarantee.
 
 ## Capabilities
 
@@ -138,7 +175,8 @@ can run concurrently.
         "parallel_safe": false,
         "retryable_when_busy": true,
         "default_wait_policy": "fail",
-        "recovery_behavior": "block"
+        "recovery_behavior": "block",
+        "requires_excel": true
       }
     }
   }

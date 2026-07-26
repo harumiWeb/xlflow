@@ -37,7 +37,7 @@ func TestCapabilitiesCommandWritesV1JSONEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatal("push capability missing")
 	}
-	if len(push.CLIPaths) != 1 || push.CLIPaths[0] != "push" || push.ResourceScope != coordination.ResourceWorkbook || push.OperationKind != coordination.OperationMutate || push.ParallelSafe || !push.RetryableWhenBusy || push.DefaultWaitPolicy != coordination.WaitFail || push.RecoveryBehavior != coordination.RecoveryBlock {
+	if len(push.CLIPaths) != 1 || push.CLIPaths[0] != "push" || push.ResourceScope != coordination.ResourceWorkbook || push.OperationKind != coordination.OperationMutate || push.ParallelSafe || !push.RetryableWhenBusy || push.DefaultWaitPolicy != coordination.WaitFail || push.RecoveryBehavior != coordination.RecoveryBlock || !push.RequiresExcel {
 		t.Fatalf("push capability = %#v", push)
 	}
 }

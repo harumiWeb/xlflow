@@ -1,7 +1,9 @@
 # xlflow build
 
 Build a release artifact from the configured VBA source. The configured base
-workbook is input only and is never modified.
+workbook is input only and is never modified. Use `build` for a Windows/Excel
+release artifact: Excel/VBIDE reconstructs the project and validates VBE
+compilation before xlflow publishes the file.
 
 ```bash
 xlflow build --dry-run
@@ -54,6 +56,37 @@ artifact remains successful and xlflow returns warning
 `build_temporary_cleanup_failed` (with the retained staging path when
 available); `output.temporary_cleanup.status` is `failed`.
 
+## Build manifest
+
+Every successful non-dry build writes a versioned companion manifest at
+`<output>.build.json` (for example `build/Release/Book.xlsm.build.json`). The
+same v1 fields appear under `build` in `--json`: resolved base/output paths,
+included and excluded components, VBE/save/close validation, and publication
+metadata. `build.schema_version` is the contract version for integrations.
+
+The workbook artifact remains authoritative. If only the manifest cannot be
+published after the workbook was safely published, build succeeds with warning
+`build_manifest_publish_failed` and `build.manifest.published=false`; rerun the
+build to recreate the companion file.
+
+## Choose the right command
+
+| Command | Purpose                                                                                              | Excel/VBE validation                                             |
+| ------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `build` | Publish a filtered release workbook without changing the development workbook.                       | Required on Windows.                                             |
+| `push`  | Synchronize the complete source tree, including development/test code, into the configured workbook. | Runs through Excel/VBIDE.                                        |
+| `pack`  | Produce an experimental `.xlsm` with the pure-Go file-level writer.                                  | Never performed by `pack`; release-gate Excel smoke is required. |
+
+`[build].exclude` filters only `build`; it never changes `push` or `pack`.
+Supported base/output pairs are `.xlsm`, `.xlam`, and `.xlsb` with matching
+extensions. Excel and Trust Center VBA-project access are required for a real
+build. Save a matching dirty xlflow session before building.
+
+`build` guarantees a separately staged workbook, VBE compilation, a clean
+save/close, and publication only after those checks pass. It does not prove
+that every runtime macro path is correct; run representative workbook tests or
+smoke macros before distributing a release.
+
 ## Dry-run
 
 Use `--dry-run` to validate workbook paths and configured `[build].exclude`
@@ -61,6 +94,10 @@ patterns without opening Excel, acquiring workbook coordination, creating a
 directory, or writing an artifact. It also remains local when invoked from WSL.
 The output lists included and excluded VBA components; `--json` exposes the
 same information under `build`.
+
+`build --dry-run` is the explicit Excel-free exception: it returns the v1
+manifest shape with `validation.vbe_compile="not_run"`, creates neither an
+artifact nor a companion manifest, and remains local under WSL.
 
 <!-- xlflow-command-guidance -->
 

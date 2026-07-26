@@ -103,6 +103,7 @@ func cli(id CommandID, path string, policy Policy) Descriptor {
 
 func both(id CommandID, path string, policy Policy, selector BridgeSelector) Descriptor {
 	descriptor := cli(id, path, policy)
+	descriptor.RequiresExcel = true
 	descriptor.Bridge = []BridgeSelector{selector}
 	return descriptor
 }

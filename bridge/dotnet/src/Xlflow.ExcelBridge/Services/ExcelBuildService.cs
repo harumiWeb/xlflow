@@ -83,7 +83,9 @@ public sealed class ExcelBuildService : IBuildService
                 excelHwnd, Windows.DialogKind.Compile, true, ExcelPushService.ResolveCompileTimeout(request), cancellationToken);
             if (compile.Dialog is not null || compile.TimedOut || compile.Result is null || !compile.Result.Ok)
             {
-                var message = compile.Dialog is not null ? "Unexpected VBE compile dialog: " + compile.Dialog.Title : compile.TimedOut ? "VBE Compile timed out." : compile.Result?.Error?.Message ?? "VBE Compile failed.";
+                var message = compile.Dialog is not null
+                    ? "Unexpected VBE compile dialog: " + DialogMessage(compile.Dialog)
+                    : compile.TimedOut ? "VBE Compile timed out." : compile.Result?.Error?.Message ?? "VBE Compile failed.";
                 var fatalComFailure = compile.Result?.Error is not null && ExcelBridgeSupport.IsFatalComFailure(compile.Result.Error.Number);
                 throw new BuildOperationException("build_compile_failed", message, stage, compile.WorkerProcessId, compile.TimedOut || fatalComFailure, compile.LocationCapture.Location);
             }
@@ -101,8 +103,10 @@ public sealed class ExcelBuildService : IBuildService
             stage = "publish";
             BuildArtifactPublisher.ValidateTemporaryArtifact(temporaryWorkbook);
             var publication = _artifactPublisher.Publish(temporaryWorkbook, outputPath);
+            var manifest = CreateManifest(plan, basePath, outputPath, publication, applied);
+            var manifestPublication = _artifactPublisher.PublishManifest(stagingDirectory!, outputPath, manifest);
             stagingCleanup = _artifactPublisher.Cleanup(stagingDirectory);
-            return BuildSuccess(request, outputPath, publication, stagingCleanup, applied);
+            return BuildSuccess(request, outputPath, publication, manifestPublication, stagingCleanup, applied);
         }
         catch (BuildOperationException failure)
         {
@@ -133,6 +137,12 @@ public sealed class ExcelBuildService : IBuildService
     }
 
     private BuildArtifactCleanup? CleanupStage(string? stagingDirectory) => stagingDirectory is null ? null : _artifactPublisher.Cleanup(stagingDirectory);
+
+    private static string DialogMessage(Windows.DialogSnapshot dialog)
+    {
+        var lines = dialog.Text.Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
+        return lines.Length > 0 ? string.Join(Environment.NewLine, lines) : dialog.Title;
+    }
 
     private static bool CloseAndConfirm(ref object? workbook, ref object? excel, int excelProcessId)
     {
@@ -231,7 +241,7 @@ public sealed class ExcelBuildService : IBuildService
         }
     }
 
-    private static BridgeResponse BuildSuccess(BridgeRequest request, string outputPath, BuildArtifactPublication publication, BuildArtifactCleanup cleanup, int applied)
+    private static BridgeResponse BuildSuccess(BridgeRequest request, string outputPath, BuildArtifactPublication publication, BuildManifestPublication manifest, BuildArtifactCleanup cleanup, int applied)
     {
         var extensions = new Dictionary<string, object?>
         {
@@ -251,22 +261,72 @@ public sealed class ExcelBuildService : IBuildService
                 ["workbook_saved"] = true,
                 ["workbook_closed"] = true,
                 ["excel_cleanup"] = "clean",
+                ["publication"] = new Dictionary<string, object?>
+                {
+                    ["replaced_existing"] = publication.ReplacedExisting,
+                    ["method"] = publication.Publication,
+                },
+                ["manifest"] = ManifestDetails(manifest),
             },
         };
+        var warnings = new List<Dictionary<string, object?>>();
         if (!cleanup.Succeeded)
         {
-            extensions["warnings"] = new[]
+            warnings.Add(new Dictionary<string, object?>
             {
-                new Dictionary<string, object?>
-                {
-                    ["code"] = "build_temporary_cleanup_failed",
-                    ["message"] = "The build output was published, but its temporary staging directory could not be removed.",
-                    ["path"] = cleanup.ResidualPath,
-                },
-            };
+                ["code"] = "build_temporary_cleanup_failed",
+                ["message"] = "The build output was published, but its temporary staging directory could not be removed.",
+                ["path"] = cleanup.ResidualPath,
+            });
+        }
+        if (!manifest.Published)
+        {
+            warnings.Add(new Dictionary<string, object?>
+            {
+                ["code"] = "build_manifest_publish_failed",
+                ["message"] = "The build workbook was published, but its companion manifest could not be published.",
+                ["path"] = manifest.Path,
+                ["error"] = manifest.Error,
+            });
+        }
+        if (warnings.Count > 0)
+        {
+            extensions["warnings"] = warnings;
         }
         return BridgeResponse.Ok(request, extensions);
     }
+
+    private static Dictionary<string, object?> ManifestDetails(BuildManifestPublication manifest) => new()
+    {
+        ["path"] = manifest.Path,
+        ["published"] = manifest.Published,
+        ["error"] = manifest.Error,
+    };
+
+    private static Dictionary<string, object?> CreateManifest(BuildPlanPayload plan, string basePath, string outputPath, BuildArtifactPublication publication, int applied) => new()
+    {
+        ["schema_version"] = 1,
+        ["command"] = "build",
+        ["backend"] = "excel",
+        ["base"] = basePath,
+        ["output"] = outputPath,
+        ["included_components"] = plan.Included,
+        ["excluded_components"] = plan.Excluded,
+        ["validation"] = new Dictionary<string, object?>
+        {
+            ["source_applied"] = true,
+            ["components_applied"] = applied,
+            ["vbe_compile"] = "passed",
+            ["workbook_saved"] = true,
+            ["workbook_closed"] = true,
+            ["excel_cleanup"] = "clean",
+        },
+        ["publication"] = new Dictionary<string, object?>
+        {
+            ["replaced_existing"] = publication.ReplacedExisting,
+            ["method"] = publication.Publication,
+        },
+    };
 
     private static BridgeResponse BuildFailure(BridgeRequest request, string code, string message, string stage, int excelPid, int workerPid, bool uncertain, object? location, BuildArtifactCleanup? cleanup)
     {
@@ -314,10 +374,24 @@ public sealed class ExcelBuildService : IBuildService
             project = ExcelBridgeSupport.Get(workbook, "VBProject") ?? throw new InvalidOperationException("VBProject access is denied");
             vbComponents = ExcelBridgeSupport.Get(project, "VBComponents") ?? throw new InvalidOperationException("VBComponents are unavailable");
             var applied = 0;
-            foreach (var component in components)
+            // Match push's dependency-friendly import order. In particular,
+            // UserForms can reference standard modules or classes while Excel
+            // validates their code during later VBE compilation.
+            foreach (var component in components
+                .OrderBy(component => component.Type switch
+                {
+                    "standard" => 0,
+                    "class" => 1,
+                    "form" => 2,
+                    _ => 3,
+                })
+                .ThenBy(component => component.SourcePath, StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var importPath = Path.Combine(tempRoot, "imports", Guid.NewGuid().ToString("N") + Path.GetExtension(component.SourcePath));
+                // Keep the original .frm basename: its designer header names
+                // the companion .frx file. Isolation comes from the unique
+                // directory, not by renaming the component artifact itself.
+                var importPath = Path.Combine(tempRoot, "imports", Guid.NewGuid().ToString("N"), Path.GetFileName(component.SourcePath));
                 VbaSourceHelper.PrepareSourceForImport(component.SourcePath, importPath, null, "off");
                 if (component.Type == "form")
                 {
@@ -484,8 +558,14 @@ public sealed class ExcelBuildService : IBuildService
 
     private sealed class BuildPlanPayload
     {
+        [JsonPropertyName("base_workbook")]
+        public string BaseWorkbook { get; init; } = "";
+        [JsonPropertyName("output_path")]
+        public string OutputPath { get; init; } = "";
         [JsonPropertyName("included")]
         public List<BuildComponentPayload> Included { get; init; } = [];
+        [JsonPropertyName("excluded")]
+        public List<BuildComponentPayload> Excluded { get; init; } = [];
     }
 
     private sealed class BuildComponentPayload
