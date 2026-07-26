@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -150,6 +152,89 @@ func TestAnalysisSnapshotCachesDeterministicSymbolErrorAndRetires(t *testing.T) 
 	}
 }
 
+func TestAnalysisSnapshotRawCallSitesAreLazyConcurrentAndDefensive(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{URI: "file:///Main.bas", Path: "Main.bas", Source: "Sub Main()\n  Target value:=1\nEnd Sub\n", Version: 1})
+	receiver := "service"
+	var loads atomic.Int32
+	load := func() (calls.FileResult, error) {
+		loads.Add(1)
+		return calls.FileResult{
+			Path:       "Main.bas",
+			ModuleName: "Main",
+			ModuleKind: "standard",
+			CallSites: []calls.CallSite{{
+				File:   "Main.bas",
+				Module: "Main",
+				Caller: &calls.Caller{Name: "Main", Kind: "sub", QualifiedName: "Main.Main"},
+				Callee: calls.Callee{Text: "service.Target", BaseName: "Target", Receiver: &receiver, Member: "Target"},
+				Arguments: calls.Arguments{
+					Count: 1,
+					Named: []calls.NamedArgument{{Name: "value", ValueText: "1"}},
+				},
+			}},
+		}, nil
+	}
+	const readers = 24
+	start := make(chan struct{})
+	results := make(chan calls.FileResult, readers)
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			result, _, err := snapshot.RawCallSites(load)
+			if err != nil {
+				t.Error(err)
+			}
+			results <- result
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if len(result.CallSites) != 1 || result.CallSites[0].Callee.BaseName != "Target" {
+			t.Fatalf("call sites = %+v", result.CallSites)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+
+	result, hit, err := snapshot.RawCallSites(load)
+	if err != nil || !hit {
+		t.Fatalf("cached call sites = (hit=%v, err=%v)", hit, err)
+	}
+	result.CallSites[0].Caller.Name = "mutated"
+	*result.CallSites[0].Callee.Receiver = "mutated"
+	result.CallSites[0].Arguments.Named[0].Name = "mutated"
+	again, _, _ := snapshot.RawCallSites(load)
+	site := again.CallSites[0]
+	if site.Caller.Name != "Main" || *site.Callee.Receiver != "service" || site.Arguments.Named[0].Name != "value" {
+		t.Fatalf("cached call site was mutated: %+v", site)
+	}
+}
+
+func TestAnalysisSnapshotCachesDeterministicRawCallSiteError(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "broken", Version: 1})
+	want := errors.New("call extraction failed")
+	var loads atomic.Int32
+	load := func() (calls.FileResult, error) {
+		loads.Add(1)
+		return calls.FileResult{Path: "Main.bas"}, want
+	}
+	for i := 0; i < 2; i++ {
+		result, hit, err := snapshot.RawCallSites(load)
+		if !errors.Is(err, want) || hit != (i > 0) || result.Path != "Main.bas" {
+			t.Fatalf("call %d = (result=%+v, hit=%v, err=%v)", i, result, hit, err)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+}
+
 func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSemanticTokens(t *testing.T) {
 	snapshot := NewAnalysisSnapshot(Document{
 		URI:        "file:///Main.bas",
@@ -171,6 +256,23 @@ func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSeman
 	}
 	if _, err := analyzer.SemanticTokens(doc, []Document{doc}); err != nil {
 		t.Fatal(err)
+	}
+	callResult, hit, err := snapshot.RawCallSites(func() (calls.FileResult, error) {
+		parsed, err := snapshot.ParsedDocument()
+		if err != nil {
+			return calls.FileResult{}, err
+		}
+		return calls.ExtractParsed(calls.SourceOptions{
+			RootDir:    ".",
+			Path:       snapshot.Path(),
+			ModuleKind: snapshot.ModuleKind(),
+		}, parsed)
+	})
+	if err != nil || hit {
+		t.Fatalf("raw call sites = (result=%+v, hit=%v, err=%v)", callResult, hit, err)
+	}
+	if callResult.Parse != (symbols.ParseSummary{}) || len(callResult.CallSites) != 2 {
+		t.Fatalf("raw call sites = %+v", callResult)
 	}
 	if parses.Load() != 1 || snapshot.ParseCount() != 1 {
 		t.Fatalf("parsed documents = factory:%d snapshot:%d, want 1", parses.Load(), snapshot.ParseCount())

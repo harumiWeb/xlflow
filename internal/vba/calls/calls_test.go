@@ -152,6 +152,99 @@ func TestResolverDoesNotAliasRawCallSite(t *testing.T) {
 	}
 }
 
+func TestCloneFileResultDeepCopiesCallSites(t *testing.T) {
+	original := FileResult{
+		Path:       "src/modules/Main.bas",
+		ModuleName: "Main",
+		ModuleKind: "standard",
+		CallSites: []CallSite{{
+			File:   "src/modules/Main.bas",
+			Module: "Main",
+			Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+			Callee: Callee{
+				Text:     "obj.Target",
+				BaseName: "Target",
+				Receiver: stringPointer("obj"),
+				Member:   "Target",
+			},
+			Arguments: Arguments{
+				Count: 1,
+				Named: []NamedArgument{{Name: "Value", ValueText: "1"}},
+			},
+		}},
+	}
+
+	clone := CloneFileResult(original)
+	clone.CallSites[0].Caller.Name = "Changed"
+	*clone.CallSites[0].Callee.Receiver = "changed"
+	clone.CallSites[0].Arguments.Named[0].Name = "Changed"
+	clone.CallSites = append(clone.CallSites, CallSite{})
+
+	if len(original.CallSites) != 1 {
+		t.Fatalf("clone shares call-site slice: %+v", original.CallSites)
+	}
+	site := original.CallSites[0]
+	if site.Caller.Name != "Run" || *site.Callee.Receiver != "obj" || site.Arguments.Named[0].Name != "Value" {
+		t.Fatalf("clone shares nested call-site state: %+v", site)
+	}
+
+	empty := CloneFileResult(FileResult{CallSites: []CallSite{}})
+	if empty.CallSites == nil {
+		t.Fatal("clone changed non-nil empty call-sites slice to nil")
+	}
+	if CloneFileResult(FileResult{}).CallSites != nil {
+		t.Fatal("clone changed nil call-sites slice to non-nil")
+	}
+}
+
+func TestNewResolverFromSymbolsNormalizesAndDeterministicallyOrdersCandidates(t *testing.T) {
+	resolver := NewResolverFromSymbols([]ResolverSymbol{
+		{Name: "Target", Module: "Main", Kind: "sub", File: filepath.Join("src", "z", "Main.bas"), Line: 7},
+		{Name: "Target", Module: "Main", Kind: "sub", File: filepath.Join("src", "a", "Main.bas"), Line: 9},
+		{Name: "Target", Module: "Main", Kind: "function", File: filepath.Join("src", "m", "Main.bas"), Line: 5},
+		{Name: "Target", Module: "Main", Kind: "sub", File: filepath.Join("src", "a", "Main.bas"), Line: 3},
+		{Name: "Target", Module: "Main", Kind: "variable", File: "ignored.bas", Line: 1},
+	})
+
+	call := resolver.Resolve(CallSite{
+		Callee:    Callee{Text: "Target", BaseName: "Target", Member: "Target"},
+		Arguments: Arguments{Named: []NamedArgument{}},
+	})
+	if call.Resolution.Status != "ambiguous" {
+		t.Fatalf("status = %q, want ambiguous: %+v", call.Resolution.Status, call.Resolution)
+	}
+	want := []Candidate{
+		{QualifiedName: "Main.Target", Kind: "function", File: "src/m/Main.bas", Line: 5},
+		{QualifiedName: "Main.Target", Kind: "sub", File: "src/a/Main.bas", Line: 3},
+		{QualifiedName: "Main.Target", Kind: "sub", File: "src/a/Main.bas", Line: 9},
+		{QualifiedName: "Main.Target", Kind: "sub", File: "src/z/Main.bas", Line: 7},
+	}
+	if !reflect.DeepEqual(call.Resolution.Candidates, want) {
+		t.Fatalf("candidates = %+v, want %+v", call.Resolution.Candidates, want)
+	}
+}
+
+func TestNewResolverPreservesLegacySymbolAdapter(t *testing.T) {
+	legacy := NewResolver([]symbols.Symbol{{
+		Name:      "Target",
+		Module:    "Main",
+		Kind:      "sub",
+		File:      filepath.Join("src", "modules", "Main.bas"),
+		StartLine: 12,
+	}})
+	neutral := NewResolverFromSymbols([]ResolverSymbol{{
+		Name:   "Target",
+		Module: "Main",
+		Kind:   "sub",
+		File:   filepath.Join("src", "modules", "Main.bas"),
+		Line:   12,
+	}})
+	site := CallSite{Callee: Callee{Text: "Target", BaseName: "Target", Member: "Target"}}
+	if !reflect.DeepEqual(legacy.Resolve(site), neutral.Resolve(site)) {
+		t.Fatalf("legacy and neutral resolvers differ:\nlegacy=%+v\nneutral=%+v", legacy.Resolve(site), neutral.Resolve(site))
+	}
+}
+
 func TestResolverPreservesCallClassificationPrecedence(t *testing.T) {
 	projectSymbols := []symbols.Symbol{
 		{Name: "Print", Module: "Main", Kind: "sub", File: "src/modules/Main.bas", StartLine: 2},

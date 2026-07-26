@@ -174,7 +174,7 @@ func BenchmarkLSPWorkspaceSymbols(b *testing.B) {
 	b.Run("Cold", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			s.symbols = s.newWorkspaceSymbolIndex()
+			s.analysis = s.newWorkspaceAnalysisIndex()
 			if _, err := s.workspaceSymbol(nil, params); err != nil {
 				b.Fatal(err)
 			}
@@ -493,7 +493,7 @@ func BenchmarkLSPSemanticTokens(b *testing.B) {
 	b.Run("Cold", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			s.symbols = s.newWorkspaceSymbolIndex()
+			s.analysis = s.newWorkspaceAnalysisIndex()
 			s.semanticTokens = newSemanticTokenCache()
 			if _, err := s.docs.change(fixture.largeURI, fixture.largeSource, int32(i+1)); err != nil {
 				b.Fatal(err)

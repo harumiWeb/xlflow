@@ -25,6 +25,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -58,7 +59,7 @@ type Server struct {
 	handler                  protocol.Handler
 	docs                     *documents
 	logger                   *log.Logger
-	symbols                  *workspaceSymbolIndex
+	analysis                 *workspaceAnalysisIndex
 	semanticTokens           *semanticTokenCache
 	semanticTokenGenerator   func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig           intel.CodeLensConfig
@@ -146,7 +147,7 @@ func New(opts Options) (*Server, func(), error) {
 		diagStates:     make(map[string]*diagnosticState),
 		docLifecycles:  make(map[string]*sync.Mutex),
 	}
-	s.symbols = s.newWorkspaceSymbolIndex()
+	s.analysis = s.newWorkspaceAnalysisIndex()
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.analyzer.WorkspaceSymbolQueryFunc = s.cachedWorkspaceSymbolQuery
@@ -254,7 +255,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 }
 
 func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
-	s.symbols.start()
+	s.analysis.start()
 	s.logger.Printf("initialized")
 	return nil
 }
@@ -361,8 +362,8 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	s.docs.close(uri)
 	s.semanticTokens.invalidateWorkspace()
 	if path, err := fileURIToPath(uri); err == nil && !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
-		if err := s.symbols.clearOverlay(path); err != nil {
-			s.logger.Printf("workspace symbol index close refresh failed for %q: %v", path, err)
+		if err := s.analysis.clearOverlay(path); err != nil {
+			s.logger.Printf("workspace analysis index close refresh failed for %q: %v", path, err)
 		}
 	}
 	return nil
@@ -384,8 +385,8 @@ func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChan
 		}
 		for _, affected := range paths {
 			s.docs.invalidateDisk(affected)
-			if err := s.symbols.updatePath(affected); err != nil {
-				s.logger.Printf("workspace symbol index watcher update failed for %q: %v", affected, err)
+			if err := s.analysis.updatePath(affected); err != nil {
+				s.logger.Printf("workspace analysis index watcher update failed for %q: %v", affected, err)
 			}
 		}
 	}
@@ -1247,11 +1248,11 @@ func (s *Server) lockDocumentLifecycle(uri string) func() {
 	return lifecycle.Unlock
 }
 
-func (s *Server) newWorkspaceSymbolIndex() *workspaceSymbolIndex {
-	return newWorkspaceSymbolIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFile, s.logInitialWorkspaceIndexPerformance)
+func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
+	return newWorkspaceAnalysisIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFile, s.logInitialWorkspaceIndexPerformance)
 }
 
-func (s *Server) parseIndexedFile(file symbols.SourceFile, body []byte) (indexedFileSymbols, error) {
+func (s *Server) parseIndexedFile(file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {
 	snapshot := intel.NewAnalysisSnapshot(intel.Document{
 		Path:       file.Path,
 		Source:     string(body),
@@ -1259,22 +1260,47 @@ func (s *Server) parseIndexedFile(file symbols.SourceFile, body []byte) (indexed
 	})
 	doc := snapshot.Document()
 	defer snapshot.Retire()
+	return s.analyzeIndexedDocument(doc)
+}
+
+func (s *Server) analyzeIndexedDocument(doc intel.Document) (indexedFileAnalysis, error) {
+	snapshot := doc.Snapshot
+	if snapshot == nil || !snapshot.Matches(doc) {
+		snapshot = intel.NewAnalysisSnapshot(doc)
+		doc = snapshot.Document()
+		defer snapshot.Retire()
+	}
 	syms, err := s.analyzer.DocumentSymbols(doc)
 	if err != nil {
-		return indexedFileSymbols{}, err
+		return indexedFileAnalysis{}, err
 	}
-	return indexedFileSymbols{
-		path:       file.Path,
+	rawCalls, _, err := snapshot.RawCallSites(func() (calls.FileResult, error) {
+		parsed, err := snapshot.ParsedDocument()
+		if err != nil {
+			return calls.FileResult{}, err
+		}
+		return calls.ExtractParsed(calls.SourceOptions{
+			RootDir:    s.opts.RootDir,
+			Path:       doc.Path,
+			ModuleKind: doc.ModuleKind,
+		}, parsed)
+	})
+	if err != nil {
+		return indexedFileAnalysis{}, err
+	}
+	return indexedFileAnalysis{
+		path:       doc.Path,
 		version:    documentVersion(doc),
-		moduleKind: file.ModuleKind,
+		moduleKind: doc.ModuleKind,
 		symbols:    syms,
+		callSites:  rawCalls.CallSites,
 	}, nil
 }
 
 func (s *Server) updateWorkspaceSymbolOverlay(doc intel.Document) {
 	file, included, err := symbols.SourceFileForPath(s.opts.RootDir, s.opts.Config, doc.Path)
 	if err != nil {
-		s.logger.Printf("workspace symbol index overlay classification failed for %q: %v", doc.Path, err)
+		s.logger.Printf("workspace analysis index overlay classification failed for %q: %v", doc.Path, err)
 		return
 	}
 	if !included {
@@ -1282,12 +1308,12 @@ func (s *Server) updateWorkspaceSymbolOverlay(doc intel.Document) {
 	}
 	doc.Path = file.Path
 	doc.ModuleKind = file.ModuleKind
-	syms, err := s.analyzer.DocumentSymbols(doc)
+	analysis, err := s.analyzeIndexedDocument(doc)
 	if err != nil {
-		s.logger.Printf("workspace symbol index overlay update failed for %q: %v", doc.Path, err)
+		s.logger.Printf("workspace analysis index overlay update failed for %q: %v", doc.Path, err)
 		return
 	}
-	s.symbols.setOverlay(doc, syms)
+	s.analysis.setOverlay(doc, analysis)
 }
 
 func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.DocumentSymbolLoader) ([]intel.Symbol, error) {
@@ -1317,17 +1343,17 @@ func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.W
 	}
 	switch query.Mode {
 	case intel.WorkspaceSymbolQueryExact:
-		return s.symbols.searchExact(query.Text)
+		return s.analysis.searchExact(query.Text)
 	case intel.WorkspaceSymbolQueryPrefix:
-		return s.symbols.searchPrefix(query.Text)
+		return s.analysis.searchPrefix(query.Text)
 	case intel.WorkspaceSymbolQueryQualified:
-		return s.symbols.searchQualified(query.Text)
+		return s.analysis.searchQualified(query.Text)
 	case intel.WorkspaceSymbolQueryModule:
-		return s.symbols.searchModule(query.Text)
+		return s.analysis.searchModule(query.Text)
 	case intel.WorkspaceSymbolQueryKind:
-		return s.symbols.searchKind(query.Text)
+		return s.analysis.searchKind(query.Text)
 	default:
-		return s.symbols.searchContains(query.Text)
+		return s.analysis.searchContains(query.Text)
 	}
 }
 
