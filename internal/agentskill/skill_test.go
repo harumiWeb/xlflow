@@ -84,8 +84,26 @@ func TestInstallSupportsAllProviders(t *testing.T) {
 			if _, err := Install(InstallOptions{RootDir: dir, Agent: provider.Name}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(provider.Dir), "xlflow", "SKILL.md")); err != nil {
+			skillPath := filepath.Join(dir, filepath.FromSlash(provider.Dir), "xlflow", "SKILL.md")
+			if _, err := os.Stat(skillPath); err != nil {
 				t.Fatalf("expected skill for %s: %v", provider.Name, err)
+			}
+			body, err := os.ReadFile(skillPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"## Parser compatibility failures",
+				"`VB014` means `tree-sitter-vba` required parser recovery.",
+				"`code`, `file`, `line`,\n`column`, and `message`",
+				"not proof that Excel/VBE rejects the VBA",
+				"Do not rewrite otherwise valid-looking, idiomatic VBA merely to satisfy the parser.",
+				"If Excel accepts the original construct, preserve it and clearly report the `tree-sitter-vba` compatibility limitation.",
+				"`VB014` remains non-suppressible and preflight-blocking.",
+			} {
+				if !strings.Contains(string(body), want) {
+					t.Fatalf("installed skill for %s is missing %q:\n%s", provider.Name, want, body)
+				}
 			}
 		})
 	}

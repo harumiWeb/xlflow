@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `VB014` parser-compatibility guidance to the bundled Agent Skill so agents distinguish tree-sitter recovery from Excel/VBE compile failures, preserve valid idiomatic VBA, and report compatibility limits without bypassing preflight.
 - Hardened `xlflow build` publication: Excel now builds only in a bridge-owned staging directory beside the requested output, verifies the saved staged artifact after Excel exits, and then uses atomic create or replace publication. Existing artifacts remain untouched on pre-publication failure; unsafe output locks, staging/output-directory failures, and non-atomic replacement fail with structured build errors. Staging cleanup failures preserve the published artifact and report a warning plus cleanup metadata.
 
 ## v0.26.1

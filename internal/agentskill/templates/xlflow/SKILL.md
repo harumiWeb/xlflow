@@ -353,6 +353,25 @@ If a headless `XlflowUI` run behaves differently than expected, reproduce with t
 
 If `xlflow lint` fails, fix lint findings directly in source files before rerunning `push`, `run`, or `test`. Use inline suppression only when the exception is intentional, local, and safer to document beside the code than to disable globally. Unknown, unsupported, and stale suppressions are reported as command warnings, so inspect `warnings` after adding one.
 
+## Parser compatibility failures
+
+`VB014` means `tree-sitter-vba` required parser recovery. Inspect the structured
+`issues` entry from `xlflow lint --json`, including its `code`, `file`, `line`,
+`column`, and `message`, to locate the recovery point. This is a parser
+compatibility finding, not proof that Excel/VBE rejects the VBA; it is distinct
+from `xlflow run` compile diagnostics such as `vba_compile_failed`.
+
+When `VB014` is the only blocker:
+
+1. Inspect the exact recovery location before changing source.
+2. Do not rewrite otherwise valid-looking, idiomatic VBA merely to satisfy the parser.
+3. Determine whether the construct is valid VBA and, where practical, verify it with Excel/VBE compile behavior.
+4. If Excel accepts the original construct, preserve it and clearly report the `tree-sitter-vba` compatibility limitation.
+
+`VB014` remains non-suppressible and preflight-blocking. Do not bypass the safety
+gate to push the source; report the compatibility gap and any resulting
+automation limitation instead.
+
 Run `xlflow analyze --json` or `xlflow check --json` before changing object-heavy VBA. Analyzer findings such as `VBA101`, `VBA102`, and `VBA103` usually mean a missing `Set` assignment. For intentional one-line analyzer exceptions, use the same inline syntax with `VBA...` IDs, for example `' xlflow:disable-next-line VBA205`.
 
 If `xlflow inspect` does not show the workbook changes you expected, first decide whether disk is stale. A prior `xlflow push --session --no-save` or `xlflow run --session` can leave the live Excel workbook newer than the saved `.xlsm`; run `xlflow save --json` and inspect again before assuming the macro logic failed.
