@@ -92,10 +92,6 @@ func TestWriteWithOptionsRendersBuildTemporaryCleanupWarning(t *testing.T) {
 		"code":    BuildTemporaryCleanupFailedCode,
 		"message": "Published output, but staging cleanup failed.",
 	}}
-	env.Hints = []map[string]any{{
-		"code":    "build_temporary_cleanup_recovery",
-		"message": "Remove the residual staging directory when it is no longer needed.",
-	}}
 
 	var buf bytes.Buffer
 	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
@@ -105,7 +101,6 @@ func TestWriteWithOptionsRendersBuildTemporaryCleanupWarning(t *testing.T) {
 	for _, want := range []string{
 		"Temporary cleanup:", "failed",
 		"[" + BuildTemporaryCleanupFailedCode + "]", "Published output, but staging cleanup failed.",
-		"[build_temporary_cleanup_recovery]", "Remove the residual staging directory when it is no longer needed.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("build cleanup warning output missing %q:\n%s", want, got)

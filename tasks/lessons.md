@@ -89,3 +89,4 @@
 - When adding procedure-name filters or staged execution errors, preserve VBA modifier/casing variants and scope filters to the component kinds where they are semantic. Keep timeout and dialog outcomes ahead of inferred runner-stage classifications.
 - For user documentation, do not treat accurate command syntax as sufficient onboarding. Explain the user's goal, the state that each step reads or changes, a visible success condition, and the next safe action before relying on command references for detail.
 - When adapting structured recovery metadata for a secondary surface such as LSP, do not make one optional field a prerequisite for all metadata. Preserve every available field independently and test the empty-context fallback.
+- When updating a Go module version, update `THIRD_PARTY_LICENCES.md` (including version-pinned licence URLs) in the same change and run `scripts/dev/check-third-party-licences.ps1` before finalizing.

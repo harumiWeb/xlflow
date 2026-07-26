@@ -95,6 +95,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `comparison_expression`
 - `compile_vba`
 - `component_type`
+- `components_applied`
 - `compressible_short_roundtrips`
 - `condition_binary_expression`
 - `conditional_function_declaration`
@@ -207,6 +208,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exceeds_max_count`
 - `exceeds_max_total_size`
 - `excel_available`
+- `excel_cleanup`
 - `excel_com`
 - `excel_com_failure`
 - `excel_com_state_uncertain`
@@ -214,6 +216,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `excel_instance`
 - `excel_pid`
 - `excel_state_uncertain`
+- `excluded_components`
 - `executable_path`
 - `existing_warning`
 - `exit_code`
@@ -308,6 +311,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `implements_statement`
 - `implicit_intersection`
 - `implicit_member_expression`
+- `included_components`
 - `incompressible_short_over_limit_errors`
 - `incompressible_short_under_limit_roundtrips`
 - `incremental_parse_unavailable`
@@ -526,6 +530,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `request_id`
 - `requested_bridge`
 - `require_option_explicit`
+- `requires_excel`
 - `requires_push`
 - `reset_excel_session`
 - `residual_path`
@@ -593,6 +598,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `skipped_legacy_entries`
 - `skipped_paths`
 - `skipped_reasons`
+- `source_applied`
 - `source_artifacts`
 - `source_file`
 - `source_files`
@@ -736,6 +742,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `workbook_busy`
 - `workbook_busy_cancelled`
 - `workbook_busy_timeout`
+- `workbook_closed`
 - `workbook_dir`
 - `workbook_format_unsupported`
 - `workbook_in_use`
