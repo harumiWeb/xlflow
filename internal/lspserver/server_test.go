@@ -978,26 +978,34 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 			URI:        protocol.DocumentUri(uri),
 			LanguageID: "vba",
 			Version:    1,
-			Text:       "Option Explicit\nSub Test()\n    Dim dict As Scripting.Dictionary\n    dict.Add \"A\"\nEnd Sub\n",
+			Text:       "Option Explicit\nPublic Sub Take(ByVal target As Object)\nEnd Sub\n\nSub Test()\n    Dim values() As Variant\n    Dim dict As Scripting.Dictionary\n    Take values\n    dict.Add \"A\"\nEnd Sub\n",
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	deadline := time.Now().Add(time.Second)
+	seenCountMismatch := false
+	seenArrayObjectMismatch := false
 	for time.Now().Before(deadline) {
 		for _, params := range recorder.publishDiagnostics() {
 			for _, diag := range params.Diagnostics {
 				if strings.Contains(diag.Message, "Argument count mismatch") {
-					_ = serverConn.Close()
-					return
+					seenCountMismatch = true
+				}
+				if strings.Contains(diag.Message, "Argument `values` has type Variant(), but parameter `target` expects Object.") {
+					seenArrayObjectMismatch = true
 				}
 			}
+		}
+		if seenCountMismatch && seenArrayObjectMismatch {
+			_ = serverConn.Close()
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	_ = serverConn.Close()
-	t.Fatalf("VB030 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
+	t.Fatalf("VB030 publishDiagnostics missing count=%t array/Object=%t: %+v", seenCountMismatch, seenArrayObjectMismatch, recorder.publishDiagnostics())
 }
 
 func TestDocumentDiagnosticsIncludesParserRecoveryContext(t *testing.T) {

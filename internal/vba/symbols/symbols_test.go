@@ -61,6 +61,9 @@ Public Function ParseJson(ByVal JsonString As String, Optional ByRef Strict As B
 Start:
 10  Debug.Print JsonString
 End Function
+Public Sub UseValues(ByVal values() As Variant, ByRef target As Object)
+End Sub
+Dim implicitValues()
 Private Sub Hidden()
 End Sub
 `
@@ -92,7 +95,7 @@ End Sub
 	if parseJson.ReturnType != "Object" {
 		t.Fatalf("return type = %q, want Object", parseJson.ReturnType)
 	}
-	if len(parseJson.Parameters) != 3 || parseJson.Parameters[0].Name != "JsonString" || parseJson.Parameters[0].Passing != "ByVal" || !parseJson.Parameters[1].Optional || parseJson.Parameters[1].Passing != "ByRef" || parseJson.Parameters[2].Name != "Extra" || parseJson.Parameters[2].Type != "Variant" {
+	if len(parseJson.Parameters) != 3 || parseJson.Parameters[0].Name != "JsonString" || parseJson.Parameters[0].Passing != "ByVal" || !parseJson.Parameters[1].Optional || parseJson.Parameters[1].Passing != "ByRef" || parseJson.Parameters[2].Name != "Extra" || parseJson.Parameters[2].Type != "Variant" || !parseJson.Parameters[2].IsArray || !parseJson.Parameters[2].ParamArray {
 		t.Fatalf("unexpected parameters: %+v", parseJson.Parameters)
 	}
 	if parseJson.Parameters[1].Default == nil || *parseJson.Parameters[1].Default != "False" {
@@ -109,10 +112,22 @@ End Sub
 	privateFile := withPrivate.Files[0]
 	assertSymbol(t, privateFile.Symbols, "cache", "module_variable")
 	counts := assertSymbol(t, privateFile.Symbols, "counts", "module_variable")
-	if counts.ReturnType != "Long" {
+	if counts.ReturnType != "Long" || !counts.IsArray {
 		t.Fatalf("counts return type = %q, want Long", counts.ReturnType)
 	}
+	implicitValues := assertSymbol(t, privateFile.Symbols, "implicitValues", "module_variable")
+	if implicitValues.ReturnType != "Variant" || !implicitValues.IsArray {
+		t.Fatalf("implicitValues = %+v, want Variant array", implicitValues)
+	}
 	assertSymbol(t, privateFile.Symbols, "title", "module_variable")
+	useValues := assertSymbol(t, privateFile.Symbols, "UseValues", "sub")
+	if len(useValues.Parameters) != 2 || !useValues.Parameters[0].IsArray || useValues.Parameters[0].Type != "Variant" || useValues.Parameters[1].IsArray || useValues.Parameters[1].Type != "Object" {
+		t.Fatalf("unexpected array parameter metadata: %+v", useValues.Parameters)
+	}
+	values := assertSymbol(t, privateFile.Symbols, "values", "parameter")
+	if values.Parent != "UseValues" || values.ReturnType != "Variant" || !values.IsArray {
+		t.Fatalf("values parameter = %+v, want Variant array parameter", values)
+	}
 	localValue := assertSymbol(t, privateFile.Symbols, "localValue", "local_variable")
 	if localValue.ReturnType != "Long" {
 		t.Fatalf("localValue return type = %q, want Long", localValue.ReturnType)

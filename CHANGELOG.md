@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Extended LSP `VB030` argument diagnostics to flag known project-local arrays passed to non-array `Object` parameters, including both `ByVal` and `ByRef` calls, before Excel can surface a runtime type mismatch.
 - Added `VB014` parser-compatibility guidance to the bundled Agent Skill so agents distinguish tree-sitter recovery from Excel/VBE compile failures, preserve valid idiomatic VBA, and report compatibility limits without bypassing preflight.
 - Added a versioned `xlflow build` manifest to JSON output and as a companion `<output>.build.json` artifact. Build now reports resolved included/excluded components and validation evidence; if only companion publication fails, the validated workbook remains successful with `build_manifest_publish_failed`. `capabilities --json` now also reports whether the normal command path requires Excel.
 - Hardened `xlflow build` publication: Excel now builds only in a bridge-owned staging directory beside the requested output, verifies the saved staged artifact after Excel exits, and then uses atomic create or replace publication. Existing artifacts remain untouched on pre-publication failure; unsafe output locks, staging/output-directory failures, and non-atomic replacement fail with structured build errors. Staging cleanup failures preserve the published artifact and report a warning plus cleanup metadata.

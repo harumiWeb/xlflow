@@ -89,6 +89,7 @@ type Symbol struct {
 	Kind          string
 	Detail        string
 	ReturnType    string
+	IsArray       bool
 	Parameters    []Parameter
 	Documentation doccomments.SymbolDocumentation
 	DocStartLine  int
@@ -104,6 +105,7 @@ type Symbol struct {
 type Parameter struct {
 	Name          string
 	Type          string
+	IsArray       bool
 	Optional      bool
 	ParamArray    bool
 	Documentation string
@@ -160,6 +162,7 @@ type Signature struct {
 	Parameters         []Parameter
 	Documentation      string
 	DocumentationModel doccomments.SymbolDocumentation
+	projectLocal       bool
 }
 
 func (a Analyzer) Check() error {
@@ -1394,7 +1397,7 @@ func signatureFromSymbol(sym Symbol) Signature {
 		label = symbolSignatureLabel(sym)
 	}
 	params = parametersWithDocumentation(params, sym.Documentation)
-	return Signature{Label: label, Parameters: params, Documentation: doccomments.Markdown(sym.Documentation, ""), DocumentationModel: sym.Documentation}
+	return Signature{Label: label, Parameters: params, Documentation: doccomments.Markdown(sym.Documentation, ""), DocumentationModel: sym.Documentation, projectLocal: true}
 }
 
 func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
@@ -1408,9 +1411,62 @@ func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 				continue
 			}
 			out = append(out, diagnosticsForCallArguments(callRange.Start.Line, call, sig)...)
+			out = append(out, a.arrayObjectArgumentDiagnostics(doc, callRange.Start, callRange.Start.Line, call, sig)...)
 		}
 	}
 	return out
+}
+
+func (a Analyzer) arrayObjectArgumentDiagnostics(doc Document, pos Position, lineNo int, call parsedCall, sig Signature) []Diagnostic {
+	if !sig.projectLocal {
+		return nil
+	}
+	var out []Diagnostic
+	positional := 0
+	for _, arg := range call.Arguments {
+		param, next, ok := signatureParameterForArgument(sig.Parameters, arg, positional)
+		if arg.Name == "" {
+			positional = next
+		}
+		if !ok || param.ParamArray || param.IsArray || !strings.EqualFold(param.Type, "Object") || !isIdentifier(arg.Text) {
+			continue
+		}
+		inferred, ok := a.inferWordTypeInfoAt(doc, arg.Text, byteOffsetForPosition(doc.Source, pos))
+		if !ok || !inferred.IsArray {
+			continue
+		}
+		out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but parameter `%s` expects %s.", arg.Text, displayInferredType(inferred), param.Name, displayParameterType(param))))
+	}
+	return out
+}
+
+func signatureParameterForArgument(params []Parameter, arg argument, positional int) (Parameter, int, bool) {
+	if arg.Name != "" {
+		for _, param := range params {
+			if strings.EqualFold(param.Name, arg.Name) {
+				return param, positional, true
+			}
+		}
+		return Parameter{}, positional, false
+	}
+	if positional >= len(params) {
+		return Parameter{}, positional + 1, false
+	}
+	return params[positional], positional + 1, true
+}
+
+func displayInferredType(inferred inferredType) string {
+	if inferred.IsArray {
+		return inferred.Type + "()"
+	}
+	return inferred.Type
+}
+
+func displayParameterType(param Parameter) string {
+	if param.IsArray {
+		return param.Type + "()"
+	}
+	return param.Type
 }
 
 type logicalCallAnalysisLine struct {
@@ -3311,8 +3367,9 @@ func (a Analyzer) inferWordType(doc Document, word string) (string, bool) {
 }
 
 type inferredType struct {
-	Type   string
-	Source string
+	Type    string
+	IsArray bool
+	Source  string
 }
 
 func (a Analyzer) inferWordTypeAt(doc Document, word string, offset int) (string, bool) {
@@ -3336,10 +3393,10 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 	if typ, ok := a.DB.ResolveGlobal(word); ok {
 		return inferredType{Type: typ.Name, Source: "built-in global"}, true
 	}
-	var declared string
+	var declared inferredType
 	if offset >= 0 {
 		if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
-			declared = inferred.Type
+			declared = inferred
 			if !isObjectFallbackType(inferred.Type) {
 				return inferred, true
 			}
@@ -3347,8 +3404,8 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 			return inferredType{}, false
 		}
 	}
-	if declared != "" && !isObjectFallbackType(declared) {
-		return inferredType{Type: declared, Source: "declaration"}, true
+	if declared.Type != "" && !isObjectFallbackType(declared.Type) {
+		return declared, true
 	}
 	index := (*documentIndex)(nil)
 	if ctx != nil {
@@ -3358,8 +3415,8 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 		var ok bool
 		index, ok = a.documentIndexFor(doc)
 		if !ok || index == nil {
-			if declared != "" {
-				return inferredType{Type: declared, Source: "declaration"}, true
+			if declared.Type != "" {
+				return declared, true
 			}
 			return inferredType{}, false
 		}
@@ -3382,8 +3439,8 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 			return inferredType{Type: typ, Source: "inferred from Set assignment"}, true
 		}
 	}
-	if declared != "" {
-		return inferredType{Type: declared, Source: "declaration"}, true
+	if declared.Type != "" {
+		return declared, true
 	}
 	return inferredType{}, false
 }
@@ -3410,7 +3467,7 @@ func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offs
 		if !strings.EqualFold(sym.Name, word) || sym.ReturnType == "" || !a.visibleDefinitionSymbol(doc, currentProcedure, sym) {
 			continue
 		}
-		inferred := inferredType{Type: sym.ReturnType, Source: "declaration"}
+		inferred := inferredType{Type: sym.ReturnType, IsArray: sym.IsArray, Source: "declaration"}
 		if isLocalSymbol(sym) || strings.EqualFold(sym.Kind, "function_return") {
 			return inferred, true
 		}
@@ -5104,6 +5161,7 @@ func symbolsFromFile(file symbols.FileResult, uri string) []Symbol {
 			Kind:          sym.Kind,
 			Detail:        firstNonEmpty(sym.Signature, sym.Kind+" "+sym.Name),
 			ReturnType:    sym.ReturnType,
+			IsArray:       sym.IsArray,
 			Parameters:    symbolParameters(sym.Parameters),
 			Documentation: documentation,
 			DocStartLine:  sym.DocStartLine,
@@ -5136,9 +5194,11 @@ func symbolParameters(params []symbols.Parameter) []Parameter {
 	out := make([]Parameter, 0, len(params))
 	for _, param := range params {
 		out = append(out, Parameter{
-			Name:     param.Name,
-			Type:     firstNonEmpty(param.Type, "Variant"),
-			Optional: param.Optional,
+			Name:       param.Name,
+			Type:       firstNonEmpty(param.Type, "Variant"),
+			IsArray:    param.IsArray,
+			Optional:   param.Optional,
+			ParamArray: param.ParamArray,
 		})
 	}
 	return out
