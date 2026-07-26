@@ -1295,6 +1295,7 @@ func (s *Server) analyzeIndexedDocument(doc intel.Document) (indexedFileAnalysis
 		path:       doc.Path,
 		version:    documentVersion(doc),
 		moduleKind: doc.ModuleKind,
+		source:     doc.Source,
 		symbols:    syms,
 		callSites:  rawCalls.CallSites,
 	}, nil
@@ -1878,6 +1879,18 @@ func (d *documents) openDocuments() []intel.Document {
 		}
 	}
 	return out
+}
+
+func (d *documents) isOpen(uri string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	key := d.keys[uri]
+	if key == "" {
+		if path, err := fileURIToPath(uri); err == nil {
+			key = normalizePathKey(path)
+		}
+	}
+	return key != "" && d.docs[key].open
 }
 
 func (d *documents) closeAll() {

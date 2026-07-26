@@ -36,7 +36,9 @@ func (s *Server) prepareCallHierarchy(_ *glsp.Context, params *protocol.CallHier
 	if s.documentKind(doc) != DocumentKindVBA {
 		return []protocol.CallHierarchyItem{}, nil
 	}
-	s.updateWorkspaceSymbolOverlay(doc)
+	if s.docs.isOpen(string(params.TextDocument.URI)) {
+		s.updateWorkspaceSymbolOverlay(doc)
+	}
 	procedure, ok, err := s.analysis.callHierarchyProcedureAt(doc.Path, fromProtocolPosition(params.Position))
 	if err != nil {
 		return nil, err
@@ -73,7 +75,10 @@ func (s *Server) callHierarchyIncomingCalls(_ *glsp.Context, params *protocol.Ca
 		if !found {
 			continue
 		}
-		grouped[caller.ID] = append(grouped[caller.ID], callHierarchyRange(call.Range))
+		if !callHierarchyAllowsEdge(call, caller, target) {
+			continue
+		}
+		grouped[caller.ID] = append(grouped[caller.ID], s.analysis.callHierarchyRange(call))
 		procedures[caller.ID] = caller
 	}
 
@@ -121,7 +126,10 @@ func (s *Server) callHierarchyOutgoingCalls(_ *glsp.Context, params *protocol.Ca
 		if !found {
 			continue
 		}
-		grouped[callee.ID] = append(grouped[callee.ID], callHierarchyRange(call.Range))
+		if !callHierarchyAllowsEdge(call, caller, callee) {
+			continue
+		}
+		grouped[callee.ID] = append(grouped[callee.ID], s.analysis.callHierarchyRange(call))
 		procedures[callee.ID] = callee
 	}
 
@@ -163,6 +171,9 @@ func (s *Server) callHierarchyItem(procedure callHierarchyProcedure) protocol.Ca
 func (x *workspaceAnalysisIndex) callHierarchyProcedureAt(path string, position intel.Position) (callHierarchyProcedure, bool, error) {
 	if err := x.waitReady(); err != nil {
 		return callHierarchyProcedure{}, false, err
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(x.root, filepath.FromSlash(path))
 	}
 	key := symbolFileKey(path)
 	x.mu.RLock()
@@ -209,6 +220,13 @@ func (x *workspaceAnalysisIndex) callHierarchyProcedureForID(id callHierarchySym
 func (x *workspaceAnalysisIndex) callHierarchyProcedureForCaller(call calls.Call) (callHierarchyProcedure, bool, error) {
 	if call.Caller == nil {
 		return callHierarchyProcedure{}, false, nil
+	}
+	procedure, found, err := x.callHierarchyProcedureAt(call.File, intel.Position{
+		Line:      max(0, call.Range.StartLine-1),
+		Character: max(0, call.Range.StartColumn-1),
+	})
+	if err != nil || found {
+		return procedure, found, err
 	}
 	return x.callHierarchyProcedureForID(callHierarchySymbolID{
 		File:   workspaceDisplayPath(x.root, call.File),
@@ -278,7 +296,7 @@ func callHierarchyIDFromData(data any) (callHierarchySymbolID, bool) {
 }
 
 func normalizeCallHierarchyID(id callHierarchySymbolID) callHierarchySymbolID {
-	id.File = filepath.ToSlash(filepath.Clean(strings.TrimSpace(id.File)))
+	id.File = filepath.ToSlash(normalizePathKey(filepath.FromSlash(filepath.ToSlash(filepath.Clean(strings.TrimSpace(id.File))))))
 	id.Module = strings.ToLower(strings.TrimSpace(id.Module))
 	id.Name = strings.ToLower(strings.TrimSpace(id.Name))
 	id.Kind = strings.ToLower(strings.TrimSpace(id.Kind))
@@ -315,6 +333,22 @@ func callHierarchyRangeContains(r intel.Range, position intel.Position) bool {
 	return compareIntelPosition(r.Start, position) <= 0 && compareIntelPosition(position, r.End) <= 0
 }
 
+func callHierarchyAllowsEdge(call calls.Call, caller, callee callHierarchyProcedure) bool {
+	if call.Callee.Receiver != nil || !callHierarchyObjectModule(callee.Symbol.ModuleKind) {
+		return true
+	}
+	return strings.EqualFold(caller.Symbol.Module, callee.Symbol.Module)
+}
+
+func callHierarchyObjectModule(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "class", "document", "form":
+		return true
+	default:
+		return false
+	}
+}
+
 func compareIntelPosition(left, right intel.Position) int {
 	if left.Line != right.Line {
 		if left.Line < right.Line {
@@ -331,11 +365,42 @@ func compareIntelPosition(left, right intel.Position) int {
 	return 0
 }
 
-func callHierarchyRange(r ast.Range) protocol.Range {
-	return protocol.Range{
-		Start: protocol.Position{Line: protocol.UInteger(max(0, r.StartLine-1)), Character: protocol.UInteger(max(0, r.StartColumn-1))},
-		End:   protocol.Position{Line: protocol.UInteger(max(0, r.EndLine-1)), Character: protocol.UInteger(max(0, r.EndColumn-1))},
+func (x *workspaceAnalysisIndex) callHierarchyRange(call calls.Call) protocol.Range {
+	return callHierarchyProtocolRange(call.Range, x.callHierarchyCallSource(call.File))
+}
+
+func (x *workspaceAnalysisIndex) callHierarchyCallSource(file string) string {
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(x.root, filepath.FromSlash(file))
 	}
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.effective[symbolFileKey(file)].source
+}
+
+func callHierarchyProtocolRange(r ast.Range, source string) protocol.Range {
+	return protocol.Range{
+		Start: callHierarchyPosition(source, r.StartLine, r.StartColumn),
+		End:   callHierarchyPosition(source, r.EndLine, r.EndColumn),
+	}
+}
+
+func callHierarchyPosition(source string, line, column int) protocol.Position {
+	line = max(0, line-1)
+	column = max(0, column-1)
+	if source == "" {
+		return protocol.Position{Line: protocol.UInteger(line), Character: protocol.UInteger(column)}
+	}
+	normalized := strings.ReplaceAll(strings.ReplaceAll(source, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	if line >= len(lines) {
+		line = len(lines) - 1
+	}
+	if line < 0 {
+		return protocol.Position{}
+	}
+	column = min(column, len(lines[line]))
+	return protocol.Position{Line: protocol.UInteger(line), Character: protocol.UInteger(utf16Len(lines[line][:column]))}
 }
 
 func sortedCallHierarchyIDs(grouped map[callHierarchySymbolID][]protocol.Range) []callHierarchySymbolID {

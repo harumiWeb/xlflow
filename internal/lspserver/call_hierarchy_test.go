@@ -15,7 +15,7 @@ import (
 func TestCallHierarchyPrepareIncomingAndOutgoing(t *testing.T) {
 	root := t.TempDir()
 	writeCallHierarchyModule(t, root, "Main", `Public Sub Run()
-    Target
+    Target "日本"
     Target
 End Sub
 `)
@@ -54,6 +54,9 @@ End Sub
 	}
 	if incoming[0].FromRanges[0].Start.Line >= incoming[0].FromRanges[1].Start.Line {
 		t.Fatalf("incoming ranges not sorted: %+v", incoming[0].FromRanges)
+	}
+	if got, want := incoming[0].FromRanges[0].End.Character, protocol.UInteger(utf16Len(`    Target "日本"`)); got != want {
+		t.Fatalf("UTF-16 range end = %d, want %d", got, want)
 	}
 
 	mainURI := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "src", "modules", "Main.bas")))
@@ -126,6 +129,77 @@ End Sub
 	incoming, err = s.callHierarchyIncomingCalls(nil, &protocol.CallHierarchyIncomingCallsParams{Item: stale})
 	if err != nil || len(incoming) != 0 {
 		t.Fatalf("incoming stale item = %+v, %v", incoming, err)
+	}
+}
+
+func TestPrepareCallHierarchyDoesNotCreateDiskOverlay(t *testing.T) {
+	root := t.TempDir()
+	writeCallHierarchyModule(t, root, "Main", `Public Sub Original()
+End Sub
+`)
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := s.analysis.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "src", "modules", "Main.bas")))
+	prepared, err := s.prepareCallHierarchy(nil, &protocol.CallHierarchyPrepareParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+		Position:     protocol.Position{Line: 1, Character: 12},
+	}})
+	if err != nil || len(prepared) != 1 || prepared[0].Name != "Original" {
+		t.Fatalf("initial prepare = %+v, %v", prepared, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "modules", "Main.bas"), []byte("Attribute VB_Name = \"Main\"\nPublic Sub Updated()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.didChangeWatchedFiles(&glsp.Context{Notify: func(string, any) {}}, &protocol.DidChangeWatchedFilesParams{Changes: []protocol.FileEvent{{URI: uri, Type: protocol.FileChangeTypeChanged}}}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = s.prepareCallHierarchy(nil, &protocol.CallHierarchyPrepareParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+		Position:     protocol.Position{Line: 1, Character: 12},
+	}})
+	if err != nil || len(prepared) != 1 || prepared[0].Name != "Updated" {
+		t.Fatalf("updated prepare = %+v, %v", prepared, err)
+	}
+}
+
+func TestCallHierarchyRejectsBareObjectModuleCalls(t *testing.T) {
+	root := t.TempDir()
+	writeCallHierarchyModule(t, root, "Main", `Public Sub Run()
+    Execute
+End Sub
+`)
+	classPath := filepath.Join(root, "src", "classes", "Service.cls")
+	if err := os.MkdirAll(filepath.Dir(classPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(classPath, []byte("VERSION 1.0 CLASS\nAttribute VB_Name = \"Service\"\nPublic Sub Execute()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := s.analysis.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	uri := protocol.DocumentUri(pathToFileURI(filepath.Join(root, "src", "modules", "Main.bas")))
+	prepared, err := s.prepareCallHierarchy(nil, &protocol.CallHierarchyPrepareParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+		Position:     protocol.Position{Line: 2, Character: 5},
+	}})
+	if err != nil || len(prepared) != 1 {
+		t.Fatalf("prepare = %+v, %v", prepared, err)
+	}
+	outgoing, err := s.callHierarchyOutgoingCalls(nil, &protocol.CallHierarchyOutgoingCallsParams{Item: roundTripCallHierarchyItem(t, prepared[0])})
+	if err != nil || len(outgoing) != 0 {
+		t.Fatalf("bare class call hierarchy = %+v, %v", outgoing, err)
 	}
 }
 
@@ -220,6 +294,15 @@ func TestInitializeAdvertisesCallHierarchy(t *testing.T) {
 	}
 	if s.handler.TextDocumentPrepareCallHierarchy == nil || s.handler.CallHierarchyIncomingCalls == nil || s.handler.CallHierarchyOutgoingCalls == nil {
 		t.Fatal("call hierarchy handlers were not registered")
+	}
+}
+
+func TestMatchingCallProcedureKindsAcceptsGenericPropertyCaller(t *testing.T) {
+	if !matchingCallProcedureKinds("property", "property_get") || !matchingCallProcedureKinds("property", "property_let") || !matchingCallProcedureKinds("property", "property_set") {
+		t.Fatal("generic property caller did not match accessor kind")
+	}
+	if matchingCallProcedureKinds("property", "function") {
+		t.Fatal("property caller matched unrelated kind")
 	}
 }
 

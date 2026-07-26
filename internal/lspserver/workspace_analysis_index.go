@@ -53,6 +53,7 @@ type indexedFileAnalysis struct {
 	path       string
 	version    string
 	moduleKind string
+	source     string
 	symbols    []intel.Symbol
 	callSites  []calls.CallSite
 }
@@ -569,13 +570,22 @@ func matchesCallQuery(site calls.CallSite, caller, callerKind, baseName, calleeT
 	if caller != "" && (site.Caller == nil || normalizeCallQuery(site.Caller.QualifiedName) != caller) {
 		return false
 	}
-	if callerKind != "" && (site.Caller == nil || normalizeCallQuery(site.Caller.Kind) != callerKind) {
+	if callerKind != "" && (site.Caller == nil || !matchingCallProcedureKinds(site.Caller.Kind, callerKind)) {
 		return false
 	}
 	if baseName != "" && normalizeCallQuery(site.Callee.BaseName) != baseName {
 		return false
 	}
 	return calleeText == "" || normalizeCallText(site.Callee.Text) == calleeText
+}
+
+func matchingCallProcedureKinds(actual, requested string) bool {
+	actual = normalizeCallQuery(actual)
+	requested = normalizeCallQuery(requested)
+	if actual == requested {
+		return true
+	}
+	return actual == "property" && (requested == "property_get" || requested == "property_let" || requested == "property_set")
 }
 
 func callSiteLess(a, b calls.CallSite) bool {
