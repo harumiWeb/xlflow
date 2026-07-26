@@ -149,6 +149,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_confusing_call_syntax`
 - `detect_dangerous_resume`
 - `detect_dictionary_collection_guard`
+- `detect_dictionary_iteration_value_usage`
 - `detect_error_handler_fallthrough`
 - `detect_excel_object_member_mismatch`
 - `detect_for_each_control_type`

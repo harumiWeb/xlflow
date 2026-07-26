@@ -43,3 +43,4 @@ Generated from diagnostic IDs in `internal/`. Run `pnpm docs:generate-reference`
 - `VBA210`
 - `VBA211`
 - `VBA212`
+- `VBA213`

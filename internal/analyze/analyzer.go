@@ -54,6 +54,11 @@ var (
 	unqualifiedExcelRe = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])\b(Range|Cells|Rows|Columns)\b\s*(?:\(|\.)`)
 	activeExcelRe      = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])\b(ActiveWorkbook|ActiveSheet|ActiveCell|Selection)\b`)
 	redimPreserveRe    = regexp.MustCompile(`(?i)^\s*redim\s+preserve\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)`)
+	forEachDirectRe    = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
+	forStartRe         = regexp.MustCompile(`(?i)^\s*for\b`)
+	nextRe             = regexp.MustCompile(`(?i)^\s*next\b`)
+	dictionaryCreateRe = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
+	dictionaryNewRe    = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
 )
 
 var objectTypes = map[string]bool{
@@ -288,7 +293,8 @@ func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []by
 		!cfg.Analyze.DetectErrorHandlerFallthrough &&
 		!cfg.Analyze.DetectRedimPreserveDimension &&
 		!cfg.Analyze.DetectObjectArrayComparison &&
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard &&
+		!cfg.Analyze.DetectDictionaryIterationValueUsage {
 		return nil, nil
 	}
 	doc, err := vbaast.ParseDocument(path, source)
@@ -306,7 +312,8 @@ func SourceRealtimeFindingsParsed(rootDir string, cfg config.Config, doc *vbaast
 		!cfg.Analyze.DetectErrorHandlerFallthrough &&
 		!cfg.Analyze.DetectRedimPreserveDimension &&
 		!cfg.Analyze.DetectObjectArrayComparison &&
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard &&
+		!cfg.Analyze.DetectDictionaryIterationValueUsage {
 		return nil, nil
 	}
 	var findings []Finding
@@ -348,6 +355,9 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 	var findings []Finding
 	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
 		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
+		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		lineNo := i + 1
@@ -486,6 +496,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	var findings []Finding
 	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
 		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
+		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
 
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
@@ -940,6 +953,129 @@ func (a Analyzer) dictionaryCollectionFindings(file parsedFile, proc sourceProce
 		}
 	}
 	return findings
+}
+
+type dictionaryIterationLoop struct {
+	item     string
+	dict     string
+	reported bool
+}
+
+// dictionaryIterationValueUsageFindings reports only direct dictionary
+// iteration whose control variable is subsequently used as an object. VBA
+// iterates Dictionary keys, so ordinary key usage must remain silent.
+func (a Analyzer) dictionaryIterationValueUsageFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
+	decls := cloneDeclarations(moduleDecls)
+	for key, decl := range procedureDeclarations(file.Lines, proc) {
+		decls[key] = decl
+	}
+	for _, param := range proc.Params {
+		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
+	}
+
+	declaredDictionaries := map[string]bool{}
+	for key, decl := range decls {
+		if isDictionaryType(decl.Type) {
+			declaredDictionaries[key] = true
+		}
+	}
+	inferredDictionaries := map[string]bool{}
+	var loops []*dictionaryIterationLoop
+	var findings []Finding
+
+	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
+		lineNo := i + 1
+		stmt := normalizedCodeLine(file.Lines[i])
+		rawStmt := strings.Join(strings.Fields(gui.StripComment(file.Lines[i])), " ")
+		if stmt == "" {
+			continue
+		}
+
+		if nextRe.MatchString(stmt) {
+			if len(loops) > 0 {
+				loops = loops[:len(loops)-1]
+			}
+			continue
+		}
+		if m := forEachDirectRe.FindStringSubmatch(stmt); len(m) > 0 {
+			dictKey := strings.ToLower(m[2])
+			loop := &dictionaryIterationLoop{}
+			if declaredDictionaries[dictKey] || inferredDictionaries[dictKey] {
+				loop.item = m[1]
+				loop.dict = m[2]
+			}
+			loops = append(loops, loop)
+			continue
+		}
+		if forStartRe.MatchString(stmt) {
+			loops = append(loops, &dictionaryIterationLoop{})
+			continue
+		}
+
+		if m := setAssignRe.FindStringSubmatch(stmt); len(m) > 0 {
+			target := strings.ToLower(m[1])
+			for _, loop := range loops {
+				if loop.item != "" && strings.EqualFold(loop.item, m[1]) {
+					loop.item = ""
+				}
+			}
+			rhs := strings.TrimSpace(rawStmt[strings.Index(rawStmt, "=")+1:])
+			if dictionaryCreateRe.MatchString(rhs) || dictionaryNewRe.MatchString(rhs) {
+				inferredDictionaries[target] = true
+			} else {
+				delete(inferredDictionaries, target)
+			}
+		}
+
+		for _, loop := range loops {
+			if loop.item == "" || loop.reported || !dictionaryIterationValueUse(stmt, loop.item, decls) {
+				continue
+			}
+			findings = append(findings, a.simpleFinding(
+				file,
+				proc,
+				lineNo,
+				"VBA213",
+				"warning",
+				loop.item+" is iterated directly from "+loop.dict+" but is used as an object/value.",
+				"Direct Scripting.Dictionary iteration yields keys, not items or values.",
+				"Iterate "+loop.dict+".Items for values, or retrieve the value with "+loop.dict+"("+loop.item+") before using it as an object.",
+			))
+			loop.reported = true
+		}
+	}
+	return findings
+}
+
+func isDictionaryType(typ string) bool {
+	switch strings.ToLower(cleanIdentifier(typ)) {
+	case "dictionary", "scripting.dictionary":
+		return true
+	default:
+		return false
+	}
+}
+
+func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDeclaration) bool {
+	if match := withRe.FindStringSubmatch(stmt); len(match) > 1 && strings.EqualFold(cleanIdentifier(match[1]), item) {
+		return true
+	}
+	itemKey := strings.ToLower(item)
+	for _, match := range memberRe.FindAllStringSubmatch(stmt, -1) {
+		if len(match) > 1 && strings.EqualFold(match[1], item) {
+			return true
+		}
+	}
+	match := setAssignRe.FindStringSubmatch(stmt)
+	if len(match) == 0 {
+		return false
+	}
+	target, ok := decls[strings.ToLower(match[1])]
+	if !ok || !target.Object {
+		return false
+	}
+	rhs := strings.TrimSpace(stmt[strings.Index(stmt, "=")+1:])
+	return strings.EqualFold(cleanIdentifier(rhs), itemKey)
 }
 
 func (a Analyzer) redimPreserveFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string) []Finding {

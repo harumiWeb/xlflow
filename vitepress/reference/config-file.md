@@ -266,6 +266,7 @@ Configurable analyzer rule IDs:
 | `VBA210` | `detect_function_return_path`           |
 | `VBA211` | `detect_excel_object_member_mismatch`   |
 | `VBA212` | `detect_non_short_circuit_object_guard` |
+| `VBA213` | `detect_dictionary_iteration_value_usage` |
 
 Analyzer diagnostics `VBA101` through `VBA106` are always enabled and cannot be disabled with `disabled_rules`.
 
