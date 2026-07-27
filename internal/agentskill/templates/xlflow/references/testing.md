@@ -253,9 +253,18 @@ xlflow test --isolation test --filter TestOrders.Test_CreateWorksheet --json
 xlflow test --fail-fast --json
 xlflow test --max-failures 3 --json
 xlflow test --rerun-failed 1 --json
+xlflow test --visible --filter KeyTests.Test_RegisterKeys --json
 ```
 
 Plain non-session `xlflow test` runs against temporary workbook copies under `.xlflow/test-runs/<run-id>/` and attempts best-effort cleanup after execution. Cleanup failures are surfaced through `test_run.cleanup.status`, with `path` and `message` when applicable. Prefer `--session` during normal AI-agent development when the live managed workbook is the intended target. Session mode supports `--isolation none`; `module` and `test` isolation are non-session modes.
+
+### Visible Excel integration tests
+
+Prefer normal hidden `xlflow test` execution for ordinary tests. When a test exercises an Excel API that requires a visible application or window, such as `Application.OnKey`, use `xlflow test --visible`. This command-level override does not modify `[excel].visible` and keeps the runtime in `test`, including deterministic `XlflowUI` responses supplied through `--msgbox`, `--inputbox`, and `--filedialog`.
+
+Do not remove, bypass, or weaken production behavior solely to make it pass in hidden Excel. Keep business logic independently testable where practical (for example, test `MoveLeft` and `MoveRight` normally), and add a focused visible integration test for the `Application.OnKey` registration boundary. A visible test does not synthesize OS keyboard input or prove physical key delivery.
+
+`xlflow test --visible --session` does not change an existing live Excel session's visibility. Managed sessions started with `xlflow session start` are already visible, so the flag is normally redundant there.
 
 Use `--fail-fast` or `--max-failures N` when a setup problem would otherwise produce noisy cascades. Tests selected but not executed after the limit is reached are reported as `not_run` with reason `maximum failure count reached`. Use `--rerun-failed N` for intermittent failures; failed-then-passed tests are reported as flaky passes with `attempts` and `attempt_results`. `--session --rerun-failed N` with `N > 0` is rejected because live session state cannot provide a clean retry baseline.
 

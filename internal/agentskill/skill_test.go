@@ -132,6 +132,11 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireContains(t, string(ui), "## Common Headless Failure Triage", "Application.OnKey", "xlflow inspect-gui --json")
+	testing, err := os.ReadFile(filepath.Join(skillDir, "references", "testing.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, string(testing), "xlflow test --visible", "Application.OnKey", "Do not remove, bypass, or weaken production behavior")
 	debugging, err := os.ReadFile(filepath.Join(skillDir, "references", "debugging.md"))
 	if err != nil {
 		t.Fatal(err)

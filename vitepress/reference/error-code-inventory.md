@@ -227,7 +227,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exit_code`
 - `expanded_formula`
 - `expected_error`
-- `expected_error_mismatch`
 - `export_image_args_invalid`
 - `external_function_declaration`
 - `external_process`
