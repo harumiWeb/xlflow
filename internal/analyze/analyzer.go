@@ -1112,7 +1112,7 @@ func identifierComparedAsOperand(stmt, name string, proc sourceProcedure) bool {
 		}
 		left := stmt[:i]
 		right := stmt[i+opLen:]
-		if opLen == 1 && stmt[i] == '=' && isFunctionReturnAssignment(left, proc) {
+		if opLen == 1 && stmt[i] == '=' && isFunctionReturnAssignment(stmt, i, proc) {
 			i += opLen - 1
 			continue
 		}
@@ -1124,8 +1124,12 @@ func identifierComparedAsOperand(stmt, name string, proc sourceProcedure) bool {
 	return false
 }
 
-func isFunctionReturnAssignment(left string, proc sourceProcedure) bool {
-	return proc.Kind == "Function" && proc.Name != "" && strings.EqualFold(cleanIdentifier(strings.TrimSpace(left)), proc.Name)
+func isFunctionReturnAssignment(stmt string, operatorIndex int, proc sourceProcedure) bool {
+	match := assignRe.FindStringSubmatchIndex(stmt)
+	if len(match) < 4 || match[1]-1 != operatorIndex || proc.Kind != "Function" || proc.Name == "" {
+		return false
+	}
+	return strings.EqualFold(stmt[match[2]:match[3]], proc.Name)
 }
 
 func comparisonOperatorLength(stmt string, index int) int {

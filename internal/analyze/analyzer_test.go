@@ -703,7 +703,7 @@ Private Function CopyValues() As Variant
   Dim values() As String
   ReDim values(0 To 0)
   values(0) = "value"
-  CopyValues = values
+	Let CopyValues = values
 End Function
 
 Public Sub Run()
