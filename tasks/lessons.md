@@ -94,3 +94,4 @@
 - When updating a Go module version, update `THIRD_PARTY_LICENCES.md` (including version-pinned licence URLs) in the same change and run `scripts/dev/check-third-party-licences.ps1` before finalizing.
 - LSP ranges derived from tree-sitter positions must translate UTF-8 byte columns to UTF-16 code units using the effective source buffer; preserve that buffer in incremental analysis when range-bearing results are served from the index.
 - Do not turn a disk-backed `getOrRead` document into an editor overlay. Only `didOpen` / `didChange` lifecycle documents may override watcher-managed disk index entries.
+- When extending VBA assignment analysis, reuse the existing assignment grammar so valid optional modifiers such as `Let` receive the same treatment; add a regression test for each supported form.

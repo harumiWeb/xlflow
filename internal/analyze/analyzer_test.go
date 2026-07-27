@@ -696,6 +696,32 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayComparisonIgnoresFunctionReturnAssignment(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function CopyValues() As Variant
+  Dim values() As String
+  ReDim values(0 To 0)
+  values(0) = "value"
+	Let CopyValues = values
+End Function
+
+Public Sub Run()
+  Dim values() As String
+  If values = "unexpected" Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 1 || got[0].Line != 11 {
+		t.Fatalf("expected only the array comparison on line 11, got %+v", got)
+	}
+}
+
 func TestAnalyzerArrayComparisonIgnoresElementsAndProcedureHeaders(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
