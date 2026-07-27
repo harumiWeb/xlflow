@@ -5,7 +5,7 @@ Discover and run workbook VBA test procedures.
 ## Usage
 
 ```bash
-xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--isolation none|module|test] [--fail-fast] [--max-failures <n>] [--rerun-failed <n>] [--no-save] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--ui-stream] [--session] [--json]
+xlflow test [--filter <pattern>] [--module <name>] [--tag <tag>] [--isolation none|module|test] [--fail-fast] [--max-failures <n>] [--rerun-failed <n>] [--no-save] [--msgbox <id=result>] [--inputbox <id=value>] [--filedialog <kind:id=value>] [--visible] [--ui-stream] [--session] [--json]
 xlflow test list [--module <name>] [--path <path>] --json
 
 ```
@@ -25,10 +25,21 @@ xlflow test list [--module <name>] [--path <path>] --json
 | `--msgbox <id=result>`         | Provide a scripted `XlflowUI.MsgBox` response. Repeat as needed.                            | -       |
 | `--inputbox <id=value>`        | Provide a scripted `XlflowUI.InputBox` response. Repeat as needed.                          | -       |
 | `--filedialog <kind:id=value>` | Provide a scripted `XlflowUI` file dialog response. Repeat as needed.                       | -       |
+| `--visible`                    | Show the Excel application window for this test run.                                        | false   |
 | `--ui-stream`                  | Stream resolved headless `XlflowUI` events to stderr in real time.                          | false   |
 | `--session`                    | Run tests in the managed live workbook.                                                     | false   |
 | `--bridge <provider>`          | Select the Excel bridge provider (`auto`, `dotnet`).                                        | auto    |
 | `--json`                       | Return structured test results.                                                             | false   |
+
+## Excel Visibility
+
+Normal tests stay hidden by default. `--visible` is a per-command escape hatch for Excel APIs that require a visible application or window, such as `Application.OnKey`; it does not modify `[excel].visible` in `xlflow.toml`.
+
+The effective visibility for a non-session test is `[excel].visible || --visible`. `--visible` affects only the Excel window: the runtime remains `test`, and scripted `XlflowUI` responses such as `--msgbox`, `--inputbox`, and `--filedialog` keep their deterministic test behavior.
+
+`xlflow test --visible --session` is accepted but does not change the visibility of the existing live Excel session. `xlflow session start` already opens its managed Excel window visibly, so the flag is normally redundant in session-first workflows.
+
+Use visible tests for the GUI-bound integration boundary while keeping ordinary business-logic tests hidden. For example, test `MoveLeft` and `MoveRight` normally, then use `xlflow test --visible --filter KeyTests.Test_RegisterKeys --json` to exercise an `Application.OnKey` registration path. This validates registration, not OS-level keyboard delivery.
 
 ## Workbook Isolation
 
@@ -290,6 +301,7 @@ xlflow test --isolation test --filter SmokeTests.TestSmoke --json
 xlflow test --fail-fast --json
 xlflow test --max-failures 3 --json
 xlflow test --rerun-failed 1 --json
+xlflow test --visible --filter KeyTests.Test_RegisterKeys --json
 xlflow test --filter SmokeTests.TestSmoke --session --no-save --json
 xlflow test --msgbox test-confirm=ok --inputbox test-user=alice --ui-stream --json
 xlflow test --filedialog folder:export-dir=@cancel --ui-stream --json

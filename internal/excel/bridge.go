@@ -284,6 +284,7 @@ type MacrosOptions struct {
 
 type TestOptions struct {
 	Session       bool
+	Visible       bool
 	Isolation     string
 	NoSave        bool
 	FailFast      bool
@@ -820,7 +821,7 @@ func buildTestScriptArgs(root string, cfg config.Config, filter string, opts Tes
 		"ProjectRoot":        root,
 		"TempRunRoot":        filepath.Join(root, ".xlflow", "test-runs"),
 		"Filter":             filter,
-		"Visible":            strconv.FormatBool(cfg.Excel.Visible),
+		"Visible":            strconv.FormatBool(cfg.Excel.Visible || opts.Visible),
 		"UseSession":         strconv.FormatBool(opts.Session),
 		"Isolation":          isolation,
 		"NoSave":             strconv.FormatBool(opts.NoSave),

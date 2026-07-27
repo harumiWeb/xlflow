@@ -6,15 +6,15 @@ The normal loop is: orient, analyze structural impact when relevant, edit source
 
 The installed Skill loads specialized guidance only when the task requires it:
 
-| Task | Reference |
-| ---- | --------- |
-| Tests and test failures | `references/testing.md` |
-| Formula-driven behavior | `references/formulas.md` |
-| UserForm design and inspection | `references/forms.md` |
-| Interactive dialogs and unattended UI | `references/xlflow-ui.md` |
-| Runtime diagnostics | `references/debugging.md` |
-| Recovery-required state | `references/recovery.md` |
-| Call graph, impact, and dependencies | `references/code-analysis.md` |
+| Task                                  | Reference                     |
+| ------------------------------------- | ----------------------------- |
+| Tests and test failures               | `references/testing.md`       |
+| Formula-driven behavior               | `references/formulas.md`      |
+| UserForm design and inspection        | `references/forms.md`         |
+| Interactive dialogs and unattended UI | `references/xlflow-ui.md`     |
+| Runtime diagnostics                   | `references/debugging.md`     |
+| Recovery-required state               | `references/recovery.md`      |
+| Call graph, impact, and dependencies  | `references/code-analysis.md` |
 
 This structure keeps detailed workflows available without turning `SKILL.md` into a CLI reference. In particular, recovery remains fail-closed: when xlflow reports that recovery is required, stop normal workbook operations and follow the recovery reference.
 

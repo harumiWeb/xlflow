@@ -4589,6 +4589,7 @@ func (a *app) testCommand() *cobra.Command {
 	var inputBoxLiterals []string
 	var fileDialogLiterals []string
 	var session bool
+	var visible bool
 	var uiStream bool
 	var failFast bool
 	var maxFailures int
@@ -4647,7 +4648,7 @@ func (a *app) testCommand() *cobra.Command {
 			}
 			err = a.withExcelProgress("Running VBA tests", commandOpts, func() error {
 				var runErr error
-				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Isolation: isolation, NoSave: noSave, FailFast: failFast, MaxFailures: resolvedMaxFailures, RerunFailed: rerunFailed, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
+				env, code, runErr = a.excelRunnerForConfig(cfg).TestWithOptions(cfg, filter, excel.TestOptions{Session: session, Visible: visible, Isolation: isolation, NoSave: noSave, FailFast: failFast, MaxFailures: resolvedMaxFailures, RerunFailed: rerunFailed, Keepalive: commandOpts, RuntimeMode: runtime.Mode, RuntimeSource: runtime.Source, UIResponses: excel.UIResponses{MsgBox: msgBoxResponses, Input: inputResponses, FileDialog: fileDialogResponses}, DebugStream: excel.DebugStreamOptions{Enabled: true}, UIStream: excel.UIStreamOptions{Enabled: uiStream, RedactInput: true}, ModuleFilter: moduleFilter, TagFilter: tagFilter})
 				return runErr
 			})
 			if err != nil {
@@ -4664,6 +4665,7 @@ func (a *app) testCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&msgBoxLiterals, "msgbox", nil, "provide a scripted MsgBox response as dialog-id=result")
 	cmd.Flags().StringArrayVar(&inputBoxLiterals, "inputbox", nil, "provide a scripted InputBox response as dialog-id=value")
 	cmd.Flags().StringArrayVar(&fileDialogLiterals, "filedialog", nil, "provide a scripted file dialog response as kind:dialog-id=path or kind:dialog-id=@cancel")
+	cmd.Flags().BoolVar(&visible, "visible", false, "show the Excel application window for this test run")
 	cmd.Flags().BoolVar(&uiStream, "ui-stream", false, "stream headless XlflowUI dialog events to stderr in real time")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "stop scheduling tests after the first final failure")
 	cmd.Flags().IntVar(&maxFailures, "max-failures", 0, "stop scheduling tests after N final failures")

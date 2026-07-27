@@ -3524,7 +3524,7 @@ func TestInitCommandIncludesWithModuleFlag(t *testing.T) {
 	}
 }
 
-func TestTestCommandIncludesModuleAndTagFlags(t *testing.T) {
+func TestTestCommandIncludesModuleTagAndVisibleFlags(t *testing.T) {
 	a := &app{}
 	root := a.rootCommand()
 	cmd, _, err := root.Find([]string{"test"})
@@ -3536,6 +3536,16 @@ func TestTestCommandIncludesModuleAndTagFlags(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("tag") == nil {
 		t.Fatal("expected test command to define --tag")
+	}
+	if err := cmd.ParseFlags([]string{"--visible"}); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := cmd.Flags().GetBool("visible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !visible {
+		t.Fatal("expected --visible to parse as true")
 	}
 }
 

@@ -26,22 +26,22 @@ Use this map to choose the first command for a goal. It is a discovery aid, not 
 complete CLI reference; read structured output and load the named reference for
 the next decision.
 
-| Goal | Start with | Use it when |
-| --- | --- | --- |
-| Discover available capabilities | `xlflow --help` | xlflow is unfamiliar or the needed feature is unknown |
-| Check source, workbook, and session state | `xlflow status --json` | before workbook work or after a failure |
-| Diagnose Excel, COM, or VBIDE setup | `xlflow doctor --json` | automation cannot be trusted |
-| Export workbook VBA into source | `xlflow pull --session --json` | the workbook is authoritative or freshness is unclear |
-| Find a runnable entrypoint | `xlflow macros --session --json` | the macro name is not already proven |
-| Check source before Excel import | `xlflow lint --json` and `xlflow analyze --json` | after source edits |
-| Estimate refactor blast radius | `xlflow impact Module.Procedure --json` | changing existing behavior; load [code analysis](references/code-analysis.md) |
-| Import edited source into Excel | `xlflow push --fast --session --no-save --json` | source validation passes |
-| Run repeatable behavior checks | `xlflow test --session --no-save --json` | tests cover the behavior; load [testing](references/testing.md) |
-| Run a macro with diagnostics | `xlflow run Macro.Name --diagnostic --headless --session --json` | tests do not cover the intended behavior |
-| Inspect values, formulas, or styles | `xlflow inspect range --sheet Result --address A1:F20 --include-style --session --json` | an observable cell result is required |
-| Inspect rendered workbook output | `xlflow export-image --sheet Sheet1 --range A1:M21 --out preview.png --session --json` | layout, styles, charts, or appearance are requirements |
-| Find headless UI boundaries | `xlflow inspect-gui --json` | headless execution may cross dialogs, forms, or UI hooks; load [UI guidance](references/xlflow-ui.md) |
-| Persist or close verified work | `xlflow save --session --json`; `xlflow session stop --json` | only after the proof loop is complete |
+| Goal                                      | Start with                                                                              | Use it when                                                                                           |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Discover available capabilities           | `xlflow --help`                                                                         | xlflow is unfamiliar or the needed feature is unknown                                                 |
+| Check source, workbook, and session state | `xlflow status --json`                                                                  | before workbook work or after a failure                                                               |
+| Diagnose Excel, COM, or VBIDE setup       | `xlflow doctor --json`                                                                  | automation cannot be trusted                                                                          |
+| Export workbook VBA into source           | `xlflow pull --session --json`                                                          | the workbook is authoritative or freshness is unclear                                                 |
+| Find a runnable entrypoint                | `xlflow macros --session --json`                                                        | the macro name is not already proven                                                                  |
+| Check source before Excel import          | `xlflow lint --json` and `xlflow analyze --json`                                        | after source edits                                                                                    |
+| Estimate refactor blast radius            | `xlflow impact Module.Procedure --json`                                                 | changing existing behavior; load [code analysis](references/code-analysis.md)                         |
+| Import edited source into Excel           | `xlflow push --fast --session --no-save --json`                                         | source validation passes                                                                              |
+| Run repeatable behavior checks            | `xlflow test --session --no-save --json`                                                | tests cover the behavior; load [testing](references/testing.md)                                       |
+| Run a macro with diagnostics              | `xlflow run Macro.Name --diagnostic --headless --session --json`                        | tests do not cover the intended behavior                                                              |
+| Inspect values, formulas, or styles       | `xlflow inspect range --sheet Result --address A1:F20 --include-style --session --json` | an observable cell result is required                                                                 |
+| Inspect rendered workbook output          | `xlflow export-image --sheet Sheet1 --range A1:M21 --out preview.png --session --json`  | layout, styles, charts, or appearance are requirements                                                |
+| Find headless UI boundaries               | `xlflow inspect-gui --json`                                                             | headless execution may cross dialogs, forms, or UI hooks; load [UI guidance](references/xlflow-ui.md) |
+| Persist or close verified work            | `xlflow save --session --json`; `xlflow session stop --json`                            | only after the proof loop is complete                                                                 |
 
 Treat `inspect workbook` as workbook metadata and `inspect range` as value or
 style evidence. Treat `export-image` as the required proof when the acceptance
@@ -212,14 +212,14 @@ that Excel not stay open.
 
 ## Dispatch to Specialized References
 
-| Task or signal | Load this reference |
-| --- | --- |
-| Writing tests, selecting tests, test metadata, hooks, or test failures | [testing.md](references/testing.md) |
-| Formula-driven behavior, defined names, or sheet-layout formulas | [formulas.md](references/formulas.md) |
-| UserForm design, code-behind authority, inspection, snapshots, or rebuilds | [forms.md](references/forms.md) |
-| Dialogs, file pickers, headless UI, or interactive-vs-unattended behavior | [xlflow-ui.md](references/xlflow-ui.md) |
-| Runtime or compile diagnostics that do not identify the cause | [debugging.md](references/debugging.md) |
-| Recovery-required state or uncertain workbook termination | [recovery.md](references/recovery.md) |
+| Task or signal                                                             | Load this reference                             |
+| -------------------------------------------------------------------------- | ----------------------------------------------- |
+| Writing tests, selecting tests, test metadata, hooks, or test failures     | [testing.md](references/testing.md)             |
+| Formula-driven behavior, defined names, or sheet-layout formulas           | [formulas.md](references/formulas.md)           |
+| UserForm design, code-behind authority, inspection, snapshots, or rebuilds | [forms.md](references/forms.md)                 |
+| Dialogs, file pickers, headless UI, or interactive-vs-unattended behavior  | [xlflow-ui.md](references/xlflow-ui.md)         |
+| Runtime or compile diagnostics that do not identify the cause              | [debugging.md](references/debugging.md)         |
+| Recovery-required state or uncertain workbook termination                  | [recovery.md](references/recovery.md)           |
 | Callers, callees, dependencies, refactors, blast radius, or affected tests | [code-analysis.md](references/code-analysis.md) |
 
 Use the reference before editing when its subject changes source authority,

@@ -3003,6 +3003,7 @@ func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 	cfg := config.Default()
 	env, code, err := Runner{RootDir: root, BridgeMode: "dotnet"}.TestWithOptions(cfg, "SpecTests", TestOptions{
 		Session:       true,
+		Visible:       true,
 		RuntimeMode:   RuntimeModeTest,
 		RuntimeSource: RuntimeSourceCommand,
 		ModuleFilter:  "SpecTests",
@@ -3039,6 +3040,9 @@ func TestRunnerDotNetTestUsesDotNetProviderAndPreservesEnvelopeFields(t *testing
 	}
 	if got := req.Args["UseSession"]; got != "true" {
 		t.Fatalf("UseSession = %q, want true", got)
+	}
+	if got := req.Args["Visible"]; got != "true" {
+		t.Fatalf("Visible = %q, want true", got)
 	}
 	if got := req.Args["RuntimeMode"]; got != RuntimeModeTest {
 		t.Fatalf("RuntimeMode = %q, want %q", got, RuntimeModeTest)
@@ -3177,6 +3181,29 @@ func TestBuildTestScriptArgsIncludesIsolationAndTempMetadata(t *testing.T) {
 	}
 	if got := args["RerunFailed"]; got != "2" {
 		t.Fatalf("RerunFailed = %q, want 2", got)
+	}
+}
+
+func TestBuildTestScriptArgsResolvesVisibleFromConfigAndCommand(t *testing.T) {
+	root := t.TempDir()
+	for _, tc := range []struct {
+		name          string
+		configVisible bool
+		optionVisible bool
+		want          string
+	}{
+		{name: "both-hidden", want: "false"},
+		{name: "command-visible", optionVisible: true, want: "true"},
+		{name: "config-visible", configVisible: true, want: "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Excel.Visible = tc.configVisible
+			args := buildTestScriptArgs(root, cfg, "", TestOptions{Visible: tc.optionVisible})
+			if got := args["Visible"]; got != tc.want {
+				t.Fatalf("Visible = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

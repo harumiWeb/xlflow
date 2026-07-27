@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.27.0
+
+- Added `xlflow test --visible` to run GUI-bound VBA integration tests, such as `Application.OnKey` registration, with a visible Excel window without changing the project's `[excel].visible` configuration.
 - Refactored the bundled `xlflow` Agent Skill into an orchestration-focused proof loop with dedicated testing, formula, UserForm, UI, debugging, recovery, and structural-analysis references. The Skill now also includes an initial `xlflow --help` discovery rule, a purpose-to-command capability map, a session-first executable quick start, explicit recovery stop conditions, and visual-verification guidance through `export-image` while leaving complete CLI syntax and diagnostics to xlflow help and documentation.
 - Fixed `xlflow analyze` `VBA209` false positives for bundled `XlflowUI` functions that return array values.
 - Fixed .NET bridge temporary VBA module injection for `run`, `test`, and related form/UI helpers when VBE's **Require Variable Declaration** option pre-populates a new module with `Option Explicit`. Generated code now replaces the initial module content, avoiding duplicate declarations and compile failures.
