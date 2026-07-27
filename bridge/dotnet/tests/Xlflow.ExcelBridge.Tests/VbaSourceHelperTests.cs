@@ -89,6 +89,17 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
+    public void SetCodeModuleText_ReplacesUnterminatedInitialLine()
+    {
+        var module = new FakeCodeModule("Option Explicit");
+
+        VbaSourceHelper.SetCodeModuleText(module, "Public Sub Run()\r\nEnd Sub\r\n");
+
+        Assert.Equal("Public Sub Run()\r\nEnd Sub\r\n", module.Text);
+        Assert.Equal(1, module.DeleteLinesCalls);
+    }
+
+    [Fact]
     public void FindDuplicateModuleNames_IgnoresUserFormCodeSidecars()
     {
         var files = new List<DiscoveredSourceFile>
@@ -235,7 +246,19 @@ public sealed class VbaSourceHelperTests
     public sealed class FakeCodeModule(string text)
     {
         public string Text { get; private set; } = text;
-        public int CountOfLines => Text.Split(["\r\n", "\n", "\r"], StringSplitOptions.None).Length - 1;
+        public int CountOfLines
+        {
+            get
+            {
+                if (Text.Length == 0)
+                {
+                    return 0;
+                }
+
+                var lines = Text.Split(["\r\n", "\n", "\r"], StringSplitOptions.None);
+                return lines.Length - (Text[^1] is '\r' or '\n' ? 1 : 0);
+            }
+        }
         public int DeleteLinesCalls { get; private set; }
 
         public object? DeleteLines(object startLine, object count)

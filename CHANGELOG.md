@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed .NET bridge temporary VBA module injection for `run`, `test`, and related form/UI helpers when VBE's **Require Variable Declaration** option pre-populates a new module with `Option Explicit`. Generated code now replaces the initial module content, avoiding duplicate declarations and compile failures.
 - Added `xlflow impact <Module.Procedure>` for deterministic, AI-friendly VBA call impact analysis. It reports confirmed direct/transitive callers and callees, cycles, affected modules, source locations, and explicit conservative-resolution uncertainty without opening Excel.
 - Added standard LSP Call Hierarchy for confidently resolved project-local VBA procedures. Incoming and outgoing calls reuse the incremental workspace index and current unsaved editor overlays; ambiguous, unresolved, external, built-in-like, dynamic-member, and module-level calls remain excluded, and private procedures stay module-scoped.
 - Extended LSP `VB030` argument diagnostics to flag known project-local arrays passed to non-array `Object` parameters, including both `ByVal` and `ByRef` calls, before Excel can surface a runtime type mismatch.
