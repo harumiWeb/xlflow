@@ -274,3 +274,34 @@ Use this order:
 5. Add targeted `XlflowDebug.Log` state logs only when the failing line is known but the cause is still unclear.
 6. Fix the source.
 7. Remove temporary instrumentation unless the project intentionally keeps it.
+
+## Parser Compatibility Findings
+
+When lint reports parser recovery, inspect the structured issue location and
+context before changing source. Parser recovery is a compatibility finding from
+xlflow's source parser; it is not, by itself, proof that Excel or the VBE rejects
+the VBA.
+
+Keep the normal safety boundary intact: do not bypass a preflight-blocking parser
+finding to push source into Excel. Inspect the exact construct, distinguish a
+parser limitation from a VBE compile failure, and use Excel-backed diagnostics
+only when they are safe and necessary to establish the difference.
+
+Do not rewrite otherwise valid, idiomatic VBA solely to satisfy parser recovery.
+If Excel accepts the original construct but xlflow cannot safely automate it,
+preserve the source when appropriate and report the compatibility limitation and
+its effect on the proof loop.
+
+## Common Diagnostic Triage
+
+Treat analysis findings in files or lines outside the requested change as possible
+existing baseline findings, not automatic evidence that the new edit is wrong.
+Use their locations and the source diff to separate newly introduced findings
+from pre-existing project debt. Fix findings caused by the change; do not hide
+unrelated findings with suppressions merely to make a broad check pass. Report a
+remaining baseline separately when it prevents a clean broader verification.
+
+Parser recovery is likewise a source-parser signal, not a reason to blindly
+rewrite compact but valid VBA syntax. Follow the parser-compatibility workflow
+above: inspect the exact context, preserve valid constructs where appropriate,
+and report any limitation that still prevents xlflow from proving the change.

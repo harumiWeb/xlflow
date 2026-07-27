@@ -7,6 +7,42 @@ import (
 	"testing"
 )
 
+var referenceFiles = []string{
+	"testing.md",
+	"debugging.md",
+	"formulas.md",
+	"forms.md",
+	"xlflow-ui.md",
+	"recovery.md",
+	"code-analysis.md",
+}
+
+func requireContains(t *testing.T, body string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing invariant %q", want)
+		}
+	}
+}
+
+func requireReferenceFiles(t *testing.T, skillDir string) {
+	t.Helper()
+	for _, name := range referenceFiles {
+		path := filepath.Join(skillDir, "references", name)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("missing installed reference %s: %v", name, err)
+		}
+	}
+}
+
+func requireBefore(t *testing.T, body, first, second string) {
+	t.Helper()
+	if strings.Index(body, first) >= strings.Index(body, second) {
+		t.Errorf("expected %q before %q", first, second)
+	}
+}
+
 func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 	dir := t.TempDir()
 	result, err := Install(InstallOptions{RootDir: dir, Agent: "codex"})
@@ -19,62 +55,88 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 	if result.Agent != "codex" {
 		t.Fatalf("agent = %q", result.Agent)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, ".codex", "skills", "xlflow", "SKILL.md"))
+	skillDir := filepath.Join(dir, ".codex", "skills", "xlflow")
+	body, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "name: xlflow") {
-		t.Fatalf("unexpected skill body:\n%s", body)
-	}
-	for _, want := range []string{
-		"Treat the configured source directories as authoritative",
-		"Use a listed `qualified_name` from `xlflow macros --session --json`",
-		"Run `xlflow doctor --json` for setup phases",
-		"xlflow session start",
+	installed := string(body)
+	requireContains(t, installed,
+		"name: xlflow",
+		"## Core Invariants",
+		"## Canonical Development Loop",
+		"Analyze structural impact when relevant.",
+		"Use structured JSON output for agent-facing commands.",
+		"If `recovery.required=true`",
+		"Do not save or blindly retry.",
+		"## Quick Orientation",
+		"xlflow --help",
+		"xlflow macros --session --json",
+		"xlflow inspect range --sheet Result --address A1:F20 --include-style --session --json",
+		"xlflow export-image --sheet Sheet1 --range A1:M21 --out preview.png --session --json",
+		"xlflow inspect-gui --json",
+		"export-image` as the required proof",
+		"## Quick Start: Normal Source Change",
+		"xlflow status --json",
+		"xlflow session start --json",
+		"xlflow session attach --json",
 		"xlflow pull --session --json",
-		"xlflow save --json",
+		"xlflow lint --json",
+		"xlflow analyze --json",
 		"xlflow push --fast --session --no-save --json",
-		"@ExpectedError` metadata for expected VBA runtime errors",
-		"expected_error_mismatch",
-		"When the macro argument is omitted, `xlflow run` uses `project.entry` from `xlflow.toml`.",
-		"Matching sessions are auto-reused for `list forms`, `inspect form`, `form snapshot`, `form build`, `form export-image`, `pull`, `push`, `macros`, `run`, `export-image`, `test`, `save`, `ui button add`, `ui button list`, and `ui button remove`",
-		"Use `xlflow list forms --session --json` when you need workbook UserForm names",
-		"Use `xlflow form snapshot <FormName> --out src/forms/specs/<FormName>.yaml --session --json`",
-		"Use `xlflow form build <spec> --session --json`",
-		"Use `xlflow form build <spec> --session --overwrite --json`",
-		"[references/formulas.md](references/formulas.md)",
-		"xlflow formulas pull --json",
-		"[references/forms.md](references/forms.md)",
-		"[references/xlflow-ui.md](references/xlflow-ui.md)",
-		"XlflowUI.MsgBox",
-		"XlflowUI.GetOpenFilename",
-		"DefaultResponse",
-		"DefaultValue",
-		"--msgbox",
-		"--inputbox",
-		"--filedialog",
-		"--ui-stream",
-		"xlflow: ui kind=msgbox id=confirm-save source=default result=yes",
-		"xlflow: ui kind=file-open id=source-files source=scripted value=C:\\temp\\a.txt | C:\\temp\\b.txt",
-		"ui.events",
-		"UI section in human output",
-		"Use `xlflow form export-image <FormName> --out <path> --session --json`",
-		"Treat it as secondary visual confirmation because the capture path is experimental",
-		"Use `xlflow export-image` when verification depends on rendered appearance",
-		"--gui-compile-errors",
-		"[lint].forbid_interactive_input = false",
-		"xlflow session stop",
-		"Interactive terminals show a spinner, non-interactive or --json runs fall back to a single stderr progress line",
-		"`ui button add`",
-		"`ui button list`",
-		"`ui button remove`",
-		"process cleanup --all",
-		"process list",
-	} {
-		if !strings.Contains(string(body), want) {
-			t.Fatalf("installed skill is missing %q:\n%s", want, body)
+		"xlflow test --filter Module.TestName --session --no-save --json",
+		"xlflow run --diagnostic --headless --session --json",
+		"xlflow inspect workbook --session --json",
+		"xlflow test --session --no-save --json",
+		"xlflow save --session --json",
+		"xlflow session stop --json",
+		"If its structured result reports recovery required, stop here",
+		"## Dispatch to Specialized References",
+		"[recovery.md](references/recovery.md)",
+		"[code-analysis.md](references/code-analysis.md)",
+		"## Evidence of Completion",
+	)
+	requireBefore(t, installed, "xlflow lint --json", "xlflow push --fast --session --no-save --json")
+	requireBefore(t, installed, "xlflow analyze --json", "xlflow push --fast --session --no-save --json")
+	requireBefore(t, installed, "xlflow push --fast --session --no-save --json", "xlflow test --filter Module.TestName --session --no-save --json")
+	for _, removed := range []string{"xlflow attach --active", "--ui-stream", "VB014", "## Progress Rules"} {
+		if strings.Contains(installed, removed) {
+			t.Errorf("installed orchestration skill still contains removed command detail %q", removed)
 		}
 	}
+	requireReferenceFiles(t, skillDir)
+	recovery, err := os.ReadFile(filepath.Join(skillDir, "references", "recovery.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, string(recovery),
+		"Do not retry the failed operation",
+		"Do not save the quarantined workbook",
+		"xlflow session stop --discard --json",
+		"external user-owned session",
+		"only after manual Excel recovery is complete",
+		"user explicitly accepts",
+	)
+	analysis, err := os.ReadFile(filepath.Join(skillDir, "references", "code-analysis.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, string(analysis),
+		"Start with the smallest question",
+		"Do not dump the full project graph",
+		"An empty resolved caller list",
+		"Re-run structural analysis",
+	)
+	ui, err := os.ReadFile(filepath.Join(skillDir, "references", "xlflow-ui.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, string(ui), "## Common Headless Failure Triage", "Application.OnKey", "xlflow inspect-gui --json")
+	debugging, err := os.ReadFile(filepath.Join(skillDir, "references", "debugging.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireContains(t, string(debugging), "## Common Diagnostic Triage", "existing baseline findings")
 }
 
 func TestInstallSupportsAllProviders(t *testing.T) {
@@ -84,28 +146,13 @@ func TestInstallSupportsAllProviders(t *testing.T) {
 			if _, err := Install(InstallOptions{RootDir: dir, Agent: provider.Name}); err != nil {
 				t.Fatal(err)
 			}
-			skillPath := filepath.Join(dir, filepath.FromSlash(provider.Dir), "xlflow", "SKILL.md")
-			if _, err := os.Stat(skillPath); err != nil {
-				t.Fatalf("expected skill for %s: %v", provider.Name, err)
-			}
-			body, err := os.ReadFile(skillPath)
+			skillDir := filepath.Join(dir, filepath.FromSlash(provider.Dir), "xlflow")
+			body, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{
-				"## Parser compatibility failures",
-				"`VB014` means `tree-sitter-vba` required parser recovery.",
-				"`code`, `file`, `line`",
-				"`column`, and `message`",
-				"not proof that Excel/VBE rejects the VBA",
-				"Do not rewrite otherwise valid-looking, idiomatic VBA merely to satisfy the parser.",
-				"If Excel accepts the original construct, preserve it and clearly report the `tree-sitter-vba` compatibility limitation.",
-				"`VB014` remains non-suppressible and preflight-blocking.",
-			} {
-				if !strings.Contains(string(body), want) {
-					t.Fatalf("installed skill for %s is missing %q:\n%s", provider.Name, want, body)
-				}
-			}
+			requireContains(t, string(body), "## Canonical Development Loop", "## Dispatch to Specialized References")
+			requireReferenceFiles(t, skillDir)
 		})
 	}
 }
@@ -119,18 +166,11 @@ func TestInstallUsesExplicitTarget(t *testing.T) {
 	if result.Path != "skills/xlflow" {
 		t.Fatalf("path = %q", result.Path)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "SKILL.md")); err != nil {
+	skillDir := filepath.Join(dir, "skills", "xlflow")
+	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "forms.md")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "formulas.md")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "skills", "xlflow", "references", "xlflow-ui.md")); err != nil {
-		t.Fatal(err)
-	}
+	requireReferenceFiles(t, skillDir)
 }
 
 func TestInstallRefusesOverwriteUnlessForced(t *testing.T) {

@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Refactored the bundled `xlflow` Agent Skill into an orchestration-focused proof loop with dedicated testing, formula, UserForm, UI, debugging, recovery, and structural-analysis references. The Skill now also includes an initial `xlflow --help` discovery rule, a purpose-to-command capability map, a session-first executable quick start, explicit recovery stop conditions, and visual-verification guidance through `export-image` while leaving complete CLI syntax and diagnostics to xlflow help and documentation.
 - Fixed `xlflow analyze` `VBA209` false positives for bundled `XlflowUI` functions that return array values.
 - Fixed .NET bridge temporary VBA module injection for `run`, `test`, and related form/UI helpers when VBE's **Require Variable Declaration** option pre-populates a new module with `Option Explicit`. Generated code now replaces the initial module content, avoiding duplicate declarations and compile failures.
 - Added `xlflow impact <Module.Procedure>` for deterministic, AI-friendly VBA call impact analysis. It reports confirmed direct/transitive callers and callees, cycles, affected modules, source locations, and explicit conservative-resolution uncertainty without opening Excel.

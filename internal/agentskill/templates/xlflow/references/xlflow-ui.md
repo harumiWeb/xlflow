@@ -139,6 +139,21 @@ If headless `XlflowUI` behavior is suspicious, rerun with the same `--msgbox` / 
 - final `ui.events` for structured post-run inspection
 - workbook-side `DefaultResponse` / `DefaultValue` expectations when `response_source=default`
 
+## Common Headless Failure Triage
+
+If a headless run fails around `Application.OnKey`, a UserForm, a dialog, or
+another UI-oriented Excel API, treat it as a possible automation boundary rather
+than retrying the same run. Start with:
+
+```bash
+xlflow inspect-gui --json
+```
+
+This static scan narrows likely GUI boundaries but does not prove that a macro is
+headless-safe. Move the business operation behind a parameterized headless core,
+route simple prompts through `XlflowUI`, or use an interactive workflow only when
+a human is available to own that UI.
+
 ## Future Extension Rule
 
 If xlflow adds support for more interactive VBA functions later, follow the same pattern:
