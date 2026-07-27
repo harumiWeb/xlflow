@@ -629,7 +629,7 @@ public sealed class ExcelTestService : ITestService
             SetProperty(runnerComponent, "Name", runnerName);
             var runnerCodeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
                 ?? throw new InvalidOperationException("CodeModule is unavailable.");
-            ExcelBridgeSupport.InvokeMethod(runnerCodeModule, "AddFromString",
+            VbaSourceHelper.SetCodeModuleText(runnerCodeModule,
                 BuildTestRunnerCode(executableSelected, hooksByModule));
             ExcelBridgeSupport.ReleaseComObject(runnerCodeModule);
             ExcelBridgeSupport.ReleaseComObject(components);

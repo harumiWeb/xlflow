@@ -142,7 +142,7 @@ public sealed class ExcelRunService : IRunService
                 RuntimeInjectionHelper.SetDefinedName(workbook, "__XLFLOW_RUN_HELPER__", runnerName);
                 runnerCodeModule = ExcelBridgeSupport.Get(runnerComponent, "CodeModule")
                     ?? throw new InvalidOperationException("inject_harness failed: CodeModule is unavailable.");
-                ExcelBridgeSupport.InvokeMethod(runnerCodeModule, "AddFromString", BuildRunHarnessCode(macroName, macroArgs));
+                VbaSourceHelper.SetCodeModuleText(runnerCodeModule, BuildRunHarnessCode(macroName, macroArgs));
                 ExcelBridgeSupport.ReleaseComObject(runnerCodeModule);
                 runnerCodeModule = null;
                 ExcelBridgeSupport.ReleaseComObject(runnerComponents);

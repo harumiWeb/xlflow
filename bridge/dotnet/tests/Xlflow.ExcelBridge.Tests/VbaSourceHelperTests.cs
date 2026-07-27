@@ -78,6 +78,17 @@ public sealed class VbaSourceHelperTests
     }
 
     [Fact]
+    public void SetCodeModuleText_ReplacesVbeInsertedOptionExplicit()
+    {
+        var module = new FakeCodeModule("Option Explicit\r\n");
+
+        VbaSourceHelper.SetCodeModuleText(module, "Option Explicit\r\nPublic Sub Run()\r\nEnd Sub\r\n");
+
+        Assert.Equal("Option Explicit\r\nPublic Sub Run()\r\nEnd Sub\r\n", module.Text);
+        Assert.Equal(1, module.DeleteLinesCalls);
+    }
+
+    [Fact]
     public void FindDuplicateModuleNames_IgnoresUserFormCodeSidecars()
     {
         var files = new List<DiscoveredSourceFile>
@@ -219,6 +230,28 @@ public sealed class VbaSourceHelperTests
             {
                 Directory.Delete(root, true);
             }
+        }
+    }
+    public sealed class FakeCodeModule(string text)
+    {
+        public string Text { get; private set; } = text;
+        public int CountOfLines => Text.Split(["\r\n", "\n", "\r"], StringSplitOptions.None).Length - 1;
+        public int DeleteLinesCalls { get; private set; }
+
+        public object? DeleteLines(object startLine, object count)
+        {
+            Assert.Equal(1, Convert.ToInt32(startLine));
+            Assert.Equal(CountOfLines, Convert.ToInt32(count));
+            Text = "";
+            DeleteLinesCalls++;
+            return null;
+        }
+
+        public object? InsertLines(object startLine, object text)
+        {
+            Assert.Equal(1, Convert.ToInt32(startLine));
+            Text = Convert.ToString(text) ?? "";
+            return null;
         }
     }
 }
