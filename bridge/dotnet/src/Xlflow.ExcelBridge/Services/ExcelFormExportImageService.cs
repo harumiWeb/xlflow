@@ -335,7 +335,7 @@ public sealed class ExcelFormExportImageService : IFormExportImageService
             ExcelBridgeSupport.Set(component, "Name", "XlflowCap_" + Guid.NewGuid().ToString("N")[..20]);
             codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
                 ?? throw new InvalidOperationException("vba_compile_failed: helper CodeModule is unavailable.");
-            ExcelBridgeSupport.InvokeMethod(codeModule, "AddFromString", BuildHelperCode());
+            VbaSourceHelper.SetCodeModuleText(codeModule, BuildHelperCode());
             return component;
         }
         finally

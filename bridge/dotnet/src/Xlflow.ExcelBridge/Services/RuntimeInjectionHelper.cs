@@ -563,7 +563,7 @@ internal static class RuntimeInjectionHelper
         SetProperty(component, "Name", moduleName);
         var codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
             ?? throw new InvalidOperationException("CodeModule is unavailable.");
-        ExcelBridgeSupport.InvokeMethod(codeModule, "AddFromString", BuildUIStreamModuleCode(pipeName));
+        VbaSourceHelper.SetCodeModuleText(codeModule, BuildUIStreamModuleCode(pipeName));
         ExcelBridgeSupport.ReleaseComObject(codeModule);
         ExcelBridgeSupport.ReleaseComObject(component);
         ExcelBridgeSupport.ReleaseComObject(components);

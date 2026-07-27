@@ -410,7 +410,7 @@ public sealed class ExcelFormInspectionService : IInspectFormService
             SetProperty(component, "Name", "XlflowForm_" + Guid.NewGuid().ToString("N")[..20]);
             codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
                 ?? throw new InvalidOperationException("inspect helper CodeModule is unavailable.");
-            ExcelBridgeSupport.InvokeMethod(codeModule, "AddFromString", BuildInspectHelperCode());
+            VbaSourceHelper.SetCodeModuleText(codeModule, BuildInspectHelperCode());
             return component;
         }
         finally

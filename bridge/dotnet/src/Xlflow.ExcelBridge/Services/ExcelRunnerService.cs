@@ -196,7 +196,7 @@ public sealed class ExcelRunnerService : IRunnerService
             component = ExcelBridgeSupport.InvokeMethod(components, "Add", 1);
             ExcelBridgeSupport.Set(component!, "Name", "XlflowRunner");
             codeModule = ExcelBridgeSupport.Get(component!, "CodeModule");
-            ExcelBridgeSupport.InvokeMethod(codeModule!, "AddFromString", BuildRunnerModuleCode());
+            VbaSourceHelper.SetCodeModuleText(codeModule!, BuildRunnerModuleCode());
         }
         finally
         {
