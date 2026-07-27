@@ -1093,14 +1093,14 @@ func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProc
 		if decl.Object && strings.Contains(lower, key+" = nothing") {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+decl.Name+" Is Nothing Then` or `If Not "+decl.Name+" Is Nothing Then`."))
 		}
-		if decl.Array && identifierComparedAsOperand(lower, key) {
+		if decl.Array && identifierComparedAsOperand(lower, key, proc) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself."))
 		}
 	}
 	return findings
 }
 
-func identifierComparedAsOperand(stmt, name string) bool {
+func identifierComparedAsOperand(stmt, name string, proc sourceProcedure) bool {
 	name = strings.ToLower(cleanIdentifier(name))
 	if name == "" {
 		return false
@@ -1112,12 +1112,20 @@ func identifierComparedAsOperand(stmt, name string) bool {
 		}
 		left := stmt[:i]
 		right := stmt[i+opLen:]
+		if opLen == 1 && stmt[i] == '=' && isFunctionReturnAssignment(left, proc) {
+			i += opLen - 1
+			continue
+		}
 		if operandEndsWithBareIdentifier(left, name) || operandStartsWithBareIdentifier(right, name) {
 			return true
 		}
 		i += opLen - 1
 	}
 	return false
+}
+
+func isFunctionReturnAssignment(left string, proc sourceProcedure) bool {
+	return proc.Kind == "Function" && proc.Name != "" && strings.EqualFold(cleanIdentifier(strings.TrimSpace(left)), proc.Name)
 }
 
 func comparisonOperatorLength(stmt string, index int) int {

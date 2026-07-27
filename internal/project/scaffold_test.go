@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -824,6 +825,27 @@ func TestNewScaffoldUIHelperLintsCleanly(t *testing.T) {
 	}
 	if len(issues) != 0 {
 		t.Fatalf("UI helper should lint cleanly: %+v", issues)
+	}
+}
+
+func TestNewScaffoldUIHelperAnalyzesCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	uiPath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowUI.bas")
+	findings, err := analyze.Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return filepath.Clean(path) == filepath.Clean(uiPath)
+		},
+	}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("UI helper should analyze cleanly: %+v", findings)
 	}
 }
 
