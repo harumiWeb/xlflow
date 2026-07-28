@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `--wait-timeout` so uncontended workbook coordination metadata work no longer consumes the lock-wait budget.
 - Updated `tree-sitter-vba` to v0.10.1, adding support for nested colon-separated single-line control flow, shared `Next` counter lists, and complete single-line `If` statement sequences.
 
 ## v0.27.0

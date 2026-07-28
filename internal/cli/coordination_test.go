@@ -410,9 +410,9 @@ func TestWorkbookCoordinationWithoutContentionEmitsNoWaitMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	// The wait deadline also covers lock metadata publication, which can be slow
-	// on loaded Windows CI runners even without workbook contention.
-	a := &app{cwd: rootDir, wait: true, waitTimeout: 5 * time.Second, stdout: &bytes.Buffer{}, stderr: &stderr, coordination: manager}
+	// An uncontended acquisition must not start the wait timer. This keeps
+	// metadata publication independent from the user-visible wait budget.
+	a := &app{cwd: rootDir, wait: true, waitTimeout: 50 * time.Millisecond, stdout: &bytes.Buffer{}, stderr: &stderr, coordination: manager}
 	if err := a.withWorkbookCoordination(context.Background(), "push", []string{filepath.Join(rootDir, "book.xlsm")}, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
