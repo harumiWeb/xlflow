@@ -1042,6 +1042,62 @@ func TestDocumentDiagnosticsIncludesParserRecoveryContext(t *testing.T) {
 	}
 }
 
+func TestDocumentDiagnosticsLocateExpectedUnclosedBlockCloser(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	source := "Option Explicit\nSub Main()\n  If ready Then\n    Debug.Print \"x\"\nEnd Sub\n"
+	var recovery intel.Diagnostic
+	for _, diagnostic := range s.analyzer.Diagnostics(intel.Document{URI: pathToFileURI(path), Path: path, Source: source}) {
+		if diagnostic.Code == "VB014" {
+			recovery = diagnostic
+			break
+		}
+	}
+	if recovery.Code == "" {
+		t.Fatal("expected VB014 diagnostic")
+	}
+	if recovery.Range.Start.Line != 4 || recovery.Range.Start.Character != 0 {
+		t.Fatalf("VB014 range = %+v, want End Sub location", recovery.Range)
+	}
+	if !strings.Contains(recovery.Message, "Possible missing 'End If' for multiline If block opened at line 3.") {
+		t.Fatalf("VB014 message = %q", recovery.Message)
+	}
+}
+
+func TestDocumentDiagnosticsLocateNestedUnclosedBlockAtParentCloser(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	source := "Option Explicit\nSub Main()\n  If outerReady Then\n    If innerReady Then\n      Debug.Print \"x\"\n  End If\nEnd Sub\n"
+	var recovery intel.Diagnostic
+	for _, diagnostic := range s.analyzer.Diagnostics(intel.Document{URI: pathToFileURI(path), Path: path, Source: source}) {
+		if diagnostic.Code == "VB014" {
+			recovery = diagnostic
+			break
+		}
+	}
+	if recovery.Code == "" {
+		t.Fatal("expected VB014 diagnostic")
+	}
+	if recovery.Range.Start.Line != 5 || recovery.Range.Start.Character != 2 {
+		t.Fatalf("VB014 range = %+v, want parent End If location", recovery.Range)
+	}
+	if !strings.Contains(recovery.Message, "Possible missing 'End If' for multiline If block opened at line 4.") {
+		t.Fatalf("VB014 message = %q", recovery.Message)
+	}
+}
+
 func TestJSONRPCPublishesParserRecoveryContextAndRange(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

@@ -6852,17 +6852,21 @@ func TestLintAndPushPropagateParserRecoveryMetadata(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run(\n    Range(\"A1\").Value = 1\nEnd Sub\n"
+	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n    If ready Then\n        Range(\"A1\").Value = 1\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	type parserRecoveryIssue struct {
-		Code        string `json:"code"`
-		Kind        string `json:"kind"`
-		ParserNode  string `json:"parser_node"`
-		ParserToken string `json:"parser_token"`
-		Context     string `json:"context"`
+		Code          string `json:"code"`
+		Kind          string `json:"kind"`
+		ParserNode    string `json:"parser_node"`
+		ParserToken   string `json:"parser_token"`
+		Context       string `json:"context"`
+		BlockKind     string `json:"block_kind"`
+		Closer        string `json:"expected_closer"`
+		OpeningLine   int    `json:"opening_line"`
+		OpeningColumn int    `json:"opening_column"`
 	}
 	findRecovery := func(issues []parserRecoveryIssue) (parserRecoveryIssue, bool) {
 		for _, issue := range issues {
@@ -6874,7 +6878,7 @@ func TestLintAndPushPropagateParserRecoveryMetadata(t *testing.T) {
 	}
 	assertRecovery := func(t *testing.T, issue parserRecoveryIssue) {
 		t.Helper()
-		if issue.Kind != "parser_recovery" || issue.ParserNode == "" || issue.ParserToken == "" || issue.Context == "" {
+		if issue.Kind != "parser_recovery" || issue.ParserNode == "" || issue.ParserToken == "" || issue.Context == "" || issue.BlockKind != "if" || issue.Closer != "End If" || issue.OpeningLine != 4 || issue.OpeningColumn != 5 {
 			t.Fatalf("unexpected VB014 metadata: %+v", issue)
 		}
 	}

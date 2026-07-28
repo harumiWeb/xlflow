@@ -31,6 +31,10 @@ type Issue struct {
 	ParserNode       string `json:"parser_node,omitempty"`
 	ParserToken      string `json:"parser_token,omitempty"`
 	Context          string `json:"context,omitempty"`
+	BlockKind        string `json:"block_kind,omitempty"`
+	ExpectedCloser   string `json:"expected_closer,omitempty"`
+	OpeningLine      int    `json:"opening_line,omitempty"`
+	OpeningColumn    int    `json:"opening_column,omitempty"`
 	parserRecoveryOK bool   `json:"-"`
 }
 
@@ -241,7 +245,7 @@ func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bo
 		ctx.lint(view.Root)
 		issues = append(issues, ctx.issues...)
 		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) {
-			issues = append(issues, ctx.parseIssue(view.Root))
+			issues = append(issues, ctx.parseIssues(view.Root)...)
 		}
 		issues = append(issues, l.flowIssues(path, string(source), view.Root)...)
 		issues = append(issues, l.procedureNameConstantIssues(path, view.Root, source)...)
@@ -562,8 +566,30 @@ func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inPro
 	}
 }
 
-func (c *astLintContext) parseIssue(root *tree_sitter.Node) Issue {
+func (c *astLintContext) parseIssues(root *tree_sitter.Node) []Issue {
 	detail := parserRecoveryDetailFor(root, c.source)
+	if blocks, reliable := unmatchedBlockCandidates(string(c.source)); reliable && len(blocks) > 0 {
+		issues := make([]Issue, 0, len(blocks))
+		for _, block := range blocks {
+			issue := c.linter.issueAt(c.path, vbaast.Range{StartLine: block.expectedLine, StartColumn: block.expectedColumn}, "VB014", "error", fmt.Sprintf("Possible missing '%s' for %s block opened at line %d.", block.expectedCloser, block.label, block.openingLine))
+			issue.Kind = "parser_recovery"
+			issue.Suggestion = fmt.Sprintf("Insert '%s' before line %d, then run xlflow lint again.", block.expectedCloser, block.expectedLine)
+			issue.ParserNode = detail.node
+			issue.ParserToken = detail.token
+			issue.Context = detail.context
+			issue.BlockKind = block.kind
+			issue.ExpectedCloser = block.expectedCloser
+			issue.OpeningLine = block.openingLine
+			issue.OpeningColumn = block.openingColumn
+			issues = append(issues, issue)
+		}
+		return issues
+	}
+	issue := c.genericParseIssue(detail)
+	return []Issue{issue}
+}
+
+func (c *astLintContext) genericParseIssue(detail parserRecoveryDetail) Issue {
 	issue := c.linter.issueAt(c.path, detail.rangeAt(), "VB014", "error", parserRecoveryMessage)
 	issue.Kind = "parser_recovery"
 	issue.Suggestion = parserRecoverySuggestion
