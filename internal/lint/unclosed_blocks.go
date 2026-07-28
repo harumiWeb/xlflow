@@ -26,7 +26,7 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 			continue
 		}
 		if isRemComment(text) {
-			for i+1 < len(statements) && statements[i+1].line == statement.line {
+			for i+1 < len(statements) && statements[i+1].group == statement.group {
 				i++
 			}
 			continue
@@ -70,7 +70,7 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 			return nil, false
 		}
 
-		if block, ok := blockOpener(lower, i+1 < len(statements) && statements[i+1].line == statement.line); ok {
+		if block, ok := blockOpener(lower, i+1 < len(statements) && statements[i+1].group == statement.group); ok {
 			block.line = statement.line
 			block.column = statement.column
 			stack = append(stack, block)
@@ -88,6 +88,7 @@ type blockStatement struct {
 	text   string
 	line   int
 	column int
+	group  int
 }
 
 // blockStatements joins valid VBA continuation lines before splitting colon
@@ -113,6 +114,7 @@ func blockStatements(source string) ([]blockStatement, bool) {
 		positions = positions[:0]
 	}
 	pending := false
+	group := 0
 	for i, line := range lines {
 		code := gui.StripComment(line)
 		trimmed := strings.TrimSpace(code)
@@ -131,6 +133,7 @@ func blockStatements(source string) ([]blockStatement, bool) {
 		}
 		appendPhysical(code, i+1)
 		parts := splitStatementsWithColumns(logical.String())
+		group++
 		for _, part := range parts {
 			if part.start < 0 || part.start >= len(positions) {
 				return nil, false
@@ -140,6 +143,7 @@ func blockStatements(source string) ([]blockStatement, bool) {
 				text:   part.text,
 				line:   position.line,
 				column: position.column,
+				group:  group,
 			})
 		}
 		resetLogical()

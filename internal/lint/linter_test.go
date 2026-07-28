@@ -641,6 +641,16 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 		t.Fatalf("continuation-tail candidates = %+v, reliable=%t", candidates, reliable)
 	}
 
+	continuedRem := "Sub Main()\n  Rem note _\n    more: If ready Then\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(continuedRem); !reliable || len(candidates) != 0 {
+		t.Fatalf("continued Rem candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	continuedSingleLineIf := "Sub Main()\n  If ready Then _\n    : Debug.Print \"x\"\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(continuedSingleLineIf); !reliable || len(candidates) != 0 {
+		t.Fatalf("continued single-line If candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
 	conditional := "Sub Main()\n#If VBA7 Then\n  If ready Then\n#End If\nEnd Sub\n"
 	if candidates, reliable := unmatchedBlockCandidates(conditional); reliable || len(candidates) != 0 {
 		t.Fatalf("conditional source candidates = %+v, reliable=%t", candidates, reliable)
