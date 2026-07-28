@@ -580,6 +580,23 @@ func TestLinterLocatesNestedUnclosedBlockAtParentCloser(t *testing.T) {
 	}
 }
 
+func TestLinterPreservesContinuationTailLocationForUnclosedBlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Sub Main()\n  result = _\n    1: If ready Then\n      Debug.Print \"x\"\nEnd Sub\n")
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) != 1 {
+		t.Fatalf("VB014 issues = %+v, want one targeted issue", vb014)
+	}
+	issue := vb014[0]
+	if issue.BlockKind != "if" || issue.OpeningLine != 3 || issue.OpeningColumn != 8 || issue.Line != 5 || issue.Column != 1 {
+		t.Fatalf("continuation-tail diagnostic location = %+v", issue)
+	}
+}
+
 func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 	valid := "Sub Main()\n  If ready Then\n    For Each item In items\n      Debug.Print item\n    Next item\n  End If\nEnd Sub\n"
 	if candidates, reliable := unmatchedBlockCandidates(valid); !reliable || len(candidates) != 0 {
@@ -616,6 +633,12 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 	candidates, reliable = unmatchedBlockCandidates(nestedParentCloser)
 	if !reliable || len(candidates) != 1 || candidates[0].kind != "if" || candidates[0].openingLine != 3 || candidates[0].expectedLine != 5 || candidates[0].expectedColumn != 3 {
 		t.Fatalf("nested parent-closer candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	continuationTail := "Sub Main()\n  result = _\n    1: If ready Then\n      Debug.Print \"x\"\nEnd Sub\n"
+	candidates, reliable = unmatchedBlockCandidates(continuationTail)
+	if !reliable || len(candidates) != 1 || candidates[0].openingLine != 3 || candidates[0].openingColumn != 8 || candidates[0].expectedLine != 5 || candidates[0].expectedColumn != 1 {
+		t.Fatalf("continuation-tail candidates = %+v, reliable=%t", candidates, reliable)
 	}
 
 	conditional := "Sub Main()\n#If VBA7 Then\n  If ready Then\n#End If\nEnd Sub\n"
@@ -680,6 +703,25 @@ func TestLinterFallsBackToGenericRecoveryForAmbiguousBlocks(t *testing.T) {
 				t.Fatalf("ambiguous source should retain generic recovery guidance: %+v", issue)
 			}
 		})
+	}
+}
+
+func TestParserRecoveryDetailsForBlocksAssociateOnlyMatchingRecovery(t *testing.T) {
+	blocks := []unclosedBlockCandidate{
+		{openingLine: 2, expectedLine: 9},
+		{openingLine: 4, expectedLine: 6},
+		{openingLine: 11, expectedLine: 14},
+	}
+	details := []parserRecoveryDetail{
+		{range_: vbaast.Range{StartLine: 5}, node: "ERROR", token: "inner", context: "inner context"},
+		{range_: vbaast.Range{StartLine: 12}, node: "MISSING", token: "later", context: "later context"},
+	}
+	associated := parserRecoveryDetailsForBlocks(details, blocks)
+	if associated[0].node != "" {
+		t.Fatalf("outer block should not inherit nested recovery detail: %+v", associated)
+	}
+	if associated[1].token != "inner" || associated[2].token != "later" {
+		t.Fatalf("associated recovery details = %+v", associated)
 	}
 }
 

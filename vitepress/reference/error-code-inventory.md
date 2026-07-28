@@ -42,6 +42,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `base_workbook`
 - `before_dialog_action`
 - `binary_expression`
+- `block_kind`
 - `bridge_file_not_openable`
 - `bridge_found`
 - `bridge_mode_invalid`
@@ -226,6 +227,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `existing_warning`
 - `exit_code`
 - `expanded_formula`
+- `expected_closer`
 - `expected_error`
 - `export_image_args_invalid`
 - `external_function_declaration`
@@ -446,6 +448,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `older_than`
 - `on_error_statement`
 - `open_workbook`
+- `opening_column`
+- `opening_line`
 - `operation_kind`
 - `operator_spacing`
 - `option_statement`

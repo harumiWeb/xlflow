@@ -6842,7 +6842,7 @@ func TestLintAndPushRejectVBAContinuationOverflowBeforeExcel(t *testing.T) {
 	}
 }
 
-func TestLintAndPushPropagateParserRecoveryMetadata(t *testing.T) {
+func TestLintAndPushPropagateTargetedBlockMetadata(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
 	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
@@ -6878,8 +6878,11 @@ func TestLintAndPushPropagateParserRecoveryMetadata(t *testing.T) {
 	}
 	assertRecovery := func(t *testing.T, issue parserRecoveryIssue) {
 		t.Helper()
-		if issue.Kind != "parser_recovery" || issue.ParserNode == "" || issue.ParserToken == "" || issue.Context == "" || issue.BlockKind != "if" || issue.Closer != "End If" || issue.OpeningLine != 4 || issue.OpeningColumn != 5 {
+		if issue.Kind != "parser_recovery" || issue.BlockKind != "if" || issue.Closer != "End If" || issue.OpeningLine != 4 || issue.OpeningColumn != 5 {
 			t.Fatalf("unexpected VB014 metadata: %+v", issue)
+		}
+		if issue.ParserNode == "" && (issue.ParserToken != "" || issue.Context != "") {
+			t.Fatalf("unassociated parser recovery metadata should be omitted together: %+v", issue)
 		}
 	}
 

@@ -97,7 +97,21 @@ func blockStatements(source string) ([]blockStatement, bool) {
 	lines := normalizedSourceLines(source)
 	statements := make([]blockStatement, 0)
 	var logical strings.Builder
-	logicalLine, logicalColumn := 0, 0
+	positions := make([]blockAnchor, 0)
+	appendPhysical := func(text string, line int) {
+		logical.WriteString(text)
+		for column := 1; column <= len(text); column++ {
+			positions = append(positions, blockAnchor{line: line, column: column})
+		}
+	}
+	appendSyntheticSpace := func(line, column int) {
+		logical.WriteByte(' ')
+		positions = append(positions, blockAnchor{line: line, column: column})
+	}
+	resetLogical := func() {
+		logical.Reset()
+		positions = positions[:0]
+	}
 	pending := false
 	for i, line := range lines {
 		code := gui.StripComment(line)
@@ -108,27 +122,27 @@ func blockStatements(source string) ([]blockStatement, bool) {
 		if !pending && trimmed == "" {
 			continue
 		}
-		if !pending {
-			logicalLine = i + 1
-			logicalColumn = 1
-		}
 		if hasValidLineContinuation(code) {
-			logical.WriteString(removeLineContinuationMarker(code))
-			logical.WriteByte(' ')
+			continued := removeLineContinuationMarker(code)
+			appendPhysical(continued, i+1)
+			appendSyntheticSpace(i+1, len(continued)+1)
 			pending = true
 			continue
 		}
-		logical.WriteString(code)
+		appendPhysical(code, i+1)
 		parts := splitStatementsWithColumns(logical.String())
 		for _, part := range parts {
+			if part.start < 0 || part.start >= len(positions) {
+				return nil, false
+			}
+			position := positions[part.start]
 			statements = append(statements, blockStatement{
 				text:   part.text,
-				line:   logicalLine,
-				column: logicalColumn + part.start,
+				line:   position.line,
+				column: position.column,
 			})
 		}
-		logical.Reset()
-		logicalLine, logicalColumn = 0, 0
+		resetLogical()
 		pending = false
 	}
 	if pending {
