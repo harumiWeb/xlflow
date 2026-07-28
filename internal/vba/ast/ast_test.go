@@ -48,6 +48,21 @@ func TestParserReportsErrorAndMissingRecovery(t *testing.T) {
 	}
 }
 
+func TestParserParsesNestedInlineLoopsWithSharedNextVariables(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	result := parser.Parse("Main.bas", []byte("Public Sub Run()\nFor outer = 1 To 2: For inner = 1 To 2: Next inner, outer\nEnd Sub\n"))
+	defer result.Close()
+
+	if result.HasError || result.HasMissing {
+		t.Fatalf("unexpected recovery state: error=%t missing=%t tree=%s", result.HasError, result.HasMissing, result.Root.ToSexp())
+	}
+}
+
 func TestParsedDocumentOwnsRecoveryStateAndClosesAfterReaders(t *testing.T) {
 	doc, err := ParseDocument("Broken.bas", []byte("Public Function Foo(ByVal x As String\nEnd Function\n"))
 	if err != nil {

@@ -291,12 +291,19 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 	acquireCtx := ctx
 	stopSignal := func() {}
 	cancelTimeout := func() {}
-	if a.wait {
+	waitStarted := false
+	startWait := func() {
+		if waitStarted {
+			return
+		}
 		acquireCtx, stopSignal = signal.NotifyContext(ctx, os.Interrupt)
 		acquireCtx, cancelTimeout = context.WithTimeout(acquireCtx, a.waitTimeout)
+		waitStarted = true
 	}
-	defer stopSignal()
-	defer cancelTimeout()
+	defer func() {
+		stopSignal()
+		cancelTimeout()
+	}()
 
 	leases := make([]*coordination.Lease, 0, len(lockIDs))
 	waitingAnnounced := false
@@ -320,10 +327,14 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 				_, _ = fmt.Fprintf(a.stderrWriter(), "Waiting up to %s for the workbook to become available: %s\n", a.waitTimeout, busy.Identity.CanonicalPath)
 				waitingAnnounced = true
 			}
+			// Start the deadline only after the initial non-waiting probe found
+			// contention. Metadata publication on an uncontended acquisition must
+			// not consume the user's wait budget or affect the command body.
+			startWait()
 			request.Wait = true
 			lease, acquireErr = manager.Acquire(acquireCtx, request)
 		}
-		if acquireErr == nil && a.wait && acquireCtx.Err() != nil {
+		if acquireErr == nil && waitStarted && acquireCtx.Err() != nil {
 			_ = lease.Release()
 			acquireErr = acquireCtx.Err()
 		}
