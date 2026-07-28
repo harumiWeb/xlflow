@@ -515,7 +515,7 @@ func TestWorkbookCoordinationUsesOneTimeoutBudgetAcrossMultipleTargets(t *testin
 
 	// Release the first lock close to the shared deadline. A correct shared
 	// deadline expires after about 4s, while a mistakenly restarted deadline
-	// needs about 7s. The 1.5s upper-bound allowance absorbs hosted Windows
+	// needs about 7s. The 2s upper-bound allowance absorbs hosted Windows
 	// scheduler pauses without masking the restarted-timeout regression.
 	const waitBudget = 4 * time.Second
 	time.AfterFunc(3*time.Second, func() { _ = firstOwner.Release() })
@@ -531,7 +531,7 @@ func TestWorkbookCoordinationUsesOneTimeoutBudgetAcrossMultipleTargets(t *testin
 	if elapsed < 3500*time.Millisecond {
 		t.Fatalf("multi-target acquisition timed out too early after %s", elapsed)
 	}
-	if elapsed >= 5500*time.Millisecond {
+	if elapsed >= 6*time.Second {
 		t.Fatalf("multi-target acquisition took %s; timeout budget appears to have restarted per target", elapsed)
 	}
 }

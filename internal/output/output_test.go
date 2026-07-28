@@ -1923,6 +1923,40 @@ func TestWriteWithOptionsRendersVB014RecoveryDetails(t *testing.T) {
 	}
 }
 
+func TestWriteWithOptionsRendersVB014UnclosedBlockDiagnostic(t *testing.T) {
+	env := Failure("lint", Error{Code: "lint_failed", Message: "1 lint issue(s) found"})
+	env.Issues = []map[string]any{{
+		"code":            "VB014",
+		"severity":        "error",
+		"file":            "src/modules/Main.bas",
+		"line":            12,
+		"column":          1,
+		"message":         "Possible missing 'End If' for multiline If block opened at line 8.",
+		"parser_node":     "MISSING",
+		"parser_token":    "End If",
+		"context":         "End Sub",
+		"block_kind":      "if",
+		"expected_closer": "End If",
+		"opening_line":    8,
+		"opening_column":  3,
+	}}
+	var buf bytes.Buffer
+	if err := WriteWithOptions(&buf, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"src/modules/Main.bas:12:1",
+		"Possible missing 'End If' for multiline If block opened at line 8.",
+		`MISSING near "End If".`,
+		`Context: "End Sub"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("VB014 unclosed-block output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestWriteWithOptionsEscapesVB014SourceExcerpts(t *testing.T) {
 	env := Failure("lint", Error{Code: "lint_failed", Message: "1 lint issue(s) found"})
 	env.Issues = []map[string]any{{

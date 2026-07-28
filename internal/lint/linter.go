@@ -31,6 +31,10 @@ type Issue struct {
 	ParserNode       string `json:"parser_node,omitempty"`
 	ParserToken      string `json:"parser_token,omitempty"`
 	Context          string `json:"context,omitempty"`
+	BlockKind        string `json:"block_kind,omitempty"`
+	ExpectedCloser   string `json:"expected_closer,omitempty"`
+	OpeningLine      int    `json:"opening_line,omitempty"`
+	OpeningColumn    int    `json:"opening_column,omitempty"`
 	parserRecoveryOK bool   `json:"-"`
 }
 
@@ -241,7 +245,7 @@ func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bo
 		ctx.lint(view.Root)
 		issues = append(issues, ctx.issues...)
 		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) {
-			issues = append(issues, ctx.parseIssue(view.Root))
+			issues = append(issues, ctx.parseIssues(view.Root)...)
 		}
 		issues = append(issues, l.flowIssues(path, string(source), view.Root)...)
 		issues = append(issues, l.procedureNameConstantIssues(path, view.Root, source)...)
@@ -562,8 +566,33 @@ func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inPro
 	}
 }
 
-func (c *astLintContext) parseIssue(root *tree_sitter.Node) Issue {
+func (c *astLintContext) parseIssues(root *tree_sitter.Node) []Issue {
 	detail := parserRecoveryDetailFor(root, c.source)
+	if blocks, reliable := unmatchedBlockCandidates(string(c.source)); reliable && len(blocks) > 0 {
+		blockDetails := parserRecoveryDetailsForBlocks(parserRecoveryDetailsFor(root, c.source), blocks)
+		issues := make([]Issue, 0, len(blocks))
+		for index, block := range blocks {
+			issue := c.linter.issueAt(c.path, vbaast.Range{StartLine: block.expectedLine, StartColumn: block.expectedColumn}, "VB014", "error", fmt.Sprintf("Possible missing '%s' for %s block opened at line %d.", block.expectedCloser, block.label, block.openingLine))
+			issue.Kind = "parser_recovery"
+			issue.Suggestion = fmt.Sprintf("Insert '%s' before line %d, then run xlflow lint again.", block.expectedCloser, block.expectedLine)
+			if blockDetail := blockDetails[index]; blockDetail.node != "" {
+				issue.ParserNode = blockDetail.node
+				issue.ParserToken = blockDetail.token
+				issue.Context = blockDetail.context
+			}
+			issue.BlockKind = block.kind
+			issue.ExpectedCloser = block.expectedCloser
+			issue.OpeningLine = block.openingLine
+			issue.OpeningColumn = block.openingColumn
+			issues = append(issues, issue)
+		}
+		return issues
+	}
+	issue := c.genericParseIssue(detail)
+	return []Issue{issue}
+}
+
+func (c *astLintContext) genericParseIssue(detail parserRecoveryDetail) Issue {
 	issue := c.linter.issueAt(c.path, detail.rangeAt(), "VB014", "error", parserRecoveryMessage)
 	issue.Kind = "parser_recovery"
 	issue.Suggestion = parserRecoverySuggestion
@@ -1099,13 +1128,34 @@ func (d parserRecoveryDetail) rangeAt() vbaast.Range {
 // node in source order. VB014 is deliberately fail-closed, but its detail is
 // diagnostic evidence rather than a claim that VBA itself is invalid.
 func parserRecoveryDetailFor(root *tree_sitter.Node, source []byte) parserRecoveryDetail {
-	detail := parserRecoveryDetail{}
-	node := firstParseProblem(root)
-	if node == nil {
-		return detail
+	details := parserRecoveryDetailsFor(root, source)
+	if len(details) == 0 {
+		return parserRecoveryDetail{}
 	}
+	return details[0]
+}
 
-	detail.range_ = vbaast.NodeRange(node)
+func parserRecoveryDetailsFor(root *tree_sitter.Node, source []byte) []parserRecoveryDetail {
+	details := make([]parserRecoveryDetail, 0)
+	collectParserRecoveryDetails(root, source, &details)
+	return details
+}
+
+func collectParserRecoveryDetails(node *tree_sitter.Node, source []byte, details *[]parserRecoveryDetail) {
+	if node == nil {
+		return
+	}
+	if node.IsError() || node.IsMissing() {
+		*details = append(*details, parserRecoveryDetailForNode(node, source))
+		return
+	}
+	for i := uint(0); i < node.ChildCount(); i++ {
+		collectParserRecoveryDetails(node.Child(i), source, details)
+	}
+}
+
+func parserRecoveryDetailForNode(node *tree_sitter.Node, source []byte) parserRecoveryDetail {
+	detail := parserRecoveryDetail{range_: vbaast.NodeRange(node)}
 	if node.IsMissing() {
 		detail.node = "MISSING"
 	} else {
@@ -1117,6 +1167,30 @@ func parserRecoveryDetailFor(root *tree_sitter.Node, source []byte) parserRecove
 	}
 	detail.context = parserRecoveryContext(source, detail.range_.StartLine)
 	return detail
+}
+
+func parserRecoveryDetailsForBlocks(details []parserRecoveryDetail, blocks []unclosedBlockCandidate) []parserRecoveryDetail {
+	associated := make([]parserRecoveryDetail, len(blocks))
+	for _, detail := range details {
+		line := detail.range_.StartLine
+		if line <= 0 {
+			continue
+		}
+		best, bestSpan := -1, 0
+		for index, block := range blocks {
+			if associated[index].node != "" || line < block.openingLine || line > block.expectedLine {
+				continue
+			}
+			span := block.expectedLine - block.openingLine
+			if best < 0 || span < bestSpan {
+				best, bestSpan = index, span
+			}
+		}
+		if best >= 0 {
+			associated[best] = detail
+		}
+	}
+	return associated
 }
 
 func parserRecoveryContext(source []byte, lineNo int) string {
@@ -1140,21 +1214,6 @@ func truncateParserRecoveryText(text string, maxRunes int) string {
 	}
 	runes := []rune(text)
 	return string(runes[:maxRunes-1]) + "…"
-}
-
-func firstParseProblem(node *tree_sitter.Node) *tree_sitter.Node {
-	if node == nil {
-		return nil
-	}
-	if node.IsError() || node.IsMissing() {
-		return node
-	}
-	for i := uint(0); i < node.ChildCount(); i++ {
-		if found := firstParseProblem(node.Child(i)); found != nil {
-			return found
-		}
-	}
-	return nil
 }
 
 func PushBlockingIssues(issues []Issue) []Issue {

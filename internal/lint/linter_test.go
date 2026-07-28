@@ -497,6 +497,244 @@ End Sub
 	assertIssue(t, PushBlockingIssues(issues), "VB014", issue.Line)
 }
 
+func TestLinterReportsLikelyUnclosedBlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	tests := []struct {
+		name         string
+		body         string
+		kind         string
+		closer       string
+		openingLine  int
+		expectedLine int
+	}{
+		{
+			name: "multiline If",
+			body: "Option Explicit\nSub Main()\n  If enabled Then\n    Debug.Print \"x\"\nEnd Sub\n",
+			kind: "if", closer: "End If", openingLine: 3, expectedLine: 5,
+		},
+		{
+			name: "For Each",
+			body: "Option Explicit\nSub Main()\n  For Each item In items\n    Debug.Print item\nEnd Sub\n",
+			kind: "for", closer: "Next", openingLine: 3, expectedLine: 5,
+		},
+		{
+			name: "Do Loop",
+			body: "Option Explicit\nSub Main()\n  Do While ready\n    Debug.Print \"x\"\nEnd Sub\n",
+			kind: "do", closer: "Loop", openingLine: 3, expectedLine: 5,
+		},
+		{
+			name: "While Wend",
+			body: "Option Explicit\nSub Main()\n  While ready\n    Debug.Print \"x\"\nEnd Sub\n",
+			kind: "while", closer: "Wend", openingLine: 3, expectedLine: 5,
+		},
+		{
+			name: "With End With",
+			body: "Option Explicit\nSub Main()\n  With Application\n    .ScreenUpdating = False\nEnd Sub\n",
+			kind: "with", closer: "End With", openingLine: 3, expectedLine: 5,
+		},
+		{
+			name: "Select Case",
+			body: "Option Explicit\nSub Main()\n  Select Case value\n  Case 1\n    Debug.Print \"x\"\nEnd Sub\n",
+			kind: "select", closer: "End Select", openingLine: 3, expectedLine: 6,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, []byte(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			vb014 := issuesByCode(issues, "VB014")
+			if len(vb014) != 1 {
+				t.Fatalf("VB014 issues = %+v, want one targeted issue", vb014)
+			}
+			issue := vb014[0]
+			if issue.Kind != "parser_recovery" || issue.BlockKind != tc.kind || issue.ExpectedCloser != tc.closer || issue.OpeningLine != tc.openingLine || issue.Line != tc.expectedLine {
+				t.Fatalf("unexpected targeted recovery issue: %+v", issue)
+			}
+			if !strings.Contains(issue.Message, "Possible missing '"+tc.closer+"'") || !strings.Contains(issue.Message, "opened at line "+strconv.Itoa(tc.openingLine)) {
+				t.Fatalf("targeted message = %q", issue.Message)
+			}
+			assertIssue(t, PushBlockingIssues(issues), "VB014", tc.expectedLine)
+		})
+	}
+}
+
+func TestLinterLocatesNestedUnclosedBlockAtParentCloser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Option Explicit\nSub Main()\n  If outerReady Then\n    If innerReady Then\n      Debug.Print \"x\"\n  End If\nEnd Sub\n")
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) != 1 {
+		t.Fatalf("VB014 issues = %+v, want one nested-block diagnostic", vb014)
+	}
+	issue := vb014[0]
+	if issue.BlockKind != "if" || issue.ExpectedCloser != "End If" || issue.OpeningLine != 4 || issue.OpeningColumn != 5 || issue.Line != 6 || issue.Column != 3 {
+		t.Fatalf("nested-block diagnostic = %+v, want inner If at its parent End If", issue)
+	}
+	if !strings.Contains(issue.Message, "opened at line 4") {
+		t.Fatalf("nested-block message = %q", issue.Message)
+	}
+}
+
+func TestLinterPreservesContinuationTailLocationForUnclosedBlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Sub Main()\n  result = _\n    1: If ready Then\n      Debug.Print \"x\"\nEnd Sub\n")
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) != 1 {
+		t.Fatalf("VB014 issues = %+v, want one targeted issue", vb014)
+	}
+	issue := vb014[0]
+	if issue.BlockKind != "if" || issue.OpeningLine != 3 || issue.OpeningColumn != 8 || issue.Line != 5 || issue.Column != 1 {
+		t.Fatalf("continuation-tail diagnostic location = %+v", issue)
+	}
+}
+
+func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
+	valid := "Sub Main()\n  If ready Then\n    For Each item In items\n      Debug.Print item\n    Next item\n  End If\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(valid); !reliable || len(candidates) != 0 {
+		t.Fatalf("valid source candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	singleLineIf := "Sub Main()\n  If ready Then Debug.Print \"End If\"\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(singleLineIf); !reliable || len(candidates) != 0 {
+		t.Fatalf("single-line If candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	colonClosed := "Sub Main()\n  For Each item In items: Debug.Print item: Next item\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(colonClosed); !reliable || len(candidates) != 0 {
+		t.Fatalf("colon-closed block candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	sharedNext := "Sub Main()\n  For Each outerItem In items\n    For Each innerItem In items\n      Debug.Print innerItem\n    Next innerItem, outerItem\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(sharedNext); !reliable || len(candidates) != 0 {
+		t.Fatalf("shared Next candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	loopUntil := "Sub Main()\n  Do While ready\n    Debug.Print \"x\"\n  Loop Until finished\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(loopUntil); !reliable || len(candidates) != 0 {
+		t.Fatalf("Loop Until candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	continuation := "Sub Main()\n  If ready _\n      And enabled Then\n    Debug.Print \"x\"\nEnd Sub\n"
+	candidates, reliable := unmatchedBlockCandidates(continuation)
+	if !reliable || len(candidates) != 1 || candidates[0].kind != "if" || candidates[0].openingLine != 2 || candidates[0].expectedLine != 5 {
+		t.Fatalf("continued If candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	nestedParentCloser := "Sub Main()\n  If outerReady Then\n    If innerReady Then\n      Debug.Print \"x\"\n  End If\nEnd Sub\n"
+	candidates, reliable = unmatchedBlockCandidates(nestedParentCloser)
+	if !reliable || len(candidates) != 1 || candidates[0].kind != "if" || candidates[0].openingLine != 3 || candidates[0].expectedLine != 5 || candidates[0].expectedColumn != 3 {
+		t.Fatalf("nested parent-closer candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	continuationTail := "Sub Main()\n  result = _\n    1: If ready Then\n      Debug.Print \"x\"\nEnd Sub\n"
+	candidates, reliable = unmatchedBlockCandidates(continuationTail)
+	if !reliable || len(candidates) != 1 || candidates[0].openingLine != 3 || candidates[0].openingColumn != 8 || candidates[0].expectedLine != 5 || candidates[0].expectedColumn != 1 {
+		t.Fatalf("continuation-tail candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	continuedRem := "Sub Main()\n  Rem note _\n    more: If ready Then\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(continuedRem); !reliable || len(candidates) != 0 {
+		t.Fatalf("continued Rem candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	continuedSingleLineIf := "Sub Main()\n  If ready Then _\n    : Debug.Print \"x\"\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(continuedSingleLineIf); !reliable || len(candidates) != 0 {
+		t.Fatalf("continued single-line If candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	conditional := "Sub Main()\n#If VBA7 Then\n  If ready Then\n#End If\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(conditional); reliable || len(candidates) != 0 {
+		t.Fatalf("conditional source candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
+	comment := "Sub Main()\n  ' If ready Then\n  Rem For Each item In items\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(comment); !reliable || len(candidates) != 0 {
+		t.Fatalf("comment source candidates = %+v, reliable=%t", candidates, reliable)
+	}
+}
+
+func TestLinterFallsBackToGenericRecoveryForConditionalCompilation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Option Explicit\nSub Main()\n#If VBA7 Then\n  If ready Then\n    Debug.Print \"x\"\n#End If\nEnd Sub\n")
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb014 := issuesByCode(issues, "VB014")
+	if len(vb014) != 1 {
+		t.Fatalf("VB014 issues = %+v, want one generic recovery issue", vb014)
+	}
+	issue := vb014[0]
+	if issue.BlockKind != "" || issue.ExpectedCloser != "" || issue.Message != parserRecoveryMessage {
+		t.Fatalf("conditional compilation should retain generic recovery guidance: %+v", issue)
+	}
+}
+
+func TestLinterFallsBackToGenericRecoveryForAmbiguousBlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "malformed For opener",
+			source: "Option Explicit\nSub Main()\n  For item\n    Debug.Print item\nEnd Sub\n",
+		},
+		{
+			name:   "malformed Next counter",
+			source: "Option Explicit\nSub Main()\n  For item = 1 To 2\n    Debug.Print item\n  Next item,\nEnd Sub\n",
+		},
+		{
+			name:   "mismatched closer",
+			source: "Option Explicit\nSub Main()\n  If ready Then\n    Debug.Print \"x\"\n  Next\nEnd Sub\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, []byte(tc.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			vb014 := issuesByCode(issues, "VB014")
+			if len(vb014) != 1 {
+				t.Fatalf("VB014 issues = %+v, want one generic recovery issue", vb014)
+			}
+			issue := vb014[0]
+			if issue.BlockKind != "" || issue.ExpectedCloser != "" || issue.OpeningLine != 0 || issue.Message != parserRecoveryMessage {
+				t.Fatalf("ambiguous source should retain generic recovery guidance: %+v", issue)
+			}
+		})
+	}
+}
+
+func TestParserRecoveryDetailsForBlocksAssociateOnlyMatchingRecovery(t *testing.T) {
+	blocks := []unclosedBlockCandidate{
+		{openingLine: 2, expectedLine: 9},
+		{openingLine: 4, expectedLine: 6},
+		{openingLine: 11, expectedLine: 14},
+	}
+	details := []parserRecoveryDetail{
+		{range_: vbaast.Range{StartLine: 5}, node: "ERROR", token: "inner", context: "inner context"},
+		{range_: vbaast.Range{StartLine: 12}, node: "MISSING", token: "later", context: "later context"},
+	}
+	associated := parserRecoveryDetailsForBlocks(details, blocks)
+	if associated[0].node != "" {
+		t.Fatalf("outer block should not inherit nested recovery detail: %+v", associated)
+	}
+	if associated[1].token != "inner" || associated[2].token != "later" {
+		t.Fatalf("associated recovery details = %+v", associated)
+	}
+}
+
 func TestParserRecoveryDetailBoundsUnicodeText(t *testing.T) {
 	text := strings.Repeat("あ", maxParserRecoveryContextRunes+1)
 	got := truncateParserRecoveryText(text, maxParserRecoveryContextRunes)

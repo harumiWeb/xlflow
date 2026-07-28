@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.27.1
+
+- Improved `VB014` parser-recovery diagnostics for likely unclosed VBA blocks. When a missing `End If`, `Next`, `Loop`, `Wend`, `End With`, or `End Select` can be identified confidently, lint, LSP, and push/run preflight now report the unmatched opening line and expected closer; a reliably indented parent closer is highlighted for an unclosed nested block, while ambiguous recovery remains generic.
 - Fixed `--wait-timeout` so uncontended workbook coordination metadata work no longer consumes the lock-wait budget.
 - Updated `tree-sitter-vba` to v0.10.1, adding support for nested colon-separated single-line control flow, shared `Next` counter lists, and complete single-line `If` statement sequences.
 
