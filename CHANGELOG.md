@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated `tree-sitter-vba` to v0.10.1, adding support for nested colon-separated single-line control flow, shared `Next` counter lists, and complete single-line `If` statement sequences.
+
 ## v0.27.0
 
 - Added `xlflow test --visible` to run GUI-bound VBA integration tests, such as `Application.OnKey` registration, with a visible Excel window without changing the project's `[excel].visible` configuration.

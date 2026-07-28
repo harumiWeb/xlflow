@@ -8,7 +8,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/harumiWeb/tree-sitter-vba v0.9.0
+	github.com/harumiWeb/tree-sitter-vba v0.10.1
 	github.com/richardlehane/mscfb v1.0.7
 	github.com/sourcegraph/jsonrpc2 v0.2.0
 	github.com/spf13/cobra v1.10.2
