@@ -197,12 +197,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `edit_args_invalid`
 - `edit_coordinates_unreconciled`
 - `else_clause`
+- `else_fragment`
 - `elseif_clause`
+- `elseif_fragment`
 - `empty_parentheses`
 - `enable_events_after`
 - `enable_events_before`
 - `enable_vba_object_model_access`
 - `end_column`
+- `end_if_fragment`
 - `end_line`
 - `enum_declaration`
 - `enum_group`

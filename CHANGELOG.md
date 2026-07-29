@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated `tree-sitter-vba` to v0.11.0 and preserved lint and formatter behavior across its flat multiline-`If` CST: VB014 now runs structural block validation even when the parser accepts fragment nodes, and formatting pairs `if_statement`, `elseif_fragment`, `else_fragment`, and `end_if_fragment` ranges.
+
 ## v0.27.1
 
 - Improved `VB014` parser-recovery diagnostics for likely unclosed VBA blocks. When a missing `End If`, `Next`, `Loop`, `Wend`, `End With`, or `End Select` can be identified confidently, lint, LSP, and push/run preflight now report the unmatched opening line and expected closer; a reliably indented parent closer is highlighted for an unclosed nested block, while ambiguous recovery remains generic.

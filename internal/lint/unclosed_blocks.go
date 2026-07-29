@@ -84,6 +84,146 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 	return candidates, true
 }
 
+// shouldReportStructuralParseIssue preserves VB014 when the CST intentionally
+// accepts block fragments, such as conditional-compilation-split If blocks.
+// The detailed scanner remains authoritative when it is reliable; ambiguous
+// conditional compilation is checked across every possible branch depth.
+func shouldReportStructuralParseIssue(source string) bool {
+	blocks, reliable := unmatchedBlockCandidates(source)
+	if reliable {
+		return len(blocks) > 0
+	}
+	if hasConditionalCompilation(source) {
+		return conditionalIfBalanceInvalid(source)
+	}
+	return hasBlockBoundarySyntax(source)
+}
+
+func hasConditionalCompilation(source string) bool {
+	for _, line := range normalizedSourceLines(source) {
+		if isConditionalCompilationDirective(strings.ToLower(strings.TrimSpace(gui.StripComment(line)))) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBlockBoundarySyntax(source string) bool {
+	for _, line := range normalizedSourceLines(source) {
+		lower := strings.ToLower(strings.TrimSpace(gui.StripComment(line)))
+		if _, ok := blockOpener(lower, false); ok {
+			return true
+		}
+		if _, _, ok := blockCloser(lower); ok {
+			return true
+		}
+		if isIfBranchStatement(lower) || isSelectCaseBranch(lower) {
+			return true
+		}
+	}
+	return false
+}
+
+type conditionalIfFrame struct {
+	baseline map[int]struct{}
+	branches map[int]struct{}
+	sawElse  bool
+}
+
+func conditionalIfBalanceInvalid(source string) bool {
+	depths := map[int]struct{}{0: {}}
+	frames := make([]conditionalIfFrame, 0)
+	for _, line := range normalizedSourceLines(source) {
+		lower := strings.ToLower(strings.TrimSpace(gui.StripComment(line)))
+		switch {
+		case strings.HasPrefix(lower, "#if ") && strings.HasSuffix(lower, " then"):
+			frames = append(frames, conditionalIfFrame{
+				baseline: cloneDepthSet(depths),
+				branches: make(map[int]struct{}),
+			})
+		case strings.HasPrefix(lower, "#elseif ") && strings.HasSuffix(lower, " then"):
+			if len(frames) == 0 {
+				return true
+			}
+			frame := &frames[len(frames)-1]
+			mergeDepthSets(frame.branches, depths)
+			depths = cloneDepthSet(frame.baseline)
+		case lower == "#else":
+			if len(frames) == 0 {
+				return true
+			}
+			frame := &frames[len(frames)-1]
+			mergeDepthSets(frame.branches, depths)
+			frame.sawElse = true
+			depths = cloneDepthSet(frame.baseline)
+		case lower == "#end if":
+			if len(frames) == 0 {
+				return true
+			}
+			frame := frames[len(frames)-1]
+			frames = frames[:len(frames)-1]
+			mergeDepthSets(frame.branches, depths)
+			if !frame.sawElse {
+				mergeDepthSets(frame.branches, frame.baseline)
+			}
+			depths = frame.branches
+		case isMultilineIfOpener(lower):
+			depths = shiftDepths(depths, 1)
+		case lower == "end if":
+			var valid bool
+			depths, valid = decrementDepths(depths)
+			if !valid {
+				return true
+			}
+		}
+	}
+	if len(frames) != 0 {
+		return true
+	}
+	for depth := range depths {
+		if depth != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func isMultilineIfOpener(lower string) bool {
+	block, ok := blockOpener(lower, false)
+	return ok && block.kind == "if"
+}
+
+func cloneDepthSet(source map[int]struct{}) map[int]struct{} {
+	cloned := make(map[int]struct{}, len(source))
+	mergeDepthSets(cloned, source)
+	return cloned
+}
+
+func mergeDepthSets(target, source map[int]struct{}) {
+	for depth := range source {
+		target[depth] = struct{}{}
+	}
+}
+
+func shiftDepths(source map[int]struct{}, delta int) map[int]struct{} {
+	shifted := make(map[int]struct{}, len(source))
+	for depth := range source {
+		shifted[depth+delta] = struct{}{}
+	}
+	return shifted
+}
+
+func decrementDepths(source map[int]struct{}) (map[int]struct{}, bool) {
+	decremented := make(map[int]struct{}, len(source))
+	for depth := range source {
+		if depth == 0 {
+			return nil, false
+		}
+		decremented[depth-1] = struct{}{}
+	}
+	return decremented, true
+}
+
 type blockStatement struct {
 	text   string
 	line   int

@@ -1091,6 +1091,71 @@ End Sub
 	assertTrimmedLineIndent(t, got, "#End If", 4)
 }
 
+func TestFormatBasConditionalCompilationSplitIfFlatCST(t *testing.T) {
+	input := `Sub Main()
+#If Win64 Then
+If a Then
+#Else
+If b Then
+#End If
+Debug.Print "x"
+Else
+Debug.Print "y"
+End If
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := FormatText(got, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != got {
+		t.Fatalf("conditional split If format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+	for _, line := range []string{"#If Win64 Then", "If a Then", "#Else", "If b Then", "#End If", "Else", "End If"} {
+		assertTrimmedLineIndent(t, got, line, 4)
+	}
+	assertTrimmedLineIndent(t, got, `Debug.Print "x"`, 8)
+	assertTrimmedLineIndent(t, got, `Debug.Print "y"`, 8)
+}
+
+func TestFormatBasNestedConditionalCompilationSplitIfFlatCST(t *testing.T) {
+	input := `Sub Main()
+If outer Then
+#If Win64 Then
+If a Then
+#Else
+If b Then
+#End If
+Debug.Print "x"
+End If
+End If
+End Sub
+`
+	want := `Sub Main()
+    If outer Then
+        #If Win64 Then
+        If a Then
+        #Else
+        If b Then
+        #End If
+            Debug.Print "x"
+        End If
+    End If
+End Sub
+`
+	got, err := FormatText(input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("unexpected nested conditional split If format:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func TestFormatBasProperty(t *testing.T) {
 	input := `Property Get Value() As Long
 Value = m_Value

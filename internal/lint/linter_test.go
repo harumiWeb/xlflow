@@ -679,6 +679,31 @@ func TestLinterFallsBackToGenericRecoveryForConditionalCompilation(t *testing.T)
 	}
 }
 
+func TestConditionalIfBalanceAcrossCompilationBranches(t *testing.T) {
+	balanced := "Sub Main()\n#If Win64 Then\n  If a Then\n#Else\n  If b Then\n#End If\n    Debug.Print \"x\"\n  Else\n    Debug.Print \"y\"\n  End If\nEnd Sub\n"
+	if conditionalIfBalanceInvalid(balanced) {
+		t.Fatal("equivalent conditional If headers should merge into one balanced shared block")
+	}
+
+	imbalanced := "Sub Main()\n#If Win64 Then\n  If a Then\n#End If\n    Debug.Print \"x\"\nEnd Sub\n"
+	if !conditionalIfBalanceInvalid(imbalanced) {
+		t.Fatal("an implicit empty compilation branch must expose the unmatched If")
+	}
+}
+
+func TestLinterAcceptsConditionalCompilationSplitIfWithFlatCST(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Option Explicit\nSub Main()\n#If Win64 Then\n  If a Then\n#Else\n  If b Then\n#End If\n    Debug.Print \"x\"\n  Else\n    Debug.Print \"y\"\n  End If\nEnd Sub\n")
+
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("balanced conditional split If should not trigger VB014 with the flat CST: %+v", got)
+	}
+}
+
 func TestLinterFallsBackToGenericRecoveryForAmbiguousBlocks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	tests := []struct {
