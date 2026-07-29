@@ -704,6 +704,55 @@ func TestLinterAcceptsConditionalCompilationSplitIfWithFlatCST(t *testing.T) {
 	}
 }
 
+func TestLinterFlagsUnbalancedConditionalCompilationSplitIfWithFlatCST(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Option Explicit\nSub Main()\n#If Win64 Then\n  If a Then\n#End If\n    Debug.Print \"x\"\nEnd Sub\n")
+
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) == 0 {
+		t.Fatal("unbalanced conditional split If should still trigger VB014 with the flat CST")
+	}
+}
+
+func TestLinterAcceptsContinuedIfWithConditionalCompilation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte("Option Explicit\nSub Main()\n#If Win64 Then\n  Debug.Print \"64\"\n#Else\n  Debug.Print \"32\"\n#End If\n  If ready _\n    And enabled Then\n    Debug.Print \"x\"\n  End If\nEnd Sub\n")
+
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("continued If with unrelated conditional compilation should not trigger VB014: %+v", got)
+	}
+}
+
+func TestLinterRejectsInvalidFlatIfBranchOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	tests := map[string]string{
+		"orphan Else":   "Option Explicit\nSub Main()\n  Else\n    Debug.Print \"x\"\nEnd Sub\n",
+		"orphan ElseIf": "Option Explicit\nSub Main()\n  ElseIf ready Then\n    Debug.Print \"x\"\nEnd Sub\n",
+		"orphan Else with conditional compilation": "Option Explicit\nSub Main()\n#If Win64 Then\n  Debug.Print \"64\"\n#Else\n  Debug.Print \"32\"\n#End If\n  Else\n    Debug.Print \"x\"\nEnd Sub\n",
+		"duplicate Else":    "Option Explicit\nSub Main()\n  If ready Then\n    Debug.Print \"x\"\n  Else\n    Debug.Print \"y\"\n  Else\n    Debug.Print \"z\"\n  End If\nEnd Sub\n",
+		"ElseIf after Else": "Option Explicit\nSub Main()\n  If ready Then\n    Debug.Print \"x\"\n  Else\n    Debug.Print \"y\"\n  ElseIf fallback Then\n    Debug.Print \"z\"\n  End If\nEnd Sub\n",
+	}
+
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := issuesByCode(issues, "VB014"); len(got) == 0 {
+				t.Fatalf("invalid flat If branch ownership should trigger VB014: %s", source)
+			}
+		})
+	}
+}
+
 func TestLinterFallsBackToGenericRecoveryForAmbiguousBlocks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	tests := []struct {

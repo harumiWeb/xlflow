@@ -46,7 +46,15 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 			continue
 		}
 		if isIfBranchStatement(lower) {
-			if len(stack) > 0 && stack[len(stack)-1].kind != "if" {
+			if len(stack) == 0 || stack[len(stack)-1].kind != "if" {
+				return nil, false
+			}
+			if lower == "else" {
+				if stack[len(stack)-1].elseSeen {
+					return nil, false
+				}
+				stack[len(stack)-1].elseSeen = true
+			} else if stack[len(stack)-1].elseSeen {
 				return nil, false
 			}
 			continue
@@ -125,103 +133,132 @@ func hasBlockBoundarySyntax(source string) bool {
 }
 
 type conditionalIfFrame struct {
-	baseline map[int]struct{}
-	branches map[int]struct{}
+	baseline map[string]struct{}
+	branches map[string]struct{}
 	sawElse  bool
 }
 
 func conditionalIfBalanceInvalid(source string) bool {
-	depths := map[int]struct{}{0: {}}
+	statements, reliable := conditionalBlockStatements(source)
+	if !reliable {
+		return true
+	}
+
+	states := map[string]struct{}{"": {}}
 	frames := make([]conditionalIfFrame, 0)
-	for _, line := range normalizedSourceLines(source) {
-		lower := strings.ToLower(strings.TrimSpace(gui.StripComment(line)))
+	for i, statement := range statements {
+		lower := strings.ToLower(strings.TrimSpace(statement.text))
 		switch {
 		case strings.HasPrefix(lower, "#if ") && strings.HasSuffix(lower, " then"):
 			frames = append(frames, conditionalIfFrame{
-				baseline: cloneDepthSet(depths),
-				branches: make(map[int]struct{}),
+				baseline: cloneConditionalIfStates(states),
+				branches: make(map[string]struct{}),
 			})
 		case strings.HasPrefix(lower, "#elseif ") && strings.HasSuffix(lower, " then"):
 			if len(frames) == 0 {
 				return true
 			}
 			frame := &frames[len(frames)-1]
-			mergeDepthSets(frame.branches, depths)
-			depths = cloneDepthSet(frame.baseline)
+			if frame.sawElse {
+				return true
+			}
+			mergeConditionalIfStates(frame.branches, states)
+			states = cloneConditionalIfStates(frame.baseline)
 		case lower == "#else":
 			if len(frames) == 0 {
 				return true
 			}
 			frame := &frames[len(frames)-1]
-			mergeDepthSets(frame.branches, depths)
+			if frame.sawElse {
+				return true
+			}
+			mergeConditionalIfStates(frame.branches, states)
 			frame.sawElse = true
-			depths = cloneDepthSet(frame.baseline)
+			states = cloneConditionalIfStates(frame.baseline)
 		case lower == "#end if":
 			if len(frames) == 0 {
 				return true
 			}
 			frame := frames[len(frames)-1]
 			frames = frames[:len(frames)-1]
-			mergeDepthSets(frame.branches, depths)
+			mergeConditionalIfStates(frame.branches, states)
 			if !frame.sawElse {
-				mergeDepthSets(frame.branches, frame.baseline)
+				mergeConditionalIfStates(frame.branches, frame.baseline)
 			}
-			depths = frame.branches
-		case isMultilineIfOpener(lower):
-			depths = shiftDepths(depths, 1)
-		case lower == "end if":
+			states = frame.branches
+		case isIfBranchStatement(lower):
 			var valid bool
-			depths, valid = decrementDepths(depths)
+			states, valid = applyConditionalIfBranch(states, lower == "else")
 			if !valid {
 				return true
+			}
+		case lower == "end if":
+			var valid bool
+			states, valid = closeConditionalIfStates(states)
+			if !valid {
+				return true
+			}
+		default:
+			block, ok := blockOpener(lower, i+1 < len(statements) && statements[i+1].group == statement.group)
+			if ok && block.kind == "if" {
+				states = openConditionalIfStates(states)
 			}
 		}
 	}
 	if len(frames) != 0 {
 		return true
 	}
-	for depth := range depths {
-		if depth != 0 {
+	for state := range states {
+		if state != "" {
 			return true
 		}
 	}
 	return false
 }
 
-func isMultilineIfOpener(lower string) bool {
-	block, ok := blockOpener(lower, false)
-	return ok && block.kind == "if"
-}
-
-func cloneDepthSet(source map[int]struct{}) map[int]struct{} {
-	cloned := make(map[int]struct{}, len(source))
-	mergeDepthSets(cloned, source)
+func cloneConditionalIfStates(source map[string]struct{}) map[string]struct{} {
+	cloned := make(map[string]struct{}, len(source))
+	mergeConditionalIfStates(cloned, source)
 	return cloned
 }
 
-func mergeDepthSets(target, source map[int]struct{}) {
-	for depth := range source {
-		target[depth] = struct{}{}
+func mergeConditionalIfStates(target, source map[string]struct{}) {
+	for state := range source {
+		target[state] = struct{}{}
 	}
 }
 
-func shiftDepths(source map[int]struct{}, delta int) map[int]struct{} {
-	shifted := make(map[int]struct{}, len(source))
-	for depth := range source {
-		shifted[depth+delta] = struct{}{}
+func openConditionalIfStates(source map[string]struct{}) map[string]struct{} {
+	opened := make(map[string]struct{}, len(source))
+	for state := range source {
+		opened[state+"0"] = struct{}{}
 	}
-	return shifted
+	return opened
 }
 
-func decrementDepths(source map[int]struct{}) (map[int]struct{}, bool) {
-	decremented := make(map[int]struct{}, len(source))
-	for depth := range source {
-		if depth == 0 {
+func applyConditionalIfBranch(source map[string]struct{}, isElse bool) (map[string]struct{}, bool) {
+	branched := make(map[string]struct{}, len(source))
+	for state := range source {
+		if state == "" || state[len(state)-1] == '1' {
 			return nil, false
 		}
-		decremented[depth-1] = struct{}{}
+		if isElse {
+			state = state[:len(state)-1] + "1"
+		}
+		branched[state] = struct{}{}
 	}
-	return decremented, true
+	return branched, true
+}
+
+func closeConditionalIfStates(source map[string]struct{}) (map[string]struct{}, bool) {
+	closed := make(map[string]struct{}, len(source))
+	for state := range source {
+		if state == "" {
+			return nil, false
+		}
+		closed[state[:len(state)-1]] = struct{}{}
+	}
+	return closed, true
 }
 
 type blockStatement struct {
@@ -235,6 +272,14 @@ type blockStatement struct {
 // statements. Conditional compilation is intentionally excluded because the
 // active branch cannot be known from exported source alone.
 func blockStatements(source string) ([]blockStatement, bool) {
+	return scanBlockStatements(source, false)
+}
+
+func conditionalBlockStatements(source string) ([]blockStatement, bool) {
+	return scanBlockStatements(source, true)
+}
+
+func scanBlockStatements(source string, allowConditionalCompilation bool) ([]blockStatement, bool) {
 	lines := normalizedSourceLines(source)
 	statements := make([]blockStatement, 0)
 	var logical strings.Builder
@@ -259,7 +304,17 @@ func blockStatements(source string) ([]blockStatement, bool) {
 		code := gui.StripComment(line)
 		trimmed := strings.TrimSpace(code)
 		if isConditionalCompilationDirective(strings.ToLower(trimmed)) {
-			return nil, false
+			if !allowConditionalCompilation || pending {
+				return nil, false
+			}
+			group++
+			statements = append(statements, blockStatement{
+				text:   trimmed,
+				line:   i + 1,
+				column: len(code) - len(strings.TrimLeft(code, " \t")) + 1,
+				group:  group,
+			})
+			continue
 		}
 		if !pending && trimmed == "" {
 			continue
@@ -296,11 +351,12 @@ func blockStatements(source string) ([]blockStatement, bool) {
 }
 
 type openBlock struct {
-	kind   string
-	label  string
-	closer string
-	line   int
-	column int
+	kind     string
+	label    string
+	closer   string
+	line     int
+	column   int
+	elseSeen bool
 }
 
 type blockAnchor struct {

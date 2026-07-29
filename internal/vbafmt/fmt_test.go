@@ -686,7 +686,10 @@ End Sub
 	if !strings.Contains(continuedIfGot, "End If") {
 		t.Fatalf("continued If block missing End If:\n%s", continuedIfGot)
 	}
+	assertTrimmedLineIndent(t, continuedIfGot, "If condition _", 4)
+	assertTrimmedLineIndent(t, continuedIfGot, "And otherCondition Then", 8)
 	assertTrimmedLineIndent(t, continuedIfGot, "value = 1", 8)
+	assertTrimmedLineIndent(t, continuedIfGot, "End If", 4)
 	second, err := FormatText(continuedIfGot, false)
 	if err != nil {
 		t.Fatal(err)
@@ -1001,6 +1004,12 @@ End Sub
 	}
 	if second != got {
 		t.Fatalf("format not idempotent for If/Else/ElseIf:\n%s\n%s", got, second)
+	}
+	for _, line := range []string{"If x = 1 Then", "ElseIf x = 2 Then", "Else", "End If"} {
+		assertTrimmedLineIndent(t, got, line, 4)
+	}
+	for _, line := range []string{"y = 1", "y = 2", "y = 0"} {
+		assertTrimmedLineIndent(t, got, line, 8)
 	}
 }
 
