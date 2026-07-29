@@ -46,7 +46,15 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 			continue
 		}
 		if isIfBranchStatement(lower) {
-			if len(stack) > 0 && stack[len(stack)-1].kind != "if" {
+			if len(stack) == 0 || stack[len(stack)-1].kind != "if" {
+				return nil, false
+			}
+			if lower == "else" {
+				if stack[len(stack)-1].elseSeen {
+					return nil, false
+				}
+				stack[len(stack)-1].elseSeen = true
+			} else if stack[len(stack)-1].elseSeen {
 				return nil, false
 			}
 			continue
@@ -84,6 +92,175 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 	return candidates, true
 }
 
+// shouldReportStructuralParseIssue preserves VB014 when the CST intentionally
+// accepts block fragments, such as conditional-compilation-split If blocks.
+// The detailed scanner remains authoritative when it is reliable; ambiguous
+// conditional compilation is checked across every possible branch depth.
+func shouldReportStructuralParseIssue(source string) bool {
+	blocks, reliable := unmatchedBlockCandidates(source)
+	if reliable {
+		return len(blocks) > 0
+	}
+	if hasConditionalCompilation(source) {
+		return conditionalIfBalanceInvalid(source)
+	}
+	return hasBlockBoundarySyntax(source)
+}
+
+func hasConditionalCompilation(source string) bool {
+	for _, line := range normalizedSourceLines(source) {
+		if isConditionalCompilationDirective(strings.ToLower(strings.TrimSpace(gui.StripComment(line)))) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBlockBoundarySyntax(source string) bool {
+	for _, line := range normalizedSourceLines(source) {
+		lower := strings.ToLower(strings.TrimSpace(gui.StripComment(line)))
+		if _, ok := blockOpener(lower, false); ok {
+			return true
+		}
+		if _, _, ok := blockCloser(lower); ok {
+			return true
+		}
+		if isIfBranchStatement(lower) || isSelectCaseBranch(lower) {
+			return true
+		}
+	}
+	return false
+}
+
+type conditionalIfFrame struct {
+	baseline map[string]struct{}
+	branches map[string]struct{}
+	sawElse  bool
+}
+
+func conditionalIfBalanceInvalid(source string) bool {
+	statements, reliable := conditionalBlockStatements(source)
+	if !reliable {
+		return true
+	}
+
+	states := map[string]struct{}{"": {}}
+	frames := make([]conditionalIfFrame, 0)
+	for i, statement := range statements {
+		lower := strings.ToLower(strings.TrimSpace(statement.text))
+		switch {
+		case strings.HasPrefix(lower, "#if ") && strings.HasSuffix(lower, " then"):
+			frames = append(frames, conditionalIfFrame{
+				baseline: cloneConditionalIfStates(states),
+				branches: make(map[string]struct{}),
+			})
+		case strings.HasPrefix(lower, "#elseif ") && strings.HasSuffix(lower, " then"):
+			if len(frames) == 0 {
+				return true
+			}
+			frame := &frames[len(frames)-1]
+			if frame.sawElse {
+				return true
+			}
+			mergeConditionalIfStates(frame.branches, states)
+			states = cloneConditionalIfStates(frame.baseline)
+		case lower == "#else":
+			if len(frames) == 0 {
+				return true
+			}
+			frame := &frames[len(frames)-1]
+			if frame.sawElse {
+				return true
+			}
+			mergeConditionalIfStates(frame.branches, states)
+			frame.sawElse = true
+			states = cloneConditionalIfStates(frame.baseline)
+		case lower == "#end if":
+			if len(frames) == 0 {
+				return true
+			}
+			frame := frames[len(frames)-1]
+			frames = frames[:len(frames)-1]
+			mergeConditionalIfStates(frame.branches, states)
+			if !frame.sawElse {
+				mergeConditionalIfStates(frame.branches, frame.baseline)
+			}
+			states = frame.branches
+		case isIfBranchStatement(lower):
+			var valid bool
+			states, valid = applyConditionalIfBranch(states, lower == "else")
+			if !valid {
+				return true
+			}
+		case lower == "end if":
+			var valid bool
+			states, valid = closeConditionalIfStates(states)
+			if !valid {
+				return true
+			}
+		default:
+			block, ok := blockOpener(lower, i+1 < len(statements) && statements[i+1].group == statement.group)
+			if ok && block.kind == "if" {
+				states = openConditionalIfStates(states)
+			}
+		}
+	}
+	if len(frames) != 0 {
+		return true
+	}
+	for state := range states {
+		if state != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneConditionalIfStates(source map[string]struct{}) map[string]struct{} {
+	cloned := make(map[string]struct{}, len(source))
+	mergeConditionalIfStates(cloned, source)
+	return cloned
+}
+
+func mergeConditionalIfStates(target, source map[string]struct{}) {
+	for state := range source {
+		target[state] = struct{}{}
+	}
+}
+
+func openConditionalIfStates(source map[string]struct{}) map[string]struct{} {
+	opened := make(map[string]struct{}, len(source))
+	for state := range source {
+		opened[state+"0"] = struct{}{}
+	}
+	return opened
+}
+
+func applyConditionalIfBranch(source map[string]struct{}, isElse bool) (map[string]struct{}, bool) {
+	branched := make(map[string]struct{}, len(source))
+	for state := range source {
+		if state == "" || state[len(state)-1] == '1' {
+			return nil, false
+		}
+		if isElse {
+			state = state[:len(state)-1] + "1"
+		}
+		branched[state] = struct{}{}
+	}
+	return branched, true
+}
+
+func closeConditionalIfStates(source map[string]struct{}) (map[string]struct{}, bool) {
+	closed := make(map[string]struct{}, len(source))
+	for state := range source {
+		if state == "" {
+			return nil, false
+		}
+		closed[state[:len(state)-1]] = struct{}{}
+	}
+	return closed, true
+}
+
 type blockStatement struct {
 	text   string
 	line   int
@@ -95,6 +272,14 @@ type blockStatement struct {
 // statements. Conditional compilation is intentionally excluded because the
 // active branch cannot be known from exported source alone.
 func blockStatements(source string) ([]blockStatement, bool) {
+	return scanBlockStatements(source, false)
+}
+
+func conditionalBlockStatements(source string) ([]blockStatement, bool) {
+	return scanBlockStatements(source, true)
+}
+
+func scanBlockStatements(source string, allowConditionalCompilation bool) ([]blockStatement, bool) {
 	lines := normalizedSourceLines(source)
 	statements := make([]blockStatement, 0)
 	var logical strings.Builder
@@ -119,7 +304,17 @@ func blockStatements(source string) ([]blockStatement, bool) {
 		code := gui.StripComment(line)
 		trimmed := strings.TrimSpace(code)
 		if isConditionalCompilationDirective(strings.ToLower(trimmed)) {
-			return nil, false
+			if !allowConditionalCompilation || pending {
+				return nil, false
+			}
+			group++
+			statements = append(statements, blockStatement{
+				text:   trimmed,
+				line:   i + 1,
+				column: len(code) - len(strings.TrimLeft(code, " \t")) + 1,
+				group:  group,
+			})
+			continue
 		}
 		if !pending && trimmed == "" {
 			continue
@@ -156,11 +351,12 @@ func blockStatements(source string) ([]blockStatement, bool) {
 }
 
 type openBlock struct {
-	kind   string
-	label  string
-	closer string
-	line   int
-	column int
+	kind     string
+	label    string
+	closer   string
+	line     int
+	column   int
+	elseSeen bool
 }
 
 type blockAnchor struct {

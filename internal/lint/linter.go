@@ -244,7 +244,8 @@ func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bo
 		ctx := astLintContext{linter: l, path: path, source: source}
 		ctx.lint(view.Root)
 		issues = append(issues, ctx.issues...)
-		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) {
+		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) ||
+			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, ctx.parseIssues(view.Root)...)
 		}
 		issues = append(issues, l.flowIssues(path, string(source), view.Root)...)
