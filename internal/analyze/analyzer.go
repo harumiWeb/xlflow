@@ -12,6 +12,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/gui"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -152,7 +153,8 @@ type parsedFile struct {
 	Module string
 	Source []byte
 	Root   *tree_sitter.Node
-	Result *vbaast.ParseResult
+	IR     procedureir.DocumentIR
+	Parsed *vbaast.ParsedDocument
 }
 
 type sourceProcedure struct {
@@ -162,6 +164,7 @@ type sourceProcedure struct {
 	StartLine  int
 	EndLine    int
 	Params     []parameterInfo
+	Statements []procedureir.Statement
 }
 
 type sourceDeclaration struct {
@@ -197,30 +200,39 @@ func (a Analyzer) RunResult() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	parser, err := vbaast.NewParser()
-	if err != nil {
-		return Result{}, err
-	}
-	defer parser.Close()
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
-		parsed, err := parser.ParseFile(file)
+		source, err := os.ReadFile(file)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
-		if parsed.HasError || parsed.HasMissing {
+		parsed, err := vbaast.ParseDocument(file, source)
+		if err != nil {
+			closeParsedFiles(parsedFiles)
+			return Result{}, err
+		}
+		ir, err := procedureir.BuildParsed(procedureir.BuildOptions{
+			RootDir: a.RootDir,
+			Path:    file,
+		}, parsed)
+		if err != nil {
+			parsed.Close()
+			closeParsedFiles(parsedFiles)
+			return Result{}, err
+		}
+		if ir.Parse.HasError || ir.Parse.HasMissing {
 			parsed.Close()
 			closeParsedFiles(parsedFiles)
 			return Result{}, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
 		}
 		parsedFiles = append(parsedFiles, parsedFile{
 			Path:   file,
-			Lines:  normalizedSourceLines(string(parsed.Source)),
+			Lines:  normalizedSourceLines(string(source)),
 			Module: strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
-			Source: parsed.Source,
-			Root:   parsed.Root,
-			Result: parsed,
+			Source: source,
+			IR:     ir,
+			Parsed: parsed,
 		})
 	}
 	defer closeParsedFiles(parsedFiles)
@@ -228,7 +240,13 @@ func (a Analyzer) RunResult() (Result, error) {
 	ctx := a.buildContext(parsedFiles)
 	var findings []Finding
 	for _, file := range parsedFiles {
-		findings = append(findings, a.analyzeParsedFile(file, ctx)...)
+		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
+			file.Root = view.Root
+			findings = append(findings, a.analyzeParsedFile(file, ctx)...)
+			return nil
+		}); err != nil {
+			return Result{}, err
+		}
 	}
 	sortFindings(findings)
 	directives, warnings, err := suppression.DirectivesForFiles(a.RootDir, files)
@@ -242,8 +260,8 @@ func (a Analyzer) RunResult() (Result, error) {
 
 func closeParsedFiles(files []parsedFile) {
 	for _, file := range files {
-		if file.Result != nil {
-			file.Result.Close()
+		if file.Parsed != nil {
+			file.Parsed.Close()
 		}
 	}
 }
@@ -263,17 +281,22 @@ func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.C
 // SourceNonShortCircuitObjectGuardFindingsParsed analyzes a caller-owned
 // parsed VBA document without closing it or retaining tree-sitter nodes.
 func SourceNonShortCircuitObjectGuardFindingsParsed(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: rootDir}, doc)
+	if err != nil {
+		return nil, err
+	}
 	var findings []Finding
-	err := doc.Read(func(view vbaast.ParsedView) error {
+	err = doc.Read(func(view vbaast.ParsedView) error {
 		file := parsedFile{
 			Path:   view.Path,
 			Lines:  normalizedSourceLines(string(view.Source)),
 			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
 			Source: view.Source,
 			Root:   view.Root,
+			IR:     ir,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-		procedures := sourceProceduresFromAST(file.Root, file.Source)
+		procedures := sourceProceduresFromIR(ir)
 		for _, proc := range procedures {
 			findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, proc)...)
 		}
@@ -308,6 +331,17 @@ func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []by
 // SourceRealtimeFindingsParsed runs real-time source analysis against a
 // caller-owned parsed VBA document. It does not close doc or retain nodes.
 func SourceRealtimeFindingsParsed(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: rootDir}, doc)
+	if err != nil {
+		return nil, err
+	}
+	return SourceRealtimeFindingsParsedIR(rootDir, cfg, doc, ir)
+}
+
+// SourceRealtimeFindingsParsedIR runs real-time source analysis with a
+// caller-supplied procedure IR built from doc. It lets immutable LSP snapshots
+// reuse their cached IR without reparsing or rewalking procedure syntax.
+func SourceRealtimeFindingsParsedIR(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR) ([]Finding, error) {
 	if !cfg.Analyze.DetectRangeFindNothingCheck &&
 		!cfg.Analyze.DetectErrorHandlerFallthrough &&
 		!cfg.Analyze.DetectRedimPreserveDimension &&
@@ -324,9 +358,10 @@ func SourceRealtimeFindingsParsed(rootDir string, cfg config.Config, doc *vbaast
 			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
 			Source: view.Source,
 			Root:   view.Root,
+			IR:     ir,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-		procedures := sourceProceduresFromAST(file.Root, file.Source)
+		procedures := sourceProceduresFromIR(ir)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
@@ -382,7 +417,7 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 		}
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
-		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc, onErrorHandlerLabels(file.Lines, proc))...)
+		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
 	return findings
 }
@@ -447,7 +482,7 @@ func (a Analyzer) shouldIncludeFile(path string) bool {
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx := analysisContext{functionReturns: map[string]string{}, procedures: map[string]procedureSignature{}}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromAST(file.Root, file.Source) {
+		for _, proc := range sourceProceduresFromIR(file.IR) {
 			if isObjectType(proc.ReturnType) {
 				ctx.functionReturns[strings.ToLower(proc.Name)] = proc.ReturnType
 			}
@@ -465,7 +500,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext) []Finding {
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
-	procedures := sourceProceduresFromAST(file.Root, file.Source)
+	procedures := sourceProceduresFromIR(file.IR)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
 	appStateProcedures := applicationStateProcedureSummaries(file.Lines, procedures)
 	for _, proc := range procedures {
@@ -486,7 +521,6 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	for _, param := range proc.Params {
 		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
 	}
-	handlerLabels := onErrorHandlerLabels(file.Lines, proc)
 	withStack := make([]withInfo, 0)
 	initialized := initialObjectState(decls)
 	maybeInitializedByCall := map[string]bool{}
@@ -600,7 +634,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		findings = append(findings, a.applicationStateFindings(file, proc, appStateProcedures)...)
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
-		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc, handlerLabels)...)
+		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
 	if a.Config.Analyze.DetectFunctionReturnPath && proc.Kind == "Function" && proc.Name != "" && !functionAssigned {
 		findings = append(findings, a.simpleFinding(file, proc, proc.StartLine, "VBA210", "warning", proc.Name+" may exit without assigning its return value.", "Functions return the default value when no assignment to the function name is reached.", "Assign "+proc.Name+" on every successful return path, or make the default return explicit."))
@@ -608,76 +642,34 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	return findings
 }
 
-func sourceProceduresFromAST(root *tree_sitter.Node, source []byte) []sourceProcedure {
-	var procedures []sourceProcedure
-	collectSourceProcedures(root, source, &procedures)
-	sort.SliceStable(procedures, func(i, j int) bool {
-		return procedures[i].StartLine < procedures[j].StartLine
-	})
-	return procedures
-}
-
-func collectSourceProcedures(node *tree_sitter.Node, source []byte, procedures *[]sourceProcedure) {
-	if node == nil {
-		return
-	}
-	switch node.Kind() {
-	case "sub_declaration", "function_declaration", "property_declaration", "property_get_declaration", "property_let_declaration", "property_set_declaration":
-		r := vbaast.NodeRange(node)
+func sourceProceduresFromIR(document procedureir.DocumentIR) []sourceProcedure {
+	procedures := make([]sourceProcedure, 0, len(document.Procedures))
+	for _, procedure := range document.Procedures {
 		kind := "Sub"
-		if strings.Contains(node.Kind(), "function") {
+		switch procedure.Symbol.Kind {
+		case procedureir.ProcedureFunction:
 			kind = "Function"
-		} else if strings.Contains(node.Kind(), "property") {
+		case procedureir.ProcedureProperty, procedureir.ProcedurePropertyGet,
+			procedureir.ProcedurePropertyLet, procedureir.ProcedurePropertySet:
 			kind = "Property"
 		}
-		*procedures = append(*procedures, sourceProcedure{
+		params := make([]parameterInfo, len(procedure.Symbol.Parameters))
+		for i, parameter := range procedure.Symbol.Parameters {
+			params[i] = parameterInfo{
+				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing,
+			}
+		}
+		procedures = append(procedures, sourceProcedure{
 			Kind:       kind,
-			Name:       nodeProcedureName(node, source),
-			ReturnType: typeText(node, source),
-			StartLine:  r.StartLine,
-			EndLine:    r.EndLine,
-			Params:     parameters(node, source),
+			Name:       procedure.Symbol.Name,
+			ReturnType: procedure.Symbol.ReturnType,
+			StartLine:  procedure.Symbol.DeclarationRange.StartLine,
+			EndLine:    procedure.Symbol.DeclarationRange.EndLine,
+			Params:     params,
+			Statements: append([]procedureir.Statement(nil), procedure.Statements...),
 		})
-		return
 	}
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		collectSourceProcedures(node.NamedChild(i), source, procedures)
-	}
-}
-
-func nodeProcedureName(node *tree_sitter.Node, source []byte) string {
-	if name := node.ChildByFieldName("name"); name != nil {
-		return cleanIdentifier(name.Utf8Text(source))
-	}
-	if name := firstNamedChildKind(node, "identifier"); name != nil {
-		return cleanIdentifier(name.Utf8Text(source))
-	}
-	return ""
-}
-
-func parameters(node *tree_sitter.Node, source []byte) []parameterInfo {
-	list := node.ChildByFieldName("parameters")
-	if list == nil {
-		list = firstNamedChildKind(node, "parameter_list")
-	}
-	if list == nil {
-		return nil
-	}
-	var params []parameterInfo
-	for i := uint(0); i < list.NamedChildCount(); i++ {
-		child := list.NamedChild(i)
-		if child == nil || child.Kind() != "parameter" {
-			continue
-		}
-		param := parameterInfo{Name: nodeName(child, source), Type: typeText(child, source)}
-		if hasWord(child.Utf8Text(source), "ByVal") {
-			param.Passing = "ByVal"
-		} else {
-			param.Passing = "ByRef"
-		}
-		params = append(params, param)
-	}
-	return params
+	return procedures
 }
 
 func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sourceDeclaration {
@@ -1324,41 +1316,34 @@ func hasLaterApplicationRestore(lines []string, proc sourceProcedure, start int,
 	return false
 }
 
-func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourceProcedure, handlerLabels map[string]bool) []Finding {
+func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourceProcedure) []Finding {
+	handlerLabels := map[string]bool{}
+	for _, statement := range proc.Statements {
+		if statement.Kind != procedureir.StatementOnError {
+			continue
+		}
+		label := cleanIdentifier(statement.Label)
+		if label != "" && !strings.EqualFold(label, "0") {
+			handlerLabels[strings.ToLower(label)] = true
+		}
+	}
 	if len(handlerLabels) == 0 {
 		return nil
 	}
 	var findings []Finding
-	lastCode := ""
-	for i := proc.StartLine - 1; i < proc.EndLine-1 && i < len(file.Lines); i++ {
-		lineNo := i + 1
-		stmt := normalizedCodeLine(file.Lines[i])
-		if stmt == "" {
-			continue
-		}
-		if label, ok := labelName(stmt); ok && handlerLabels[strings.ToLower(label)] {
-			if !isCleanupFallthroughLabel(label) && !terminatesNormalFlow(lastCode) {
+	lastCodeByParent := map[int]string{}
+	for _, statement := range proc.Statements {
+		if statement.Kind == procedureir.StatementLabel {
+			label := cleanIdentifier(statement.Label)
+			if handlerLabels[strings.ToLower(label)] &&
+				!isCleanupFallthroughLabel(label) && !terminatesNormalFlow(lastCodeByParent[statement.ParentID]) {
+				lineNo := statement.Range.StartLine
 				findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA204", "warning", "Normal execution can fall through into error handler "+label+".", "Without Exit Sub, Exit Function, or Exit Property before the handler label, successful execution can run error handling code.", errorHandlerFallthroughSuggestion(proc, label)))
 			}
 		}
-		lastCode = stmt
+		lastCodeByParent[statement.ParentID] = statement.Text
 	}
 	return findings
-}
-
-func onErrorHandlerLabels(lines []string, proc sourceProcedure) map[string]bool {
-	labels := map[string]bool{}
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		lower := strings.ToLower(stmt)
-		if strings.HasPrefix(lower, "on error goto ") && lower != "on error goto 0" {
-			label := cleanIdentifier(strings.TrimSpace(stmt[len("on error goto "):]))
-			if label != "" {
-				labels[strings.ToLower(label)] = true
-			}
-		}
-	}
-	return labels
 }
 
 func BlockingFindings(findings []Finding) []Finding {
@@ -1684,15 +1669,6 @@ func rangeFindAssignment(stmt string) (string, bool) {
 	return cleanIdentifier(fields[len(fields)-1]), true
 }
 
-func labelName(stmt string) (string, bool) {
-	stmt = strings.TrimSpace(stmt)
-	if !strings.HasSuffix(stmt, ":") || strings.Contains(stmt, " ") {
-		return "", false
-	}
-	name := cleanIdentifier(strings.TrimSuffix(stmt, ":"))
-	return name, name != ""
-}
-
 func isCleanupFallthroughLabel(label string) bool {
 	switch strings.ToLower(label) {
 	case "cleanup", "clean_up", "finally", "done":
@@ -1823,47 +1799,6 @@ func obviousArgumentMismatch(arg, typ string) bool {
 		return lowerType == "string" || isObjectType(typ)
 	}
 	return false
-}
-
-func typeText(node *tree_sitter.Node, source []byte) string {
-	asType := node.ChildByFieldName("type")
-	if asType == nil {
-		asType = firstNamedChildKind(node, "as_type_clause")
-	}
-	if asType == nil {
-		return ""
-	}
-	if typeExpr := asType.ChildByFieldName("type"); typeExpr != nil {
-		return strings.TrimSpace(typeExpr.Utf8Text(source))
-	}
-	if asType.Kind() == "type_expression" {
-		return strings.TrimSpace(asType.Utf8Text(source))
-	}
-	text := strings.TrimSpace(asType.Utf8Text(source))
-	if strings.HasPrefix(strings.ToLower(text), "as ") {
-		return strings.TrimSpace(text[3:])
-	}
-	return text
-}
-
-func nodeName(node *tree_sitter.Node, source []byte) string {
-	if name := node.ChildByFieldName("name"); name != nil {
-		return cleanIdentifier(name.Utf8Text(source))
-	}
-	if name := firstNamedChildKind(node, "identifier"); name != nil {
-		return cleanIdentifier(name.Utf8Text(source))
-	}
-	return ""
-}
-
-func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		child := node.NamedChild(i)
-		if child != nil && child.Kind() == kind {
-			return child
-		}
-	}
-	return nil
 }
 
 func cleanIdentifier(text string) string {

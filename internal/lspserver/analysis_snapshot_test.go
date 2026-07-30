@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestDocumentsReuseReplaceCloseAndReopenSnapshots(t *testing.T) {
@@ -175,6 +177,25 @@ func TestDocumentsApplyChangesIncrementalMultilineMatchesFullParse(t *testing.T)
 	}
 	if incrementalSexp != completeSexp || incrementalRecovery != completeRecovery {
 		t.Fatalf("incremental = (%s, %v), complete = (%s, %v)", incrementalSexp, incrementalRecovery, completeSexp, completeRecovery)
+	}
+	incrementalIR, _, err := result.document.Snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		return procedureir.BuildParsed(procedureir.BuildOptions{
+			Path: result.document.Path, ModuleKind: result.document.ModuleKind,
+		}, incrementalParsed)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeIR, _, err := complete.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		return procedureir.BuildParsed(procedureir.BuildOptions{
+			Path: result.document.Path, ModuleKind: result.document.ModuleKind,
+		}, completeParsed)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(incrementalIR, completeIR) {
+		t.Fatalf("incremental procedure IR differs from complete parse:\nincremental=%+v\ncomplete=%+v", incrementalIR, completeIR)
 	}
 }
 

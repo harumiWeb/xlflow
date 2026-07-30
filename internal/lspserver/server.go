@@ -27,6 +27,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
@@ -1277,16 +1278,22 @@ func (s *Server) analyzeIndexedDocument(doc intel.Document) (indexedFileAnalysis
 	if err != nil {
 		return indexedFileAnalysis{}, err
 	}
-	rawCalls, _, err := snapshot.RawCallSites(func() (calls.FileResult, error) {
+	procedureIR, _, err := snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
 		parsed, err := snapshot.ParsedDocument()
 		if err != nil {
-			return calls.FileResult{}, err
+			return procedureir.DocumentIR{}, err
 		}
-		return calls.ExtractParsed(calls.SourceOptions{
+		return procedureir.BuildParsed(procedureir.BuildOptions{
 			RootDir:    s.opts.RootDir,
 			Path:       doc.Path,
 			ModuleKind: doc.ModuleKind,
 		}, parsed)
+	})
+	if err != nil {
+		return indexedFileAnalysis{}, err
+	}
+	rawCalls, _, err := snapshot.RawCallSites(func() (calls.FileResult, error) {
+		return calls.ExtractIR(procedureIR), nil
 	})
 	if err != nil {
 		return indexedFileAnalysis{}, err

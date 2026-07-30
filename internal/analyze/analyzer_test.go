@@ -571,6 +571,103 @@ End Sub
 	}
 }
 
+func TestAnalyzerIRVBA204PreservesPropertyExitAndCleanupSemantics(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Property Get SafeValue() As Long
+  On Error GoTo Handler
+  SafeValue = 1
+  Exit Property
+Handler:
+  SafeValue = 0
+End Property
+
+Public Property Get UnsafeValue() As Long
+  On Error GoTo Handler
+  UnsafeValue = 1
+Handler:
+  UnsafeValue = 0
+End Property
+
+Public Sub CleanupAllowed()
+  On Error GoTo Cleanup
+  Debug.Print "work"
+Cleanup:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "UnsafeValue" || got[0].Line != 13 {
+		t.Fatalf("VBA204 findings = %+v, want only UnsafeValue handler", got)
+	}
+	if !containsAll(got[0].Suggestion, "`Exit Property`", "`Handler:`") {
+		t.Fatalf("unexpected property suggestion: %+v", got[0])
+	}
+}
+
+func TestAnalyzerIRVBA204PreservesInlineSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error GoTo Handler
+  Debug.Print "work"
+  ' xlflow:disable-next-line VBA204
+Handler:
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA204"); len(got) != 0 {
+		t.Fatalf("VBA204 should remain suppressible: %+v", got)
+	}
+}
+
+func TestAnalyzerIRVBA204DoesNotTreatNestedExitAsUnconditional(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal stopEarly As Boolean)
+  On Error GoTo Handler
+  If stopEarly Then
+    Exit Sub
+  End If
+Handler:
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 7 {
+		t.Fatalf("VBA204 findings = %+v, want conditional Exit Sub fallthrough", got)
+	}
+}
+
+func TestAnalyzerIRVBA204DoesNotNestHandlerAfterSingleLineIf(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal stopEarly As Boolean)
+  On Error GoTo Handler
+  If stopEarly Then Exit Sub
+Handler:
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 5 {
+		t.Fatalf("VBA204 findings = %+v, want single-line If fallthrough", got)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

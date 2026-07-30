@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -50,6 +51,10 @@ type AnalysisSnapshot struct {
 	callSitesOnce sync.Once
 	callSites     calls.FileResult
 	callSitesErr  error
+
+	procedureIROnce sync.Once
+	procedureIR     procedureir.DocumentIR
+	procedureIRErr  error
 
 	indexOnce sync.Once
 	index     *documentIndex
@@ -266,6 +271,25 @@ func (s *AnalysisSnapshot) RawCallSites(load func() (calls.FileResult, error)) (
 	return calls.CloneFileResult(s.callSites), initialized, s.callSitesErr
 }
 
+// ProcedureIR returns the snapshot-scoped procedure analysis IR and whether
+// the lazy value was already initialized. Both successful results and build
+// errors are cached for this immutable revision. The returned IR is a deep
+// copy and can be modified by the caller.
+func (s *AnalysisSnapshot) ProcedureIR(load func() (procedureir.DocumentIR, error)) (procedureir.DocumentIR, bool, error) {
+	if s == nil {
+		result, err := load()
+		return procedureir.Clone(result), false, err
+	}
+	initialized := true
+	s.procedureIROnce.Do(func() {
+		initialized = false
+		result, err := load()
+		s.procedureIR = procedureir.Clone(result)
+		s.procedureIRErr = err
+	})
+	return procedureir.Clone(s.procedureIR), initialized, s.procedureIRErr
+}
+
 // documentIndex returns the immutable lookup index for this snapshot. The
 // caller supplies the same symbol loader used by document analysis so custom
 // analyzers and the normal source-symbol cache retain identical semantics.
@@ -370,6 +394,21 @@ func parsedDocumentForDocument(doc Document) (*ast.ParsedDocument, func(), error
 		return nil, func() {}, err
 	}
 	return parsed, parsed.Close, nil
+}
+
+func procedureIRForDocument(doc Document, rootDir string, parsed *ast.ParsedDocument) (procedureir.DocumentIR, error) {
+	load := func() (procedureir.DocumentIR, error) {
+		return procedureir.BuildParsed(procedureir.BuildOptions{
+			RootDir:    rootDir,
+			Path:       doc.Path,
+			ModuleKind: doc.ModuleKind,
+		}, parsed)
+	}
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		result, _, err := snapshot.ProcedureIR(load)
+		return result, err
+	}
+	return load()
 }
 
 func documentLines(doc Document) []string {

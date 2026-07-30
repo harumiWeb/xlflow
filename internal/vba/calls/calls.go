@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -163,7 +164,8 @@ type extractor struct {
 // Resolver resolves raw call sites against a snapshot of project procedure
 // symbols. A Resolver can be replaced without re-extracting unchanged sites.
 type Resolver struct {
-	byName map[string][]Candidate
+	byName  map[string][]Candidate
+	symbols procedureir.SymbolResolver
 }
 
 var procedureKinds = map[string]bool{
@@ -316,6 +318,103 @@ func ExtractSource(opts SourceOptions, source []byte) (FileResult, error) {
 // returns.
 func ExtractParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
 	rootDir := opts.RootDir
+	if strings.TrimSpace(rootDir) == "" {
+		rootDir = "."
+	}
+	rootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return FileResult{}, err
+	}
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{
+		RootDir:    rootDir,
+		Path:       opts.Path,
+		ModuleKind: opts.ModuleKind,
+	}, doc)
+	if err != nil {
+		return FileResult{}, err
+	}
+	return ExtractIR(ir), nil
+}
+
+// ExtractIR projects syntax-local calls and type references from the shared
+// procedure IR without reparsing or rescanning source.
+func ExtractIR(ir procedureir.DocumentIR) FileResult {
+	result := FileResult{
+		Path:       ir.Path,
+		ModuleName: ir.ModuleName,
+		ModuleKind: ir.ModuleKind,
+		Parse: symbols.ParseSummary{
+			HasError: ir.Parse.HasError, HasMissing: ir.Parse.HasMissing,
+		},
+		CallSites:      []CallSite{},
+		TypeReferences: []TypeReference{},
+	}
+	for _, procedure := range ir.Procedures {
+		for _, site := range procedure.Calls {
+			result.CallSites = append(result.CallSites, callSiteFromIR(site, result.Parse))
+		}
+	}
+	for _, reference := range ir.TypeReferences {
+		result.TypeReferences = append(result.TypeReferences, typeReferenceFromIR(reference, result.Parse))
+	}
+	sort.SliceStable(result.CallSites, func(i, j int) bool {
+		return result.CallSites[i].Range.StartByte < result.CallSites[j].Range.StartByte
+	})
+	sort.SliceStable(result.TypeReferences, func(i, j int) bool {
+		return result.TypeReferences[i].Range.StartByte < result.TypeReferences[j].Range.StartByte
+	})
+	return result
+}
+
+func callSiteFromIR(site procedureir.CallSite, parse symbols.ParseSummary) CallSite {
+	var caller *Caller
+	if site.Caller.Name != "" || site.Caller.QualifiedName != "" {
+		caller = &Caller{
+			Name: site.Caller.Name, Kind: string(site.Caller.Kind),
+			QualifiedName: site.Caller.QualifiedName,
+		}
+	}
+	named := make([]NamedArgument, len(site.Arguments.Named))
+	for i, argument := range site.Arguments.Named {
+		named[i] = NamedArgument{Name: argument.Name, ValueText: argument.ValueText}
+	}
+	return CallSite{
+		File: site.File, Module: site.Module, Caller: caller,
+		Callee: Callee{
+			Text: site.Callee.Text, BaseName: site.Callee.BaseName,
+			Receiver: cloneStringPointer(site.Callee.Receiver), Member: site.Callee.Member,
+		},
+		Arguments: Arguments{Count: site.Arguments.Count, Named: named},
+		Range:     site.Range, Parse: parse,
+	}
+}
+
+func typeReferenceFromIR(reference procedureir.TypeReference, parse symbols.ParseSummary) TypeReference {
+	var caller *Caller
+	if reference.Caller != nil {
+		caller = &Caller{
+			Name: reference.Caller.Name, Kind: string(reference.Caller.Kind),
+			QualifiedName: reference.Caller.QualifiedName,
+		}
+	}
+	return TypeReference{
+		Kind: reference.Kind, File: reference.File, Module: reference.Module,
+		Caller: caller, Target: reference.Target, Range: reference.Range, Parse: parse,
+	}
+}
+
+func cloneStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+// extractParsedLegacy is retained temporarily as an independent compatibility
+// oracle for tests while call extraction migrates to procedureir.
+func extractParsedLegacy(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
+	rootDir := opts.RootDir
 	if rootDir == "" {
 		rootDir = "."
 	}
@@ -390,7 +489,21 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 // NewResolverFromSymbols creates a deterministic resolver from the
 // protocol-neutral symbol shape.
 func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
-	res := Resolver{byName: map[string][]Candidate{}}
+	irSymbols := make([]procedureir.ResolverSymbol, 0, len(projectSymbols))
+	for _, sym := range projectSymbols {
+		irSymbols = append(irSymbols, procedureir.ResolverSymbol{
+			Name:       sym.Name,
+			Module:     sym.Module,
+			Kind:       sym.Kind,
+			Visibility: sym.Visibility,
+			File:       sym.File,
+			Line:       sym.Line,
+		})
+	}
+	res := Resolver{
+		byName:  map[string][]Candidate{},
+		symbols: procedureir.NewResolver(irSymbols),
+	}
 	for _, sym := range projectSymbols {
 		if !procedureKinds[sym.Kind] || sym.Name == "" {
 			continue
@@ -423,6 +536,31 @@ func (r Resolver) Resolve(site CallSite) Call {
 		CallSite:   CloneCallSite(site),
 		Resolution: r.resolveCallee(site),
 	}
+}
+
+// ResolveCall adapts the existing project call resolver to procedureir without
+// coupling the IR package to inspect-call result types.
+func (r Resolver) ResolveCall(site procedureir.CallSite) procedureir.CallResolution {
+	resolved := r.Resolve(callSiteFromIR(site, symbols.ParseSummary{})).Resolution
+	candidates := make([]procedureir.Candidate, len(resolved.Candidates))
+	for i, candidate := range resolved.Candidates {
+		candidates[i] = procedureir.Candidate{
+			QualifiedName: candidate.QualifiedName,
+			Kind:          candidate.Kind,
+			File:          candidate.File,
+			Line:          candidate.Line,
+		}
+	}
+	return procedureir.CallResolution{
+		Status:     procedureir.ResolutionStatus(resolved.Status),
+		Candidates: candidates,
+	}
+}
+
+// ResolveSymbol provides the symbol half of procedureir.Resolver using the
+// complete project symbol snapshot, including non-procedure declarations.
+func (r Resolver) ResolveSymbol(reference procedureir.SymbolReference) procedureir.SymbolResolution {
+	return r.symbols.ResolveSymbol(reference)
 }
 
 func (e *extractor) visit(node *tree_sitter.Node) {

@@ -11,6 +11,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `analyze_failed`
 - `argument_count`
 - `argument_list`
+- `array_bounds`
 - `as_type_clause`
 - `assignable_to`
 - `assignment_statement`
@@ -19,6 +20,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `attach_active_deprecated`
 - `attach_args_invalid`
 - `attempted_operation`
+- `attribute_statement`
 - `auto_close`
 - `auto_open`
 - `auto_session`
@@ -198,6 +200,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `edit_coordinates_unreconciled`
 - `else_clause`
 - `else_fragment`
+- `else_if`
 - `elseif_clause`
 - `elseif_fragment`
 - `empty_parentheses`
@@ -229,6 +232,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `executable_path`
 - `existing_warning`
 - `exit_code`
+- `exit_statement`
 - `expanded_formula`
 - `expected_closer`
 - `expected_error`
@@ -252,6 +256,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `fmt_stdin_write_failed`
 - `fmt_write_hint`
 - `folder_annotation`
+- `for_each`
 - `for_each_statement`
 - `for_statement`
 - `forbid_activate`
@@ -306,6 +311,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version`
 - `generator_version_changed`
 - `global_values`
+- `goto_statement`
 - `graph_dependencies_failed`
 - `gui_boundaries`
 - `gui_boundary_detected`
@@ -363,6 +369,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `leading_underscore`
 - `legacy_backup_entry`
 - `legacy_entry`
+- `let_statement`
 - `likely_cause`
 - `line_number_label`
 - `line_number_literal`
@@ -404,7 +411,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `max_count`
 - `max_rows`
 - `max_total_size_mb`
+- `member_access`
 - `member_call`
+- `member_expression`
 - `merge_range`
 - `merged_ranges`
 - `message_pump`
@@ -442,6 +451,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `non_numeric`
 - `non_test`
 - `not_applicable`
+- `not_attempted`
 - `not_performed`
 - `not_run`
 - `not_vba_document`
@@ -449,6 +459,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `number_format`
 - `old_name`
 - `older_than`
+- `on_error`
 - `on_error_statement`
 - `open_workbook`
 - `opening_column`
@@ -483,7 +494,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_write_failed`
 - `parallel_safe`
 - `param_array`
+- `paramarray_modifier`
 - `parameter_list`
+- `parenthesized_expression`
 - `parse_status`
 - `parse_status_summary`
 - `parser_node`
@@ -533,6 +546,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `qualified_name`
 - `quoted_name`
 - `read_only`
+- `read_write`
 - `reason_not_runnable`
 - `recorded_at`
 - `recover_workbook`
@@ -542,6 +556,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `recovery_force_cleared`
 - `recovery_metadata_invalid`
 - `recovery_required`
+- `redim_declarator`
+- `redim_statement`
 - `refers_to`
 - `replaced_existing`
 - `request_id`
@@ -557,7 +573,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `response_source`
 - `restored_from`
 - `result_file`
+- `resume_statement`
 - `retryable_when_busy`
+- `return_slot`
 - `return_type`
 - `returned_range`
 - `rollback_args_invalid`
@@ -598,6 +616,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `session_requested`
 - `session_required`
 - `session_rerun_failed`
+- `set_assignment`
 - `set_statement`
 - `shared_formula_malformed_ref`
 - `shared_formula_missing_anchor`
@@ -607,6 +626,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `sheet_exists`
 - `sheet_id`
 - `sheet_not_found`
+- `single_line_if_statement`
 - `single_space`
 - `size_bytes`
 - `skill_agent_required`
@@ -687,6 +707,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ui_button_args_invalid`
 - `ui_dialog`
 - `ui_stream_init_failed`
+- `unary_expression`
 - `uncertain_edges`
 - `undeclared_variable`
 - `unexpected_helper_mode`
