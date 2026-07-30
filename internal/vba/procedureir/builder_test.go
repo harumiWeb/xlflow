@@ -204,6 +204,39 @@ End Sub
 	}
 }
 
+func TestNonLabelErrorHandlingFormsHaveNoLabel(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    On Error Resume Next
+    On Error GoTo 0
+    On Error GoTo [Next]
+    Resume
+    Resume Next
+    Resume [Next]
+    Resume Handler
+Handler:
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onErrorLabels, resumeLabels []string
+	for _, statement := range doc.Procedures[0].Statements {
+		switch statement.Kind {
+		case StatementOnError:
+			onErrorLabels = append(onErrorLabels, statement.Label)
+		case StatementResume:
+			resumeLabels = append(resumeLabels, statement.Label)
+		}
+	}
+	if !reflect.DeepEqual(onErrorLabels, []string{"", "", "Next"}) {
+		t.Fatalf("On Error labels = %#v, want non-label forms empty", onErrorLabels)
+	}
+	if !reflect.DeepEqual(resumeLabels, []string{"", "", "Next", "Handler"}) {
+		t.Fatalf("Resume labels = %#v, want only explicit handler label", resumeLabels)
+	}
+}
+
 func TestSetAssignmentRecordsObjectWriteAndRead(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
@@ -219,6 +252,75 @@ End Sub
 	requireStatementKind(t, procedure.Statements, StatementSet)
 	assertAccess(t, procedure.Accesses, "target", ScopeLocal, AccessWrite)
 	assertAccess(t, procedure.Accesses, "source", ScopeLocal, AccessRead)
+}
+
+func TestCompositeAssignmentTargetsKeepReceiverAndIndexesAsReads(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    Dim obj As Object
+    Dim values() As Long
+    Dim index As Long
+    Dim source As Long
+    obj.Value = source
+    values(index) = source
+    Let values(index) = source
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modes := map[string][]AccessMode{}
+	for _, access := range doc.Procedures[0].Accesses {
+		key := strings.ToLower(access.Name)
+		modes[key] = append(modes[key], access.Mode)
+	}
+	if !reflect.DeepEqual(modes["obj"], []AccessMode{AccessRead}) {
+		t.Fatalf("object receiver modes = %v, want read", modes["obj"])
+	}
+	if !reflect.DeepEqual(modes["values"], []AccessMode{AccessWrite, AccessWrite}) {
+		t.Fatalf("indexed assignment base modes = %v, want writes; accesses=%+v",
+			modes["values"], doc.Procedures[0].Accesses)
+	}
+	if !reflect.DeepEqual(modes["index"], []AccessMode{AccessRead, AccessRead}) {
+		t.Fatalf("index modes = %v, want reads", modes["index"])
+	}
+	if !reflect.DeepEqual(modes["source"], []AccessMode{AccessRead, AccessRead, AccessRead}) {
+		t.Fatalf("assignment value modes = %v, want reads", modes["source"])
+	}
+}
+
+func TestParenthesizedComparisonArgumentRemainsCallAndReads(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+    Dim actual As Long
+    Dim expected As Long
+    Check (actual) = expected
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	procedure := doc.Procedures[0]
+	var statement *Statement
+	for i := range procedure.Statements {
+		if procedure.Statements[i].Range.StartLine == 4 {
+			statement = &procedure.Statements[i]
+			break
+		}
+	}
+	if statement == nil || statement.Kind != StatementCall {
+		t.Fatalf("comparison argument statement = %+v, want call", statement)
+	}
+	if len(procedure.Calls) != 1 || !strings.EqualFold(procedure.Calls[0].Callee.BaseName, "Check") {
+		t.Fatalf("comparison argument call was lost: %+v", procedure.Calls)
+	}
+	assertAccess(t, procedure.Accesses, "actual", ScopeLocal, AccessRead)
+	assertAccess(t, procedure.Accesses, "expected", ScopeLocal, AccessRead)
+	for _, access := range procedure.Accesses {
+		if strings.EqualFold(access.Name, "Check") {
+			t.Fatalf("callee became a variable access: %+v", access)
+		}
+	}
 }
 
 func TestCallAccessesExcludeOnlyCalleeAndNamedArgumentLabels(t *testing.T) {
@@ -459,8 +561,8 @@ End Sub
 
 func TestFunctionAndPropertyGetNamesResolveAsLocalReturnSlots(t *testing.T) {
 	t.Parallel()
-	doc, err := BuildSource(BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, []byte(`Public Function Compute() As Long
-    Compute = 1
+	doc, err := BuildSource(BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, []byte(`Public Function Compute(ByVal input As Long) As Long
+    Compute = input
 End Function
 
 Public Property Get Value() As Long
@@ -469,6 +571,11 @@ End Property
 `))
 	if err != nil {
 		t.Fatal(err)
+	}
+	declarations := doc.Procedures[0].Declarations
+	if len(declarations) < 2 || declarations[0].Kind != "return_slot" || declarations[1].Kind != "parameter" ||
+		declarations[0].Range.StartByte >= declarations[1].Range.StartByte {
+		t.Fatalf("function declarations are not in source order: %+v", declarations)
 	}
 	resolved := Resolve(doc, NewResolver([]ResolverSymbol{
 		{Name: "Compute", Module: "Other", Kind: "module_variable", Visibility: "Public"},

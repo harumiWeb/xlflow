@@ -87,6 +87,9 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 	v.addTypeReference(node, ctx)
 	if procedure != nil && ctx.inBody {
 		if kind, ok := statementKind(node); ok {
+			if kind == StatementCall && isIndexedAssignmentNode(node, v.builder.source) {
+				kind = StatementAssignment
+			}
 			ctx.statementID = v.addStatement(procedure, node, ctx.statementID, kind)
 		}
 		if isExpressionNode(node.Kind()) {
@@ -127,12 +130,6 @@ func (v *singleVisitor) enterProcedure(node *tree_sitter.Node) visitContext {
 		Symbol: symbol, Declarations: []Declaration{}, Statements: []Statement{},
 		Expressions: []Expression{}, Calls: []CallSite{}, Accesses: []VariableAccess{},
 	}
-	for _, parameter := range symbol.Parameters {
-		procedure.Declarations = append(procedure.Declarations, Declaration{
-			ID: v.builder.takeDeclarationID(), Name: parameter.Name, Type: parameter.Type,
-			Scope: ScopeParameter, Kind: "parameter", Range: parameter.Range,
-		})
-	}
 	if symbol.Kind == ProcedureFunction || symbol.Kind == ProcedurePropertyGet || symbol.Kind == ProcedureProperty {
 		nameRange := symbol.DeclarationRange
 		if name := node.ChildByFieldName("name"); name != nil {
@@ -141,6 +138,12 @@ func (v *singleVisitor) enterProcedure(node *tree_sitter.Node) visitContext {
 		procedure.Declarations = append(procedure.Declarations, Declaration{
 			ID: v.builder.takeDeclarationID(), Name: symbol.Name, Type: symbol.ReturnType,
 			Scope: ScopeLocal, Kind: "return_slot", Range: nameRange,
+		})
+	}
+	for _, parameter := range symbol.Parameters {
+		procedure.Declarations = append(procedure.Declarations, Declaration{
+			ID: v.builder.takeDeclarationID(), Name: parameter.Name, Type: parameter.Type,
+			Scope: ScopeParameter, Kind: "parameter", Range: parameter.Range,
 		})
 	}
 	v.document.Procedures = append(v.document.Procedures, procedure)
@@ -432,6 +435,8 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 	case "qualified_member_expression", "implicit_member_expression", "member_expression":
 		if sameNode(child, childByFieldNameAny(parent, "member", "property")) {
 			childCtx.metadata = true
+		} else if isTargetAccessMode(ctx.accessMode) {
+			childCtx.accessMode = AccessRead
 		}
 	case "new_expression":
 		if sameNode(child, parent.ChildByFieldName("type")) {
@@ -445,18 +450,47 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 		if sameNode(child, parent.ChildByFieldName("function")) {
 			childCtx.suppressCall = true
 			if child.Kind() == "identifier" {
-				childCtx.metadata = true
+				if isTargetAccessMode(ctx.accessMode) {
+					childCtx.metadata = false
+					childCtx.accessMode = ctx.accessMode
+					if statement := statementByID(v.procedure(ctx.procedure), ctx.statementID); statement != nil {
+						statement.Target = expressionStub(child, ctx.statementID, v.builder.source)
+					}
+				} else {
+					childCtx.metadata = true
+				}
 			}
 		}
 		if sameNode(child, parent.ChildByFieldName("arguments")) {
 			childCtx.suppressCall = false
+			if isTargetAccessMode(ctx.accessMode) {
+				childCtx.accessMode = AccessRead
+			}
 		}
 	case "call_statement":
 		if sameNode(child, parent.ChildByFieldName("callee")) {
 			childCtx.callIndex = ctx.callIndex
 			childCtx.suppressCall = child.Kind() == "call_expression"
-			if child.Kind() == "identifier" {
+			if isIndexedAssignmentNode(parent, v.builder.source) && !isLetIndexedAssignmentNode(parent, v.builder.source) {
+				childCtx.metadata = false
+				childCtx.accessMode = AccessWrite
+				if statement := statementByID(v.procedure(ctx.procedure), ctx.statementID); statement != nil {
+					statement.Target = expressionStub(child, ctx.statementID, v.builder.source)
+				}
+			} else if child.Kind() == "identifier" {
 				childCtx.metadata = true
+			}
+		}
+		if sameNode(child, parent.ChildByFieldName("arguments")) &&
+			isLetIndexedAssignmentNode(parent, v.builder.source) {
+			childCtx.accessMode = AccessWrite
+		}
+	case "comparison_expression":
+		if statement := statementByID(v.procedure(ctx.procedure), ctx.statementID); statement != nil &&
+			statement.SyntaxKind == "call_statement" && statement.Kind == StatementAssignment {
+			childCtx.accessMode = AccessRead
+			if sameNode(child, childByFieldNameAny(parent, "right", "value")) {
+				statement.Value = expressionStub(child, ctx.statementID, v.builder.source)
 			}
 		}
 	case "redim_statement":
@@ -477,8 +511,10 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 		target := childByFieldNameAny(parent, "target", "left", "variable")
 		value := childByFieldNameAny(parent, "value", "right")
 		condition := childByFieldNameAny(parent, "condition", "test")
+		indexedAssignmentComparison := parent.Kind() == "comparison_expression" &&
+			statement.SyntaxKind == "call_statement" && statement.Kind == StatementAssignment
 		switch {
-		case sameNode(child, target):
+		case sameNode(child, target) && !indexedAssignmentComparison:
 			childCtx.accessMode = targetAccessMode(*statement)
 			statement.Target = expressionStub(child, ctx.statementID, v.builder.source)
 		case sameNode(child, value):
@@ -507,6 +543,9 @@ func (v *singleVisitor) finalize() {
 		}
 		for _, declaration := range procedure.Declarations {
 			scopes[strings.ToLower(declaration.Name)] = declaration.Scope
+		}
+		for statementIndex := range procedure.Statements {
+			ensureIndexedAssignmentAccess(procedure, &procedure.Statements[statementIndex])
 		}
 		for accessIndex := range procedure.Accesses {
 			access := &procedure.Accesses[accessIndex]
@@ -542,6 +581,9 @@ func (v *singleVisitor) finalize() {
 			statement.Value = canonicalExpression(procedure.Expressions, statement.ValueID, statement.Value)
 			statement.Condition = canonicalExpression(procedure.Expressions, statement.ConditionID, statement.Condition)
 		}
+		sort.SliceStable(procedure.Accesses, func(i, j int) bool {
+			return procedure.Accesses[i].Range.StartByte < procedure.Accesses[j].Range.StartByte
+		})
 	}
 	sort.SliceStable(v.document.Procedures, func(i, j int) bool {
 		return v.document.Procedures[i].Symbol.DeclarationRange.StartByte < v.document.Procedures[j].Symbol.DeclarationRange.StartByte
@@ -607,6 +649,114 @@ func firstAccessMode(mode AccessMode) AccessMode {
 		return AccessRead
 	}
 	return mode
+}
+
+func isTargetAccessMode(mode AccessMode) bool {
+	return mode == AccessWrite || mode == AccessReadWrite
+}
+
+func isIndexedAssignmentNode(node *tree_sitter.Node, source []byte) bool {
+	if node == nil || node.Kind() != "call_statement" || node.ChildByFieldName("callee") == nil {
+		return false
+	}
+	if isLetIndexedAssignmentNode(node, source) {
+		return true
+	}
+	callee := node.ChildByFieldName("callee")
+	if callee.EndByte() >= node.EndByte() || int(node.EndByte()) > len(source) {
+		return false
+	}
+	tail := string(source[callee.EndByte():node.EndByte()])
+	return hasIndexedAssignmentTail(tail)
+}
+
+func isLetIndexedAssignmentNode(node *tree_sitter.Node, source []byte) bool {
+	if node == nil || node.Kind() != "call_statement" {
+		return false
+	}
+	text := nodeText(node, source)
+	if len(text) < len("Let ") || !strings.EqualFold(text[:len("Let ")], "Let ") {
+		return false
+	}
+	tail := strings.TrimSpace(text[len("Let "):])
+	open := strings.IndexByte(tail, '(')
+	return open > 0 && hasIndexedAssignmentTail(tail[open:])
+}
+
+func hasIndexedAssignmentTail(tail string) bool {
+	if !strings.HasPrefix(tail, "(") {
+		return false
+	}
+	depth := 0
+	inString := false
+	for i := 0; i < len(tail); i++ {
+		switch tail[i] {
+		case '"':
+			if inString && i+1 < len(tail) && tail[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '=':
+			if !inString && depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ensureIndexedAssignmentAccess(procedure *ProcedureIR, statement *Statement) {
+	if procedure == nil || statement == nil || statement.Kind != StatementAssignment ||
+		statement.SyntaxKind != "call_statement" {
+		return
+	}
+	name := indexedAssignmentTargetName(statement.Text)
+	if name == "" {
+		return
+	}
+	for accessIndex := range procedure.Accesses {
+		access := &procedure.Accesses[accessIndex]
+		if access.StatementID == statement.ID && strings.EqualFold(access.Name, name) {
+			access.Mode = AccessWrite
+			return
+		}
+	}
+	for expressionIndex := range procedure.Expressions {
+		expression := &procedure.Expressions[expressionIndex]
+		if expression.StatementID != statement.ID || expression.Kind != ExpressionIdentifier ||
+			!strings.EqualFold(cleanIdentifier(expression.Text), name) {
+			continue
+		}
+		statement.TargetID = expression.ID
+		statement.Target = canonicalExpression(procedure.Expressions, expression.ID, nil)
+		procedure.Accesses = append(procedure.Accesses, VariableAccess{
+			Name: name, Mode: AccessWrite, Scope: ScopeUnresolved, Range: expression.Range,
+			StatementID: statement.ID, ExpressionID: expression.ID,
+			Resolution: SymbolResolution{Scope: ScopeUnresolved},
+		})
+		return
+	}
+}
+
+func indexedAssignmentTargetName(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) >= len("Let ") && strings.EqualFold(text[:len("Let ")], "Let ") {
+		text = strings.TrimSpace(text[len("Let "):])
+	}
+	open := strings.IndexByte(text, '(')
+	if open <= 0 {
+		return ""
+	}
+	return cleanIdentifier(text[:open])
 }
 
 func targetAccessMode(statement Statement) AccessMode {

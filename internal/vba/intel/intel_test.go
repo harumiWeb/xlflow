@@ -11,6 +11,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
@@ -154,6 +155,34 @@ End Sub
 `
 	if diagnostics := analyzer.Diagnostics(doc); len(diagnostics) != 0 {
 		t.Fatalf("expected diagnostics to clear, got %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsPreserveLintResultsWhenProcedureIRBuildFails(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	snapshot := NewAnalysisSnapshot(Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Range("A1").Select
+End Sub
+`,
+		Version: 1,
+	})
+	wantErr := errors.New("procedure IR unavailable")
+	if _, _, err := snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		return procedureir.DocumentIR{}, wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("seed procedure IR error = %v, want %v", err, wantErr)
+	}
+
+	diagnostics := analyzer.Diagnostics(snapshot.Document())
+	if !hasDiagnostic(diagnostics, "VB002") {
+		t.Fatalf("lint diagnostic was discarded: %+v", diagnostics)
+	}
+	vba000 := diagnosticsByCode(diagnostics, "VBA000")
+	if len(vba000) != 1 || !strings.Contains(vba000[0].Message, wantErr.Error()) {
+		t.Fatalf("procedure IR error diagnostic = %+v, want %q", vba000, wantErr)
 	}
 }
 

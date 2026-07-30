@@ -587,11 +587,19 @@ func statementOperand(text string, kind StatementKind) string {
 		}
 	case StatementOnError:
 		if len(fields) >= 4 {
-			return cleanIdentifier(fields[len(fields)-1])
+			rawTarget := strings.TrimSpace(fields[len(fields)-1])
+			if strings.EqualFold(rawTarget, "Next") || rawTarget == "0" {
+				return ""
+			}
+			return cleanIdentifier(rawTarget)
 		}
 	case StatementResume:
 		if len(fields) >= 2 {
-			return cleanIdentifier(fields[1])
+			rawTarget := strings.TrimSpace(fields[1])
+			if strings.EqualFold(rawTarget, "Next") {
+				return ""
+			}
+			return cleanIdentifier(rawTarget)
 		}
 	case StatementExit:
 		if len(fields) >= 2 {

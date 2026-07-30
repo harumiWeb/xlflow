@@ -144,6 +144,32 @@ End Function
 	}
 }
 
+func TestExtractParsedPreservesParenthesizedComparisonCallCompatibility(t *testing.T) {
+	source := []byte(`Public Sub Run()
+    Dim actual As Long
+    Dim expected As Long
+    Check (actual) = expected
+End Sub
+`)
+	doc, err := vbaast.ParseDocument("Module1.bas", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+
+	got, err := ExtractParsed(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := extractParsedLegacy(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parenthesized comparison call compatibility changed:\nIR=%+v\nlegacy=%+v", got, want)
+	}
+}
+
 func TestResolverCanReResolveUnchangedCallSite(t *testing.T) {
 	site := CallSite{
 		File:      "src/modules/Main.bas",

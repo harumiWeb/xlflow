@@ -216,7 +216,7 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	}
 	procedureIR, err := procedureIRForDocument(doc, a.RootDir, parsed)
 	if err != nil {
-		return []Diagnostic{lineDiagnostic("VBA000", "error", 0, err.Error())}
+		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
 	findings, err := analyze.SourceRealtimeFindingsParsedIR(a.RootDir, a.Config, parsed, procedureIR)
 	if ctx.Err() != nil {

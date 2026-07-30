@@ -95,5 +95,7 @@
 - When adapting structured recovery metadata for a secondary surface such as LSP, do not make one optional field a prerequisite for all metadata. Preserve every available field independently and test the empty-context fallback.
 - When updating a Go module version, update `THIRD_PARTY_LICENCES.md` (including version-pinned licence URLs) in the same change and run `scripts/dev/check-third-party-licences.ps1` before finalizing.
 - LSP ranges derived from tree-sitter positions must translate UTF-8 byte columns to UTF-16 code units using the effective source buffer; preserve that buffer in incremental analysis when range-bearing results are served from the index.
+- When a diagnostic pipeline has already accumulated valid findings, a later optional-stage failure must append its error diagnostic instead of replacing earlier results.
+- Assignment access modes belong to the actual lvalue binding only. Receivers and index expressions inside composite targets remain reads even when the enclosing target is a write.
 - Do not turn a disk-backed `getOrRead` document into an editor overlay. Only `didOpen` / `didChange` lifecycle documents may override watcher-managed disk index entries.
 - When extending VBA assignment analysis, reuse the existing assignment grammar so valid optional modifiers such as `Let` receive the same treatment; add a regression test for each supported form.
