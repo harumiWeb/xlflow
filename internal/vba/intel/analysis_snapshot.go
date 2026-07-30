@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -55,6 +56,10 @@ type AnalysisSnapshot struct {
 	procedureIROnce sync.Once
 	procedureIR     procedureir.DocumentIR
 	procedureIRErr  error
+
+	controlFlowOnce sync.Once
+	controlFlow     vbacfg.Document
+	controlFlowErr  error
 
 	indexOnce sync.Once
 	index     *documentIndex
@@ -290,6 +295,25 @@ func (s *AnalysisSnapshot) ProcedureIR(load func() (procedureir.DocumentIR, erro
 	return procedureir.Clone(s.procedureIR), initialized, s.procedureIRErr
 }
 
+// ControlFlowGraphs returns the snapshot-scoped procedure control-flow graphs
+// and whether the lazy value was already initialized. Both successful results
+// and build errors are cached for this immutable revision. The returned
+// document is a deep copy and can be modified by the caller.
+func (s *AnalysisSnapshot) ControlFlowGraphs(load func() (vbacfg.Document, error)) (vbacfg.Document, bool, error) {
+	if s == nil {
+		result, err := load()
+		return vbacfg.CloneDocument(result), false, err
+	}
+	initialized := true
+	s.controlFlowOnce.Do(func() {
+		initialized = false
+		result, err := load()
+		s.controlFlow = vbacfg.CloneDocument(result)
+		s.controlFlowErr = err
+	})
+	return vbacfg.CloneDocument(s.controlFlow), initialized, s.controlFlowErr
+}
+
 // documentIndex returns the immutable lookup index for this snapshot. The
 // caller supplies the same symbol loader used by document analysis so custom
 // analyzers and the normal source-symbol cache retain identical semantics.
@@ -406,6 +430,17 @@ func procedureIRForDocument(doc Document, rootDir string, parsed *ast.ParsedDocu
 	}
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
 		result, _, err := snapshot.ProcedureIR(load)
+		return result, err
+	}
+	return load()
+}
+
+func controlFlowForDocument(doc Document, ir procedureir.DocumentIR) (vbacfg.Document, error) {
+	load := func() (vbacfg.Document, error) {
+		return vbacfg.BuildDocument(ir), nil
+	}
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		result, _, err := snapshot.ControlFlowGraphs(load)
 		return result, err
 	}
 	return load()

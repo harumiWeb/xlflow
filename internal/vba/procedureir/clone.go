@@ -44,6 +44,10 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 		out.Statements[i].Target = cloneExpressionPointer(in.Statements[i].Target)
 		out.Statements[i].Value = cloneExpressionPointer(in.Statements[i].Value)
 		out.Statements[i].Condition = cloneExpressionPointer(in.Statements[i].Condition)
+		if in.Statements[i].Control != nil {
+			control := *in.Statements[i].Control
+			out.Statements[i].Control = &control
+		}
 	}
 	out.Expressions = make([]Expression, len(in.Expressions))
 	for i := range in.Expressions {

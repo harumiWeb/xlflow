@@ -13,6 +13,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -196,6 +197,21 @@ func TestDocumentsApplyChangesIncrementalMultilineMatchesFullParse(t *testing.T)
 	}
 	if !reflect.DeepEqual(incrementalIR, completeIR) {
 		t.Fatalf("incremental procedure IR differs from complete parse:\nincremental=%+v\ncomplete=%+v", incrementalIR, completeIR)
+	}
+	incrementalCFG, _, err := result.document.Snapshot.ControlFlowGraphs(func() (vbacfg.Document, error) {
+		return vbacfg.BuildDocument(incrementalIR), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeCFG, _, err := complete.ControlFlowGraphs(func() (vbacfg.Document, error) {
+		return vbacfg.BuildDocument(completeIR), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(incrementalCFG, completeCFG) {
+		t.Fatalf("incremental CFG differs from complete parse:\nincremental=%+v\ncomplete=%+v", incrementalCFG, completeCFG)
 	}
 }
 

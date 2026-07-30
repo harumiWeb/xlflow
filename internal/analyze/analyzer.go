@@ -12,6 +12,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/gui"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -154,6 +155,7 @@ type parsedFile struct {
 	Source []byte
 	Root   *tree_sitter.Node
 	IR     procedureir.DocumentIR
+	CFG    vbacfg.Document
 	Parsed *vbaast.ParsedDocument
 }
 
@@ -165,6 +167,7 @@ type sourceProcedure struct {
 	EndLine    int
 	Params     []parameterInfo
 	Statements []procedureir.Statement
+	Graph      *vbacfg.Graph
 }
 
 type sourceDeclaration struct {
@@ -226,12 +229,14 @@ func (a Analyzer) RunResult() (Result, error) {
 			closeParsedFiles(parsedFiles)
 			return Result{}, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
 		}
+		controlFlow := vbacfg.BuildDocument(ir)
 		parsedFiles = append(parsedFiles, parsedFile{
 			Path:   file,
 			Lines:  normalizedSourceLines(string(source)),
 			Module: strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
 			Source: source,
 			IR:     ir,
+			CFG:    controlFlow,
 			Parsed: parsed,
 		})
 	}
@@ -342,6 +347,13 @@ func SourceRealtimeFindingsParsed(rootDir string, cfg config.Config, doc *vbaast
 // caller-supplied procedure IR built from doc. It lets immutable LSP snapshots
 // reuse their cached IR without reparsing or rewalking procedure syntax.
 func SourceRealtimeFindingsParsedIR(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFG(rootDir, cfg, doc, ir, vbacfg.BuildDocument(ir))
+}
+
+// SourceRealtimeFindingsParsedIRCFG runs real-time source analysis with
+// caller-supplied procedure IR and control-flow graphs. Immutable LSP
+// snapshots use this entry point to reuse both cached analysis layers.
+func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]Finding, error) {
 	if !cfg.Analyze.DetectRangeFindNothingCheck &&
 		!cfg.Analyze.DetectErrorHandlerFallthrough &&
 		!cfg.Analyze.DetectRedimPreserveDimension &&
@@ -359,9 +371,10 @@ func SourceRealtimeFindingsParsedIR(rootDir string, cfg config.Config, doc *vbaa
 			Source: view.Source,
 			Root:   view.Root,
 			IR:     ir,
+			CFG:    controlFlow,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-		procedures := sourceProceduresFromIR(ir)
+		procedures := sourceProceduresFromIR(ir, controlFlow)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
@@ -500,7 +513,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext) []Finding {
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
-	procedures := sourceProceduresFromIR(file.IR)
+	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
 	appStateProcedures := applicationStateProcedureSummaries(file.Lines, procedures)
 	for _, proc := range procedures {
@@ -642,9 +655,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	return findings
 }
 
-func sourceProceduresFromIR(document procedureir.DocumentIR) []sourceProcedure {
+func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
 	procedures := make([]sourceProcedure, 0, len(document.Procedures))
-	for _, procedure := range document.Procedures {
+	for procedureIndex, procedure := range document.Procedures {
 		kind := "Sub"
 		switch procedure.Symbol.Kind {
 		case procedureir.ProcedureFunction:
@@ -659,7 +672,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR) []sourceProcedure {
 				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing,
 			}
 		}
-		procedures = append(procedures, sourceProcedure{
+		source := sourceProcedure{
 			Kind:       kind,
 			Name:       procedure.Symbol.Name,
 			ReturnType: procedure.Symbol.ReturnType,
@@ -667,7 +680,12 @@ func sourceProceduresFromIR(document procedureir.DocumentIR) []sourceProcedure {
 			EndLine:    procedure.Symbol.DeclarationRange.EndLine,
 			Params:     params,
 			Statements: append([]procedureir.Statement(nil), procedure.Statements...),
-		})
+		}
+		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
+			graph := controlFlow[0].Graphs[procedureIndex]
+			source.Graph = &graph
+		}
+		procedures = append(procedures, source)
 	}
 	return procedures
 }
@@ -1331,6 +1349,29 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 		return nil
 	}
 	var findings []Finding
+	if proc.Graph != nil {
+		reachable := map[vbacfg.BlockID]bool{}
+		for _, blockID := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
+			reachable[blockID] = true
+		}
+		for _, statement := range proc.Statements {
+			if statement.Kind != procedureir.StatementLabel {
+				continue
+			}
+			label := cleanIdentifier(statement.Label)
+			if !handlerLabels[strings.ToLower(label)] || isCleanupFallthroughLabel(label) {
+				continue
+			}
+			block, ok := proc.Graph.BlockForStatement(statement.ID)
+			if !ok || !reachable[block.ID] {
+				continue
+			}
+			lineNo := statement.Range.StartLine
+			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA204", "warning", "Normal execution can fall through into error handler "+label+".", "Without Exit Sub, Exit Function, or Exit Property before the handler label, successful execution can run error handling code.", errorHandlerFallthroughSuggestion(proc, label)))
+		}
+		return findings
+	}
+
 	lastCodeByParent := map[int]string{}
 	for _, statement := range proc.Statements {
 		if statement.Kind == procedureir.StatementLabel {

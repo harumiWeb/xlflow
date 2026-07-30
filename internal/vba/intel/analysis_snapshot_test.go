@@ -9,6 +9,7 @@ import (
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -317,6 +318,79 @@ func TestAnalysisSnapshotCachesDeterministicProcedureIRError(t *testing.T) {
 	}
 }
 
+func TestAnalysisSnapshotControlFlowIsLazyConcurrentAndDefensive(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n", Version: 1})
+	var loads atomic.Int32
+	load := func() (vbacfg.Document, error) {
+		loads.Add(1)
+		return vbacfg.Document{
+			Path: "Main.bas",
+			Graphs: []vbacfg.Graph{{
+				Procedure: procedureir.ProcedureSymbol{Name: "Main"},
+				Blocks:    []vbacfg.Block{{ID: 1, Kind: vbacfg.BlockEntry}},
+				Entry:     1,
+			}},
+		}, nil
+	}
+	const readers = 24
+	start := make(chan struct{})
+	results := make(chan vbacfg.Document, readers)
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			result, _, err := snapshot.ControlFlowGraphs(load)
+			if err != nil {
+				t.Error(err)
+			}
+			results <- result
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if len(result.Graphs) != 1 || result.Graphs[0].Procedure.Name != "Main" {
+			t.Fatalf("control-flow document = %+v", result)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+
+	result, hit, err := snapshot.ControlFlowGraphs(load)
+	if err != nil || !hit {
+		t.Fatalf("cached control flow = (hit=%v, err=%v)", hit, err)
+	}
+	result.Graphs[0].Procedure.Name = "mutated"
+	result.Graphs[0].Blocks[0].Kind = vbacfg.BlockUnknownExit
+	again, _, _ := snapshot.ControlFlowGraphs(load)
+	if again.Graphs[0].Procedure.Name != "Main" || again.Graphs[0].Blocks[0].Kind != vbacfg.BlockEntry {
+		t.Fatalf("cached control flow was mutated: %+v", again)
+	}
+}
+
+func TestAnalysisSnapshotCachesDeterministicControlFlowError(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "broken", Version: 1})
+	want := errors.New("control-flow build failed")
+	var loads atomic.Int32
+	load := func() (vbacfg.Document, error) {
+		loads.Add(1)
+		return vbacfg.Document{Path: "Main.bas"}, want
+	}
+	for i := 0; i < 2; i++ {
+		result, hit, err := snapshot.ControlFlowGraphs(load)
+		if !errors.Is(err, want) || hit != (i > 0) || result.Path != "Main.bas" {
+			t.Fatalf("call %d = (result=%+v, hit=%v, err=%v)", i, result, hit, err)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+}
+
 func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSemanticTokens(t *testing.T) {
 	snapshot := NewAnalysisSnapshot(Document{
 		URI:        "file:///Main.bas",
@@ -339,6 +413,13 @@ func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSeman
 	})
 	if err != nil || !hit || len(procedureIR.Procedures) != 1 {
 		t.Fatalf("procedure IR = (result=%+v, hit=%v, err=%v)", procedureIR, hit, err)
+	}
+	controlFlow, hit, err := snapshot.ControlFlowGraphs(func() (vbacfg.Document, error) {
+		t.Fatal("diagnostics did not initialize the snapshot control-flow graphs")
+		return vbacfg.Document{}, nil
+	})
+	if err != nil || !hit || len(controlFlow.Graphs) != 1 {
+		t.Fatalf("control flow = (result=%+v, hit=%v, err=%v)", controlFlow, hit, err)
 	}
 	if _, err := analyzer.DocumentSymbols(doc); err != nil {
 		t.Fatal(err)

@@ -668,6 +668,28 @@ End Sub
 	}
 }
 
+func TestAnalyzerCFGVBA204DoesNotReportHandlerSkippedByGoto(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error GoTo Handler
+  Debug.Print "work"
+  GoTo Done
+Handler:
+  Debug.Print "failed"
+Done:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA204"); len(got) != 0 {
+		t.Fatalf("VBA204 should not report a handler skipped by normal GoTo: %+v", got)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

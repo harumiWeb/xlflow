@@ -242,6 +242,8 @@ func statementKind(node *tree_sitter.Node) (StatementKind, bool) {
 		return StatementResume, true
 	case "exit_statement":
 		return StatementExit, true
+	case "end_statement":
+		return StatementEnd, true
 	}
 	switch {
 	case strings.Contains(kind, "else_if") || strings.Contains(kind, "elseif"):

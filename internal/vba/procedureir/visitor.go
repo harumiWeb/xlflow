@@ -12,6 +12,7 @@ type visitContext struct {
 	procedure    int
 	statementID  int
 	parentExprID int
+	branch       BranchRole
 	metadata     bool
 	accessMode   AccessMode
 	callIndex    int
@@ -90,7 +91,7 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 			if kind == StatementCall && isIndexedAssignmentNode(node, v.builder.source) {
 				kind = StatementAssignment
 			}
-			ctx.statementID = v.addStatement(procedure, node, ctx.statementID, kind)
+			ctx.statementID = v.addStatement(procedure, node, ctx.statementID, ctx.branch, kind)
 		}
 		if isExpressionNode(node.Kind()) {
 			ctx.parentExprID = v.addExpression(procedure, node, ctx)
@@ -158,21 +159,155 @@ func (v *singleVisitor) procedure(index int) *ProcedureIR {
 	return &v.document.Procedures[index]
 }
 
-func (v *singleVisitor) addStatement(procedure *ProcedureIR, node *tree_sitter.Node, parentID int, kind StatementKind) int {
+func (v *singleVisitor) addStatement(
+	procedure *ProcedureIR,
+	node *tree_sitter.Node,
+	parentID int,
+	branch BranchRole,
+	kind StatementKind,
+) int {
 	id := len(procedure.Statements) + 1
 	statement := Statement{
 		ID: id, ParentID: parentID, Kind: kind, SyntaxKind: node.Kind(),
 		Text: nodeText(node, v.builder.source), Range: vbaast.NodeRange(node), Recovered: recovered(node),
 	}
+	if node.Kind() == "line_number_statement" {
+		if number := node.ChildByFieldName("number"); number != nil {
+			statement.Text = nodeText(number, v.builder.source)
+			statement.Range = vbaast.NodeRange(number)
+		}
+	}
 	if statement.Recovered && kind == StatementUnknown {
 		statement.Kind = StatementRecovered
 	}
+	if branch != "" {
+		statement.Control = &ControlFlowMetadata{Branch: branch}
+	}
+	v.populateControlMetadata(&statement, node)
 	switch statement.Kind {
-	case StatementLabel, StatementGoTo, StatementOnError, StatementResume, StatementExit:
+	case StatementLabel:
+		if node.Kind() == "line_number_statement" {
+			statement.Label = nodeText(node.ChildByFieldName("number"), v.builder.source)
+		} else {
+			statement.Label = nodeText(node.ChildByFieldName("name"), v.builder.source)
+		}
+	case StatementGoTo, StatementOnError, StatementResume, StatementExit:
 		statement.Label = statementOperand(statement.Text, statement.Kind)
+		if statement.Control != nil {
+			switch statement.Control.Transfer {
+			case TransferGoto, TransferOnErrorGoto, TransferResumeLabel:
+				statement.Label = statement.Control.Target
+			}
+		}
 	}
 	procedure.Statements = append(procedure.Statements, statement)
 	return id
+}
+
+func (v *singleVisitor) populateControlMetadata(statement *Statement, node *tree_sitter.Node) {
+	if statement == nil || node == nil {
+		return
+	}
+	control := statement.Control
+	ensureControl := func() *ControlFlowMetadata {
+		if control == nil {
+			control = &ControlFlowMetadata{}
+		}
+		return control
+	}
+	switch node.Kind() {
+	case "case_clause":
+		if childByKind(node, "case_expression") == nil && !recovered(node) {
+			ensureControl().CaseElse = true
+		}
+	case "do_statement":
+		if loop := doLoopTest(node, v.builder.source); loop != "" {
+			ensureControl().Loop = loop
+		}
+	case "goto_statement":
+		target := node.ChildByFieldName("target")
+		if target != nil {
+			value := ensureControl()
+			value.Transfer = TransferGoto
+			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
+		}
+	case "exit_statement":
+		if transfer := exitTransfer(node, v.builder.source); transfer != "" {
+			ensureControl().Transfer = transfer
+		}
+	case "on_error_statement":
+		value := ensureControl()
+		if target := node.ChildByFieldName("target"); target != nil {
+			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
+			if value.Target == "0" {
+				value.Transfer = TransferOnErrorDisable
+				value.Target = ""
+			} else {
+				value.Transfer = TransferOnErrorGoto
+			}
+		} else {
+			value.Transfer = TransferOnErrorResumeNext
+		}
+	case "resume_statement":
+		value := ensureControl()
+		if target := node.ChildByFieldName("target"); target != nil {
+			value.Transfer = TransferResumeLabel
+			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
+		} else if strings.EqualFold(strings.TrimSpace(nodeText(node, v.builder.source)), "Resume Next") {
+			value.Transfer = TransferResumeNext
+		} else {
+			value.Transfer = TransferResumeRetry
+		}
+	case "end_statement":
+		ensureControl().Transfer = TransferTerminate
+	}
+	if control != nil {
+		control.Range = vbaast.NodeRange(node)
+		statement.Control = control
+	}
+}
+
+func doLoopTest(node *tree_sitter.Node, source []byte) LoopTest {
+	condition := childByKind(node, "do_condition")
+	if condition == nil {
+		return ""
+	}
+	conditionText := strings.TrimSpace(nodeText(condition, source))
+	until := strings.HasPrefix(strings.ToLower(conditionText), "until")
+	post := condition.StartPosition().Row > node.StartPosition().Row
+	if body := node.ChildByFieldName("body"); body != nil {
+		post = condition.StartByte() >= body.EndByte()
+	} else if int(condition.StartByte()) <= len(source) {
+		prefix := string(source[node.StartByte():condition.StartByte()])
+		post = hasWord(prefix, "Loop")
+	}
+	switch {
+	case post && until:
+		return LoopPostUntil
+	case post:
+		return LoopPostWhile
+	case until:
+		return LoopPreUntil
+	default:
+		return LoopPreWhile
+	}
+}
+
+func exitTransfer(node *tree_sitter.Node, source []byte) TransferKind {
+	switch statementOperand(nodeText(node, source), StatementExit) {
+	case "sub":
+		return TransferExitSub
+	case "function":
+		return TransferExitFunction
+	case "property":
+		return TransferExitProperty
+	case "for":
+		return TransferExitFor
+	case "do":
+		return TransferExitDo
+	default:
+		return ""
+	}
 }
 
 func (v *singleVisitor) addExpression(procedure *ProcedureIR, node *tree_sitter.Node, ctx visitContext) int {
@@ -361,7 +496,7 @@ func (v *singleVisitor) visitBlock(node *tree_sitter.Node, ctx visitContext) {
 				continue
 			}
 			procedure := v.procedure(ctx.procedure)
-			activeParent = v.addStatement(procedure, child, stack[len(stack)-1].ifID, StatementElse)
+			activeParent = v.addStatement(procedure, child, stack[len(stack)-1].ifID, ctx.branch, StatementElse)
 			continue
 		case "end_if_fragment":
 			if len(stack) > 0 {
@@ -419,6 +554,14 @@ func (v *singleVisitor) visitNamedArgument(node *tree_sitter.Node, ctx visitCont
 
 func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitContext) visitContext {
 	childCtx := ctx
+	if parent.Kind() == "single_line_if_statement" {
+		switch {
+		case sameNode(child, parent.ChildByFieldName("consequence")):
+			childCtx.branch = BranchThen
+		case sameNode(child, parent.ChildByFieldName("alternative")):
+			childCtx.branch = BranchElse
+		}
+	}
 	if isExpressionNode(parent.Kind()) {
 		childCtx.parentExprID = ctx.parentExprID
 	}
