@@ -17,6 +17,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vba/userforms"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -213,7 +214,11 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	findings, err := analyze.SourceRealtimeFindingsParsed(a.RootDir, a.Config, parsed)
+	procedureIR, err := procedureIRForDocument(doc, a.RootDir, parsed)
+	if err != nil {
+		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
+	}
+	findings, err := analyze.SourceRealtimeFindingsParsedIR(a.RootDir, a.Config, parsed, procedureIR)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -5670,29 +5675,13 @@ func isTestProcedureName(name string) bool {
 }
 
 func isUserFormEventProcedure(sym Symbol) bool {
-	if !strings.EqualFold(sym.ModuleKind, "form") {
-		return false
-	}
-	name := strings.TrimSpace(sym.Name)
-	if name == "" || !strings.Contains(name, "_") {
-		return false
-	}
-	if isTestProcedureName(name) {
-		return false
-	}
-	idx := strings.LastIndex(name, "_")
-	return idx > 0 && idx < len(name)-1
+	event, kind := procedureir.ClassifyEvent(sym.ModuleKind, sym.Name)
+	return event && kind == "userform"
 }
 
 func isWorkbookEventProcedure(sym Symbol) bool {
-	name := strings.ToLower(strings.TrimSpace(sym.Name))
-	if name == "auto_open" || name == "auto_close" {
-		return true
-	}
-	if !strings.EqualFold(sym.ModuleKind, "document") {
-		return false
-	}
-	return strings.HasPrefix(name, "workbook_") || strings.HasPrefix(name, "worksheet_")
+	event, kind := procedureir.ClassifyEvent(sym.ModuleKind, sym.Name)
+	return event && (kind == "auto" || kind == "workbook" || kind == "worksheet")
 }
 
 func moduleNameForDocument(doc Document) string {

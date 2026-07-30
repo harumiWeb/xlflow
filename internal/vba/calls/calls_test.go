@@ -9,6 +9,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
@@ -38,6 +39,17 @@ End Sub
 	}, doc)
 	if err != nil {
 		t.Fatal(err)
+	}
+	legacyResult, err := extractParsedLegacy(SourceOptions{
+		RootDir:    dir,
+		Path:       path,
+		ModuleKind: "standard",
+	}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(parsedResult, legacyResult) {
+		t.Fatalf("procedure IR projection changed call extraction:\nIR=%+v\nlegacy=%+v", parsedResult, legacyResult)
 	}
 	if parsedResult.Path != "Main.bas" || parsedResult.ModuleName != "Main" || parsedResult.ModuleKind != "standard" {
 		t.Fatalf("unexpected file metadata: %+v", parsedResult)
@@ -84,6 +96,80 @@ End Sub
 	}
 }
 
+func TestExtractParsedPreservesDefaultRootPathCompatibility(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Main.bas")
+	source := []byte("Public Sub Run()\n    Call Target\nEnd Sub\n")
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+
+	got, err := ExtractParsed(SourceOptions{Path: path}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := extractParsedLegacy(SourceOptions{Path: path}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("empty RootDir path compatibility changed:\nIR=%+v\nlegacy=%+v", got, want)
+	}
+}
+
+func TestExtractParsedPreservesConditionalProcedureCompatibility(t *testing.T) {
+	source := []byte(`#If VBA7 Then
+Public Function ConditionalRun() As Long
+    ConditionalRun = TargetCall(1)
+End Function
+#End If
+`)
+	doc, err := vbaast.ParseDocument("Module1.bas", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+
+	got, err := ExtractParsed(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := extractParsedLegacy(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("conditional procedure compatibility changed:\nIR=%+v\nlegacy=%+v", got, want)
+	}
+}
+
+func TestExtractParsedPreservesParenthesizedComparisonCallCompatibility(t *testing.T) {
+	source := []byte(`Public Sub Run()
+    Dim actual As Long
+    Dim expected As Long
+    Check (actual) = expected
+End Sub
+`)
+	doc, err := vbaast.ParseDocument("Module1.bas", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+
+	got, err := ExtractParsed(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := extractParsedLegacy(SourceOptions{Path: "Module1.bas"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parenthesized comparison call compatibility changed:\nIR=%+v\nlegacy=%+v", got, want)
+	}
+}
+
 func TestResolverCanReResolveUnchangedCallSite(t *testing.T) {
 	site := CallSite{
 		File:      "src/modules/Main.bas",
@@ -125,6 +211,37 @@ func TestResolverCanReResolveUnchangedCallSite(t *testing.T) {
 	}
 	if site.Callee.Text != "Target" {
 		t.Fatalf("resolver mutated raw site: %+v", site)
+	}
+}
+
+func TestResolverAdaptsToProcedureIR(t *testing.T) {
+	var _ procedureir.Resolver = Resolver{}
+	document := procedureir.DocumentIR{
+		Procedures: []procedureir.ProcedureIR{{
+			Calls: []procedureir.CallSite{{
+				Caller: procedureir.ProcedureRef{
+					Name: "Run", Kind: procedureir.ProcedureSub, QualifiedName: "Main.Run",
+				},
+				Callee: procedureir.Callee{
+					Text: "Target", BaseName: "Target", Member: "Target",
+				},
+				Resolution: procedureir.CallResolution{Status: procedureir.ResolutionNotAttempted},
+			}},
+		}},
+	}
+	resolver := NewResolver([]symbols.Symbol{{
+		Name: "Target", Module: "Helpers", Kind: "sub",
+		File: "src/modules/Helpers.bas", StartLine: 4,
+	}})
+	resolved := procedureir.Resolve(document, resolver)
+	call := resolved.Procedures[0].Calls[0]
+	if call.Resolution.Status != procedureir.ResolutionMatched ||
+		len(call.Resolution.Candidates) != 1 ||
+		call.Resolution.Candidates[0].QualifiedName != "Helpers.Target" {
+		t.Fatalf("procedure IR call resolution = %+v", call.Resolution)
+	}
+	if document.Procedures[0].Calls[0].Resolution.Status != procedureir.ResolutionNotAttempted {
+		t.Fatalf("procedure IR resolver mutated input: %+v", document)
 	}
 }
 
@@ -221,6 +338,30 @@ func TestNewResolverFromSymbolsNormalizesAndDeterministicallyOrdersCandidates(t 
 	}
 	if !reflect.DeepEqual(call.Resolution.Candidates, want) {
 		t.Fatalf("candidates = %+v, want %+v", call.Resolution.Candidates, want)
+	}
+}
+
+func TestResolverAdapterResolvesNonProcedureProjectSymbols(t *testing.T) {
+	resolver := NewResolverFromSymbols([]ResolverSymbol{{
+		Name: "SharedValue", Module: "Globals", Kind: "variable",
+		Visibility: "Public", File: "src/modules/Globals.bas", Line: 3,
+	}})
+
+	resolution := resolver.ResolveSymbol(procedureir.SymbolReference{
+		Name: "SharedValue",
+		Caller: procedureir.ProcedureRef{
+			Name: "Run", Kind: procedureir.ProcedureSub, QualifiedName: "Main.Run",
+		},
+	})
+	if resolution.Scope != procedureir.ScopeProject {
+		t.Fatalf("scope = %q, want project: %+v", resolution.Scope, resolution)
+	}
+	want := []procedureir.Candidate{{
+		QualifiedName: "Globals.SharedValue", Kind: "variable",
+		File: "src/modules/Globals.bas", Line: 3,
+	}}
+	if !reflect.DeepEqual(resolution.Candidates, want) {
+		t.Fatalf("candidates = %+v, want %+v", resolution.Candidates, want)
 	}
 }
 

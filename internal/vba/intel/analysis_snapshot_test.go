@@ -10,6 +10,7 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -235,6 +236,87 @@ func TestAnalysisSnapshotCachesDeterministicRawCallSiteError(t *testing.T) {
 	}
 }
 
+func TestAnalysisSnapshotProcedureIRIsLazyConcurrentAndDefensive(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{
+		URI: "file:///Main.bas", Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n", Version: 1,
+	})
+	var loads atomic.Int32
+	load := func() (procedureir.DocumentIR, error) {
+		loads.Add(1)
+		return procedureir.DocumentIR{
+			Path: "Main.bas",
+			Procedures: []procedureir.ProcedureIR{{
+				Symbol: procedureir.ProcedureSymbol{
+					Name: "Main", Parameters: []procedureir.Parameter{{Name: "value"}},
+				},
+				Statements: []procedureir.Statement{{
+					ID: 1, Kind: procedureir.StatementCall, Text: "Target",
+				}},
+			}},
+		}, nil
+	}
+	const readers = 24
+	start := make(chan struct{})
+	results := make(chan procedureir.DocumentIR, readers)
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			result, _, err := snapshot.ProcedureIR(load)
+			if err != nil {
+				t.Error(err)
+			}
+			results <- result
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if len(result.Procedures) != 1 || result.Procedures[0].Symbol.Name != "Main" {
+			t.Fatalf("procedure IR = %+v", result)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+
+	result, hit, err := snapshot.ProcedureIR(load)
+	if err != nil || !hit {
+		t.Fatalf("cached procedure IR = (hit=%v, err=%v)", hit, err)
+	}
+	result.Procedures[0].Symbol.Name = "mutated"
+	result.Procedures[0].Symbol.Parameters[0].Name = "mutated"
+	result.Procedures[0].Statements[0].Text = "mutated"
+	again, _, _ := snapshot.ProcedureIR(load)
+	if again.Procedures[0].Symbol.Name != "Main" ||
+		again.Procedures[0].Symbol.Parameters[0].Name != "value" ||
+		again.Procedures[0].Statements[0].Text != "Target" {
+		t.Fatalf("cached procedure IR was mutated: %+v", again)
+	}
+}
+
+func TestAnalysisSnapshotCachesDeterministicProcedureIRError(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "broken", Version: 1})
+	want := errors.New("procedure IR build failed")
+	var loads atomic.Int32
+	load := func() (procedureir.DocumentIR, error) {
+		loads.Add(1)
+		return procedureir.DocumentIR{Path: "Main.bas"}, want
+	}
+	for i := 0; i < 2; i++ {
+		result, hit, err := snapshot.ProcedureIR(load)
+		if !errors.Is(err, want) || hit != (i > 0) || result.Path != "Main.bas" {
+			t.Fatalf("call %d = (result=%+v, hit=%v, err=%v)", i, result, hit, err)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+}
+
 func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSemanticTokens(t *testing.T) {
 	snapshot := NewAnalysisSnapshot(Document{
 		URI:        "file:///Main.bas",
@@ -251,6 +333,13 @@ func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSeman
 	doc := snapshot.Document()
 	analyzer := newTestAnalyzer(t)
 	_ = analyzer.Diagnostics(doc)
+	procedureIR, hit, err := snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		t.Fatal("diagnostics did not initialize the snapshot procedure IR")
+		return procedureir.DocumentIR{}, nil
+	})
+	if err != nil || !hit || len(procedureIR.Procedures) != 1 {
+		t.Fatalf("procedure IR = (result=%+v, hit=%v, err=%v)", procedureIR, hit, err)
+	}
 	if _, err := analyzer.DocumentSymbols(doc); err != nil {
 		t.Fatal(err)
 	}
@@ -258,15 +347,7 @@ func TestAnalysisSnapshotSharesOneParsedDocumentAcrossDiagnosticsSymbolsAndSeman
 		t.Fatal(err)
 	}
 	callResult, hit, err := snapshot.RawCallSites(func() (calls.FileResult, error) {
-		parsed, err := snapshot.ParsedDocument()
-		if err != nil {
-			return calls.FileResult{}, err
-		}
-		return calls.ExtractParsed(calls.SourceOptions{
-			RootDir:    ".",
-			Path:       snapshot.Path(),
-			ModuleKind: snapshot.ModuleKind(),
-		}, parsed)
+		return calls.ExtractIR(procedureIR), nil
 	})
 	if err != nil || hit {
 		t.Fatalf("raw call sites = (result=%+v, hit=%v, err=%v)", callResult, hit, err)
