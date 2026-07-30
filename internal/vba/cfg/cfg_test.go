@@ -441,6 +441,190 @@ func TestRecoveredLabelTargetAlsoRetainsUnknownFlow(t *testing.T) {
 	}
 }
 
+func TestValidUnclassifiedStatementKeepsOrdinaryFallthrough(t *testing.T) {
+	t.Parallel()
+	graph := Build(buildProcedure(t, `Public Sub Run(ByVal filePath As String)
+    Open filePath For Input As #1
+    GoTo Done
+Handler:
+    Call Failed
+Done:
+    Exit Sub
+End Sub
+`))
+	unknownID := statementIDContaining(t, graph, "Open filePath")
+	unknownBlock := graph.block(blockID(t, graph, unknownID))
+	if unknownBlock.Statement == nil || unknownBlock.Statement.Kind != procedureir.StatementUnknown {
+		t.Fatalf("Open statement kind = %+v, want valid unclassified statement", unknownBlock.Statement)
+	}
+	unknown := unknownBlock.ID
+	gotoBlock := blockID(t, graph, statementIDContaining(t, graph, "GoTo Done"))
+	handler := blockID(t, graph, statementIDContaining(t, graph, "Handler:"))
+	if !hasEdge(graph, unknown, gotoBlock, EdgeFallthrough) {
+		t.Fatalf("valid unclassified statement lost fallthrough: %+v", graph.Edges)
+	}
+	if len(graph.UnknownFlowSources) != 0 {
+		t.Fatalf("valid unclassified statement became unknown flow: %+v", graph.UnknownFlowSources)
+	}
+	if graph.IsReachable(handler, EdgeFilter{NormalOnly: true}) {
+		t.Fatal("valid unclassified statement made skipped handler reachable")
+	}
+}
+
+func TestUnclassifiedStructuredChildrenRemainConservativelyReachable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		statements []procedureir.Statement
+		parentID   int
+		childID    int
+	}{
+		{
+			name: "if",
+			statements: []procedureir.Statement{
+				{ID: 1, Kind: procedureir.StatementIf},
+				{
+					ID: 2, ParentID: 1, Kind: procedureir.StatementCall,
+					Control: &procedureir.ControlFlowMetadata{Branch: procedureir.BranchThen},
+				},
+				{
+					ID: 3, ParentID: 1, Kind: procedureir.StatementCall,
+					Control: &procedureir.ControlFlowMetadata{Branch: procedureir.BranchElse},
+				},
+				{ID: 4, ParentID: 1, Kind: procedureir.StatementRecovered, Recovered: true},
+				{ID: 5, Kind: procedureir.StatementExit, Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferExitSub}},
+			},
+			parentID: 1,
+			childID:  4,
+		},
+		{
+			name: "select",
+			statements: []procedureir.Statement{
+				{ID: 1, Kind: procedureir.StatementSelect},
+				{ID: 2, ParentID: 1, Kind: procedureir.StatementCase},
+				{ID: 3, ParentID: 1, Kind: procedureir.StatementRecovered, Recovered: true},
+				{ID: 4, Kind: procedureir.StatementExit, Control: &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferExitSub}},
+			},
+			parentID: 1,
+			childID:  3,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			graph := Build(procedureir.ProcedureIR{
+				Symbol:     procedureir.ProcedureSymbol{Name: "Run", Kind: procedureir.ProcedureSub},
+				Statements: test.statements,
+			})
+			parent := blockID(t, graph, test.parentID)
+			child := blockID(t, graph, test.childID)
+			if !hasUncertainEdge(graph, parent, child) {
+				t.Fatalf("unclassified child lacks local uncertain entry: %+v", graph.Edges)
+			}
+			if !graph.IsReachable(child, EdgeFilter{NormalOnly: true}) {
+				t.Fatal("unclassified structured child is spuriously unreachable")
+			}
+		})
+	}
+}
+
+func TestExactResumeTargetRetainsEnabledErrorMode(t *testing.T) {
+	t.Parallel()
+	graph := Build(buildProcedure(t, `Public Sub Run()
+    On Error GoTo Handler
+    Call First
+    Exit Sub
+Handler:
+    Resume ContinueHere
+ContinueHere:
+    Call Second
+    Exit Sub
+End Sub
+`))
+	handler := blockID(t, graph, statementIDContaining(t, graph, "Handler:"))
+	resume := blockID(t, graph, statementIDContaining(t, graph, "Resume ContinueHere"))
+	continuation := blockID(t, graph, statementIDContaining(t, graph, "ContinueHere:"))
+	second := blockID(t, graph, statementIDContaining(t, graph, "Call Second"))
+	if !hasEdge(graph, resume, continuation, EdgeResume) {
+		t.Fatalf("exact Resume target missing: %+v", graph.Edges)
+	}
+	found := false
+	for _, edge := range graph.Edges {
+		if edge.From == second && edge.To == handler && edge.Kind == EdgeError &&
+			edge.Class == EdgeExceptional && edge.Uncertain {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("post-Resume fault lost enabled handler mode: %+v", graph.Edges)
+	}
+}
+
+func TestRecoveredFlowUsesLinearMarkersAndPreWriteAssignmentState(t *testing.T) {
+	t.Parallel()
+	const statementCount = 100
+	statements := make([]procedureir.Statement, statementCount)
+	for i := range statements {
+		statements[i] = procedureir.Statement{
+			ID: i + 1, Kind: procedureir.StatementRecovered, Recovered: true,
+		}
+	}
+	procedure := procedureir.ProcedureIR{
+		Symbol:     procedureir.ProcedureSymbol{Name: "Recovered", Kind: procedureir.ProcedureSub},
+		Statements: statements,
+		Accesses: []procedureir.VariableAccess{{
+			Name: "value", Mode: procedureir.AccessWrite, Scope: procedureir.ScopeLocal, StatementID: 1,
+		}},
+	}
+	graph := Build(procedure)
+	if len(graph.UnknownFlowSources) != statementCount {
+		t.Fatalf("unknown-flow sources = %d, want %d", len(graph.UnknownFlowSources), statementCount)
+	}
+	if got := countEdges(graph, EdgeUnknown); got != statementCount {
+		t.Fatalf("unknown edges = %d, want linear count %d", got, statementCount)
+	}
+	if graph.IsDefinitelyAssigned(
+		blockID(t, graph, 2),
+		Variable{Scope: procedureir.ScopeLocal, Name: "value"},
+		EdgeFilter{NormalOnly: true},
+	) {
+		t.Fatal("recovered assignment write propagated after unknown divergence")
+	}
+}
+
+func TestUnknownFlowPreservesPreDivergenceFactsWithoutInventingSyntheticExits(t *testing.T) {
+	t.Parallel()
+	procedure := procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{Name: "Recovered", Kind: procedureir.ProcedureSub},
+		Statements: []procedureir.Statement{
+			{ID: 1, Kind: procedureir.StatementAssignment},
+			{ID: 2, Kind: procedureir.StatementRecovered, Recovered: true},
+			{ID: 3, Kind: procedureir.StatementLabel, Label: "Cleanup"},
+		},
+		Accesses: []procedureir.VariableAccess{{
+			Name: "value", Mode: procedureir.AccessWrite, Scope: procedureir.ScopeLocal, StatementID: 1,
+		}},
+	}
+	graph := Build(procedure)
+	filter := EdgeFilter{NormalOnly: true}
+	assignment := blockID(t, graph, 1)
+	cleanup := blockID(t, graph, 3)
+	value := Variable{Scope: procedureir.ScopeLocal, Name: "value"}
+	if !graph.IsDefinitelyAssigned(cleanup, value, filter) {
+		t.Fatal("assignment completed before unknown divergence was discarded")
+	}
+	if !containsBlock(graph.Dominators(filter)[cleanup], assignment) {
+		t.Fatal("pre-divergence assignment should still dominate the cleanup label")
+	}
+	if graph.IsReachable(graph.TerminationExit, filter) {
+		t.Fatal("unknown flow invented a termination exit without an End statement")
+	}
+	if !graph.CleanupGuaranteed([]int{3}, ExitSelection{Normal: true}, filter) {
+		t.Fatal("unknown flow invented a normal path around the terminal cleanup label")
+	}
+}
+
 func TestReachabilityDominanceDefiniteAssignmentAndCleanup(t *testing.T) {
 	t.Parallel()
 	graph := Build(buildProcedure(t, `Public Sub Run(ByVal Ready As Boolean)

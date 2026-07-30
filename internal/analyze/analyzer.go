@@ -1366,6 +1366,17 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 			if !ok || !reachable[block.ID] {
 				continue
 			}
+			implicitEntry := false
+			for _, edge := range proc.Graph.Edges {
+				if edge.To == block.ID && edge.Class == vbacfg.EdgeNormal && reachable[edge.From] &&
+					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
+					implicitEntry = true
+					break
+				}
+			}
+			if !implicitEntry {
+				continue
+			}
 			lineNo := statement.Range.StartLine
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA204", "warning", "Normal execution can fall through into error handler "+label+".", "Without Exit Sub, Exit Function, or Exit Property before the handler label, successful execution can run error handling code.", errorHandlerFallthroughSuggestion(proc, label)))
 		}

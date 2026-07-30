@@ -87,14 +87,15 @@ func (v Variable) canonical() Variable {
 // Graph owns all data for one ProcedureIR. IDs are deterministic for an
 // identical input but are meaningful only within this graph revision.
 type Graph struct {
-	Procedure       procedureir.ProcedureSymbol `json:"procedure"`
-	Blocks          []Block                     `json:"blocks"`
-	Edges           []Edge                      `json:"edges"`
-	Entry           BlockID                     `json:"entry"`
-	NormalExit      BlockID                     `json:"normalExit"`
-	ExceptionalExit BlockID                     `json:"exceptionalExit"`
-	TerminationExit BlockID                     `json:"terminationExit"`
-	UnknownExit     BlockID                     `json:"unknownExit"`
+	Procedure          procedureir.ProcedureSymbol `json:"procedure"`
+	Blocks             []Block                     `json:"blocks"`
+	Edges              []Edge                      `json:"edges"`
+	UnknownFlowSources []BlockID                   `json:"unknownFlowSources,omitempty"`
+	Entry              BlockID                     `json:"entry"`
+	NormalExit         BlockID                     `json:"normalExit"`
+	ExceptionalExit    BlockID                     `json:"exceptionalExit"`
+	TerminationExit    BlockID                     `json:"terminationExit"`
+	UnknownExit        BlockID                     `json:"unknownExit"`
 }
 
 type Document struct {

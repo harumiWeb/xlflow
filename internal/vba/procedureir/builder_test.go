@@ -757,6 +757,27 @@ func TestCloneControlFlowMetadataIsDeep(t *testing.T) {
 	}
 }
 
+func TestResumeNextControlMetadataNormalizesWhitespace(t *testing.T) {
+	t.Parallel()
+	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(
+		"Public Sub Run()\nResume    Next\nResume\tNext\nEnd Sub\n",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumeNext int
+	for _, statement := range source.Procedures[0].Statements {
+		if statement.Kind == StatementResume && statement.Control != nil &&
+			statement.Control.Transfer == TransferResumeNext {
+			resumeNext++
+		}
+	}
+	if resumeNext != 2 {
+		t.Fatalf("Resume Next statements = %d, want 2; statements=%+v",
+			resumeNext, source.Procedures[0].Statements)
+	}
+}
+
 func TestBuildParsedClosedDocument(t *testing.T) {
 	t.Parallel()
 	doc, err := vbaast.ParseDocument("Module1.bas", []byte("Sub Run()\nEnd Sub\n"))

@@ -89,7 +89,12 @@ A missing, duplicate, or recovered target is not resolved to an arbitrary
 candidate. Its transition enters conservative unknown flow, preserving the
 possibility of reaching relevant known successors and `UnknownExit`. Unknown or
 recovered control syntax follows the same rule whenever omitting it could make
-a guarantee appear true.
+a guarantee appear true. The graph records these sources once instead of
+materializing an edge from every unknown source to every statement. Queries
+interpret a reachable unknown-flow source conservatively. Valid executable
+statements whose control behavior is known to be ordinary fallthrough do not
+become unknown flow merely because their statement kind is otherwise
+unclassified.
 
 Colon-separated executable statements remain individually ordered statements.
 Control transitions use their exact normalized ranges so CRLF, UTF-8 source,
@@ -120,7 +125,9 @@ statement. Labels and purely structural markers are not fault sites.
 `Resume Next` have dynamic destinations determined by the active error and
 fault site; when one exact destination cannot be proven, they use conservative
 unknown flow. Missing, duplicate, or recovered resume labels are handled like
-unresolved `GoTo` targets.
+unresolved `GoTo` targets. A uniquely resolved `Resume <label>` carries the
+enabled handler mode to the continuation, where the handler is inactive and may
+be entered again by a later fault.
 
 ## Query Semantics
 
@@ -148,8 +155,9 @@ class does not remove uncertain edges of the retained class.
 
 `VBA204` error-handler fallthrough detection uses an explicit normal-flow view
 that excludes exceptional edges. A handler is a fallthrough risk when its label
-block is normally reachable from the procedure entry. A transfer caused only
-by an error does not make the handler normally reachable.
+block has a reachable implicit normal-flow predecessor. An explicit
+`GoTo <handler>` does not count as fallthrough, and a transfer caused only by an
+error does not make the handler normally reachable.
 
 This replaces the previous preceding-text heuristic and correctly accounts for
 structured branches and jumps. The existing cleanup-label exception, inline

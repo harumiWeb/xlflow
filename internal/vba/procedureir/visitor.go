@@ -253,7 +253,8 @@ func (v *singleVisitor) populateControlMetadata(statement *Statement, node *tree
 		if target := node.ChildByFieldName("target"); target != nil {
 			value.Transfer = TransferResumeLabel
 			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
-		} else if strings.EqualFold(strings.TrimSpace(nodeText(node, v.builder.source)), "Resume Next") {
+		} else if fields := strings.Fields(nodeText(node, v.builder.source)); len(fields) == 2 &&
+			strings.EqualFold(fields[0], "Resume") && strings.EqualFold(fields[1], "Next") {
 			value.Transfer = TransferResumeNext
 		} else {
 			value.Transfer = TransferResumeRetry

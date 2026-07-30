@@ -480,6 +480,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `on_error_goto`
 - `on_error_resume_next`
 - `on_error_statement`
+- `on_goto_statement`
 - `open_workbook`
 - `opening_column`
 - `opening_line`
@@ -688,6 +689,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `started_at`
 - `static_modifier`
 - `status_hint`
+- `stop_statement`
 - `storage_kinds`
 - `structured_reference`
 - `style_included`

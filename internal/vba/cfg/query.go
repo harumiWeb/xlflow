@@ -80,14 +80,16 @@ func (g Graph) Dominators(filter EdgeFilter) map[BlockID][]BlockID {
 	changed := true
 	for changed {
 		changed = false
+		unknownDominators, hasUnknown := g.unknownDominatorInput(reachable, dom)
 		for id := range reachable {
 			if id == g.Entry {
 				continue
 			}
 			preds := g.predecessors(id, filter, reachable)
 			next := map[BlockID]bool{id: true}
+			var intersection map[BlockID]bool
 			if len(preds) > 0 {
-				intersection := copySet(dom[preds[0]])
+				intersection = copySet(dom[preds[0]])
 				for _, pred := range preds[1:] {
 					for candidate := range intersection {
 						if !dom[pred][candidate] {
@@ -95,9 +97,20 @@ func (g Graph) Dominators(filter EdgeFilter) map[BlockID][]BlockID {
 						}
 					}
 				}
-				for candidate := range intersection {
-					next[candidate] = true
+			}
+			if hasUnknown && g.block(id).Kind == BlockStatement {
+				if intersection == nil {
+					intersection = copySet(unknownDominators)
+				} else {
+					for candidate := range intersection {
+						if !unknownDominators[candidate] {
+							delete(intersection, candidate)
+						}
+					}
 				}
+			}
+			for candidate := range intersection {
+				next[candidate] = true
 			}
 			if !sameSet(dom[id], next) {
 				dom[id] = next
@@ -113,6 +126,28 @@ func (g Graph) Dominators(filter EdgeFilter) map[BlockID][]BlockID {
 		sort.Slice(out[id], func(i, j int) bool { return out[id][i] < out[id][j] })
 	}
 	return out
+}
+
+func (g Graph) unknownDominatorInput(
+	reachable map[BlockID]bool,
+	dominators map[BlockID]map[BlockID]bool,
+) (map[BlockID]bool, bool) {
+	var intersection map[BlockID]bool
+	for _, source := range g.UnknownFlowSources {
+		if !reachable[source] {
+			continue
+		}
+		if intersection == nil {
+			intersection = copySet(dominators[source])
+			continue
+		}
+		for candidate := range intersection {
+			if !dominators[source][candidate] {
+				delete(intersection, candidate)
+			}
+		}
+	}
+	return intersection, intersection != nil
 }
 
 // DefiniteAssignments returns variables definitely assigned on entry to every
@@ -144,11 +179,15 @@ func (g Graph) DefiniteAssignments(filter EdgeFilter) map[BlockID][]Variable {
 	changed := true
 	for changed {
 		changed = false
+		unknownInput, hasUnknown := g.unknownAssignmentInput(reachable, in)
 		for id := range reachable {
 			if id == g.Entry {
 				continue
 			}
 			incoming := g.assignmentInputs(id, filter, reachable, in, outSet)
+			if hasUnknown && g.block(id).Kind == BlockStatement {
+				incoming = append(incoming, unknownInput)
+			}
 			next := map[Variable]bool{}
 			if len(incoming) > 0 {
 				next = copyVariableSet(incoming[0])
@@ -182,6 +221,28 @@ func (g Graph) DefiniteAssignments(filter EdgeFilter) map[BlockID][]Variable {
 	return result
 }
 
+func (g Graph) unknownAssignmentInput(
+	reachable map[BlockID]bool,
+	in map[BlockID]map[Variable]bool,
+) (map[Variable]bool, bool) {
+	var intersection map[Variable]bool
+	for _, source := range g.UnknownFlowSources {
+		if !reachable[source] {
+			continue
+		}
+		if intersection == nil {
+			intersection = copyVariableSet(in[source])
+			continue
+		}
+		for variable := range intersection {
+			if !in[source][variable] {
+				delete(intersection, variable)
+			}
+		}
+	}
+	return intersection, intersection != nil
+}
+
 func (g Graph) assignmentInputs(
 	id BlockID,
 	filter EdgeFilter,
@@ -196,10 +257,12 @@ func (g Graph) assignmentInputs(
 		source := g.block(edge.From)
 		forEachZeroIteration := source.Statement != nil &&
 			source.Statement.Kind == procedureir.StatementForEach && edge.Kind == EdgeLoopExit
-		if edge.Class == EdgeExceptional || forEachZeroIteration {
+		unknownBeforeCompletion := edge.Kind == EdgeUnknown && edge.Uncertain
+		if edge.Class == EdgeExceptional || forEachZeroIteration || unknownBeforeCompletion {
 			// A fault can occur before the source statement's writes complete.
 			// For Each may also take its zero-iteration exit before assigning
-			// the iterator variable.
+			// the iterator variable. Unknown control may diverge before a
+			// recovered statement's writes complete.
 			inputs = append(inputs, in[edge.From])
 		} else {
 			inputs = append(inputs, out[edge.From])
@@ -242,24 +305,66 @@ func (g Graph) CleanupGuaranteed(cleanupStatementIDs []int, selection ExitSelect
 }
 
 func (g Graph) reachableWithout(filter EdgeFilter, removed map[BlockID]bool) map[BlockID]bool {
+	seen := g.physicalReachable(filter, removed)
+	if g.unknownFlowReached(seen) {
+		for _, block := range g.Blocks {
+			if block.Kind == BlockStatement && !removed[block.ID] {
+				seen[block.ID] = true
+			}
+		}
+		if !removed[g.UnknownExit] {
+			seen[g.UnknownExit] = true
+		}
+		seen = g.expandReachable(filter, removed, seen)
+	}
+	return seen
+}
+
+func (g Graph) physicalReachable(filter EdgeFilter, removed map[BlockID]bool) map[BlockID]bool {
 	seen := map[BlockID]bool{}
 	if removed[g.Entry] {
 		return seen
 	}
-	queue := []BlockID{g.Entry}
 	seen[g.Entry] = true
+	return g.expandReachable(filter, removed, seen)
+}
+
+func (g Graph) expandReachable(
+	filter EdgeFilter,
+	removed map[BlockID]bool,
+	seen map[BlockID]bool,
+) map[BlockID]bool {
+	successors := map[BlockID][]BlockID{}
+	for _, edge := range g.Edges {
+		if filter.accepts(edge) && !removed[edge.To] {
+			successors[edge.From] = append(successors[edge.From], edge.To)
+		}
+	}
+	queue := make([]BlockID, 0, len(seen))
+	for id := range seen {
+		queue = append(queue, id)
+	}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, edge := range g.Edges {
-			if edge.From != current || !filter.accepts(edge) || removed[edge.To] || seen[edge.To] {
+		for _, target := range successors[current] {
+			if seen[target] {
 				continue
 			}
-			seen[edge.To] = true
-			queue = append(queue, edge.To)
+			seen[target] = true
+			queue = append(queue, target)
 		}
 	}
 	return seen
+}
+
+func (g Graph) unknownFlowReached(reachable map[BlockID]bool) bool {
+	for _, source := range g.UnknownFlowSources {
+		if reachable[source] {
+			return true
+		}
+	}
+	return false
 }
 
 func (g Graph) predecessors(id BlockID, filter EdgeFilter, reachable map[BlockID]bool) []BlockID {

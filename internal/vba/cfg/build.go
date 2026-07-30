@@ -48,7 +48,7 @@ func Build(in procedureir.ProcedureIR) Graph {
 		entry = b.buildSequence(top, b.graph.NormalExit, nil)
 	}
 	b.add(b.graph.Entry, entry, EdgeFallthrough, EdgeNormal, false, nil)
-	b.addUnknownRecoveryEdges()
+	b.addUnknownRecoveryFlow()
 	b.addExceptionalEdges()
 	b.finish()
 	return b.graph
@@ -204,7 +204,7 @@ func transferMatchesProcedure(transfer procedureir.TransferKind, kind procedurei
 func (b *builder) buildIf(statement procedureir.Statement, next BlockID, loops []loopFrame) {
 	block := b.blockByID[statement.ID]
 	children := b.children[statement.ID]
-	var thenIDs, alternatives []int
+	var thenIDs, alternatives, unclassified []int
 	hasRoles := false
 	for _, id := range children {
 		child := b.stmtByID[id]
@@ -215,9 +215,12 @@ func (b *builder) buildIf(statement procedureir.Statement, next BlockID, loops [
 			} else {
 				thenIDs = append(thenIDs, id)
 			}
+		} else {
+			unclassified = append(unclassified, id)
 		}
 	}
 	if !hasRoles {
+		unclassified = nil
 		for _, id := range children {
 			child := b.stmtByID[id]
 			if child.Kind == procedureir.StatementElseIf || child.Kind == procedureir.StatementElse {
@@ -241,6 +244,10 @@ func (b *builder) buildIf(statement procedureir.Statement, next BlockID, loops [
 	}
 	b.add(block, thenEntry, EdgeBranchTrue, EdgeNormal, false, &statement)
 	b.add(block, elseEntry, EdgeBranchFalse, EdgeNormal, false, &statement)
+	if len(unclassified) > 0 {
+		entry := b.buildSequence(unclassified, next, loops)
+		b.add(block, entry, EdgeUnknown, EdgeNormal, true, &statement)
+	}
 }
 
 func (b *builder) buildAlternativeChain(ids []int, falseFallback, join BlockID, loops []loopFrame) BlockID {
@@ -289,9 +296,11 @@ func (b *builder) buildSelect(statement procedureir.Statement, next BlockID, loo
 	block := b.blockByID[statement.ID]
 	cases := b.children[statement.ID]
 	hasElse := false
+	var unclassified []int
 	for _, id := range cases {
 		candidate := b.stmtByID[id]
 		if candidate.Kind != procedureir.StatementCase {
+			unclassified = append(unclassified, id)
 			continue
 		}
 		caseEntry := b.buildStatement(id, next, loops)
@@ -300,6 +309,10 @@ func (b *builder) buildSelect(statement procedureir.Statement, next BlockID, loo
 	}
 	if !hasElse {
 		b.add(block, next, EdgeBranchFalse, EdgeNormal, false, &statement)
+	}
+	if len(unclassified) > 0 {
+		entry := b.buildSequence(unclassified, next, loops)
+		b.add(block, entry, EdgeUnknown, EdgeNormal, true, &statement)
 	}
 }
 
@@ -437,19 +450,29 @@ func (b *builder) add(from, to BlockID, kind EdgeKind, class EdgeClass, uncertai
 	b.edges = append(b.edges, edge)
 }
 
-func (b *builder) addUnknownRecoveryEdges() {
+func (b *builder) addUnknownRecoveryFlow() {
 	for _, statement := range b.procedure.Statements {
-		if statement.Kind != procedureir.StatementUnknown && statement.Kind != procedureir.StatementRecovered &&
-			!statement.Recovered {
+		if !requiresUnknownFlow(statement) {
 			continue
 		}
 		from := b.blockByID[statement.ID]
+		b.graph.UnknownFlowSources = append(b.graph.UnknownFlowSources, from)
 		b.add(from, b.graph.UnknownExit, EdgeUnknown, EdgeNormal, true, &statement)
-		for _, block := range b.graph.Blocks {
-			if block.Kind == BlockStatement && block.ID != from {
-				b.add(from, block.ID, EdgeUnknown, EdgeNormal, true, &statement)
-			}
-		}
+	}
+}
+
+func requiresUnknownFlow(statement procedureir.Statement) bool {
+	if statement.Kind == procedureir.StatementRecovered || statement.Recovered {
+		return true
+	}
+	if statement.Kind != procedureir.StatementUnknown {
+		return false
+	}
+	switch strings.ToLower(statement.SyntaxKind) {
+	case "on_goto_statement", "stop_statement":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -462,23 +485,7 @@ const (
 
 func (b *builder) addExceptionalEdges() {
 	modes := map[BlockID]map[errorMode]bool{b.graph.Entry: {errorDisabled: true}}
-	changed := true
-	for changed {
-		changed = false
-		for _, edge := range b.edges {
-			if edge.Class != EdgeNormal {
-				continue
-			}
-			in := modes[edge.From]
-			if len(in) == 0 {
-				continue
-			}
-			out := b.transferErrorMode(edge.From, in)
-			if mergeModes(modes, edge.To, out) {
-				changed = true
-			}
-		}
-	}
+	b.propagateErrorModes(modes)
 	baseEdges := append([]Edge(nil), b.edges...)
 	for _, block := range b.graph.Blocks {
 		if !b.isFaultSite(block) {
@@ -528,6 +535,40 @@ func (b *builder) addExceptionalEdges() {
 			if b.isFaultSite(block) {
 				b.add(blockID, b.graph.ExceptionalExit, EdgeError, EdgeExceptional, true, block.Statement)
 			}
+		}
+	}
+}
+
+func (b *builder) propagateErrorModes(modes map[BlockID]map[errorMode]bool) {
+	successors := map[BlockID][]BlockID{}
+	for _, edge := range b.edges {
+		if edge.Class == EdgeNormal ||
+			(edge.Class == EdgeExceptional && edge.Kind == EdgeResume && !edge.Uncertain) {
+			successors[edge.From] = append(successors[edge.From], edge.To)
+		}
+	}
+	queue := []BlockID{b.graph.Entry}
+	queued := map[BlockID]bool{b.graph.Entry: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		queued[current] = false
+		out := b.transferErrorMode(current, modes[current])
+		targets := successors[current]
+		block := b.graph.block(current)
+		if block.Statement != nil && block.Statement.Control != nil &&
+			block.Statement.Control.Transfer == procedureir.TransferOnErrorGoto {
+			candidates := b.labels[normalizedTarget(block.Statement.Control.Target)]
+			if len(candidates) == 1 {
+				targets = append(targets, candidates[0])
+			}
+		}
+		for _, target := range targets {
+			if !mergeModes(modes, target, out) || queued[target] {
+				continue
+			}
+			queue = append(queue, target)
+			queued[target] = true
 		}
 	}
 }
