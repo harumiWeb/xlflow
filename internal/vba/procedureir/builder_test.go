@@ -237,6 +237,97 @@ End Sub
 	}
 }
 
+func TestControlFlowMetadataNormalizesBranchesCasesLoopsAndTransfers(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Function Run() As Long
+    If Ready Then Work 1: GoTo Done Else Work 2: End
+    Select Case value
+    Case 1
+        Work 3
+    Case Else
+        Work 4
+    End Select
+    Do While Ready
+        Exit Do
+    Loop
+    Do Until Ready
+    Loop
+    Do
+    Loop While Ready
+    Do
+    Loop Until Ready
+    For index = 1 To 2
+        Exit For
+    Next
+    On Error GoTo Handler
+    On Error Resume Next
+    On Error GoTo 0
+    Resume
+    Resume Next
+    Resume [Next]
+    Resume Handler
+    Exit Function
+Done:
+    Exit Sub
+Handler:
+    Exit Property
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := doc.Procedures[0].Statements
+	assertControl(t, statements, "Work 1", BranchThen, "", "", "", "")
+	assertControl(t, statements, "GoTo Done", BranchThen, "", TransferGoto, "Done", "")
+	assertControl(t, statements, "Work 2", BranchElse, "", "", "", "")
+	assertControl(t, statements, "End", BranchElse, "", TransferTerminate, "", "")
+	assertControl(t, statements, "Case Else", "", "", "", "", "case_else")
+	assertControl(t, statements, "Do While Ready", "", LoopPreWhile, "", "", "")
+	assertControl(t, statements, "Do Until Ready", "", LoopPreUntil, "", "", "")
+	assertControl(t, statements, "Loop While Ready", "", LoopPostWhile, "", "", "")
+	assertControl(t, statements, "Loop Until Ready", "", LoopPostUntil, "", "", "")
+	assertControl(t, statements, "Exit Do", "", "", TransferExitDo, "", "")
+	assertControl(t, statements, "Exit For", "", "", TransferExitFor, "", "")
+	assertControl(t, statements, "On Error GoTo Handler", "", "", TransferOnErrorGoto, "Handler", "")
+	assertControl(t, statements, "On Error Resume Next", "", "", TransferOnErrorResumeNext, "", "")
+	assertControl(t, statements, "On Error GoTo 0", "", "", TransferOnErrorDisable, "", "")
+	assertControl(t, statements, "Resume", "", "", TransferResumeRetry, "", "")
+	assertControl(t, statements, "Resume Next", "", "", TransferResumeNext, "", "")
+	assertControl(t, statements, "Resume [Next]", "", "", TransferResumeLabel, "Next", "")
+	assertControl(t, statements, "Resume Handler", "", "", TransferResumeLabel, "Handler", "")
+	assertControl(t, statements, "Exit Function", "", "", TransferExitFunction, "", "")
+	assertControl(t, statements, "Exit Sub", "", "", TransferExitSub, "", "")
+	assertControl(t, statements, "Exit Property", "", "", TransferExitProperty, "", "")
+}
+
+func TestNumericLineLabelKeepsNestedExecutableStatement(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+100 GoTo 200
+200 Work
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := doc.Procedures[0].Statements
+	if len(statements) != 4 {
+		t.Fatalf("statements = %+v, want two labels and two nested executable statements", statements)
+	}
+	if statements[0].Kind != StatementLabel || statements[0].Label != "100" ||
+		statements[1].Kind != StatementGoTo || statements[1].ParentID != statements[0].ID ||
+		statements[1].Control == nil || statements[1].Control.Target != "200" {
+		t.Fatalf("first numbered statement = %+v / %+v", statements[0], statements[1])
+	}
+	if statements[0].Text != "100" || statements[0].Range.EndByte > statements[1].Range.StartByte {
+		t.Fatalf("numeric label range overlaps nested statement: %+v / %+v", statements[0], statements[1])
+	}
+	if statements[2].Kind != StatementLabel || statements[2].Label != "200" ||
+		statements[3].Kind != StatementCall || statements[3].ParentID != statements[2].ID {
+		t.Fatalf("second numbered statement = %+v / %+v", statements[2], statements[3])
+	}
+}
+
 func TestSetAssignmentRecordsObjectWriteAndRead(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
@@ -653,6 +744,40 @@ func TestCloneIsDeep(t *testing.T) {
 	}
 }
 
+func TestCloneControlFlowMetadataIsDeep(t *testing.T) {
+	t.Parallel()
+	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte("Public Sub Run()\nGoTo Done\nDone:\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clone := Clone(source)
+	clone.Procedures[0].Statements[0].Control.Target = "Changed"
+	if source.Procedures[0].Statements[0].Control.Target != "Done" {
+		t.Fatal("Clone shares control-flow metadata")
+	}
+}
+
+func TestResumeNextControlMetadataNormalizesWhitespace(t *testing.T) {
+	t.Parallel()
+	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(
+		"Public Sub Run()\nResume    Next\nResume\tNext\nEnd Sub\n",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumeNext int
+	for _, statement := range source.Procedures[0].Statements {
+		if statement.Kind == StatementResume && statement.Control != nil &&
+			statement.Control.Transfer == TransferResumeNext {
+			resumeNext++
+		}
+	}
+	if resumeNext != 2 {
+		t.Fatalf("Resume Next statements = %d, want 2; statements=%+v",
+			resumeNext, source.Procedures[0].Statements)
+	}
+}
+
 func TestBuildParsedClosedDocument(t *testing.T) {
 	t.Parallel()
 	doc, err := vbaast.ParseDocument("Module1.bas", []byte("Sub Run()\nEnd Sub\n"))
@@ -674,6 +799,53 @@ func requireStatementKind(t *testing.T, statements []Statement, want StatementKi
 		}
 	}
 	t.Fatalf("missing statement kind %q in %#v", want, statements)
+}
+
+func assertControl(
+	t *testing.T,
+	statements []Statement,
+	text string,
+	branch BranchRole,
+	loop LoopTest,
+	transfer TransferKind,
+	target string,
+	flag string,
+) {
+	t.Helper()
+	var found *Statement
+	for i := range statements {
+		if statementText := strings.TrimSpace(statements[i].Text); statementText == text {
+			found = &statements[i]
+			break
+		}
+	}
+	if found == nil {
+		bestWidth := -1
+		for i := range statements {
+			if strings.Contains(statements[i].Text, text) {
+				width := len(statements[i].Text)
+				if bestWidth < 0 || width < bestWidth {
+					found = &statements[i]
+					bestWidth = width
+				}
+			}
+		}
+	}
+	if found == nil {
+		t.Fatalf("missing statement containing %q in %+v", text, statements)
+	}
+	if found.Control == nil {
+		t.Fatalf("%q has no control metadata: %+v", text, *found)
+	}
+	if found.Control.Branch != branch || found.Control.Loop != loop ||
+		found.Control.Transfer != transfer || found.Control.Target != target ||
+		(flag == "case_else") != found.Control.CaseElse {
+		t.Fatalf("%q control = %+v, want branch=%q loop=%q transfer=%q target=%q flag=%q",
+			text, found.Control, branch, loop, transfer, target, flag)
+	}
+	if found.Control.Range != found.Range {
+		t.Fatalf("%q control range = %+v, want statement range %+v", text, found.Control.Range, found.Range)
+	}
 }
 
 func assertAccess(t *testing.T, accesses []VariableAccess, name string, scope SymbolScope, mode AccessMode) {

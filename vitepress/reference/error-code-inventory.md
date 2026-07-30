@@ -45,6 +45,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `before_dialog_action`
 - `binary_expression`
 - `block_kind`
+- `branch_false`
+- `branch_true`
 - `bridge_file_not_openable`
 - `bridge_found`
 - `bridge_mode_invalid`
@@ -74,6 +76,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `capture_state`
 - `carried_streams`
 - `case_clause`
+- `case_else`
+- `case_expression`
 - `cell_diffs`
 - `cells_updated`
 - `changed_only`
@@ -179,6 +183,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `discard_required`
 - `discarded_runs`
 - `display_alerts`
+- `do_condition`
 - `do_statement`
 - `doc_comment`
 - `doctor_workbook_requires_project`
@@ -210,6 +215,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `end_column`
 - `end_if_fragment`
 - `end_line`
+- `end_statement`
 - `enum_declaration`
 - `enum_group`
 - `event_declaration`
@@ -228,11 +234,17 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `excel_instance`
 - `excel_pid`
 - `excel_state_uncertain`
+- `exceptional_exit`
 - `excluded_components`
 - `executable_path`
 - `existing_warning`
 - `exit_code`
+- `exit_do`
+- `exit_for`
+- `exit_function`
+- `exit_property`
 - `exit_statement`
+- `exit_sub`
 - `expanded_formula`
 - `expected_closer`
 - `expected_error`
@@ -392,6 +404,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `location_capture`
 - `logical_line`
 - `logical_value_expression`
+- `loop_back`
+- `loop_body`
+- `loop_exit`
 - `lsp_args_invalid`
 - `lsp_check_failed`
 - `macro_disabled`
@@ -450,6 +465,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `no_tests_found`
 - `non_numeric`
 - `non_test`
+- `normal_exit`
 - `not_applicable`
 - `not_attempted`
 - `not_performed`
@@ -460,7 +476,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `old_name`
 - `older_than`
 - `on_error`
+- `on_error_disable`
+- `on_error_goto`
+- `on_error_resume_next`
 - `on_error_statement`
+- `on_goto_statement`
 - `open_workbook`
 - `opening_column`
 - `opening_line`
@@ -505,8 +525,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `passing_mode`
 - `path_translation`
 - `poison_reason`
+- `post_until`
+- `post_while`
+- `pre_until`
+- `pre_while`
 - `procedure_call`
 - `procedure_declaration`
+- `procedure_exit`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -573,6 +598,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `response_source`
 - `restored_from`
 - `result_file`
+- `resume_label`
+- `resume_next`
+- `resume_retry`
 - `resume_statement`
 - `retryable_when_busy`
 - `return_slot`
@@ -661,6 +689,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `started_at`
 - `static_modifier`
 - `status_hint`
+- `stop_statement`
 - `storage_kinds`
 - `structured_reference`
 - `style_included`
@@ -678,6 +707,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `temporary_copy`
 - `temporary_object_cleanup_failed`
 - `temporary_workbook`
+- `termination_exit`
 - `test_args_invalid`
 - `test_discovery_failed`
 - `test_environment_failed`
@@ -712,6 +742,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `undeclared_variable`
 - `unexpected_helper_mode`
 - `unknown_command`
+- `unknown_exit`
 - `unknown_inline_suppression_rule`
 - `unnamed_control_placeholder`
 - `unsafe_backup_file_path`

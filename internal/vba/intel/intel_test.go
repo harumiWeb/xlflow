@@ -271,6 +271,47 @@ End Sub
 	}
 }
 
+func TestDiagnosticsVBA204IgnoresHandlerSkippedByGoto(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    On Error GoTo Handler
+    Debug.Print "work"
+    GoTo Done
+Handler:
+    Debug.Print Err.Description
+Done:
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VBA204"); len(diagnostics) != 0 {
+		t.Fatalf("VBA204 should not report a handler skipped by GoTo: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsVBA204IgnoresExplicitGotoHandler(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    On Error GoTo Handler
+    GoTo Handler
+    Exit Sub
+Handler:
+    Debug.Print Err.Description
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VBA204"); len(diagnostics) != 0 {
+		t.Fatalf("VBA204 should not treat explicit GoTo Handler as fallthrough: %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsSuppressAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

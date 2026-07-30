@@ -218,7 +218,11 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
-	findings, err := analyze.SourceRealtimeFindingsParsedIR(a.RootDir, a.Config, parsed, procedureIR)
+	controlFlow, err := controlFlowForDocument(doc, procedureIR)
+	if err != nil {
+		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
+	}
+	findings, err := analyze.SourceRealtimeFindingsParsedIRCFG(a.RootDir, a.Config, parsed, procedureIR, controlFlow)
 	if ctx.Err() != nil {
 		return nil
 	}

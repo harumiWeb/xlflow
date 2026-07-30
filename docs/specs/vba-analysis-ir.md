@@ -224,13 +224,12 @@ symbol results, or LSP-owned values. Those projections preserve:
 - CLI byte-based and LSP UTF-16 diagnostic ranges.
 
 Issue #426 intentionally stops at procedure syntax and conservative name/call
-resolution:
+resolution. The separate CFG layer defined by
+`docs/specs/vba-control-flow-graph.md` consumes this IR to provide basic blocks,
+edges, reachability, and path queries without changing the meaning of the IR's
+syntactic `Blocks`. Issue #428 adds direct and transitive effect summaries plus
+fixed-point propagation.
 
-- issue #427 adds basic blocks, CFG edges, reachability, and path queries; and
-- issue #428 adds direct and transitive effect summaries plus fixed-point
-  propagation.
-
-Until those layers exist, `Blocks` means syntax nesting only and the IR must not
-expose reachability or effect claims. No new public CLI flag, configuration key,
-JSON field, diagnostic ID, or LSP capability is introduced by this
-specification.
+The IR itself does not expose reachability or effect claims. No new public CLI
+flag, configuration key, JSON field, diagnostic ID, or LSP capability is
+introduced by this specification.
