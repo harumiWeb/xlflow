@@ -71,8 +71,9 @@ None. `rules` is a read-only, parallel-safe metadata operation.
 
 - Inspect a rule before adding it to `[lint].disabled_rules` or
   `[analyze].disabled_rules`.
-- Cache `rules --json` by resolved xlflow executable path in an editor
-  integration.
+- Cache `rules --json` by resolved xlflow executable identity in an editor
+  integration. The identity must include binary file attributes or an equivalent
+  fingerprint so an in-place executable replacement invalidates stale metadata.
 - Follow `documentation_url` from a diagnostic code to its catalog entry.
 
 ## Common failures

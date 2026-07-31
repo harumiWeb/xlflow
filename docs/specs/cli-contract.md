@@ -841,8 +841,16 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 - `VB029`: `Option Explicit` is present and an assignment target or loop control variable is not declared
+- `VB030`: procedure call argument does not match the resolved signature
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
+- `VB033`: member is not present on the resolved receiver type
+- `VB034`: assignment targets a read-only property
+- `VB035`: expression reads a write-only property
+- `VB036`: object assignment omits `Set`
+- `VB037`: value assignment incorrectly uses `Set`
+- `VB038`: assigned expression is incompatible with the resolved target type
+- `VB039`: method without a return value is used as an expression
 - `VB040`: documentation comment references an unknown procedure parameter
 - `VB041`: documentation comment lists duplicate or case-only duplicate parameters
 - `VB042`: documentation comment has `Returns:` on a `Sub`

@@ -72,6 +72,7 @@
 - Treat caller-supplied temporary directories as ownership boundaries: create and clean up only a unique child directory created by the operation, never recursively delete the supplied root.
 - User-visible compatibility fixes must add a concise `CHANGELOG.md` entry under `Unreleased`, including fixes to generated .NET bridge runtime behavior.
 - For user-visible changes in a component with its own changelog, update both the repository `CHANGELOG.md` and the component changelog (for example `editors/vscode/CHANGELOG.md`) under `Unreleased`.
+- Registry-backed documentation generators must validate canonical item shapes and field types before sorting or rendering, and documentation coverage checks must match exact formatted tokens rather than incidental substrings.
 - Preserve source-plan path contracts across process boundaries. When a planner publishes project-root-relative paths, the receiving bridge must resolve them against an explicit project root rather than requiring callers to rewrite the plan ad hoc.
 - For destructive output paths, lexical project-root containment is insufficient: resolve the nearest existing ancestor and reject paths whose canonical identity escapes through a symlink or junction.
 - Treat matching xlflow session metadata as a liveness hint, not proof of ownership: verify the recorded Excel process and workbook before blocking an output path, and ensure human command renderers include top-level operational warnings returned by the bridge.

@@ -110,8 +110,19 @@ for (const code of [
 const configSource = fs.readFileSync(path.join(repo, "internal/config/config.go"), "utf8");
 const configReference = fs.readFileSync(path.join(docs, "reference/config-file.md"), "utf8");
 const diagnosticReference = fs.readFileSync(path.join(docs, "reference/diagnostics.md"), "utf8");
+const documentedConfigTokens = new Set();
+for (const reference of [configReference, diagnosticReference]) {
+  for (const [, token] of reference.matchAll(/`([^`\r\n]+)`/g)) {
+    const table = /^\[([a-z0-9_.-]+)\]$/i.exec(token);
+    if (table !== null) {
+      for (const component of table[1].split(".")) documentedConfigTokens.add(component);
+    } else if (/^[a-z0-9_-]+$/i.test(token)) {
+      documentedConfigTokens.add(token);
+    }
+  }
+}
 for (const [, key] of configSource.matchAll(/toml:"([^,"]+)"/g)) {
-  if (!configReference.includes(key) && !diagnosticReference.includes(key)) {
+  if (key !== "-" && !documentedConfigTokens.has(key)) {
     failures.push(`config key missing from reference: ${key}`);
   }
 }

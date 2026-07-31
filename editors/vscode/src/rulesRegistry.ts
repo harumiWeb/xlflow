@@ -27,11 +27,15 @@ export interface ResolvedExecutable {
 export type ExecutableResolver = (configured: string) => ResolvedExecutable;
 
 const rulesTimeoutMs = 5000;
+const resolutionTtlMs = 1000;
 
 export class XlflowRulesRegistryService {
   private cache: { identity: string; rules: ReadonlyMap<string, RuleMetadata> } | undefined;
   private pending:
     | { identity: string; promise: Promise<ReadonlyMap<string, RuleMetadata>> }
+    | undefined;
+  private resolvedCache:
+    | { configured: string; resolved: ResolvedExecutable; at: number }
     | undefined;
   private generation = 0;
 
@@ -39,10 +43,11 @@ export class XlflowRulesRegistryService {
     private readonly executablePath: () => string = () => readConfig().path,
     private readonly run: RulesCommandRunner = runRulesCommand,
     private readonly resolveExecutable: ExecutableResolver = resolveExecutableIdentity,
+    private readonly now: () => number = Date.now,
   ) {}
 
   async load(): Promise<ReadonlyMap<string, RuleMetadata>> {
-    const resolved = this.resolveExecutable(this.executablePath());
+    const resolved = this.currentResolution();
     if (this.cache?.identity === resolved.identity) {
       return this.cache.rules;
     }
@@ -61,7 +66,7 @@ export class XlflowRulesRegistryService {
       .then((rules) => {
         if (
           this.generation !== generation ||
-          this.resolveExecutable(this.executablePath()).identity !== resolved.identity
+          this.currentResolution().identity !== resolved.identity
         ) {
           throw new Error("Discarded stale xlflow rules metadata.");
         }
@@ -95,6 +100,22 @@ export class XlflowRulesRegistryService {
     this.generation++;
     this.cache = undefined;
     this.pending = undefined;
+    this.resolvedCache = undefined;
+  }
+
+  private currentResolution(): ResolvedExecutable {
+    const configured = this.executablePath();
+    const now = this.now();
+    if (
+      this.resolvedCache !== undefined &&
+      this.resolvedCache.configured === configured &&
+      now - this.resolvedCache.at < resolutionTtlMs
+    ) {
+      return this.resolvedCache.resolved;
+    }
+    const resolved = this.resolveExecutable(configured);
+    this.resolvedCache = { configured, resolved, at: now };
+    return resolved;
   }
 
   private async loadForExecutable(

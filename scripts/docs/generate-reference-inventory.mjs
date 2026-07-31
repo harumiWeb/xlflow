@@ -24,7 +24,6 @@ if (
 }
 const registryRules = registryDocument.items;
 
-const rules = registryRules.map((rule) => ({ ...rule })).sort((a, b) => a.id.localeCompare(b.id));
 const requiredRuleFields = [
   "id",
   "title",
@@ -43,12 +42,31 @@ const requiredRuleFields = [
   "inline_suppressible",
   "preflight_blocking",
 ];
-for (const rule of rules) {
+const booleanRuleFields = new Set([
+  "default_enabled",
+  "realtime",
+  "fix_available",
+  "configurable",
+  "inline_suppressible",
+  "preflight_blocking",
+]);
+for (const [index, rule] of registryRules.entries()) {
+  if (typeof rule !== "object" || rule === null || Array.isArray(rule)) {
+    throw new Error(`diagnostic registry item ${index} must be an object`);
+  }
   const missing = requiredRuleFields.filter((field) => !(field in rule));
   if (missing.length > 0) {
     throw new Error(`diagnostic ${rule.id ?? "<unknown>"} is missing: ${missing.join(", ")}`);
   }
+  for (const field of requiredRuleFields) {
+    const expected = booleanRuleFields.has(field) ? "boolean" : "string";
+    if (typeof rule[field] !== expected) {
+      const diagnostic = typeof rule.id === "string" ? rule.id : `<item ${index}>`;
+      throw new Error(`diagnostic ${diagnostic} has invalid ${field}: expected ${expected}`);
+    }
+  }
 }
+const rules = registryRules.map((rule) => ({ ...rule })).sort((a, b) => a.id.localeCompare(b.id));
 const duplicateIDs = rules
   .filter((rule, index) => index > 0 && rule.id === rules[index - 1].id)
   .map((rule) => rule.id);

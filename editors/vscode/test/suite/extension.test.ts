@@ -974,7 +974,10 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   assert.strictEqual(await service.isInlineSuppressible("VB020"), true);
   assert.deepStrictEqual(calls, ["xlflow-one --json rules", "xlflow-two --json rules"]);
 
-  let resolvedExecutable = "C:/tools/one/xlflow.exe";
+  const resolvedExecutable = "C:/tools/xlflow.exe";
+  let resolvedIdentity = `${resolvedExecutable}:v1`;
+  let resolutionCalls = 0;
+  let resolutionTime = 0;
   const retargetedCalls: string[] = [];
   const retargeted = new XlflowRulesRegistryService(
     () => "xlflow",
@@ -986,15 +989,28 @@ async function assertRulesRegistryBehavior(): Promise<void> {
         stderr: "",
       };
     },
-    () => ({ executable: resolvedExecutable, identity: resolvedExecutable }),
+    () => {
+      resolutionCalls++;
+      return { executable: resolvedExecutable, identity: resolvedIdentity };
+    },
+    () => resolutionTime,
   );
   await retargeted.load();
-  resolvedExecutable = "C:/tools/two/xlflow.exe";
+  await retargeted.load();
+  assert.strictEqual(resolutionCalls, 1, "resolution must be memoized across cache hits");
+  resolvedIdentity = `${resolvedExecutable}:v2`;
+  resolutionTime = 999;
+  await retargeted.load();
+  assert.strictEqual(retargetedCalls.length, 1, "resolution must remain memoized within the TTL");
+  resolutionTime = 1000;
   await retargeted.load();
   assert.deepStrictEqual(retargetedCalls, [
-    "C:/tools/one/xlflow.exe",
-    "C:/tools/two/xlflow.exe",
+    resolvedExecutable,
+    resolvedExecutable,
   ]);
+  retargeted.invalidate();
+  await retargeted.load();
+  assert.strictEqual(resolutionCalls, 4, "invalidation must clear executable resolution");
 
   let attempts = 0;
   const recovering = new XlflowRulesRegistryService(
