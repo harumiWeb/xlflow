@@ -7,7 +7,48 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
+
+func TestConfigRuleAdaptersMatchRegistry(t *testing.T) {
+	for _, rule := range staticrules.All() {
+		switch rule.Family {
+		case staticrules.FamilyLint:
+			_, hasAdapter := lintRuleAdapters[rule.ID]
+			if hasAdapter != rule.Configurable {
+				t.Errorf("lint adapter for %s = %v, configurable = %v", rule.ID, hasAdapter, rule.Configurable)
+			}
+		case staticrules.FamilyAnalyze:
+			_, hasAdapter := analyzeRuleAdapters[rule.ID]
+			if hasAdapter != rule.Configurable {
+				t.Errorf("analyze adapter for %s = %v, configurable = %v", rule.ID, hasAdapter, rule.Configurable)
+			}
+		}
+	}
+}
+
+func TestConfigRuleDefaultsComeFromRegistry(t *testing.T) {
+	cfg := Default()
+	for _, rule := range configurableLintRules {
+		if got := rule.Get(cfg.Lint); got != rule.Default {
+			t.Errorf("lint default %s = %v, want %v", rule.ID, got, rule.Default)
+		}
+		metadata, _ := staticrules.Lookup(rule.ID)
+		if rule.Default != metadata.DefaultEnabled || rule.Key != metadata.ConfigurationKey {
+			t.Errorf("lint binding %s is inconsistent with registry", rule.ID)
+		}
+	}
+	for _, rule := range configurableAnalyzeRules {
+		if got := rule.Get(cfg.Analyze); got != rule.Default {
+			t.Errorf("analyze default %s = %v, want %v", rule.ID, got, rule.Default)
+		}
+		metadata, _ := staticrules.Lookup(rule.ID)
+		if rule.Default != metadata.DefaultEnabled || rule.Key != metadata.ConfigurationKey {
+			t.Errorf("analyze binding %s is inconsistent with registry", rule.ID)
+		}
+	}
+}
 
 func TestLoadDefaultsAndConfiguredValues(t *testing.T) {
 	dir := t.TempDir()
@@ -493,7 +534,7 @@ disabled_rules = ["VBA999"]
 }
 
 func TestLoadRejectsNonConfigurableDisabledLintRule(t *testing.T) {
-	for _, ruleID := range []string{"VB013", "VB015", "VB028", "VB029", "VB031", "VB032"} {
+	for _, ruleID := range []string{"VB013", "VB015", "VB028", "VB029", "VB030", "VB031", "VB032", "VB033", "VB043"} {
 		t.Run(ruleID, func(t *testing.T) {
 			dir := t.TempDir()
 			body := []byte(`[project]

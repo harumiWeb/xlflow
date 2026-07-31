@@ -14,6 +14,7 @@ func buildDescriptors() []Descriptor {
 
 	return []Descriptor{
 		cli("capabilities", "capabilities", sourceRead),
+		cli("rules", "rules", sourceRead),
 		cli("version", "version", sourceRead),
 		cli("update", "update", sourceMutate),
 		cli("update.check", "update check", sourceRead),

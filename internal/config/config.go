@@ -11,6 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
 const FileName = "xlflow.toml"
@@ -139,125 +140,97 @@ type AnalyzeConfig struct {
 	DetectDictionaryIterationValueUsage bool     `toml:"detect_dictionary_iteration_value_usage"`
 }
 
+type lintRuleAdapter struct {
+	Get func(LintConfig) bool
+	Set func(*LintConfig, bool)
+}
+
+type analyzeRuleAdapter struct {
+	Get func(AnalyzeConfig) bool
+	Set func(*AnalyzeConfig, bool)
+}
+
+// lintRuleConfig and analyzeRuleConfig are derived views. Rule identity,
+// defaults, and configuration keys are owned by the shared registry; only the
+// config-type-specific accessors remain here.
 type lintRuleConfig struct {
 	ID      string
 	Key     string
 	Default bool
-	Get     func(LintConfig) bool
-	Set     func(*LintConfig, bool)
+	lintRuleAdapter
 }
 
 type analyzeRuleConfig struct {
 	ID      string
 	Key     string
 	Default bool
-	Get     func(AnalyzeConfig) bool
-	Set     func(*AnalyzeConfig, bool)
+	analyzeRuleAdapter
 }
 
-var configurableLintRules = []lintRuleConfig{
-	{ID: "VB001", Key: "require_option_explicit", Default: true, Get: func(c LintConfig) bool { return c.RequireOptionExplicit }, Set: func(c *LintConfig, v bool) { c.RequireOptionExplicit = v }},
-	{ID: "VB002", Key: "forbid_select", Default: true, Get: func(c LintConfig) bool { return c.ForbidSelect }, Set: func(c *LintConfig, v bool) { c.ForbidSelect = v }},
-	{ID: "VB003", Key: "forbid_activate", Default: true, Get: func(c LintConfig) bool { return c.ForbidActivate }, Set: func(c *LintConfig, v bool) { c.ForbidActivate = v }},
-	{ID: "VB004", Key: "forbid_on_error_resume_next", Default: true, Get: func(c LintConfig) bool { return c.ForbidOnErrorResumeNext }, Set: func(c *LintConfig, v bool) { c.ForbidOnErrorResumeNext = v }},
-	{ID: "VB005", Key: "detect_implicit_variant", Default: true, Get: func(c LintConfig) bool { return c.DetectImplicitVariant }, Set: func(c *LintConfig, v bool) { c.DetectImplicitVariant = v }},
-	{ID: "VB006", Key: "forbid_public_module_fields", Default: true, Get: func(c LintConfig) bool { return c.ForbidPublicModuleFields }, Set: func(c *LintConfig, v bool) { c.ForbidPublicModuleFields = v }},
-	{ID: "VB007", Key: "forbid_interactive_input", Default: true, Get: func(c LintConfig) bool { return c.ForbidInteractiveInput }, Set: func(c *LintConfig, v bool) { c.ForbidInteractiveInput = v }},
-	{ID: "VB018", Key: "detect_scope_shadowing", Default: false, Get: func(c LintConfig) bool { return c.DetectScopeShadowing }, Set: func(c *LintConfig, v bool) { c.DetectScopeShadowing = v }},
-	{ID: "VB019", Key: "detect_multiple_declarator_clarity", Default: true, Get: func(c LintConfig) bool { return c.DetectMultipleDeclaratorClarity }, Set: func(c *LintConfig, v bool) { c.DetectMultipleDeclaratorClarity = v }},
-	{ID: "VB020", Key: "detect_unused_local_variables", Default: true, Get: func(c LintConfig) bool { return c.DetectUnusedLocalVariables }, Set: func(c *LintConfig, v bool) { c.DetectUnusedLocalVariables = v }},
-	{ID: "VB021", Key: "detect_unused_private_procedures", Default: false, Get: func(c LintConfig) bool { return c.DetectUnusedPrivateProcedures }, Set: func(c *LintConfig, v bool) { c.DetectUnusedPrivateProcedures = v }},
-	{ID: "VB022", Key: "detect_confusing_call_syntax", Default: true, Get: func(c LintConfig) bool { return c.DetectConfusingCallSyntax }, Set: func(c *LintConfig, v bool) { c.DetectConfusingCallSyntax = v }},
-	{ID: "VB023", Key: "detect_for_each_control_type", Default: true, Get: func(c LintConfig) bool { return c.DetectForEachControlType }, Set: func(c *LintConfig, v bool) { c.DetectForEachControlType = v }},
-	{ID: "VB026", Key: "detect_dangerous_resume", Default: true, Get: func(c LintConfig) bool { return c.DetectDangerousResume }, Set: func(c *LintConfig, v bool) { c.DetectDangerousResume = v }},
-	{ID: "VB027", Key: "detect_nested_with_ambiguity", Default: false, Get: func(c LintConfig) bool { return c.DetectNestedWithAmbiguity }, Set: func(c *LintConfig, v bool) { c.DetectNestedWithAmbiguity = v }},
-	{ID: "VB044", Key: "procedure_name_constant", Default: false, Get: func(c LintConfig) bool { return c.ProcedureNameConstant.Enabled }, Set: func(c *LintConfig, v bool) { c.ProcedureNameConstant.Enabled = v }},
+var lintRuleAdapters = map[string]lintRuleAdapter{
+	"VB001": {Get: func(c LintConfig) bool { return c.RequireOptionExplicit }, Set: func(c *LintConfig, v bool) { c.RequireOptionExplicit = v }},
+	"VB002": {Get: func(c LintConfig) bool { return c.ForbidSelect }, Set: func(c *LintConfig, v bool) { c.ForbidSelect = v }},
+	"VB003": {Get: func(c LintConfig) bool { return c.ForbidActivate }, Set: func(c *LintConfig, v bool) { c.ForbidActivate = v }},
+	"VB004": {Get: func(c LintConfig) bool { return c.ForbidOnErrorResumeNext }, Set: func(c *LintConfig, v bool) { c.ForbidOnErrorResumeNext = v }},
+	"VB005": {Get: func(c LintConfig) bool { return c.DetectImplicitVariant }, Set: func(c *LintConfig, v bool) { c.DetectImplicitVariant = v }},
+	"VB006": {Get: func(c LintConfig) bool { return c.ForbidPublicModuleFields }, Set: func(c *LintConfig, v bool) { c.ForbidPublicModuleFields = v }},
+	"VB007": {Get: func(c LintConfig) bool { return c.ForbidInteractiveInput }, Set: func(c *LintConfig, v bool) { c.ForbidInteractiveInput = v }},
+	"VB018": {Get: func(c LintConfig) bool { return c.DetectScopeShadowing }, Set: func(c *LintConfig, v bool) { c.DetectScopeShadowing = v }},
+	"VB019": {Get: func(c LintConfig) bool { return c.DetectMultipleDeclaratorClarity }, Set: func(c *LintConfig, v bool) { c.DetectMultipleDeclaratorClarity = v }},
+	"VB020": {Get: func(c LintConfig) bool { return c.DetectUnusedLocalVariables }, Set: func(c *LintConfig, v bool) { c.DetectUnusedLocalVariables = v }},
+	"VB021": {Get: func(c LintConfig) bool { return c.DetectUnusedPrivateProcedures }, Set: func(c *LintConfig, v bool) { c.DetectUnusedPrivateProcedures = v }},
+	"VB022": {Get: func(c LintConfig) bool { return c.DetectConfusingCallSyntax }, Set: func(c *LintConfig, v bool) { c.DetectConfusingCallSyntax = v }},
+	"VB023": {Get: func(c LintConfig) bool { return c.DetectForEachControlType }, Set: func(c *LintConfig, v bool) { c.DetectForEachControlType = v }},
+	"VB026": {Get: func(c LintConfig) bool { return c.DetectDangerousResume }, Set: func(c *LintConfig, v bool) { c.DetectDangerousResume = v }},
+	"VB027": {Get: func(c LintConfig) bool { return c.DetectNestedWithAmbiguity }, Set: func(c *LintConfig, v bool) { c.DetectNestedWithAmbiguity = v }},
+	"VB044": {Get: func(c LintConfig) bool { return c.ProcedureNameConstant.Enabled }, Set: func(c *LintConfig, v bool) { c.ProcedureNameConstant.Enabled = v }},
 }
 
-var configurableAnalyzeRules = []analyzeRuleConfig{
-	{ID: "VBA201", Key: "detect_range_find_nothing_check", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectRangeFindNothingCheck }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRangeFindNothingCheck = v }},
-	{ID: "VBA202", Key: "detect_object_use_before_set", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectObjectUseBeforeSet }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectUseBeforeSet = v }},
-	{ID: "VBA203", Key: "detect_application_state_restore", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectApplicationStateRestore }, Set: func(c *AnalyzeConfig, v bool) { c.DetectApplicationStateRestore = v }},
-	{ID: "VBA204", Key: "detect_error_handler_fallthrough", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectErrorHandlerFallthrough }, Set: func(c *AnalyzeConfig, v bool) { c.DetectErrorHandlerFallthrough = v }},
-	{ID: "VBA205", Key: "forbid_unqualified_excel_objects", Default: true, Get: func(c AnalyzeConfig) bool { return c.ForbidUnqualifiedExcelObjects }, Set: func(c *AnalyzeConfig, v bool) { c.ForbidUnqualifiedExcelObjects = v }},
-	{ID: "VBA206", Key: "detect_byref_argument_mismatch", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectByRefArgumentMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefArgumentMismatch = v }},
-	{ID: "VBA207", Key: "detect_dictionary_collection_guard", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryCollectionGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryCollectionGuard = v }},
-	{ID: "VBA208", Key: "detect_redim_preserve_dimension", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectRedimPreserveDimension }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedimPreserveDimension = v }},
-	{ID: "VBA209", Key: "detect_object_array_comparison", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectObjectArrayComparison }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectArrayComparison = v }},
-	{ID: "VBA210", Key: "detect_function_return_path", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnPath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnPath = v }},
-	{ID: "VBA211", Key: "detect_excel_object_member_mismatch", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectExcelObjectMemberMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelObjectMemberMismatch = v }},
-	{ID: "VBA212", Key: "detect_non_short_circuit_object_guard", Default: true, Get: func(c AnalyzeConfig) bool { return c.DetectNonShortCircuitObjectGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNonShortCircuitObjectGuard = v }},
-	{ID: "VBA213", Key: "detect_dictionary_iteration_value_usage", Default: false, Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryIterationValueUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryIterationValueUsage = v }},
+var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
+	"VBA201": {Get: func(c AnalyzeConfig) bool { return c.DetectRangeFindNothingCheck }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRangeFindNothingCheck = v }},
+	"VBA202": {Get: func(c AnalyzeConfig) bool { return c.DetectObjectUseBeforeSet }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectUseBeforeSet = v }},
+	"VBA203": {Get: func(c AnalyzeConfig) bool { return c.DetectApplicationStateRestore }, Set: func(c *AnalyzeConfig, v bool) { c.DetectApplicationStateRestore = v }},
+	"VBA204": {Get: func(c AnalyzeConfig) bool { return c.DetectErrorHandlerFallthrough }, Set: func(c *AnalyzeConfig, v bool) { c.DetectErrorHandlerFallthrough = v }},
+	"VBA205": {Get: func(c AnalyzeConfig) bool { return c.ForbidUnqualifiedExcelObjects }, Set: func(c *AnalyzeConfig, v bool) { c.ForbidUnqualifiedExcelObjects = v }},
+	"VBA206": {Get: func(c AnalyzeConfig) bool { return c.DetectByRefArgumentMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectByRefArgumentMismatch = v }},
+	"VBA207": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryCollectionGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryCollectionGuard = v }},
+	"VBA208": {Get: func(c AnalyzeConfig) bool { return c.DetectRedimPreserveDimension }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedimPreserveDimension = v }},
+	"VBA209": {Get: func(c AnalyzeConfig) bool { return c.DetectObjectArrayComparison }, Set: func(c *AnalyzeConfig, v bool) { c.DetectObjectArrayComparison = v }},
+	"VBA210": {Get: func(c AnalyzeConfig) bool { return c.DetectFunctionReturnPath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectFunctionReturnPath = v }},
+	"VBA211": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelObjectMemberMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelObjectMemberMismatch = v }},
+	"VBA212": {Get: func(c AnalyzeConfig) bool { return c.DetectNonShortCircuitObjectGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNonShortCircuitObjectGuard = v }},
+	"VBA213": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryIterationValueUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryIterationValueUsage = v }},
 }
 
 var (
-	lintRuleByID           = indexLintRulesByID()
-	analyzeRuleByID        = indexAnalyzeRulesByID()
-	nonConfigurableRuleIDs = map[string]bool{
-		"VB008":  true,
-		"VB009":  true,
-		"VB010":  true,
-		"VB011":  true,
-		"VB012":  true,
-		"VB013":  true,
-		"VB014":  true,
-		"VB015":  true,
-		"VB028":  true,
-		"VB029":  true,
-		"VB031":  true,
-		"VB032":  true,
-		"VBA101": true,
-		"VBA102": true,
-		"VBA103": true,
-		"VBA104": true,
-		"VBA105": true,
-		"VBA106": true,
-	}
+	configurableLintRules    = bindLintRules()
+	configurableAnalyzeRules = bindAnalyzeRules()
+	lintRuleByID             = indexLintRulesByID()
+	analyzeRuleByID          = indexAnalyzeRulesByID()
 )
 
 func KnownDiagnosticID(id string) bool {
-	id = strings.ToUpper(strings.TrimSpace(id))
-	if _, ok := lintRuleByID[id]; ok {
-		return true
-	}
-	if _, ok := analyzeRuleByID[id]; ok {
-		return true
-	}
-	return nonConfigurableRuleIDs[id]
+	_, ok := staticrules.Lookup(id)
+	return ok
 }
 
 func LintDiagnosticID(id string) bool {
-	id = strings.ToUpper(strings.TrimSpace(id))
-	if strings.HasPrefix(id, "VBA") {
-		return false
-	}
-	if _, ok := lintRuleByID[id]; ok {
-		return true
-	}
-	return strings.HasPrefix(id, "VB") && nonConfigurableRuleIDs[id]
+	rule, ok := staticrules.Lookup(id)
+	return ok && rule.Family == staticrules.FamilyLint
 }
 
 func AnalyzeDiagnosticID(id string) bool {
-	id = strings.ToUpper(strings.TrimSpace(id))
-	if _, ok := analyzeRuleByID[id]; ok {
-		return true
-	}
-	return strings.HasPrefix(id, "VBA") && nonConfigurableRuleIDs[id]
+	rule, ok := staticrules.Lookup(id)
+	return ok && rule.Family == staticrules.FamilyAnalyze
 }
 
 func InlineSuppressibleDiagnosticID(id string) bool {
-	id = strings.ToUpper(strings.TrimSpace(id))
-	switch id {
-	case "VB008", "VB009", "VB010", "VB011", "VB012", "VB013", "VB014", "VB015", "VB028", "VB029", "VB031", "VB032",
-		"VBA104", "VBA105", "VBA106", "VBA211":
-		return false
-	default:
-		return KnownDiagnosticID(id)
-	}
+	rule, ok := staticrules.Lookup(id)
+	return ok && rule.InlineSuppressible
 }
 
 func Default() Config {
-	return Config{
+	cfg := Config{
 		Project: ProjectConfig{
 			Name:  "sample",
 			Entry: "Main.Run",
@@ -297,32 +270,24 @@ func Default() Config {
 			KeywordCasing:      true,
 			BuiltinCasing:      true,
 		},
-		Lint: LintConfig{
-			RequireOptionExplicit:           true,
-			ForbidSelect:                    true,
-			ForbidActivate:                  true,
-			ForbidOnErrorResumeNext:         true,
-			DetectImplicitVariant:           true,
-			ForbidPublicModuleFields:        true,
-			ForbidInteractiveInput:          true,
-			DetectMultipleDeclaratorClarity: true,
-			DetectUnusedLocalVariables:      true,
-			DetectConfusingCallSyntax:       true,
-			DetectForEachControlType:        true,
-			DetectDangerousResume:           true,
-		},
-		Analyze: AnalyzeConfig{
-			DetectRangeFindNothingCheck:      true,
-			DetectObjectUseBeforeSet:         true,
-			DetectApplicationStateRestore:    true,
-			DetectErrorHandlerFallthrough:    true,
-			ForbidUnqualifiedExcelObjects:    true,
-			DetectRedimPreserveDimension:     true,
-			DetectObjectArrayComparison:      true,
-			DetectExcelObjectMemberMismatch:  true,
-			DetectNonShortCircuitObjectGuard: true,
-		},
 	}
+	for _, rule := range configurableLintRules {
+		rule.Set(&cfg.Lint, rule.Default)
+	}
+	for _, rule := range configurableAnalyzeRules {
+		rule.Set(&cfg.Analyze, rule.Default)
+	}
+	return cfg
+}
+
+// AnalyzeRuleEnabled reads a configurable analyzer rule through the config
+// adapter boundary. The registry deliberately does not depend on Config.
+func AnalyzeRuleEnabled(cfg AnalyzeConfig, id string) (bool, bool) {
+	rule, ok := analyzeRuleByID[strings.ToUpper(strings.TrimSpace(id))]
+	if !ok {
+		return false, false
+	}
+	return rule.Get(cfg), true
 }
 
 func Load(cwd string) (Config, error) {
@@ -456,6 +421,48 @@ func indexLintRulesByID() map[string]lintRuleConfig {
 	return out
 }
 
+func bindLintRules() []lintRuleConfig {
+	metadata := staticrules.ByFamily(staticrules.FamilyLint)
+	out := make([]lintRuleConfig, 0, len(lintRuleAdapters))
+	for _, rule := range metadata {
+		if !rule.Configurable {
+			continue
+		}
+		adapter, ok := lintRuleAdapters[rule.ID]
+		if !ok {
+			panic(fmt.Sprintf("missing lint config adapter for %s", rule.ID))
+		}
+		out = append(out, lintRuleConfig{
+			ID: rule.ID, Key: rule.ConfigurationKey, Default: rule.DefaultEnabled, lintRuleAdapter: adapter,
+		})
+	}
+	if len(out) != len(lintRuleAdapters) {
+		panic("lint config adapters do not match configurable rule metadata")
+	}
+	return out
+}
+
+func bindAnalyzeRules() []analyzeRuleConfig {
+	metadata := staticrules.ByFamily(staticrules.FamilyAnalyze)
+	out := make([]analyzeRuleConfig, 0, len(analyzeRuleAdapters))
+	for _, rule := range metadata {
+		if !rule.Configurable {
+			continue
+		}
+		adapter, ok := analyzeRuleAdapters[rule.ID]
+		if !ok {
+			panic(fmt.Sprintf("missing analyze config adapter for %s", rule.ID))
+		}
+		out = append(out, analyzeRuleConfig{
+			ID: rule.ID, Key: rule.ConfigurationKey, Default: rule.DefaultEnabled, analyzeRuleAdapter: adapter,
+		})
+	}
+	if len(out) != len(analyzeRuleAdapters) {
+		panic("analyze config adapters do not match configurable rule metadata")
+	}
+	return out
+}
+
 func indexAnalyzeRulesByID() map[string]analyzeRuleConfig {
 	out := make(map[string]analyzeRuleConfig, len(configurableAnalyzeRules))
 	for _, rule := range configurableAnalyzeRules {
@@ -534,7 +541,7 @@ func normalizeDisabledLintRules(ids []string) ([]string, map[string]bool, error)
 			continue
 		}
 		if _, ok := lintRuleByID[id]; !ok {
-			if nonConfigurableRuleIDs[id] {
+			if rule, known := staticrules.Lookup(id); known && rule.Family == staticrules.FamilyLint && !rule.Configurable {
 				return nil, nil, fmt.Errorf("lint rule ID is not configurable in [lint].disabled_rules: %s", id)
 			}
 			return nil, nil, fmt.Errorf("unknown lint rule ID in [lint].disabled_rules: %s", id)
@@ -614,7 +621,7 @@ func normalizeDisabledAnalyzeRules(ids []string) ([]string, map[string]bool, err
 			continue
 		}
 		if _, ok := analyzeRuleByID[id]; !ok {
-			if nonConfigurableRuleIDs[id] {
+			if rule, known := staticrules.Lookup(id); known && rule.Family == staticrules.FamilyAnalyze && !rule.Configurable {
 				return nil, nil, fmt.Errorf("analyze rule ID is not configurable in [analyze].disabled_rules: %s", id)
 			}
 			return nil, nil, fmt.Errorf("unknown analyze rule ID in [analyze].disabled_rules: %s", id)

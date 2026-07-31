@@ -200,28 +200,12 @@ Legacy per-rule booleans such as `forbid_select = false` remain accepted for com
 
 `VB044` is disabled by default and uses the nested `[lint.procedure_name_constant]` table rather than a legacy boolean. When enabled, `constant_name` is required and must be a VBA identifier. xlflow compares matching procedure-local constants case-insensitively by name, but requires their direct string-literal values to match the enclosing procedure name exactly. `disabled_rules = ["VB044"]` takes precedence over `enabled = true`.
 
-Configurable lint rule IDs:
-
-| ID      | Legacy key                           |
-| ------- | ------------------------------------ |
-| `VB001` | `require_option_explicit`            |
-| `VB002` | `forbid_select`                      |
-| `VB003` | `forbid_activate`                    |
-| `VB004` | `forbid_on_error_resume_next`        |
-| `VB005` | `detect_implicit_variant`            |
-| `VB006` | `forbid_public_module_fields`        |
-| `VB007` | `forbid_interactive_input`           |
-| `VB018` | `detect_scope_shadowing`             |
-| `VB019` | `detect_multiple_declarator_clarity` |
-| `VB020` | `detect_unused_local_variables`      |
-| `VB021` | `detect_unused_private_procedures`   |
-| `VB022` | `detect_confusing_call_syntax`       |
-| `VB023` | `detect_for_each_control_type`       |
-| `VB026` | `detect_dangerous_resume`            |
-| `VB027` | `detect_nested_with_ambiguity`       |
-| `VB044` | `[lint.procedure_name_constant]`     |
-
-Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be disabled with `disabled_rules`.
+The generated [diagnostic catalog](./diagnostics) is the authoritative list of
+configurable IDs, configuration keys, defaults, and non-configurable safety
+diagnostics. The same metadata is available from `xlflow rules --json`.
+`disabled_rules` remains case-insensitive, rejects unknown or non-configurable
+IDs, removes duplicates, and takes precedence over an enabled legacy boolean or
+the nested `VB044` setting.
 
 For local exceptions, keep the rule enabled and suppress a specific source line with an apostrophe comment:
 
@@ -231,7 +215,8 @@ Range("A1").Select
 Range("A2").Select ' xlflow:disable-line VB002
 ```
 
-Preflight-blocking lint diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` cannot be suppressed inline.
+Rules marked `inline_suppressible: false` in the catalog cannot be suppressed
+inline. This includes every preflight-blocking lint diagnostic.
 
 ### `[lint.procedure_name_constant]`
 
@@ -250,25 +235,8 @@ Preflight-blocking lint diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `
 
 Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`.
 
-Configurable analyzer rule IDs:
-
-| ID       | Legacy key                                |
-| -------- | ----------------------------------------- |
-| `VBA201` | `detect_range_find_nothing_check`         |
-| `VBA202` | `detect_object_use_before_set`            |
-| `VBA203` | `detect_application_state_restore`        |
-| `VBA204` | `detect_error_handler_fallthrough`        |
-| `VBA205` | `forbid_unqualified_excel_objects`        |
-| `VBA206` | `detect_byref_argument_mismatch`          |
-| `VBA207` | `detect_dictionary_collection_guard`      |
-| `VBA208` | `detect_redim_preserve_dimension`         |
-| `VBA209` | `detect_object_array_comparison`          |
-| `VBA210` | `detect_function_return_path`             |
-| `VBA211` | `detect_excel_object_member_mismatch`     |
-| `VBA212` | `detect_non_short_circuit_object_guard`   |
-| `VBA213` | `detect_dictionary_iteration_value_usage` |
-
-Analyzer diagnostics `VBA101` through `VBA106` are always enabled and cannot be disabled with `disabled_rules`.
+The generated [diagnostic catalog](./diagnostics) is the authoritative list of
+analyzer configuration keys, defaults, and always-enabled diagnostics.
 
 Analyzer diagnostics can use the same inline suppression syntax:
 
@@ -277,7 +245,9 @@ Analyzer diagnostics can use the same inline suppression syntax:
 Range("A1").Value = 1
 ```
 
-Preflight-blocking analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VBA211` cannot be suppressed inline. Unknown inline IDs, unsupported IDs, and unused suppressions are reported as command warnings.
+Rules marked `inline_suppressible: false` in the catalog cannot be suppressed
+inline. This includes every preflight-blocking analyzer error. Unknown inline
+IDs, unsupported IDs, and unused suppressions are reported as command warnings.
 
 ## Defaults differ between `new` and `init`
 

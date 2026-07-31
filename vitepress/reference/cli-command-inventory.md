@@ -5,6 +5,7 @@ Generated from the Cobra command registrations in `internal/cli/root.go`. Run `p
 | Command                     | Documentation                                   |
 | --------------------------- | ----------------------------------------------- |
 | `xlflow capabilities`       | [command guide](../commands/capabilities)       |
+| `xlflow rules`              | [command guide](../commands/rules)              |
 | `xlflow new`                | [command guide](../commands/new)                |
 | `xlflow init`               | [command guide](../commands/init)               |
 | `xlflow pack`               | [command guide](../commands/pack)               |

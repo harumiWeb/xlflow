@@ -14,6 +14,7 @@ import { XlflowSidebar } from "./sidebar";
 import { XlflowUpdateService } from "./updateCheck";
 import { XlflowTestController } from "./testing";
 import { XlflowCapabilitiesService } from "./capabilities";
+import { XlflowRulesRegistryService } from "./rulesRegistry";
 import { setXlflowCapabilitiesService, setXlflowCliAvailabilityService } from "./xlflow";
 
 let clientManager: XlflowLanguageClientManager | undefined;
@@ -40,6 +41,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await sessionManager?.refreshStatus();
     },
   });
+  const rulesRegistry = new XlflowRulesRegistryService();
   setXlflowCapabilitiesService(capabilitiesService);
   projectState = new XlflowProjectStateService();
   updateService = new XlflowUpdateService(context);
@@ -61,7 +63,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     projectState,
     updateService,
     sidebar,
-    registerLineSuppressionCodeActions(),
+    registerLineSuppressionCodeActions(rulesRegistry),
     registerDocumentationCodeActions(),
   );
   let lastSelectedWorkspaceKey = selectedWorkspaceKey();
@@ -185,7 +187,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const lspChanged = event.affectsConfiguration("xlflow.lsp");
       if (pathChanged) {
         capabilitiesService?.invalidate();
+        rulesRegistry.invalidate();
         await cliAvailability?.refresh();
+        void rulesRegistry.load().catch(() => undefined);
         void capabilitiesService?.load();
         await updateService?.checkAutomatic(cliAvailability?.current());
       }
@@ -212,6 +216,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
   await cliAvailability.refresh();
+  void rulesRegistry.load().catch(() => undefined);
   void capabilitiesService.load();
   await updateService.checkAutomatic(cliAvailability.current());
   await refreshSelectedProject({ restartLsp: false });

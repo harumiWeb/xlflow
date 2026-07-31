@@ -6,6 +6,7 @@ const check = process.argv.includes("--check");
 const source = `${fs.readFileSync(path.join(repo, "internal/cli/root.go"), "utf8")}\n${fs.readFileSync(path.join(repo, "internal/cli/recovery.go"), "utf8")}`;
 const commands = [
   ["capabilities", "capabilities"],
+  ["rules", "rules"],
   ["new", "new"],
   ["init", "init"],
   ["pack", "pack"],

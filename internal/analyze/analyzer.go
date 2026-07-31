@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -349,12 +350,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsed(rootDir string, cfg config.C
 }
 
 func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
-	if !cfg.Analyze.DetectRangeFindNothingCheck &&
-		!cfg.Analyze.DetectErrorHandlerFallthrough &&
-		!cfg.Analyze.DetectRedimPreserveDimension &&
-		!cfg.Analyze.DetectObjectArrayComparison &&
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard &&
-		!cfg.Analyze.DetectDictionaryIterationValueUsage {
+	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
 	doc, err := vbaast.ParseDocument(path, source)
@@ -386,12 +382,7 @@ func SourceRealtimeFindingsParsedIR(rootDir string, cfg config.Config, doc *vbaa
 // caller-supplied procedure IR and control-flow graphs. Immutable LSP
 // snapshots use this entry point to reuse both cached analysis layers.
 func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]Finding, error) {
-	if !cfg.Analyze.DetectRangeFindNothingCheck &&
-		!cfg.Analyze.DetectErrorHandlerFallthrough &&
-		!cfg.Analyze.DetectRedimPreserveDimension &&
-		!cfg.Analyze.DetectObjectArrayComparison &&
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard &&
-		!cfg.Analyze.DetectDictionaryIterationValueUsage {
+	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
 	var findings []Finding
@@ -414,12 +405,44 @@ func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *v
 		for _, proc := range procedures {
 			findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls)...)
 		}
+		findings = realtimeFindings(findings)
 		sortFindings(findings)
 		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
 		findings, _ = applyInlineSuppressions(findings, directives)
 		return nil
 	})
 	return findings, err
+}
+
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213"}
+
+func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
+	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
+		if !rule.Realtime {
+			continue
+		}
+		if enabled, configurable := config.AnalyzeRuleEnabled(cfg, rule.ID); configurable {
+			if enabled {
+				return true
+			}
+			continue
+		}
+		if rule.DefaultEnabled {
+			return true
+		}
+	}
+	return false
+}
+
+func realtimeFindings(findings []Finding) []Finding {
+	out := findings[:0]
+	for _, finding := range findings {
+		rule, ok := staticrules.Lookup(finding.Code)
+		if ok && rule.Realtime {
+			out = append(out, finding)
+		}
+	}
+	return out
 }
 
 func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
@@ -1463,7 +1486,8 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 func BlockingFindings(findings []Finding) []Finding {
 	blocking := make([]Finding, 0)
 	for _, finding := range findings {
-		if strings.EqualFold(finding.Severity, "error") {
+		metadata, ok := staticrules.Lookup(finding.Code)
+		if ok && metadata.PreflightBlocking {
 			blocking = append(blocking, finding)
 		}
 	}

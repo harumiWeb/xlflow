@@ -753,6 +753,26 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	}
 }
 
+func TestProtocolDiagnosticUsesRegistryDocumentationURL(t *testing.T) {
+	diagnostic := toProtocolDiagnostic(intel.Diagnostic{
+		Code:     "VB001",
+		Severity: "warning",
+		Source:   "xlflow",
+		Message:  "Missing Option Explicit.",
+	})
+	if diagnostic.CodeDescription == nil || string(diagnostic.CodeDescription.HRef) != "https://harumiweb.github.io/xlflow/reference/diagnostics#vb001" {
+		t.Fatalf("code description = %#v", diagnostic.CodeDescription)
+	}
+	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityError {
+		t.Fatalf("registry severity was not applied: %#v", diagnostic.Severity)
+	}
+
+	synthetic := toProtocolDiagnostic(intel.Diagnostic{Code: "VBA000", Severity: "error", Source: "xlflow", Message: "analysis failed"})
+	if synthetic.CodeDescription != nil {
+		t.Fatalf("synthetic diagnostics must not link to rule metadata: %#v", synthetic.CodeDescription)
+	}
+}
+
 func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

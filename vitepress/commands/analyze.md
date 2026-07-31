@@ -41,6 +41,10 @@ diagnostics.
 
 ## Rules
 
+The generated [static-analysis diagnostic catalog](../reference/diagnostics) is
+the authoritative reference for rule metadata, including configuration,
+default state, scope, precision, preflight behavior, and inline suppression.
+
 | Code     | Severity | Description                                                                  |
 | -------- | -------- | ---------------------------------------------------------------------------- |
 | `VBA101` | warning  | Object variable assignment likely missing `Set`.                             |

@@ -32,6 +32,11 @@ Use `lint --json` in agent loops before `push` to catch source problems while Ex
 
 ## Rules
 
+The generated [static-analysis diagnostic catalog](../reference/diagnostics) is
+the authoritative reference for rule metadata, including configuration,
+default state, scope, precision, preflight behavior, and inline suppression.
+The summary below explains the lint findings in workflow terms.
+
 | Code    | Severity | Description                                                                                                                          |
 | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `VB001` | error    | Missing `Option Explicit`.                                                                                                           |

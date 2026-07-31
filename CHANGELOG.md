@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a shared, protocol-neutral static-analysis rule registry for `VB...` and `VBA...` diagnostics, plus the source-only `xlflow rules` command, generated rule catalog, LSP documentation links, and registry-driven VS Code inline-suppression eligibility while preserving existing `disabled_rules`, legacy boolean, and inline suppression behavior.
 - Updated `tree-sitter-vba` to v0.11.0 and preserved lint and formatter behavior across its flat multiline-`If` CST: VB014 now runs structural block validation even when the parser accepts fragment nodes, and formatting pairs `if_statement`, `elseif_fragment`, `else_fragment`, and `end_if_fragment` ranges.
 - Added a conservative procedure-level VBA control-flow graph shared by batch analysis and LSP snapshots, and moved `VBA204` error-handler fallthrough detection from preceding-text heuristics to normal-flow reachability without changing its public diagnostic contract.
 - Added deterministic, provenance-bearing VBA procedure effect summaries with fixed-point propagation across uniquely resolved reachable project-local calls, and updated the existing `VBA203` Push/Pop helper exemption to recognize indirect restores without changing public diagnostics, configuration, or JSON output.

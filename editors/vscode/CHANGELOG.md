@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Load static-analysis rule metadata from `xlflow rules --json` and offer inline-suppression Quick Fixes only for rules declared suppressible by the active CLI. Metadata discovery is cached per resolved CLI executable and fails closed when unavailable or incompatible.
+- Link xlflow diagnostics in the Problems view to their generated rule documentation through LSP code descriptions.
+
 ## v0.8.1
 
 - Minor fixes accompanying updates to the xlflow CLI

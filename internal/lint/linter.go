@@ -11,6 +11,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -1220,7 +1221,8 @@ func truncateParserRecoveryText(text string, maxRunes int) string {
 func PushBlockingIssues(issues []Issue) []Issue {
 	blocking := make([]Issue, 0)
 	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB014" || issue.Code == "VB015" || issue.Code == "VB028" || issue.Code == "VB029" || issue.Code == "VB031" || issue.Code == "VB032" {
+		metadata, ok := staticrules.Lookup(issue.Code)
+		if ok && metadata.PreflightBlocking {
 			blocking = append(blocking, issue)
 		}
 	}

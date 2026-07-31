@@ -8,8 +8,26 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
+
+func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
+	var registryIDs []string
+	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
+		if rule.Realtime {
+			registryIDs = append(registryIDs, rule.ID)
+		}
+	}
+	if !reflect.DeepEqual(sourceRealtimeRuleIDs, registryIDs) {
+		t.Fatalf("source realtime implementations = %v, registry = %v", sourceRealtimeRuleIDs, registryIDs)
+	}
+	for _, id := range sourceRealtimeRuleIDs {
+		if _, ok := config.AnalyzeRuleEnabled(config.Default().Analyze, id); !ok {
+			t.Fatalf("source realtime rule %s has no config adapter", id)
+		}
+	}
+}
 
 func TestSourceRealtimeFindingsParsedMatchesSource(t *testing.T) {
 	dir := t.TempDir()
