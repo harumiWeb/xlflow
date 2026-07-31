@@ -82,6 +82,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cells_updated`
 - `changed_only`
 - `changed_paths`
+- `changes_application_state`
+- `changes_calculation`
+- `changes_workbook`
 - `check_dialog`
 - `check_failed`
 - `classes_dir`
@@ -89,6 +92,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cleanup_confirmed`
 - `cli_paths`
 - `clipboard_retry_succeeded`
+- `closes_workbook`
 - `code_path`
 - `code_source`
 - `code_source_after`
@@ -180,6 +184,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `direct_callers`
 - `disabled_rules`
 - `disabled_rules_precedence`
+- `disables_events`
 - `discard_required`
 - `discarded_runs`
 - `display_alerts`
@@ -377,6 +382,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `keyword_casing`
 - `label_statement`
 - `latest_source_modified_at`
+- `launches_process`
 - `lbl_child`
 - `leading_underscore`
 - `legacy_backup_entry`
@@ -484,6 +490,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `open_workbook`
 - `opening_column`
 - `opening_line`
+- `opens_workbook`
 - `operation_kind`
 - `operator_spacing`
 - `option_statement`
@@ -570,6 +577,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `qualified_member_expression`
 - `qualified_name`
 - `quoted_name`
+- `raises_error`
 - `read_only`
 - `read_write`
 - `reason_not_runnable`
@@ -597,6 +605,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `resource_scope`
 - `response_source`
 - `restored_from`
+- `restores_application_state`
+- `restores_events`
 - `result_file`
 - `resume_label`
 - `resume_next`
@@ -654,6 +664,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `sheet_exists`
 - `sheet_id`
 - `sheet_not_found`
+- `shows_dialog`
 - `single_line_if_statement`
 - `single_space`
 - `size_bytes`
@@ -694,6 +705,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `structured_reference`
 - `style_included`
 - `sub_declaration`
+- `suppresses_errors`
 - `sync_source`
 - `systemprofile_desktop`
 - `systemprofile_desktop_missing`
@@ -835,6 +847,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `workbook_vbproject_access_error`
 - `worker_pid`
 - `write_only`
+- `writes_cells`
 - `wsl_path`
 - `wsl_path_translation_failed`
 - `wsl_project_path_unsupported`

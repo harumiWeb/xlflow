@@ -13,7 +13,9 @@ import (
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -168,6 +170,7 @@ type sourceProcedure struct {
 	Params     []parameterInfo
 	Statements []procedureir.Statement
 	Graph      *vbacfg.Graph
+	Effects    *effects.ProcedureSummary
 }
 
 type sourceDeclaration struct {
@@ -178,11 +181,6 @@ type sourceDeclaration struct {
 	Array         bool
 	NewExpression bool
 	Parameter     bool
-}
-
-type applicationStateProcedureSummary struct {
-	Disables map[string]bool
-	Restores map[string]bool
 }
 
 type withInfo struct {
@@ -215,9 +213,18 @@ func (a Analyzer) RunResult() (Result, error) {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
+		moduleKind := ""
+		if sourceFile, included, classifyErr := symbols.SourceFileForPath(a.RootDir, a.Config, file); classifyErr != nil {
+			parsed.Close()
+			closeParsedFiles(parsedFiles)
+			return Result{}, classifyErr
+		} else if included {
+			moduleKind = sourceFile.ModuleKind
+		}
 		ir, err := procedureir.BuildParsed(procedureir.BuildOptions{
-			RootDir: a.RootDir,
-			Path:    file,
+			RootDir:    a.RootDir,
+			Path:       file,
+			ModuleKind: moduleKind,
 		}, parsed)
 		if err != nil {
 			parsed.Close()
@@ -242,12 +249,13 @@ func (a Analyzer) RunResult() (Result, error) {
 	}
 	defer closeParsedFiles(parsedFiles)
 
+	projectEffects := buildProjectEffects(parsedFiles)
 	ctx := a.buildContext(parsedFiles)
 	var findings []Finding
 	for _, file := range parsedFiles {
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
 			file.Root = view.Root
-			findings = append(findings, a.analyzeParsedFile(file, ctx)...)
+			findings = append(findings, a.analyzeParsedFile(file, ctx, projectEffects)...)
 			return nil
 		}); err != nil {
 			return Result{}, err
@@ -261,6 +269,30 @@ func (a Analyzer) RunResult() (Result, error) {
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
 	return Result{Findings: findings, Warnings: warnings}, nil
+}
+
+func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, file := range files {
+		for _, proc := range file.IR.Procedures {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name:       proc.Symbol.Name,
+				Module:     file.IR.ModuleName,
+				ModuleKind: file.IR.ModuleKind,
+				Kind:       string(proc.Symbol.Kind),
+				Visibility: proc.Symbol.Visibility,
+				File:       file.IR.Path,
+				Line:       proc.Symbol.DeclarationRange.StartLine,
+			})
+		}
+	}
+	resolver := procedureir.NewResolver(resolverSymbols)
+	documents := make([]effects.Document, 0, len(files))
+	for i := range files {
+		files[i].IR = procedureir.Resolve(files[i].IR, resolver)
+		documents = append(documents, effects.Document{IR: files[i].IR, CFG: files[i].CFG})
+	}
+	return effects.Build(documents)
 }
 
 func closeParsedFiles(files []parsedFile) {
@@ -510,23 +542,36 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	return ctx
 }
 
-func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext) []Finding {
+func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext, projectEffects effects.ProjectSummary) []Finding {
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	for i := range procedures {
+		if i >= len(file.IR.Procedures) {
+			break
+		}
+		symbol := file.IR.Procedures[i].Symbol
+		id := effects.ProcedureIdentity{
+			File: file.IR.Path, Module: file.IR.ModuleName, ModuleKind: file.IR.ModuleKind, Name: symbol.Name,
+			QualifiedName: symbol.QualifiedName, Kind: symbol.Kind,
+			Visibility: symbol.Visibility, DeclarationLine: symbol.DeclarationRange.StartLine,
+		}
+		if summary, ok := projectEffects.Lookup(id); ok {
+			procedures[i].Effects = &summary
+		}
+	}
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
-	appStateProcedures := applicationStateProcedureSummaries(file.Lines, procedures)
 	for _, proc := range procedures {
-		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, appStateProcedures, reportedMissingHelpers)...)
+		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
 	}
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, appStateProcedures, reportedMissingHelpers)...)
+		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
 	}
 	return findings
 }
 
-func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, appStateProcedures map[string]applicationStateProcedureSummary, reportedMissingHelpers map[string]bool) []Finding {
+func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool) []Finding {
 	decls := cloneDeclarations(moduleDecls)
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
@@ -644,7 +689,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		_ = lower
 	}
 	if a.Config.Analyze.DetectApplicationStateRestore {
-		findings = append(findings, a.applicationStateFindings(file, proc, appStateProcedures)...)
+		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
@@ -1234,7 +1279,7 @@ func nextNonSpace(text string, index int) byte {
 	return 0
 }
 
-func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, summaries map[string]applicationStateProcedureSummary) []Finding {
+func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
 	var findings []Finding
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		stmt := normalizedCodeLine(file.Lines[i])
@@ -1247,7 +1292,7 @@ func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure
 			if hasLaterApplicationRestore(file.Lines, proc, i+1, prop) {
 				continue
 			}
-			if hasPairedApplicationRestoreProcedure(proc.Name, prop, summaries) {
+			if hasPairedApplicationRestoreProcedure(proc, prop, project) {
 				continue
 			}
 			name := applicationStateName(prop)
@@ -1255,27 +1300,6 @@ func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure
 		}
 	}
 	return findings
-}
-
-func applicationStateProcedureSummaries(lines []string, procedures []sourceProcedure) map[string]applicationStateProcedureSummary {
-	summaries := map[string]applicationStateProcedureSummary{}
-	for _, proc := range procedures {
-		summary := applicationStateProcedureSummary{Disables: map[string]bool{}, Restores: map[string]bool{}}
-		for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-			lower := compactStatement(strings.ToLower(normalizedCodeLine(lines[i])))
-			for _, prop := range applicationStateProperties() {
-				disables, restores := applicationStateAssignmentKind(lower, prop)
-				if disables {
-					summary.Disables[prop] = true
-				}
-				if restores {
-					summary.Restores[prop] = true
-				}
-			}
-		}
-		summaries[strings.ToLower(proc.Name)] = summary
-	}
-	return summaries
 }
 
 func applicationStateProperties() []string {
@@ -1303,24 +1327,62 @@ func applicationStateAssignmentKind(lower, prop string) (bool, bool) {
 	return false, true
 }
 
-func hasPairedApplicationRestoreProcedure(procName, prop string, summaries map[string]applicationStateProcedureSummary) bool {
-	if procName == "" {
+func hasPairedApplicationRestoreProcedure(proc sourceProcedure, prop string, project effects.ProjectSummary) bool {
+	if proc.Name == "" || proc.Effects == nil {
 		return false
 	}
-	lowerName := strings.ToLower(procName)
+	lowerName := strings.ToLower(proc.Name)
 	if !strings.HasPrefix(lowerName, "push") {
 		return false
 	}
-	current, ok := summaries[lowerName]
-	if !ok || !current.Disables[prop] {
+	if !hasApplicationStateEffect(proc.Effects.Direct, effects.ChangesApplicationState, prop) {
 		return false
 	}
-	for _, restoreName := range []string{"pop" + strings.TrimPrefix(lowerName, "push"), "restore" + strings.TrimPrefix(lowerName, "push")} {
-		if summary, ok := summaries[restoreName]; ok && summary.Restores[prop] {
+	suffix := strings.TrimPrefix(lowerName, "push")
+	pairNames := map[string]bool{"pop" + suffix: true, "restore" + suffix: true}
+	sameModule := make([]effects.ProcedureSummary, 0, 1)
+	projectVisible := make([]effects.ProcedureSummary, 0, 1)
+	for _, summary := range project.All() {
+		if !pairNames[strings.ToLower(summary.Identity.Name)] {
+			continue
+		}
+		if strings.EqualFold(summary.Identity.Module, proc.Effects.Identity.Module) {
+			sameModule = append(sameModule, summary)
+			continue
+		}
+		if isProjectVisibleProcedure(summary.Identity) {
+			projectVisible = append(projectVisible, summary)
+		}
+	}
+	if len(sameModule) > 0 {
+		for _, candidate := range sameModule {
+			if hasApplicationStateEffect(candidate.Direct, effects.RestoresApplicationState, prop) ||
+				hasApplicationStateEffect(candidate.Propagated, effects.RestoresApplicationState, prop) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(projectVisible) != 1 {
+		return false
+	}
+	return hasApplicationStateEffect(projectVisible[0].Direct, effects.RestoresApplicationState, prop) ||
+		hasApplicationStateEffect(projectVisible[0].Propagated, effects.RestoresApplicationState, prop)
+}
+
+func hasApplicationStateEffect(evidence []effects.Evidence, kind effects.EffectKind, prop string) bool {
+	target := "application." + strings.ToLower(prop)
+	for _, item := range evidence {
+		if item.Effect == kind && strings.EqualFold(item.Target, target) {
 			return true
 		}
 	}
 	return false
+}
+
+func isProjectVisibleProcedure(identity effects.ProcedureIdentity) bool {
+	return (identity.ModuleKind == "" || strings.EqualFold(identity.ModuleKind, "standard")) &&
+		!strings.EqualFold(strings.TrimSpace(identity.Visibility), "private")
 }
 
 func hasLaterApplicationRestore(lines []string, proc sourceProcedure, start int, prop string) bool {

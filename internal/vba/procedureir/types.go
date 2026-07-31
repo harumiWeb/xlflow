@@ -312,6 +312,7 @@ type Resolver interface {
 type ResolverSymbol struct {
 	Name       string
 	Module     string
+	ModuleKind string
 	Kind       string
 	Visibility string
 	File       string

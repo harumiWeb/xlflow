@@ -396,6 +396,30 @@ func TestResolverRespectsPrivateProcedureVisibility(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsReceiverlessCrossModuleClassProcedure(t *testing.T) {
+	resolver := NewResolverFromSymbols([]ResolverSymbol{{
+		Name: "RestoreEvents", Module: "StateHelper", ModuleKind: "class",
+		Kind: "sub", Visibility: "Public", File: "src/classes/StateHelper.cls", Line: 2,
+	}})
+
+	bare := resolver.Resolve(CallSite{
+		Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+		Callee: Callee{Text: "RestoreEvents", BaseName: "RestoreEvents", Member: "RestoreEvents"},
+	})
+	if bare.Resolution.Status != "unresolved" {
+		t.Fatalf("receiverless cross-module class call = %+v", bare.Resolution)
+	}
+
+	receiver := "StateHelper"
+	explicit := resolver.Resolve(CallSite{
+		Caller: &Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+		Callee: Callee{Text: "StateHelper.RestoreEvents", BaseName: "RestoreEvents", Receiver: &receiver, Member: "RestoreEvents"},
+	})
+	if explicit.Resolution.Status != "matched" {
+		t.Fatalf("explicit class receiver call = %+v", explicit.Resolution)
+	}
+}
+
 func TestNewResolverPreservesLegacySymbolAdapter(t *testing.T) {
 	legacy := NewResolver([]symbols.Symbol{{
 		Name:      "Target",
@@ -452,6 +476,11 @@ func TestResolverPreservesCallClassificationPrecedence(t *testing.T) {
 		{
 			name:   "bare builtin without project symbol",
 			callee: Callee{Text: "Trim", BaseName: "Trim", Member: "Trim"},
+			status: "builtin_like",
+		},
+		{
+			name:   "effectful builtin without project symbol",
+			callee: Callee{Text: "Shell", BaseName: "Shell", Member: "Shell"},
 			status: "builtin_like",
 		},
 	}
@@ -599,7 +628,7 @@ End Sub
 	assertCall(t, result.Calls, "obj.DoSomething", "member_call", 1)
 	assertCall(t, result.Calls, "Application.WorksheetFunction.Sum", "external", 1)
 	assertCall(t, result.Calls, "New Customer", "unresolved", 0)
-	eventCall := assertCall(t, result.Calls, "CommandButton1_Click", "matched", 0)
+	eventCall := assertCall(t, result.Calls, "CommandButton1_Click", "unresolved", 0)
 	if eventCall.Caller == nil || eventCall.Caller.QualifiedName != "Main.RunReport" {
 		t.Fatalf("unexpected caller: %+v", eventCall.Caller)
 	}

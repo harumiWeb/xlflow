@@ -20,9 +20,9 @@ successor. Treating those cases as impossible would let guarantee-oriented
 rules report unsafe conclusions.
 
 The graph must serve both batch analysis and immutable LSP snapshots without
-depending on CLI or LSP protocol types. Issue #428 will later refine which
-statements can fail and propagate interprocedural effects, but issue #427 must
-remain conservative without that information.
+depending on CLI or LSP protocol types. ADR-0023 adds interprocedural effect
+summaries as a separate consumer layer; the CFG remains conservative and does
+not depend on that information.
 
 ## Decision
 
@@ -45,9 +45,9 @@ or recovered targets must not be resolved to an arbitrary statement.
 
 Model the active VBA error mode with forward, path-sensitive dataflow.
 `On Error GoTo <label>`, `On Error Resume Next`, and `On Error GoTo 0` update
-that mode along their paths and are merged conservatively. Until issue #428
-provides effect information, every executable statement is a possible fault
-site. The builder therefore adds uncertain exceptional transitions to the
+that mode along their paths and are merged conservatively. Every executable
+statement remains a possible fault site even after ADR-0023 adds effect
+summaries. The builder therefore adds uncertain exceptional transitions to the
 active handler, the resume-next successor, or the exceptional exit as
 appropriate. Dynamic or recovered `Resume` behavior and other unresolved
 control flow pass through conservative unknown flow rather than disappearing.
@@ -81,7 +81,7 @@ configuration key, JSON shape, diagnostic ID, or LSP capability is added.
 - Positive: the graph remains protocol-neutral and safe after parser retirement
   because it contains only Go-owned IR values and ranges.
 - Negative: treating every executable statement as a potential fault site adds
-  edges and can reduce precision until issue #428 supplies effect summaries.
+  edges and can reduce precision; ADR-0023 does not narrow this fallback.
 - Negative: path-sensitive error modes and conservative unknown flow make graph
   construction and query testing more complex than a structured-only CFG.
 - Negative: callers must choose a flow view deliberately; using a normal-only
@@ -127,5 +127,6 @@ configuration key, JSON shape, diagnostic ID, or LSP capability is added.
 - `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0021-procedure-analysis-ir.md`
+- `docs/adr/ADR-0023-procedure-effect-summaries.md`
 - `docs/specs/vba-control-flow-graph.md`
 - xlflow issues #425, #426, #427, and #428

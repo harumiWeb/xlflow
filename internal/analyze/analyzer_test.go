@@ -536,6 +536,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStateAllowsEitherSameModuleRestoreAlias(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+
+Private Sub PopFastMode()
+  Debug.Print "cleanup"
+End Sub
+
+Private Sub RestoreFastMode()
+  Application.EnableEvents = True
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 should accept either same-module restore alias: %+v", got)
+	}
+}
+
 func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -549,6 +574,173 @@ End Sub
 		t.Fatal(err)
 	}
 	assertFinding(t, findings, "VBA203", 3)
+}
+
+func TestAnalyzerApplicationStateAllowsPropagatedRestoreEffect(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+  Application.DisplayAlerts = False
+  Application.ScreenUpdating = False
+  Application.Calculation = xlCalculationManual
+End Sub
+
+Private Sub RestoreEvents()
+  Application.EnableEvents = True
+  Application.DisplayAlerts = True
+  Application.ScreenUpdating = True
+  Application.Calculation = xlCalculationAutomatic
+End Sub
+
+Private Sub PopFastMode()
+  RestoreEvents
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 should accept a uniquely propagated restore effect: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateAllowsUniqueProjectVisibleRestorePair(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+	writeModule(t, dir, "StateHelpers.bas", `Option Explicit
+Public Sub PopFastMode()
+  RestoreEvents
+End Sub
+
+Private Sub RestoreEvents()
+  Application.EnableEvents = True
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 should accept one project-visible paired restore: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateRejectsAmbiguousProjectRestorePair(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+	for _, name := range []string{"StateHelpersA.bas", "StateHelpersB.bas"} {
+		writeModule(t, dir, name, `Option Explicit
+Public Sub PopFastMode()
+  Application.EnableEvents = True
+End Sub
+`)
+	}
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
+func TestAnalyzerApplicationStateRejectsCrossModuleClassMethodPair(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+	writeClass(t, dir, "StateHelper.cls", `Option Explicit
+Public Sub PopFastMode()
+  Application.EnableEvents = True
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
+func TestAnalyzerApplicationStateRejectsRestorePropagatedFromBareClassMethod(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Sub PopFastMode()
+  RestoreEvents
+End Sub
+`)
+	writeClass(t, dir, "StateClass.cls", `Option Explicit
+Public Sub RestoreEvents()
+  Application.EnableEvents = True
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
+func TestAnalyzerApplicationStateRejectsRestorePropagatedFromBareUserFormMethod(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Sub PopFastMode()
+  RestoreEvents
+End Sub
+`)
+	writeFormSidecar(t, dir, "UserForm1.bas", `Option Explicit
+Public Sub RestoreEvents()
+  Application.EnableEvents = True
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
+func TestAnalyzerApplicationStatePreservesInlineSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  ' xlflow:disable-next-line VBA203
+  Application.EnableEvents = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 inline suppression should remain effective: %+v", got)
+	}
 }
 
 func TestAnalyzerErrorHandlerFallthroughSuggestsConcreteExitStatement(t *testing.T) {
@@ -1208,6 +1400,32 @@ func writeModule(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeClass(t *testing.T, dir, name, body string) {
+	t.Helper()
+	src := filepath.Join(dir, "src", "classes")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFormSidecar(t *testing.T, dir, name, body string) {
+	t.Helper()
+	src := filepath.Join(dir, "src", "forms", "code")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	formName := strings.TrimSuffix(name, filepath.Ext(name)) + ".frm"
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", formName), []byte("VERSION 5.00\nBegin VB.UserForm "+strings.TrimSuffix(name, filepath.Ext(name))+"\nEnd\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

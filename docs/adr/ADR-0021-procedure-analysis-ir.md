@@ -43,6 +43,10 @@ resolver to a copy of that IR without reparsing or rescanning source. Resolution
 must explicitly represent matched, ambiguous, unresolved, external,
 built-in-like, and member-call outcomes.
 
+Carry module kind in resolver symbols. A receiver-less call may resolve to a
+non-standard procedure only within the same module; class, document, and
+UserForm procedures require an explicit receiver across module boundaries.
+
 Use `ast.Range` as the canonical source coordinate contract. LSP UTF-16
 conversion remains in the LSP adapter; the IR does not import LSP protocol
 types.
@@ -68,8 +72,9 @@ batch `analyze` may continue to reject parser recovery even though the builder
 does not discard the partial IR.
 
 Issue #426 models syntactic statement nesting only. Basic blocks, control-flow
-edges, reachability, and path queries belong to issue #427. Direct/transitive
-effect summaries and fixed-point propagation belong to issue #428.
+edges, reachability, and path queries belong to the CFG layer in ADR-0022.
+Direct/transitive effect summaries and fixed-point propagation belong to the
+separate effects layer in ADR-0023.
 
 Migrate `VBA204` error-handler fallthrough detection as the validation consumer.
 Its diagnostic fields, ordering, cleanup-label exception, inline suppression,
@@ -139,5 +144,7 @@ change its JSON shape or resolution meaning.
 
 - `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
+- `docs/adr/ADR-0022-conservative-vba-control-flow-graph.md`
+- `docs/adr/ADR-0023-procedure-effect-summaries.md`
 - `docs/specs/vba-analysis-ir.md`
 - xlflow issues #425, #426, #427, and #428

@@ -337,6 +337,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{
 			Name:       sym.Name,
 			Module:     sym.Module,
+			ModuleKind: sym.ModuleKind,
 			Kind:       sym.Kind,
 			Visibility: sym.Visibility,
 			File:       workspaceDisplayPath(x.root, entry.path),
@@ -386,7 +387,7 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 		}
 		entry := x.effective[ref.path]
 		file := workspaceDisplayPath(x.root, entry.path)
-		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{Name: sym.Name, Module: sym.Module, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1})
+		resolverSymbols = append(resolverSymbols, calls.ResolverSymbol{Name: sym.Name, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1})
 		graphSymbols = append(graphSymbols, callgraph.Symbol{
 			Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
 			Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1, EndLine: sym.Range.End.Line + 1, EndColumn: sym.Range.End.Character + 1,

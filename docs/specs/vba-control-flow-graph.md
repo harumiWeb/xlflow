@@ -116,8 +116,9 @@ path:
 Merging paths preserves every possible active mode rather than selecting one.
 `On Error` statements change the mode only on paths that execute them.
 
-Until issue #428 provides direct and propagated effect summaries, every
-executable statement is a possible fault site. The graph adds an uncertain
+Every executable statement remains a possible fault site. The effect-summary
+layer in `docs/specs/vba-effect-analysis.md` does not narrow this conservative
+fallback. The graph adds an uncertain
 exceptional transition according to every error mode that can reach that
 statement. Labels and purely structural markers are not fault sites.
 
@@ -184,8 +185,8 @@ fragments, blocks, edges, and IDs are not reused across revisions.
 
 The procedure IR owns normalized syntax, statement identity, ranges, and
 recovery metadata. The CFG owns executable-path structure and procedure-local
-path queries. Issue #428 owns direct and transitive effects and may refine
-potential fault sites without changing this graph's conservative fallback.
+path queries. `internal/vba/effects` owns direct and transitive effect summaries
+without changing this graph's conservative potential-fault-site fallback.
 
 The CFG does not define interprocedural call propagation, public visualization,
 new CLI output, configuration, or LSP capabilities. Adapters remain responsible
