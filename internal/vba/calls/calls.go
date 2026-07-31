@@ -137,6 +137,7 @@ type Candidate struct {
 	Line          int    `json:"line"`
 
 	module     string
+	moduleKind string
 	visibility string
 }
 
@@ -516,10 +517,9 @@ func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 			Kind:          sym.Kind,
 			File:          normalizeCandidateFile(sym.File),
 			Line:          sym.Line,
-		}
-		if strings.EqualFold(sym.Visibility, "private") {
-			candidate.module = sym.Module
-			candidate.visibility = sym.Visibility
+			module:        sym.Module,
+			moduleKind:    sym.ModuleKind,
+			visibility:    sym.Visibility,
 		}
 		key := strings.ToLower(sym.Name)
 		res.byName[key] = append(res.byName[key], candidate)
@@ -854,6 +854,9 @@ func (r Resolver) resolveCallee(site CallSite) Resolution {
 	base := strings.TrimPrefix(callee.BaseName, "New ")
 	base = cleanIdentifier(base)
 	candidates := visibleCandidates(r.byName[strings.ToLower(base)], site.Caller)
+	if callee.Receiver == nil {
+		candidates = receiverlessCandidates(candidates, callerModule(site.Caller))
+	}
 	if callee.Receiver != nil {
 		receiver := cleanQualifiedName(*callee.Receiver)
 		if isExternalLikeReceiver(receiver) {
@@ -861,10 +864,10 @@ func (r Resolver) resolveCallee(site CallSite) Resolution {
 		}
 		matches := candidatesForReceiver(candidates, receiver, base)
 		if len(matches) == 1 {
-			return Resolution{Status: "matched", Candidates: matches}
+			return Resolution{Status: "matched", Candidates: cloneCandidates(matches)}
 		}
 		if len(matches) > 1 {
-			return Resolution{Status: "ambiguous", Candidates: matches}
+			return Resolution{Status: "ambiguous", Candidates: cloneCandidates(matches)}
 		}
 		return Resolution{Status: "member_call"}
 	}
@@ -897,6 +900,17 @@ func visibleCandidates(candidates []Candidate, caller *Caller) []Candidate {
 			continue
 		}
 		visible = append(visible, candidate)
+	}
+	return visible
+}
+
+func receiverlessCandidates(candidates []Candidate, callerModule string) []Candidate {
+	visible := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if strings.EqualFold(candidate.module, callerModule) || candidate.moduleKind == "" ||
+			strings.EqualFold(candidate.moduleKind, "standard") {
+			visible = append(visible, candidate)
+		}
 	}
 	return visible
 }
@@ -1008,7 +1022,16 @@ func cloneCandidates(candidates []Candidate) []Candidate {
 	if len(candidates) == 0 {
 		return nil
 	}
-	return append([]Candidate(nil), candidates...)
+	cloned := make([]Candidate, len(candidates))
+	for i, candidate := range candidates {
+		cloned[i] = Candidate{
+			QualifiedName: candidate.QualifiedName,
+			Kind:          candidate.Kind,
+			File:          candidate.File,
+			Line:          candidate.Line,
+		}
+	}
+	return cloned
 }
 
 func displayPath(rootDir, path string) string {

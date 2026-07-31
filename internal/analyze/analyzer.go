@@ -1354,15 +1354,20 @@ func hasPairedApplicationRestoreProcedure(proc sourceProcedure, prop string, pro
 			projectVisible = append(projectVisible, summary)
 		}
 	}
-	candidates := sameModule
-	if len(candidates) == 0 {
-		candidates = projectVisible
-	}
-	if len(candidates) != 1 {
+	if len(sameModule) > 0 {
+		for _, candidate := range sameModule {
+			if hasApplicationStateEffect(candidate.Direct, effects.RestoresApplicationState, prop) ||
+				hasApplicationStateEffect(candidate.Propagated, effects.RestoresApplicationState, prop) {
+				return true
+			}
+		}
 		return false
 	}
-	return hasApplicationStateEffect(candidates[0].Direct, effects.RestoresApplicationState, prop) ||
-		hasApplicationStateEffect(candidates[0].Propagated, effects.RestoresApplicationState, prop)
+	if len(projectVisible) != 1 {
+		return false
+	}
+	return hasApplicationStateEffect(projectVisible[0].Direct, effects.RestoresApplicationState, prop) ||
+		hasApplicationStateEffect(projectVisible[0].Propagated, effects.RestoresApplicationState, prop)
 }
 
 func hasApplicationStateEffect(evidence []effects.Evidence, kind effects.EffectKind, prop string) bool {

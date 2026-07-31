@@ -99,3 +99,6 @@
 - Assignment access modes belong to the actual lvalue binding only. Receivers and index expressions inside composite targets remain reads even when the enclosing target is a write.
 - Do not turn a disk-backed `getOrRead` document into an editor overlay. Only `didOpen` / `didChange` lifecycle documents may override watcher-managed disk index entries.
 - When extending VBA assignment analysis, reuse the existing assignment grammar so valid optional modifiers such as `Let` receive the same treatment; add a regression test for each supported form.
+- Treat same-module `Pop*` and `Restore*` names as alternative restore aliases, not ambiguous candidates; reserve uniqueness checks for cross-module helper lookup.
+- Direct-effect extraction must distinguish statement syntax from value-returning functions with the same VBA name, such as `Error 5` versus `Error(5)`.
+- When resolver policy depends on new symbol metadata, verify every resolver entry point actually consumes that metadata; copying it into only one index does not enforce the policy across compatibility wrappers.

@@ -536,6 +536,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStateAllowsEitherSameModuleRestoreAlias(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+
+Private Sub PopFastMode()
+  Debug.Print "cleanup"
+End Sub
+
+Private Sub RestoreFastMode()
+  Application.EnableEvents = True
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("VBA203 should accept either same-module restore alias: %+v", got)
+	}
+}
+
 func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

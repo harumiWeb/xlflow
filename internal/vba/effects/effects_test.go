@@ -59,6 +59,26 @@ End Sub
 	}
 }
 
+func TestErrorFunctionDoesNotRaiseButErrorStatementDoes(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Errors.bas", "Errors", `Public Sub Run()
+    Dim description As String
+    description = Error(5)
+End Sub
+
+Public Sub RaiseError()
+    Error 6
+End Sub
+`})
+	run := find(t, summary, "Errors.Run")
+	if got := count(run.Direct, RaisesError); got != 0 {
+		t.Fatalf("Error() function raises_error count = %d, want 0: %#v", got, run.Direct)
+	}
+	raise := find(t, summary, "Errors.RaiseError")
+	if got := count(raise.Direct, RaisesError); got != 1 {
+		t.Fatalf("Error statement raises_error count = %d, want 1: %#v", got, raise.Direct)
+	}
+}
+
 func TestGenericApplicationStateEvidencePreservesVBA203Properties(t *testing.T) {
 	summary := buildSources(t, sourceFile{"State.bas", "State", `Public Sub PushState()
     Application.DisplayAlerts = False

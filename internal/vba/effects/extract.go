@@ -70,7 +70,7 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 	}
 }
 
-func extractCall(summary *ProcedureSummary, call procedureir.CallSite) {
+func extractCall(summary *ProcedureSummary, call procedureir.CallSite, statement procedureir.Statement) {
 	// A matched call names project code even when it happens to share a name
 	// with a VBA/Excel builtin.
 	if call.Resolution.Status == procedureir.ResolutionMatched {
@@ -99,7 +99,8 @@ func extractCall(summary *ProcedureSummary, call procedureir.CallSite) {
 		addCallEffect(summary, call, OpensWorkbook, call.Callee.Text)
 	case member == "close" && isWorkbookReceiver(receiver):
 		addCallEffect(summary, call, ClosesWorkbook, call.Callee.Text)
-	case builtin && receiver == "" && base == "error" || (member == "raise" && receiver == "err"):
+	case builtin && receiver == "" && base == "error" && statement.Kind == procedureir.StatementCall ||
+		(member == "raise" && receiver == "err"):
 		addCallEffect(summary, call, RaisesError, call.Callee.Text)
 	}
 	if isWorkbookMutation(full, member) {

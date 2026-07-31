@@ -33,7 +33,7 @@ func Build(documents []Document) ProjectSummary {
 			if !reachable[call.StatementID] || statement.Recovered {
 				continue
 			}
-			extractCall(summary, call)
+			extractCall(summary, call, statement)
 			switch call.Resolution.Status {
 			case procedureir.ResolutionMatched:
 				if len(call.Resolution.Candidates) == 1 {
