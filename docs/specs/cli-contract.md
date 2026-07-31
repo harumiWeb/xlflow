@@ -12,6 +12,7 @@ xlflow is a Windows-first Go CLI that treats Excel VBA projects as source-contro
 xlflow [--json] [--bridge <auto|dotnet>] new [workbook] [--with-skill] [--agent <provider>] [--no-update-check]
 xlflow [--json] [--bridge <auto|dotnet>] init <workbook> [--with-module] [--with-skill] [--agent <provider>] [--no-update-check]
 xlflow [--json] capabilities
+xlflow [--json] rules
 xlflow [--json] [--bridge <auto|dotnet>] doctor [--workbook]
 xlflow [--json] [--bridge <auto|dotnet>] attach --active
 xlflow [--json] backup list
@@ -85,7 +86,7 @@ Unknown top-level commands fail loudly before any workbook or project configurat
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto` and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` selects the `.NET` bridge. Explicit `--bridge dotnet` is strict. The removed value `powershell` is rejected with a bridge-mode/configuration error.
 
-Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `diff`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `impact`, `graph`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `diff`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `impact`, `graph`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `rules`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
 
 Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
 
@@ -402,6 +403,26 @@ project-independent and source-only. Older CLI versions may not provide it, so
 integrations must treat an unavailable, invalid, failed, or unsupported-version
 response as unavailable advisory metadata, not infer safety from command names.
 See `docs/specs/workbook-coordination.md` for the complete capability contract.
+
+`rules --json` returns top-level `rules` with `schema_version: 1` and an `items`
+array sorted by diagnostic ID. The command is project-independent and is
+registered in the coordination policy as a source-scoped read operation that is
+parallel-safe, does not require Excel, and is not subject to workbook wait or
+recovery policy.
+
+Each item publishes the canonical rule `id`, `title`, `description`, `family`,
+`category`, `default_severity`, `scope`, `precision`, `default_enabled`, `configurable`,
+`configuration_key`, `inline_suppressible`, `preflight_blocking`, `realtime`,
+`fix_available`, and `documentation_url`. `configuration_key` is empty for a
+non-configurable rule. Version 1 evolves additively: new rule entries and fields
+may be added, clients must ignore fields and IDs they do not recognize, and a
+field removal or incompatible meaning change requires a new `schema_version`.
+Unavailable, failed, malformed, or unsupported-version metadata must be treated
+as unknown; a client must not infer that an unknown rule is suppressible.
+
+The registry covers normal `VB...` lint/LSP rules and `VBA...` analyzer rules.
+`VBA000` is a synthetic analysis-failure diagnostic rather than a rule, and
+UserForm `FRM...` / `UFY...` diagnostics remain outside schema version 1.
 
 Workbook lock contention uses the stable error code `workbook_busy`. It fails
 immediately by default and uses the same envelope for every workbook-bound
@@ -785,6 +806,12 @@ End Sub
 
 ## Lint Rules
 
+The canonical static-analysis registry owns rule identity, defaults, severity,
+configuration binding, inline-suppression eligibility, preflight behavior, and
+real-time eligibility for the lint and analyzer rules described below. The
+generated diagnostic catalog and `xlflow rules --json` are projections of that
+registry; this section defines command behavior and compatibility.
+
 Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). When xlflow can confidently identify an unclosed block, VB014 also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`; its primary location is the point where the closer is expected, while the metadata identifies the unmatched opener. Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
 
 Core declaration, member-access, error-handling, Excel object, and procedure-scope rules use `tree-sitter-vba` so comments, string literals, procedure scope, and individual declarators are handled structurally.
@@ -828,6 +855,10 @@ Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `V
 
 Projects should disable configurable lint rules with `[lint].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VB002", "VB006"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
 
+`[lint].disabled_rules` lookup is case-insensitive, preserves deterministic
+duplicate removal, and rejects unknown or non-configurable IDs. Its precedence
+over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
+
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
 Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, and `VBA211` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
@@ -861,6 +892,10 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA213`: direct `Scripting.Dictionary` iteration is used as if it yielded values or objects
 
 Projects should disable configurable analyzer rules with `[analyze].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VBA205", "VBA211"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
+
+`[analyze].disabled_rules` uses the same case-insensitive lookup, deterministic
+duplicate removal, unknown/non-configurable rejection, warning, and precedence
+contract as `[lint].disabled_rules`.
 
 Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect_range_find_nothing_check`, `VBA202` = `detect_object_use_before_set`, `VBA203` = `detect_application_state_restore`, `VBA204` = `detect_error_handler_fallthrough`, `VBA205` = `forbid_unqualified_excel_objects`, `VBA206` = `detect_byref_argument_mismatch`, `VBA207` = `detect_dictionary_collection_guard`, `VBA208` = `detect_redim_preserve_dimension`, `VBA209` = `detect_object_array_comparison`, `VBA210` = `detect_function_return_path`, `VBA211` = `detect_excel_object_member_mismatch`, `VBA212` = `detect_non_short_circuit_object_guard`, and `VBA213` = `detect_dictionary_iteration_value_usage`.
 

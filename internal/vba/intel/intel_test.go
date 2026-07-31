@@ -884,6 +884,25 @@ End Sub
 	}
 }
 
+func TestDiagnosticsApplyInlineSuppressionToIntelligenceRules(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	dir := t.TempDir()
+	doc := Document{
+		Path: filepath.Join(dir, "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim dict As Scripting.Dictionary
+    ' xlflow:disable-next-line VB030
+    dict.Add "A"
+End Sub
+`,
+	}
+	analyzer.RootDir = dir
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+		t.Fatalf("VB030 should be suppressed by registry-backed directive: %+v", diagnostics)
+	}
+}
+
 func TestArgumentDiagnosticsAllowParamArray(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	if err := analyzer.DB.MergeJSON([]byte(`{

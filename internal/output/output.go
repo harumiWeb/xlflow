@@ -89,6 +89,7 @@ type Envelope struct {
 	Process        any `json:"process,omitempty"`
 	Recovery       any `json:"recovery,omitempty"`
 	Capabilities   any `json:"capabilities,omitempty"`
+	Rules          any `json:"rules,omitempty"`
 }
 
 type Options struct {
@@ -394,6 +395,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderTargetSession(env))
 	}
 	switch env.Command {
+	case "rules":
+		b.WriteString(r.renderRules(env))
 	case "version":
 		b.WriteString(r.renderVersion(env))
 	case "doctor":
@@ -492,6 +495,34 @@ func renderHuman(env Envelope, opts Options) string {
 	}
 	out := strings.TrimRight(b.String(), "\n")
 	return out + "\n"
+}
+
+func (r renderer) renderRules(env Envelope) string {
+	catalog := objectMap(env.Rules)
+	items := listOfObjects(catalog["items"])
+	if len(items) == 0 {
+		return r.renderLogs(env)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "%-6s %-7s %-7s %-17s %-8s %s\n", "ID", "FAMILY", "SEVERITY", "SCOPE", "DEFAULT", "TITLE")
+	for _, rule := range items {
+		state := "disabled"
+		if enabled, ok := rule["default_enabled"].(bool); ok && enabled {
+			state = "enabled"
+		}
+		fmt.Fprintf(
+			&b,
+			"%-6s %-7s %-7s %-17s %-8s %s\n",
+			stringValue(rule, "id"),
+			stringValue(rule, "family"),
+			stringValue(rule, "default_severity"),
+			stringValue(rule, "scope"),
+			state,
+			stringValue(rule, "title"),
+		)
+	}
+	return b.String()
 }
 
 func (r renderer) renderGraphDependencies(env Envelope) string {

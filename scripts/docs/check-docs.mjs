@@ -5,6 +5,7 @@ const repo = path.resolve(".");
 const docs = path.join(repo, "vitepress");
 const requiredCommandPages = [
   "capabilities",
+  "rules",
   "new",
   "init",
   "pack",
@@ -108,8 +109,11 @@ for (const code of [
 
 const configSource = fs.readFileSync(path.join(repo, "internal/config/config.go"), "utf8");
 const configReference = fs.readFileSync(path.join(docs, "reference/config-file.md"), "utf8");
+const diagnosticReference = fs.readFileSync(path.join(docs, "reference/diagnostics.md"), "utf8");
 for (const [, key] of configSource.matchAll(/toml:"([^,"]+)"/g)) {
-  if (!configReference.includes(key)) failures.push(`config key missing from reference: ${key}`);
+  if (!configReference.includes(key) && !diagnosticReference.includes(key)) {
+    failures.push(`config key missing from reference: ${key}`);
+  }
 }
 
 if (failures.length) {

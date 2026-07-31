@@ -1,47 +1,1129 @@
-# Diagnostic rule inventory
+# Static-analysis diagnostic catalog
 
-Generated from diagnostic IDs in `internal/`. Run `pnpm docs:generate-reference` after adding a rule.
+Generated from the canonical rule registry at `internal/staticanalysis/rules/registry.json`. Run `pnpm docs:generate-reference` after changing rule metadata. Do not edit this page by hand.
 
-- `FRM201`
-- `FRM203`
-- `UFY001`
-- `VB001`
-- `VB002`
-- `VB003`
-- `VB004`
-- `VB005`
-- `VB006`
-- `VB007`
-- `VB014`
-- `VB018`
-- `VB019`
-- `VB020`
-- `VB021`
-- `VB022`
-- `VB023`
-- `VB026`
-- `VB027`
-- `VB029`
-- `VB030`
-- `VB033`
-- `VB040`
-- `VB041`
-- `VB042`
-- `VB043`
-- `VB044`
-- `VBA104`
-- `VBA105`
-- `VBA106`
-- `VBA201`
-- `VBA202`
-- `VBA203`
-- `VBA204`
-- `VBA205`
-- `VBA206`
-- `VBA207`
-- `VBA208`
-- `VBA209`
-- `VBA210`
-- `VBA211`
-- `VBA212`
-- `VBA213`
+Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an installed xlflow binary. `VBA000` is a synthetic analysis-failure diagnostic and is intentionally outside the registry; UserForm `FRM...` and `UFY...` diagnostics are outside this catalog.
+
+| ID | Family | Severity | Scope | Default | Title |
+| --- | --- | --- | --- | --- | --- |
+| [`VB001`](#vb001) | lint | error | file-local | yes | Missing Option Explicit |
+| [`VB002`](#vb002) | lint | warning | procedure-local | yes | Select usage |
+| [`VB003`](#vb003) | lint | warning | procedure-local | yes | Activate usage |
+| [`VB004`](#vb004) | lint | warning | procedure-local | yes | Broad On Error Resume Next |
+| [`VB005`](#vb005) | lint | warning | file-local | yes | Implicit Variant |
+| [`VB006`](#vb006) | lint | warning | file-local | yes | Public module field |
+| [`VB007`](#vb007) | lint | warning | file-local | yes | Automation-hostile GUI boundary |
+| [`VB008`](#vb008) | lint | error | file-local | yes | Typographic quote |
+| [`VB009`](#vb009) | lint | error | file-local | yes | C-style quote escape |
+| [`VB010`](#vb010) | lint | error | file-local | yes | Unterminated procedure |
+| [`VB011`](#vb011) | lint | error | file-local | yes | Unexpected procedure terminator |
+| [`VB012`](#vb012) | lint | error | file-local | yes | Mismatched procedure terminator |
+| [`VB013`](#vb013) | lint | error | file-local | yes | Invalid line continuation |
+| [`VB014`](#vb014) | lint | error | file-local | yes | Parser recovery |
+| [`VB015`](#vb015) | lint | error | file-local | yes | Continuation limit exceeded |
+| [`VB018`](#vb018) | lint | warning | project-wide | no | Scope shadowing |
+| [`VB019`](#vb019) | lint | warning | file-local | yes | Mixed declarator typing |
+| [`VB020`](#vb020) | lint | warning | procedure-local | yes | Unused local variable |
+| [`VB021`](#vb021) | lint | warning | project-wide | no | Unused private procedure |
+| [`VB022`](#vb022) | lint | warning | procedure-local | yes | Confusing call syntax |
+| [`VB023`](#vb023) | lint | warning | procedure-local | yes | Invalid For Each control type |
+| [`VB026`](#vb026) | lint | warning | procedure-local | yes | Dangerous Resume |
+| [`VB027`](#vb027) | lint | warning | procedure-local | no | Ambiguous nested With member |
+| [`VB028`](#vb028) | lint | error | project-wide | yes | Bare dialog call with XlflowUI |
+| [`VB029`](#vb029) | lint | error | file-local | yes | Undeclared variable |
+| [`VB030`](#vb030) | lint | warning | procedure-local | yes | Argument mismatch |
+| [`VB031`](#vb031) | lint | error | file-local | yes | Missing module name attribute |
+| [`VB032`](#vb032) | lint | error | file-local | yes | Repeated Debug.Print shorthand |
+| [`VB033`](#vb033) | lint | warning | procedure-local | yes | Unknown member |
+| [`VB034`](#vb034) | lint | warning | procedure-local | yes | Read-only property assignment |
+| [`VB035`](#vb035) | lint | warning | procedure-local | yes | Write-only property read |
+| [`VB036`](#vb036) | lint | warning | procedure-local | yes | Set required |
+| [`VB037`](#vb037) | lint | warning | procedure-local | yes | Set not allowed |
+| [`VB038`](#vb038) | lint | warning | procedure-local | yes | Incompatible assignment |
+| [`VB039`](#vb039) | lint | warning | procedure-local | yes | Method has no return value |
+| [`VB040`](#vb040) | lint | warning | file-local | yes | Unknown documented parameter |
+| [`VB041`](#vb041) | lint | warning | file-local | yes | Duplicate documented parameter |
+| [`VB042`](#vb042) | lint | warning | file-local | yes | Returns documentation on Sub |
+| [`VB043`](#vb043) | lint | warning | file-local | yes | Orphan documentation comment |
+| [`VB044`](#vb044) | lint | warning | procedure-local | no | Procedure-name constant mismatch |
+| [`VBA101`](#vba101) | analyze | warning | procedure-local | yes | Object assignment missing Set |
+| [`VBA102`](#vba102) | analyze | warning | procedure-local | yes | Object-returning call assignment missing Set |
+| [`VBA103`](#vba103) | analyze | warning | procedure-local | yes | Object function return missing Set |
+| [`VBA104`](#vba104) | analyze | error | procedure-local | yes | Excel object member mismatch |
+| [`VBA105`](#vba105) | analyze | error | project-wide | yes | Removed XlflowLog helper |
+| [`VBA106`](#vba106) | analyze | error | project-wide | yes | Removed XlflowSetTraceFile helper |
+| [`VBA201`](#vba201) | analyze | warning | procedure-local | yes | Unchecked Range.Find result |
+| [`VBA202`](#vba202) | analyze | warning | procedure-local | yes | Object use before Set |
+| [`VBA203`](#vba203) | analyze | warning | interprocedural | yes | Application state not restored |
+| [`VBA204`](#vba204) | analyze | warning | procedure-local | yes | Error-handler fallthrough |
+| [`VBA205`](#vba205) | analyze | warning | procedure-local | yes | Active Excel object dependency |
+| [`VBA206`](#vba206) | analyze | warning | interprocedural | no | ByRef argument mismatch |
+| [`VBA207`](#vba207) | analyze | warning | procedure-local | no | Unguarded keyed access |
+| [`VBA208`](#vba208) | analyze | warning | procedure-local | yes | Invalid ReDim Preserve dimension |
+| [`VBA209`](#vba209) | analyze | warning | procedure-local | yes | Object or array comparison mistake |
+| [`VBA210`](#vba210) | analyze | warning | procedure-local | no | Missing function return assignment |
+| [`VBA211`](#vba211) | analyze | error | procedure-local | yes | Expanded Excel member mismatch |
+| [`VBA212`](#vba212) | analyze | warning | procedure-local | yes | Non-short-circuit object guard |
+| [`VBA213`](#vba213) | analyze | warning | procedure-local | no | Dictionary iteration value misuse |
+
+## VB001
+
+**Missing Option Explicit.** The module does not declare Option Explicit.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `require_option_explicit` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB002
+
+**Select usage.** Select makes behavior depend on Excel selection state.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `forbid_select` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB003
+
+**Activate usage.** Activate makes behavior depend on Excel active-object state.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `forbid_activate` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB004
+
+**Broad On Error Resume Next.** On Error Resume Next is used without a narrow recovery scope.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `forbid_on_error_resume_next` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB005
+
+**Implicit Variant.** A declaration omits an explicit As type.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_implicit_variant` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB006
+
+**Public module field.** A module-level Public variable exposes mutable global state.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `forbid_public_module_fields` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB007
+
+**Automation-hostile GUI boundary.** The source invokes an interactive boundary that can block automation.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `forbid_interactive_input` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VB008
+
+**Typographic quote.** A typographic quote can trigger an Excel VBE compile dialog.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB009
+
+**C-style quote escape.** A C-style escaped quote is invalid VBA string syntax.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB010
+
+**Unterminated procedure.** A Sub, Function, or Property procedure has no matching terminator.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB011
+
+**Unexpected procedure terminator.** An End procedure statement has no matching opener.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB012
+
+**Mismatched procedure terminator.** A procedure is closed with the wrong End statement kind.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB013
+
+**Invalid line continuation.** A line-continuation underscore is not preceded by whitespace.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB014
+
+**Parser recovery.** The parser recovered from an error, missing node, or unmatched source structure.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `medium` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB015
+
+**Continuation limit exceeded.** A VBA logical line exceeds the supported continuation-line limit.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB018
+
+**Scope shadowing.** A declaration shadows another visible declaration or procedure.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `project-wide` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_scope_shadowing` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VB019
+
+**Mixed declarator typing.** A multi-name declaration explicitly types only some declarators.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_multiple_declarator_clarity` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB020
+
+**Unused local variable.** A procedure-local variable is declared but never referenced.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_unused_local_variables` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB021
+
+**Unused private procedure.** A private procedure has no resolved project-local caller.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `project-wide` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_unused_private_procedures` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VB022
+
+**Confusing call syntax.** A parenthesized procedure call uses ambiguous VBA call syntax.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_confusing_call_syntax` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB023
+
+**Invalid For Each control type.** A For Each control variable is undeclared or incompatible.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_for_each_control_type` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB026
+
+**Dangerous Resume.** Resume is used outside a recognizable error-handler context.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `medium` |
+| Enabled by default | yes |
+| Configuration | `detect_dangerous_resume` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB027
+
+**Ambiguous nested With member.** An implicit Excel member inside nested With blocks has an ambiguous target.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_nested_with_ambiguity` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB028
+
+**Bare dialog call with XlflowUI.** A bare dialog call can bind to an incompatible XlflowUI member.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `project-wide` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VB029
+
+**Undeclared variable.** Option Explicit is present but a referenced assignment or loop variable is undeclared.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB030
+
+**Argument mismatch.** A procedure call argument does not match the resolved signature.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB031
+
+**Missing module name attribute.** A standard module lacks its exported Attribute VB_Name declaration.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB032
+
+**Repeated Debug.Print shorthand.** Repeated question-mark shorthand is invalid VBA syntax.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB033
+
+**Unknown member.** A member is not present on the resolved receiver type.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB034
+
+**Read-only property assignment.** An assignment targets a read-only property.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB035
+
+**Write-only property read.** An expression reads a write-only property.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB036
+
+**Set required.** An object assignment omits the Set keyword.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB037
+
+**Set not allowed.** A value assignment incorrectly uses the Set keyword.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB038
+
+**Incompatible assignment.** The assigned expression is incompatible with the resolved target type.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB039
+
+**Method has no return value.** A method without a return value is used as an expression.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB040
+
+**Unknown documented parameter.** A documentation comment names a parameter that the procedure does not declare.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `documentation` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB041
+
+**Duplicate documented parameter.** A documentation comment lists the same parameter more than once.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `documentation` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB042
+
+**Returns documentation on Sub.** A Sub procedure documentation comment contains a Returns section.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `documentation` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB043
+
+**Orphan documentation comment.** A documentation comment is not associated with a declaration.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `documentation` |
+| Default severity | `warning` |
+| Scope | `file-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VB044
+
+**Procedure-name constant mismatch.** A configured procedure-name string constant differs from its enclosing procedure name.
+
+| Property | Value |
+| --- | --- |
+| Family | `lint` |
+| Category | `maintainability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | no |
+| Configuration | `procedure_name_constant` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | yes |
+
+## VBA101
+
+**Object assignment missing Set.** An object variable assignment likely omits Set.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA102
+
+**Object-returning call assignment missing Set.** An object-returning function assignment likely omits Set.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA103
+
+**Object function return missing Set.** An object-returning function body likely assigns its return without Set.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA104
+
+**Excel object member mismatch.** A known Excel object does not provide the referenced member.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA105
+
+**Removed XlflowLog helper.** The source calls the removed XlflowLog trace helper.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `project-wide` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA106
+
+**Removed XlflowSetTraceFile helper.** The source calls the removed XlflowSetTraceFile trace helper.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `project-wide` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | not configurable |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA201
+
+**Unchecked Range.Find result.** A Range.Find result is dereferenced before a Nothing check.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_range_find_nothing_check` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VBA202
+
+**Object use before Set.** An object variable may be used before an obvious Set assignment.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `medium` |
+| Enabled by default | yes |
+| Configuration | `detect_object_use_before_set` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA203
+
+**Application state not restored.** Changed Excel Application state has no obvious restore path.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `interprocedural` |
+| Precision | `medium` |
+| Enabled by default | yes |
+| Configuration | `detect_application_state_restore` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA204
+
+**Error-handler fallthrough.** Normal execution can fall through into an error-handler label.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_error_handler_fallthrough` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VBA205
+
+**Active Excel object dependency.** Unqualified Excel object access depends on active workbook or worksheet state.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `forbid_unqualified_excel_objects` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA206
+
+**ByRef argument mismatch.** A ByRef argument may be incompatible with its resolved parameter type.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `interprocedural` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_byref_argument_mismatch` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA207
+
+**Unguarded keyed access.** Dictionary or Collection item access has no obvious existence guard.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_dictionary_collection_guard` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA208
+
+**Invalid ReDim Preserve dimension.** ReDim Preserve is used on a multi-dimensional array.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `correctness` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_redim_preserve_dimension` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VBA209
+
+**Object or array comparison mistake.** An object or array is compared with scalar equality semantics.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_object_array_comparison` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VBA210
+
+**Missing function return assignment.** A function may exit without assigning its return value.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `correctness` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_function_return_path` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA211
+
+**Expanded Excel member mismatch.** Expanded Excel type metadata proves an object/member mismatch.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `correctness` |
+| Default severity | `error` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_excel_object_member_mismatch` |
+| Inline suppression | no |
+| Blocks source preflight | yes |
+| Real-time editor diagnostic | no |
+| Fix available | no |
+
+## VBA212
+
+**Non-short-circuit object guard.** An object Nothing guard and dereference share a non-short-circuit expression.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `reliability` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `high` |
+| Enabled by default | yes |
+| Configuration | `detect_non_short_circuit_object_guard` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |
+
+## VBA213
+
+**Dictionary iteration value misuse.** A Dictionary key yielded by direct iteration is used as a value or object.
+
+| Property | Value |
+| --- | --- |
+| Family | `analyze` |
+| Category | `type-safety` |
+| Default severity | `warning` |
+| Scope | `procedure-local` |
+| Precision | `medium` |
+| Enabled by default | no |
+| Configuration | `detect_dictionary_iteration_value_usage` |
+| Inline suppression | yes |
+| Blocks source preflight | no |
+| Real-time editor diagnostic | yes |
+| Fix available | no |

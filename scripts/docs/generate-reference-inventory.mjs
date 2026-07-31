@@ -3,8 +3,62 @@ import path from "node:path";
 
 const repo = path.resolve(".");
 const check = process.argv.includes("--check");
+const registryPath = path.join(repo, "internal/staticanalysis/rules/registry.json");
+
+if (!fs.existsSync(registryPath)) {
+  console.error(
+    "canonical diagnostic registry is missing: internal/staticanalysis/rules/registry.json",
+  );
+  process.exit(1);
+}
+
+const registryDocument = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+if (
+  typeof registryDocument !== "object" ||
+  registryDocument === null ||
+  Array.isArray(registryDocument) ||
+  registryDocument.schema_version !== 1 ||
+  !Array.isArray(registryDocument.items)
+) {
+  throw new Error("diagnostic registry must use schema_version 1 with an items array");
+}
+const registryRules = registryDocument.items;
+
+const rules = registryRules.map((rule) => ({ ...rule })).sort((a, b) => a.id.localeCompare(b.id));
+const requiredRuleFields = [
+  "id",
+  "title",
+  "description",
+  "family",
+  "category",
+  "default_severity",
+  "default_enabled",
+  "scope",
+  "realtime",
+  "precision",
+  "fix_available",
+  "documentation_url",
+  "configurable",
+  "configuration_key",
+  "inline_suppressible",
+  "preflight_blocking",
+];
+for (const rule of rules) {
+  const missing = requiredRuleFields.filter((field) => !(field in rule));
+  if (missing.length > 0) {
+    throw new Error(`diagnostic ${rule.id ?? "<unknown>"} is missing: ${missing.join(", ")}`);
+  }
+}
+const duplicateIDs = rules
+  .filter((rule, index) => index > 0 && rule.id === rules[index - 1].id)
+  .map((rule) => rule.id);
+if (duplicateIDs.length > 0) {
+  throw new Error(`diagnostic registry contains duplicate IDs: ${duplicateIDs.join(", ")}`);
+}
+
 const sourceFiles = [];
 function walk(dir) {
+  if (path.resolve(dir) === path.resolve(repo, "internal/staticanalysis/rules")) return;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === "vendor" || entry.name === ".git") continue;
     const full = path.join(dir, entry.name);
@@ -15,17 +69,73 @@ function walk(dir) {
 walk(path.join(repo, "internal"));
 
 const source = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
-const diagnostics = [
-  ...new Set([...source.matchAll(/(?:ID|Code):\s*"([A-Z]{2,5}\d{3})"/g)].map((m) => m[1])),
-].sort();
 const errors = [
   ...new Set([...source.matchAll(/"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g)].map((m) => m[1])),
 ]
-  .filter((code) => code.length < 80 && !code.startsWith("go_") && !code.startsWith("http_"))
+  .filter(
+    (code) =>
+      code.length < 80 &&
+      !code.startsWith("go_") &&
+      !code.startsWith("http_") &&
+      code !== "default_enabled" &&
+      code !== "default_severity",
+  )
   .sort();
 
-const diagnosticPage = `# Diagnostic rule inventory\n\nGenerated from diagnostic IDs in \`internal/\`. Run \`pnpm docs:generate-reference\` after adding a rule.\n\n${diagnostics.map((code) => `- \`${code}\``).join("\n")}\n`;
-const errorPage = `# Error-code inventory\n\nGenerated from structured error-code literals in \`internal/\`. Descriptions and recovery guidance remain curated in [Error Codes](./error-codes) and [Troubleshooting](../help/troubleshooting).\n\n${errors.map((code) => `- \`${code}\``).join("\n")}\n`;
+const markdown = (value) =>
+  String(value ?? "")
+    .replaceAll("|", "\\|")
+    .replaceAll("\n", " ");
+const yesNo = (value) => (value ? "yes" : "no");
+const setting = (rule) =>
+  rule.configurable ? `\`${markdown(rule.configuration_key)}\`` : "not configurable";
+
+const summaryRows = rules
+  .map(
+    (rule) =>
+      `| [\`${rule.id}\`](#${rule.id.toLowerCase()}) | ${markdown(rule.family)} | ${markdown(rule.default_severity)} | ${markdown(rule.scope)} | ${yesNo(rule.default_enabled)} | ${markdown(rule.title)} |`,
+  )
+  .join("\n");
+const details = rules
+  .map(
+    (rule) => `## ${rule.id}
+
+**${markdown(rule.title)}.** ${markdown(rule.description)}
+
+| Property | Value |
+| --- | --- |
+| Family | \`${markdown(rule.family)}\` |
+| Category | \`${markdown(rule.category)}\` |
+| Default severity | \`${markdown(rule.default_severity)}\` |
+| Scope | \`${markdown(rule.scope)}\` |
+| Precision | \`${markdown(rule.precision)}\` |
+| Enabled by default | ${yesNo(rule.default_enabled)} |
+| Configuration | ${setting(rule)} |
+| Inline suppression | ${yesNo(rule.inline_suppressible)} |
+| Blocks source preflight | ${yesNo(rule.preflight_blocking)} |
+| Real-time editor diagnostic | ${yesNo(rule.realtime)} |
+| Fix available | ${yesNo(rule.fix_available)} |
+`,
+  )
+  .join("\n");
+
+const diagnosticPage = `# Static-analysis diagnostic catalog
+
+Generated from the canonical rule registry at \`internal/staticanalysis/rules/registry.json\`. Run \`pnpm docs:generate-reference\` after changing rule metadata. Do not edit this page by hand.
+
+Use [\`xlflow rules\`](../commands/rules) to inspect the same metadata from an installed xlflow binary. \`VBA000\` is a synthetic analysis-failure diagnostic and is intentionally outside the registry; UserForm \`FRM...\` and \`UFY...\` diagnostics are outside this catalog.
+
+| ID | Family | Severity | Scope | Default | Title |
+| --- | --- | --- | --- | --- | --- |
+${summaryRows}
+
+${details}`;
+const errorPage = `# Error-code inventory
+
+Generated from structured error-code literals in \`internal/\`. Descriptions and recovery guidance remain curated in [Error Codes](./error-codes) and [Troubleshooting](../help/troubleshooting).
+
+${errors.map((code) => `- \`${code}\``).join("\n")}
+`;
 
 const outputs = new Map([
   [path.join(repo, "vitepress/reference/diagnostics.md"), diagnosticPage],

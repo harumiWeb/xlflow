@@ -1,3 +1,18 @@
+# Issue #429: Shared static-analysis rule registry
+
+- [x] Add protocol-neutral VB/VBA rule registry and validation
+- [x] Migrate config defaults, disabled rules, and suppression policy
+- [x] Add `xlflow rules` JSON/human output and LSP documentation links
+- [x] Make VS Code suppression Quick Fixes consume registry metadata
+- [x] Add ADR-0024, CLI contract, generated rule catalog, and changelog
+- [x] Run Go, VS Code, docs, lint, diff, and final review verification
+  - `task test`, `task lint`, `pnpm docs:check`, and `pnpm docs:build` passed
+  - VS Code `check`, `lint`, and extension-host tests passed
+  - `git diff --check` passed; final review findings were addressed
+  - Excel COM E2E was not required because workbook and bridge behavior are unchanged
+
+---
+
 # Issue #344: Document-version-scoped LSP analysis snapshots
 
 - [x] Add immutable protocol-neutral analysis snapshots with source identity, normalized lines, procedure ranges, lazy source symbols, and semantic metadata

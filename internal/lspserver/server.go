@@ -24,6 +24,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
@@ -1113,16 +1114,7 @@ func (s *Server) runDiagnostics(
 	diagnostics := s.documentDiagnostics(runCtx, doc)
 	out := make([]protocol.Diagnostic, 0, len(diagnostics))
 	for _, diag := range diagnostics {
-		severity := diagnosticSeverity(diag.Severity)
-		source := diag.Source
-		code := protocol.IntegerOrString{Value: diag.Code}
-		out = append(out, protocol.Diagnostic{
-			Range:    toProtocolRange(diag.Range),
-			Severity: &severity,
-			Code:     &code,
-			Source:   &source,
-			Message:  diag.Message,
-		})
+		out = append(out, toProtocolDiagnostic(diag))
 	}
 	if s.beforeDiagnosticsPublish != nil {
 		s.beforeDiagnosticsPublish()
@@ -1145,6 +1137,28 @@ func (s *Server) runDiagnostics(
 	if ready {
 		s.launchDiagnostics(uri, state)
 	}
+}
+
+func toProtocolDiagnostic(diag intel.Diagnostic) protocol.Diagnostic {
+	severityName := diag.Severity
+	metadata, hasMetadata := staticrules.Lookup(diag.Code)
+	if hasMetadata {
+		severityName = string(metadata.DefaultSeverity)
+	}
+	severity := diagnosticSeverity(severityName)
+	source := diag.Source
+	code := protocol.IntegerOrString{Value: diag.Code}
+	out := protocol.Diagnostic{
+		Range:    toProtocolRange(diag.Range),
+		Severity: &severity,
+		Code:     &code,
+		Source:   &source,
+		Message:  diag.Message,
+	}
+	if hasMetadata {
+		out.CodeDescription = &protocol.CodeDescription{HRef: protocol.URI(metadata.DocumentationURL)}
+	}
+	return out
 }
 
 func (s *Server) documentKind(doc intel.Document) DocumentKind {

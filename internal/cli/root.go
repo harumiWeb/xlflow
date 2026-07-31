@@ -42,6 +42,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -198,6 +199,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.PersistentFlags().DurationVar(&a.waitTimeout, "wait-timeout", 30*time.Second, "maximum time to wait for workbook coordination")
 	root.AddCommand(
 		a.capabilitiesCommand(),
+		a.rulesCommand(),
 		a.newCommand(),
 		a.initCommand(),
 		a.doctorCommand(),
@@ -242,6 +244,21 @@ func (a *app) rootCommand() *cobra.Command {
 	)
 	a.wrapCoordinatedLeaves(root)
 	return root
+}
+
+func (a *app) rulesCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rules",
+		Short: "List static-analysis rule metadata",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			catalog := staticrules.CatalogSnapshot()
+			env := output.New("rules")
+			env.Rules = catalog
+			env.Logs = []string{fmt.Sprintf("rule schema version: %d", catalog.SchemaVersion), fmt.Sprintf("rules: %d", len(catalog.Items))}
+			return a.write(env, output.ExitSuccess)
+		},
+	}
 }
 
 func (a *app) capabilitiesCommand() *cobra.Command {

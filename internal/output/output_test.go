@@ -36,6 +36,45 @@ func TestWriteJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestWriteRulesJSONAndHumanOutput(t *testing.T) {
+	env := New("rules")
+	env.Rules = map[string]any{
+		"schema_version": 1,
+		"items": []map[string]any{
+			{
+				"id":               "VB001",
+				"family":           "lint",
+				"default_severity": "error",
+				"scope":            "file-local",
+				"default_enabled":  true,
+				"title":            "Require Option Explicit",
+			},
+		},
+	}
+	var jsonBuf bytes.Buffer
+	if err := WriteWithOptions(&jsonBuf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(jsonBuf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	rules := objectMap(decoded["rules"])
+	if rules["schema_version"] != float64(1) || len(listOfObjects(rules["items"])) != 1 {
+		t.Fatalf("rules JSON = %#v", rules)
+	}
+
+	var human bytes.Buffer
+	if err := WriteWithOptions(&human, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"VB001", "lint", "error", "file-local", "enabled", "Require Option Explicit"} {
+		if !strings.Contains(human.String(), want) {
+			t.Fatalf("rules human output missing %q:\n%s", want, human.String())
+		}
+	}
+}
+
 func TestWriteBuildJSONIncludesPublicationMetadata(t *testing.T) {
 	env := New("build")
 	env.Build = map[string]any{"base": "build/Base.xlsm", "output": "dist/Product.xlsm"}

@@ -15,6 +15,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
@@ -263,6 +264,34 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	out = append(out, a.documentationDiagnosticsParsed(doc, parsed)...)
 	if ctx.Err() != nil {
 		return nil
+	}
+	return applyDocumentInlineSuppressions(a.RootDir, doc, out)
+}
+
+func applyDocumentInlineSuppressions(root string, doc Document, diagnostics []Diagnostic) []Diagnostic {
+	directives, _ := suppression.DirectivesForSource(root, doc.Path, doc.Source)
+	if len(directives) == 0 || len(diagnostics) == 0 {
+		return diagnostics
+	}
+	file := doc.Path
+	if rel, err := filepath.Rel(root, doc.Path); err == nil {
+		file = rel
+	}
+	if !filepath.IsAbs(doc.Path) {
+		file = doc.Path
+	}
+	file = filepath.ToSlash(file)
+	records := make([]suppression.Diagnostic, len(diagnostics))
+	for i, diagnostic := range diagnostics {
+		records[i] = suppression.Diagnostic{Code: diagnostic.Code, File: file, Line: diagnostic.Range.Start.Line + 1}
+	}
+	lintSuppressed, _ := suppression.Apply(records, directives, suppression.FamilyLint)
+	analyzeSuppressed, _ := suppression.Apply(records, directives, suppression.FamilyAnalyze)
+	out := make([]Diagnostic, 0, len(diagnostics))
+	for i, diagnostic := range diagnostics {
+		if !lintSuppressed[i] && !analyzeSuppressed[i] {
+			out = append(out, diagnostic)
+		}
 	}
 	return out
 }

@@ -1,29 +1,13 @@
 import * as vscode from "vscode";
+import { XlflowRulesRegistryService } from "./rulesRegistry";
 
-const unsupportedInlineSuppressionRules = new Set([
-  "VB008",
-  "VB009",
-  "VB010",
-  "VB011",
-  "VB012",
-  "VB013",
-  "VB014",
-  "VB015",
-  "VB028",
-  "VB029",
-  "VB031",
-  "VB032",
-  "VBA104",
-  "VBA105",
-  "VBA106",
-  "VBA211",
-]);
-
-export function registerLineSuppressionCodeActions(): vscode.Disposable {
+export function registerLineSuppressionCodeActions(
+  rulesRegistry: XlflowRulesRegistryService,
+): vscode.Disposable {
   return vscode.Disposable.from(
     vscode.languages.registerCodeActionsProvider(
       { language: "vba", scheme: "file" },
-      new XlflowLineSuppressionCodeActionProvider(),
+      new XlflowLineSuppressionCodeActionProvider(rulesRegistry),
       {
         providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
       },
@@ -225,18 +209,20 @@ function propertySetterKind(kind: ProcedureDeclaration["kind"]): boolean {
 }
 
 class XlflowLineSuppressionCodeActionProvider implements vscode.CodeActionProvider {
-  public provideCodeActions(
+  constructor(private readonly rulesRegistry: XlflowRulesRegistryService) {}
+
+  public async provideCodeActions(
     document: vscode.TextDocument,
     _range: vscode.Range,
     context: vscode.CodeActionContext,
-  ): vscode.CodeAction[] {
+  ): Promise<vscode.CodeAction[]> {
     const actions: vscode.CodeAction[] = [];
     const seen = new Set<string>();
-    for (const diagnostic of context.diagnostics) {
-      const code = diagnosticRuleCode(diagnostic);
-      if (code === undefined) {
-        continue;
-      }
+    const diagnostics = await inlineSuppressibleDiagnostics(
+      this.rulesRegistry,
+      context.diagnostics,
+    );
+    for (const { diagnostic, code } of diagnostics) {
       const key = diagnosticActionKey(diagnostic, code);
       if (seen.has(key)) {
         continue;
@@ -255,6 +241,26 @@ class XlflowLineSuppressionCodeActionProvider implements vscode.CodeActionProvid
   }
 }
 
+export async function inlineSuppressibleDiagnostics(
+  rulesRegistry: XlflowRulesRegistryService,
+  diagnostics: readonly vscode.Diagnostic[],
+): Promise<Array<{ diagnostic: vscode.Diagnostic; code: string }>> {
+  let rules: ReadonlyMap<string, { inlineSuppressible: boolean }>;
+  try {
+    rules = await rulesRegistry.load();
+  } catch {
+    return [];
+  }
+  const suppressible: Array<{ diagnostic: vscode.Diagnostic; code: string }> = [];
+  for (const diagnostic of diagnostics) {
+    const code = diagnosticRuleCode(diagnostic);
+    if (code !== undefined && rules.get(code)?.inlineSuppressible === true) {
+      suppressible.push({ diagnostic, code });
+    }
+  }
+  return suppressible;
+}
+
 export function diagnosticRuleCode(diagnostic: vscode.Diagnostic): string | undefined {
   if (diagnostic.source !== "xlflow") {
     return undefined;
@@ -268,9 +274,6 @@ export function diagnosticRuleCode(diagnostic: vscode.Diagnostic): string | unde
         : String(raw.value);
   const normalized = code.trim().toUpperCase();
   if (!/^(?:VB|VBA)\d{3}$/.test(normalized)) {
-    return undefined;
-  }
-  if (unsupportedInlineSuppressionRules.has(normalized)) {
     return undefined;
   }
   return normalized;

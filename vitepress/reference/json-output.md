@@ -153,6 +153,50 @@ publication. Dry-run uses `publication.method="not_run"` and
 the workbook artifact successful and reports the manifest failure without
 weakening the artifact replacement guarantee.
 
+## Static-analysis rules
+
+`xlflow rules --json` is project-independent and returns the canonical metadata
+for the static-analysis rules embedded in the installed binary. Items are sorted
+by `id`.
+
+```json
+{
+  "status": "ok",
+  "command": "rules",
+  "rules": {
+    "schema_version": 1,
+    "items": [
+      {
+        "id": "VB001",
+        "title": "Missing Option Explicit",
+        "description": "The module does not declare Option Explicit.",
+        "family": "lint",
+        "category": "correctness",
+        "default_severity": "error",
+        "scope": "file-local",
+        "precision": "high",
+        "default_enabled": true,
+        "configurable": true,
+        "configuration_key": "require_option_explicit",
+        "inline_suppressible": true,
+        "preflight_blocking": false,
+        "realtime": true,
+        "fix_available": false,
+        "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vb001"
+      }
+    ]
+  }
+}
+```
+
+Version 1 is additive: new rules and fields may appear without changing
+`schema_version`, and consumers must ignore fields they do not recognize. A
+breaking field removal or meaning change requires a new version. An unavailable
+command, malformed response, unsupported version, or unknown rule ID means the
+metadata is unavailable; consumers must not infer suppressibility or other
+safety policy. `VBA000`, `FRM...`, and `UFY...` diagnostics are intentionally
+outside this registry.
+
 ## Capabilities
 
 `xlflow capabilities --json` is project-independent and returns a versioned,

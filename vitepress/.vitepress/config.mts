@@ -67,6 +67,7 @@ function commandSidebar() {
       items: [
         { text: "Overview", link: "/commands/" },
         { text: "capabilities", link: "/commands/capabilities" },
+        { text: "rules", link: "/commands/rules" },
         { text: "new", link: "/commands/new" },
         { text: "init", link: "/commands/init" },
         { text: "pack", link: "/commands/pack" },
@@ -206,7 +207,7 @@ function referenceSidebar() {
         { text: "XlflowUI", link: "/reference/xlflow-ui" },
         { text: "Exit Codes", link: "/reference/exit-codes" },
         { text: "Error Codes", link: "/reference/error-codes" },
-        { text: "Diagnostic Inventory", link: "/reference/diagnostics" },
+        { text: "Diagnostic Catalog", link: "/reference/diagnostics" },
         { text: "Error-code Inventory", link: "/reference/error-code-inventory" },
         { text: "Documentation Maintenance", link: "/reference/documentation-maintenance" },
         { text: "Environment Variables", link: "/reference/environment-variables" },
