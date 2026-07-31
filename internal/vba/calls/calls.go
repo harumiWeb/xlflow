@@ -145,6 +145,7 @@ type Candidate struct {
 type ResolverSymbol struct {
 	Name       string
 	Module     string
+	ModuleKind string
 	Kind       string
 	Visibility string
 	File       string
@@ -186,12 +187,12 @@ var builtinLikeNames = map[string]bool{
 	"cdate": true, "cdbl": true, "cdec": true, "choose": true, "chr": true,
 	"cint": true, "clng": true, "clnglng": true, "clngptr": true, "cos": true,
 	"createobject": true, "cstr": true, "date": true, "dateadd": true,
-	"debug.print": true, "dir": true, "doevents": true, "environ": true,
+	"debug.print": true, "dir": true, "doevents": true, "environ": true, "error": true,
 	"format": true, "getobject": true, "inputbox": true, "instr": true,
 	"isarray": true, "isdate": true, "isempty": true, "iserror": true,
 	"isnull": true, "isnumeric": true, "join": true, "lbound": true,
 	"lcase": true, "left": true, "len": true, "mid": true, "msgbox": true,
-	"replace": true, "right": true, "rnd": true, "split": true, "str": true,
+	"replace": true, "right": true, "rnd": true, "shell": true, "split": true, "str": true,
 	"trim": true, "typename": true, "ubound": true, "ucase": true, "val": true,
 }
 
@@ -477,6 +478,7 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 		resolverSymbols = append(resolverSymbols, ResolverSymbol{
 			Name:       sym.Name,
 			Module:     sym.Module,
+			ModuleKind: sym.ModuleKind,
 			Kind:       sym.Kind,
 			Visibility: sym.Visibility,
 			File:       sym.File,
@@ -494,6 +496,7 @@ func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 		irSymbols = append(irSymbols, procedureir.ResolverSymbol{
 			Name:       sym.Name,
 			Module:     sym.Module,
+			ModuleKind: sym.ModuleKind,
 			Kind:       sym.Kind,
 			Visibility: sym.Visibility,
 			File:       sym.File,

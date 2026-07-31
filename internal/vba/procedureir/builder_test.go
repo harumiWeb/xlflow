@@ -491,6 +491,40 @@ End Sub
 	}
 }
 
+func TestResolverClassifiesEffectfulBuiltins(t *testing.T) {
+	t.Parallel()
+	resolver := NewResolver(nil)
+	for _, name := range []string{"Shell", "Error"} {
+		resolution := resolver.ResolveCall(CallSite{Callee: Callee{Text: name, BaseName: name, Member: name}})
+		if resolution.Status != ResolutionBuiltinLike {
+			t.Fatalf("%s status = %q, want %q", name, resolution.Status, ResolutionBuiltinLike)
+		}
+	}
+}
+
+func TestResolverRequiresReceiverForCrossModuleClassProcedure(t *testing.T) {
+	t.Parallel()
+	resolver := NewResolver([]ResolverSymbol{{
+		Name: "RestoreEvents", Module: "StateClass", ModuleKind: "class",
+		Kind: "sub", Visibility: "Public", File: "StateClass.cls", Line: 2,
+	}})
+	bare := resolver.ResolveCall(CallSite{
+		Caller: ProcedureRef{Name: "Run", QualifiedName: "Main.Run"},
+		Callee: Callee{Text: "RestoreEvents", BaseName: "RestoreEvents", Member: "RestoreEvents"},
+	})
+	if bare.Status != ResolutionUnresolved {
+		t.Fatalf("bare class call status = %q, want %q", bare.Status, ResolutionUnresolved)
+	}
+	receiver := "StateClass"
+	qualified := resolver.ResolveCall(CallSite{
+		Caller: ProcedureRef{Name: "Run", QualifiedName: "Main.Run"},
+		Callee: Callee{Text: "StateClass.RestoreEvents", BaseName: "RestoreEvents", Receiver: &receiver, Member: "RestoreEvents"},
+	})
+	if qualified.Status != ResolutionMatched {
+		t.Fatalf("qualified class call status = %q, want %q", qualified.Status, ResolutionMatched)
+	}
+}
+
 func TestResolveSymbolOverlayAndPrivateVisibility(t *testing.T) {
 	t.Parallel()
 	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()

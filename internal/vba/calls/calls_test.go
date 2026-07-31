@@ -454,6 +454,11 @@ func TestResolverPreservesCallClassificationPrecedence(t *testing.T) {
 			callee: Callee{Text: "Trim", BaseName: "Trim", Member: "Trim"},
 			status: "builtin_like",
 		},
+		{
+			name:   "effectful builtin without project symbol",
+			callee: Callee{Text: "Shell", BaseName: "Shell", Member: "Shell"},
+			status: "builtin_like",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

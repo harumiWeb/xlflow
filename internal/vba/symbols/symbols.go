@@ -54,6 +54,7 @@ type Symbol struct {
 	Kind          string                           `json:"kind"`
 	Visibility    string                           `json:"visibility,omitempty"`
 	Module        string                           `json:"module"`
+	ModuleKind    string                           `json:"-"`
 	File          string                           `json:"file"`
 	Parent        string                           `json:"parent,omitempty"`
 	StartLine     int                              `json:"startLine"`
@@ -549,6 +550,9 @@ func (e *extractor) extract(root *tree_sitter.Node) []Symbol {
 	}
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		e.visit(root.NamedChild(i), "")
+	}
+	for i := range e.symbols {
+		e.symbols[i].ModuleKind = e.moduleKind
 	}
 	return e.symbols
 }

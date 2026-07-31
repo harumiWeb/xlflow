@@ -121,6 +121,9 @@ A reference bound to a declaration in the current module has `module` scope
 even when that declaration is publicly visible to other modules. Public or
 Friend visibility makes the declaration a project candidate for other modules;
 it does not allow a project overlay to replace the current-module binding.
+For procedure calls without a receiver, cross-module candidates are limited to
+standard modules. Procedures in class, document, and UserForm modules require
+an explicit receiver outside their own module.
 
 Syntax construction does not require a project snapshot. Calls initially carry
 `not_attempted` resolution, and variable accesses that cannot be decided from
@@ -142,10 +145,11 @@ Call resolution statuses are:
 - `member_call`: a receiver/member call cannot be bound conservatively.
 
 Candidates use deterministic order and preserve qualified name, kind, file, and
-declaration line needed by the existing `inspect calls` projection. Private
-procedures are visible only from the same module. Resolution does not claim
-full VBA type inference, COM type-library binding, or Excel object-model
-dispatch.
+declaration line needed by the existing `inspect calls` projection. Resolver
+symbols also retain module kind so receiver-less calls cannot bind non-standard
+module procedures across module boundaries. Private procedures are visible only
+from the same module. Resolution does not claim full VBA type inference, COM
+type-library binding, or Excel object-model dispatch.
 
 ## Ranges and Determinism
 
@@ -227,8 +231,9 @@ Issue #426 intentionally stops at procedure syntax and conservative name/call
 resolution. The separate CFG layer defined by
 `docs/specs/vba-control-flow-graph.md` consumes this IR to provide basic blocks,
 edges, reachability, and path queries without changing the meaning of the IR's
-syntactic `Blocks`. Issue #428 adds direct and transitive effect summaries plus
-fixed-point propagation.
+syntactic `Blocks`. `docs/specs/vba-effect-analysis.md` consumes resolved IR and
+CFG facts to add direct and transitive effect summaries plus fixed-point
+propagation without adding effect claims to the IR itself.
 
 The IR itself does not expose reachability or effect claims. No new public CLI
 flag, configuration key, JSON field, diagnostic ID, or LSP capability is

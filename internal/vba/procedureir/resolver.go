@@ -57,6 +57,7 @@ func cloneSymbolResolution(in SymbolResolution) SymbolResolution {
 type resolverEntry struct {
 	Candidate
 	module     string
+	moduleKind string
 	visibility string
 }
 
@@ -80,7 +81,7 @@ func NewSymbolResolver(symbols []ResolverSymbol) SymbolResolver {
 				QualifiedName: qualified, Kind: symbol.Kind,
 				File: normalizeCandidateFile(symbol.File), Line: symbol.Line,
 			},
-			module: symbol.Module, visibility: symbol.Visibility,
+			module: symbol.Module, moduleKind: symbol.ModuleKind, visibility: symbol.Visibility,
 		}
 		key := strings.ToLower(cleanIdentifier(symbol.Name))
 		out.byName[key] = append(out.byName[key], entry)
@@ -110,10 +111,11 @@ func NewResolver(symbols []ResolverSymbol) SymbolResolver {
 
 func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 	base := cleanIdentifier(strings.TrimPrefix(site.Callee.BaseName, "New "))
-	entries := r.visible(r.byName[strings.ToLower(base)], callerModule(site.Caller))
+	caller := callerModule(site.Caller)
+	entries := r.visible(r.byName[strings.ToLower(base)], caller)
 	procedures := make([]resolverEntry, 0, len(entries))
 	for _, entry := range entries {
-		if isProcedureSymbolKind(entry.Kind) {
+		if isProcedureSymbolKind(entry.Kind) && (site.Callee.Receiver != nil || isReceiverlessProcedureCandidate(entry, caller)) {
 			procedures = append(procedures, entry)
 		}
 	}
@@ -145,6 +147,13 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 		return CallResolution{Status: ResolutionBuiltinLike}
 	}
 	return CallResolution{Status: ResolutionUnresolved}
+}
+
+func isReceiverlessProcedureCandidate(entry resolverEntry, callerModule string) bool {
+	if strings.EqualFold(entry.module, callerModule) {
+		return true
+	}
+	return entry.moduleKind == "" || strings.EqualFold(entry.moduleKind, "standard")
 }
 
 func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
@@ -259,11 +268,11 @@ var builtinLikeNames = map[string]bool{
 	"cdate": true, "cdbl": true, "cdec": true, "choose": true, "chr": true,
 	"cint": true, "clng": true, "clnglng": true, "clngptr": true, "cos": true,
 	"createobject": true, "cstr": true, "date": true, "dateadd": true,
-	"debug.print": true, "dir": true, "doevents": true, "environ": true,
+	"debug.print": true, "dir": true, "doevents": true, "environ": true, "error": true,
 	"format": true, "getobject": true, "inputbox": true, "instr": true,
 	"isarray": true, "isdate": true, "isempty": true, "iserror": true,
 	"isnull": true, "isnumeric": true, "join": true, "lbound": true,
 	"lcase": true, "left": true, "len": true, "mid": true, "msgbox": true,
-	"replace": true, "right": true, "rnd": true, "split": true, "str": true,
+	"replace": true, "right": true, "rnd": true, "shell": true, "split": true, "str": true,
 	"trim": true, "typename": true, "ubound": true, "ucase": true, "val": true,
 }

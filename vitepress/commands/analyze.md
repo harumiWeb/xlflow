@@ -27,6 +27,12 @@ xlflow analyze --json
 Use `analyze` for fast source-level feedback before opening Excel.
 :::
 
+`VBA203` recognizes a uniquely paired Pop/Restore helper when its matching
+restore is direct or reached through uniquely resolved project-local calls.
+Ambiguous, missing, external, or dynamically bound helper paths are not treated
+as proof of restoration. This internal analysis does not add fields to JSON
+output or report new caller-level diagnostics.
+
 > [!IMPORTANT]
 > Findings that block automation return a failure status and exit code `1`.
 
