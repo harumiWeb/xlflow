@@ -303,6 +303,21 @@ func TestBuiltinVBAStandardLibraryCoverage(t *testing.T) {
 	}
 }
 
+func TestBuiltinArrayUsesOptionalParamArray(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	array, ok := db.ResolveMember("VBA.Global", "Array")
+	if !ok || len(array.Parameters) != 1 {
+		t.Fatalf("VBA.Global.Array = %+v, %v", array, ok)
+	}
+	if param := array.Parameters[0]; !param.Optional || !param.ParamArray {
+		t.Fatalf("Array parameter = %+v, want optional ParamArray", param)
+	}
+}
+
 func TestResolveMemberIncludesEvents(t *testing.T) {
 	db := &DB{Types: map[string]TypeInfo{}, Aliases: map[string]string{}}
 	db.addType(TypeInfo{
