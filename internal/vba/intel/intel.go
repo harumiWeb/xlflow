@@ -12,11 +12,11 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -55,7 +55,25 @@ type Analyzer struct {
 	DocumentSymbolsFunc      DocumentSymbolsFunc
 	WorkspaceSymbolsFunc     func(open []Document, query string) ([]Symbol, error)
 	WorkspaceSymbolQueryFunc WorkspaceSymbolQueryFunc
+	RealtimeFindingsFunc     RealtimeFindingsFunc
 }
+
+// RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
+// callers without making the VBA intelligence package depend on analyze.
+type RealtimeFinding struct {
+	Code      string
+	Severity  string
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
+	Message   string
+}
+
+// RealtimeFindingsFunc supplies analyzer-family findings for an already parsed
+// document. The LSP injects the source analyzer here; keeping it as a callback
+// lets batch analysis reuse typed VBA call resolution without an import cycle.
+type RealtimeFindingsFunc func(rootDir string, cfg config.Config, doc *ast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]RealtimeFinding, error)
 
 type Document struct {
 	URI        string
@@ -165,6 +183,8 @@ type Signature struct {
 	Documentation      string
 	DocumentationModel doccomments.SymbolDocumentation
 	projectLocal       bool
+	receiverType       string
+	memberName         string
 }
 
 func (a Analyzer) Check() error {
@@ -223,19 +243,33 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
-	findings, err := analyze.SourceRealtimeFindingsParsedIRCFG(a.RootDir, a.Config, parsed, procedureIR, controlFlow)
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err == nil {
-		for _, finding := range findings {
-			out = append(out, Diagnostic{
-				Code:     finding.Code,
-				Severity: finding.Severity,
-				Source:   "xlflow",
-				Message:  finding.Message,
-				Range:    issueRange(doc.Source, finding.Line, finding.Column),
-			})
+	if a.RealtimeFindingsFunc != nil {
+		findings, err := a.RealtimeFindingsFunc(a.RootDir, a.Config, parsed, procedureIR, controlFlow)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			for _, finding := range findings {
+				diagnosticRange := issueRange(doc.Source, finding.Line, finding.Column)
+				if finding.EndLine > 0 {
+					// Analyzer findings with an end range (currently VBA215) carry
+					// LSP UTF-16 columns, unlike issueRange's byte-based input.
+					diagnosticRange = Range{Start: Position{
+						Line:      max(0, finding.Line-1),
+						Character: max(0, finding.Column-1),
+					}, End: Position{
+						Line:      max(0, finding.EndLine-1),
+						Character: max(0, finding.EndColumn-1),
+					}}
+				}
+				out = append(out, Diagnostic{
+					Code:     finding.Code,
+					Severity: finding.Severity,
+					Source:   "xlflow",
+					Message:  finding.Message,
+					Range:    diagnosticRange,
+				})
+			}
 		}
 	}
 	if ctx.Err() != nil {
@@ -1314,6 +1348,10 @@ func (c callContext) ActiveParameter(params []Parameter) int {
 }
 
 func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position, open []Document) (Signature, bool, error) {
+	return a.resolveCallSignatureAtContext(doc, target, pos, open, nil)
+}
+
+func (a Analyzer) resolveCallSignatureAtContext(doc Document, target string, pos Position, open []Document, typeContext *documentTypeContext) (Signature, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return Signature{}, false, nil
@@ -1323,7 +1361,7 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 		if !hasReceiver {
 			memberName = strings.TrimSpace(strings.TrimPrefix(target, "."))
 		}
-		if receiverType, ok := a.withBlockTypeAt(doc, pos, byteOffsetForPosition(doc.Source, pos)); ok {
+		if receiverType, ok := a.withBlockTypeAtContext(doc, pos, byteOffsetForPosition(doc.Source, pos), typeContext); ok {
 			if hasReceiver {
 				if typ, ok := a.resolveRelativeMemberExpressionType(receiverType, receiver); ok {
 					receiverType = typ
@@ -1343,7 +1381,7 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 		}
 	}
 	if receiver, memberName, ok := splitCallTarget(target); ok {
-		receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForPosition(doc.Source, pos))
+		receiverType, ok := a.resolveDocumentExpressionTypeAtContext(doc, receiver, byteOffsetForPosition(doc.Source, pos), typeContext)
 		if ok {
 			if strings.EqualFold(receiverType, "Object") && sheetsDefaultExpression(receiver) {
 				receiverType = "Excel.Worksheet"
@@ -1414,7 +1452,7 @@ func (a Analyzer) signatureFromMember(receiverType string, member vbadb.MemberIn
 	}
 	params := parametersFromDB(member.Parameters)
 	label := memberSignature(receiverType, member, kind)
-	return Signature{Label: label, Parameters: params, Documentation: member.Summary}
+	return Signature{Label: label, Parameters: params, Documentation: member.Summary, receiverType: receiverType, memberName: member.Name}
 }
 
 func parametersFromDB(params []vbadb.ParamInfo) []Parameter {
@@ -1453,6 +1491,95 @@ func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 		}
 	}
 	return out
+}
+
+// StatefulExcelCallArgumentDiagnostics reports resolved Range.Find and
+// Range.Replace calls that omit Excel settings documented as saved and reused
+// by later UI operations or macro calls. It is intentionally separate from
+// Diagnostics so batch and real-time analysis can share this typed path without
+// duplicating the rest of language-server diagnostics.
+func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnostic {
+	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.DB == nil {
+		return nil
+	}
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return nil
+	}
+	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
+	var out []Diagnostic
+	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		for _, call := range callsOnLine(logicalLine.Text) {
+			wanted := statefulExcelCallParameters(statefulExcelCallMember(call.Target))
+			if len(wanted) == 0 {
+				continue
+			}
+			callRange := logicalLine.callRange(call)
+			call.DiagnosticRange = &callRange
+			sig, ok, err := a.resolveCallSignatureAtContext(doc, call.Target, callRange.Start, []Document{doc}, typeContext)
+			if err != nil || !ok || !strings.EqualFold(sig.receiverType, "Excel.Range") {
+				continue
+			}
+			omitted := omittedCallParameters(sig.Parameters, call.Arguments, wanted)
+			if len(omitted) == 0 {
+				continue
+			}
+			out = append(out, Diagnostic{
+				Code:       "VBA215",
+				Severity:   "warning",
+				Source:     "xlflow",
+				Message:    "Range." + sig.memberName + " omits stateful argument(s): " + strings.Join(omitted, ", ") + ".",
+				Range:      callRange,
+				Rule:       "VBA215",
+				Confidence: "high",
+			})
+		}
+	}
+	return out
+}
+
+func statefulExcelCallMember(target string) string {
+	_, member, ok := splitCallTarget(target)
+	if !ok && strings.HasPrefix(strings.TrimSpace(target), ".") {
+		member = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "."))
+	}
+	if len(statefulExcelCallParameters(member)) == 0 {
+		return ""
+	}
+	return member
+}
+
+func statefulExcelCallParameters(member string) []string {
+	switch strings.ToLower(strings.TrimSpace(member)) {
+	case "find":
+		return []string{"LookIn", "LookAt", "SearchOrder", "MatchByte"}
+	case "replace":
+		return []string{"LookAt", "SearchOrder", "MatchCase", "MatchByte"}
+	default:
+		return nil
+	}
+}
+
+func omittedCallParameters(params []Parameter, args []argument, wanted []string) []string {
+	supplied := make(map[string]bool, len(args))
+	positional := 0
+	for _, arg := range args {
+		param, next, ok := signatureParameterForArgument(params, arg, positional)
+		if arg.Name == "" {
+			positional = next
+		}
+		if !ok || strings.TrimSpace(arg.Text) == "" {
+			continue
+		}
+		supplied[strings.ToLower(param.Name)] = true
+	}
+	omitted := make([]string, 0, len(wanted))
+	for _, name := range wanted {
+		if !supplied[strings.ToLower(name)] {
+			omitted = append(omitted, name)
+		}
+	}
+	return omitted
 }
 
 func (a Analyzer) arrayObjectArgumentDiagnostics(doc Document, pos Position, lineNo int, call parsedCall, sig Signature) []Diagnostic {
@@ -2239,7 +2366,6 @@ func parenCallsOnLine(line string) []parsedCall {
 				Start:     max(0, i-len(target)),
 				End:       close + 1,
 			})
-			i = close
 		}
 	}
 	return out
@@ -2571,8 +2697,36 @@ func callTargetBeforeOpen(prefix string) string {
 	if strings.HasPrefix(strings.ToLower(target), "call ") {
 		target = strings.TrimSpace(target[len("call "):])
 	}
+	target = suffixAfterLastUnmatchedOpen(target)
 	target = lastTopLevelSpaceSeparatedField(target)
 	return strings.TrimSpace(target)
+}
+
+func suffixAfterLastUnmatchedOpen(text string) string {
+	stack := make([]int, 0, 2)
+	inString := false
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				stack = append(stack, i)
+			}
+		case ')':
+			if !inString && len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(stack) == 0 {
+		return text
+	}
+	return strings.TrimSpace(text[stack[len(stack)-1]+1:])
 }
 
 func lastTopLevelSpaceSeparatedField(text string) string {

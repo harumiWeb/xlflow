@@ -175,6 +175,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_range_find_nothing_check`
 - `detect_redim_preserve_dimension`
 - `detect_scope_shadowing`
+- `detect_stateful_excel_call_arguments`
 - `detect_unused_local_variables`
 - `detect_unused_private_procedures`
 - `diagnostic_runs`

@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled real-time `VBA215` warnings for resolved `Range.Find` and `Range.Replace` calls that omit saved Excel search settings, including support for positional, named, mixed, and multiline calls plus normal rule-specific suppression.
 - Fixed scaffolded `XlflowAssert.bas` helpers to restore `On Error` handling immediately after each compatibility probe, so new projects pass the default-enabled `VBA214` analysis without warnings.
 - Fixed `VB030` false positives for valid VBA `Array` calls with zero or multiple arguments by modeling its optional argument list as a `ParamArray`.
 - Added default-enabled `VBA214` analysis for `On Error Resume Next` scopes that extend beyond one compatibility probe or can exit without restoration. Findings report the scope's start and effective end line; a confirmed project-local call inside the scope raises severity to `error` without blocking `push` or `run` preflight.

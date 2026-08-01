@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
@@ -37,6 +39,61 @@ func TestDiagnosticsChangesCoalesceToLatestDebouncedGeneration(t *testing.T) {
 	wantNoVersion(t, versions)
 	created[1].Fire()
 	wantVersion(t, versions, 3)
+}
+
+func TestLSPDiagnosticsIncludeVBA215FromSharedRealtimeAnalysis(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	diagnostics := s.diagnostics(context.Background(), intel.Document{
+		Path: filepath.Join(root, "Main.bas"),
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    rng.Find _
+        What:="missing"
+End Sub
+`,
+	})
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VBA215" {
+			if diagnostic.Range.Start.Line != 4 || diagnostic.Range.End.Line != 5 || diagnostic.Message != "Range.Find omits stateful argument(s): LookIn, LookAt, SearchOrder, MatchByte." {
+				t.Fatalf("VBA215 diagnostic = %+v", diagnostic)
+			}
+			return
+		}
+	}
+	t.Fatalf("VBA215 diagnostic missing: %+v", diagnostics)
+}
+
+func TestLSPDiagnosticsPreserveVBA215UTF16StartRange(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	line := `    Debug.Print "😀日本": Set found = rng.Find("missing")`
+	diagnostics := s.diagnostics(context.Background(), intel.Document{
+		Path:   filepath.Join(root, "Main.bas"),
+		Source: "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n    Dim rng As Range\n    Dim found As Range\n" + line + "\nEnd Sub\n",
+	})
+	wantStart := len(utf16.Encode([]rune(line[:strings.Index(line, "rng.Find")])))
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "VBA215" {
+			if diagnostic.Range.Start.Line != 5 || diagnostic.Range.Start.Character != wantStart {
+				t.Fatalf("VBA215 UTF-16 range = %+v, want line 5 character %d", diagnostic.Range, wantStart)
+			}
+			return
+		}
+	}
+	t.Fatalf("VBA215 diagnostic missing: %+v", diagnostics)
 }
 
 func TestDiagnosticsChangeDuringDidOpenAnalysisBecomesLatestPendingGeneration(t *testing.T) {

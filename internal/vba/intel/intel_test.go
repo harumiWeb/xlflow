@@ -11,6 +11,8 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
@@ -221,7 +223,10 @@ func TestProcedureNameConstantQuickFixPreservesCRLFRange(t *testing.T) {
 }
 
 func TestDiagnosticsIncludeAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
-	analyzer := newTestAnalyzer(t)
+	analyzer := withRealtimeFindings(newTestAnalyzer(t), []RealtimeFinding{{
+		Code: "VBA212", Severity: "warning", Line: 4,
+		Message: "deck is guarded against Nothing and dereferenced in the same non-short-circuit expression.",
+	}})
 	doc := Document{
 		Path: filepath.Join(t.TempDir(), "Main.bas"),
 		Source: `Option Explicit
@@ -243,7 +248,12 @@ End Sub
 }
 
 func TestDiagnosticsIncludeAnalyzerRealtimeRuntimeRiskRules(t *testing.T) {
-	analyzer := newTestAnalyzer(t)
+	analyzer := withRealtimeFindings(newTestAnalyzer(t), []RealtimeFinding{
+		{Code: "VBA201", Severity: "warning", Line: 7, Message: "Range.Find result found is dereferenced before a Nothing check."},
+		{Code: "VBA204", Severity: "warning", Line: 12, Message: "Normal execution can fall through into an error handler."},
+		{Code: "VBA208", Severity: "warning", Line: 9, Message: "ReDim Preserve is used on a multi-dimensional array."},
+		{Code: "VBA209", Severity: "warning", Line: 10, Message: "deck is compared to Nothing with =."},
+	})
 	doc := Document{
 		Path: filepath.Join(t.TempDir(), "Main.bas"),
 		Source: `Option Explicit
@@ -4219,6 +4229,78 @@ func newTestAnalyzer(t *testing.T) Analyzer {
 		t.Fatal(err)
 	}
 	return Analyzer{RootDir: t.TempDir(), Config: config.Default(), DB: db}
+}
+
+func TestStatefulExcelCallArgumentDiagnostics(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim lateBound As Object
+    rng.Find What:="safe", LookIn:=xlValues, LookAt:=xlWhole, SearchOrder:=xlByRows, MatchByte:=False
+    rng.Find "missing"
+    rng.Find "placeholder", , xlValues, , xlByRows, , , False
+    rng.Replace What:="safe", Replacement:="done", LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False, MatchByte:=False
+    rng.Replace "old", "new", , xlByRows
+    With rng
+        .Find _
+            What:="multi", _
+            LookIn:=xlValues, _
+            LookAt:=xlWhole, _
+            SearchOrder:=xlByRows, _
+            MatchByte:=False
+    End With
+    lateBound.Find "ignored"
+End Sub
+`,
+	}
+	diagnostics := analyzer.StatefulExcelCallArgumentDiagnostics(doc)
+	if len(diagnostics) != 3 {
+		t.Fatalf("VBA215 diagnostics = %+v, want three", diagnostics)
+	}
+	want := map[int]string{
+		5: "Range.Find omits stateful argument(s): LookIn, LookAt, SearchOrder, MatchByte.",
+		6: "Range.Find omits stateful argument(s): LookAt.",
+		8: "Range.Replace omits stateful argument(s): LookAt, MatchCase, MatchByte.",
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "VBA215" || diagnostic.Severity != "warning" || diagnostic.Message != want[diagnostic.Range.Start.Line] {
+			t.Fatalf("unexpected VBA215 diagnostic: %+v; want lines/messages %#v", diagnostic, want)
+		}
+	}
+}
+
+func TestStatefulExcelCallArgumentDiagnosticsFindsNestedCallsWithoutProjectLookup(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	workspaceQueries := 0
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, _ WorkspaceSymbolQuery) ([]Symbol, error) {
+		workspaceQueries++
+		return nil, nil
+	}
+	diagnostics := analyzer.StatefulExcelCallArgumentDiagnostics(Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Consume(rng.Find("nested"))
+End Sub
+`,
+	})
+	if len(diagnostics) != 1 || diagnostics[0].Message != "Range.Find omits stateful argument(s): LookIn, LookAt, SearchOrder, MatchByte." {
+		t.Fatalf("VBA215 nested diagnostics = %+v", diagnostics)
+	}
+	if workspaceQueries != 0 {
+		t.Fatalf("workspace queries = %d, want none for non-candidate calls", workspaceQueries)
+	}
+}
+
+func withRealtimeFindings(analyzer Analyzer, findings []RealtimeFinding) Analyzer {
+	analyzer.RealtimeFindingsFunc = func(_ string, _ config.Config, _ *vbaast.ParsedDocument, _ procedureir.DocumentIR, _ vbacfg.Document) ([]RealtimeFinding, error) {
+		return append([]RealtimeFinding(nil), findings...), nil
+	}
+	return analyzer
 }
 
 func hasCompletion(items []Completion, label string) bool {
