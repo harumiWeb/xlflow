@@ -15,8 +15,10 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -28,6 +30,8 @@ type Finding struct {
 	Procedure    string   `json:"procedure,omitempty"`
 	Line         int      `json:"line"`
 	Column       int      `json:"column,omitempty"`
+	EndLine      int      `json:"-"`
+	EndColumn    int      `json:"-"`
 	ScopeEndLine int      `json:"scope_end_line,omitempty"`
 	Message      string   `json:"message"`
 	Reason       string   `json:"reason"`
@@ -44,6 +48,7 @@ type Analyzer struct {
 	RootDir    string
 	Config     config.Config
 	PathFilter func(string) bool
+	typeDB     *vbadb.DB
 }
 
 var (
@@ -256,11 +261,20 @@ func (a Analyzer) RunResult() (Result, error) {
 
 	projectEffects := buildProjectEffects(parsedFiles)
 	ctx := a.buildContext(parsedFiles)
+	analysis := a
+	if a.Config.Analyze.DetectStatefulExcelCallArguments {
+		typeDB, err := vbadb.LoadBuiltin()
+		if err != nil {
+			return Result{}, err
+		}
+		analysis.typeDB = typeDB
+	}
 	var findings []Finding
 	for _, file := range parsedFiles {
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
 			file.Root = view.Root
-			findings = append(findings, a.analyzeParsedFile(file, ctx, projectEffects)...)
+			findings = append(findings, analysis.analyzeParsedFile(file, ctx, projectEffects)...)
+			findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
 			return nil
 		}); err != nil {
 			return Result{}, err
@@ -274,6 +288,45 @@ func (a Analyzer) RunResult() (Result, error) {
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
 	return Result{Findings: findings, Warnings: warnings}, nil
+}
+
+func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
+	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.typeDB == nil {
+		return nil
+	}
+	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnostics(intel.Document{
+		Path: file.Path, Source: string(file.Source),
+	})
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	out := make([]Finding, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		line := diagnostic.Range.Start.Line + 1
+		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
+		for _, candidate := range procedures {
+			if line >= candidate.StartLine && line <= candidate.EndLine {
+				proc = candidate
+				break
+			}
+		}
+		finding := a.simpleFinding(
+			file,
+			proc,
+			line,
+			diagnostic.Code,
+			diagnostic.Severity,
+			diagnostic.Message,
+			"Excel saves selected Range.Find and Range.Replace settings; later calls that omit them can inherit settings changed by the Find or Replace dialog or a previous macro call.",
+			"Pass every stateful argument explicitly, or suppress VBA215 on a call that intentionally inherits Excel's saved settings.",
+		)
+		finding.Column = diagnostic.Range.Start.Character + 1
+		finding.EndLine = diagnostic.Range.End.Line + 1
+		finding.EndColumn = diagnostic.Range.End.Character + 1
+		out = append(out, finding)
+	}
+	return out
 }
 
 func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
@@ -386,8 +439,23 @@ func SourceRealtimeFindingsParsedIR(rootDir string, cfg config.Config, doc *vbaa
 // caller-supplied procedure IR and control-flow graphs. Immutable LSP
 // snapshots use this entry point to reuse both cached analysis layers.
 func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir, cfg, doc, ir, controlFlow, nil)
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithTypeDB runs real-time source analysis
+// with an optional caller-owned type database. LSP callers pass their loaded
+// database; standalone callers load the built-in database only when VBA215 is
+// enabled.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB) ([]Finding, error) {
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
+	}
+	if cfg.Analyze.DetectStatefulExcelCallArguments && typeDB == nil {
+		var err error
+		typeDB, err = vbadb.LoadBuiltin()
+		if err != nil {
+			return nil, err
+		}
 	}
 	var findings []Finding
 	err := doc.Read(func(view vbaast.ParsedView) error {
@@ -400,7 +468,7 @@ func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *v
 			IR:     ir,
 			CFG:    controlFlow,
 		}
-		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB}
 		procedures := sourceProceduresFromIR(ir, controlFlow)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
 		if len(procedures) == 0 {
@@ -409,6 +477,7 @@ func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *v
 		for _, proc := range procedures {
 			findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls)...)
 		}
+		findings = append(findings, analyzer.statefulExcelCallArgumentFindings(file)...)
 		findings = realtimeFindings(findings)
 		sortFindings(findings)
 		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
@@ -418,7 +487,7 @@ func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *v
 	return findings, err
 }
 
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {

@@ -22,11 +22,14 @@ import (
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
+	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -141,6 +144,17 @@ func New(opts Options) (*Server, func(), error) {
 			RootDir: opts.RootDir,
 			Config:  opts.Config,
 			DB:      typeDB.DB,
+			RealtimeFindingsFunc: func(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
+				findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir, cfg, doc, ir, controlFlow, typeDB.DB)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]intel.RealtimeFinding, 0, len(findings))
+				for _, finding := range findings {
+					out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
+				}
+				return out, nil
+			},
 		},
 		docs:           newDocuments(opts.RootDir, opts.Config.Src.Forms, opts.Config.Src.Workbook),
 		logger:         logger,

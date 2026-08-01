@@ -12,11 +12,11 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -55,7 +55,25 @@ type Analyzer struct {
 	DocumentSymbolsFunc      DocumentSymbolsFunc
 	WorkspaceSymbolsFunc     func(open []Document, query string) ([]Symbol, error)
 	WorkspaceSymbolQueryFunc WorkspaceSymbolQueryFunc
+	RealtimeFindingsFunc     RealtimeFindingsFunc
 }
+
+// RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
+// callers without making the VBA intelligence package depend on analyze.
+type RealtimeFinding struct {
+	Code      string
+	Severity  string
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
+	Message   string
+}
+
+// RealtimeFindingsFunc supplies analyzer-family findings for an already parsed
+// document. The LSP injects the source analyzer here; keeping it as a callback
+// lets batch analysis reuse typed VBA call resolution without an import cycle.
+type RealtimeFindingsFunc func(rootDir string, cfg config.Config, doc *ast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]RealtimeFinding, error)
 
 type Document struct {
 	URI        string
@@ -165,6 +183,8 @@ type Signature struct {
 	Documentation      string
 	DocumentationModel doccomments.SymbolDocumentation
 	projectLocal       bool
+	receiverType       string
+	memberName         string
 }
 
 func (a Analyzer) Check() error {
@@ -223,19 +243,28 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
-	findings, err := analyze.SourceRealtimeFindingsParsedIRCFG(a.RootDir, a.Config, parsed, procedureIR, controlFlow)
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err == nil {
-		for _, finding := range findings {
-			out = append(out, Diagnostic{
-				Code:     finding.Code,
-				Severity: finding.Severity,
-				Source:   "xlflow",
-				Message:  finding.Message,
-				Range:    issueRange(doc.Source, finding.Line, finding.Column),
-			})
+	if a.RealtimeFindingsFunc != nil {
+		findings, err := a.RealtimeFindingsFunc(a.RootDir, a.Config, parsed, procedureIR, controlFlow)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			for _, finding := range findings {
+				diagnosticRange := issueRange(doc.Source, finding.Line, finding.Column)
+				if finding.EndLine > 0 {
+					diagnosticRange.End = Position{
+						Line:      max(0, finding.EndLine-1),
+						Character: max(0, finding.EndColumn-1),
+					}
+				}
+				out = append(out, Diagnostic{
+					Code:     finding.Code,
+					Severity: finding.Severity,
+					Source:   "xlflow",
+					Message:  finding.Message,
+					Range:    diagnosticRange,
+				})
+			}
 		}
 	}
 	if ctx.Err() != nil {
@@ -1414,7 +1443,7 @@ func (a Analyzer) signatureFromMember(receiverType string, member vbadb.MemberIn
 	}
 	params := parametersFromDB(member.Parameters)
 	label := memberSignature(receiverType, member, kind)
-	return Signature{Label: label, Parameters: params, Documentation: member.Summary}
+	return Signature{Label: label, Parameters: params, Documentation: member.Summary, receiverType: receiverType, memberName: member.Name}
 }
 
 func parametersFromDB(params []vbadb.ParamInfo) []Parameter {
@@ -1453,6 +1482,79 @@ func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 		}
 	}
 	return out
+}
+
+// StatefulExcelCallArgumentDiagnostics reports resolved Range.Find and
+// Range.Replace calls that omit Excel settings documented as saved and reused
+// by later UI operations or macro calls. It is intentionally separate from
+// Diagnostics so batch and real-time analysis can share this typed path without
+// duplicating the rest of language-server diagnostics.
+func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnostic {
+	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.DB == nil {
+		return nil
+	}
+	var out []Diagnostic
+	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		for _, call := range callsOnLine(logicalLine.Text) {
+			callRange := logicalLine.callRange(call)
+			call.DiagnosticRange = &callRange
+			sig, ok, err := a.resolveCallSignature(doc, call.Target, callRange.Start, []Document{doc})
+			if err != nil || !ok || !strings.EqualFold(sig.receiverType, "Excel.Range") {
+				continue
+			}
+			wanted := statefulExcelCallParameters(sig.memberName)
+			if len(wanted) == 0 {
+				continue
+			}
+			omitted := omittedCallParameters(sig.Parameters, call.Arguments, wanted)
+			if len(omitted) == 0 {
+				continue
+			}
+			out = append(out, Diagnostic{
+				Code:       "VBA215",
+				Severity:   "warning",
+				Source:     "xlflow",
+				Message:    "Range." + sig.memberName + " omits stateful argument(s): " + strings.Join(omitted, ", ") + ".",
+				Range:      callRange,
+				Rule:       "VBA215",
+				Confidence: "high",
+			})
+		}
+	}
+	return out
+}
+
+func statefulExcelCallParameters(member string) []string {
+	switch strings.ToLower(strings.TrimSpace(member)) {
+	case "find":
+		return []string{"LookIn", "LookAt", "SearchOrder", "MatchByte"}
+	case "replace":
+		return []string{"LookAt", "SearchOrder", "MatchCase", "MatchByte"}
+	default:
+		return nil
+	}
+}
+
+func omittedCallParameters(params []Parameter, args []argument, wanted []string) []string {
+	supplied := make(map[string]bool, len(args))
+	positional := 0
+	for _, arg := range args {
+		param, next, ok := signatureParameterForArgument(params, arg, positional)
+		if arg.Name == "" {
+			positional = next
+		}
+		if !ok || strings.TrimSpace(arg.Text) == "" {
+			continue
+		}
+		supplied[strings.ToLower(param.Name)] = true
+	}
+	omitted := make([]string, 0, len(wanted))
+	for _, name := range wanted {
+		if !supplied[strings.ToLower(name)] {
+			omitted = append(omitted, name)
+		}
+	}
+	return omitted
 }
 
 func (a Analyzer) arrayObjectArgumentDiagnostics(doc Document, pos Position, lineNo int, call parsedCall, sig Signature) []Diagnostic {

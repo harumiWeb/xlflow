@@ -1080,6 +1080,24 @@
       "configuration_key": "detect_leaked_on_error_resume_next_scopes",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA215",
+      "title": "Omitted stateful Excel call arguments",
+      "description": "A Range.Find or Range.Replace call omits settings that Excel saves and can reuse from prior UI operations or macro calls.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba215",
+      "configurable": true,
+      "configuration_key": "detect_stateful_excel_call_arguments",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

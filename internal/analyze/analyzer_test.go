@@ -1530,6 +1530,51 @@ End Sub
 	}
 }
 
+func TestVBA215MatchesBatchAndRealtimeAnalysisAndHonorsSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    rng.Find "missing"
+    rng.Replace What:="old", Replacement:="new", LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False, MatchByte:=False
+    ' xlflow:disable-next-line VBA215
+    rng.Replace "old", "new"
+End Sub
+`)
+	cfg := config.Default()
+	batch, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "Main.bas"), cfg, []byte(`Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    rng.Find "missing"
+    rng.Replace What:="old", Replacement:="new", LookAt:=xlPart, SearchOrder:=xlByRows, MatchCase:=False, MatchByte:=False
+    ' xlflow:disable-next-line VBA215
+    rng.Replace "old", "new"
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		got := findingsByCode(findings, "VBA215")
+		if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "LookIn, LookAt, SearchOrder, MatchByte") {
+			t.Fatalf("%s VBA215 findings = %+v", name, got)
+		}
+	}
+
+	cfg.Analyze.DetectStatefulExcelCallArguments = false
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA215"); len(got) != 0 {
+		t.Fatalf("disabled VBA215 should not report: %+v", got)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

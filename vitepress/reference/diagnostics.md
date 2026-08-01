@@ -66,6 +66,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA212`](#vba212) | analyze | warning  | procedure-local | yes     | Non-short-circuit object guard               |
 | [`VBA213`](#vba213) | analyze | warning  | procedure-local | no      | Dictionary iteration value misuse            |
 | [`VBA214`](#vba214) | analyze | warning  | procedure-local | yes     | Leaked On Error Resume Next scope            |
+| [`VBA215`](#vba215) | analyze | warning  | procedure-local | yes     | Omitted stateful Excel call arguments        |
 
 ## VB001
 
@@ -1146,3 +1147,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                          |
 | Real-time editor diagnostic | no                                          |
 | Fix available               | no                                          |
+
+## VBA215
+
+**Omitted stateful Excel call arguments.** A Range.Find or Range.Replace call omits settings that Excel saves and can reuse from prior UI operations or macro calls.
+
+| Property                    | Value                                  |
+| --------------------------- | -------------------------------------- |
+| Family                      | `analyze`                              |
+| Category                    | `reliability`                          |
+| Default severity            | `warning`                              |
+| Scope                       | `procedure-local`                      |
+| Precision                   | `high`                                 |
+| Enabled by default          | yes                                    |
+| Configuration               | `detect_stateful_excel_call_arguments` |
+| Inline suppression          | yes                                    |
+| Blocks source preflight     | no                                     |
+| Real-time editor diagnostic | yes                                    |
+| Fix available               | no                                     |

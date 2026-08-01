@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -433,11 +433,14 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA201"]
 	if cfg.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		t.Fatal("expected VBA214/detect_leaked_on_error_resume_next_scopes to be disabled")
 	}
+	if cfg.Analyze.DetectStatefulExcelCallArguments {
+		t.Fatal("expected VBA215/detect_stateful_excel_call_arguments to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215", got)
 	}
 }
 
@@ -915,6 +918,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.Analyze.ForbidUnqualifiedExcelObjects = false
 	cfg.Analyze.DetectDictionaryIterationValueUsage = true
 	cfg.Analyze.DetectLeakedOnErrorResumeNextScopes = false
+	cfg.Analyze.DetectStatefulExcelCallArguments = false
 
 	p := filepath.Join(dir, FileName)
 	if err := Write(p, cfg); err != nil {
@@ -933,6 +937,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, `"VBA214"`) {
 		t.Fatalf("expected generated config to disable VBA214 by ID:\n%s", text)
+	}
+	if !strings.Contains(text, `"VBA215"`) {
+		t.Fatalf("expected generated config to disable VBA215 by ID:\n%s", text)
 	}
 	if strings.Contains(text, "forbid_interactive_input = false") || strings.Contains(text, "require_option_explicit = true") {
 		t.Fatalf("generated config should prefer disabled_rules over legacy lint booleans:\n%s", text)
@@ -1025,6 +1032,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		t.Fatal("expected detect_leaked_on_error_resume_next_scopes=false after Write/Load")
+	}
+	if loaded.Analyze.DetectStatefulExcelCallArguments {
+		t.Fatal("expected detect_stateful_excel_call_arguments=false after Write/Load")
 	}
 }
 
