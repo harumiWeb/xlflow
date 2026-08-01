@@ -118,14 +118,10 @@ export class XlflowRulesRegistryService {
     return resolved;
   }
 
-  private async loadForExecutable(
-    executable: string,
-  ): Promise<ReadonlyMap<string, RuleMetadata>> {
+  private async loadForExecutable(executable: string): Promise<ReadonlyMap<string, RuleMetadata>> {
     const result = await this.run(executable, ["--json", "rules"]);
     if (result.exitCode !== 0) {
-      throw new Error(
-        result.stderr.trim() || `xlflow rules exited with code ${result.exitCode}.`,
-      );
+      throw new Error(result.stderr.trim() || `xlflow rules exited with code ${result.exitCode}.`);
     }
     let parsed: unknown;
     try {
@@ -170,9 +166,7 @@ function executableCandidates(command: string): string[] {
     return [path.resolve(command)];
   }
   const extensions =
-    process.platform === "win32"
-      ? executableExtensions(command, process.env.PATHEXT)
-      : [""];
+    process.platform === "win32" ? executableExtensions(command, process.env.PATHEXT) : [""];
   const candidates: string[] = [];
   for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
     if (directory.trim() === "") {
@@ -231,10 +225,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function runRulesCommand(
-  executable: string,
-  args: readonly string[],
-): Promise<RulesCommandResult> {
+function runRulesCommand(executable: string, args: readonly string[]): Promise<RulesCommandResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const stdoutChunks: Buffer[] = [];

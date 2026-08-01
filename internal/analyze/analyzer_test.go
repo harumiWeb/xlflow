@@ -579,6 +579,25 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStateRejectsPopThatDisablesEvents(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+
+Private Sub PopFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
 func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

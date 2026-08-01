@@ -74,9 +74,11 @@ The initial detectors cover:
 - `Workbooks.Open`: `opens_workbook`;
 - a confidently recognized `Workbook.Close`: `closes_workbook`;
 - every recognized assignment to the ten `Application` properties above:
-  `changes_application_state`; obvious stored-value or default-value cleanup
-  assignments additionally carry `restores_application_state` for the
-  established Push/Pop helper convention;
+  `changes_application_state`; known property-reset values and resolved
+  saved-value variables additionally carry `restores_application_state` for
+  the established Push/Pop helper convention. A state-setting assignment,
+  including `Application.EnableEvents = False`, never doubles as restoration
+  evidence;
 - disabling and restore-candidate assignments to `Application.EnableEvents`:
   `disables_events` or `restores_events`, plus property-neutral evidence; and
 - assignments to `Application.Calculation`: `changes_calculation`, plus the

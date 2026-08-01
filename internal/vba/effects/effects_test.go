@@ -45,7 +45,8 @@ End Sub
 }
 
 func TestRestoresEventsAndCellMutations(t *testing.T) {
-	summary := buildSources(t, sourceFile{"Helpers.bas", "Helpers", `Public Sub Restore()
+	summary := buildSources(t, sourceFile{"Helpers.bas", "Helpers", `Private savedEvents As Boolean
+Public Sub Restore()
     Application.EnableEvents = savedEvents
     Worksheets(1).Range("A1").ClearContents
     ThisWorkbook.Save
@@ -80,7 +81,8 @@ End Sub
 }
 
 func TestGenericApplicationStateEvidencePreservesVBA203Properties(t *testing.T) {
-	summary := buildSources(t, sourceFile{"State.bas", "State", `Public Sub PushState()
+	summary := buildSources(t, sourceFile{"State.bas", "State", `Private savedAlerts As Boolean
+Public Sub PushState()
     Application.DisplayAlerts = False
     Application.ScreenUpdating = False
 End Sub
@@ -95,13 +97,19 @@ End Sub
 	if count(push.Direct, ChangesApplicationState) != 2 {
 		t.Fatalf("changes = %#v", push.Direct)
 	}
+	if count(push.Direct, RestoresApplicationState) != 0 {
+		t.Fatalf("state-setting assignments produced restore evidence: %#v", push.Direct)
+	}
 	if count(pop.Direct, RestoresApplicationState) != 3 {
 		t.Fatalf("restores = %#v", pop.Direct)
 	}
 }
 
 func TestGenericApplicationStateEvidenceCoversAllTrackedProperties(t *testing.T) {
-	summary := buildSources(t, sourceFile{"State.bas", "State", `Public Sub PushState()
+	summary := buildSources(t, sourceFile{"State.bas", "State", `Private savedStatus As Variant
+Private savedInteractive As Boolean
+Private savedLinks As Boolean
+Public Sub PushState()
     Application.StatusBar = "working"
     Application.Cursor = xlWait
     Application.Interactive = False
@@ -123,7 +131,33 @@ End Sub
 	if count(push.Direct, ChangesApplicationState) != 6 {
 		t.Fatalf("push state changes = %#v", push.Direct)
 	}
+	if count(push.Direct, RestoresApplicationState) != 0 {
+		t.Fatalf("state-setting assignments produced restore evidence: %#v", push.Direct)
+	}
 	if count(pop.Direct, ChangesApplicationState) != 6 || count(pop.Direct, RestoresApplicationState) != 6 {
+		t.Fatalf("pop state evidence = %#v", pop.Direct)
+	}
+}
+
+func TestGenericApplicationStateEvidenceRecognizesWithApplication(t *testing.T) {
+	summary := buildSources(t, sourceFile{"State.bas", "State", `Private savedEvents As Boolean
+Public Sub PushState()
+    With Application
+        .EnableEvents = False
+    End With
+End Sub
+Public Sub PopState()
+    With Application
+        .EnableEvents = savedEvents
+    End With
+End Sub
+`})
+	push := find(t, summary, "State.PushState")
+	pop := find(t, summary, "State.PopState")
+	if count(push.Direct, ChangesApplicationState) != 1 || count(push.Direct, RestoresApplicationState) != 0 {
+		t.Fatalf("push state evidence = %#v", push.Direct)
+	}
+	if count(pop.Direct, RestoresApplicationState) != 1 {
 		t.Fatalf("pop state evidence = %#v", pop.Direct)
 	}
 }
