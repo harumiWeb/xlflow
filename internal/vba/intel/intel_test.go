@@ -944,6 +944,26 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsAllowBuiltinArrayParamArray(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub Test()
+    Dim values As Variant
+    values = Array()
+    values = Array(1)
+    values = Array(1, 2, 3, 4)
+    values = Array("a", 10, True, Empty)
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+		t.Fatalf("built-in Array ParamArray calls should not produce argument diagnostics: %+v", diagnostics)
+	}
+}
+
 func TestArgumentDiagnosticsReportProjectArrayObjectMismatch(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	if err := analyzer.DB.MergeJSON([]byte(`{

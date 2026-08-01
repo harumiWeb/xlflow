@@ -104,3 +104,4 @@
 - Treat same-module `Pop*` and `Restore*` names as alternative restore aliases, not ambiguous candidates; reserve uniqueness checks for cross-module helper lookup.
 - Direct-effect extraction must distinguish statement syntax from value-returning functions with the same VBA name, such as `Error 5` versus `Error(5)`.
 - When resolver policy depends on new symbol metadata, verify every resolver entry point actually consumes that metadata; copying it into only one index does not enforce the policy across compatibility wrappers.
+- Changelog entries for corrected variadic APIs must explicitly cover every validated boundary case, including zero arguments when the regression suite tests it.

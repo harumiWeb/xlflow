@@ -5,6 +5,7 @@ All notable changes to xlflow will be documented in this file.
 ## Unreleased
 
 - Fixed scaffolded `XlflowAssert.bas` helpers to restore `On Error` handling immediately after each compatibility probe, so new projects pass the default-enabled `VBA214` analysis without warnings.
+- Fixed `VB030` false positives for valid VBA `Array` calls with zero or multiple arguments by modeling its optional argument list as a `ParamArray`.
 - Added default-enabled `VBA214` analysis for `On Error Resume Next` scopes that extend beyond one compatibility probe or can exit without restoration. Findings report the scope's start and effective end line; a confirmed project-local call inside the scope raises severity to `error` without blocking `push` or `run` preflight.
 - Strengthened `VBA203` so all paths after a tracked Excel `Application` state change, including early exits and error handlers, must restore the saved prior value. The diagnostic now covers `ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation`, `StatusBar`, `Cursor`, `Interactive`, `AskToUpdateLinks`, `AutomationSecurity`, and `CutCopyMode`.
 - Added a shared, protocol-neutral static-analysis rule registry for `VB...` and `VBA...` diagnostics, plus the source-only `xlflow rules` command, generated rule catalog, LSP documentation links, and registry-driven VS Code inline-suppression eligibility while preserving existing `disabled_rules`, legacy boolean, and inline suppression behavior.
