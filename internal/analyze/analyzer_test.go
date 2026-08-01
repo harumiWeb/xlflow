@@ -477,6 +477,8 @@ End Sub
 
 func TestAnalyzerDoesNotSuppressVBA216(t *testing.T) {
 	dir := t.TempDir()
+	writeWorkbookModule(t, dir, "Sheet1.bas")
+	writeWorkbookModule(t, dir, "Sheet2.bas")
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
   Dim lastRow As Long
@@ -1645,6 +1647,32 @@ End Sub
 	}
 }
 
+func TestWorksheetRootRealtimeAnalysisHandlesContinuationsAndWithHeaders(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkbookModule(t, dir, "InputSheet.bas")
+	writeWorkbookModule(t, dir, "OutputSheet.bas")
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  lastRow = InputSheet.Cells( _
+      OutputSheet.Rows.Count, 1).End(xlUp).Row
+  With InputSheet.Range( _
+      OutputSheet.Cells(1, 1), OutputSheet.Cells(2, 1))
+  End With
+End Sub
+`)
+
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA216")
+	if len(got) != 2 || got[0].Line != 4 || got[1].Line != 6 {
+		t.Fatalf("realtime VBA216 continuation and With-header findings = %+v", got)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -2171,9 +2199,9 @@ End Sub
 
 Public Sub WithRoots()
   Dim lastRow As Long
-  With Sheet1
+  With InputSheet
     With .Range("A1")
-      lastRow = .Cells(Sheet2.Rows.Count, 1).End(xlUp).Row
+      lastRow = .Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row
     End With
   End With
 End Sub
@@ -2194,6 +2222,88 @@ End Sub
 	}
 	if blocking := findingsByCode(BlockingFindings(findings), "VBA216"); len(blocking) != 4 {
 		t.Fatalf("VBA216 must block preflight: %+v", blocking)
+	}
+}
+
+func TestAnalyzerVBA216OnlyComparesProvableRootIdentities(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkbookModule(t, dir, "InputSheet.bas")
+	writeWorkbookModule(t, dir, "OutputSheet.bas")
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Selectors(ByVal Sheet1 As Worksheet, ByVal Sheet2 As Worksheet, ByVal position As Long)
+  Dim lastRow As Long
+  Dim target As Worksheet
+  lastRow = ThisWorkbook.Worksheets("Data").Cells(ThisWorkbook.Sheets("Data").Rows.Count, 1).End(xlUp).Row
+  lastRow = ThisWorkbook.Worksheets(position).Cells(ThisWorkbook.Worksheets("Data").Rows.Count, 1).End(xlUp).Row
+  lastRow = InputSheet.Cells(ThisWorkbook.Worksheets("Input").Rows.Count, 1).End(xlUp).Row
+  lastRow = Sheet1.Cells(Sheet2.Rows.Count, 1).End(xlUp).Row
+  Set target = InputSheet
+  Set target = OutputSheet
+  lastRow = target.Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row
+  lastRow = InputSheet.Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA216")
+	if len(got) != 1 || got[0].Line != 12 {
+		t.Fatalf("VBA216 must report only literal-name or codename mismatches, got %+v", got)
+	}
+}
+
+func TestAnalyzerVBA216AnalyzesContinuationsAndWithHeaders(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkbookModule(t, dir, "InputSheet.bas")
+	writeWorkbookModule(t, dir, "OutputSheet.bas")
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  lastRow = InputSheet.Cells( _
+      OutputSheet.Rows.Count, 1).End(xlUp).Row
+  With InputSheet.Range( _
+      OutputSheet.Cells(1, 1), OutputSheet.Cells(2, 1))
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA216")
+	if len(got) != 2 || got[0].Line != 4 || got[1].Line != 6 {
+		t.Fatalf("VBA216 continuation and With-header findings = %+v", got)
+	}
+}
+
+func TestAnalyzerVBA217AnalyzesContinuationStatements(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  lastRow = Cells( _
+      Rows.Count, 1).End(xlDown).Row
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA217")
+	if len(got) != 2 || got[0].Line != 4 || got[1].Line != 4 {
+		t.Fatalf("VBA217 continuation findings = %+v", got)
+	}
+}
+
+func TestWorksheetRootMemberOffsetsPreserveUTF8(t *testing.T) {
+	tracker := newWorksheetRootTracker(map[string]string{"inputsheet": "InputSheet", "outputsheet": "OutputSheet"})
+	accesses := worksheetMemberAccesses(`lastRow = Len("İ") + InputSheet.Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row`, tracker)
+	if len(accesses) != 2 || accesses[0].root.identity != "codename:inputsheet" || accesses[1].root.identity != "codename:outputsheet" {
+		t.Fatalf("worksheet accesses after UTF-8 text = %+v", accesses)
 	}
 }
 

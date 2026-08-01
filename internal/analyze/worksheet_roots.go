@@ -15,6 +15,7 @@ type worksheetRoot struct {
 	kind     worksheetRootKind
 	identity string
 	label    string
+	selector string
 }
 
 type worksheetRootKind uint8
@@ -28,6 +29,7 @@ const (
 type worksheetRootTracker struct {
 	codenames map[string]string
 	variables map[string]worksheetRoot
+	ambiguous map[string]bool
 	withStack []worksheetRoot
 }
 
@@ -36,7 +38,7 @@ func newWorksheetRootTracker(codenames map[string]string) *worksheetRootTracker 
 	for key, value := range codenames {
 		copyCodenames[key] = value
 	}
-	return &worksheetRootTracker{codenames: copyCodenames, variables: map[string]worksheetRoot{}}
+	return &worksheetRootTracker{codenames: copyCodenames, variables: map[string]worksheetRoot{}, ambiguous: map[string]bool{}}
 }
 
 // realtimeWorksheetCodenames reads only workbook component names. Names are
@@ -88,11 +90,18 @@ func (t *worksheetRootTracker) observeSetAssignment(statement string) {
 	}
 	name := strings.ToLower(match[1])
 	root := t.resolve(match[2])
-	if root.kind == worksheetRootExplicit {
+	previous, known := t.variables[name]
+	if root.kind == worksheetRootExplicit && !t.ambiguous[name] {
+		if known && (previous.identity != root.identity || previous.selector != root.selector) {
+			delete(t.variables, name)
+			t.ambiguous[name] = true
+			return
+		}
 		t.variables[name] = root
 		return
 	}
 	delete(t.variables, name)
+	delete(t.ambiguous, name)
 }
 
 func (t *worksheetRootTracker) resolve(expression string) worksheetRoot {
@@ -110,11 +119,8 @@ func (t *worksheetRootTracker) resolve(expression string) worksheetRoot {
 	if strings.HasPrefix(lower, "activesheet") || strings.HasPrefix(lower, "activeworkbook") || strings.HasPrefix(lower, "selection") {
 		return worksheetRoot{kind: worksheetRootImplicit, label: "the active worksheet"}
 	}
-	if strings.HasPrefix(lower, "thisworkbook.worksheets(") || strings.HasPrefix(lower, "thisworkbook.sheets(") {
-		if end := balancedCallEnd(expression, strings.Index(expression, "(")); end > 0 {
-			label := strings.TrimSpace(expression[:end+1])
-			return worksheetRoot{kind: worksheetRootExplicit, identity: strings.ToLower(strings.ReplaceAll(label, " ", "")), label: label}
-		}
+	if root, ok := thisWorkbookWorksheetRoot(expression, lower); ok {
+		return root
 	}
 	name := firstVBAIdentifier(expression)
 	if name == "" {
@@ -124,12 +130,53 @@ func (t *worksheetRootTracker) resolve(expression string) worksheetRoot {
 		return root
 	}
 	if codename, ok := t.codenames[strings.ToLower(name)]; ok {
-		return worksheetRoot{kind: worksheetRootExplicit, identity: "codename:" + strings.ToLower(codename), label: codename}
-	}
-	if sheetCodenameRe.MatchString(name) {
-		return worksheetRoot{kind: worksheetRootExplicit, identity: "codename:" + strings.ToLower(name), label: name}
+		return worksheetRoot{kind: worksheetRootExplicit, identity: "codename:" + strings.ToLower(codename), label: codename, selector: "codename"}
 	}
 	return worksheetRoot{kind: worksheetRootUnknown}
+}
+
+func thisWorkbookWorksheetRoot(expression, lower string) (worksheetRoot, bool) {
+	if !strings.HasPrefix(lower, "thisworkbook.worksheets(") && !strings.HasPrefix(lower, "thisworkbook.sheets(") {
+		return worksheetRoot{}, false
+	}
+	open := strings.Index(expression, "(")
+	if open < 0 {
+		return worksheetRoot{}, false
+	}
+	end := balancedCallEnd(expression, open)
+	if end <= open {
+		return worksheetRoot{}, false
+	}
+	name, ok := worksheetNameLiteral(expression[open+1 : end])
+	if !ok {
+		return worksheetRoot{}, false
+	}
+	return worksheetRoot{
+		kind:     worksheetRootExplicit,
+		identity: "name:" + strings.ToLower(name),
+		label:    "ThisWorkbook.Worksheets(" + expression[open+1:end] + ")",
+		selector: "name",
+	}, true
+}
+
+func worksheetNameLiteral(argument string) (string, bool) {
+	argument = strings.TrimSpace(argument)
+	if len(argument) < 2 || argument[0] != '"' || argument[len(argument)-1] != '"' {
+		return "", false
+	}
+	var value strings.Builder
+	for index := 1; index < len(argument)-1; index++ {
+		if argument[index] != '"' {
+			value.WriteByte(argument[index])
+			continue
+		}
+		if index+1 >= len(argument)-1 || argument[index+1] != '"' {
+			return "", false
+		}
+		value.WriteByte('"')
+		index++
+	}
+	return value.String(), true
 }
 
 func trimOuterVBAParentheses(expression string) string {
@@ -154,7 +201,6 @@ type worksheetMemberAccess struct {
 
 var (
 	setWorksheetAssignmentRe = regexp.MustCompile(`(?i)^\s*set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$`)
-	sheetCodenameRe          = regexp.MustCompile(`(?i)^sheet[0-9]+$`)
 	lastRowTargetRe          = regexp.MustCompile(`(?i)^\s*(?:let\s+)?(last_?row|end_?row)\s*=`)
 	endDownRowRe             = regexp.MustCompile(`(?i)\.\s*end\s*\(\s*xlDown\s*\)\s*\.\s*row\b`)
 	endRowRe                 = regexp.MustCompile(`(?i)\.\s*end\s*\([^)]*\)\s*\.\s*row\b`)
@@ -222,7 +268,7 @@ func (a Analyzer) worksheetRootFindings(file parsedFile, proc sourceProcedure, l
 }
 
 func worksheetMemberAccesses(statement string, roots *worksheetRootTracker) []worksheetMemberAccess {
-	lower := strings.ToLower(maskVBAStringLiterals(statement))
+	lower := asciiLower(maskVBAStringLiterals(statement))
 	var accesses []worksheetMemberAccess
 	for index := 0; index < len(lower); {
 		member, start, ok := nextWorksheetMember(lower, index)
@@ -249,6 +295,16 @@ func worksheetMemberAccesses(statement string, roots *worksheetRootTracker) []wo
 		index = end
 	}
 	return accesses
+}
+
+func asciiLower(text string) string {
+	out := []byte(text)
+	for index := range out {
+		if out[index] >= 'A' && out[index] <= 'Z' {
+			out[index] += 'a' - 'A'
+		}
+	}
+	return string(out)
 }
 
 func displayWorksheetMember(member string) string {
@@ -354,11 +410,18 @@ func distinctExplicitRootInArguments(accesses []worksheetMemberAccess, outer wor
 		if candidate.start <= outer.start || candidate.start >= outer.end || candidate.root.kind != worksheetRootExplicit {
 			continue
 		}
+		if !comparableRootIdentities(outer.root, candidate.root) {
+			continue
+		}
 		if candidate.root.identity != outer.root.identity {
 			return candidate.root, true
 		}
 	}
 	return worksheetRoot{}, false
+}
+
+func comparableRootIdentities(left, right worksheetRoot) bool {
+	return left.selector != "" && left.selector == right.selector
 }
 
 func hasImplicitWorksheetAccess(accesses []worksheetMemberAccess) bool {

@@ -541,7 +541,7 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		lineNo := i + 1
 		stmt := normalizedCodeLine(file.Lines[i])
-		rawStmt := strings.Join(strings.Fields(gui.StripComment(file.Lines[i])), " ")
+		worksheetStmt, worksheetStatementStart := worksheetLogicalStatement(file.Lines, i, proc.EndLine-1)
 		if stmt == "" {
 			continue
 		}
@@ -550,17 +550,24 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 			continue
 		}
 		if m := withRe.FindStringSubmatch(stmt); len(m) > 0 {
-			if rawWith := withRe.FindStringSubmatch(rawStmt); len(rawWith) > 0 {
-				worksheetRoots.pushWith(rawWith[1])
-			} else {
-				worksheetRoots.pushWith(m[1])
+			if worksheetStatementStart {
+				if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
+					findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
+				}
+				if rootWith := withRe.FindStringSubmatch(worksheetStmt); len(rootWith) > 0 {
+					worksheetRoots.pushWith(rootWith[1])
+				} else {
+					worksheetRoots.pushWith(m[1])
+				}
 			}
 			continue
 		}
-		if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
-			findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, rawStmt, worksheetRoots)...)
+		if worksheetStatementStart {
+			if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
+				findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
+			}
+			worksheetRoots.observeSetAssignment(worksheetStmt)
 		}
-		worksheetRoots.observeSetAssignment(rawStmt)
 		if setAssignRe.MatchString(stmt) {
 			if name, ok := rangeFindAssignment(stmt); ok {
 				findAssignments[strings.ToLower(name)] = lineNo
@@ -721,7 +728,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		lineNo := i + 1
 		stmt := normalizedCodeLine(file.Lines[i])
-		rawStmt := strings.Join(strings.Fields(gui.StripComment(file.Lines[i])), " ")
+		worksheetStmt, worksheetStatementStart := worksheetLogicalStatement(file.Lines, i, proc.EndLine-1)
 		if stmt == "" {
 			continue
 		}
@@ -736,17 +743,24 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		}
 		if m := withRe.FindStringSubmatch(stmt); len(m) > 0 {
 			withStack = append(withStack, resolveWithInfo(m[1], decls))
-			if rawWith := withRe.FindStringSubmatch(rawStmt); len(rawWith) > 0 {
-				worksheetRoots.pushWith(rawWith[1])
-			} else {
-				worksheetRoots.pushWith(m[1])
+			if worksheetStatementStart {
+				if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
+					findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
+				}
+				if rootWith := withRe.FindStringSubmatch(worksheetStmt); len(rootWith) > 0 {
+					worksheetRoots.pushWith(rootWith[1])
+				} else {
+					worksheetRoots.pushWith(m[1])
+				}
 			}
 			continue
 		}
-		if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
-			findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, rawStmt, worksheetRoots)...)
+		if worksheetStatementStart {
+			if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
+				findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
+			}
+			worksheetRoots.observeSetAssignment(worksheetStmt)
 		}
-		worksheetRoots.observeSetAssignment(rawStmt)
 		for _, helper := range referencedTraceHelpers(stmt) {
 			key := strings.ToLower(helper)
 			if reportedMissingHelpers[key] {
@@ -2435,6 +2449,46 @@ func normalizedSourceLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
 	return strings.Split(source, "\n")
+}
+
+// worksheetLogicalStatement joins only explicit continuation lines for the
+// worksheet-root rules. Other rules keep their established physical-line or
+// AST handling, while these rules need the complete member chain to compare
+// roots accurately. The caller reports on the first physical line.
+func worksheetLogicalStatement(lines []string, index, last int) (string, bool) {
+	if index < 0 || index >= len(lines) || (index > 0 && vbaLineContinues(lines[index-1])) {
+		return "", false
+	}
+	if last >= len(lines) {
+		last = len(lines) - 1
+	}
+	parts := make([]string, 0, 1)
+	for current := index; current <= last; current++ {
+		line := rawWorksheetCodeLine(lines[current])
+		continues := vbaLineContinues(lines[current])
+		if continues {
+			line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "_"))
+		}
+		if line != "" {
+			parts = append(parts, line)
+		}
+		if !continues {
+			return strings.Join(parts, " "), true
+		}
+	}
+	return strings.Join(parts, " "), true
+}
+
+func rawWorksheetCodeLine(line string) string {
+	return strings.TrimSpace(gui.StripComment(line))
+}
+
+func vbaLineContinues(line string) bool {
+	line = strings.TrimSpace(gui.StripComment(line))
+	if len(line) < 2 || line[len(line)-1] != '_' {
+		return false
+	}
+	return line[len(line)-2] == ' ' || line[len(line)-2] == '\t'
 }
 
 func normalizedCodeLine(line string) string {
