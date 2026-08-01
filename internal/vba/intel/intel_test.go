@@ -4272,6 +4272,30 @@ End Sub
 	}
 }
 
+func TestStatefulExcelCallArgumentDiagnosticsFindsNestedCallsWithoutProjectLookup(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	workspaceQueries := 0
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, _ WorkspaceSymbolQuery) ([]Symbol, error) {
+		workspaceQueries++
+		return nil, nil
+	}
+	diagnostics := analyzer.StatefulExcelCallArgumentDiagnostics(Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Consume(rng.Find("nested"))
+End Sub
+`,
+	})
+	if len(diagnostics) != 1 || diagnostics[0].Message != "Range.Find omits stateful argument(s): LookIn, LookAt, SearchOrder, MatchByte." {
+		t.Fatalf("VBA215 nested diagnostics = %+v", diagnostics)
+	}
+	if workspaceQueries != 0 {
+		t.Fatalf("workspace queries = %d, want none for non-candidate calls", workspaceQueries)
+	}
+}
+
 func withRealtimeFindings(analyzer Analyzer, findings []RealtimeFinding) Analyzer {
 	analyzer.RealtimeFindingsFunc = func(_ string, _ config.Config, _ *vbaast.ParsedDocument, _ procedureir.DocumentIR, _ vbacfg.Document) ([]RealtimeFinding, error) {
 		return append([]RealtimeFinding(nil), findings...), nil

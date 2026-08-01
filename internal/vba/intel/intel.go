@@ -252,10 +252,15 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 			for _, finding := range findings {
 				diagnosticRange := issueRange(doc.Source, finding.Line, finding.Column)
 				if finding.EndLine > 0 {
-					diagnosticRange.End = Position{
+					// Analyzer findings with an end range (currently VBA215) carry
+					// LSP UTF-16 columns, unlike issueRange's byte-based input.
+					diagnosticRange = Range{Start: Position{
+						Line:      max(0, finding.Line-1),
+						Character: max(0, finding.Column-1),
+					}, End: Position{
 						Line:      max(0, finding.EndLine-1),
 						Character: max(0, finding.EndColumn-1),
-					}
+					}}
 				}
 				out = append(out, Diagnostic{
 					Code:     finding.Code,
@@ -1343,6 +1348,10 @@ func (c callContext) ActiveParameter(params []Parameter) int {
 }
 
 func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position, open []Document) (Signature, bool, error) {
+	return a.resolveCallSignatureAtContext(doc, target, pos, open, nil)
+}
+
+func (a Analyzer) resolveCallSignatureAtContext(doc Document, target string, pos Position, open []Document, typeContext *documentTypeContext) (Signature, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return Signature{}, false, nil
@@ -1352,7 +1361,7 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 		if !hasReceiver {
 			memberName = strings.TrimSpace(strings.TrimPrefix(target, "."))
 		}
-		if receiverType, ok := a.withBlockTypeAt(doc, pos, byteOffsetForPosition(doc.Source, pos)); ok {
+		if receiverType, ok := a.withBlockTypeAtContext(doc, pos, byteOffsetForPosition(doc.Source, pos), typeContext); ok {
 			if hasReceiver {
 				if typ, ok := a.resolveRelativeMemberExpressionType(receiverType, receiver); ok {
 					receiverType = typ
@@ -1372,7 +1381,7 @@ func (a Analyzer) resolveCallSignature(doc Document, target string, pos Position
 		}
 	}
 	if receiver, memberName, ok := splitCallTarget(target); ok {
-		receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForPosition(doc.Source, pos))
+		receiverType, ok := a.resolveDocumentExpressionTypeAtContext(doc, receiver, byteOffsetForPosition(doc.Source, pos), typeContext)
 		if ok {
 			if strings.EqualFold(receiverType, "Object") && sheetsDefaultExpression(receiver) {
 				receiverType = "Excel.Worksheet"
@@ -1493,17 +1502,22 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnosti
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.DB == nil {
 		return nil
 	}
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return nil
+	}
+	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	var out []Diagnostic
 	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
 		for _, call := range callsOnLine(logicalLine.Text) {
-			callRange := logicalLine.callRange(call)
-			call.DiagnosticRange = &callRange
-			sig, ok, err := a.resolveCallSignature(doc, call.Target, callRange.Start, []Document{doc})
-			if err != nil || !ok || !strings.EqualFold(sig.receiverType, "Excel.Range") {
+			wanted := statefulExcelCallParameters(statefulExcelCallMember(call.Target))
+			if len(wanted) == 0 {
 				continue
 			}
-			wanted := statefulExcelCallParameters(sig.memberName)
-			if len(wanted) == 0 {
+			callRange := logicalLine.callRange(call)
+			call.DiagnosticRange = &callRange
+			sig, ok, err := a.resolveCallSignatureAtContext(doc, call.Target, callRange.Start, []Document{doc}, typeContext)
+			if err != nil || !ok || !strings.EqualFold(sig.receiverType, "Excel.Range") {
 				continue
 			}
 			omitted := omittedCallParameters(sig.Parameters, call.Arguments, wanted)
@@ -1522,6 +1536,17 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnosti
 		}
 	}
 	return out
+}
+
+func statefulExcelCallMember(target string) string {
+	_, member, ok := splitCallTarget(target)
+	if !ok && strings.HasPrefix(strings.TrimSpace(target), ".") {
+		member = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "."))
+	}
+	if len(statefulExcelCallParameters(member)) == 0 {
+		return ""
+	}
+	return member
 }
 
 func statefulExcelCallParameters(member string) []string {
@@ -2341,7 +2366,6 @@ func parenCallsOnLine(line string) []parsedCall {
 				Start:     max(0, i-len(target)),
 				End:       close + 1,
 			})
-			i = close
 		}
 	}
 	return out
@@ -2673,8 +2697,36 @@ func callTargetBeforeOpen(prefix string) string {
 	if strings.HasPrefix(strings.ToLower(target), "call ") {
 		target = strings.TrimSpace(target[len("call "):])
 	}
+	target = suffixAfterLastUnmatchedOpen(target)
 	target = lastTopLevelSpaceSeparatedField(target)
 	return strings.TrimSpace(target)
+}
+
+func suffixAfterLastUnmatchedOpen(text string) string {
+	stack := make([]int, 0, 2)
+	inString := false
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				stack = append(stack, i)
+			}
+		case ')':
+			if !inString && len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(stack) == 0 {
+		return text
+	}
+	return strings.TrimSpace(text[stack[len(stack)-1]+1:])
 }
 
 func lastTopLevelSpaceSeparatedField(text string) string {
