@@ -1098,6 +1098,42 @@
       "configuration_key": "detect_stateful_excel_call_arguments",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA216",
+      "title": "Worksheet root mismatch",
+      "description": "A range expression combines explicit objects rooted in different worksheets.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "error",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba216",
+      "configurable": true,
+      "configuration_key": "detect_worksheet_root_mismatch",
+      "inline_suppressible": false,
+      "preflight_blocking": true
+    },
+    {
+      "id": "VBA217",
+      "title": "Unstable last-row boundary",
+      "description": "A last-row calculation depends on an implicit worksheet root or a boundary pattern that can produce unstable results.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba217",
+      "configurable": true,
+      "configuration_key": "detect_unstable_last_row_patterns",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

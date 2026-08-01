@@ -67,6 +67,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA213`](#vba213) | analyze | warning  | procedure-local | no      | Dictionary iteration value misuse            |
 | [`VBA214`](#vba214) | analyze | warning  | procedure-local | yes     | Leaked On Error Resume Next scope            |
 | [`VBA215`](#vba215) | analyze | warning  | procedure-local | yes     | Omitted stateful Excel call arguments        |
+| [`VBA216`](#vba216) | analyze | error    | procedure-local | yes     | Worksheet root mismatch                      |
+| [`VBA217`](#vba217) | analyze | warning  | procedure-local | yes     | Unstable last-row boundary                   |
 
 ## VB001
 
@@ -1165,3 +1167,39 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                     |
 | Real-time editor diagnostic | yes                                    |
 | Fix available               | no                                     |
+
+## VBA216
+
+**Worksheet root mismatch.** A range expression combines explicit objects rooted in different worksheets.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `reliability`                    |
+| Default severity            | `error`                          |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | yes                              |
+| Configuration               | `detect_worksheet_root_mismatch` |
+| Inline suppression          | no                               |
+| Blocks source preflight     | yes                              |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |
+
+## VBA217
+
+**Unstable last-row boundary.** A last-row calculation depends on an implicit worksheet root or a boundary pattern that can produce unstable results.
+
+| Property                    | Value                               |
+| --------------------------- | ----------------------------------- |
+| Family                      | `analyze`                           |
+| Category                    | `reliability`                       |
+| Default severity            | `warning`                           |
+| Scope                       | `procedure-local`                   |
+| Precision                   | `medium`                            |
+| Enabled by default          | yes                                 |
+| Configuration               | `detect_unstable_last_row_patterns` |
+| Inline suppression          | yes                                 |
+| Blocks source preflight     | no                                  |
+| Real-time editor diagnostic | yes                                 |
+| Fix available               | no                                  |

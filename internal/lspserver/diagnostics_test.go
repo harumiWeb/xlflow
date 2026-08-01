@@ -71,6 +71,49 @@ End Sub
 	t.Fatalf("VBA215 diagnostic missing: %+v", diagnostics)
 }
 
+func TestLSPDiagnosticsIncludeWorksheetRootFindings(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	diagnostics := s.diagnostics(context.Background(), intel.Document{
+		Path: filepath.Join(root, "Main.bas"),
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim inputSheet As Worksheet
+    Dim outputSheet As Worksheet
+    Dim lastRow As Long
+    Set inputSheet = ThisWorkbook.Worksheets("Input")
+    Set outputSheet = ThisWorkbook.Worksheets("Output")
+    lastRow = inputSheet.Cells(outputSheet.Rows.Count, 1).End(xlUp).Row
+    lastRow = Cells(Rows.Count, 1).End(xlDown).Row
+End Sub
+`,
+	})
+	var mismatch, unstable int
+	for _, diagnostic := range diagnostics {
+		switch diagnostic.Code {
+		case "VBA216":
+			if diagnostic.Severity != "error" || diagnostic.Range.Start.Line != 8 {
+				t.Fatalf("VBA216 diagnostic = %+v", diagnostic)
+			}
+			mismatch++
+		case "VBA217":
+			if diagnostic.Severity != "warning" || diagnostic.Range.Start.Line != 9 {
+				t.Fatalf("VBA217 diagnostic = %+v", diagnostic)
+			}
+			unstable++
+		}
+	}
+	if mismatch != 1 || unstable != 2 {
+		t.Fatalf("worksheet diagnostics: VBA216=%d, VBA217=%d; all=%+v", mismatch, unstable, diagnostics)
+	}
+}
+
 func TestLSPDiagnosticsPreserveVBA215UTF16StartRange(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

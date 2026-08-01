@@ -13,7 +13,7 @@ VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
-VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215`)
+VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -53,6 +53,14 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	rule, ok := Lookup("  vba211 ")
 	if !ok || rule.ID != "VBA211" || rule.Family != FamilyAnalyze || !rule.PreflightBlocking || rule.InlineSuppressible {
 		t.Fatalf("unexpected lookup result: %+v, %v", rule, ok)
+	}
+	mismatch, ok := Lookup("VBA216")
+	if !ok || mismatch.DefaultSeverity != SeverityError || !mismatch.PreflightBlocking || mismatch.InlineSuppressible || !mismatch.Realtime {
+		t.Fatalf("unexpected VBA216 metadata: %+v, %v", mismatch, ok)
+	}
+	unstable, ok := Lookup("VBA217")
+	if !ok || unstable.DefaultSeverity != SeverityWarning || unstable.PreflightBlocking || !unstable.InlineSuppressible || !unstable.Realtime || unstable.Precision != PrecisionMedium {
+		t.Fatalf("unexpected VBA217 metadata: %+v, %v", unstable, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {
