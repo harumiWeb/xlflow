@@ -54,30 +54,31 @@ type Analyzer struct {
 }
 
 var (
-	declRe                       = regexp.MustCompile(`(?i)^\s*(?:dim|private|public|static)\s+(.+)$`)
-	assignRe                     = regexp.MustCompile(`(?i)^\s*(?:let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=`)
-	setAssignRe                  = regexp.MustCompile(`(?i)^\s*set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
-	callAssignRe                 = regexp.MustCompile(`(?i)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:\(|$)`)
-	withRe                       = regexp.MustCompile(`(?i)^\s*with\s+(.+)$`)
-	endWithRe                    = regexp.MustCompile(`(?i)^\s*end\s+with\b`)
-	withMemberRe                 = regexp.MustCompile(`(?i)^\s*\.([A-Za-z_][A-Za-z0-9_]*)\b`)
-	memberRe                     = regexp.MustCompile(`(?i)\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b`)
-	traceHelperCallRe            = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(XlflowLog|XlflowSetTraceFile)\b`)
-	traceHelperQualRe            = regexp.MustCompile(`(?i)\bXlflowTrace\s*\.\s*(XlflowLog|XlflowSetTraceFile)\b`)
-	unqualifiedExcelRe           = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(Range|Cells|Rows|Columns)\b\s*(?:\(|\.)`)
-	activeExcelRe                = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(ActiveWorkbook|ActiveSheet|ActiveCell|Selection)\b`)
-	unqualifiedSheetCollectionRe = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(Worksheets|Sheets)\b\s*\(`)
-	positionalExcelCollectionRe  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(Workbooks|Windows)\b\s*\(\s*1\s*\)`)
-	workbooksOpenRe              = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\bWorkbooks\s*\.\s*Open\b`)
-	capturedWorkbooksOpenRe      = regexp.MustCompile(`(?i)(?:^|:|\bthen\b|\belse\b)\s*set\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:Application\s*\.\s*)?Workbooks\s*\.\s*Open\b`)
-	thisWorkbookRe               = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])\bThisWorkbook\b`)
-	redimPreserveRe              = regexp.MustCompile(`(?i)^\s*redim\s+preserve\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)`)
-	forEachDirectRe              = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
-	forStartRe                   = regexp.MustCompile(`(?i)^\s*for\b`)
-	nextRe                       = regexp.MustCompile(`(?i)^\s*next\b`)
-	dictionaryCreateRe           = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
-	dictionaryNewRe              = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
-	errProbeReferenceRe          = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|clear)\b`)
+	declRe                        = regexp.MustCompile(`(?i)^\s*(?:dim|private|public|static)\s+(.+)$`)
+	assignRe                      = regexp.MustCompile(`(?i)^\s*(?:let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	setAssignRe                   = regexp.MustCompile(`(?i)^\s*set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	callAssignRe                  = regexp.MustCompile(`(?i)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:\(|$)`)
+	withRe                        = regexp.MustCompile(`(?i)^\s*with\s+(.+)$`)
+	endWithRe                     = regexp.MustCompile(`(?i)^\s*end\s+with\b`)
+	withMemberRe                  = regexp.MustCompile(`(?i)^\s*\.([A-Za-z_][A-Za-z0-9_]*)\b`)
+	memberRe                      = regexp.MustCompile(`(?i)\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b`)
+	traceHelperCallRe             = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(XlflowLog|XlflowSetTraceFile)\b`)
+	traceHelperQualRe             = regexp.MustCompile(`(?i)\bXlflowTrace\s*\.\s*(XlflowLog|XlflowSetTraceFile)\b`)
+	unqualifiedExcelRe            = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(Range|Cells|Rows|Columns)\b\s*(?:\(|\.)`)
+	activeExcelRe                 = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(ActiveWorkbook|ActiveSheet|ActiveCell|Selection)\b`)
+	unqualifiedSheetCollectionRe  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(Worksheets|Sheets)\b\s*\(`)
+	positionalExcelCollectionRe   = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])(?:Application\s*\.\s*)?\b(Workbooks|Windows)\b\s*\(\s*([0-9]+)\s*\)`)
+	workbooksOpenRe               = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])((?:Application\s*\.\s*)?\bWorkbooks\s*\.\s*Open\b)`)
+	workbooksOpenBranchBoundaryRe = regexp.MustCompile(`(?i):|\bthen\b|\belse\b`)
+	setAssignmentPrefixRe         = regexp.MustCompile(`(?i)^\s*set\s+.+?\s*=\s*$`)
+	thisWorkbookRe                = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])\bThisWorkbook\b`)
+	redimPreserveRe               = regexp.MustCompile(`(?i)^\s*redim\s+preserve\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)`)
+	forEachDirectRe               = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
+	forStartRe                    = regexp.MustCompile(`(?i)^\s*for\b`)
+	nextRe                        = regexp.MustCompile(`(?i)^\s*next\b`)
+	dictionaryCreateRe            = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
+	dictionaryNewRe               = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
+	errProbeReferenceRe           = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|clear)\b`)
 )
 
 var objectTypes = map[string]bool{
@@ -1135,21 +1136,42 @@ func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure
 	}
 	for _, m := range unqualifiedSheetCollectionRe.FindAllStringSubmatch(stmt, -1) {
 		name := m[1]
-		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "Unqualified "+name+" access depends on the active workbook.", "The unqualified "+name+" collection is resolved from Excel's active workbook at runtime.", "Use ThisWorkbook."+name+"(...) or select "+name+" from an explicit Workbook argument."))
+		suggestion := "Use ThisWorkbook." + name + "(...) or select " + name + " from an explicit Workbook argument."
+		if addInStandardModule(a.Config, file) {
+			suggestion = "Select " + name + " from an explicit caller Workbook argument."
+		}
+		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "Unqualified "+name+" access depends on the active workbook.", "The unqualified "+name+" collection is resolved from Excel's active workbook at runtime.", suggestion))
 	}
 	for _, m := range positionalExcelCollectionRe.FindAllStringSubmatch(stmt, -1) {
 		name := m[1]
-		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", name+"(1) depends on Excel collection ordering.", name+"(1) can select a different object when workbook or window order changes.", "Select the target by name or receive an explicit "+strings.TrimSuffix(name, "s")+" argument."))
+		index := m[2]
+		root := name + "(" + index + ")"
+		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", root+" depends on Excel collection ordering.", root+" can select a different object when workbook or window order changes.", "Select the target by name or receive an explicit "+strings.TrimSuffix(name, "s")+" argument."))
 	}
-	for _, clause := range strings.Split(stmt, ":") {
-		if workbooksOpenRe.MatchString(clause) && !capturedWorkbooksOpenRe.MatchString(clause) {
+	for _, open := range workbooksOpenRe.FindAllStringSubmatchIndex(stmt, -1) {
+		if !capturedWorkbooksOpen(stmt, open[2]) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "Workbooks.Open result is not captured.", "An uncaptured Workbooks.Open result forces later code to depend on active workbook state.", "Capture the opened workbook: Set wb = Workbooks.Open(...)."))
 		}
 	}
-	if strings.EqualFold(filepath.Ext(a.Config.Excel.Path), ".xlam") && file.ModuleKind == "standard" && thisWorkbookRe.MatchString(stmt) {
+	if addInStandardModule(a.Config, file) && thisWorkbookRe.MatchString(stmt) {
 		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "ThisWorkbook in an add-in targets the add-in workbook.", "Inside an add-in standard module, ThisWorkbook is the add-in rather than the caller workbook.", "Receive the caller workbook as an explicit Workbook argument."))
 	}
 	return findings
+}
+
+func addInStandardModule(cfg config.Config, file parsedFile) bool {
+	return strings.EqualFold(filepath.Ext(cfg.Excel.Path), ".xlam") && file.ModuleKind == "standard"
+}
+
+func capturedWorkbooksOpen(stmt string, openStart int) bool {
+	if openStart < 0 || openStart > len(stmt) {
+		return false
+	}
+	branchStart := 0
+	for _, boundary := range workbooksOpenBranchBoundaryRe.FindAllStringIndex(stmt[:openStart], -1) {
+		branchStart = boundary[1]
+	}
+	return setAssignmentPrefixRe.MatchString(stmt[branchStart:openStart])
 }
 
 func (a Analyzer) byRefMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, ctx analysisContext) []Finding {

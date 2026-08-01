@@ -528,6 +528,81 @@ End Sub
 	}
 }
 
+func TestAnalyzerDetectsAllNumericPositionalWorkbookAndWindowIndices(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Workbooks(2).Close
+  Application.Windows(3).Visible = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	for line, root := range map[int]string{3: "Workbooks(2)", 4: "Windows(3)"} {
+		found := false
+		for _, finding := range got {
+			if finding.Line == line && strings.Contains(finding.Message, root) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected VBA205 mentioning %q on line %d: %+v", root, line, got)
+		}
+	}
+}
+
+func TestAnalyzerClassifiesEachWorkbooksOpenCaptureIndependently(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal useA As Boolean)
+  If useA Then Set wb = Workbooks.Open("A.xlsm") Else Workbooks.Open "B.xlsm"
+  Set plain=Workbooks.Open("NoSpace.xlsm")
+  Set app=Application.Workbooks.Open("Application.xlsm")
+  Set books(1) = Workbooks.Open("Array.xlsm")
+  Set holder.Book = Workbooks.Open("Property.xlsm")
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	if len(got) != 1 || got[0].Line != 3 || !strings.Contains(got[0].Message, "Workbooks.Open") {
+		t.Fatalf("Workbooks.Open findings = %+v, want only uncaptured Else branch", got)
+	}
+}
+
+func TestAnalyzerAddInSheetCollectionSuggestsCallerWorkbook(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "AddInEntry.bas", `Option Explicit
+Public Sub Run()
+  Worksheets("Data").Range("A1").Value = 1
+  Sheets("Data").Range("A2").Value = 2
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Excel.Path = "build/AddIn.xlam"
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	if len(got) != 2 {
+		t.Fatalf("add-in sheet collection findings = %+v, want Worksheets and Sheets guidance", got)
+	}
+	for _, finding := range got {
+		if !strings.Contains(finding.Suggestion, "caller Workbook") || strings.Contains(finding.Suggestion, "ThisWorkbook") {
+			t.Fatalf("add-in sheet collection finding = %+v, want caller-workbook guidance", finding)
+		}
+	}
+}
+
 func TestAnalyzerReportsThisWorkbookOnlyForAddInStandardModules(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "AddInEntry.bas", `Option Explicit
