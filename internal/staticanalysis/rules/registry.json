@@ -1143,7 +1143,7 @@
       "category": "reliability",
       "default_severity": "warning",
       "default_enabled": true,
-      "scope": "procedure-local",
+      "scope": "interprocedural",
       "realtime": true,
       "precision": "high",
       "fix_available": false,

@@ -273,8 +273,10 @@ func (a Analyzer) RunResult() (Result, error) {
 		analysis.typeDB = typeDB
 	}
 	var findings []Finding
-	analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
-	analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
+	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
+		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
+		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
+	}
 	for _, file := range parsedFiles {
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
 			file.Root = view.Root

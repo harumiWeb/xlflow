@@ -176,6 +176,9 @@ func projectIsErrorGuardAliases(files []parsedFile) map[string]bool {
 // The wrapper's own exception is handled, but an unchecked returned sentinel
 // remains unsafe at the caller.
 func (a Analyzer) errorValueWrapperFindings(file parsedFile) []Finding {
+	if !a.Config.Analyze.DetectExcelAPIFailureContracts {
+		return nil
+	}
 	wrappers := a.errorValueWrappers
 	if wrappers == nil {
 		wrappers = errorValueWrappersForFile(file, false)
@@ -184,15 +187,19 @@ func (a Analyzer) errorValueWrapperFindings(file parsedFile) []Finding {
 		return nil
 	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	aliases := a.errorGuardAliases
+	if aliases == nil {
+		aliases = isErrorGuardAliases(file.Lines)
+	}
 	var findings []Finding
 	for _, irProcedure := range file.IR.Procedures {
 		proc := procedureForLine(procedures, irProcedure.Symbol.DeclarationRange.StartLine+1, len(file.Lines))
 		for _, call := range irProcedure.Calls {
-			if !wrapperCallMatches(file, call, wrappers) {
+			if !wrapperCallMatches(call, wrappers) {
 				continue
 			}
 			line := call.Range.StartLine
-			if wrapperCallIsDirectIsError(file, call) || discardedWrapperCallResult(file, call) || variantContractResultSafelyConsumed(file.Lines, proc, line, a.errorGuardAliases) {
+			if wrapperCallIsDirectIsError(file, call) || discardedWrapperCallResult(file, call) || variantContractResultSafelyConsumed(file.Lines, proc, line, aliases) {
 				continue
 			}
 			finding := a.simpleFinding(
@@ -201,9 +208,9 @@ func (a Analyzer) errorValueWrapperFindings(file parsedFile) []Finding {
 				"The wrapper handles its internal Excel exception by returning CVErr, so its caller can still receive a Variant/Error instead of an ordinary result.",
 				"Store the wrapper result and use IsError before consuming its success value.",
 			)
-			finding.Column = call.Range.StartColumn + 1
-			finding.EndLine = call.Range.EndLine + 1
-			finding.EndColumn = call.Range.EndColumn + 1
+			finding.Column = call.Range.StartColumn
+			finding.EndLine = call.Range.EndLine
+			finding.EndColumn = call.Range.EndColumn
 			findings = append(findings, finding)
 		}
 	}
@@ -253,15 +260,13 @@ func errorValueWrappersForFile(file parsedFile, publicOnly bool) map[string]bool
 	return wrappers
 }
 
-func wrapperCallMatches(file parsedFile, call procedureir.CallSite, wrappers map[string]bool) bool {
+func wrapperCallMatches(call procedureir.CallSite, wrappers map[string]bool) bool {
 	if call.Callee.Receiver != nil {
 		return false
 	}
-	local := strings.ToLower(file.Module + "." + call.Callee.BaseName)
-	if call.Resolution.Status != procedureir.ResolutionMatched {
-		return wrappers[local]
-	}
-	return len(call.Resolution.Candidates) == 1 && wrappers[strings.ToLower(call.Resolution.Candidates[0].QualifiedName)]
+	return call.Resolution.Status == procedureir.ResolutionMatched &&
+		len(call.Resolution.Candidates) == 1 &&
+		wrappers[strings.ToLower(call.Resolution.Candidates[0].QualifiedName)]
 }
 
 func wrapperCallIsDirectIsError(file parsedFile, call procedureir.CallSite) bool {
@@ -303,7 +308,7 @@ func variantContractResultSafelyConsumed(lines []string, proc sourceProcedure, l
 	for index := line; index < proc.EndLine && index < len(lines); index++ {
 		statement := normalizedCodeLine(lines[index])
 		lower := strings.ToLower(strings.TrimSpace(statement))
-		if excelAPIContractAssignmentRe.MatchString(statement) && index != line && strings.EqualFold(excelAPIContractAssignmentRe.FindStringSubmatch(statement)[1], name) {
+		if excelAPIContractAssignmentRe.MatchString(statement) && strings.EqualFold(excelAPIContractAssignmentRe.FindStringSubmatch(statement)[1], name) {
 			break
 		}
 		guardMatch := guardRe.FindStringSubmatch(statement)
@@ -321,6 +326,10 @@ func variantContractResultSafelyConsumed(lines []string, proc sourceProcedure, l
 		}
 		if strings.HasPrefix(lower, "else") && errorGuardDepth > 0 {
 			safeDepth++
+			continue
+		}
+		if errorGuardDepth > 0 && safeDepth == 0 && (lower == "exit sub" || lower == "exit function" || lower == "exit property") {
+			postErrorExit = true
 			continue
 		}
 		if strings.HasPrefix(lower, "end if") {

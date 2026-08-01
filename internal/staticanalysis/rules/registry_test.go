@@ -63,7 +63,7 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		t.Fatalf("unexpected VBA217 metadata: %+v, %v", unstable, ok)
 	}
 	failureContract, ok := Lookup("VBA218")
-	if !ok || failureContract.DefaultSeverity != SeverityWarning || failureContract.PreflightBlocking || !failureContract.InlineSuppressible || !failureContract.Realtime || failureContract.Precision != PrecisionHigh {
+	if !ok || failureContract.DefaultSeverity != SeverityWarning || failureContract.PreflightBlocking || !failureContract.InlineSuppressible || !failureContract.Realtime || failureContract.Scope != ScopeInterprocedural || failureContract.Precision != PrecisionHigh {
 		t.Fatalf("unexpected VBA218 metadata: %+v, %v", failureContract, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {

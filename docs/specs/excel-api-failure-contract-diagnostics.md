@@ -2,7 +2,7 @@
 
 ## Scope
 
-`VBA218` is a default-enabled, high-precision, procedure-local `analyze`
+`VBA218` is a default-enabled, high-precision, interprocedural `analyze`
 warning. It runs in batch analysis and the shared real-time editor path,
 supports normal inline suppression, and does not block `push` or `run` source
 preflight.

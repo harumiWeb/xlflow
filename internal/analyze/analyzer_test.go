@@ -1773,8 +1773,111 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA218")
-	if len(got) != 1 || got[0].Line != 13 || !strings.Contains(got[0].Message, "TryVisible may return") {
+	if len(got) != 1 || got[0].Line != 13 || got[0].Column != 17 || got[0].EndLine != 13 || !strings.Contains(got[0].Message, "TryVisible may return") {
 		t.Fatalf("unchecked CVErr wrapper result should report VBA218: %+v", got)
+	}
+}
+
+func TestVBA218SuppressesDisabledCVErrWrapperFindingsInBatchAndRealtime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := `Option Explicit
+Private Function TryVisible(ByVal rng As Range) As Variant
+  On Error GoTo Missing
+  TryVisible = rng.SpecialCells(xlCellTypeVisible)
+  Exit Function
+Missing:
+  TryVisible = CVErr(xlErrNA)
+End Function
+Public Sub Run(ByVal rng As Range)
+  Debug.Print TryVisible(rng)
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	cfg.Analyze.DetectExcelAPIFailureContracts = false
+	batch, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		if got := findingsByCode(findings, "VBA218"); len(got) != 0 {
+			t.Fatalf("disabled VBA218 should suppress %s CVErr wrapper findings: %+v", name, got)
+		}
+	}
+}
+
+func TestVBA218RecognizesLocalGuardAliasInRealtimeWrapperChecks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := `Option Explicit
+Private Function IsLookupError(ByVal value As Variant) As Boolean
+  IsLookupError = IsError(value)
+End Function
+Private Function TryVisible(ByVal rng As Range) As Variant
+  On Error GoTo Missing
+  TryVisible = rng.SpecialCells(xlCellTypeVisible)
+  Exit Function
+Missing:
+  TryVisible = CVErr(xlErrNA)
+End Function
+Public Sub Run(ByVal rng As Range)
+  Dim result As Variant
+  result = TryVisible(rng)
+  If IsLookupError(result) Then Exit Sub
+  Debug.Print result
+End Sub
+`
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA218"); len(got) != 0 {
+		t.Fatalf("local IsError guard alias should suppress realtime wrapper finding: %+v", got)
+	}
+}
+
+func TestVBA218StopsVariantTrackingAfterImmediateReassignment(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal values As Range)
+  Dim result As Variant
+  result = Application.Match("needle", values, 0)
+  result = 1
+  Debug.Print result
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA218"); len(got) != 0 {
+		t.Fatalf("reassigned Variant/Error result should be dead: %+v", got)
+	}
+}
+
+func TestVBA218RecognizesMultilineIsErrorExitGuard(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal values As Range)
+  Dim result As Variant
+  result = Application.Match("needle", values, 0)
+  If IsError(result) Then
+    Exit Sub
+  End If
+  Debug.Print result
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA218"); len(got) != 0 {
+		t.Fatalf("multiline IsError exit guard should suppress VBA218: %+v", got)
 	}
 }
 
