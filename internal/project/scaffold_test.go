@@ -849,6 +849,27 @@ func TestNewScaffoldUIHelperAnalyzesCleanly(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldAssertHelperAnalyzesCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	assertPath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowAssert.bas")
+	findings, err := analyze.Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return filepath.Clean(path) == filepath.Clean(assertPath)
+		},
+	}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("Assert helper should analyze cleanly: %+v", findings)
+	}
+}
+
 func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
