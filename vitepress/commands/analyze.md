@@ -48,29 +48,31 @@ The generated [static-analysis diagnostic catalog](../reference/diagnostics) is
 the authoritative reference for rule metadata, including configuration,
 default state, scope, precision, preflight behavior, and inline suppression.
 
-| Code     | Severity | Description                                                                  |
-| -------- | -------- | ---------------------------------------------------------------------------- |
-| `VBA101` | warning  | Object variable assignment likely missing `Set`.                             |
-| `VBA102` | warning  | Object-returning project function assignment likely missing `Set`.           |
-| `VBA103` | warning  | Object-returning function body likely missing `Set <FunctionName> = ...`.    |
-| `VBA104` | error    | Known Excel object/member mismatch such as `Worksheet.DisplayGridlines`.     |
-| `VBA105` | error    | Removed `XlflowLog` trace helper call.                                       |
-| `VBA106` | error    | Removed `XlflowSetTraceFile` trace helper call.                              |
-| `VBA201` | warning  | `Range.Find` result is dereferenced before a `Nothing` check.                |
-| `VBA202` | warning  | Object variable may be used before an obvious `Set` assignment.              |
-| `VBA203` | warning  | `Application` state is changed without an obvious restore path.              |
-| `VBA204` | warning  | Normal execution can fall through into an error-handler label.               |
-| `VBA205` | warning  | Unqualified or active Excel object access depends on runtime sheet state.    |
-| `VBA206` | warning  | Likely ByRef argument type mismatch against a project-local procedure.       |
-| `VBA207` | warning  | `Dictionary` or `Collection` item access has no obvious existence guard.     |
-| `VBA208` | warning  | `ReDim Preserve` is used on a multi-dimensional array.                       |
-| `VBA209` | warning  | Object or array is compared with scalar equality.                            |
-| `VBA210` | warning  | Function may exit without assigning its return value.                        |
-| `VBA211` | error    | Expanded known Excel object/member mismatch.                                 |
-| `VBA212` | warning  | Object `Nothing` guard and dereference share a non-short-circuit expression. |
-| `VBA213` | warning  | Direct Dictionary iteration key is used as an object or value.               |
-| `VBA214` | warning/error | `On Error Resume Next` extends beyond a narrow compatibility probe.       |
-| `VBA215` | warning  | `Range.Find`/`Replace` omits saved Excel search settings.                    |
+| Code     | Severity      | Description                                                                  |
+| -------- | ------------- | ---------------------------------------------------------------------------- |
+| `VBA101` | warning       | Object variable assignment likely missing `Set`.                             |
+| `VBA102` | warning       | Object-returning project function assignment likely missing `Set`.           |
+| `VBA103` | warning       | Object-returning function body likely missing `Set <FunctionName> = ...`.    |
+| `VBA104` | error         | Known Excel object/member mismatch such as `Worksheet.DisplayGridlines`.     |
+| `VBA105` | error         | Removed `XlflowLog` trace helper call.                                       |
+| `VBA106` | error         | Removed `XlflowSetTraceFile` trace helper call.                              |
+| `VBA201` | warning       | `Range.Find` result is dereferenced before a `Nothing` check.                |
+| `VBA202` | warning       | Object variable may be used before an obvious `Set` assignment.              |
+| `VBA203` | warning       | `Application` state is changed without an obvious restore path.              |
+| `VBA204` | warning       | Normal execution can fall through into an error-handler label.               |
+| `VBA205` | warning       | Unqualified or active Excel object access depends on runtime sheet state.    |
+| `VBA206` | warning       | Likely ByRef argument type mismatch against a project-local procedure.       |
+| `VBA207` | warning       | `Dictionary` or `Collection` item access has no obvious existence guard.     |
+| `VBA208` | warning       | `ReDim Preserve` is used on a multi-dimensional array.                       |
+| `VBA209` | warning       | Object or array is compared with scalar equality.                            |
+| `VBA210` | warning       | Function may exit without assigning its return value.                        |
+| `VBA211` | error         | Expanded known Excel object/member mismatch.                                 |
+| `VBA212` | warning       | Object `Nothing` guard and dereference share a non-short-circuit expression. |
+| `VBA213` | warning       | Direct Dictionary iteration key is used as an object or value.               |
+| `VBA214` | warning/error | `On Error Resume Next` extends beyond a narrow compatibility probe.          |
+| `VBA215` | warning       | `Range.Find`/`Replace` omits saved Excel search settings.                    |
+| `VBA216` | error         | A range expression mixes distinct explicit worksheet roots.                  |
+| `VBA217` | warning       | A last-row calculation has an implicit root or unstable boundary strategy.   |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -92,7 +94,7 @@ Cells(1, 1).Value = 2 ' xlflow:disable-line VBA205
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match an analyzer diagnostic are reported as warnings.
 
-Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214`, and `VBA215` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration is not reported. `VBA214` allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported. Resolved project-local calls raise its severity to `error`, but this rule does not block `push` or `run` preflight. `VBA215` requires explicit `Find` `LookIn`, `LookAt`, `SearchOrder`, and `MatchByte`, or `Replace` `LookAt`, `SearchOrder`, `MatchCase`, and `MatchByte`, because Excel can reuse saved Find/Replace dialog or macro settings when they are omitted. Diagnostics `VBA101` through `VBA106` are always enabled.
+Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA217` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration is not reported. `VBA214` allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported. Resolved project-local calls raise its severity to `error`, but this rule does not block `push` or `run` preflight. `VBA215` requires explicit `Find` `LookIn`, `LookAt`, `SearchOrder`, and `MatchByte`, or `Replace` `LookAt`, `SearchOrder`, `MatchCase`, and `MatchByte`, because Excel can reuse saved Find/Replace dialog or macro settings when they are omitted. `VBA216` blocks preflight only when xlflow can prove that explicit range roots refer to different worksheets. `VBA217` guides last-row calculations that rely on the active sheet, `End(xlDown)`, unadjusted `UsedRange.Rows.Count`, or `CurrentRegion`; it does not block preflight. Diagnostics `VBA101` through `VBA106` are always enabled.
 
 ## JSON Output Example
 

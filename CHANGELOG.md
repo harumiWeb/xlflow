@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled real-time `VBA216` preflight errors for VBA range expressions that provably mix distinct worksheet roots, plus `VBA217` guidance for implicit-root and unstable last-row calculation patterns.
+
 - Added default-enabled real-time `VBA215` warnings for resolved `Range.Find` and `Range.Replace` calls that omit saved Excel search settings, including support for positional, named, mixed, and multiline calls plus normal rule-specific suppression.
 - Fixed scaffolded `XlflowAssert.bas` helpers to restore `On Error` handling immediately after each compatibility probe, so new projects pass the default-enabled `VBA214` analysis without warnings.
 - Fixed `VB030` false positives for valid VBA `Array` calls with zero or multiple arguments by modeling its optional argument list as a `ParamArray`.

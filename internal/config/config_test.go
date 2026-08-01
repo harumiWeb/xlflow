@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -436,11 +436,17 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "V
 	if cfg.Analyze.DetectStatefulExcelCallArguments {
 		t.Fatal("expected VBA215/detect_stateful_excel_call_arguments to be disabled")
 	}
+	if cfg.Analyze.DetectWorksheetRootMismatch {
+		t.Fatal("expected VBA216/detect_worksheet_root_mismatch to be disabled")
+	}
+	if cfg.Analyze.DetectUnstableLastRowPatterns {
+		t.Fatal("expected VBA217/detect_unstable_last_row_patterns to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217", got)
 	}
 }
 
@@ -798,6 +804,35 @@ disabled_rules = ["VBA205"]
 		!hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA205") ||
 		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA205") {
 		t.Fatalf("expected analyze deprecation and conflict warnings, got %+v", cfg.Warnings)
+	}
+}
+
+func TestLoadSupportsWorksheetRootRuleLegacyConfig(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_worksheet_root_mismatch = false
+detect_unstable_last_row_patterns = false
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Analyze.DetectWorksheetRootMismatch || cfg.Analyze.DetectUnstableLastRowPatterns {
+		t.Fatalf("worksheet-root legacy settings were not applied: %+v", cfg.Analyze)
+	}
+	for _, id := range []string{"VBA216", "VBA217"} {
+		if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", id) {
+			t.Fatalf("expected %s legacy-config warning, got %+v", id, cfg.Warnings)
+		}
 	}
 }
 

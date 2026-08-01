@@ -176,8 +176,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_redim_preserve_dimension`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
+- `detect_unstable_last_row_patterns`
 - `detect_unused_local_variables`
 - `detect_unused_private_procedures`
+- `detect_worksheet_root_mismatch`
 - `diagnostic_runs`
 - `dialog_id`
 - `diff_args_invalid`

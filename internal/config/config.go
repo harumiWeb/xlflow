@@ -140,6 +140,8 @@ type AnalyzeConfig struct {
 	DetectDictionaryIterationValueUsage bool     `toml:"detect_dictionary_iteration_value_usage"`
 	DetectLeakedOnErrorResumeNextScopes bool     `toml:"detect_leaked_on_error_resume_next_scopes"`
 	DetectStatefulExcelCallArguments    bool     `toml:"detect_stateful_excel_call_arguments"`
+	DetectWorksheetRootMismatch         bool     `toml:"detect_worksheet_root_mismatch"`
+	DetectUnstableLastRowPatterns       bool     `toml:"detect_unstable_last_row_patterns"`
 }
 
 type lintRuleAdapter struct {
@@ -204,6 +206,8 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA213": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryIterationValueUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryIterationValueUsage = v }},
 	"VBA214": {Get: func(c AnalyzeConfig) bool { return c.DetectLeakedOnErrorResumeNextScopes }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLeakedOnErrorResumeNextScopes = v }},
 	"VBA215": {Get: func(c AnalyzeConfig) bool { return c.DetectStatefulExcelCallArguments }, Set: func(c *AnalyzeConfig, v bool) { c.DetectStatefulExcelCallArguments = v }},
+	"VBA216": {Get: func(c AnalyzeConfig) bool { return c.DetectWorksheetRootMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWorksheetRootMismatch = v }},
+	"VBA217": {Get: func(c AnalyzeConfig) bool { return c.DetectUnstableLastRowPatterns }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnstableLastRowPatterns = v }},
 }
 
 var (

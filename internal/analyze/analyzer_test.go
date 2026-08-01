@@ -475,6 +475,28 @@ End Sub
 	}
 }
 
+func TestAnalyzerDoesNotSuppressVBA216(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  ' xlflow:disable-next-line VBA216
+  lastRow = Sheet1.Cells(Sheet2.Rows.Count, 1).End(xlUp).Row
+End Sub
+`)
+
+	result, err := Analyzer{RootDir: dir, Config: config.Default()}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA216"); len(got) != 1 {
+		t.Fatalf("VBA216 should remain unsuppressed: findings=%+v warnings=%+v", result.Findings, result.Warnings)
+	}
+	if !hasWarning(result.Warnings, "unsupported_inline_suppression_rule", "VBA216") {
+		t.Fatalf("expected unsupported suppression warning, got %+v", result.Warnings)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRulesAllowGuardedPatterns(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -1575,6 +1597,54 @@ End Sub
 	}
 }
 
+func TestWorksheetRootFindingsAppearInRealtimeAnalysis(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+  Dim inputSheet As Worksheet
+  Dim outputSheet As Worksheet
+  Dim lastRow As Long
+  Set inputSheet = ThisWorkbook.Worksheets("Input")
+  Set outputSheet = ThisWorkbook.Worksheets("Output")
+  lastRow = inputSheet.Cells(outputSheet.Rows.Count, 1).End(xlUp).Row
+  lastRow = Cells(Rows.Count, 1).End(xlDown).Row
+End Sub
+`)
+
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA216"); len(got) != 1 || got[0].Line != 8 || got[0].Severity != "error" {
+		t.Fatalf("realtime VBA216 findings = %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA217"); len(got) != 2 || got[0].Line != 9 || got[1].Line != 9 {
+		t.Fatalf("realtime VBA217 findings = %+v", got)
+	}
+}
+
+func TestWorksheetRootRealtimeAnalysisUsesWorkbookCodenames(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkbookModule(t, dir, "InputSheet.bas")
+	writeWorkbookModule(t, dir, "OutputSheet.bas")
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  lastRow = InputSheet.Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row
+End Sub
+`)
+
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA216"); len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("realtime workbook-codename VBA216 findings = %+v", got)
+	}
+}
+
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -2065,12 +2135,195 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA216DetectsDistinctWorksheetRoots(t *testing.T) {
+	dir := t.TempDir()
+	tracker := newWorksheetRootTracker(nil)
+	tracker.observeSetAssignment(`Set inputSheet = ThisWorkbook.Worksheets("Input")`)
+	tracker.observeSetAssignment(`Set outputSheet = ThisWorkbook.Worksheets("Output")`)
+	if input, output := tracker.variables["inputsheet"], tracker.variables["outputsheet"]; input.kind != worksheetRootExplicit || output.kind != worksheetRootExplicit || input.identity == output.identity {
+		t.Fatalf("worksheet selector identities = %+v / %+v", input, output)
+	}
+	writeWorkbookModule(t, dir, "InputSheet.bas")
+	writeWorkbookModule(t, dir, "OutputSheet.bas")
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub VariableRoots()
+  Dim inputSheet As Worksheet
+  Dim outputSheet As Worksheet
+  Dim lastRow As Long
+  Set inputSheet = InputSheet
+  Set outputSheet = OutputSheet
+  lastRow = inputSheet.Cells(outputSheet.Rows.Count, 1).End(xlUp).Row
+End Sub
+
+Public Sub WorkbookSelectorRoots()
+  Dim inputSheet As Worksheet
+  Dim outputSheet As Worksheet
+  Dim lastRow As Long
+  Set inputSheet = ThisWorkbook.Worksheets("Input")
+  Set outputSheet = ThisWorkbook.Worksheets("Output")
+  lastRow = inputSheet.Cells(outputSheet.Rows.Count, 1).End(xlUp).Row
+End Sub
+
+Public Sub CodenameRangeRoots()
+  Dim result As Range
+  Set result = InputSheet.Range(OutputSheet.Cells(1, 1), OutputSheet.Cells(2, 1))
+End Sub
+
+Public Sub WithRoots()
+  Dim lastRow As Long
+  With Sheet1
+    With .Range("A1")
+      lastRow = .Cells(Sheet2.Rows.Count, 1).End(xlUp).Row
+    End With
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA216")
+	if len(got) != 4 {
+		t.Fatalf("VBA216 findings = %+v, want four", got)
+	}
+	for _, finding := range got {
+		if finding.Severity != "error" || !strings.Contains(finding.Suggestion, "Cells(") {
+			t.Fatalf("unexpected VBA216 finding: %+v", finding)
+		}
+	}
+	if blocking := findingsByCode(BlockingFindings(findings), "VBA216"); len(blocking) != 4 {
+		t.Fatalf("VBA216 must block preflight: %+v", blocking)
+	}
+}
+
+func TestAnalyzerVBA216AcceptsSameWorksheetRootsAndUnknowns(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub SameRoot()
+  Dim ws As Worksheet
+  Dim lastRow As Long
+  Set ws = ThisWorkbook.Worksheets("Data")
+  lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+  With ws
+    lastRow = .Cells(.Rows.Count, 1).End(xlUp).Row
+  End With
+  Set ws = GetWorksheetAtRuntime()
+  lastRow = ws.Cells(Sheet2.Rows.Count, 1).End(xlUp).Row
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA216"); len(got) != 0 {
+		t.Fatalf("same and unknown roots must not report VBA216: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA217ReportsOnlyUnstableLastRowPatterns(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  Dim count As Long
+  lastRow = Cells(Rows.Count, 1).End(xlUp).Row
+  lastRow = Sheet1.Cells(Rows.Count, 1).End(xlUp).Row
+  lastRow = Sheet1.Cells(1, 1).End(xlDown).Row
+  lastRow = Sheet1.UsedRange.Rows.Count
+  lastRow = Sheet1.Range("A1").CurrentRegion.Rows.Count
+  lastRow = Sheet1.UsedRange.Row + Sheet1.UsedRange.Rows.Count - 1
+  count = Sheet1.UsedRange.Rows.Count
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA217")
+	if len(got) != 5 {
+		t.Fatalf("VBA217 findings = %+v, want five", got)
+	}
+	for _, finding := range got {
+		if finding.Severity != "warning" {
+			t.Fatalf("VBA217 must be a warning: %+v", finding)
+		}
+	}
+	if blocking := findingsByCode(BlockingFindings(findings), "VBA217"); len(blocking) != 0 {
+		t.Fatalf("VBA217 must not block preflight: %+v", blocking)
+	}
+}
+
+func TestAnalyzerVBA217HonorsDisableAndInlineSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub InlineSuppressed()
+  Dim lastRow As Long
+  ' xlflow:disable-next-line VBA217
+  lastRow = Cells(Rows.Count, 1).End(xlUp).Row
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA217"); len(got) != 0 {
+		t.Fatalf("VBA217 inline suppression should apply: %+v", got)
+	}
+
+	cfg := config.Default()
+	cfg.Analyze.DetectUnstableLastRowPatterns = false
+	findings, err = Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA217"); len(got) != 0 {
+		t.Fatalf("disabled VBA217 should not report: %+v", got)
+	}
+}
+
+func TestAnalyzerWorksheetRootRulesIgnoreStringLiterals(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  lastRow = Len("Cells(Rows.Count, 1).End(xlDown).Row")
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VBA216", "VBA217"} {
+		if got := findingsByCode(findings, code); len(got) != 0 {
+			t.Fatalf("%s should ignore string literals: %+v", code, got)
+		}
+	}
+}
+
 func writeModule(t *testing.T, dir, name, body string) {
 	t.Helper()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeWorkbookModule(t *testing.T, dir, name string) {
+	t.Helper()
+	src := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	module := strings.TrimSuffix(name, filepath.Ext(name))
+	body := "Attribute VB_Name = \"" + module + "\"\nOption Explicit\n"
 	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

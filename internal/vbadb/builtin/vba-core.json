@@ -177,7 +177,9 @@
         {
           "name": "Array",
           "return_type": "Variant",
-          "parameters": [{ "name": "ArgList", "type": "Variant", "optional": true, "param_array": true }]
+          "parameters": [
+            { "name": "ArgList", "type": "Variant", "optional": true, "param_array": true }
+          ]
         },
         {
           "name": "LBound",
