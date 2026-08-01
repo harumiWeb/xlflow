@@ -65,6 +65,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA211`](#vba211) | analyze | error    | procedure-local | yes     | Expanded Excel member mismatch               |
 | [`VBA212`](#vba212) | analyze | warning  | procedure-local | yes     | Non-short-circuit object guard               |
 | [`VBA213`](#vba213) | analyze | warning  | procedure-local | no      | Dictionary iteration value misuse            |
+| [`VBA214`](#vba214) | analyze | warning  | procedure-local | yes     | Leaked On Error Resume Next scope            |
 
 ## VB001
 
@@ -1127,3 +1128,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                        |
 | Real-time editor diagnostic | yes                                       |
 | Fix available               | no                                        |
+
+## VBA214
+
+**Leaked On Error Resume Next scope.** On Error Resume Next remains active across an unsafe procedure scope.
+
+| Property                    | Value                                       |
+| --------------------------- | ------------------------------------------- |
+| Family                      | `analyze`                                   |
+| Category                    | `reliability`                               |
+| Default severity            | `warning`                                   |
+| Scope                       | `procedure-local`                           |
+| Precision                   | `medium`                                    |
+| Enabled by default          | yes                                         |
+| Configuration               | `detect_leaked_on_error_resume_next_scopes` |
+| Inline suppression          | yes                                         |
+| Blocks source preflight     | no                                          |
+| Real-time editor diagnostic | no                                          |
+| Fix available               | no                                          |

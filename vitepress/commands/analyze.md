@@ -69,6 +69,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA211` | error    | Expanded known Excel object/member mismatch.                                 |
 | `VBA212` | warning  | Object `Nothing` guard and dereference share a non-short-circuit expression. |
 | `VBA213` | warning  | Direct Dictionary iteration key is used as an object or value.               |
+| `VBA214` | warning/error | `On Error Resume Next` extends beyond a narrow compatibility probe.       |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -90,7 +91,7 @@ Cells(1, 1).Value = 2 ' xlflow:disable-line VBA205
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match an analyzer diagnostic are reported as warnings.
 
-Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, and `VBA212` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration is not reported. Diagnostics `VBA101` through `VBA106` are always enabled.
+Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, and `VBA214` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration is not reported. `VBA214` allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported. Resolved project-local calls raise its severity to `error`, but this rule does not block `push` or `run` preflight. Diagnostics `VBA101` through `VBA106` are always enabled.
 
 ## JSON Output Example
 

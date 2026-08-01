@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
@@ -1134,6 +1135,398 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA204"); len(got) != 0 {
 		t.Fatalf("VBA204 should not treat explicit GoTo Handler as fallthrough: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214AllowsNarrowCompatibilityProbes(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub DirectProbe()
+  Dim ws As Worksheet
+  On Error Resume Next
+  Set ws = ThisWorkbook.Worksheets("Data")
+  On Error GoTo 0
+  If ws Is Nothing Then Exit Sub
+End Sub
+
+Public Sub CheckedProbe()
+  Dim ws As Worksheet
+  On Error Resume Next
+  Set ws = ThisWorkbook.Worksheets("Data")
+  If Err.Number <> 0 Then
+    Err.Clear
+  End If
+  On Error GoTo 0
+End Sub
+
+Public Sub ReplacedByHandler()
+  Dim ws As Worksheet
+  On Error Resume Next
+  Set ws = ThisWorkbook.Worksheets("Data")
+  On Error GoTo Handler
+  Exit Sub
+Handler:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("narrow probes should not report VBA214: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214ReportsScopeBoundsAndEarlyExits(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub BroadScope()
+  On Error Resume Next
+  Debug.Print "one"
+  Debug.Print "two"
+  On Error GoTo 0
+End Sub
+
+Public Sub EarlyExit()
+  On Error Resume Next
+  Debug.Print "one"
+  Exit Sub
+End Sub
+
+Public Sub NaturalExit()
+  On Error Resume Next
+  Debug.Print "one"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 3 {
+		t.Fatalf("VBA214 findings = %+v, want three", got)
+	}
+	wantEnds := map[int]int{3: 6, 10: 12, 16: 18}
+	for _, finding := range got {
+		if end, ok := wantEnds[finding.Line]; !ok || finding.ScopeEndLine != end {
+			t.Fatalf("unexpected VBA214 scope boundary: %+v, want starts/ends %+v", finding, wantEnds)
+		}
+		if finding.Severity != "warning" || !containsAll(finding.Message, "line "+strconvItoa(finding.Line), "line "+strconvItoa(finding.ScopeEndLine)) {
+			t.Fatalf("unexpected VBA214 finding: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA214ReportsContinuationAfterObjectProbeBeforeRestore(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UsesFailedProbe()
+  Dim ws As Worksheet
+  On Error Resume Next
+  Set ws = ThisWorkbook.Worksheets("Data")
+  Debug.Print ws.Name
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Line != 4 || got[0].ScopeEndLine != 7 || got[0].Severity != "warning" {
+		t.Fatalf("VBA214 object-probe continuation = %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214DoesNotTreatStringLiteralsAsErrProbes(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error Resume Next
+  Debug.Print "Err.Number"
+  Debug.Print "two"
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Line != 3 || got[0].ScopeEndLine != 6 {
+		t.Fatalf("VBA214 must not treat string literals as Err probes: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214ElevatesResolvedProjectCallsAndWarnsUnresolvedCalls(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Helper()
+End Sub
+
+Public Function ValueHelper() As Long
+  ValueHelper = 1
+End Function
+
+Public Sub LocalCall()
+  On Error Resume Next
+  Helper
+  On Error GoTo 0
+End Sub
+
+Public Sub LocalFunctionCall()
+  Dim value As Long
+  On Error Resume Next
+  value = ValueHelper()
+  On Error GoTo 0
+End Sub
+
+Public Sub UnknownCall()
+  On Error Resume Next
+  MissingHelper
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 3 {
+		t.Fatalf("VBA214 findings = %+v, want three", got)
+	}
+	severityByProcedure := map[string]string{}
+	for _, finding := range got {
+		severityByProcedure[finding.Procedure] = finding.Severity
+	}
+	if severityByProcedure["LocalCall"] != "error" || severityByProcedure["LocalFunctionCall"] != "error" || severityByProcedure["UnknownCall"] != "warning" {
+		t.Fatalf("VBA214 call severities = %+v", severityByProcedure)
+	}
+	if blocking := findingsByCode(BlockingFindings(findings), "VBA214"); len(blocking) != 0 {
+		t.Fatalf("VBA214 must not block source preflight: %+v", blocking)
+	}
+}
+
+func TestAnalyzerVBA214TracksNestedBranchAndHandlerScopes(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub BranchLeak(ByVal stopEarly As Boolean)
+  On Error Resume Next
+  If stopEarly Then
+    Exit Sub
+  End If
+  Debug.Print "work"
+  On Error GoTo 0
+End Sub
+
+Public Sub HandlerLeak()
+  On Error GoTo Handler
+  Debug.Print "work"
+  Exit Sub
+Handler:
+  On Error Resume Next
+  Debug.Print "work"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 3 {
+		t.Fatalf("VBA214 findings = %+v, want branch restore/exit and handler exit", got)
+	}
+	boundaries := map[string]map[int]bool{}
+	for _, finding := range got {
+		if boundaries[finding.Procedure] == nil {
+			boundaries[finding.Procedure] = map[int]bool{}
+		}
+		boundaries[finding.Procedure][finding.ScopeEndLine] = true
+	}
+	if !boundaries["BranchLeak"][5] || !boundaries["BranchLeak"][8] || !boundaries["HandlerLeak"][18] {
+		t.Fatalf("VBA214 scope ends = %+v", boundaries)
+	}
+}
+
+func TestAnalyzerVBA214DoesNotFollowMergedDisabledErrorMode(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error Resume Next
+  If Err.Number <> 0 Then
+    On Error GoTo 0
+  End If
+  Debug.Print "probe"
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("merged disabled-mode error edge must not leak Resume Next scope: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214ReportsAllProcedureExitKindsAndHandlerReplacement(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function FunctionExit() As Long
+  On Error Resume Next
+  Exit Function
+End Function
+
+Public Property Get PropertyExit() As Long
+  On Error Resume Next
+  Exit Property
+End Property
+
+Public Sub TerminatesProcess()
+  On Error Resume Next
+  End
+End Sub
+
+Public Sub UnsafeHandlerReplacement()
+  On Error Resume Next
+  Debug.Print "one"
+  Debug.Print "two"
+  On Error GoTo Handler
+Handler:
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	for _, procedure := range []string{"FunctionExit", "PropertyExit", "TerminatesProcess", "UnsafeHandlerReplacement"} {
+		if !procedures[procedure] {
+			t.Fatalf("missing VBA214 for %s: %+v", procedure, got)
+		}
+	}
+}
+
+func TestAnalyzerVBA214ReportsUnknownGotoExit(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  On Error Resume Next
+  GoTo MissingLabel
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Line != 3 || got[0].ScopeEndLine != 4 || !strings.Contains(got[0].Reason, "exit before") {
+		t.Fatalf("VBA214 unknown goto exit = %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214ElevatesProjectCallsInControlConditions(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function ProjectPredicate() As Boolean
+  ProjectPredicate = True
+End Function
+
+Public Sub Run()
+  On Error Resume Next
+  If ProjectPredicate() Then
+    Debug.Print "work"
+  End If
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Severity != "error" || got[0].Procedure != "Run" {
+		t.Fatalf("project call in control condition should be VBA214 error: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA214HonorsInlineAndConfigSuppressionIndependentlyOfVB004(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub InlineSuppressed()
+  ' xlflow:disable-next-line VBA214
+  On Error Resume Next
+  Debug.Print "one"
+  Exit Sub
+End Sub
+
+Public Sub Reported()
+  On Error Resume Next
+  Debug.Print "one"
+  Exit Sub
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.ForbidOnErrorResumeNext = false
+	issues, err := (lint.Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "VB004" {
+			t.Fatalf("VB004 should be disabled independently: %+v", issues)
+		}
+	}
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA214")
+	if len(got) != 1 || got[0].Procedure != "Reported" {
+		t.Fatalf("VBA214 should remain independent from VB004 and honor inline suppression: %+v", got)
+	}
+
+	cfg.Analyze.DetectLeakedOnErrorResumeNextScopes = false
+	findings, err = Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("disabled VBA214 should not report: %+v", got)
+	}
+}
+
+func TestSourceRealtimeAnalysisExcludesBatchOnlyVBA214(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+  On Error Resume Next
+  Debug.Print "one"
+  Debug.Print "two"
+  On Error GoTo 0
+End Sub
+`)
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("batch-only VBA214 should not appear in realtime findings: %+v", got)
 	}
 }
 

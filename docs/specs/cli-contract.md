@@ -814,6 +814,8 @@ registry; this section defines command behavior and compatibility.
 
 Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). When xlflow can confidently identify an unclosed block, VB014 also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`; its primary location is the point where the closer is expected, while the metadata identifies the unmatched opener. Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
 
+Analyzer finding objects use the same core location and remediation fields. `VBA214` additionally includes `scope_end_line`: `line` identifies the `On Error Resume Next` start, and `scope_end_line` identifies the path-specific restoration or exit boundary.
+
 Core declaration, member-access, error-handling, Excel object, and procedure-scope rules use `tree-sitter-vba` so comments, string literals, procedure scope, and individual declarators are handled structurally.
 
 - `VB001`: missing `Option Explicit`
@@ -898,6 +900,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA211`: expanded known Excel object/member mismatch
 - `VBA212`: object `Nothing` guard and dereference are combined in a non-short-circuit boolean expression
 - `VBA213`: direct `Scripting.Dictionary` iteration is used as if it yielded values or objects
+- `VBA214`: `On Error Resume Next` remains active across an unsafe scope; resolved project-local calls are reported as errors
 
 Projects should disable configurable analyzer rules with `[analyze].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VBA205", "VBA211"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
 
@@ -905,6 +908,6 @@ Projects should disable configurable analyzer rules with `[analyze].disabled_rul
 duplicate removal, unknown/non-configurable rejection, warning, and precedence
 contract as `[lint].disabled_rules`.
 
-Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect_range_find_nothing_check`, `VBA202` = `detect_object_use_before_set`, `VBA203` = `detect_application_state_restore`, `VBA204` = `detect_error_handler_fallthrough`, `VBA205` = `forbid_unqualified_excel_objects`, `VBA206` = `detect_byref_argument_mismatch`, `VBA207` = `detect_dictionary_collection_guard`, `VBA208` = `detect_redim_preserve_dimension`, `VBA209` = `detect_object_array_comparison`, `VBA210` = `detect_function_return_path`, `VBA211` = `detect_excel_object_member_mismatch`, `VBA212` = `detect_non_short_circuit_object_guard`, and `VBA213` = `detect_dictionary_iteration_value_usage`.
+Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect_range_find_nothing_check`, `VBA202` = `detect_object_use_before_set`, `VBA203` = `detect_application_state_restore`, `VBA204` = `detect_error_handler_fallthrough`, `VBA205` = `forbid_unqualified_excel_objects`, `VBA206` = `detect_byref_argument_mismatch`, `VBA207` = `detect_dictionary_collection_guard`, `VBA208` = `detect_redim_preserve_dimension`, `VBA209` = `detect_object_array_comparison`, `VBA210` = `detect_function_return_path`, `VBA211` = `detect_excel_object_member_mismatch`, `VBA212` = `detect_non_short_circuit_object_guard`, `VBA213` = `detect_dictionary_iteration_value_usage`, and `VBA214` = `detect_leaked_on_error_resume_next_scopes`.
 
-Analyzer rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, and `VBA212` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are disabled by default and can still be enabled with their legacy `[analyze]` booleans during the compatibility window. `VBA213` warns only when direct iteration of a known `Scripting.Dictionary` uses its key variable as an object or value; ordinary key iteration remains valid. Analyzer diagnostics `VBA101` through `VBA106` are always enabled.
+Analyzer rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, and `VBA214` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are disabled by default and can still be enabled with their legacy `[analyze]` booleans during the compatibility window. `VBA213` warns only when direct iteration of a known `Scripting.Dictionary` uses its key variable as an object or value; ordinary key iteration remains valid. `VBA214` accepts one compatibility probe followed by immediate restoration (with optional `Err.Number` inspection and `Err.Clear`), but reports wider scopes and any un-restored exit. Analyzer diagnostics `VBA101` through `VBA106` are always enabled.

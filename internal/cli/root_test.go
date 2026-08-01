@@ -772,6 +772,49 @@ func TestAnalyzeCommandJSONIncludesConfigWarnings(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCommandJSONIncludesVBA214ScopeEndLine(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(`Option Explicit
+Public Sub Run()
+  On Error Resume Next
+  Debug.Print "one"
+  Debug.Print "two"
+  On Error GoTo 0
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+	if err := root.Execute(); err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("analyze command error = %v, exit = %d; want validation failure", err, output.ExitCode(err))
+	}
+	var got struct {
+		Analysis []analyze.Finding `json:"analysis"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA214" || got.Analysis[0].Line != 3 || got.Analysis[0].ScopeEndLine != 6 {
+		t.Fatalf("VBA214 JSON analysis = %+v", got.Analysis)
+	}
+}
+
 func TestLintCommandJSONIncludesInlineSuppressionWarnings(t *testing.T) {
 	dir := writeCLIInlineSuppressionProject(t, "lint", `Option Explicit
 Public Sub Run()

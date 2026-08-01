@@ -166,6 +166,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_for_each_control_type`
 - `detect_function_return_path`
 - `detect_implicit_variant`
+- `detect_leaked_on_error_resume_next_scopes`
 - `detect_multiple_declarator_clarity`
 - `detect_nested_with_ambiguity`
 - `detect_non_short_circuit_object_guard`

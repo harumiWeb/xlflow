@@ -138,6 +138,7 @@ type AnalyzeConfig struct {
 	DetectExcelObjectMemberMismatch     bool     `toml:"detect_excel_object_member_mismatch"`
 	DetectNonShortCircuitObjectGuard    bool     `toml:"detect_non_short_circuit_object_guard"`
 	DetectDictionaryIterationValueUsage bool     `toml:"detect_dictionary_iteration_value_usage"`
+	DetectLeakedOnErrorResumeNextScopes bool     `toml:"detect_leaked_on_error_resume_next_scopes"`
 }
 
 type lintRuleAdapter struct {
@@ -200,6 +201,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA211": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelObjectMemberMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelObjectMemberMismatch = v }},
 	"VBA212": {Get: func(c AnalyzeConfig) bool { return c.DetectNonShortCircuitObjectGuard }, Set: func(c *AnalyzeConfig, v bool) { c.DetectNonShortCircuitObjectGuard = v }},
 	"VBA213": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryIterationValueUsage }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryIterationValueUsage = v }},
+	"VBA214": {Get: func(c AnalyzeConfig) bool { return c.DetectLeakedOnErrorResumeNextScopes }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLeakedOnErrorResumeNextScopes = v }},
 }
 
 var (

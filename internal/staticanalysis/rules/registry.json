@@ -1062,6 +1062,24 @@
       "configuration_key": "detect_dictionary_iteration_value_usage",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA214",
+      "title": "Leaked On Error Resume Next scope",
+      "description": "On Error Resume Next remains active across an unsafe procedure scope.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": false,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba214",
+      "configurable": true,
+      "configuration_key": "detect_leaked_on_error_resume_next_scopes",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

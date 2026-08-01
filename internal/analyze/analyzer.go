@@ -21,17 +21,18 @@ import (
 )
 
 type Finding struct {
-	Code       string   `json:"code"`
-	Severity   string   `json:"severity"`
-	File       string   `json:"file"`
-	Module     string   `json:"module,omitempty"`
-	Procedure  string   `json:"procedure,omitempty"`
-	Line       int      `json:"line"`
-	Column     int      `json:"column,omitempty"`
-	Message    string   `json:"message"`
-	Reason     string   `json:"reason"`
-	Suggestion string   `json:"suggestion"`
-	NearbyCode []string `json:"nearby_code,omitempty"`
+	Code         string   `json:"code"`
+	Severity     string   `json:"severity"`
+	File         string   `json:"file"`
+	Module       string   `json:"module,omitempty"`
+	Procedure    string   `json:"procedure,omitempty"`
+	Line         int      `json:"line"`
+	Column       int      `json:"column,omitempty"`
+	ScopeEndLine int      `json:"scope_end_line,omitempty"`
+	Message      string   `json:"message"`
+	Reason       string   `json:"reason"`
+	Suggestion   string   `json:"suggestion"`
+	NearbyCode   []string `json:"nearby_code,omitempty"`
 }
 
 type Result struct {
@@ -46,24 +47,25 @@ type Analyzer struct {
 }
 
 var (
-	declRe             = regexp.MustCompile(`(?i)^\s*(?:dim|private|public|static)\s+(.+)$`)
-	assignRe           = regexp.MustCompile(`(?i)^\s*(?:let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=`)
-	setAssignRe        = regexp.MustCompile(`(?i)^\s*set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
-	callAssignRe       = regexp.MustCompile(`(?i)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:\(|$)`)
-	withRe             = regexp.MustCompile(`(?i)^\s*with\s+(.+)$`)
-	endWithRe          = regexp.MustCompile(`(?i)^\s*end\s+with\b`)
-	withMemberRe       = regexp.MustCompile(`(?i)^\s*\.([A-Za-z_][A-Za-z0-9_]*)\b`)
-	memberRe           = regexp.MustCompile(`(?i)\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b`)
-	traceHelperCallRe  = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(XlflowLog|XlflowSetTraceFile)\b`)
-	traceHelperQualRe  = regexp.MustCompile(`(?i)\bXlflowTrace\s*\.\s*(XlflowLog|XlflowSetTraceFile)\b`)
-	unqualifiedExcelRe = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])\b(Range|Cells|Rows|Columns)\b\s*(?:\(|\.)`)
-	activeExcelRe      = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])\b(ActiveWorkbook|ActiveSheet|ActiveCell|Selection)\b`)
-	redimPreserveRe    = regexp.MustCompile(`(?i)^\s*redim\s+preserve\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)`)
-	forEachDirectRe    = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
-	forStartRe         = regexp.MustCompile(`(?i)^\s*for\b`)
-	nextRe             = regexp.MustCompile(`(?i)^\s*next\b`)
-	dictionaryCreateRe = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
-	dictionaryNewRe    = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
+	declRe              = regexp.MustCompile(`(?i)^\s*(?:dim|private|public|static)\s+(.+)$`)
+	assignRe            = regexp.MustCompile(`(?i)^\s*(?:let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	setAssignRe         = regexp.MustCompile(`(?i)^\s*set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	callAssignRe        = regexp.MustCompile(`(?i)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:\(|$)`)
+	withRe              = regexp.MustCompile(`(?i)^\s*with\s+(.+)$`)
+	endWithRe           = regexp.MustCompile(`(?i)^\s*end\s+with\b`)
+	withMemberRe        = regexp.MustCompile(`(?i)^\s*\.([A-Za-z_][A-Za-z0-9_]*)\b`)
+	memberRe            = regexp.MustCompile(`(?i)\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b`)
+	traceHelperCallRe   = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(XlflowLog|XlflowSetTraceFile)\b`)
+	traceHelperQualRe   = regexp.MustCompile(`(?i)\bXlflowTrace\s*\.\s*(XlflowLog|XlflowSetTraceFile)\b`)
+	unqualifiedExcelRe  = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])\b(Range|Cells|Rows|Columns)\b\s*(?:\(|\.)`)
+	activeExcelRe       = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_.$])\b(ActiveWorkbook|ActiveSheet|ActiveCell|Selection)\b`)
+	redimPreserveRe     = regexp.MustCompile(`(?i)^\s*redim\s+preserve\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)`)
+	forEachDirectRe     = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
+	forStartRe          = regexp.MustCompile(`(?i)^\s*for\b`)
+	nextRe              = regexp.MustCompile(`(?i)^\s*next\b`)
+	dictionaryCreateRe  = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
+	dictionaryNewRe     = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
+	errProbeReferenceRe = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|clear)\b`)
 )
 
 var objectTypes = map[string]bool{
@@ -170,6 +172,7 @@ type sourceProcedure struct {
 	EndLine    int
 	Params     []parameterInfo
 	Statements []procedureir.Statement
+	Calls      []procedureir.CallSite
 	Accesses   []procedureir.VariableAccess
 	Graph      *vbacfg.Graph
 	Effects    *effects.ProcedureSummary
@@ -718,6 +721,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
+	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
+		findings = append(findings, a.leakedOnErrorResumeNextFindings(file, proc)...)
+	}
 	if a.Config.Analyze.DetectFunctionReturnPath && proc.Kind == "Function" && proc.Name != "" && !functionAssigned {
 		findings = append(findings, a.simpleFinding(file, proc, proc.StartLine, "VBA210", "warning", proc.Name+" may exit without assigning its return value.", "Functions return the default value when no assignment to the function name is reached.", "Assign "+proc.Name+" on every successful return path, or make the default return explicit."))
 	}
@@ -749,6 +755,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			EndLine:    procedure.Symbol.DeclarationRange.EndLine,
 			Params:     params,
 			Statements: append([]procedureir.Statement(nil), procedure.Statements...),
+			Calls:      append([]procedureir.CallSite(nil), procedure.Calls...),
 			Accesses:   append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
@@ -1845,6 +1852,277 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 		lastCodeByParent[statement.ParentID] = statement.Text
 	}
 	return findings
+}
+
+type resumeNextScopeFlag uint8
+
+const (
+	resumeNextScopeMultipleOperations resumeNextScopeFlag = 1 << iota
+	resumeNextScopeControlFlow
+	resumeNextScopeCall
+	resumeNextScopeProjectCall
+	resumeNextScopeUnrestoredExit
+)
+
+type resumeNextScopeState struct {
+	block      vbacfg.BlockID
+	operations uint8
+	flags      resumeNextScopeFlag
+}
+
+type resumeNextScopeOutcome struct {
+	startLine int
+	endLine   int
+	flags     resumeNextScopeFlag
+}
+
+// leakedOnErrorResumeNextFindings follows each reachable Resume Next scope until
+// it is explicitly replaced or leaves the procedure. The small state domain is
+// deliberately saturated at two operations: the rule only needs to distinguish
+// a single compatibility probe from a wider protected region.
+func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourceProcedure) []Finding {
+	if proc.Graph == nil {
+		return nil
+	}
+	reachable := map[vbacfg.BlockID]bool{}
+	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
+		reachable[id] = true
+	}
+	outcomes := map[string]resumeNextScopeOutcome{}
+	for _, statement := range proc.Statements {
+		if !isOnErrorResumeNext(statement) {
+			continue
+		}
+		start, ok := proc.Graph.BlockForStatement(statement.ID)
+		if !ok || !reachable[start.ID] {
+			continue
+		}
+		for _, outcome := range resumeNextScopeOutcomes(proc, start.ID) {
+			if outcome.flags == 0 {
+				continue
+			}
+			outcome.startLine = statement.Range.StartLine
+			key := strings.Join([]string{strconvItoa(outcome.startLine), strconvItoa(outcome.endLine)}, ":")
+			if existing, found := outcomes[key]; found {
+				existing.flags |= outcome.flags
+				outcomes[key] = existing
+			} else {
+				outcomes[key] = outcome
+			}
+		}
+	}
+	if len(outcomes) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(outcomes))
+	for key := range outcomes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	findings := make([]Finding, 0, len(keys))
+	for _, key := range keys {
+		outcome := outcomes[key]
+		severity := "warning"
+		if outcome.flags&resumeNextScopeProjectCall != 0 {
+			severity = "error"
+		}
+		finding := a.simpleFinding(
+			file, proc, outcome.startLine, "VBA214", severity,
+			"On Error Resume Next starting at line "+strconvItoa(outcome.startLine)+" remains active through line "+strconvItoa(outcome.endLine)+".",
+			resumeNextScopeReason(outcome.flags),
+			"Limit `On Error Resume Next` to one compatibility probe, inspect and clear `Err` when needed, then restore error handling with `On Error GoTo 0` before calls, branches, or exits.",
+		)
+		finding.ScopeEndLine = outcome.endLine
+		findings = append(findings, finding)
+	}
+	return findings
+}
+
+func resumeNextScopeOutcomes(proc sourceProcedure, start vbacfg.BlockID) []resumeNextScopeOutcome {
+	graph := proc.Graph
+	queue := make([]resumeNextScopeState, 0)
+	var outcomes []resumeNextScopeOutcome
+	for _, edge := range graph.Edges {
+		if edge.From != start || edge.Class != vbacfg.EdgeNormal {
+			continue
+		}
+		if isResumeNextScopeExit(*graph, edge.To) {
+			outcomes = append(outcomes, resumeNextScopeOutcome{
+				endLine: resumeNextScopeEndLine(proc, *graph, edge),
+				flags:   resumeNextScopeUnrestoredExit,
+			})
+			continue
+		}
+		queue = append(queue, resumeNextScopeState{block: edge.To})
+	}
+	seen := map[string]bool{}
+	for len(queue) > 0 {
+		state := queue[0]
+		queue = queue[1:]
+		key := strings.Join([]string{strconvItoa(int(state.block)), strconvItoa(int(state.operations)), strconvItoa(int(state.flags))}, ":")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		block, ok := resumeNextScopeBlock(*graph, state.block)
+		if !ok || block.Statement == nil {
+			continue
+		}
+		statement := *block.Statement
+		if restoresErrorHandling(statement) {
+			if state.flags != 0 {
+				outcomes = append(outcomes, resumeNextScopeOutcome{endLine: statement.Range.StartLine, flags: state.flags})
+			}
+			continue
+		}
+		state = applyResumeNextScopeStatement(proc, state, statement)
+		for _, edge := range graph.Edges {
+			if edge.From != state.block {
+				continue
+			}
+			if !resumeNextScopeFollowsEdge(*graph, edge) {
+				continue
+			}
+			if isResumeNextScopeExit(*graph, edge.To) {
+				terminal := state
+				terminal.flags |= resumeNextScopeUnrestoredExit
+				outcomes = append(outcomes, resumeNextScopeOutcome{
+					endLine: resumeNextScopeEndLine(proc, *graph, edge),
+					flags:   terminal.flags,
+				})
+				continue
+			}
+			queue = append(queue, resumeNextScopeState{block: edge.To, operations: state.operations, flags: state.flags})
+		}
+	}
+	return outcomes
+}
+
+func isOnErrorResumeNext(statement procedureir.Statement) bool {
+	return statement.Kind == procedureir.StatementOnError && statement.Control != nil &&
+		statement.Control.Transfer == procedureir.TransferOnErrorResumeNext
+}
+
+func restoresErrorHandling(statement procedureir.Statement) bool {
+	if statement.Kind != procedureir.StatementOnError || statement.Control == nil {
+		return false
+	}
+	return statement.Control.Transfer == procedureir.TransferOnErrorDisable ||
+		statement.Control.Transfer == procedureir.TransferOnErrorGoto
+}
+
+func applyResumeNextScopeStatement(proc sourceProcedure, state resumeNextScopeState, statement procedureir.Statement) resumeNextScopeState {
+	if isOnErrorResumeNext(statement) || resumeNextScopeErrProbeStatement(statement) ||
+		statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
+		return state
+	}
+	call, projectCall := resumeNextScopeCallRisk(proc.Calls, statement.ID)
+	if call {
+		state.flags |= resumeNextScopeCall
+	}
+	if projectCall {
+		state.flags |= resumeNextScopeProjectCall
+	}
+	if resumeNextScopeControlStatement(statement) {
+		state.flags |= resumeNextScopeControlFlow
+		return state
+	}
+	if state.operations < 2 {
+		state.operations++
+	}
+	if state.operations >= 2 {
+		state.flags |= resumeNextScopeMultipleOperations
+	}
+	return state
+}
+
+func resumeNextScopeErrProbeStatement(statement procedureir.Statement) bool {
+	code := maskStringLiterals(gui.StripComment(statement.Text))
+	return errProbeReferenceRe.MatchString(code)
+}
+
+func resumeNextScopeControlStatement(statement procedureir.Statement) bool {
+	switch statement.Kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementElse,
+		procedureir.StatementSelect, procedureir.StatementCase, procedureir.StatementFor,
+		procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile,
+		procedureir.StatementWith, procedureir.StatementGoTo, procedureir.StatementResume:
+		return true
+	default:
+		return false
+	}
+}
+
+func resumeNextScopeCallRisk(calls []procedureir.CallSite, statementID int) (call bool, projectCall bool) {
+	for _, candidate := range calls {
+		if candidate.StatementID != statementID {
+			continue
+		}
+		switch candidate.Resolution.Status {
+		case procedureir.ResolutionMatched:
+			if len(candidate.Resolution.Candidates) == 1 {
+				return true, true
+			}
+		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted:
+			call = true
+		}
+	}
+	return call, projectCall
+}
+
+func isResumeNextScopeExit(graph vbacfg.Graph, id vbacfg.BlockID) bool {
+	return id == graph.NormalExit || id == graph.ExceptionalExit || id == graph.TerminationExit || id == graph.UnknownExit
+}
+
+// A graph can merge paths with different active error modes. Only an
+// exceptional EdgeError that mirrors a normal successor represents Resume Next
+// continuation for this scope; handler and disabled-mode error edges belong to
+// the other merged mode and must not be followed.
+func resumeNextScopeFollowsEdge(graph vbacfg.Graph, edge vbacfg.Edge) bool {
+	if edge.Class != vbacfg.EdgeExceptional {
+		return true
+	}
+	if edge.Kind != vbacfg.EdgeError {
+		return false
+	}
+	for _, normal := range graph.Edges {
+		if normal.From == edge.From && normal.To == edge.To && normal.Class == vbacfg.EdgeNormal {
+			return true
+		}
+	}
+	return false
+}
+
+func resumeNextScopeBlock(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
+	if id <= 0 || int(id) > len(graph.Blocks) {
+		return vbacfg.Block{}, false
+	}
+	return graph.Blocks[int(id)-1], true
+}
+
+func resumeNextScopeEndLine(proc sourceProcedure, graph vbacfg.Graph, edge vbacfg.Edge) int {
+	if edge.To == graph.NormalExit && edge.Kind != vbacfg.EdgeProcedureExit {
+		return proc.EndLine
+	}
+	if edge.Range.StartLine > 0 {
+		return edge.Range.StartLine
+	}
+	return proc.EndLine
+}
+
+func resumeNextScopeReason(flags resumeNextScopeFlag) string {
+	switch {
+	case flags&resumeNextScopeProjectCall != 0:
+		return "A resolved project-local procedure call executes while `On Error Resume Next` is active."
+	case flags&resumeNextScopeCall != 0:
+		return "A procedure call can execute while `On Error Resume Next` is active."
+	case flags&resumeNextScopeUnrestoredExit != 0:
+		return "The procedure can exit before error handling is restored."
+	case flags&resumeNextScopeMultipleOperations != 0:
+		return "More than one executable operation is protected by `On Error Resume Next`."
+	default:
+		return "Control flow other than an Err.Number check executes while `On Error Resume Next` is active."
+	}
 }
 
 func BlockingFindings(findings []Finding) []Finding {
