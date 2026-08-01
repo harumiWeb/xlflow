@@ -370,6 +370,238 @@ End Sub
 	}
 }
 
+func TestAnalyzerDetectsAmbiguousExcelScopeRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub InteractiveEntry()
+  ActiveWorkbook.Save
+  Application.ActiveSheet.Range("A1").Value = 1
+  With ActiveWorkbook
+    .Save
+  End With
+  ActiveCell.Value = "x"
+  Selection.Clear
+  Range("A1").Value = 1
+  Cells(1, 1).Value = 2
+  Rows(1).Delete
+  Columns(1).Hidden = True
+  Worksheets("Data").Range("A1").Value = 1
+  Sheets(1).Name = "Data"
+  Workbooks(1).Close
+  Application.Windows(1).Visible = False
+  Workbooks.Open "C:\\temp\\Book.xlsm"
+  Application.Workbooks.Open _
+    Filename:="C:\\temp\\Other.xlsm"
+  Set wb = Workbooks.Open( _
+    Filename:="C:\\temp\\Captured.xlsm" _
+  )
+  Set wb = Application.Workbooks.Open("C:\\temp\\CapturedToo.xlsm")
+  Dim another As Workbook: Set another = Workbooks.Open("C:\\temp\\CapturedAfterDeclaration.xlsm")
+  Set first = Workbooks.Open("C:\\temp\\First.xlsm"): Workbooks.Open "C:\\temp\\Second.xlsm"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	if len(got) != 16 {
+		t.Fatalf("VBA205 findings = %+v, want 16", got)
+	}
+	for line, expected := range map[int]struct{ root, suggestion string }{
+		3: {"ActiveWorkbook", "explicit Workbook"}, 4: {"ActiveSheet", "explicit Workbook"}, 5: {"ActiveWorkbook", "explicit Workbook"}, 8: {"ActiveCell", "explicit Workbook"}, 9: {"Selection", "explicit Workbook"},
+		10: {"Range", "explicit Worksheet or Range"}, 11: {"Cells", "explicit Worksheet or Range"}, 12: {"Rows", "explicit Worksheet or Range"}, 13: {"Columns", "explicit Worksheet or Range"}, 14: {"Worksheets", "ThisWorkbook.Worksheets"},
+		15: {"Sheets", "ThisWorkbook.Sheets"}, 16: {"Workbooks(1)", "by name"}, 17: {"Windows(1)", "by name"}, 18: {"Workbooks.Open", "Set wb = Workbooks.Open"}, 19: {"Workbooks.Open", "Set wb = Workbooks.Open"}, 26: {"Workbooks.Open", "Set wb = Workbooks.Open"},
+	} {
+		matching := false
+		for _, finding := range got {
+			if finding.Line == line && strings.Contains(finding.Message, expected.root) && finding.Reason != "" && strings.Contains(finding.Suggestion, expected.suggestion) {
+				matching = true
+				break
+			}
+		}
+		if !matching {
+			t.Fatalf("expected VBA205 mentioning %q with suggestion %q on line %d: %+v", expected.root, expected.suggestion, line, got)
+		}
+	}
+	for _, finding := range got {
+		if finding.Line == 21 || finding.Line == 24 || finding.Line == 25 {
+			t.Fatalf("captured Workbooks.Open should not be reported: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerAcceptsExplicitExcelScopeReferences(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal wb As Workbook, ByVal ws As Worksheet)
+  ThisWorkbook.Worksheets("Data").Range("A1").Value = 1
+  wb.Worksheets("Data").Range("A1").Value = 2
+  ws.Range("A1").Value = 3
+  Workbooks("Book.xlsm").Worksheets("Data").Range("A1").Value = 4
+  Windows("Book.xlsm").Visible = True
+  Set wb = Workbooks.Open("C:\\temp\\Book.xlsm")
+  With wb.Worksheets("Data")
+    .Range("A2").Value = 5
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA205"); len(got) != 0 {
+		t.Fatalf("explicit Excel scopes should not be reported: %+v", got)
+	}
+}
+
+func TestAnalyzerDetectsAmbiguousExcelScopeRootsInWithHeaders(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  With ActiveSheet
+    .Range("A1").Value = 1
+  End With
+  With Worksheets("Data")
+    .Range("A1").Value = 2
+  End With
+  With Workbooks.Open("C:\\temp\\Book.xlsm")
+    .Worksheets(1).Range("A1").Value = 3
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	for line, root := range map[int]string{3: "ActiveSheet", 6: "Worksheets", 9: "Workbooks.Open"} {
+		found := false
+		for _, finding := range got {
+			if finding.Line == line && strings.Contains(finding.Message, root) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected VBA205 mentioning %q on With header line %d: %+v", root, line, got)
+		}
+	}
+}
+
+func TestAnalyzerDetectsApplicationScopedAmbiguousRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Application.Range("A1").Value = 1
+  Application.Cells(1, 1).Value = 2
+  Application.Rows(1).Delete
+  Application.Columns(1).Hidden = True
+  Application.Worksheets("Data").Range("A1").Value = 3
+  Application.Sheets("Data").Range("A1").Value = 4
+  If True Then Set wb = Workbooks.Open("C:\\temp\\Captured.xlsm")
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	for line, root := range map[int]string{3: "Range", 4: "Cells", 5: "Rows", 6: "Columns", 7: "Worksheets", 8: "Sheets"} {
+		found := false
+		for _, finding := range got {
+			if finding.Line == line && strings.Contains(finding.Message, root) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected VBA205 mentioning %q on Application root line %d: %+v", root, line, got)
+		}
+	}
+	if len(got) != 6 {
+		t.Fatalf("VBA205 findings = %+v, want six Application-root findings", got)
+	}
+}
+
+func TestAnalyzerReportsThisWorkbookOnlyForAddInStandardModules(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "AddInEntry.bas", `Option Explicit
+Public Sub Run()
+  ThisWorkbook.Worksheets("Data").Range("A1").Value = 1
+End Sub
+`)
+	workbookDir := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbookDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbookDir, "ThisWorkbook.cls"), []byte(`Attribute VB_Name = "ThisWorkbook"
+Option Explicit
+Private Sub Workbook_Open()
+  ThisWorkbook.Worksheets("Data").Range("A1").Value = 1
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Excel.Path = "build/AddIn.xlam"
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	if len(got) != 1 || got[0].File != "src/modules/AddInEntry.bas" || got[0].Line != 3 || !strings.Contains(got[0].Message, "ThisWorkbook") || !strings.Contains(got[0].Suggestion, "caller workbook") {
+		t.Fatalf("add-in ThisWorkbook findings = %+v, want one standard-module finding", got)
+	}
+}
+
+func TestAnalyzerReportsActiveSheetDependenciesInPrivateHelpers(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  WriteStatus
+End Sub
+
+Private Sub WriteStatus()
+  Range("A1").Value = "done"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	if len(got) != 1 || got[0].Procedure != "WriteStatus" || got[0].Line != 7 {
+		t.Fatalf("helper scope dependency = %+v, want WriteStatus line 7", got)
+	}
+	if !strings.Contains(got[0].Suggestion, "Worksheet") {
+		t.Fatalf("helper suggestion = %q, want explicit Worksheet guidance", got[0].Suggestion)
+	}
+}
+
+func TestAnalyzerVBA205IgnoresCommentsAndStringLiterals(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Debug.Print "ActiveWorkbook Worksheets(1) Workbooks.Open"
+  ' Selection.Cells(1, 1).Value = Workbooks(1).Name
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA205"); len(got) != 0 {
+		t.Fatalf("VBA205 should ignore comments and string literals: %+v", got)
+	}
+}
+
 func TestAnalyzerHonorsDisabledRuleIDs(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

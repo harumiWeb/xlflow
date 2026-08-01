@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Expanded default-enabled `VBA205` warnings to identify ambiguous Excel workbook and worksheet roots: active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open` calls, and `ThisWorkbook` from add-in standard modules. Findings remain non-blocking and can be suppressed locally for intentional interactive macros.
 - Added default-enabled real-time `VBA218` warnings for resolved Excel APIs whose exceptional or `Variant/Error` failure contracts are consumed without an appropriate local guard.
 
 - Added default-enabled real-time `VBA216` preflight errors for VBA range expressions that provably mix distinct worksheet roots, plus `VBA217` guidance for implicit-root and unstable last-row calculation patterns.

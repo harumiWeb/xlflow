@@ -56,7 +56,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA202`](#vba202) | analyze | warning  | procedure-local | yes     | Object use before Set                        |
 | [`VBA203`](#vba203) | analyze | warning  | interprocedural | yes     | Application state not restored               |
 | [`VBA204`](#vba204) | analyze | warning  | procedure-local | yes     | Error-handler fallthrough                    |
-| [`VBA205`](#vba205) | analyze | warning  | procedure-local | yes     | Active Excel object dependency               |
+| [`VBA205`](#vba205) | analyze | warning  | procedure-local | yes     | Ambiguous Excel object scope                 |
 | [`VBA206`](#vba206) | analyze | warning  | interprocedural | no      | ByRef argument mismatch                      |
 | [`VBA207`](#vba207) | analyze | warning  | procedure-local | no      | Unguarded keyed access                       |
 | [`VBA208`](#vba208) | analyze | warning  | procedure-local | yes     | Invalid ReDim Preserve dimension             |
@@ -973,7 +973,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA205
 
-**Active Excel object dependency.** Unqualified Excel object access depends on active workbook or worksheet state.
+**Ambiguous Excel object scope.** Active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured Workbooks.Open calls, and add-in ThisWorkbook references can target an unintended workbook or worksheet.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |

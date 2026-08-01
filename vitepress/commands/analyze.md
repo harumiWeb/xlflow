@@ -60,7 +60,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA202` | warning       | Object variable may be used before an obvious `Set` assignment.              |
 | `VBA203` | warning       | `Application` state is changed without an obvious restore path.              |
 | `VBA204` | warning       | Normal execution can fall through into an error-handler label.               |
-| `VBA205` | warning       | Unqualified or active Excel object access depends on runtime sheet state.    |
+| `VBA205` | warning       | Ambiguous Excel workbook or worksheet scope depends on UI state or ordering. |
 | `VBA206` | warning       | Likely ByRef argument type mismatch against a project-local procedure.       |
 | `VBA207` | warning       | `Dictionary` or `Collection` item access has no obvious existence guard.     |
 | `VBA208` | warning       | `ReDim Preserve` is used on a multi-dimensional array.                       |
@@ -94,6 +94,8 @@ Cells(1, 1).Value = 2 ' xlflow:disable-line VBA205
 ```
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match an analyzer diagnostic are reported as warnings.
+
+`VBA205` reports active UI roots such as `ActiveWorkbook` and `Selection`, unqualified `Sheets` / `Worksheets`, `Workbooks(1)` / `Windows(1)`, discarded `Workbooks.Open` results, and `ThisWorkbook` in add-in standard modules. It names the ambiguous root and suggests an explicit workbook, worksheet, range, or captured open result. Intentional interactive entrypoints can use the local suppression shown above.
 
 Rules `VBA201` through `VBA205`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA218` are enabled by default. Rules `VBA206`, `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration remains valid. `VBA214` allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported. Resolved project-local calls raise its severity to `error`, but this rule does not block `push` or `run` preflight. `VBA215` requires explicit `Find` `LookIn`, `LookAt`, `SearchOrder`, and `MatchByte`, or `Replace` `LookAt`, `SearchOrder`, `MatchCase`, and `MatchByte`, because Excel can reuse saved Find/Replace dialog or macro settings when they are omitted. `VBA216` blocks preflight only when xlflow can prove that explicit range roots refer to different worksheets. `VBA217` guides last-row calculations that rely on the active sheet, `End(xlDown)`, unadjusted `UsedRange.Rows.Count`, or `CurrentRegion`; it does not block preflight. `VBA218` accepts `On Error GoTo <label>` for exception-raising APIs, or only a narrow `On Error Resume Next` probe that checks `Err` and immediately restores `On Error GoTo 0`; an unbounded `Resume Next` scope is not sufficient. `Variant/Error` APIs require `IsError` before consumption. The rule does not claim an error is guaranteed or block preflight. Diagnostics `VBA101` through `VBA106` are always enabled.
 

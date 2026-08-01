@@ -903,8 +903,8 @@
     },
     {
       "id": "VBA205",
-      "title": "Active Excel object dependency",
-      "description": "Unqualified Excel object access depends on active workbook or worksheet state.",
+      "title": "Ambiguous Excel object scope",
+      "description": "Active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured Workbooks.Open calls, and add-in ThisWorkbook references can target an unintended workbook or worksheet.",
       "family": "analyze",
       "category": "reliability",
       "default_severity": "warning",
