@@ -891,7 +891,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA202`: object variable may be used before an obvious `Set` assignment
 - `VBA203`: a change to `Application.ScreenUpdating`, `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.Calculation`, `Application.StatusBar`, `Application.Cursor`, `Application.Interactive`, `Application.AskToUpdateLinks`, `Application.AutomationSecurity`, or `Application.CutCopyMode` can reach an exit without restoring its previous value
 - `VBA204`: normal execution can fall through into an error-handler label
-- `VBA205`: ambiguous Excel workbook or worksheet scope: active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open`, or `ThisWorkbook` in an add-in standard module
+- `VBA205`: ambiguous Excel workbook or worksheet scope: active UI objects, unqualified worksheet members (`Range`, `Cells`, `Rows`, and `Columns`), unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open`, or `ThisWorkbook` in an add-in standard module
 - `VBA206`: likely ByRef argument type mismatch candidate
 - `VBA207`: `Dictionary` or `Collection` access without an obvious existence guard
 - `VBA208`: `ReDim Preserve` is used on a multi-dimensional array

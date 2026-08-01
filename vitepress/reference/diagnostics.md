@@ -973,7 +973,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA205
 
-**Ambiguous Excel object scope.** Active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured Workbooks.Open calls, and add-in ThisWorkbook references can target an unintended workbook or worksheet.
+**Ambiguous Excel object scope.** Active UI objects, unqualified worksheet members (Range, Cells, Rows, and Columns), unqualified sheet collections, positional workbook/window access, uncaptured Workbooks.Open calls, and add-in ThisWorkbook references can target an unintended workbook or worksheet.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |
