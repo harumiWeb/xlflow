@@ -162,6 +162,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_dictionary_collection_guard`
 - `detect_dictionary_iteration_value_usage`
 - `detect_error_handler_fallthrough`
+- `detect_excel_api_failure_contracts`
 - `detect_excel_object_member_mismatch`
 - `detect_for_each_control_type`
 - `detect_function_return_path`
@@ -620,6 +621,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `return_slot`
 - `return_type`
 - `returned_range`
+- `returns_error_value`
 - `rollback_args_invalid`
 - `rollback_backup_failed`
 - `rollback_failed`

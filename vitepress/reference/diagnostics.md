@@ -69,6 +69,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA215`](#vba215) | analyze | warning  | procedure-local | yes     | Omitted stateful Excel call arguments        |
 | [`VBA216`](#vba216) | analyze | error    | procedure-local | yes     | Worksheet root mismatch                      |
 | [`VBA217`](#vba217) | analyze | warning  | procedure-local | yes     | Unstable last-row boundary                   |
+| [`VBA218`](#vba218) | analyze | warning  | procedure-local | yes     | Unhandled Excel API failure contract         |
 
 ## VB001
 
@@ -1203,3 +1204,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                  |
 | Real-time editor diagnostic | yes                                 |
 | Fix available               | no                                  |
+
+## VBA218
+
+**Unhandled Excel API failure contract.** An Excel API call can raise a runtime error or return Variant/Error when no result exists, but its failure contract is not handled.
+
+| Property                    | Value                                |
+| --------------------------- | ------------------------------------ |
+| Family                      | `analyze`                            |
+| Category                    | `reliability`                        |
+| Default severity            | `warning`                            |
+| Scope                       | `procedure-local`                    |
+| Precision                   | `high`                               |
+| Enabled by default          | yes                                  |
+| Configuration               | `detect_excel_api_failure_contracts` |
+| Inline suppression          | yes                                  |
+| Blocks source preflight     | no                                   |
+| Real-time editor diagnostic | yes                                  |
+| Fix available               | no                                   |

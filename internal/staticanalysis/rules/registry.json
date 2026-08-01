@@ -1134,6 +1134,24 @@
       "configuration_key": "detect_unstable_last_row_patterns",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA218",
+      "title": "Unhandled Excel API failure contract",
+      "description": "An Excel API call can raise a runtime error or return Variant/Error when no result exists, but its failure contract is not handled.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba218",
+      "configurable": true,
+      "configuration_key": "detect_excel_api_failure_contracts",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

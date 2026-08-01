@@ -1599,6 +1599,219 @@ End Sub
 	}
 }
 
+func TestVBA218MatchesBatchAndRealtimeAnalysisAndHonorsFailureContracts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    rng.SpecialCells xlCellTypeVisible
+    On Error GoTo Handler
+    WorksheetFunction.Match "key", rng, 0
+    On Error GoTo 0
+    On Error Resume Next
+    WorksheetFunction.VLookup "key", rng, 2, False
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+    result = Application.Match("key", rng, 0)
+    If IsError(result) Then Exit Sub
+    Debug.Print result
+    Debug.Print Application.VLookup("key", rng, 2, False)
+Handler:
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	batch, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		got := findingsByCode(findings, "VBA218")
+		if len(got) != 2 || got[0].Line != 5 || got[1].Line != 16 {
+			t.Fatalf("%s VBA218 findings = %+v", name, got)
+		}
+		if !strings.Contains(got[0].Message, "may raise") || !strings.Contains(got[1].Message, "Variant/Error") {
+			t.Fatalf("%s VBA218 contract messages = %+v", name, got)
+		}
+	}
+
+	cfg.Analyze.DetectExcelAPIFailureContracts = false
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA218"); len(got) != 0 {
+		t.Fatalf("disabled VBA218 should not report: %+v", got)
+	}
+}
+
+func TestVBA218RecognizesLocalIsErrorGuardAndCVErrWrapper(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsLookupError(ByVal value As Variant) As Boolean
+    IsLookupError = IsError(value)
+End Function
+
+Private Function TryVisible(ByVal rng As Range) As Variant
+    On Error GoTo Missing
+    TryVisible = rng.SpecialCells(xlCellTypeVisible)
+    Exit Function
+Missing:
+    TryVisible = CVErr(xlErrNA)
+End Function
+
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = Application.XLookup("key", rng, rng)
+    If IsLookupError(result) Then Exit Sub
+    Debug.Print result
+    result = TryVisible(rng)
+    If IsError(result) Then Exit Sub
+    Debug.Print result
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA218"); len(got) != 0 {
+		t.Fatalf("guarded local wrapper calls should not report VBA218: %+v", got)
+	}
+}
+
+func TestVBA218UsesUniqueCrossModuleIsErrorGuardOnlyInBatch(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Guards.bas", `Option Explicit
+Public Function IsLookupFailure(ByVal value As Variant) As Boolean
+    IsLookupFailure = IsError(value)
+End Function
+`)
+	source := `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    result = Application.Match("key", rng, 0)
+    If IsLookupFailure(result) Then Exit Sub
+    Debug.Print result
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	batch, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(batch, "VBA218"); len(got) != 0 {
+		t.Fatalf("uniquely resolved cross-module guard should suppress batch VBA218: %+v", got)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "Main.bas"), config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA218"); len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("realtime analysis must remain document-local: %+v", got)
+	}
+}
+
+func TestVBA218RejectsNonDominatingAndUninspectedGuards(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function IsLookupError(ByVal value As Variant) As Boolean
+    IsLookupError = IsError(value)
+End Function
+
+Public Sub Run(ByVal retry As Boolean)
+    Dim rng As Range
+    Dim result As Variant
+    On Error Resume Next
+    rng.SpecialCells xlCellTypeVisible
+    Err.Clear
+    On Error GoTo 0
+    result = Application.Match("key", rng, 0)
+    If IsError(result) And retry Then Exit Sub
+    Debug.Print result
+    result = Application.XLookup("key", rng, rng)
+    If checker.IsLookupError(result) Then Exit Sub
+    Debug.Print result
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA218")
+	if len(got) != 3 || got[0].Line != 10 || got[1].Line != 13 || got[2].Line != 16 {
+		t.Fatalf("non-dominating/unchecked VBA218 findings = %+v", got)
+	}
+}
+
+func TestVBA218TracksCVErrWrapperResultAtCaller(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function TryVisible(ByVal rng As Range) As Variant
+    On Error GoTo Missing
+    TryVisible = rng.SpecialCells(xlCellTypeVisible)
+    Exit Function
+Missing:
+    TryVisible = CVErr(xlErrNA)
+End Function
+
+Public Sub Run()
+    Dim rng As Range
+    TryVisible(rng)
+    Debug.Print TryVisible(rng)
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA218")
+	if len(got) != 1 || got[0].Line != 13 || !strings.Contains(got[0].Message, "TryVisible may return") {
+		t.Fatalf("unchecked CVErr wrapper result should report VBA218: %+v", got)
+	}
+}
+
+func TestVBA218TracksUniqueCrossModuleCVErrWrapperOnlyInBatch(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Guards.bas", `Option Explicit
+Public Function TryVisible(ByVal rng As Range) As Variant
+    On Error GoTo Missing
+    TryVisible = rng.SpecialCells(xlCellTypeVisible)
+    Exit Function
+Missing:
+    TryVisible = CVErr(xlErrNA)
+End Function
+`)
+	source := `Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Debug.Print TryVisible(rng)
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	batch, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(batch, "VBA218"); len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("batch analysis should resolve cross-module CVErr wrapper: %+v", got)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "Main.bas"), config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA218"); len(got) != 0 {
+		t.Fatalf("realtime analysis must not resolve cross-module CVErr wrappers: %+v", got)
+	}
+}
+
 func TestWorksheetRootFindingsAppearInRealtimeAnalysis(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")

@@ -308,6 +308,18 @@
             { "name": "Arg3", "type": "Variant", "optional": true },
             { "name": "Arg4", "type": "Variant", "optional": true }
           ]
+        },
+        {
+          "name": "XLookup",
+          "return_type": "Variant",
+          "parameters": [
+            { "name": "Arg1", "type": "Variant" },
+            { "name": "Arg2", "type": "Variant" },
+            { "name": "Arg3", "type": "Variant" },
+            { "name": "Arg4", "type": "Variant", "optional": true },
+            { "name": "Arg5", "type": "Variant", "optional": true },
+            { "name": "Arg6", "type": "Variant", "optional": true }
+          ]
         }
       ],
       "confidence": "curated",

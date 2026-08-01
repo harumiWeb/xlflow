@@ -90,6 +90,11 @@
           "parameters": [{ "name": "Expression", "type": "Variant" }]
         },
         {
+          "name": "CVErr",
+          "return_type": "Variant",
+          "parameters": [{ "name": "ErrorNumber", "type": "Long" }]
+        },
+        {
           "name": "CVDate",
           "return_type": "Date",
           "parameters": [{ "name": "Expression", "type": "Variant" }]
