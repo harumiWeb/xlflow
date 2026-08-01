@@ -4,6 +4,7 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Strengthened `VBA203` so all paths after a tracked Excel `Application` state change, including early exits and error handlers, must restore the saved prior value. The diagnostic now covers `ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation`, `StatusBar`, `Cursor`, `Interactive`, `AskToUpdateLinks`, `AutomationSecurity`, and `CutCopyMode`.
 - Added a shared, protocol-neutral static-analysis rule registry for `VB...` and `VBA...` diagnostics, plus the source-only `xlflow rules` command, generated rule catalog, LSP documentation links, and registry-driven VS Code inline-suppression eligibility while preserving existing `disabled_rules`, legacy boolean, and inline suppression behavior.
 - Updated `tree-sitter-vba` to v0.11.0 and preserved lint and formatter behavior across its flat multiline-`If` CST: VB014 now runs structural block validation even when the parser accepts fragment nodes, and formatting pairs `if_statement`, `elseif_fragment`, `else_fragment`, and `end_if_fragment` ranges.
 - Added a conservative procedure-level VBA control-flow graph shared by batch analysis and LSP snapshots, and moved `VBA204` error-handler fallthrough detection from preceding-text heuristics to normal-flow reachability without changing its public diagnostic contract.

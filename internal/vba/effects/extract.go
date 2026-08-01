@@ -43,31 +43,80 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 		case isCellSurface(lower):
 			addStatementEffect(summary, statement, WritesCells, target, value)
 			addStatementEffect(summary, statement, ChangesWorkbook, target, value)
-		case lower == "application.enableevents":
-			if strings.EqualFold(strings.TrimSpace(value), "false") || strings.TrimSpace(value) == "0" {
-				addStatementEffect(summary, statement, DisablesEvents, "Application.EnableEvents", value)
-				addStatementEffect(summary, statement, ChangesApplicationState, "Application.EnableEvents", value)
-			} else {
-				addStatementEffect(summary, statement, RestoresEvents, "Application.EnableEvents", value)
-				addStatementEffect(summary, statement, RestoresApplicationState, "Application.EnableEvents", value)
+		case applicationStateTarget(lower):
+			targetName := applicationStateTargetName(target)
+			addStatementEffect(summary, statement, ChangesApplicationState, targetName, value)
+			if strings.EqualFold(lower, "application.enableevents") && (strings.EqualFold(strings.TrimSpace(value), "false") || strings.TrimSpace(value) == "0") {
+				addStatementEffect(summary, statement, DisablesEvents, targetName, value)
 			}
-		case lower == "application.calculation":
-			addStatementEffect(summary, statement, ChangesCalculation, "Application.Calculation", value)
-			valueLower := strings.ToLower(strings.TrimSpace(value))
-			if valueLower == "xlcalculationmanual" || valueLower == "xlcalculationsemiautomatic" {
-				addStatementEffect(summary, statement, ChangesApplicationState, "Application.Calculation", value)
-			} else {
-				addStatementEffect(summary, statement, RestoresApplicationState, "Application.Calculation", value)
+			if strings.EqualFold(lower, "application.calculation") {
+				addStatementEffect(summary, statement, ChangesCalculation, targetName, value)
 			}
-		case lower == "application.displayalerts" || lower == "application.screenupdating":
-			targetName := target
-			if strings.EqualFold(strings.TrimSpace(value), "false") || strings.TrimSpace(value) == "0" {
-				addStatementEffect(summary, statement, ChangesApplicationState, targetName, value)
-			} else {
+			if applicationStateRestoreCandidate(lower, value) {
+				if strings.EqualFold(lower, "application.enableevents") {
+					addStatementEffect(summary, statement, RestoresEvents, targetName, value)
+				}
 				addStatementEffect(summary, statement, RestoresApplicationState, targetName, value)
 			}
 		}
 	}
+}
+
+func applicationStateTarget(target string) bool {
+	switch target {
+	case "application.enableevents", "application.displayalerts", "application.screenupdating", "application.calculation",
+		"application.statusbar", "application.cursor", "application.interactive", "application.asktoupdatelinks",
+		"application.automationsecurity", "application.cutcopymode":
+		return true
+	default:
+		return false
+	}
+}
+
+func applicationStateTargetName(target string) string {
+	if len(target) <= len("application.") {
+		return target
+	}
+	name := target[len("application."):]
+	switch name {
+	case "enableevents":
+		return "Application.EnableEvents"
+	case "displayalerts":
+		return "Application.DisplayAlerts"
+	case "screenupdating":
+		return "Application.ScreenUpdating"
+	case "calculation":
+		return "Application.Calculation"
+	case "statusbar":
+		return "Application.StatusBar"
+	case "cursor":
+		return "Application.Cursor"
+	case "interactive":
+		return "Application.Interactive"
+	case "asktoupdatelinks":
+		return "Application.AskToUpdateLinks"
+	case "automationsecurity":
+		return "Application.AutomationSecurity"
+	case "cutcopymode":
+		return "Application.CutCopyMode"
+	default:
+		return target
+	}
+}
+
+// Restore evidence remains intentionally broader than the CFG proof used by
+// VBA203. It exists only for the established Push/Pop helper convention,
+// where a stored value or an Excel default is an obvious cleanup candidate.
+func applicationStateRestoreCandidate(target, value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "true" || value == "false" || value == "0" || value == "xldefault" ||
+		value == "xlcalculationautomatic" || value == "msoautomationsecuritybyui" {
+		return true
+	}
+	if strings.ContainsAny(value, ".() +-*/&=<>:") {
+		return false
+	}
+	return value != ""
 }
 
 func extractCall(summary *ProcedureSummary, call procedureir.CallSite, statement procedureir.Statement) {

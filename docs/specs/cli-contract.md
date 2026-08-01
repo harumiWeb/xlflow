@@ -887,7 +887,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA106`: removed `XlflowSetTraceFile` trace helper call
 - `VBA201`: `Range.Find` result is dereferenced before a `Nothing` check
 - `VBA202`: object variable may be used before an obvious `Set` assignment
-- `VBA203`: `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.ScreenUpdating`, or `Application.Calculation` is changed without an obvious restore path
+- `VBA203`: a change to `Application.ScreenUpdating`, `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.Calculation`, `Application.StatusBar`, `Application.Cursor`, `Application.Interactive`, `Application.AskToUpdateLinks`, `Application.AutomationSecurity`, or `Application.CutCopyMode` can reach an exit without restoring its previous value
 - `VBA204`: normal execution can fall through into an error-handler label
 - `VBA205`: unqualified Excel object access or active object dependency
 - `VBA206`: likely ByRef argument type mismatch candidate

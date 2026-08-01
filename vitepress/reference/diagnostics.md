@@ -932,7 +932,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA203
 
-**Application state not restored.** Changed Excel Application state has no obvious restore path.
+**Application state not restored.** An Application state change can reach an exit without restoring its previous value.
 
 | Property | Value |
 | --- | --- |

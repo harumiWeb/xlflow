@@ -100,6 +100,34 @@ End Sub
 	}
 }
 
+func TestGenericApplicationStateEvidenceCoversAllTrackedProperties(t *testing.T) {
+	summary := buildSources(t, sourceFile{"State.bas", "State", `Public Sub PushState()
+    Application.StatusBar = "working"
+    Application.Cursor = xlWait
+    Application.Interactive = False
+    Application.AskToUpdateLinks = False
+    Application.AutomationSecurity = msoAutomationSecurityForceDisable
+    Application.CutCopyMode = xlCopy
+End Sub
+Public Sub PopState()
+    Application.StatusBar = savedStatus
+    Application.Cursor = xlDefault
+    Application.Interactive = savedInteractive
+    Application.AskToUpdateLinks = savedLinks
+    Application.AutomationSecurity = msoAutomationSecurityByUI
+    Application.CutCopyMode = False
+End Sub
+`})
+	push := find(t, summary, "State.PushState")
+	pop := find(t, summary, "State.PopState")
+	if count(push.Direct, ChangesApplicationState) != 6 {
+		t.Fatalf("push state changes = %#v", push.Direct)
+	}
+	if count(pop.Direct, ChangesApplicationState) != 6 || count(pop.Direct, RestoresApplicationState) != 6 {
+		t.Fatalf("pop state evidence = %#v", pop.Direct)
+	}
+}
+
 func TestPropagationConvergesAndDeduplicatesDiamondAndCycles(t *testing.T) {
 	summary := buildSources(t,
 		sourceFile{"A.bas", "A", "Public Sub Root()\n Left\n Right\nEnd Sub\n"},
