@@ -142,6 +142,7 @@ type AnalyzeConfig struct {
 	DetectStatefulExcelCallArguments    bool     `toml:"detect_stateful_excel_call_arguments"`
 	DetectWorksheetRootMismatch         bool     `toml:"detect_worksheet_root_mismatch"`
 	DetectUnstableLastRowPatterns       bool     `toml:"detect_unstable_last_row_patterns"`
+	DetectExcelAPIFailureContracts      bool     `toml:"detect_excel_api_failure_contracts"`
 }
 
 type lintRuleAdapter struct {
@@ -208,6 +209,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA215": {Get: func(c AnalyzeConfig) bool { return c.DetectStatefulExcelCallArguments }, Set: func(c *AnalyzeConfig, v bool) { c.DetectStatefulExcelCallArguments = v }},
 	"VBA216": {Get: func(c AnalyzeConfig) bool { return c.DetectWorksheetRootMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWorksheetRootMismatch = v }},
 	"VBA217": {Get: func(c AnalyzeConfig) bool { return c.DetectUnstableLastRowPatterns }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnstableLastRowPatterns = v }},
+	"VBA218": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelAPIFailureContracts }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelAPIFailureContracts = v }},
 }
 
 var (

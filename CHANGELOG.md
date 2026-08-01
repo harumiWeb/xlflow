@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled real-time `VBA218` warnings for resolved Excel APIs whose exceptional or `Variant/Error` failure contracts are consumed without an appropriate local guard.
+
 - Added default-enabled real-time `VBA216` preflight errors for VBA range expressions that provably mix distinct worksheet roots, plus `VBA217` guidance for implicit-root and unstable last-row calculation patterns.
 
 - Added default-enabled real-time `VBA215` warnings for resolved `Range.Find` and `Range.Replace` calls that omit saved Excel search settings, including support for positional, named, mixed, and multiline calls plus normal rule-specific suppression.

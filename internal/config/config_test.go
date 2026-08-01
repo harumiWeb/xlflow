@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -442,11 +442,14 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "V
 	if cfg.Analyze.DetectUnstableLastRowPatterns {
 		t.Fatal("expected VBA217/detect_unstable_last_row_patterns to be disabled")
 	}
+	if cfg.Analyze.DetectExcelAPIFailureContracts {
+		t.Fatal("expected VBA218/detect_excel_api_failure_contracts to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218", got)
 	}
 }
 
@@ -818,6 +821,7 @@ path = "build/Book.xlsm"
 [analyze]
 detect_worksheet_root_mismatch = false
 detect_unstable_last_row_patterns = false
+detect_excel_api_failure_contracts = false
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -826,10 +830,10 @@ detect_unstable_last_row_patterns = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Analyze.DetectWorksheetRootMismatch || cfg.Analyze.DetectUnstableLastRowPatterns {
-		t.Fatalf("worksheet-root legacy settings were not applied: %+v", cfg.Analyze)
+	if cfg.Analyze.DetectWorksheetRootMismatch || cfg.Analyze.DetectUnstableLastRowPatterns || cfg.Analyze.DetectExcelAPIFailureContracts {
+		t.Fatalf("legacy analyze settings were not applied: %+v", cfg.Analyze)
 	}
-	for _, id := range []string{"VBA216", "VBA217"} {
+	for _, id := range []string{"VBA216", "VBA217", "VBA218"} {
 		if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", id) {
 			t.Fatalf("expected %s legacy-config warning, got %+v", id, cfg.Warnings)
 		}
@@ -954,6 +958,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.Analyze.DetectDictionaryIterationValueUsage = true
 	cfg.Analyze.DetectLeakedOnErrorResumeNextScopes = false
 	cfg.Analyze.DetectStatefulExcelCallArguments = false
+	cfg.Analyze.DetectExcelAPIFailureContracts = false
 
 	p := filepath.Join(dir, FileName)
 	if err := Write(p, cfg); err != nil {
@@ -975,6 +980,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, `"VBA215"`) {
 		t.Fatalf("expected generated config to disable VBA215 by ID:\n%s", text)
+	}
+	if !strings.Contains(text, `"VBA218"`) {
+		t.Fatalf("expected generated config to disable VBA218 by ID:\n%s", text)
 	}
 	if strings.Contains(text, "forbid_interactive_input = false") || strings.Contains(text, "require_option_explicit = true") {
 		t.Fatalf("generated config should prefer disabled_rules over legacy lint booleans:\n%s", text)
@@ -1070,6 +1078,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.DetectStatefulExcelCallArguments {
 		t.Fatal("expected detect_stateful_excel_call_arguments=false after Write/Load")
+	}
+	if loaded.Analyze.DetectExcelAPIFailureContracts {
+		t.Fatal("expected detect_excel_api_failure_contracts=false after Write/Load")
 	}
 }
 

@@ -45,10 +45,12 @@ type Result struct {
 }
 
 type Analyzer struct {
-	RootDir    string
-	Config     config.Config
-	PathFilter func(string) bool
-	typeDB     *vbadb.DB
+	RootDir            string
+	Config             config.Config
+	PathFilter         func(string) bool
+	typeDB             *vbadb.DB
+	errorGuardAliases  map[string]bool
+	errorValueWrappers map[string]bool
 }
 
 var (
@@ -263,7 +265,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	projectEffects := buildProjectEffects(parsedFiles)
 	ctx := a.buildContext(parsedFiles)
 	analysis := a
-	if a.Config.Analyze.DetectStatefulExcelCallArguments {
+	if a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts {
 		typeDB, err := vbadb.LoadBuiltin()
 		if err != nil {
 			return Result{}, err
@@ -271,11 +273,17 @@ func (a Analyzer) RunResult() (Result, error) {
 		analysis.typeDB = typeDB
 	}
 	var findings []Finding
+	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
+		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
+		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
+	}
 	for _, file := range parsedFiles {
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
 			file.Root = view.Root
 			findings = append(findings, analysis.analyzeParsedFile(file, ctx, projectEffects)...)
 			findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
+			findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
+			findings = append(findings, analysis.errorValueWrapperFindings(file)...)
 			return nil
 		}); err != nil {
 			return Result{}, err
@@ -451,7 +459,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if cfg.Analyze.DetectStatefulExcelCallArguments && typeDB == nil {
+	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -480,6 +488,8 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 			findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls, worksheetCodenames)...)
 		}
 		findings = append(findings, analyzer.statefulExcelCallArgumentFindings(file)...)
+		findings = append(findings, analyzer.excelAPIFailureContractFindings(file)...)
+		findings = append(findings, analyzer.errorValueWrapperFindings(file)...)
 		findings = realtimeFindings(findings)
 		sortFindings(findings)
 		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
@@ -489,7 +499,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 	return findings, err
 }
 
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
