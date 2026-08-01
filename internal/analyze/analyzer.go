@@ -170,6 +170,7 @@ type sourceProcedure struct {
 	EndLine    int
 	Params     []parameterInfo
 	Statements []procedureir.Statement
+	Accesses   []procedureir.VariableAccess
 	Graph      *vbacfg.Graph
 	Effects    *effects.ProcedureSummary
 }
@@ -748,6 +749,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			EndLine:    procedure.Symbol.DeclarationRange.EndLine,
 			Params:     params,
 			Statements: append([]procedureir.Statement(nil), procedure.Statements...),
+			Accesses:   append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			graph := controlFlow[0].Graphs[procedureIndex]
@@ -1303,51 +1305,375 @@ func nextNonSpace(text string, index int) byte {
 }
 
 func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
+	if proc.Graph == nil {
+		return nil
+	}
+	byID := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		byID[statement.ID] = statement
+	}
 	var findings []Finding
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
-		stmt := normalizedCodeLine(file.Lines[i])
-		lower := compactStatement(strings.ToLower(stmt))
-		for _, prop := range applicationStateProperties() {
-			disables, _ := applicationStateAssignmentKind(lower, prop)
-			if !disables {
+	for _, property := range applicationStateProperties() {
+		unsafe := applicationStateExitWitnesses(proc, property.Key, byID)
+		if len(unsafe) == 0 || hasPairedApplicationRestoreProcedure(proc, property.Key, project) {
+			continue
+		}
+		for _, statement := range proc.Statements {
+			witness, found := unsafe[statement.ID]
+			if !found {
 				continue
 			}
-			if hasLaterApplicationRestore(file.Lines, proc, i+1, prop) {
+			assigned, _, ok := applicationPropertyAssignment(statement, byID)
+			if !ok || assigned != property.Key {
 				continue
 			}
-			if hasPairedApplicationRestoreProcedure(proc, prop, project) {
-				continue
-			}
-			name := applicationStateName(prop)
-			findings = append(findings, a.simpleFinding(file, proc, i+1, "VBA203", "warning", "Application."+name+" is changed without an obvious restore path.", "Macros that leave Excel application state changed can break later user or automation workflows after failure.", "Save the previous Application."+name+" value and restore it in a cleanup path."))
+			findings = append(findings, a.simpleFinding(
+				file, proc, statement.Range.StartLine, "VBA203", "warning",
+				"Application."+property.Name+" can reach "+witness.Kind+" without restoring its previous value.",
+				"The changed Application."+property.Name+" value can leave this procedure through "+witness.description()+".",
+				"Save the previous Application."+property.Name+" value and restore it in a cleanup path.",
+			))
 		}
 	}
 	return findings
 }
 
-func applicationStateProperties() []string {
-	return []string{"enableevents", "displayalerts", "screenupdating", "calculation"}
+type applicationStateProperty struct {
+	Key  string
+	Name string
 }
 
-func applicationStateAssignmentKind(lower, prop string) (bool, bool) {
-	prefix := "application." + prop + "="
-	if !strings.Contains(lower, prefix) {
-		return false, false
+func applicationStateProperties() []applicationStateProperty {
+	return []applicationStateProperty{
+		{Key: "screenupdating", Name: "ScreenUpdating"},
+		{Key: "enableevents", Name: "EnableEvents"},
+		{Key: "displayalerts", Name: "DisplayAlerts"},
+		{Key: "calculation", Name: "Calculation"},
+		{Key: "statusbar", Name: "StatusBar"},
+		{Key: "cursor", Name: "Cursor"},
+		{Key: "interactive", Name: "Interactive"},
+		{Key: "asktoupdatelinks", Name: "AskToUpdateLinks"},
+		{Key: "automationsecurity", Name: "AutomationSecurity"},
+		{Key: "cutcopymode", Name: "CutCopyMode"},
 	}
-	rhs := lower[strings.Index(lower, prefix)+len(prefix):]
-	if prop != "calculation" {
-		if strings.HasPrefix(rhs, "false") {
-			return true, false
+}
+
+type applicationStateSnapshot struct {
+	Dirty   map[int]bool
+	Unknown bool
+}
+
+type applicationStateFlow struct {
+	Dirty          map[int]bool
+	Saved          map[string]applicationStateSnapshot
+	ViaExceptional bool
+}
+
+type applicationStateExitWitness struct {
+	Kind string
+	Line int
+}
+
+func (w applicationStateExitWitness) description() string {
+	if w.Line > 0 {
+		return w.Kind + " at line " + strconvItoa(w.Line)
+	}
+	return w.Kind
+}
+
+// applicationStateExitWitnesses performs a may analysis. A state-changing
+// assignment is reported whenever one possible path reaches an exit while the
+// prior state is still dirty. State-changing assignments take effect only on
+// their normal successors; exceptional successors observe the input state
+// because VBA can fault before an assignment completes. A proven saved-value
+// restoration is the cleanup boundary itself, so it clears state on its own
+// exceptional transition as well.
+func applicationStateExitWitnesses(proc sourceProcedure, property string, byID map[int]procedureir.Statement) map[int]applicationStateExitWitness {
+	graph := proc.Graph
+	in := map[vbacfg.BlockID]applicationStateFlow{graph.Entry: newApplicationStateFlow()}
+	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
+	queue := []vbacfg.BlockID{graph.Entry}
+	witnesses := map[int]applicationStateExitWitness{}
+
+	for len(queue) > 0 {
+		blockID := queue[0]
+		queue = queue[1:]
+		queued[blockID] = false
+		state := in[blockID]
+		block, ok := applicationStateBlock(*graph, blockID)
+		if !ok {
+			continue
 		}
-		return false, true
+		for _, edge := range graph.Edges {
+			if edge.From != blockID {
+				continue
+			}
+			out := cloneApplicationStateFlow(state)
+			out.ViaExceptional = out.ViaExceptional || edge.Class == vbacfg.EdgeExceptional
+			if block.Statement != nil && (edge.Class == vbacfg.EdgeNormal || applicationStateSavedRestore(proc, state, *block.Statement, property, byID)) {
+				out = applyApplicationStateStatement(proc, out, *block.Statement, property, byID)
+			}
+			if applicationStateExitKind(*graph, edge.To) != "" {
+				kind := applicationStateExitKind(*graph, edge.To)
+				if out.ViaExceptional && kind == "normal exit" {
+					kind = "error-handler path to normal exit"
+				}
+				for origin := range out.Dirty {
+					if existing, exists := witnesses[origin]; !exists || applicationStateWitnessRank(kind) > applicationStateWitnessRank(existing.Kind) {
+						witnesses[origin] = applicationStateExitWitness{Kind: kind, Line: edge.Range.StartLine}
+					}
+				}
+			}
+			merged, changed := mergeApplicationStateFlow(in[edge.To], out)
+			if !changed {
+				continue
+			}
+			in[edge.To] = merged
+			if !queued[edge.To] {
+				queue = append(queue, edge.To)
+				queued[edge.To] = true
+			}
+		}
 	}
-	if strings.HasPrefix(rhs, "xlcalculationautomatic") {
-		return false, true
+	return witnesses
+}
+
+func applicationStateWitnessRank(kind string) int {
+	switch kind {
+	case "error-handler path to normal exit":
+		return 4
+	case "error exit":
+		return 3
+	case "unknown exit":
+		return 2
+	case "termination exit":
+		return 1
+	default:
+		return 0
 	}
-	if strings.HasPrefix(rhs, "xlcalculationmanual") || strings.HasPrefix(rhs, "xlcalculationsemiautomatic") {
-		return true, false
+}
+
+func applicationStateBlock(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
+	if id <= 0 || int(id) > len(graph.Blocks) {
+		return vbacfg.Block{}, false
 	}
-	return false, true
+	return graph.Blocks[int(id)-1], true
+}
+
+func applicationStateExitKind(graph vbacfg.Graph, id vbacfg.BlockID) string {
+	switch id {
+	case graph.NormalExit:
+		return "normal exit"
+	case graph.ExceptionalExit:
+		return "error exit"
+	case graph.TerminationExit:
+		return "termination exit"
+	case graph.UnknownExit:
+		return "unknown exit"
+	default:
+		return ""
+	}
+}
+
+func newApplicationStateFlow() applicationStateFlow {
+	return applicationStateFlow{Dirty: map[int]bool{}, Saved: map[string]applicationStateSnapshot{}}
+}
+
+func cloneApplicationStateFlow(in applicationStateFlow) applicationStateFlow {
+	out := newApplicationStateFlow()
+	for origin := range in.Dirty {
+		out.Dirty[origin] = true
+	}
+	for key, snapshot := range in.Saved {
+		out.Saved[key] = cloneApplicationStateSnapshot(snapshot)
+	}
+	out.ViaExceptional = in.ViaExceptional
+	return out
+}
+
+func cloneApplicationStateSnapshot(in applicationStateSnapshot) applicationStateSnapshot {
+	out := applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: in.Unknown}
+	for origin := range in.Dirty {
+		out.Dirty[origin] = true
+	}
+	return out
+}
+
+func mergeApplicationStateFlow(current, incoming applicationStateFlow) (applicationStateFlow, bool) {
+	if current.Dirty == nil {
+		return cloneApplicationStateFlow(incoming), true
+	}
+	next := cloneApplicationStateFlow(current)
+	changed := false
+	for origin := range incoming.Dirty {
+		if !next.Dirty[origin] {
+			next.Dirty[origin] = true
+			changed = true
+		}
+	}
+	if incoming.ViaExceptional && !next.ViaExceptional {
+		next.ViaExceptional = true
+		changed = true
+	}
+	keys := map[string]bool{}
+	for key := range current.Saved {
+		keys[key] = true
+	}
+	for key := range incoming.Saved {
+		keys[key] = true
+	}
+	for key := range keys {
+		left, leftOK := current.Saved[key]
+		right, rightOK := incoming.Saved[key]
+		if !leftOK {
+			left = applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: true}
+		}
+		if !rightOK {
+			right = applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: true}
+		}
+		merged := cloneApplicationStateSnapshot(left)
+		merged.Unknown = left.Unknown || right.Unknown
+		for origin := range right.Dirty {
+			merged.Dirty[origin] = true
+		}
+		if !applicationStateSnapshotEqual(current.Saved[key], merged) {
+			next.Saved[key] = merged
+			changed = true
+		}
+	}
+	return next, changed
+}
+
+func applicationStateSnapshotEqual(a, b applicationStateSnapshot) bool {
+	if a.Unknown != b.Unknown || len(a.Dirty) != len(b.Dirty) {
+		return false
+	}
+	for origin := range a.Dirty {
+		if !b.Dirty[origin] {
+			return false
+		}
+	}
+	return true
+}
+
+func applyApplicationStateStatement(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) applicationStateFlow {
+	if statement.Recovered || statement.Kind != procedureir.StatementAssignment || statement.Target == nil {
+		return state
+	}
+	if assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, byID); isPropertyWrite && assignedProperty == property {
+		if applicationStateSavedRestore(proc, state, statement, property, byID) {
+			variable, _ := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead)
+			state.Dirty = cloneApplicationStateSnapshot(state.Saved[variable]).Dirty
+			return state
+		}
+		state.Dirty[statement.ID] = true
+		return state
+	}
+	variable, ok := applicationStateVariable(proc, statement.ID, statement.Target.Text, procedureir.AccessWrite)
+	if !ok {
+		return state
+	}
+	if isApplicationPropertyReference(statement.Value, statement, byID, property) {
+		state.Saved[variable] = applicationStateSnapshot{Dirty: cloneApplicationStateFlow(state).Dirty}
+		return state
+	}
+	if source, ok := applicationStateVariable(proc, statement.ID, expressionText(statement.Value), procedureir.AccessRead); ok {
+		if saved, exists := state.Saved[source]; exists {
+			state.Saved[variable] = cloneApplicationStateSnapshot(saved)
+			return state
+		}
+	}
+	state.Saved[variable] = applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: true}
+	return state
+}
+
+func applicationStateSavedRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) bool {
+	assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, byID)
+	if !isPropertyWrite || assignedProperty != property {
+		return false
+	}
+	variable, ok := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead)
+	if !ok {
+		return false
+	}
+	saved, exists := state.Saved[variable]
+	return exists && !saved.Unknown
+}
+
+func expressionText(expr *procedureir.Expression) string {
+	if expr == nil {
+		return ""
+	}
+	return expr.Text
+}
+
+func applicationStateVariable(proc sourceProcedure, statementID int, expression string, mode procedureir.AccessMode) (string, bool) {
+	name := cleanIdentifier(strings.TrimSpace(expression))
+	if name == "" || strings.ContainsAny(name, ".() ") {
+		return "", false
+	}
+	for _, access := range proc.Accesses {
+		if access.StatementID != statementID || !strings.EqualFold(access.Name, name) {
+			continue
+		}
+		if mode == procedureir.AccessWrite && access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite {
+			continue
+		}
+		if mode == procedureir.AccessRead && access.Mode != procedureir.AccessRead && access.Mode != procedureir.AccessReadWrite {
+			continue
+		}
+		if access.Scope == procedureir.ScopeUnresolved {
+			return "", false
+		}
+		return string(access.Scope) + ":" + strings.ToLower(name), true
+	}
+	return "", false
+}
+
+func applicationPropertyAssignment(statement procedureir.Statement, byID map[int]procedureir.Statement) (string, string, bool) {
+	if statement.Target == nil || statement.Value == nil {
+		return "", "", false
+	}
+	property, ok := applicationPropertyTarget(statement.Target.Text, statement, byID)
+	if !ok {
+		return "", "", false
+	}
+	return property, statement.Value.Text, true
+}
+
+func isApplicationPropertyReference(expr *procedureir.Expression, statement procedureir.Statement, byID map[int]procedureir.Statement, property string) bool {
+	if expr == nil {
+		return false
+	}
+	got, ok := applicationPropertyTarget(expr.Text, statement, byID)
+	return ok && got == property
+}
+
+func applicationPropertyTarget(expression string, statement procedureir.Statement, byID map[int]procedureir.Statement) (string, bool) {
+	compact := strings.ToLower(compactStatement(expression))
+	for _, property := range applicationStateProperties() {
+		if compact == "application."+property.Key {
+			return property.Key, true
+		}
+		if compact == "."+property.Key && statementWithinApplicationWith(statement, byID) {
+			return property.Key, true
+		}
+	}
+	return "", false
+}
+
+func statementWithinApplicationWith(statement procedureir.Statement, byID map[int]procedureir.Statement) bool {
+	for parentID := statement.ParentID; parentID != 0; {
+		parent, ok := byID[parentID]
+		if !ok {
+			return false
+		}
+		if parent.Kind == procedureir.StatementWith {
+			return strings.EqualFold(compactStatement(parent.Text), "withapplication")
+		}
+		parentID = parent.ParentID
+	}
+	return false
 }
 
 func hasPairedApplicationRestoreProcedure(proc sourceProcedure, prop string, project effects.ProjectSummary) bool {
@@ -1355,42 +1681,54 @@ func hasPairedApplicationRestoreProcedure(proc sourceProcedure, prop string, pro
 		return false
 	}
 	lowerName := strings.ToLower(proc.Name)
-	if !strings.HasPrefix(lowerName, "push") {
-		return false
-	}
-	if !hasApplicationStateEffect(proc.Effects.Direct, effects.ChangesApplicationState, prop) {
-		return false
-	}
-	suffix := strings.TrimPrefix(lowerName, "push")
-	pairNames := map[string]bool{"pop" + suffix: true, "restore" + suffix: true}
-	sameModule := make([]effects.ProcedureSummary, 0, 1)
-	projectVisible := make([]effects.ProcedureSummary, 0, 1)
-	for _, summary := range project.All() {
-		if !pairNames[strings.ToLower(summary.Identity.Name)] {
-			continue
-		}
-		if strings.EqualFold(summary.Identity.Module, proc.Effects.Identity.Module) {
-			sameModule = append(sameModule, summary)
-			continue
-		}
-		if isProjectVisibleProcedure(summary.Identity) {
-			projectVisible = append(projectVisible, summary)
-		}
-	}
-	if len(sameModule) > 0 {
-		for _, candidate := range sameModule {
-			if hasApplicationStateEffect(candidate.Direct, effects.RestoresApplicationState, prop) ||
-				hasApplicationStateEffect(candidate.Propagated, effects.RestoresApplicationState, prop) {
-				return true
+	if strings.HasPrefix(lowerName, "push") && hasApplicationStateEffect(proc.Effects.Direct, effects.ChangesApplicationState, prop) {
+		suffix := strings.TrimPrefix(lowerName, "push")
+		pairNames := map[string]bool{"pop" + suffix: true, "restore" + suffix: true}
+		sameModule := make([]effects.ProcedureSummary, 0, 1)
+		projectVisible := make([]effects.ProcedureSummary, 0, 1)
+		for _, summary := range project.All() {
+			if !pairNames[strings.ToLower(summary.Identity.Name)] {
+				continue
+			}
+			if strings.EqualFold(summary.Identity.Module, proc.Effects.Identity.Module) {
+				sameModule = append(sameModule, summary)
+				continue
+			}
+			if isProjectVisibleProcedure(summary.Identity) {
+				projectVisible = append(projectVisible, summary)
 			}
 		}
+		if len(sameModule) > 0 {
+			for _, candidate := range sameModule {
+				if hasApplicationStateEffect(candidate.Direct, effects.RestoresApplicationState, prop) ||
+					hasApplicationStateEffect(candidate.Propagated, effects.RestoresApplicationState, prop) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(projectVisible) == 1 {
+			return hasApplicationStateEffect(projectVisible[0].Direct, effects.RestoresApplicationState, prop) ||
+				hasApplicationStateEffect(projectVisible[0].Propagated, effects.RestoresApplicationState, prop)
+		}
+	}
+
+	// Keep the established helper convention quiet on the restore side too. A
+	// restoration helper can be the paired Pop/Restore procedure itself or a
+	// uniquely resolved leaf called by that procedure.
+	if !hasApplicationStateEffect(proc.Effects.Direct, effects.RestoresApplicationState, prop) {
 		return false
 	}
-	if len(projectVisible) != 1 {
-		return false
+	for _, candidate := range project.All() {
+		if !hasApplicationStateEffectFrom(candidate.Direct, effects.RestoresApplicationState, prop, proc.Effects.Identity) &&
+			!hasApplicationStateEffectFrom(candidate.Propagated, effects.RestoresApplicationState, prop, proc.Effects.Identity) {
+			continue
+		}
+		if hasMatchingPushProcedure(candidate, prop, project) {
+			return true
+		}
 	}
-	return hasApplicationStateEffect(projectVisible[0].Direct, effects.RestoresApplicationState, prop) ||
-		hasApplicationStateEffect(projectVisible[0].Propagated, effects.RestoresApplicationState, prop)
+	return false
 }
 
 func hasApplicationStateEffect(evidence []effects.Evidence, kind effects.EffectKind, prop string) bool {
@@ -1403,20 +1741,46 @@ func hasApplicationStateEffect(evidence []effects.Evidence, kind effects.EffectK
 	return false
 }
 
-func isProjectVisibleProcedure(identity effects.ProcedureIdentity) bool {
-	return (identity.ModuleKind == "" || strings.EqualFold(identity.ModuleKind, "standard")) &&
-		!strings.EqualFold(strings.TrimSpace(identity.Visibility), "private")
-}
-
-func hasLaterApplicationRestore(lines []string, proc sourceProcedure, start int, prop string) bool {
-	for i := start; i < proc.EndLine && i < len(lines); i++ {
-		lower := compactStatement(strings.ToLower(normalizedCodeLine(lines[i])))
-		_, restores := applicationStateAssignmentKind(lower, prop)
-		if restores {
+func hasApplicationStateEffectFrom(evidence []effects.Evidence, kind effects.EffectKind, prop string, origin effects.ProcedureIdentity) bool {
+	target := "application." + strings.ToLower(prop)
+	for _, item := range evidence {
+		if item.Effect == kind && strings.EqualFold(item.Target, target) && item.Origin.Key() == origin.Key() {
 			return true
 		}
 	}
 	return false
+}
+
+func hasMatchingPushProcedure(candidate effects.ProcedureSummary, prop string, project effects.ProjectSummary) bool {
+	name := strings.ToLower(candidate.Identity.Name)
+	var suffix string
+	switch {
+	case strings.HasPrefix(name, "pop"):
+		suffix = strings.TrimPrefix(name, "pop")
+	case strings.HasPrefix(name, "restore"):
+		suffix = strings.TrimPrefix(name, "restore")
+	default:
+		return false
+	}
+	matches := 0
+	for _, push := range project.All() {
+		if !strings.EqualFold(push.Identity.Name, "push"+suffix) || !hasApplicationStateEffect(push.Direct, effects.ChangesApplicationState, prop) {
+			continue
+		}
+		if strings.EqualFold(push.Identity.Module, candidate.Identity.Module) || isProjectVisibleProcedure(push.Identity) && isProjectVisibleProcedure(candidate.Identity) {
+			return true
+		}
+		matches++
+	}
+	// This mirrors the existing cross-module Push/Pop exception: one visible
+	// Pop helper may establish a paired restore even when its Push counterpart
+	// is private in a different standard module.
+	return matches == 1 && isProjectVisibleProcedure(candidate.Identity)
+}
+
+func isProjectVisibleProcedure(identity effects.ProcedureIdentity) bool {
+	return (identity.ModuleKind == "" || strings.EqualFold(identity.ModuleKind, "standard")) &&
+		!strings.EqualFold(strings.TrimSpace(identity.Visibility), "private")
 }
 
 func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -1834,21 +2198,6 @@ func terminatesNormalFlow(stmt string) bool {
 		strings.HasPrefix(lower, "exit property") ||
 		strings.HasPrefix(lower, "goto ") ||
 		lower == "end"
-}
-
-func applicationStateName(prop string) string {
-	switch strings.ToLower(prop) {
-	case "enableevents":
-		return "EnableEvents"
-	case "displayalerts":
-		return "DisplayAlerts"
-	case "screenupdating":
-		return "ScreenUpdating"
-	case "calculation":
-		return "Calculation"
-	default:
-		return prop
-	}
 }
 
 func parseSimpleCall(stmt string) (string, []string, bool) {

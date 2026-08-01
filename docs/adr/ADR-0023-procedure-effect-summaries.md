@@ -67,11 +67,13 @@ ambiguous pairs remain unsafe. Diagnostic ID, severity, location, message,
 ordering, inline suppression, configuration, and CLI/LSP representation remain
 unchanged.
 
-Keep caller-level diagnostics, proof that restoration occurs on every exit,
-event re-entry analysis, and workspace/LSP effect caching outside this decision.
-Those concerns remain assigned to issues #439, #431, #438, and a future LSP
-consumer respectively. The CFG keeps its existing conservative rule that every
-executable statement may fault; effect summaries do not alter that fallback.
+Keep caller-level diagnostics, event re-entry analysis, and workspace/LSP
+effect caching outside this decision. Issue #431 now consumes the CFG directly
+to prove procedure-local restoration on every exit; effect summaries remain
+only the Push/Pop helper exemption and do not establish that proof. Those
+remaining concerns are assigned to issues #439, #438, and a future LSP consumer
+respectively. The CFG keeps its existing conservative rule that every executable
+statement may fault; effect summaries do not alter that fallback.
 
 ## Consequences
 
@@ -86,8 +88,9 @@ executable statement may fault; effect summaries do not alter that fallback.
 - Negative: high-confidence detectors intentionally miss effects hidden behind
   aliases, late binding, type-library dispatch, or recovered syntax.
 - Negative: retaining provenance uses more memory than one boolean per effect.
-- Limitation: a summary reports that an effect is reachable, not that a restore
-  dominates every exit or makes a caller safe.
+- Limitation: a summary reports that an effect is reachable. The CFG-based
+  procedure-local #431 analysis separately proves local exit restoration, but
+  neither layer makes an arbitrary caller or dynamic helper path safe.
 
 ## Alternatives Considered
 

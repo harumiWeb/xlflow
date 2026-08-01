@@ -107,34 +107,51 @@ const markdown = (value) =>
 const yesNo = (value) => (value ? "yes" : "no");
 const setting = (rule) =>
   rule.configurable ? `\`${markdown(rule.configuration_key)}\`` : "not configurable";
+const formatTable = (rows) => {
+  const widths = rows[0].map((_, column) => Math.max(...rows.map((row) => row[column].length)));
+  const formatRow = (row) =>
+    `| ${row.map((cell, column) => cell.padEnd(widths[column])).join(" | ")} |`;
+  return [
+    formatRow(rows[0]),
+    formatRow(widths.map((width) => "-".repeat(width))),
+    ...rows.slice(1).map(formatRow),
+  ].join("\n");
+};
 
-const summaryRows = rules
-  .map(
-    (rule) =>
-      `| [\`${rule.id}\`](#${rule.id.toLowerCase()}) | ${markdown(rule.family)} | ${markdown(rule.default_severity)} | ${markdown(rule.scope)} | ${yesNo(rule.default_enabled)} | ${markdown(rule.title)} |`,
-  )
-  .join("\n");
+const summaryRows = formatTable([
+  ["ID", "Family", "Severity", "Scope", "Default", "Title"],
+  ...rules.map((rule) => [
+    `[\`${rule.id}\`](#${rule.id.toLowerCase()})`,
+    markdown(rule.family),
+    markdown(rule.default_severity),
+    markdown(rule.scope),
+    yesNo(rule.default_enabled),
+    markdown(rule.title),
+  ]),
+]);
 const details = rules
-  .map(
-    (rule) => `## ${rule.id}
+  .map((rule) => {
+    const properties = formatTable([
+      ["Property", "Value"],
+      ["Family", `\`${markdown(rule.family)}\``],
+      ["Category", `\`${markdown(rule.category)}\``],
+      ["Default severity", `\`${markdown(rule.default_severity)}\``],
+      ["Scope", `\`${markdown(rule.scope)}\``],
+      ["Precision", `\`${markdown(rule.precision)}\``],
+      ["Enabled by default", yesNo(rule.default_enabled)],
+      ["Configuration", setting(rule)],
+      ["Inline suppression", yesNo(rule.inline_suppressible)],
+      ["Blocks source preflight", yesNo(rule.preflight_blocking)],
+      ["Real-time editor diagnostic", yesNo(rule.realtime)],
+      ["Fix available", yesNo(rule.fix_available)],
+    ]);
+    return `## ${rule.id}
 
 **${markdown(rule.title)}.** ${markdown(rule.description)}
 
-| Property | Value |
-| --- | --- |
-| Family | \`${markdown(rule.family)}\` |
-| Category | \`${markdown(rule.category)}\` |
-| Default severity | \`${markdown(rule.default_severity)}\` |
-| Scope | \`${markdown(rule.scope)}\` |
-| Precision | \`${markdown(rule.precision)}\` |
-| Enabled by default | ${yesNo(rule.default_enabled)} |
-| Configuration | ${setting(rule)} |
-| Inline suppression | ${yesNo(rule.inline_suppressible)} |
-| Blocks source preflight | ${yesNo(rule.preflight_blocking)} |
-| Real-time editor diagnostic | ${yesNo(rule.realtime)} |
-| Fix available | ${yesNo(rule.fix_available)} |
-`,
-  )
+${properties}
+`;
+  })
   .join("\n");
 
 const diagnosticPage = `# Static-analysis diagnostic catalog
@@ -143,8 +160,6 @@ Generated from the canonical rule registry at \`internal/staticanalysis/rules/re
 
 Use [\`xlflow rules\`](../commands/rules) to inspect the same metadata from an installed xlflow binary. \`VBA000\` is a synthetic analysis-failure diagnostic and is intentionally outside the registry; UserForm \`FRM...\` and \`UFY...\` diagnostics are outside this catalog.
 
-| ID | Family | Severity | Scope | Default | Title |
-| --- | --- | --- | --- | --- | --- |
 ${summaryRows}
 
 ${details}`;

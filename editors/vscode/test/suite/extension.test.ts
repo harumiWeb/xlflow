@@ -81,10 +81,7 @@ import {
   updateDismissedKey,
   updateSummary,
 } from "../../src/updateCheck";
-import {
-  parseRulesEnvelope,
-  XlflowRulesRegistryService,
-} from "../../src/rulesRegistry";
+import { parseRulesEnvelope, XlflowRulesRegistryService } from "../../src/rulesRegistry";
 import type { RulesCommandResult } from "../../src/rulesRegistry";
 
 export async function run(): Promise<void> {
@@ -944,10 +941,7 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   );
   assert.strictEqual(parsed.get("VB020")?.inlineSuppressible, true);
   assert.strictEqual(parsed.get("VB029")?.inlineSuppressible, false);
-  assert.throws(
-    () => parseRulesEnvelope(rulesEnvelope([], 2)),
-    /unsupported response schema/,
-  );
+  assert.throws(() => parseRulesEnvelope(rulesEnvelope([], 2)), /unsupported response schema/);
 
   let executable = "xlflow-one";
   const calls: string[] = [];
@@ -1004,10 +998,7 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   assert.strictEqual(retargetedCalls.length, 1, "resolution must remain memoized within the TTL");
   resolutionTime = 1000;
   await retargeted.load();
-  assert.deepStrictEqual(retargetedCalls, [
-    resolvedExecutable,
-    resolvedExecutable,
-  ]);
+  assert.deepStrictEqual(retargetedCalls, [resolvedExecutable, resolvedExecutable]);
   retargeted.invalidate();
   await retargeted.load();
   assert.strictEqual(resolutionCalls, 4, "invalidation must clear executable resolution");

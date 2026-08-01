@@ -7,11 +7,18 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-var whitespace = regexp.MustCompile(`\s+`)
+var (
+	whitespace          = regexp.MustCompile(`\s+`)
+	bareVBAIdentifierRE = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+)
 
 func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, reachable map[int]bool) {
+	statementsByID := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		statementsByID[statement.ID] = statement
+	}
 	for index, statement := range proc.Statements {
-		if !reachable[statement.ID] || statement.Recovered {
+		if !statementReachable(statement, reachable, statementsByID) || statement.Recovered {
 			continue
 		}
 		// The parser represents a chained parameterized receiver and its final
@@ -20,7 +27,7 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 		if strings.HasPrefix(strings.TrimSpace(statement.Text), ".") && index > 0 {
 			previous := proc.Statements[index-1]
 			member := strings.ToLower(strings.TrimPrefix(compact(statement.Text), "."))
-			if reachable[previous.ID] && !previous.Recovered && previous.Range.EndByte == statement.Range.StartByte &&
+			if statementReachable(previous, reachable, statementsByID) && !previous.Recovered && previous.Range.EndByte == statement.Range.StartByte &&
 				previous.Range.EndLine == statement.Range.StartLine && isCellSurface(strings.ToLower(compact(previous.Text))) &&
 				(member == "clear" || member == "clearcontents" || member == "insert" || member == "delete") {
 				addStatementEffect(summary, statement, WritesCells, previous.Text+statement.Text, "")
@@ -39,35 +46,147 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 			value = strings.TrimSpace(statement.Value.Text)
 		}
 		lower := strings.ToLower(target)
+		property, applicationState := applicationStateTarget(statement, lower, statementsByID)
 		switch {
 		case isCellSurface(lower):
 			addStatementEffect(summary, statement, WritesCells, target, value)
 			addStatementEffect(summary, statement, ChangesWorkbook, target, value)
-		case lower == "application.enableevents":
-			if strings.EqualFold(strings.TrimSpace(value), "false") || strings.TrimSpace(value) == "0" {
-				addStatementEffect(summary, statement, DisablesEvents, "Application.EnableEvents", value)
-				addStatementEffect(summary, statement, ChangesApplicationState, "Application.EnableEvents", value)
-			} else {
-				addStatementEffect(summary, statement, RestoresEvents, "Application.EnableEvents", value)
-				addStatementEffect(summary, statement, RestoresApplicationState, "Application.EnableEvents", value)
+		case applicationState:
+			targetName := applicationStateTargetName("application." + property)
+			addStatementEffect(summary, statement, ChangesApplicationState, targetName, value)
+			if property == "enableevents" && (strings.EqualFold(strings.TrimSpace(value), "false") || strings.TrimSpace(value) == "0") {
+				addStatementEffect(summary, statement, DisablesEvents, targetName, value)
 			}
-		case lower == "application.calculation":
-			addStatementEffect(summary, statement, ChangesCalculation, "Application.Calculation", value)
-			valueLower := strings.ToLower(strings.TrimSpace(value))
-			if valueLower == "xlcalculationmanual" || valueLower == "xlcalculationsemiautomatic" {
-				addStatementEffect(summary, statement, ChangesApplicationState, "Application.Calculation", value)
-			} else {
-				addStatementEffect(summary, statement, RestoresApplicationState, "Application.Calculation", value)
+			if property == "calculation" {
+				addStatementEffect(summary, statement, ChangesCalculation, targetName, value)
 			}
-		case lower == "application.displayalerts" || lower == "application.screenupdating":
-			targetName := target
-			if strings.EqualFold(strings.TrimSpace(value), "false") || strings.TrimSpace(value) == "0" {
-				addStatementEffect(summary, statement, ChangesApplicationState, targetName, value)
-			} else {
+			if applicationStateRestoreCandidate(proc, statement, property, value) {
+				if property == "enableevents" {
+					addStatementEffect(summary, statement, RestoresEvents, targetName, value)
+				}
 				addStatementEffect(summary, statement, RestoresApplicationState, targetName, value)
 			}
 		}
 	}
+}
+
+func statementReachable(statement procedureir.Statement, reachable map[int]bool, statementsByID map[int]procedureir.Statement) bool {
+	for {
+		if reachable[statement.ID] {
+			return true
+		}
+		if statement.ParentID == 0 {
+			return false
+		}
+		parent, ok := statementsByID[statement.ParentID]
+		if !ok {
+			return false
+		}
+		statement = parent
+	}
+}
+
+func applicationStateTarget(statement procedureir.Statement, target string, statementsByID map[int]procedureir.Statement) (string, bool) {
+	property := strings.TrimPrefix(target, "application.")
+	if property == target {
+		if !strings.HasPrefix(target, ".") || !statementWithinApplicationWith(statement, statementsByID) {
+			return "", false
+		}
+		property = strings.TrimPrefix(target, ".")
+	}
+	switch property {
+	case "enableevents", "displayalerts", "screenupdating", "calculation", "statusbar", "cursor", "interactive", "asktoupdatelinks", "automationsecurity", "cutcopymode":
+		return property, true
+	default:
+		return "", false
+	}
+}
+
+func statementWithinApplicationWith(statement procedureir.Statement, statementsByID map[int]procedureir.Statement) bool {
+	for parentID := statement.ParentID; parentID != 0; {
+		parent, ok := statementsByID[parentID]
+		if !ok {
+			return false
+		}
+		if parent.Kind == procedureir.StatementWith {
+			return parent.Value != nil && strings.EqualFold(compact(parent.Value.Text), "application")
+		}
+		parentID = parent.ParentID
+	}
+	return false
+}
+
+func applicationStateTargetName(target string) string {
+	if len(target) <= len("application.") {
+		return target
+	}
+	name := target[len("application."):]
+	switch name {
+	case "enableevents":
+		return "Application.EnableEvents"
+	case "displayalerts":
+		return "Application.DisplayAlerts"
+	case "screenupdating":
+		return "Application.ScreenUpdating"
+	case "calculation":
+		return "Application.Calculation"
+	case "statusbar":
+		return "Application.StatusBar"
+	case "cursor":
+		return "Application.Cursor"
+	case "interactive":
+		return "Application.Interactive"
+	case "asktoupdatelinks":
+		return "Application.AskToUpdateLinks"
+	case "automationsecurity":
+		return "Application.AutomationSecurity"
+	case "cutcopymode":
+		return "Application.CutCopyMode"
+	default:
+		return target
+	}
+}
+
+// Restore evidence remains intentionally narrower than the CFG proof used by
+// VBA203. It exists only for the established Push/Pop helper convention and
+// accepts a known property reset or a resolved saved-value variable. In
+// particular, a disabling assignment must never claim restoration evidence.
+func applicationStateRestoreCandidate(proc procedureir.ProcedureIR, statement procedureir.Statement, property, value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if knownApplicationStateReset(property, normalized) {
+		return true
+	}
+	if !bareVBAIdentifier(normalized) {
+		return false
+	}
+	for _, access := range proc.Accesses {
+		if access.StatementID == statement.ID && access.Mode != procedureir.AccessWrite &&
+			access.Scope != procedureir.ScopeUnresolved && strings.EqualFold(access.Name, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func knownApplicationStateReset(property, value string) bool {
+	switch property {
+	case "enableevents", "displayalerts", "screenupdating", "interactive", "asktoupdatelinks":
+		return value == "true"
+	case "calculation":
+		return value == "xlcalculationautomatic"
+	case "statusbar", "cutcopymode":
+		return value == "false" || value == "0"
+	case "cursor":
+		return value == "xldefault"
+	case "automationsecurity":
+		return value == "msoautomationsecuritybyui"
+	default:
+		return false
+	}
+}
+
+func bareVBAIdentifier(value string) bool {
+	return bareVBAIdentifierRE.MatchString(value)
 }
 
 func extractCall(summary *ProcedureSummary, call procedureir.CallSite, statement procedureir.Statement) {

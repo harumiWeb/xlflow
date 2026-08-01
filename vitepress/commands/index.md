@@ -22,7 +22,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [new](./new)                               | Create a new xlflow project and macro-enabled workbook or add-in.                          |
 | [init](./init)                             | Initialize an xlflow project from an existing workbook or add-in.                          |
 | [capabilities](./capabilities)             | Show machine-readable command safety metadata.                                             |
-| [rules](./rules)                           | List canonical static-analysis rule metadata without opening Excel.                         |
+| [rules](./rules)                           | List canonical static-analysis rule metadata without opening Excel.                        |
 | [doctor](./doctor)                         | Diagnose Excel, COM, PowerShell, VBIDE access, and source GUI boundaries.                  |
 | [attach](./attach)                         | Validate that the active Excel workbook matches the configured workbook.                   |
 | [backup](./backup)                         | List rollback-capable workbook backups for the configured workbook.                        |

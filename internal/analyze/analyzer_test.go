@@ -579,6 +579,25 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStateRejectsPopThatDisablesEvents(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PushFastMode()
+  Application.EnableEvents = False
+End Sub
+
+Private Sub PopFastMode()
+  Application.EnableEvents = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinding(t, findings, "VBA203", 3)
+}
+
 func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -758,6 +777,203 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
 		t.Fatalf("VBA203 inline suppression should remain effective: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateChecksEveryConfiguredProperty(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UnsafeAllProperties()
+  Application.ScreenUpdating = False
+  Application.EnableEvents = False
+  Application.DisplayAlerts = False
+  Application.Calculation = xlCalculationManual
+  Application.StatusBar = "working"
+  Application.Cursor = xlWait
+  Application.Interactive = False
+  Application.AskToUpdateLinks = False
+  Application.AutomationSecurity = msoAutomationSecurityForceDisable
+  Application.CutCopyMode = xlCopy
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	if len(got) != 10 {
+		t.Fatalf("VBA203 findings = %+v, want one per Application property", got)
+	}
+	for _, property := range []string{"ScreenUpdating", "EnableEvents", "DisplayAlerts", "Calculation", "StatusBar", "Cursor", "Interactive", "AskToUpdateLinks", "AutomationSecurity", "CutCopyMode"} {
+		found := false
+		for _, finding := range got {
+			if strings.Contains(finding.Message, "Application."+property) && strings.Contains(finding.Reason, "exit") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s all-path finding: %+v", property, got)
+		}
+	}
+}
+
+func TestAnalyzerApplicationStateRecognizesWithApplicationSharedCleanupAndCopies(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub SafeCleanup(ByVal invalidInput As Boolean)
+  Dim savedEvents As Boolean
+  Dim copiedEvents As Boolean
+  Dim savedStatus As Variant
+  On Error GoTo Cleanup
+  With Application
+    savedEvents = .EnableEvents
+    copiedEvents = savedEvents
+    savedStatus = .StatusBar
+    .EnableEvents = False
+    .StatusBar = "working"
+  End With
+  If invalidInput Then GoTo Cleanup
+  Debug.Print "work"
+Cleanup:
+  With Application
+    .StatusBar = savedStatus
+    .EnableEvents = copiedEvents
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
+		t.Fatalf("shared cleanup and copied saved values should be safe: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateReportsEarlyExitAndErrorHandlerPaths(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UnsafeExitSub(ByVal invalidInput As Boolean)
+  Dim savedEvents As Boolean
+  savedEvents = Application.EnableEvents
+  On Error GoTo Handler
+  Application.EnableEvents = False
+  If invalidInput Then Exit Sub
+  Err.Raise 5
+Cleanup:
+  Application.EnableEvents = savedEvents
+  Exit Sub
+Handler:
+  Exit Sub
+End Sub
+
+Public Sub UnsafeErrorHandler()
+  Dim savedCursor As Long
+  savedCursor = Application.Cursor
+  On Error GoTo Handler
+  Application.Cursor = xlWait
+  Err.Raise 5
+  Exit Sub
+Handler:
+  Exit Sub
+End Sub
+
+Public Sub UnsafeNestedBranches(ByVal outer As Boolean, ByVal inner As Boolean)
+  Dim savedLinks As Boolean
+  savedLinks = Application.AskToUpdateLinks
+  If outer Then
+    Application.AskToUpdateLinks = False
+    If inner Then Exit Sub
+  End If
+  Application.AskToUpdateLinks = savedLinks
+End Sub
+
+Public Function UnsafeExitFunction(ByVal done As Boolean) As Long
+  Dim savedAlerts As Boolean
+  savedAlerts = Application.DisplayAlerts
+  Application.DisplayAlerts = False
+  If done Then Exit Function
+  Application.DisplayAlerts = savedAlerts
+End Function
+
+Public Property Get UnsafeExitProperty(ByVal done As Boolean) As Long
+  Dim savedInteractive As Boolean
+  savedInteractive = Application.Interactive
+  Application.Interactive = False
+  If done Then Exit Property
+  Application.Interactive = savedInteractive
+End Property
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	for _, procedure := range []string{"UnsafeExitSub", "UnsafeErrorHandler", "UnsafeNestedBranches", "UnsafeExitFunction", "UnsafeExitProperty"} {
+		found := false
+		for _, finding := range got {
+			if finding.Procedure == procedure {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s early-exit finding: %+v", procedure, got)
+		}
+	}
+	var handlerPath bool
+	for _, finding := range got {
+		if finding.Procedure == "UnsafeErrorHandler" && strings.Contains(finding.Reason, "error-handler path") {
+			handlerPath = true
+		}
+	}
+	if !handlerPath {
+		t.Fatalf("missing error-handler exit witness: %+v", got)
+	}
+}
+
+func TestAnalyzerApplicationStateRejectsInvalidOrConditionalSavedValue(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ReassignedSavedValue()
+  Dim savedEvents As Boolean
+  savedEvents = Application.EnableEvents
+  Application.EnableEvents = False
+  savedEvents = True
+  Application.EnableEvents = savedEvents
+End Sub
+
+Public Sub ConditionalSavedValue(ByVal changeState As Boolean)
+  Dim savedAlerts As Boolean
+  If changeState Then
+    savedAlerts = Application.DisplayAlerts
+    Application.DisplayAlerts = False
+    Application.DisplayAlerts = savedAlerts
+  End If
+  Application.DisplayAlerts = savedAlerts
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	for _, procedure := range []string{"ReassignedSavedValue", "ConditionalSavedValue"} {
+		found := false
+		for _, finding := range got {
+			if finding.Procedure == procedure {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s should not prove a restore from an invalid saved value: %+v", procedure, got)
+		}
 	}
 }
 

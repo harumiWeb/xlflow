@@ -40,10 +40,11 @@ and do not depend on file input or Go map iteration order.
 - `restores_application_state`
 
 The last two internal kinds preserve property-neutral `VBA203` compatibility
-for `EnableEvents`, `DisplayAlerts`, `ScreenUpdating`, and `Calculation`.
-Evidence still carries the exact `Application.<Property>` target; the more
-specific event and calculation kinds are emitted alongside them where
-applicable.
+for `ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation`,
+`StatusBar`, `Cursor`, `Interactive`, `AskToUpdateLinks`, `AutomationSecurity`,
+and `CutCopyMode`. Evidence still carries the exact `Application.<Property>`
+target; the more-specific event and calculation kinds are emitted alongside
+them where applicable.
 
 `Evidence` identifies the effect, originating procedure identity, canonical
 `ast.Range`, statement or call ID, and an optional normalized target such as an
@@ -72,13 +73,16 @@ The initial detectors cover:
   `changes_workbook`;
 - `Workbooks.Open`: `opens_workbook`;
 - a confidently recognized `Workbook.Close`: `closes_workbook`;
-- disabling and restoring `Application.EnableEvents`: `disables_events` or
-  `restores_events`, plus the matching property-neutral state effect;
-- changes to `Application.Calculation`: `changes_calculation`, plus a
-  property-neutral change or restore classified with the existing `VBA203`
-  assignment rules;
-- changes and restores of `Application.DisplayAlerts` and
-  `Application.ScreenUpdating`: property-neutral state evidence;
+- every recognized assignment to the ten `Application` properties above:
+  `changes_application_state`; known property-reset values and resolved
+  saved-value variables additionally carry `restores_application_state` for
+  the established Push/Pop helper convention. A state-setting assignment,
+  including `Application.EnableEvents = False`, never doubles as restoration
+  evidence;
+- disabling and restore-candidate assignments to `Application.EnableEvents`:
+  `disables_events` or `restores_events`, plus property-neutral evidence; and
+- assignments to `Application.Calculation`: `changes_calculation`, plus the
+  property-neutral evidence;
 - `MsgBox` and `InputBox`: `shows_dialog`;
 - `Shell`, and explicit `WScript.Shell.Run` or `WScript.Shell.Exec`:
   `launches_process`;
@@ -146,15 +150,24 @@ does not contain the matching restore is not treated as safe. The analyzer
 continues to emit at most the existing root-assignment finding; it does not emit
 caller-level findings under issue #428.
 
-The integration preserves the existing `VBA203` diagnostic position, message,
-reason, suggestion, severity, ordering, inline suppression, and
-`[analyze].disabled_rules` behavior. The `analyze --json` shape is unchanged.
+Issue #431 also consumes the CFG directly for procedure-local all-path
+restoration. It tracks saved property-value snapshots and their direct variable
+copies, then reports a changed assignment when a normal, exceptional,
+termination, or unknown exit can retain that change. Cleanup labels and error
+handlers therefore participate naturally. Effect summaries remain the narrow
+interprocedural Push/Pop exemption only; they do not prove a caller's paths.
+
+The integration preserves the `VBA203` diagnostic ID, severity, ordering,
+inline suppression, configuration, and `analyze --json` field shape. Its
+message and reason now name the affected property and an available uncovered
+exit witness.
 
 ## Boundaries
 
 An effect summary establishes possible reachable behavior, not an all-path
-guarantee. Verifying restoration on every exit is issue #431, event re-entry is
-issue #438, and caller-level state propagation/reporting is issue #439.
+guarantee. Issue #431 provides procedure-local all-path restoration through the
+CFG; event re-entry remains issue #438, and caller-level state
+propagation/reporting remains issue #439.
 
 The CFG retains its existing fallback that every executable statement is a
 potential fault site. Effect summaries are not embedded into CFG construction

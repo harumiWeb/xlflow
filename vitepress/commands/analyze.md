@@ -27,14 +27,17 @@ xlflow analyze --json
 Use `analyze` for fast source-level feedback before opening Excel.
 :::
 
-`VBA203` prefers same-module Pop/Restore helpers and recognizes a matching
-direct or propagated restore from either same-module alias. A cross-module pair
-is accepted only when exactly one candidate is a non-private procedure in a
-standard module; class, document, and UserForm procedures do not establish a
-receiver-less cross-module pair. Ambiguous, missing, external, or dynamically
-bound helper paths are not treated as proof of restoration. This internal
-analysis does not add fields to JSON output or report new caller-level
-diagnostics.
+`VBA203` tracks each recognized `Application` state write through normal,
+early-exit, error-handler, termination, and unknown CFG exits. A direct saved
+value (including an exact saved-variable copy) restores the state only when it
+reaches that exit on every path; cleanup labels are supported. It covers
+`ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation`, `StatusBar`,
+`Cursor`, `Interactive`, `AskToUpdateLinks`, `AutomationSecurity`, and
+`CutCopyMode`. The existing Push/Pop helper exception still prefers same-module
+Pop/Restore helpers and accepts a uniquely resolved project-visible standard
+module pair. Ambiguous, missing, external, or dynamically bound helper paths
+are not treated as proof of restoration. This internal analysis does not add
+fields to JSON output or report new caller-level diagnostics.
 
 > [!IMPORTANT]
 > Findings that block automation return a failure status and exit code `1`.
