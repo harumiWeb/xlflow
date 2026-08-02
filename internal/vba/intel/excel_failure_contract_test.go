@@ -128,6 +128,24 @@ End Sub
 	}
 }
 
+func TestExcelAPIFailureCallCandidateKeepsOnlyContractMembers(t *testing.T) {
+	for target, want := range map[string]bool{
+		"rng.SpecialCells":                    true,
+		".SpecialCells":                       true,
+		"Application.Match":                   true,
+		"Application.WorksheetFunction.Index": true,
+		"XlflowAssert.AreEqual":               false,
+		"Debug.Print":                         false,
+		"Application.Calculate":               false,
+		"Range.Find":                          false,
+		"Match":                               true,
+	} {
+		if got := excelAPIFailureCallCandidate(target); got != want {
+			t.Fatalf("excelAPIFailureCallCandidate(%q) = %v, want %v", target, got, want)
+		}
+	}
+}
+
 func addFailureContractMembers(t *testing.T, analyzer Analyzer) {
 	t.Helper()
 	if err := analyzer.DB.MergeJSON([]byte(`{

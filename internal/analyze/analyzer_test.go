@@ -12,7 +12,9 @@ import (
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
@@ -2109,6 +2111,48 @@ End Sub
 	}
 }
 
+func TestBatchTypedExcelRulesReusePreparedParsedDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim rng As Range
+    Dim result As Variant
+    rng.Find "missing"
+    rng.SpecialCells xlCellTypeVisible
+    result = Application.Match("missing", rng, 0)
+    Debug.Print result
+End Sub
+`)
+	parsed, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := intel.Document{Path: path, Source: string(source)}
+	document.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(document, parsed)
+	defer document.Snapshot.Retire()
+	db, err := vbadb.LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := parsedFile{
+		Path:          path,
+		Lines:         normalizedSourceLines(string(source)),
+		Source:        source,
+		IntelDocument: document,
+	}
+	analysis := Analyzer{RootDir: dir, Config: config.Default(), typeDB: db}
+	if got := analysis.statefulExcelCallArgumentFindings(file); len(got) == 0 {
+		t.Fatal("VBA215 fixture should exercise the shared typed document index")
+	}
+	if got := analysis.excelAPIFailureContractFindings(file); len(got) == 0 {
+		t.Fatal("VBA218 fixture should exercise the shared typed document index")
+	}
+	if got := document.Snapshot.ParseCount(); got != 1 {
+		t.Fatalf("shared VBA215/VBA218 snapshot parse count = %d, want 1", got)
+	}
+}
+
 func TestVBA218MatchesBatchAndRealtimeAnalysisAndHonorsFailureContracts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
@@ -3249,6 +3293,118 @@ func writeModule(t *testing.T, dir, name, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVBA220DetectsEventReentryAndHonorsSafeEventCleanup(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
+  Target.Value = 1
+End Sub
+
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+  SelectElsewhere
+End Sub
+
+Private Sub SelectElsewhere()
+  Application.Goto Range("A1")
+End Sub
+
+Private Sub Worksheet_Calculate()
+  MysteryOperation
+End Sub
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+  Dim oldEvents As Boolean
+  oldEvents = Application.EnableEvents
+  On Error GoTo Cleanup
+  Application.EnableEvents = False
+  Range("C1").Value = 1
+Cleanup:
+  Application.EnableEvents = oldEvents
+End Sub
+
+Private Sub Workbook_Open()
+  Application.EnableEvents = False
+  Range("D1").Value = 1
+End Sub
+`
+	path := filepath.Join(workbook, "Sheet1.cls")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) < 4 {
+		t.Fatalf("VBA220 findings = %+v, want direct, helper, uncertainty, and un-restored guard hazards", got)
+	}
+	if !strings.Contains(got[0].Message, "same-event") {
+		t.Fatalf("first VBA220 should be direct recursion: %+v", got[0])
+	}
+	for _, finding := range got {
+		if finding.Procedure == "Workbook_SheetChange" {
+			t.Fatalf("safe cleanup should suppress VBA220: %+v", finding)
+		}
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) == 0 {
+		t.Fatalf("missing EnableEvents restoration must remain reportable: %+v", findings)
+	}
+	if realtime, err := SourceRealtimeFindings(dir, path, config.Default(), []byte(source)); err != nil {
+		t.Fatal(err)
+	} else if got := findingsByCode(realtime, "VBA220"); len(got) != 0 {
+		t.Fatalf("batch-only VBA220 must not be returned in realtime: %+v", got)
+	}
+}
+
+func TestVBA220ReportsUserFormControlReentryWithoutEnableEventsExemption(t *testing.T) {
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub TextBox1_Change()
+  Application.EnableEvents = False
+  Me.TextBox1.Value = "updated"
+  Application.EnableEvents = True
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "same-event") {
+		t.Fatalf("UserForm control change should remain a same-event VBA220 hazard: %+v", got)
+	}
+}
+
+func TestVBA220ReportsAmbiguousCallsAsUncertainty(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.cls"), []byte(`Option Explicit
+Private Sub Worksheet_Calculate()
+  RefreshData
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeModule(t, dir, "First.bas", "Public Sub RefreshData()\nEnd Sub\n")
+	writeModule(t, dir, "Second.bas", "Public Sub RefreshData()\nEnd Sub\n")
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "ambiguous") || strings.Contains(got[0].Message, "same-event") {
+		t.Fatalf("ambiguous event call must be an uncertainty, not a confirmed recursion: %+v", got)
 	}
 }
 

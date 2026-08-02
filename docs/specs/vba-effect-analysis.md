@@ -32,6 +32,9 @@ and do not depend on file input or Go map iteration order.
 - `disables_events`
 - `restores_events`
 - `changes_calculation`
+- `recalculates`
+- `changes_selection`
+- `changes_controls`
 - `shows_dialog`
 - `launches_process`
 - `suppresses_errors`
@@ -168,6 +171,15 @@ An effect summary establishes possible reachable behavior, not an all-path
 guarantee. Issue #431 provides procedure-local all-path restoration through the
 CFG; event re-entry remains issue #438, and caller-level state
 propagation/reporting remains issue #439.
+
+`VBA220` consumes these summaries for supported event handlers. It classifies
+cell writes, explicit recalculation, selection changes, workbook lifecycle and
+structure changes, and recognized UserForm-control changes as same-event or
+broader-chain risks. Only uniquely resolved project-local calls prove a
+triggering effect; other calls remain explicit uncertainty. `EnableEvents`
+suppresses only Excel events when its False assignment dominates the effect and
+the existing CFG analysis proves restoration on every exit; it does not
+suppress UserForm control events.
 
 The CFG retains its existing fallback that every executable statement is a
 potential fault site. Effect summaries are not embedded into CFG construction

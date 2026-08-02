@@ -45,12 +45,13 @@ type Result struct {
 }
 
 type Analyzer struct {
-	RootDir            string
-	Config             config.Config
-	PathFilter         func(string) bool
-	typeDB             *vbadb.DB
-	errorGuardAliases  map[string]bool
-	errorValueWrappers map[string]bool
+	RootDir             string
+	Config              config.Config
+	PathFilter          func(string) bool
+	typeDB              *vbadb.DB
+	errorGuardAliases   map[string]bool
+	errorValueWrappers  map[string]bool
+	eventSafeProcedures map[string]bool
 }
 
 var (
@@ -168,20 +169,22 @@ type parameterInfo struct {
 }
 
 type parsedFile struct {
-	Path       string
-	Lines      []string
-	Module     string
-	ModuleKind string
-	Source     []byte
-	Root       *tree_sitter.Node
-	IR         procedureir.DocumentIR
-	CFG        vbacfg.Document
-	Parsed     *vbaast.ParsedDocument
+	Path          string
+	Lines         []string
+	Module        string
+	ModuleKind    string
+	Source        []byte
+	Root          *tree_sitter.Node
+	IR            procedureir.DocumentIR
+	CFG           vbacfg.Document
+	Parsed        *vbaast.ParsedDocument
+	IntelDocument intel.Document
 }
 
 type sourceProcedure struct {
 	Kind         string
 	Name         string
+	ModuleKind   string
 	ReturnType   string
 	StartLine    int
 	EndLine      int
@@ -222,6 +225,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		source, err := os.ReadFile(file)
@@ -258,15 +262,21 @@ func (a Analyzer) RunResult() (Result, error) {
 			return Result{}, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
 		}
 		controlFlow := vbacfg.BuildDocument(ir)
+		var intelDocument intel.Document
+		if needsTypedExcelAnalysis {
+			intelDocument = intel.Document{Path: file, Source: string(source), ModuleKind: moduleKind}
+			intelDocument.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(intelDocument, parsed)
+		}
 		parsedFiles = append(parsedFiles, parsedFile{
-			Path:       file,
-			Lines:      normalizedSourceLines(string(source)),
-			Module:     strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
-			ModuleKind: moduleKind,
-			Source:     source,
-			IR:         ir,
-			CFG:        controlFlow,
-			Parsed:     parsed,
+			Path:          file,
+			Lines:         normalizedSourceLines(string(source)),
+			Module:        strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
+			ModuleKind:    moduleKind,
+			Source:        source,
+			IR:            ir,
+			CFG:           controlFlow,
+			Parsed:        parsed,
+			IntelDocument: intelDocument,
 		})
 	}
 	defer closeParsedFiles(parsedFiles)
@@ -274,7 +284,10 @@ func (a Analyzer) RunResult() (Result, error) {
 	projectEffects := buildProjectEffects(parsedFiles)
 	ctx := a.buildContext(parsedFiles)
 	analysis := a
-	if a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts {
+	if analysis.Config.Analyze.DetectEventHandlerReentry {
+		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
+	}
+	if needsTypedExcelAnalysis {
 		typeDB, err := vbadb.LoadBuiltin()
 		if err != nil {
 			return Result{}, err
@@ -290,13 +303,16 @@ func (a Analyzer) RunResult() (Result, error) {
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
 			file.Root = view.Root
 			findings = append(findings, analysis.analyzeParsedFile(file, ctx, projectEffects)...)
-			findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
-			findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
 			findings = append(findings, analysis.errorValueWrapperFindings(file)...)
 			return nil
 		}); err != nil {
 			return Result{}, err
 		}
+		// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
+		// document. Run it after the tree callback releases its exclusive read
+		// lease so the snapshot can reuse that parse without re-entering it.
+		findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
+		findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
 	}
 	sortFindings(findings)
 	directives, warnings, err := suppression.DirectivesForFiles(a.RootDir, files)
@@ -312,9 +328,7 @@ func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.typeDB == nil {
 		return nil
 	}
-	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnostics(intel.Document{
-		Path: file.Path, Source: string(file.Source),
-	})
+	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnostics(file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil
 	}
@@ -373,10 +387,24 @@ func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
 
 func closeParsedFiles(files []parsedFile) {
 	for _, file := range files {
+		if file.IntelDocument.Snapshot != nil {
+			file.IntelDocument.Snapshot.Retire()
+			continue
+		}
 		if file.Parsed != nil {
 			file.Parsed.Close()
 		}
 	}
+}
+
+// intelDocument returns the batch-owned immutable document revision. Batch
+// analysis seeds it with the parser already used to build IR and CFG, so the
+// typed VBA215 and VBA218 rules share both that parse and their document index.
+func (file parsedFile) intelDocument() intel.Document {
+	if file.IntelDocument.Snapshot != nil {
+		return file.IntelDocument
+	}
+	return intel.Document{Path: file.Path, Source: string(file.Source), ModuleKind: file.ModuleKind}
 }
 
 func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
@@ -860,6 +888,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectApplicationStateRestore {
 		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}
+	if a.Config.Analyze.DetectEventHandlerReentry {
+		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
+	}
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -895,6 +926,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 		source := sourceProcedure{
 			Kind:         kind,
 			Name:         procedure.Symbol.Name,
+			ModuleKind:   document.ModuleKind,
 			ReturnType:   procedure.Symbol.ReturnType,
 			StartLine:    procedure.Symbol.DeclarationRange.StartLine,
 			EndLine:      procedure.Symbol.DeclarationRange.EndLine,

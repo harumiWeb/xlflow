@@ -44,6 +44,9 @@ func (a Analyzer) ResolvedExcelAPIFailureCalls(doc Document) []ExcelAPIFailureCa
 	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
 		calls := callsOnLine(logicalLine.Text)
 		for _, call := range calls {
+			if !excelAPIFailureCallCandidate(call.Target) {
+				continue
+			}
 			callRange := logicalLine.callRange(call)
 			sig, resolved, err := a.resolveCallSignatureAtContext(doc, call.Target, callRange.Start, []Document{doc}, typeContext)
 			if err != nil || !resolved {
@@ -65,6 +68,23 @@ func (a Analyzer) ResolvedExcelAPIFailureCalls(doc Document) []ExcelAPIFailureCa
 		}
 	}
 	return out
+}
+
+// excelAPIFailureCallCandidate avoids resolving every VBA call in a document.
+// The failure-contract table is intentionally closed: only these member names
+// can produce VBA218, so resolving any other call cannot change its result.
+// Receiver type resolution remains authoritative for the retained candidates.
+func excelAPIFailureCallCandidate(target string) bool {
+	_, member, hasReceiver := splitCallTarget(target)
+	if !hasReceiver {
+		member = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "."))
+	}
+	switch strings.ToLower(member) {
+	case "specialcells", "match", "vlookup", "xlookup", "index":
+		return true
+	default:
+		return false
+	}
 }
 
 // discardedCallResult excludes a standalone function call: its Variant/Error

@@ -84,6 +84,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `changed_paths`
 - `changes_application_state`
 - `changes_calculation`
+- `changes_controls`
+- `changes_selection`
 - `changes_workbook`
 - `check_dialog`
 - `check_failed`
@@ -162,6 +164,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_dictionary_collection_guard`
 - `detect_dictionary_iteration_value_usage`
 - `detect_error_handler_fallthrough`
+- `detect_event_handler_reentry`
 - `detect_excel_api_failure_contracts`
 - `detect_excel_object_member_mismatch`
 - `detect_for_each_control_type`
@@ -850,9 +853,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `workbook_recovery_required`
 - `workbook_recovery_verification_failed`
 - `workbook_saved`
+- `workbook_sheetchange`
 - `workbook_vbproject_access`
 - `workbook_vbproject_access_error`
 - `worker_pid`
+- `worksheet_calculate`
+- `worksheet_change`
+- `worksheet_selectionchange`
 - `write_only`
 - `writes_cells`
 - `wsl_path`

@@ -60,6 +60,22 @@ End Sub
 	}
 }
 
+func TestEffectsRecognizeEventTriggeringOperations(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Events.bas", "Events", `Public Sub Trigger()
+    Application.Calculate
+    Application.Goto Range("A1")
+    Worksheets.Add
+    Worksheets(1).Name = "Renamed"
+End Sub
+`})
+	trigger := find(t, summary, "Events.Trigger")
+	for _, kind := range []EffectKind{Recalculates, ChangesSelection, ChangesWorkbook} {
+		if !trigger.Has(kind) {
+			t.Errorf("missing event-triggering effect %s: %#v", kind, trigger.Direct)
+		}
+	}
+}
+
 func TestErrorFunctionDoesNotRaiseButErrorStatementDoes(t *testing.T) {
 	summary := buildSources(t, sourceFile{"Errors.bas", "Errors", `Public Sub Run()
     Dim description As String
