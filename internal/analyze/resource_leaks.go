@@ -80,10 +80,6 @@ func resourceAcquisitions(proc sourceProcedure) []resourceAcquisition {
 			continue
 		}
 		if target, ok := resourceWorkbookOpenTarget(statement.Text); ok && resourceLocalVariable(proc, target) {
-			// A Function return slot is the approved v1 ownership-transfer form.
-			if proc.Kind == "Function" && isObjectType(proc.ReturnType) && strings.EqualFold(target, proc.Name) {
-				continue
-			}
 			acquisitions = append(acquisitions, resourceAcquisition{
 				StatementID: statement.ID, Kind: resourceWorkbook, Owner: target, Line: statement.Range.StartLine,
 			})
@@ -104,6 +100,13 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 	if !ok {
 		return resourceExitWitness{}, false
 	}
+	if !graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
+		return resourceExitWitness{}, false
+	}
+	initialAliases := map[string]bool{acquisition.Owner: true}
+	if acquisition.Kind == resourceFileHandle {
+		initialAliases = resourceFileAliasesBefore(proc, block.ID, acquisition.Owner)
+	}
 	in := map[int]map[string]bool{}
 	queued := map[int]bool{}
 	queue := make([]int, 0)
@@ -119,7 +122,7 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 			found = true
 			continue
 		}
-		resourceMergeAliases(in, queued, &queue, int(edge.To), map[string]bool{acquisition.Owner: true})
+		resourceMergeAliases(in, queued, &queue, int(edge.To), initialAliases)
 	}
 
 	for len(queue) > 0 {
@@ -131,23 +134,23 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 		if !ok {
 			continue
 		}
-		if current.Statement != nil && resourceStatementReleases(acquisition.Kind, current.Statement.Text, aliases) {
-			continue
-		}
-		if current.Statement != nil && resourceStatementTransfers(proc, acquisition.Kind, current.Statement.Text, aliases) {
-			continue
+		if current.Statement != nil && !current.Statement.Recovered {
+			if resourceStatementReleases(acquisition.Kind, current.Statement.Text, aliases) {
+				continue
+			}
 		}
 		for _, edge := range graph.Edges {
 			if int(edge.From) != blockID {
 				continue
 			}
 			out := cloneResourceAliases(aliases)
-			if current.Statement != nil {
-				// Direct local alias copies are treated as non-failing bookkeeping.
-				// Acquisition remains normal-edge-only because Open itself can fail.
+			if current.Statement != nil && !current.Statement.Recovered && edge.Class == vbacfg.EdgeNormal {
 				resourceApplyAliasAssignment(proc, acquisition.Kind, current.Statement.Text, out)
 			}
 			if kind := applicationStateExitKind(*graph, edge.To); kind != "" {
+				if resourceTransfersAtExit(proc, acquisition.Kind, kind, out) {
+					continue
+				}
 				witness = chooseResourceWitness(witness, resourceExitWitness{Kind: kind, Line: edge.Range.StartLine})
 				found = true
 				continue
@@ -156,6 +159,103 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 		}
 	}
 	return witness, found
+}
+
+// resourceFileAliasesBefore finds local numeric aliases that are definitely
+// equal to the handle operand immediately before its Open statement. The
+// handle itself is always present; a reassignment clears prior aliases.
+func resourceFileAliasesBefore(proc sourceProcedure, acquisitionBlock vbacfg.BlockID, handle string) map[string]bool {
+	graph := proc.Graph
+	in := map[vbacfg.BlockID]map[string]bool{graph.Entry: {handle: true}}
+	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
+	queue := []vbacfg.BlockID{graph.Entry}
+	for len(queue) > 0 {
+		blockID := queue[0]
+		queue = queue[1:]
+		queued[blockID] = false
+		current, ok := resourceGraphBlock(*graph, int(blockID))
+		if !ok || current.ID == acquisitionBlock {
+			continue
+		}
+		aliases := in[blockID]
+		for _, edge := range graph.Edges {
+			if edge.From != blockID {
+				continue
+			}
+			out := cloneResourceAliases(aliases)
+			if current.Statement != nil && !current.Statement.Recovered && edge.Class == vbacfg.EdgeNormal {
+				resourceApplyFileEquivalence(proc, current.Statement.Text, handle, out)
+			}
+			resourceMergeAliasesByBlock(in, queued, &queue, edge.To, out)
+		}
+	}
+	if aliases, ok := in[acquisitionBlock]; ok {
+		return aliases
+	}
+	return map[string]bool{handle: true}
+}
+
+func resourceApplyFileEquivalence(proc sourceProcedure, text, handle string, aliases map[string]bool) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "set ") {
+		return
+	}
+	match := resourceValueAliasRe.FindStringSubmatch(text)
+	if len(match) == 3 {
+		target, source := resourceName(match[1]), resourceName(match[2])
+		if !resourceLocalVariable(proc, target) {
+			return
+		}
+		if target == handle && !aliases[source] {
+			for alias := range aliases {
+				delete(aliases, alias)
+			}
+			aliases[handle] = true
+			return
+		}
+		if aliases[source] {
+			aliases[target] = true
+			return
+		}
+		delete(aliases, target)
+		return
+	}
+	targetMatch := resourceValueTargetRe.FindStringSubmatch(text)
+	if len(targetMatch) != 2 {
+		return
+	}
+	target := resourceName(targetMatch[1])
+	if !resourceLocalVariable(proc, target) {
+		return
+	}
+	if target == handle {
+		for alias := range aliases {
+			delete(aliases, alias)
+		}
+		aliases[handle] = true
+		return
+	}
+	delete(aliases, target)
+}
+
+func resourceMergeAliasesByBlock(in map[vbacfg.BlockID]map[string]bool, queued map[vbacfg.BlockID]bool, queue *[]vbacfg.BlockID, blockID vbacfg.BlockID, incoming map[string]bool) {
+	current, exists := in[blockID]
+	if !exists {
+		in[blockID] = cloneResourceAliases(incoming)
+		if !queued[blockID] {
+			queued[blockID] = true
+			*queue = append(*queue, blockID)
+		}
+		return
+	}
+	next := intersectResourceAliases(current, incoming)
+	if resourceAliasesEqual(current, next) {
+		return
+	}
+	in[blockID] = next
+	if !queued[blockID] {
+		queued[blockID] = true
+		*queue = append(*queue, blockID)
+	}
 }
 
 func resourceGraphBlock(graph vbacfg.Graph, id int) (vbacfg.Block, bool) {
@@ -225,12 +325,9 @@ func resourceStatementReleases(kind resourceKind, text string, aliases map[strin
 	return false
 }
 
-func resourceStatementTransfers(proc sourceProcedure, kind resourceKind, text string, aliases map[string]bool) bool {
-	if kind != resourceWorkbook || proc.Kind != "Function" || !isObjectType(proc.ReturnType) {
-		return false
-	}
-	match := resourceSetAliasRe.FindStringSubmatch(text)
-	return len(match) == 3 && strings.EqualFold(resourceName(match[1]), resourceName(proc.Name)) && aliases[resourceName(match[2])]
+func resourceTransfersAtExit(proc sourceProcedure, kind resourceKind, exitKind string, aliases map[string]bool) bool {
+	return kind == resourceWorkbook && exitKind == "normal exit" && proc.Kind == "Function" &&
+		isObjectType(proc.ReturnType) && aliases[resourceName(proc.Name)]
 }
 
 func resourceApplyAliasAssignment(proc sourceProcedure, kind resourceKind, text string, aliases map[string]bool) {
@@ -284,12 +381,7 @@ func resourceMergeAliases(in map[int]map[string]bool, queued map[int]bool, queue
 		}
 		return
 	}
-	next := map[string]bool{}
-	for alias := range current {
-		if incoming[alias] {
-			next[alias] = true
-		}
-	}
+	next := intersectResourceAliases(current, incoming)
 	if resourceAliasesEqual(current, next) {
 		return
 	}
@@ -298,6 +390,16 @@ func resourceMergeAliases(in map[int]map[string]bool, queued map[int]bool, queue
 		queued[blockID] = true
 		*queue = append(*queue, blockID)
 	}
+}
+
+func intersectResourceAliases(current, incoming map[string]bool) map[string]bool {
+	next := map[string]bool{}
+	for alias := range current {
+		if incoming[alias] {
+			next[alias] = true
+		}
+	}
+	return next
 }
 
 func resourceAliasesEqual(left, right map[string]bool) bool {

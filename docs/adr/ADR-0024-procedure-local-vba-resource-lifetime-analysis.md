@@ -23,8 +23,9 @@ Each explicit acquisition is tracked independently from its normal successor.
 An acquisition must be released before every reachable CFG exit. Direct local
 aliases can identify the same resource for Close. Parameters and aliases that
 originate only from parameters are borrowed and never create an ownership
-obligation. A local Workbook may transfer ownership only by being assigned to
-an object-returning Function's return slot.
+obligation. A local Workbook may transfer ownership only when its alias remains
+in an object-returning Function's return slot through a successful normal
+Function exit.
 
 Release means a recognized `Workbook.Close`, `Close #handle`, or bare `Close`
 statement is reached. The rule intentionally does not model a Close call's own
