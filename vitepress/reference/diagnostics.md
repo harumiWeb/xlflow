@@ -70,6 +70,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA216`](#vba216) | analyze | error    | procedure-local | yes     | Worksheet root mismatch                      |
 | [`VBA217`](#vba217) | analyze | warning  | procedure-local | yes     | Unstable last-row boundary                   |
 | [`VBA218`](#vba218) | analyze | warning  | interprocedural | yes     | Unhandled Excel API failure contract         |
+| [`VBA219`](#vba219) | analyze | warning  | procedure-local | yes     | Unreleased workbook or VBA file handle       |
 
 ## VB001
 
@@ -1222,3 +1223,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                   |
 | Real-time editor diagnostic | yes                                  |
 | Fix available               | no                                   |
+
+## VBA219
+
+**Unreleased workbook or VBA file handle.** A procedure-local Workbook or VBA file handle acquired by an explicit Open call can reach an exit without a matching Close.
+
+| Property                    | Value                   |
+| --------------------------- | ----------------------- |
+| Family                      | `analyze`               |
+| Category                    | `reliability`           |
+| Default severity            | `warning`               |
+| Scope                       | `procedure-local`       |
+| Precision                   | `high`                  |
+| Enabled by default          | yes                     |
+| Configuration               | `detect_resource_leaks` |
+| Inline suppression          | yes                     |
+| Blocks source preflight     | no                      |
+| Real-time editor diagnostic | yes                     |
+| Fix available               | no                      |

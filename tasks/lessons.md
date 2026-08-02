@@ -107,3 +107,4 @@
 - When resolver policy depends on new symbol metadata, verify every resolver entry point actually consumes that metadata; copying it into only one index does not enforce the policy across compatibility wrappers.
 - Changelog entries for corrected variadic APIs must explicitly cover every validated boundary case, including zero arguments when the regression suite tests it.
 - For regex-backed VBA diagnostics, evaluate each repeated call occurrence within its single-line `If` branch, accept valid non-identifier `Set` lvalues, and keep remediation valid for the enclosing workbook context such as add-ins.
+- For CFG-based resource ownership, start only from entry-reachable acquisitions, preserve pre-acquisition scalar-handle equivalences, apply assignments only on normal edges, and treat Function-return ownership transfer as complete only at a successful normal exit.

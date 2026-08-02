@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled real-time `VBA219` warnings for locally acquired
+  Workbooks and VBA file handles that can reach a normal, error, termination,
+  or unknown exit without a recognized Close path. The rule recognizes local
+  aliases, cleanup handlers, and object-returning Function ownership transfer;
+  it remains non-blocking and locally suppressible.
 - Expanded default-enabled `VBA205` warnings to identify ambiguous Excel workbook and worksheet roots: active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open` calls, and `ThisWorkbook` from add-in standard modules. Findings remain non-blocking and can be suppressed locally for intentional interactive macros.
 - Added default-enabled real-time `VBA218` warnings for resolved Excel APIs whose exceptional or `Variant/Error` failure contracts are consumed without an appropriate local guard.
 
