@@ -34,6 +34,26 @@ func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
 	}
 }
 
+func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
+	document := procedureir.DocumentIR{
+		Path:       `modules\..\modules\Main.bas`,
+		ModuleName: "Main",
+		ModuleKind: "standard",
+	}
+	symbol := procedureir.ProcedureSymbol{
+		Name:             "Run",
+		QualifiedName:    "Main.Run",
+		Kind:             procedureir.ProcedureSub,
+		Visibility:       "public",
+		DeclarationRange: vbaast.Range{StartLine: 3},
+	}
+
+	got := procedureEffectIdentity(document, symbol)
+	if got.File != "modules/Main.bas" {
+		t.Fatalf("canonical file = %q, want modules/Main.bas", got.File)
+	}
+}
+
 func TestAnalyzerDetectsProcedureLocalResourceLeaks(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Resources.bas", `Option Explicit
@@ -1535,8 +1555,19 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA203"); len(got) != 2 || got[0].Procedure != "PrepareExcel" || got[0].Line != 7 {
+	if got := findingsByCode(findings, "VBA203"); len(got) != 2 {
 		t.Fatalf("VBA203 root causes = %+v, want both PrepareExcel assignments", got)
+	} else {
+		lines := map[int]bool{}
+		for _, finding := range got {
+			if finding.Procedure != "PrepareExcel" {
+				t.Fatalf("VBA203 root cause procedure = %+v, want PrepareExcel", finding)
+			}
+			lines[finding.Line] = true
+		}
+		if !lines[7] || !lines[8] {
+			t.Fatalf("VBA203 root cause lines = %+v, want 7 and 8", got)
+		}
 	}
 	got := findingsByCode(findings, "VBA221")
 	if len(got) != 1 || got[0].Procedure != "Main" || got[0].Line != 3 || !strings.Contains(got[0].Message, "Application.EnableEvents") || !strings.Contains(got[0].Reason, "Main.PrepareExcel") || !strings.Contains(got[0].Reason, "unresolved") {
@@ -1604,8 +1635,7 @@ func TestVBA221HonorsConfigAndInlineSuppression(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Main()
-  ' xlflow:disable-next-line VBA221
-  PrepareExcel
+	  PrepareExcel
 End Sub
 
 Private Sub PrepareExcel()
@@ -1617,8 +1647,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
-		t.Fatalf("inline suppression should remove VBA221: %+v", got)
+	if got := findingsByCode(findings, "VBA221"); len(got) != 1 {
+		t.Fatalf("default VBA221 should report the direct caller: %+v", got)
 	}
 	cfg := config.Default()
 	cfg.Analyze.DetectApplicationStateCallEffects = false
@@ -1628,6 +1658,23 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
 		t.Fatalf("disabled VBA221 should not report: %+v", got)
+	}
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Main()
+  ' xlflow:disable-next-line VBA221
+  PrepareExcel
+End Sub
+
+Private Sub PrepareExcel()
+  Application.DisplayAlerts = False
+End Sub
+`)
+	findings, err = (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
+		t.Fatalf("inline suppression should remove VBA221: %+v", got)
 	}
 }
 

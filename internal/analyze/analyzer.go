@@ -52,7 +52,7 @@ type Analyzer struct {
 	errorGuardAliases     map[string]bool
 	errorValueWrappers    map[string]bool
 	eventSafeProcedures   map[string]bool
-	applicationStateLeaks applicationStateLeakIndex
+	applicationStateLeaks *applicationStateLeakIndex
 }
 
 var (
@@ -285,7 +285,9 @@ func (a Analyzer) RunResult() (Result, error) {
 	projectEffects := buildProjectEffects(parsedFiles)
 	ctx := a.buildContext(parsedFiles)
 	analysis := a
-	analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
+	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
+		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
+	}
 	if analysis.Config.Analyze.DetectEventHandlerReentry {
 		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
@@ -903,17 +905,20 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 		if i >= len(file.IR.Procedures) {
 			break
 		}
-		symbol := file.IR.Procedures[i].Symbol
-		id := effects.ProcedureIdentity{
-			File: file.IR.Path, Module: file.IR.ModuleName, ModuleKind: file.IR.ModuleKind, Name: symbol.Name,
-			QualifiedName: symbol.QualifiedName, Kind: symbol.Kind,
-			Visibility: symbol.Visibility, DeclarationLine: symbol.DeclarationRange.StartLine,
-		}
+		id := procedureEffectIdentity(file.IR, file.IR.Procedures[i].Symbol)
 		if summary, ok := project.Lookup(id); ok {
 			procedures[i].Effects = &summary
 		}
 	}
 	return procedures
+}
+
+func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir.ProcedureSymbol) effects.ProcedureIdentity {
+	return effects.ProcedureIdentity{
+		File: filepath.ToSlash(filepath.Clean(document.Path)), Module: document.ModuleName, ModuleKind: document.ModuleKind,
+		Name: symbol.Name, QualifiedName: symbol.QualifiedName, Kind: symbol.Kind,
+		Visibility: symbol.Visibility, DeclarationLine: symbol.DeclarationRange.StartLine,
+	}
 }
 
 func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
@@ -1538,7 +1543,13 @@ func nextNonSpace(text string, index int) byte {
 
 func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
 	var findings []Finding
-	for _, origin := range applicationStateLeakOrigins(proc, project) {
+	var origins []applicationStateLeakOrigin
+	if a.applicationStateLeaks != nil {
+		origins = a.applicationStateLeaks.originsFor(proc)
+	} else {
+		origins = applicationStateLeakOrigins(proc, project)
+	}
+	for _, origin := range origins {
 		property := applicationStatePropertyName(origin.Property)
 		findings = append(findings, a.simpleFinding(
 			file, proc, origin.Line, "VBA203", "warning",

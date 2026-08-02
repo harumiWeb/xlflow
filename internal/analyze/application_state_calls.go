@@ -20,14 +20,21 @@ type applicationStateLeakOrigin struct {
 	Witness     applicationStateExitWitness
 }
 
-type applicationStateLeakIndex map[string]applicationStateLeakOrigin
+type applicationStateLeakIndex struct {
+	byEffect    map[string]applicationStateLeakOrigin
+	byProcedure map[string][]applicationStateLeakOrigin
+}
 
-func buildApplicationStateLeakIndex(files []parsedFile, project effects.ProjectSummary) applicationStateLeakIndex {
-	index := applicationStateLeakIndex{}
+func buildApplicationStateLeakIndex(files []parsedFile, project effects.ProjectSummary) *applicationStateLeakIndex {
+	index := &applicationStateLeakIndex{
+		byEffect:    map[string]applicationStateLeakOrigin{},
+		byProcedure: map[string][]applicationStateLeakOrigin{},
+	}
 	for _, file := range files {
 		for _, proc := range sourceProceduresWithEffects(file, project) {
 			for _, origin := range applicationStateLeakOrigins(proc, project) {
-				index[applicationStateLeakKey(origin.Identity, origin.StatementID, origin.Property)] = origin
+				index.byEffect[applicationStateLeakKey(origin.Identity, origin.StatementID, origin.Property)] = origin
+				index.byProcedure[origin.Identity.Key()] = append(index.byProcedure[origin.Identity.Key()], origin)
 			}
 		}
 	}
@@ -70,7 +77,10 @@ func applicationStateLeakKey(identity effects.ProcedureIdentity, statementID int
 	return strings.Join([]string{identity.Key(), strconvItoa(statementID), strings.ToLower(property)}, "\x00")
 }
 
-func (index applicationStateLeakIndex) lookup(evidence effects.Evidence) (applicationStateLeakOrigin, bool) {
+func (index *applicationStateLeakIndex) lookup(evidence effects.Evidence) (applicationStateLeakOrigin, bool) {
+	if index == nil {
+		return applicationStateLeakOrigin{}, false
+	}
 	if evidence.Effect != effects.ChangesApplicationState {
 		return applicationStateLeakOrigin{}, false
 	}
@@ -78,8 +88,15 @@ func (index applicationStateLeakIndex) lookup(evidence effects.Evidence) (applic
 	if !ok {
 		return applicationStateLeakOrigin{}, false
 	}
-	origin, ok := index[applicationStateLeakKey(evidence.Origin, evidence.StatementID, property)]
+	origin, ok := index.byEffect[applicationStateLeakKey(evidence.Origin, evidence.StatementID, property)]
 	return origin, ok
+}
+
+func (index *applicationStateLeakIndex) originsFor(proc sourceProcedure) []applicationStateLeakOrigin {
+	if index == nil || proc.Effects == nil {
+		return nil
+	}
+	return append([]applicationStateLeakOrigin(nil), index.byProcedure[proc.Effects.Identity.Key()]...)
 }
 
 func applicationStatePropertyKey(target string) (string, bool) {
@@ -106,7 +123,7 @@ func applicationStatePropertyName(key string) string {
 // deliberately not enough: reporting it again at every ancestor would make a
 // single leak noisy without adding actionable context.
 func (a Analyzer) applicationStateCallEffectFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
-	if proc.Effects == nil || len(a.applicationStateLeaks) == 0 {
+	if proc.Effects == nil || a.applicationStateLeaks == nil {
 		return nil
 	}
 	var out []Finding

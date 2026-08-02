@@ -2,9 +2,10 @@
 
 This specification defines xlflow's deterministic, protocol-neutral procedure
 effect summaries. ADR-0023 records the rationale. The summaries are an internal
-analysis contract built from resolved procedure IR and conservative CFG facts;
-they do not add a public CLI option, configuration key, JSON field, diagnostic
-ID, or LSP capability.
+analysis contract built from resolved procedure IR and conservative CFG facts.
+They add no public CLI option, JSON field, or LSP capability; `VBA221` is the
+sole consumer that adds the `detect_application_state_call_effects`
+configuration key and a diagnostic ID.
 
 ## Construction and Ownership
 
