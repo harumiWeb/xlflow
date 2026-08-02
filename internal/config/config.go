@@ -143,6 +143,7 @@ type AnalyzeConfig struct {
 	DetectWorksheetRootMismatch         bool     `toml:"detect_worksheet_root_mismatch"`
 	DetectUnstableLastRowPatterns       bool     `toml:"detect_unstable_last_row_patterns"`
 	DetectExcelAPIFailureContracts      bool     `toml:"detect_excel_api_failure_contracts"`
+	DetectResourceLeaks                 bool     `toml:"detect_resource_leaks"`
 }
 
 type lintRuleAdapter struct {
@@ -210,6 +211,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA216": {Get: func(c AnalyzeConfig) bool { return c.DetectWorksheetRootMismatch }, Set: func(c *AnalyzeConfig, v bool) { c.DetectWorksheetRootMismatch = v }},
 	"VBA217": {Get: func(c AnalyzeConfig) bool { return c.DetectUnstableLastRowPatterns }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnstableLastRowPatterns = v }},
 	"VBA218": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelAPIFailureContracts }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelAPIFailureContracts = v }},
+	"VBA219": {Get: func(c AnalyzeConfig) bool { return c.DetectResourceLeaks }, Set: func(c *AnalyzeConfig, v bool) { c.DetectResourceLeaks = v }},
 }
 
 var (

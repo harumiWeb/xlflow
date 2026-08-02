@@ -30,6 +30,128 @@ func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
 	}
 }
 
+func TestAnalyzerDetectsProcedureLocalResourceLeaks(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Resources.bas", `Option Explicit
+
+Public Sub SafeWorkbook(ByVal path As String)
+  Dim wb As Workbook
+  On Error GoTo Cleanup
+  Set wb = Workbooks.Open(path)
+  If wb.ReadOnly Then GoTo Cleanup
+Cleanup:
+  wb.Close SaveChanges:=False
+End Sub
+
+Public Sub WorkbookLeak(ByVal path As String)
+  Dim wb As Workbook
+  Set wb = Application.Workbooks.Open(path)
+  Exit Sub
+End Sub
+
+Public Function TransferWorkbook(ByVal path As String) As Workbook
+  Dim wb As Workbook
+  Set wb = Workbooks.Open(path)
+  Set TransferWorkbook = wb
+End Function
+
+Public Sub BorrowedWorkbook(ByVal wb As Workbook)
+  Debug.Print wb.Name
+End Sub
+
+Public Sub SafeFile(ByVal path As String)
+  Dim handle As Integer
+  Dim aliasHandle As Integer
+  On Error GoTo Cleanup
+  handle = FreeFile
+  Open path For Output As #handle
+  aliasHandle = handle
+Cleanup:
+  Close #aliasHandle
+End Sub
+
+Public Sub SafeCloseAll(ByVal path As String)
+  Dim handle As Integer
+  handle = FreeFile
+  Open path For Output As #handle
+  Close
+End Sub
+
+Public Sub FileLeak(ByVal path As String)
+  Dim handle As Integer
+  handle = FreeFile
+  Open path For Output As #handle
+  Exit Sub
+End Sub
+
+Public Sub NestedBranchLeak(ByVal path As String, ByVal enabled As Boolean)
+  Dim wb As Workbook
+  If enabled Then
+    Set wb = Workbooks.Open(path)
+    If wb.ReadOnly Then Exit Sub
+  End If
+End Sub
+
+Public Sub ReassignedWorkbookLeak(ByVal firstPath As String, ByVal secondPath As String)
+  Dim wb As Workbook
+  Set wb = Workbooks.Open(firstPath)
+  Set wb = Workbooks.Open(secondPath)
+  wb.Close SaveChanges:=False
+End Sub
+
+Public Sub SuppressedWorkbookLeak(ByVal path As String)
+  Dim wb As Workbook
+  ' xlflow:disable-next-line VBA219
+  Set wb = Workbooks.Open(path)
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA219")
+	if len(got) != 4 {
+		t.Fatalf("VBA219 findings = %+v, want workbook, file, nested-branch, and reassignment leaks", got)
+	}
+	want := map[string]int{"WorkbookLeak": 14, "FileLeak": 49, "NestedBranchLeak": 56, "ReassignedWorkbookLeak": 63}
+	for _, finding := range got {
+		line, ok := want[finding.Procedure]
+		if !ok || finding.Line != line || !strings.Contains(finding.Reason, "without a matching Close") || !strings.Contains(finding.Suggestion, "cleanup path") {
+			t.Fatalf("unexpected VBA219 finding: %+v", finding)
+		}
+	}
+
+	source, err := os.ReadFile(filepath.Join(dir, "src", "modules", "Resources.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Resources.bas"), config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA219"); len(got) != 4 {
+		t.Fatalf("realtime VBA219 findings = %+v, want four", got)
+	}
+
+	cfg := config.Default()
+	cfg.Analyze.DetectResourceLeaks = false
+	findings, err = Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA219"); len(got) != 0 {
+		t.Fatalf("disabled VBA219 should not report in batch: %+v", got)
+	}
+	realtime, err = SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Resources.bas"), cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA219"); len(got) != 0 {
+		t.Fatalf("disabled VBA219 should not report in realtime: %+v", got)
+	}
+}
+
 func TestSourceRealtimeFindingsParsedMatchesSource(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")

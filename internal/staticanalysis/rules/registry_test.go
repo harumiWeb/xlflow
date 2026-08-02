@@ -13,7 +13,7 @@ VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
-VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218`)
+VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -65,6 +65,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	failureContract, ok := Lookup("VBA218")
 	if !ok || failureContract.DefaultSeverity != SeverityWarning || failureContract.PreflightBlocking || !failureContract.InlineSuppressible || !failureContract.Realtime || failureContract.Scope != ScopeInterprocedural || failureContract.Precision != PrecisionHigh {
 		t.Fatalf("unexpected VBA218 metadata: %+v, %v", failureContract, ok)
+	}
+	resourceLeaks, ok := Lookup("VBA219")
+	if !ok || resourceLeaks.DefaultSeverity != SeverityWarning || resourceLeaks.PreflightBlocking || !resourceLeaks.InlineSuppressible || !resourceLeaks.Realtime || resourceLeaks.Scope != ScopeProcedureLocal || resourceLeaks.Precision != PrecisionHigh {
+		t.Fatalf("unexpected VBA219 metadata: %+v, %v", resourceLeaks, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {

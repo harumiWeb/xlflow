@@ -1152,6 +1152,24 @@
       "configuration_key": "detect_excel_api_failure_contracts",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA219",
+      "title": "Unreleased workbook or VBA file handle",
+      "description": "A procedure-local Workbook or VBA file handle acquired by an explicit Open call can reach an exit without a matching Close.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba219",
+      "configurable": true,
+      "configuration_key": "detect_resource_leaks",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

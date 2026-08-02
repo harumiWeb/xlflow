@@ -180,17 +180,18 @@ type parsedFile struct {
 }
 
 type sourceProcedure struct {
-	Kind       string
-	Name       string
-	ReturnType string
-	StartLine  int
-	EndLine    int
-	Params     []parameterInfo
-	Statements []procedureir.Statement
-	Calls      []procedureir.CallSite
-	Accesses   []procedureir.VariableAccess
-	Graph      *vbacfg.Graph
-	Effects    *effects.ProcedureSummary
+	Kind         string
+	Name         string
+	ReturnType   string
+	StartLine    int
+	EndLine      int
+	Params       []parameterInfo
+	Declarations []procedureir.Declaration
+	Statements   []procedureir.Statement
+	Calls        []procedureir.CallSite
+	Accesses     []procedureir.VariableAccess
+	Graph        *vbacfg.Graph
+	Effects      *effects.ProcedureSummary
 }
 
 type sourceDeclaration struct {
@@ -507,7 +508,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 	return findings, err
 }
 
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -604,6 +605,9 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectResourceLeaks {
+		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
 	return findings
 }
@@ -856,6 +860,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectApplicationStateRestore {
 		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}
+	if a.Config.Analyze.DetectResourceLeaks {
+		findings = append(findings, a.resourceLeakFindings(file, proc)...)
+	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
@@ -886,15 +893,16 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			}
 		}
 		source := sourceProcedure{
-			Kind:       kind,
-			Name:       procedure.Symbol.Name,
-			ReturnType: procedure.Symbol.ReturnType,
-			StartLine:  procedure.Symbol.DeclarationRange.StartLine,
-			EndLine:    procedure.Symbol.DeclarationRange.EndLine,
-			Params:     params,
-			Statements: append([]procedureir.Statement(nil), procedure.Statements...),
-			Calls:      append([]procedureir.CallSite(nil), procedure.Calls...),
-			Accesses:   append([]procedureir.VariableAccess(nil), procedure.Accesses...),
+			Kind:         kind,
+			Name:         procedure.Symbol.Name,
+			ReturnType:   procedure.Symbol.ReturnType,
+			StartLine:    procedure.Symbol.DeclarationRange.StartLine,
+			EndLine:      procedure.Symbol.DeclarationRange.EndLine,
+			Params:       params,
+			Declarations: append([]procedureir.Declaration(nil), procedure.Declarations...),
+			Statements:   append([]procedureir.Statement(nil), procedure.Statements...),
+			Calls:        append([]procedureir.CallSite(nil), procedure.Calls...),
+			Accesses:     append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			graph := controlFlow[0].Graphs[procedureIndex]
