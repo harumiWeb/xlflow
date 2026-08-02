@@ -21,9 +21,7 @@ func (a Analyzer) excelAPIFailureContractFindings(file parsedFile) []Finding {
 	if !a.Config.Analyze.DetectExcelAPIFailureContracts || a.typeDB == nil {
 		return nil
 	}
-	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).ExcelAPIFailureContractDiagnostics(intel.Document{
-		Path: file.Path, Source: string(file.Source),
-	})
+	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).ExcelAPIFailureContractDiagnostics(file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil
 	}

@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -448,11 +448,14 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "V
 	if cfg.Analyze.DetectResourceLeaks {
 		t.Fatal("expected VBA219/detect_resource_leaks to be disabled")
 	}
+	if cfg.Analyze.DetectEventHandlerReentry {
+		t.Fatal("expected VBA220/detect_event_handler_reentry to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220", got)
 	}
 }
 

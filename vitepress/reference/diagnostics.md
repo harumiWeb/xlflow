@@ -71,6 +71,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA217`](#vba217) | analyze | warning  | procedure-local | yes     | Unstable last-row boundary                   |
 | [`VBA218`](#vba218) | analyze | warning  | interprocedural | yes     | Unhandled Excel API failure contract         |
 | [`VBA219`](#vba219) | analyze | warning  | procedure-local | yes     | Unreleased workbook or VBA file handle       |
+| [`VBA220`](#vba220) | analyze | warning  | interprocedural | yes     | Event handler re-entry hazard                |
 
 ## VB001
 
@@ -1241,3 +1242,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                      |
 | Real-time editor diagnostic | yes                     |
 | Fix available               | no                      |
+
+## VBA220
+
+**Event handler re-entry hazard.** An Excel or UserForm event handler can trigger itself or a related event without a proven safe event guard.
+
+| Property                    | Value                          |
+| --------------------------- | ------------------------------ |
+| Family                      | `analyze`                      |
+| Category                    | `reliability`                  |
+| Default severity            | `warning`                      |
+| Scope                       | `interprocedural`              |
+| Precision                   | `medium`                       |
+| Enabled by default          | yes                            |
+| Configuration               | `detect_event_handler_reentry` |
+| Inline suppression          | yes                            |
+| Blocks source preflight     | no                             |
+| Real-time editor diagnostic | no                             |
+| Fix available               | no                             |

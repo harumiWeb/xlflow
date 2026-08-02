@@ -8,8 +8,10 @@ import (
 )
 
 var (
-	whitespace          = regexp.MustCompile(`\s+`)
-	bareVBAIdentifierRE = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	whitespace           = regexp.MustCompile(`\s+`)
+	bareVBAIdentifierRE  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	formControlTargetRE  = regexp.MustCompile(`^(?:me\.)?([a-z_][a-z0-9_]*)\.(?:value|text|listindex|list)$`)
+	formControlsTargetRE = regexp.MustCompile(`^(?:me\.)?controls\((?:"[^"]+"|'[^']+')\)\.(?:value|text|listindex|list)$`)
 )
 
 func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, reachable map[int]bool) {
@@ -31,7 +33,6 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 				previous.Range.EndLine == statement.Range.StartLine && isCellSurface(strings.ToLower(compact(previous.Text))) &&
 				(member == "clear" || member == "clearcontents" || member == "insert" || member == "delete") {
 				addStatementEffect(summary, statement, WritesCells, previous.Text+statement.Text, "")
-				addStatementEffect(summary, statement, ChangesWorkbook, previous.Text+statement.Text, "")
 			}
 		}
 		if statement.Kind == procedureir.StatementOnError && statement.Control != nil && statement.Control.Transfer == procedureir.TransferOnErrorResumeNext {
@@ -48,9 +49,12 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 		lower := strings.ToLower(target)
 		property, applicationState := applicationStateTarget(statement, lower, statementsByID)
 		switch {
-		case isCellSurface(lower):
+		case isCellTarget(proc, lower):
 			addStatementEffect(summary, statement, WritesCells, target, value)
+		case isSheetNameTarget(lower):
 			addStatementEffect(summary, statement, ChangesWorkbook, target, value)
+		case controlTarget(summary.Identity.ModuleKind, lower):
+			addStatementEffect(summary, statement, ChangesControls, target, value)
 		case applicationState:
 			targetName := applicationStateTargetName("application." + property)
 			addStatementEffect(summary, statement, ChangesApplicationState, targetName, value)
@@ -227,7 +231,12 @@ func extractCall(summary *ProcedureSummary, call procedureir.CallSite, statement
 	}
 	if isCellMutation(full, member) {
 		addCallEffect(summary, call, WritesCells, call.Callee.Text)
-		addCallEffect(summary, call, ChangesWorkbook, call.Callee.Text)
+	}
+	if member == "calculate" && (isCalculationReceiver(receiver) || builtin && receiver == "") {
+		addCallEffect(summary, call, Recalculates, call.Callee.Text)
+	}
+	if (member == "select" || member == "activate" || member == "goto") && isSelectionReceiver(receiver) {
+		addCallEffect(summary, call, ChangesSelection, call.Callee.Text)
 	}
 }
 
@@ -245,8 +254,30 @@ func isCellSurface(lower string) bool {
 	if strings.HasPrefix(lower, "range(") || strings.HasPrefix(lower, "cells(") {
 		return true
 	}
-	for _, prefix := range []string{"activesheet.range(", "activesheet.cells(", "application.range(", "application.cells(", "thisworkbook.worksheets(", "thisworkbook.sheets(", "worksheets(", "sheets("} {
+	for _, prefix := range []string{"me.range(", "me.cells(", "activesheet.range(", "activesheet.cells(", "application.range(", "application.cells(", "thisworkbook.worksheets(", "thisworkbook.sheets(", "worksheets(", "sheets("} {
 		if strings.HasPrefix(lower, prefix) && (strings.Contains(lower, ".range(") || strings.Contains(lower, ".cells(")) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCellTarget(proc procedureir.ProcedureIR, target string) bool {
+	if isCellSurface(target) {
+		return true
+	}
+	root := target
+	if index := strings.IndexByte(root, '.'); index >= 0 {
+		root = root[:index]
+	}
+	root = strings.TrimSuffix(root, "()")
+	for _, parameter := range proc.Symbol.Parameters {
+		if strings.EqualFold(parameter.Name, root) && strings.EqualFold(strings.TrimSpace(parameter.Type), "Range") {
+			return true
+		}
+	}
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(declaration.Name, root) && strings.EqualFold(strings.TrimSpace(declaration.Type), "Range") {
 			return true
 		}
 	}
@@ -270,6 +301,31 @@ func isWorkbookMutation(full, member string) bool {
 		return receiver == "worksheets" || receiver == "sheets" || receiver == "thisworkbook.worksheets" || receiver == "thisworkbook.sheets" || receiver == "activeworkbook.worksheets" || receiver == "activeworkbook.sheets" || strings.HasPrefix(receiver, "worksheets(") || strings.HasPrefix(receiver, "sheets(") || strings.HasPrefix(receiver, "thisworkbook.worksheets(") || strings.HasPrefix(receiver, "thisworkbook.sheets(") || strings.HasPrefix(receiver, "activeworkbook.worksheets(") || strings.HasPrefix(receiver, "activeworkbook.sheets(")
 	}
 	return false
+}
+
+func isSheetNameTarget(target string) bool {
+	return strings.HasSuffix(target, ".name") && (strings.Contains(target, "worksheets(") || strings.Contains(target, "sheets(") || strings.HasPrefix(target, "activesheet.") || strings.HasPrefix(target, "thisworkbook.worksheets"))
+}
+
+func controlTarget(moduleKind, target string) bool {
+	if !strings.EqualFold(moduleKind, "form") {
+		return false
+	}
+	return formControlTargetRE.MatchString(target) || formControlsTargetRE.MatchString(target)
+}
+
+func isCalculationReceiver(receiver string) bool {
+	return receiver == "application" || receiver == "thisworkbook" || receiver == "activeworkbook" || receiver == "activesheet" ||
+		strings.Contains(receiver, ".range(") || strings.HasPrefix(receiver, "range(") || strings.HasPrefix(receiver, "cells(")
+}
+
+func isSelectionReceiver(receiver string) bool {
+	return receiver == "application" || receiver == "activesheet" || receiver == "activeworkbook" || receiver == "thisworkbook" ||
+		receiver == "selection" || receiver == "activecell" || strings.HasPrefix(receiver, "workbooks(") ||
+		strings.HasPrefix(receiver, "worksheets(") || strings.HasPrefix(receiver, "sheets(") ||
+		strings.Contains(receiver, ".worksheets(") || strings.Contains(receiver, ".sheets(") ||
+		strings.Contains(receiver, ".range(") || strings.HasPrefix(receiver, "range(") || strings.HasPrefix(receiver, "cells(") ||
+		strings.Contains(receiver, ".cells(")
 }
 
 func isWorkbookReceiver(receiver string) bool {
