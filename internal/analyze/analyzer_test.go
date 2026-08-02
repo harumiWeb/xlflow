@@ -36,7 +36,7 @@ func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
 
 func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	document := procedureir.DocumentIR{
-		Path:       `modules\..\modules\Main.bas`,
+		Path:       filepath.Join("modules", "..", "modules", "Main.bas"),
 		ModuleName: "Main",
 		ModuleKind: "standard",
 	}
@@ -49,8 +49,9 @@ func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	}
 
 	got := procedureEffectIdentity(document, symbol)
-	if got.File != "modules/Main.bas" {
-		t.Fatalf("canonical file = %q, want modules/Main.bas", got.File)
+	want := filepath.ToSlash(filepath.Join("modules", "Main.bas"))
+	if got.File != want {
+		t.Fatalf("canonical file = %q, want %q", got.File, want)
 	}
 }
 
