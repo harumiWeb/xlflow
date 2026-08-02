@@ -9,7 +9,7 @@ preflight.
 
 The rule resolves the receiver and member before classifying a call. It does
 not report late-bound or unresolved calls, and it does not infer API identity
-from text alone. A finding says that the API *can* fail when no result exists;
+from text alone. A finding says that the API _can_ fail when no result exists;
 it does not assert that an error is guaranteed.
 
 ## Failure Contracts

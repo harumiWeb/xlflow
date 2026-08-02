@@ -20,8 +20,9 @@ observable unless propagation has an explicit convergence contract.
 
 The first consumer is deliberately narrow. `VBA203` already recognizes paired
 Push/Pop or Push/Restore helpers for Excel `Application` state. It needs to
-recognize a restore reached through a uniquely resolved helper without adding
-caller-level findings or changing its public diagnostic contract.
+recognize a restore reached through a uniquely resolved helper without changing
+its root-cause diagnostic contract. Issue #439 additionally needs one useful
+caller context for a direct helper that can leave Application state changed.
 
 ## Decision
 
@@ -59,7 +60,7 @@ not reintroduced as propagated evidence through a recursive cycle. Project and
 procedure summaries are sorted by stable procedure identity and stable
 provenance keys, never input or map iteration order.
 
-Use the summary as the first validation consumer only for the existing
+Use the summary as a validation consumer for the existing
 `VBA203` Push/Pop helper exemption. Pair lookup prefers the same module, then
 requires exactly one project-visible Pop/Restore candidate. A direct or
 propagated matching restore effect permits the existing exemption; missing or
@@ -67,13 +68,19 @@ ambiguous pairs remain unsafe. Diagnostic ID, severity, location, message,
 ordering, inline suppression, configuration, and CLI/LSP representation remain
 unchanged.
 
-Keep caller-level diagnostics, event re-entry analysis, and workspace/LSP
-effect caching outside this decision. Issue #431 now consumes the CFG directly
-to prove procedure-local restoration on every exit; effect summaries remain
-only the Push/Pop helper exemption and do not establish that proof. Those
-remaining concerns are assigned to issues #439, #438, and a future LSP consumer
-respectively. The CFG keeps its existing conservative rule that every executable
-statement may fault; effect summaries do not alter that fallback.
+`VBA221` reports a batch-only caller context at a uniquely resolved, reachable
+call only when the direct callee has direct Application-state evidence that
+matches a CFG-proven `VBA203` leak origin. It names that property and origin,
+and includes propagated call uncertainty from the callee. It does not report a
+transitive callee leak at every ancestor, and it does not use later restoration
+helpers to claim that the caller is safe. `VBA203` remains at the direct
+assignment that introduced the leak.
+
+Event re-entry analysis and workspace/LSP effect caching remain outside this
+decision. Issue #431 still consumes the CFG directly to prove procedure-local
+restoration on every exit; summaries do not establish that proof. The CFG keeps
+its existing conservative rule that every executable statement may fault;
+effect summaries do not alter that fallback.
 
 ## Consequences
 
@@ -85,6 +92,8 @@ statement may fault; effect summaries do not alter that fallback.
   diamond-shaped call graphs and produces stable counts and ordering.
 - Positive: `VBA203` can validate an indirect Pop/Restore helper without adding
   a new diagnostic or public data contract.
+- Positive: `VBA221` gives the immediate caller actionable context while the
+  original assignment remains the single root-cause location.
 - Negative: high-confidence detectors intentionally miss effects hidden behind
   aliases, late binding, type-library dispatch, or recovered syntax.
 - Negative: retaining provenance uses more memory than one boolean per effect.
@@ -106,13 +115,12 @@ statement may fault; effect summaries do not alter that fallback.
 4. **Implement only a `VBA203` helper search** - Rejected because it would
    duplicate resolver and graph traversal policy and would not provide the
    reusable issue #425 foundation.
-5. **Add caller-level diagnostics immediately** - Rejected because summary
-   availability does not itself prove restoration on all paths; that reporting
-   policy belongs to issue #439.
+5. **Report every transitive caller** - Rejected because each ancestor would
+   repeat the same root cause without adding a nearer actionable call boundary.
 
 ## Evidence
 
-- Requirements: xlflow issues #425 and #428.
+- Requirements: xlflow issues #425, #428, and #439.
 - Syntax and resolution foundation:
   `internal/vba/procedureir`, `docs/specs/vba-analysis-ir.md`.
 - Reachability foundation:

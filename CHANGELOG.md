@@ -4,12 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.28.0
+
+- Added default-enabled batch `VBA221` warnings for direct calls to local
+  helpers that can leave an `Application` property changed. The warning keeps
+  `VBA203` at the root assignment, reports only the immediate caller, preserves
+  callee uncertainty, and remains non-blocking and locally suppressible.
 - Fixed `VBA220` to ignore non-Excel `Select`/`Activate` calls, avoid duplicate cell-write and workbook-structure risks, and recognize safely restored event guards around delegated cell work.
-
 - Fixed `xlflow analyze` performance for `VBA215`, `VBA218`, and `VBA220`: typed Excel-call rules now reuse each batch file's parsed analysis snapshot, and `VBA220` preparation is skipped when the rule is disabled.
-
 - Added default-enabled batch `VBA220` warnings for supported Excel and UserForm event handlers that can re-enter themselves or trigger related event chains. The rule uses uniquely resolved local call effects, reports unresolved calls as uncertainty, recognizes CFG-proven `Application.EnableEvents` cleanup for Excel events, and remains non-blocking and locally suppressible.
-
 - Added default-enabled real-time `VBA219` warnings for locally acquired
   Workbooks and VBA file handles that can reach a normal, error, termination,
   or unknown exit without a recognized Close path. The rule recognizes local
@@ -17,9 +20,7 @@ All notable changes to xlflow will be documented in this file.
   it remains non-blocking and locally suppressible.
 - Expanded default-enabled `VBA205` warnings to identify ambiguous Excel workbook and worksheet roots: active UI objects, unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open` calls, and `ThisWorkbook` from add-in standard modules. Findings remain non-blocking and can be suppressed locally for intentional interactive macros.
 - Added default-enabled real-time `VBA218` warnings for resolved Excel APIs whose exceptional or `Variant/Error` failure contracts are consumed without an appropriate local guard.
-
 - Added default-enabled real-time `VBA216` preflight errors for VBA range expressions that provably mix distinct worksheet roots, plus `VBA217` guidance for implicit-root and unstable last-row calculation patterns.
-
 - Added default-enabled real-time `VBA215` warnings for resolved `Range.Find` and `Range.Replace` calls that omit saved Excel search settings, including support for positional, named, mixed, and multiline calls plus normal rule-specific suppression.
 - Fixed scaffolded `XlflowAssert.bas` helpers to restore `On Error` handling immediately after each compatibility probe, so new projects pass the default-enabled `VBA214` analysis without warnings.
 - Fixed `VB030` false positives for valid VBA `Array` calls with zero or multiple arguments by modeling its optional argument list as a `ParamArray`.

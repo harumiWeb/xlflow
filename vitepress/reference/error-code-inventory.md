@@ -157,6 +157,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `deprecated_analyze_rule_config`
 - `deprecated_lint_rule_config`
 - `designer_write_failed`
+- `detect_application_state_call_effects`
 - `detect_application_state_restore`
 - `detect_byref_argument_mismatch`
 - `detect_confusing_call_syntax`

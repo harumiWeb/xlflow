@@ -160,8 +160,7 @@ func eventSafeProcedures(files []parsedFile, project effects.ProjectSummary) map
 			if index >= len(file.IR.Procedures) {
 				continue
 			}
-			symbol := file.IR.Procedures[index].Symbol
-			id := effects.ProcedureIdentity{File: file.IR.Path, Module: file.IR.ModuleName, ModuleKind: file.IR.ModuleKind, Name: symbol.Name, QualifiedName: symbol.QualifiedName, Kind: symbol.Kind, Visibility: symbol.Visibility, DeclarationLine: symbol.DeclarationRange.StartLine}
+			id := procedureEffectIdentity(file.IR, file.IR.Procedures[index].Symbol)
 			summary, ok := project.Lookup(id)
 			if !ok || !summary.Has(effects.DisablesEvents) || !summary.Has(effects.RestoresEvents) {
 				continue
