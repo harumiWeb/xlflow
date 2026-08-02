@@ -28,7 +28,7 @@ End Sub
 	run := find(t, summary, "Module1.Run")
 	want := map[EffectKind]bool{
 		DisablesEvents: true, ChangesCalculation: true, WritesCells: true,
-		ChangesWorkbook: true, ShowsDialog: true, LaunchesProcess: true,
+		ShowsDialog: true, LaunchesProcess: true,
 		OpensWorkbook: true, ClosesWorkbook: true, SuppressesErrors: true,
 		RaisesError: true,
 	}
@@ -73,6 +73,26 @@ End Sub
 		if !trigger.Has(kind) {
 			t.Errorf("missing event-triggering effect %s: %#v", kind, trigger.Direct)
 		}
+	}
+}
+
+func TestCellAndSelectionEffectsAvoidUnrelatedWorkbookOrObjectEffects(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Effects.bas", "Effects", `Public Sub Trigger()
+    Dim worker As Object
+    Range("A1").Value = 1
+    worker.Activate
+    Application.Goto Range("B2")
+End Sub
+`})
+	trigger := find(t, summary, "Effects.Trigger")
+	if got := count(trigger.Direct, WritesCells); got != 1 {
+		t.Fatalf("cell write effects = %d, want 1: %#v", got, trigger.Direct)
+	}
+	if got := count(trigger.Direct, ChangesWorkbook); got != 0 {
+		t.Fatalf("cell value assignment must not duplicate changes_workbook: %#v", trigger.Direct)
+	}
+	if got := count(trigger.Direct, ChangesSelection); got != 1 {
+		t.Fatalf("only Application.Goto should change selection: %#v", trigger.Direct)
 	}
 }
 
@@ -189,7 +209,7 @@ func TestPropagationConvergesAndDeduplicatesDiamondAndCycles(t *testing.T) {
 	if len(root.Direct) != 0 {
 		t.Fatalf("root direct = %#v", root.Direct)
 	}
-	if count(root.Propagated, WritesCells) != 1 || count(root.Propagated, ChangesWorkbook) != 1 {
+	if count(root.Propagated, WritesCells) != 1 || count(root.Propagated, ChangesWorkbook) != 0 {
 		t.Fatalf("diamond/cycle provenance not deduplicated: %#v", root.Propagated)
 	}
 	leaf := find(t, summary, "D.Leaf")

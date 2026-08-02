@@ -46,7 +46,7 @@ root: .
 ### 2. Multi-Agent Strategy
 
 - Make active use of subagents to avoid contaminating the main context.
-- Delegation tasks such as research, verification, and parallel analysis to subagents.
+- Delegate tasks such as research, verification, and parallel analysis to subagents.
 - For complex problems, utilize subagents even when they require significant computational resources.
 - Assign each subagent only one task to maintain focused execution.
 - Use an explorer for codebase exploration (primarily reading activities).
@@ -66,7 +66,7 @@ root: .
 - When necessary, compare your changes against the main branch for verification.
 - Always ask yourself: "Would a staff engineer approve this?"
 - Complete the process by running tests, reviewing logs, and demonstrating proper operation.
-- For pre-release validation, do not assume CI alone is sufficient. If Windows + Excel integration requires actual E2E testing, use the `xlflow-tmp-workspace-e2e_` skill to perform release verification through `tmp_workspaces`.
+- For pre-release validation, do not assume CI alone is sufficient. If Windows + Excel integration requires actual E2E testing, use the `xlflow-tmp-workspace-e2e` skill to perform release verification through `tmp_workspaces`.
 - When performing multiple `push`/`run`/`test`/`pull`/`save` operations on Windows+Excel real device validation, avoid non-session single-command sequences. Instead, use the basic workflow pattern: `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop`. Reopening the workbook each time can significantly slow down verification or make it appear frozen during waiting periods.
 
 ### 5. Maintain Balance While Pursuing More Elegant Solutions
@@ -116,7 +116,7 @@ Before generating or modifying code, perform the following steps according to th
 - Before releasing any changes involving Windows + Excel COM / VBIDE access, perform real device E2E testing using the repo-local `xlflow-tmp-workspace-e2e` skill.
 - Ensure you verify at least the following scenarios: blank workbook, standard module round-trip, class module round-trip, UserForm + `.frx` round-trip, and `init` functionality paths.
 - For releases including the `pack` command, also perform pack artifact smoke testing by opening the generated `.xlsm` in actual Excel to compile/run minimal macros and observe observable effects like sentinel cell values (procedures can be found in Section 7 of the "Release-gate Excel smoke" section and in the `xlflow-tmp-workspace-e2e` skill documentation under `docs/specs/pack-command.md`). Restrict automated PR CI to Linux/pure Go environments only.
-- If modifying session-aware workflows, also include the sequence `session start -> push --fast --session --no-save -> run/test -> save -> session stop` in the release gate checks.
+- If modifying session-aware workflows, also include the sequence `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop` in the release gate checks.
 - When combining multiple workbook-backed commands during real device E2E testing for Windows + Excel, even if not altering the session-aware workflow, prioritize first performing `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop`.
 
 ## - In final reports, retain the absolute paths of used `tmp_workspaces`, the execution commands, test results, and any unverified items.

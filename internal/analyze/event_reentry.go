@@ -93,7 +93,11 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 		if !ok {
 			continue
 		}
+		safeCallee := a.eventSafeProcedures[summary.Identity.Key()]
 		for _, evidence := range append(append([]effects.Evidence{}, summary.Direct...), summary.Propagated...) {
+			if safeCallee {
+				continue
+			}
 			report(call.Range.StartLine, call.StatementID, evidence, "")
 		}
 		for _, uncertainty := range append(append([]effects.CallUncertainty{}, summary.DirectUncertainty...), summary.PropagatedUncertainty...) {
@@ -168,6 +172,23 @@ func eventSafeProcedures(files []parsedFile, project effects.ProjectSummary) map
 					hasTrigger = true
 					if !eventGuardedAt(proc, evidence.StatementID) {
 						allGuarded = false
+					}
+				}
+			}
+			for _, call := range proc.Calls {
+				if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+					continue
+				}
+				callee, ok := summaryForCandidate(project, call.Resolution.Candidates[0])
+				if !ok {
+					continue
+				}
+				for _, evidence := range append(append([]effects.Evidence{}, callee.Direct...), callee.Propagated...) {
+					if _, _, relevant := eventEffectRisk(proc, "", evidence); relevant {
+						hasTrigger = true
+						if !eventGuardedAt(proc, call.StatementID) {
+							allGuarded = false
+						}
 					}
 				}
 			}

@@ -33,7 +33,6 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 				previous.Range.EndLine == statement.Range.StartLine && isCellSurface(strings.ToLower(compact(previous.Text))) &&
 				(member == "clear" || member == "clearcontents" || member == "insert" || member == "delete") {
 				addStatementEffect(summary, statement, WritesCells, previous.Text+statement.Text, "")
-				addStatementEffect(summary, statement, ChangesWorkbook, previous.Text+statement.Text, "")
 			}
 		}
 		if statement.Kind == procedureir.StatementOnError && statement.Control != nil && statement.Control.Transfer == procedureir.TransferOnErrorResumeNext {
@@ -52,7 +51,6 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 		switch {
 		case isCellTarget(proc, lower):
 			addStatementEffect(summary, statement, WritesCells, target, value)
-			addStatementEffect(summary, statement, ChangesWorkbook, target, value)
 		case isSheetNameTarget(lower):
 			addStatementEffect(summary, statement, ChangesWorkbook, target, value)
 		case controlTarget(summary.Identity.ModuleKind, lower):
@@ -233,12 +231,11 @@ func extractCall(summary *ProcedureSummary, call procedureir.CallSite, statement
 	}
 	if isCellMutation(full, member) {
 		addCallEffect(summary, call, WritesCells, call.Callee.Text)
-		addCallEffect(summary, call, ChangesWorkbook, call.Callee.Text)
 	}
 	if member == "calculate" && (isCalculationReceiver(receiver) || builtin && receiver == "") {
 		addCallEffect(summary, call, Recalculates, call.Callee.Text)
 	}
-	if (member == "select" || member == "activate" || member == "goto") && isSelectionReceiver(receiver, full) {
+	if (member == "select" || member == "activate" || member == "goto") && isSelectionReceiver(receiver) {
 		addCallEffect(summary, call, ChangesSelection, call.Callee.Text)
 	}
 }
@@ -322,10 +319,13 @@ func isCalculationReceiver(receiver string) bool {
 		strings.Contains(receiver, ".range(") || strings.HasPrefix(receiver, "range(") || strings.HasPrefix(receiver, "cells(")
 }
 
-func isSelectionReceiver(receiver, full string) bool {
+func isSelectionReceiver(receiver string) bool {
 	return receiver == "application" || receiver == "activesheet" || receiver == "activeworkbook" || receiver == "thisworkbook" ||
+		receiver == "selection" || receiver == "activecell" || strings.HasPrefix(receiver, "workbooks(") ||
+		strings.HasPrefix(receiver, "worksheets(") || strings.HasPrefix(receiver, "sheets(") ||
+		strings.Contains(receiver, ".worksheets(") || strings.Contains(receiver, ".sheets(") ||
 		strings.Contains(receiver, ".range(") || strings.HasPrefix(receiver, "range(") || strings.HasPrefix(receiver, "cells(") ||
-		strings.Contains(full, ".select") || strings.Contains(full, ".activate")
+		strings.Contains(receiver, ".cells(")
 }
 
 func isWorkbookReceiver(receiver string) bool {

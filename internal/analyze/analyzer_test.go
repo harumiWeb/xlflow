@@ -3383,6 +3383,44 @@ End Sub
 	}
 }
 
+func TestVBA220AcceptsDelegatedWorkCoveredBySafeEventCleanup(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.cls"), []byte(`Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
+  SafelyWrite
+End Sub
+
+Private Sub SafelyWrite()
+  Dim oldEvents As Boolean
+  oldEvents = Application.EnableEvents
+  On Error GoTo Cleanup
+  Application.EnableEvents = False
+  WriteCell
+Cleanup:
+  Application.EnableEvents = oldEvents
+End Sub
+
+Private Sub WriteCell()
+  Range("A1").Value = 1
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA220") {
+		if strings.Contains(finding.Message, "same-event") || strings.Contains(finding.Message, "broader event-chain") {
+			t.Fatalf("delegated work covered by cleanup should not report a confirmed VBA220 hazard: %+v", finding)
+		}
+	}
+}
+
 func TestVBA220ReportsAmbiguousCallsAsUncertainty(t *testing.T) {
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "src", "workbook")

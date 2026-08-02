@@ -1245,7 +1245,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA220
 
-**Event handler re-entry hazard.** An Excel event handler can trigger itself or a related event without a proven safe event guard.
+**Event handler re-entry hazard.** An Excel or UserForm event handler can trigger itself or a related event without a proven safe event guard.
 
 | Property                    | Value                          |
 | --------------------------- | ------------------------------ |

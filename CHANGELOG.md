@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA220` to ignore non-Excel `Select`/`Activate` calls, avoid duplicate cell-write and workbook-structure risks, and recognize safely restored event guards around delegated cell work.
+
 - Fixed `xlflow analyze` performance for `VBA215`, `VBA218`, and `VBA220`: typed Excel-call rules now reuse each batch file's parsed analysis snapshot, and `VBA220` preparation is skipped when the rule is disabled.
 
 - Added default-enabled batch `VBA220` warnings for supported Excel and UserForm event handlers that can re-enter themselves or trigger related event chains. The rule uses uniquely resolved local call effects, reports unresolved calls as uncertainty, recognizes CFG-proven `Application.EnableEvents` cleanup for Excel events, and remains non-blocking and locally suppressible.

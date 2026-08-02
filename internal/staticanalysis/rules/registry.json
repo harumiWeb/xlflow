@@ -1174,7 +1174,7 @@
     {
       "id": "VBA220",
       "title": "Event handler re-entry hazard",
-      "description": "An Excel event handler can trigger itself or a related event without a proven safe event guard.",
+      "description": "An Excel or UserForm event handler can trigger itself or a related event without a proven safe event guard.",
       "family": "analyze",
       "category": "reliability",
       "default_severity": "warning",
