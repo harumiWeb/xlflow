@@ -169,8 +169,11 @@ exit witness.
 
 An effect summary establishes possible reachable behavior, not an all-path
 guarantee. Issue #431 provides procedure-local all-path restoration through the
-CFG; event re-entry remains issue #438, and caller-level state
-propagation/reporting remains issue #439.
+CFG. `VBA221` consumes the direct callee summary only when its direct
+Application-state evidence matches a `VBA203` leak origin. It reports that
+immediate call boundary once per property, names the originating procedure, and
+preserves any callee uncertainty; it never repeats the same leak at transitive
+ancestors or treats a later restore helper as an all-path proof.
 
 `VBA220` consumes these summaries for supported event handlers. It classifies
 cell writes, explicit recalculation, selection changes, workbook lifecycle and

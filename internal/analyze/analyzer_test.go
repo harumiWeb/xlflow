@@ -1089,6 +1089,9 @@ End Sub
 	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
 		t.Fatalf("VBA203 should allow paired Push/Pop Application state restore: %+v", got)
 	}
+	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
+		t.Fatalf("VBA221 should not report a paired Push/Pop helper: %+v", got)
+	}
 }
 
 func TestAnalyzerApplicationStateAllowsEitherSameModuleRestoreAlias(t *testing.T) {
@@ -1511,6 +1514,120 @@ End Sub
 		if !found {
 			t.Fatalf("%s should not prove a restore from an invalid saved value: %+v", procedure, got)
 		}
+	}
+}
+
+func TestVBA221ReportsImmediateCallerAndUncertainCalleeOncePerProperty(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Main()
+  PrepareExcel
+End Sub
+
+Private Sub PrepareExcel()
+  Application.EnableEvents = False
+  Application.EnableEvents = False
+  MaybeRestoreEvents
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA203"); len(got) != 2 || got[0].Procedure != "PrepareExcel" || got[0].Line != 7 {
+		t.Fatalf("VBA203 root causes = %+v, want both PrepareExcel assignments", got)
+	}
+	got := findingsByCode(findings, "VBA221")
+	if len(got) != 1 || got[0].Procedure != "Main" || got[0].Line != 3 || !strings.Contains(got[0].Message, "Application.EnableEvents") || !strings.Contains(got[0].Reason, "Main.PrepareExcel") || !strings.Contains(got[0].Reason, "unresolved") {
+		t.Fatalf("VBA221 caller context = %+v, want one uncertain Main call finding", got)
+	}
+}
+
+func TestVBA221DoesNotRepeatTransitiveLeakAtAncestorOrRealtime(t *testing.T) {
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Main()
+  Wrapper
+End Sub
+
+Private Sub Wrapper()
+  PrepareExcel
+End Sub
+
+Private Sub PrepareExcel()
+  Application.ScreenUpdating = False
+End Sub
+`
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA221")
+	if len(got) != 1 || got[0].Procedure != "Wrapper" || got[0].Line != 7 || !strings.Contains(got[0].Reason, "Main.PrepareExcel") {
+		t.Fatalf("VBA221 should report only the immediate caller: %+v", got)
+	}
+	if realtime, err := SourceRealtimeFindings(dir, path, config.Default(), []byte(source)); err != nil {
+		t.Fatal(err)
+	} else if got := findingsByCode(realtime, "VBA221"); len(got) != 0 {
+		t.Fatalf("batch-only VBA221 must not be returned in realtime: %+v", got)
+	}
+}
+
+func TestVBA221IgnoresUnreachableCallerPaths(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Main()
+  GoTo Done
+  PrepareExcel
+Done:
+End Sub
+
+Private Sub PrepareExcel()
+  Application.EnableEvents = False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
+		t.Fatalf("unreachable call must not report VBA221: %+v", got)
+	}
+}
+
+func TestVBA221HonorsConfigAndInlineSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Main()
+  ' xlflow:disable-next-line VBA221
+  PrepareExcel
+End Sub
+
+Private Sub PrepareExcel()
+  Application.DisplayAlerts = False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
+		t.Fatalf("inline suppression should remove VBA221: %+v", got)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectApplicationStateCallEffects = false
+	findings, err = (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
+		t.Fatalf("disabled VBA221 should not report: %+v", got)
 	}
 }
 

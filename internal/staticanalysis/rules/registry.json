@@ -1188,6 +1188,24 @@
       "configuration_key": "detect_event_handler_reentry",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA221",
+      "title": "Application state changed by local helper",
+      "description": "A direct project-local call can leave an Application property changed because the callee does not restore it on every exit.",
+      "family": "analyze",
+      "category": "reliability",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "interprocedural",
+      "realtime": false,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba221",
+      "configurable": true,
+      "configuration_key": "detect_application_state_call_effects",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

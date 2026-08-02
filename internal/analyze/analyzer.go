@@ -45,13 +45,14 @@ type Result struct {
 }
 
 type Analyzer struct {
-	RootDir             string
-	Config              config.Config
-	PathFilter          func(string) bool
-	typeDB              *vbadb.DB
-	errorGuardAliases   map[string]bool
-	errorValueWrappers  map[string]bool
-	eventSafeProcedures map[string]bool
+	RootDir               string
+	Config                config.Config
+	PathFilter            func(string) bool
+	typeDB                *vbadb.DB
+	errorGuardAliases     map[string]bool
+	errorValueWrappers    map[string]bool
+	eventSafeProcedures   map[string]bool
+	applicationStateLeaks applicationStateLeakIndex
 }
 
 var (
@@ -284,6 +285,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	projectEffects := buildProjectEffects(parsedFiles)
 	ctx := a.buildContext(parsedFiles)
 	analysis := a
+	analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
 	if analysis.Config.Analyze.DetectEventHandlerReentry {
 		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
@@ -726,21 +728,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext, projectEffects effects.ProjectSummary) []Finding {
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
-	for i := range procedures {
-		if i >= len(file.IR.Procedures) {
-			break
-		}
-		symbol := file.IR.Procedures[i].Symbol
-		id := effects.ProcedureIdentity{
-			File: file.IR.Path, Module: file.IR.ModuleName, ModuleKind: file.IR.ModuleKind, Name: symbol.Name,
-			QualifiedName: symbol.QualifiedName, Kind: symbol.Kind,
-			Visibility: symbol.Visibility, DeclarationLine: symbol.DeclarationRange.StartLine,
-		}
-		if summary, ok := projectEffects.Lookup(id); ok {
-			procedures[i].Effects = &summary
-		}
-	}
+	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
 	for _, proc := range procedures {
 		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
@@ -888,6 +876,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectApplicationStateRestore {
 		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}
+	if a.Config.Analyze.DetectApplicationStateCallEffects {
+		findings = append(findings, a.applicationStateCallEffectFindings(file, proc, projectEffects)...)
+	}
 	if a.Config.Analyze.DetectEventHandlerReentry {
 		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
 	}
@@ -904,6 +895,25 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		findings = append(findings, a.simpleFinding(file, proc, proc.StartLine, "VBA210", "warning", proc.Name+" may exit without assigning its return value.", "Functions return the default value when no assignment to the function name is reached.", "Assign "+proc.Name+" on every successful return path, or make the default return explicit."))
 	}
 	return findings
+}
+
+func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {
+	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	for i := range procedures {
+		if i >= len(file.IR.Procedures) {
+			break
+		}
+		symbol := file.IR.Procedures[i].Symbol
+		id := effects.ProcedureIdentity{
+			File: file.IR.Path, Module: file.IR.ModuleName, ModuleKind: file.IR.ModuleKind, Name: symbol.Name,
+			QualifiedName: symbol.QualifiedName, Kind: symbol.Kind,
+			Visibility: symbol.Visibility, DeclarationLine: symbol.DeclarationRange.StartLine,
+		}
+		if summary, ok := project.Lookup(id); ok {
+			procedures[i].Effects = &summary
+		}
+	}
+	return procedures
 }
 
 func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
@@ -1527,35 +1537,15 @@ func nextNonSpace(text string, index int) byte {
 }
 
 func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
-	if proc.Graph == nil {
-		return nil
-	}
-	byID := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		byID[statement.ID] = statement
-	}
 	var findings []Finding
-	for _, property := range applicationStateProperties() {
-		unsafe := applicationStateExitWitnesses(proc, property.Key, byID)
-		if len(unsafe) == 0 || hasPairedApplicationRestoreProcedure(proc, property.Key, project) {
-			continue
-		}
-		for _, statement := range proc.Statements {
-			witness, found := unsafe[statement.ID]
-			if !found {
-				continue
-			}
-			assigned, _, ok := applicationPropertyAssignment(statement, byID)
-			if !ok || assigned != property.Key {
-				continue
-			}
-			findings = append(findings, a.simpleFinding(
-				file, proc, statement.Range.StartLine, "VBA203", "warning",
-				"Application."+property.Name+" can reach "+witness.Kind+" without restoring its previous value.",
-				"The changed Application."+property.Name+" value can leave this procedure through "+witness.description()+".",
-				"Save the previous Application."+property.Name+" value and restore it in a cleanup path.",
-			))
-		}
+	for _, origin := range applicationStateLeakOrigins(proc, project) {
+		property := applicationStatePropertyName(origin.Property)
+		findings = append(findings, a.simpleFinding(
+			file, proc, origin.Line, "VBA203", "warning",
+			"Application."+property+" can reach "+origin.Witness.Kind+" without restoring its previous value.",
+			"The changed Application."+property+" value can leave this procedure through "+origin.Witness.description()+".",
+			"Save the previous Application."+property+" value and restore it in a cleanup path.",
+		))
 	}
 	return findings
 }

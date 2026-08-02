@@ -72,6 +72,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA218`](#vba218) | analyze | warning  | interprocedural | yes     | Unhandled Excel API failure contract         |
 | [`VBA219`](#vba219) | analyze | warning  | procedure-local | yes     | Unreleased workbook or VBA file handle       |
 | [`VBA220`](#vba220) | analyze | warning  | interprocedural | yes     | Event handler re-entry hazard                |
+| [`VBA221`](#vba221) | analyze | warning  | interprocedural | yes     | Application state changed by local helper    |
 
 ## VB001
 
@@ -1260,3 +1261,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                             |
 | Real-time editor diagnostic | no                             |
 | Fix available               | no                             |
+
+## VBA221
+
+**Application state changed by local helper.** A direct project-local call can leave an Application property changed because the callee does not restore it on every exit.
+
+| Property                    | Value                                   |
+| --------------------------- | --------------------------------------- |
+| Family                      | `analyze`                               |
+| Category                    | `reliability`                           |
+| Default severity            | `warning`                               |
+| Scope                       | `interprocedural`                       |
+| Precision                   | `high`                                  |
+| Enabled by default          | yes                                     |
+| Configuration               | `detect_application_state_call_effects` |
+| Inline suppression          | yes                                     |
+| Blocks source preflight     | no                                      |
+| Real-time editor diagnostic | no                                      |
+| Fix available               | no                                      |

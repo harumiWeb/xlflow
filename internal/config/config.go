@@ -145,6 +145,7 @@ type AnalyzeConfig struct {
 	DetectExcelAPIFailureContracts      bool     `toml:"detect_excel_api_failure_contracts"`
 	DetectResourceLeaks                 bool     `toml:"detect_resource_leaks"`
 	DetectEventHandlerReentry           bool     `toml:"detect_event_handler_reentry"`
+	DetectApplicationStateCallEffects   bool     `toml:"detect_application_state_call_effects"`
 }
 
 type lintRuleAdapter struct {
@@ -214,6 +215,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA218": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelAPIFailureContracts }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelAPIFailureContracts = v }},
 	"VBA219": {Get: func(c AnalyzeConfig) bool { return c.DetectResourceLeaks }, Set: func(c *AnalyzeConfig, v bool) { c.DetectResourceLeaks = v }},
 	"VBA220": {Get: func(c AnalyzeConfig) bool { return c.DetectEventHandlerReentry }, Set: func(c *AnalyzeConfig, v bool) { c.DetectEventHandlerReentry = v }},
+	"VBA221": {Get: func(c AnalyzeConfig) bool { return c.DetectApplicationStateCallEffects }, Set: func(c *AnalyzeConfig, v bool) { c.DetectApplicationStateCallEffects = v }},
 }
 
 var (
