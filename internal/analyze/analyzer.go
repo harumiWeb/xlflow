@@ -49,6 +49,7 @@ type Analyzer struct {
 	Config                config.Config
 	PathFilter            func(string) bool
 	typeDB                *vbadb.DB
+	byRefSymbols          []intel.Symbol
 	errorGuardAliases     map[string]bool
 	errorValueWrappers    map[string]bool
 	eventSafeProcedures   map[string]bool
@@ -226,7 +227,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectByRefArgumentMismatch
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		source, err := os.ReadFile(file)
@@ -298,6 +299,13 @@ func (a Analyzer) RunResult() (Result, error) {
 		}
 		analysis.typeDB = typeDB
 	}
+	if analysis.Config.Analyze.DetectByRefArgumentMismatch {
+		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
+		if err != nil {
+			return Result{}, err
+		}
+		analysis.byRefSymbols = byRefSymbols
+	}
 	var findings []Finding
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
@@ -317,6 +325,7 @@ func (a Analyzer) RunResult() (Result, error) {
 		// lease so the snapshot can reuse that parse without re-entering it.
 		findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
 		findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
+		findings = append(findings, analysis.byRefArgumentFindings(file)...)
 	}
 	sortFindings(findings)
 	directives, warnings, err := suppression.DirectivesForFiles(a.RootDir, files)
@@ -326,6 +335,69 @@ func (a Analyzer) RunResult() (Result, error) {
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
 	return Result{Findings: findings, Warnings: warnings}, nil
+}
+
+func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
+	if !a.Config.Analyze.DetectByRefArgumentMismatch || a.typeDB == nil {
+		return nil
+	}
+	diagnostics := (intel.Analyzer{
+		RootDir:                  a.RootDir,
+		Config:                   a.Config,
+		DB:                       a.typeDB,
+		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+	}).ByRefArgumentDiagnostics(file.intelDocument())
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	out := make([]Finding, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		line := diagnostic.Range.Start.Line + 1
+		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
+		for _, candidate := range procedures {
+			if line >= candidate.StartLine && line <= candidate.EndLine {
+				proc = candidate
+				break
+			}
+		}
+		finding := a.simpleFinding(
+			file,
+			proc,
+			line,
+			diagnostic.Code,
+			diagnostic.Severity,
+			diagnostic.Message,
+			"ByRef parameters require a compatible writable argument. Parenthesized and computed arguments can be passed through temporary values, so mutations may not reach the caller.",
+			"Pass a compatible writable variable, remove only the argument-level parentheses when mutation is intended, or change the callee parameter to ByVal.",
+		)
+		finding.Column = diagnostic.Range.Start.Character + 1
+		finding.EndLine = diagnostic.Range.End.Line + 1
+		finding.EndColumn = diagnostic.Range.End.Character + 1
+		out = append(out, finding)
+	}
+	return out
+}
+
+// projectByRefSymbols builds the batch project's procedure index once. VBA206
+// resolves every call through this immutable slice instead of rediscovering the
+// entire source tree through symbols.Inspect for each call site.
+func projectByRefSymbols(rootDir string, cfg config.Config) ([]intel.Symbol, error) {
+	return (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
+}
+
+func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+	needle := strings.ToLower(strings.TrimSpace(query.Text))
+	if query.Mode != intel.WorkspaceSymbolQueryExact || needle == "" {
+		return nil, nil
+	}
+	out := make([]intel.Symbol, 0)
+	for _, sym := range a.byRefSymbols {
+		if strings.EqualFold(sym.Name, needle) {
+			out = append(out, sym)
+		}
+	}
+	return out, nil
 }
 
 func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
@@ -540,7 +612,9 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 	return findings, err
 }
 
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219"}
+// VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
+// resolve the latest workspace-document overlays through its symbol provider.
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -859,9 +933,6 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		}
 		if a.Config.Analyze.DetectObjectUseBeforeSet {
 			findings = append(findings, a.objectUseBeforeSetFindings(file, proc, lineNo, stmt, decls, initialized, maybeInitializedByCall)...)
-		}
-		if a.Config.Analyze.DetectByRefArgumentMismatch {
-			findings = append(findings, a.byRefMismatchFindings(file, proc, lineNo, stmt, ctx)...)
 		}
 		if a.Config.Analyze.DetectDictionaryCollectionGuard {
 			findings = append(findings, a.dictionaryCollectionFindings(file, proc, lineNo, stmt, decls)...)
@@ -1227,31 +1298,6 @@ func capturedWorkbooksOpen(stmt string, openStart int) bool {
 		branchStart = boundary[1]
 	}
 	return setAssignmentPrefixRe.MatchString(stmt[branchStart:openStart])
-}
-
-func (a Analyzer) byRefMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, ctx analysisContext) []Finding {
-	name, args, ok := parseSimpleCall(stmt)
-	if !ok {
-		return nil
-	}
-	sig, ok := ctx.procedures[strings.ToLower(name)]
-	if !ok {
-		return nil
-	}
-	var findings []Finding
-	for i, arg := range args {
-		if i >= len(sig.Params) {
-			break
-		}
-		param := sig.Params[i]
-		if strings.EqualFold(param.Passing, "ByVal") || param.Type == "" {
-			continue
-		}
-		if obviousArgumentMismatch(arg, param.Type) {
-			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA206", "warning", "Argument for ByRef parameter "+param.Name+" may not match "+param.Type+".", "VBA ByRef arguments must be type-compatible with the declared parameter.", "Pass a variable of type "+param.Type+" or change the procedure parameter to ByVal when mutation is not required."))
-		}
-	}
-	return findings
 }
 
 func (a Analyzer) dictionaryCollectionFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration) []Finding {
@@ -2797,29 +2843,6 @@ func splitArgs(text string) []string {
 		args = append(args, strings.TrimSpace(text[start:]))
 	}
 	return args
-}
-
-func obviousArgumentMismatch(arg, typ string) bool {
-	arg = strings.TrimSpace(arg)
-	if arg == "" {
-		return false
-	}
-	lowerType := strings.ToLower(cleanIdentifier(typ))
-	isStringLiteral := strings.HasPrefix(arg, `"`) && strings.HasSuffix(arg, `"`)
-	isNumericLiteral := true
-	for _, r := range arg {
-		if (r < '0' || r > '9') && r != '.' && r != '-' {
-			isNumericLiteral = false
-			break
-		}
-	}
-	if isStringLiteral {
-		return lowerType != "string" && lowerType != "variant"
-	}
-	if isNumericLiteral {
-		return lowerType == "string" || isObjectType(typ)
-	}
-	return false
 }
 
 func cleanIdentifier(text string) string {

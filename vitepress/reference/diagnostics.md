@@ -57,7 +57,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA203`](#vba203) | analyze | warning  | interprocedural | yes     | Application state not restored               |
 | [`VBA204`](#vba204) | analyze | warning  | procedure-local | yes     | Error-handler fallthrough                    |
 | [`VBA205`](#vba205) | analyze | warning  | procedure-local | yes     | Ambiguous Excel object scope                 |
-| [`VBA206`](#vba206) | analyze | warning  | interprocedural | no      | ByRef argument mismatch                      |
+| [`VBA206`](#vba206) | analyze | warning  | interprocedural | yes     | Unsafe ByRef argument                        |
 | [`VBA207`](#vba207) | analyze | warning  | procedure-local | no      | Unguarded keyed access                       |
 | [`VBA208`](#vba208) | analyze | warning  | procedure-local | yes     | Invalid ReDim Preserve dimension             |
 | [`VBA209`](#vba209) | analyze | warning  | procedure-local | yes     | Object or array comparison mistake           |
@@ -994,20 +994,20 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA206
 
-**ByRef argument mismatch.** A ByRef argument may be incompatible with its resolved parameter type.
+**Unsafe ByRef argument.** A resolved project-local ByRef call has an explicit type mismatch, a temporary value, or an indirect argument whose mutation may be lost or surprising. Parentheses around one VBA argument force expression evaluation into a temporary value, so callee changes do not update the original variable.
 
 | Property                    | Value                            |
 | --------------------------- | -------------------------------- |
 | Family                      | `analyze`                        |
-| Category                    | `type-safety`                    |
+| Category                    | `runtime-safety`                 |
 | Default severity            | `warning`                        |
 | Scope                       | `interprocedural`                |
-| Precision                   | `medium`                         |
-| Enabled by default          | no                               |
+| Precision                   | `high`                           |
+| Enabled by default          | yes                              |
 | Configuration               | `detect_byref_argument_mismatch` |
 | Inline suppression          | yes                              |
 | Blocks source preflight     | no                               |
-| Real-time editor diagnostic | no                               |
+| Real-time editor diagnostic | yes                              |
 | Fix available               | no                               |
 
 ## VBA207

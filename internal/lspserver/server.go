@@ -331,6 +331,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		s.semanticTokens.open(doc)
 		s.semanticTokens.invalidateWorkspace()
 		s.updateWorkspaceSymbolOverlay(doc)
+		s.scheduleByRefDependentDiagnostics(ctx, doc.URI, changedProcedureNames(nil, s.procedureSignatures(doc)))
 	}
 	done := s.openDiagnostics(ctx, doc)
 	unlock()
@@ -352,6 +353,10 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	uri := string(params.TextDocument.URI)
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
+	var previousSignatures map[string]procedureSignature
+	if previous, previousErr := s.docs.getOrRead(uri); previousErr == nil && s.documentKind(previous) == DocumentKindVBA {
+		previousSignatures = s.procedureSignatures(previous)
+	}
 	changeStarted := time.Now()
 	change, err := s.docs.applyChangesWithResult(uri, changes, int32(params.TextDocument.Version))
 	s.logDocumentChangePerformance(uri, int32(params.TextDocument.Version), change, changeStarted)
@@ -365,9 +370,103 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if s.documentKind(change.document) == DocumentKindVBA {
 		s.semanticTokens.invalidateWorkspace()
 		s.updateWorkspaceSymbolOverlay(change.document)
+		s.scheduleByRefDependentDiagnostics(ctx, change.document.URI, changedProcedureNames(previousSignatures, s.procedureSignatures(change.document)))
 	}
 	s.scheduleDiagnostics(ctx, change.document)
 	return nil
+}
+
+type procedureSignature struct {
+	name        string
+	fingerprint string
+}
+
+func (s *Server) procedureSignatures(doc intel.Document) map[string]procedureSignature {
+	syms, err := s.analyzer.DocumentSymbols(doc)
+	if err != nil {
+		s.logger.Printf("procedure signature lookup failed for %q: %v", doc.Path, err)
+		return nil
+	}
+	out := make(map[string]procedureSignature)
+	for _, sym := range syms {
+		if !procedureSymbolKind(sym.Kind) {
+			continue
+		}
+		var fingerprint strings.Builder
+		fingerprint.WriteString(strings.ToLower(sym.Kind))
+		fingerprint.WriteString("|")
+		fingerprint.WriteString(strings.ToLower(sym.ReturnType))
+		fingerprint.WriteString("|")
+		fingerprint.WriteString(strings.ToLower(sym.Visibility))
+		for _, param := range sym.Parameters {
+			fmt.Fprintf(&fingerprint, "|%s:%s:%t:%s:%t:%t", strings.ToLower(param.Name), strings.ToLower(param.Type), param.IsArray, strings.ToLower(param.Passing), param.Optional, param.ParamArray)
+		}
+		key := strings.ToLower(sym.Module + "." + sym.Name + "." + sym.Kind)
+		out[key] = procedureSignature{name: sym.Name, fingerprint: fingerprint.String()}
+	}
+	return out
+}
+
+func procedureSymbolKind(kind string) bool {
+	switch strings.ToLower(kind) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func changedProcedureNames(before, after map[string]procedureSignature) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for key, old := range before {
+		current, exists := after[key]
+		if exists && current.fingerprint == old.fingerprint {
+			continue
+		}
+		if !seen[strings.ToLower(old.name)] {
+			seen[strings.ToLower(old.name)] = true
+			out = append(out, old.name)
+		}
+	}
+	for key, current := range after {
+		old, exists := before[key]
+		if exists && old.fingerprint == current.fingerprint {
+			continue
+		}
+		if !seen[strings.ToLower(current.name)] {
+			seen[strings.ToLower(current.name)] = true
+			out = append(out, current.name)
+		}
+	}
+	return out
+}
+
+// scheduleByRefDependentDiagnostics refreshes open callers after a project
+// procedure signature changes. The workspace index narrows work to calls with
+// the changed base name, so unrelated open documents are not republished.
+func (s *Server) scheduleByRefDependentDiagnostics(ctx *glsp.Context, changedURI string, names []string) {
+	if !s.opts.Config.Analyze.DetectByRefArgumentMismatch || len(names) == 0 {
+		return
+	}
+	openByPath := make(map[string]intel.Document)
+	for _, doc := range s.docs.openDocuments() {
+		if doc.URI != changedURI {
+			openByPath[symbolFileKey(doc.Path)] = doc
+		}
+	}
+	for _, name := range names {
+		calls, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: name})
+		if err != nil {
+			s.logger.Printf("ByRef caller refresh lookup failed for %q: %v", name, err)
+			continue
+		}
+		for _, call := range calls {
+			if caller, ok := openByPath[symbolFileKey(call.File)]; ok {
+				s.scheduleDiagnostics(ctx, caller)
+			}
+		}
+	}
 }
 
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
@@ -375,14 +474,18 @@ func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
 	s.closeDiagnostics(ctx, uri)
+	var closingProcedureNames []string
 	if doc, err := s.docs.getOrRead(uri); err == nil && s.documentKind(doc) == DocumentKindVBA {
 		s.semanticTokens.close(doc)
+		closingProcedureNames = changedProcedureNames(s.procedureSignatures(doc), nil)
 	}
 	s.docs.close(uri)
 	s.semanticTokens.invalidateWorkspace()
 	if path, err := fileURIToPath(uri); err == nil && !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
 		if err := s.analysis.clearOverlay(path); err != nil {
 			s.logger.Printf("workspace analysis index close refresh failed for %q: %v", path, err)
+		} else {
+			s.scheduleByRefDependentDiagnostics(ctx, uri, closingProcedureNames)
 		}
 	}
 	return nil

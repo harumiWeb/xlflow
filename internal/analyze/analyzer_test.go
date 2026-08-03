@@ -2764,7 +2764,7 @@ End Sub
 	}
 }
 
-func TestAnalyzerOptInRuntimeRiskRules(t *testing.T) {
+func TestAnalyzerRuntimeRiskRules(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub NeedsLong(ByRef value As Long)
@@ -2779,7 +2779,6 @@ Public Sub Run()
 End Sub
 `)
 	cfg := config.Default()
-	cfg.Analyze.DetectByRefArgumentMismatch = true
 	cfg.Analyze.DetectDictionaryCollectionGuard = true
 	cfg.Analyze.DetectFunctionReturnPath = true
 
@@ -2801,14 +2800,63 @@ Public Sub Run()
   call NeedsLong("abc")
 End Sub
 `)
-	cfg := config.Default()
-	cfg.Analyze.DetectByRefArgumentMismatch = true
-
-	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertFinding(t, findings, "VBA206", 5)
+}
+
+func TestAnalyzerByRefUsesProjectLocalNamedSignatures(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Receiver.bas", `Option Explicit
+Public Sub ReplaceText(ByRef target As String, Optional ByVal suffix As String = "")
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  Receiver.ReplaceText target:=count
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA206")
+	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
+		t.Fatalf("named project-local ByRef finding = %+v", got)
+	}
+}
+
+func TestAnalyzerByRefSkipsAmbiguousCallsAndHonorsSuppression(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "First.bas", `Option Explicit
+Public Sub TakeText(ByRef target As String)
+End Sub
+`)
+	writeModule(t, dir, "Second.bas", `Option Explicit
+Public Sub TakeText(ByRef target As String)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub TakeLong(ByRef target As Long)
+End Sub
+Public Sub Run()
+  Dim value As Long
+  TakeText value
+  TakeLong "temporary" ' xlflow:disable-line VBA206
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA206"); len(got) != 0 {
+		t.Fatalf("ambiguous and inline-suppressed ByRef calls must not report: %+v", got)
+	}
 }
 
 func TestAnalyzerArrayComparisonUsesIdentifierBoundaries(t *testing.T) {

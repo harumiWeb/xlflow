@@ -136,9 +136,9 @@ exclude = ["src/modules/Tests/**"]
 		!cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
 	}
-	if cfg.Analyze.DetectByRefArgumentMismatch || cfg.Analyze.DetectDictionaryCollectionGuard ||
+	if cfg.Analyze.DetectDictionaryCollectionGuard ||
 		cfg.Analyze.DetectFunctionReturnPath || cfg.Analyze.DetectDictionaryIterationValueUsage {
-		t.Fatalf("expected false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
+		t.Fatalf("expected remaining false-positive-prone analyze defaults to be opt-in: %+v", cfg.Analyze)
 	}
 }
 
@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -423,6 +423,9 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "V
 	}
 	if cfg.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected VBA205/forbid_unqualified_excel_objects to be disabled")
+	}
+	if cfg.Analyze.DetectByRefArgumentMismatch {
+		t.Fatal("expected VBA206/detect_byref_argument_mismatch to be disabled")
 	}
 	if cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		t.Fatal("expected VBA212/detect_non_short_circuit_object_guard to be disabled")
@@ -457,8 +460,8 @@ disabled_rules = ["VBA201", "vba205", "VBA212", "VBA213", "VBA214", "VBA215", "V
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221", got)
 	}
 }
 
@@ -724,11 +727,11 @@ detect_byref_argument_mismatch = true
 	if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206") {
 		t.Fatalf("expected deprecated analyze config warning, got %+v", cfg.Warnings)
 	}
-	if !hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206", "compatibility opt-in") {
-		t.Fatalf("expected true opt-in analyze warning to avoid disabled_rules migration, got %+v", cfg.Warnings)
+	if !hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206", "redundant because VBA206 is enabled by default") {
+		t.Fatalf("expected redundant default-enabled analyze warning, got %+v", cfg.Warnings)
 	}
-	if hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206", "disabled_rules") {
-		t.Fatalf("true opt-in analyze warning must not suggest disabled_rules, got %+v", cfg.Warnings)
+	if hasConfigWarningMessage(cfg.Warnings, "deprecated_analyze_rule_config", "VBA206", "compatibility opt-in") {
+		t.Fatalf("default-enabled rule must not be described as an opt-in, got %+v", cfg.Warnings)
 	}
 }
 

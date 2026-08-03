@@ -58,6 +58,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	if !ok || mismatch.DefaultSeverity != SeverityError || !mismatch.PreflightBlocking || mismatch.InlineSuppressible || !mismatch.Realtime {
 		t.Fatalf("unexpected VBA216 metadata: %+v, %v", mismatch, ok)
 	}
+	byRef, ok := Lookup("VBA206")
+	if !ok || byRef.DefaultSeverity != SeverityWarning || byRef.PreflightBlocking || !byRef.InlineSuppressible || !byRef.Realtime || byRef.Scope != ScopeInterprocedural || byRef.Precision != PrecisionHigh || !byRef.DefaultEnabled || byRef.Category != "runtime-safety" {
+		t.Fatalf("unexpected VBA206 metadata: %+v, %v", byRef, ok)
+	}
 	unstable, ok := Lookup("VBA217")
 	if !ok || unstable.DefaultSeverity != SeverityWarning || unstable.PreflightBlocking || !unstable.InlineSuppressible || !unstable.Realtime || unstable.Precision != PrecisionMedium {
 		t.Fatalf("unexpected VBA217 metadata: %+v, %v", unstable, ok)

@@ -1033,6 +1033,183 @@ End Sub
 	}
 }
 
+func TestByRefArgumentDiagnosticsUseResolvedProjectSignatures(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+
+Public Sub TakeString(ByRef value As String)
+End Sub
+
+Public Sub TakeValues(ByRef values() As Long)
+End Sub
+
+Public Sub TakeLongPtr(ByRef value As LongPtr)
+End Sub
+
+Public Sub TakeLongLong(ByRef value As LongLong)
+End Sub
+
+Public Sub TakeAny(ByRef value As Any)
+End Sub
+
+Public Sub TakeByValue(ByVal value As Long)
+End Sub
+
+Public Sub TakeRest(ByRef first As Long, ParamArray rest())
+End Sub
+
+Public Sub Run()
+    Dim number As Long
+    Dim pointer As LongPtr
+    Dim text As String
+    Dim values() As Long
+    TakeLong text
+    TakeLong value:=text
+    TakeString "literal"
+    TakeLong (number)
+    TakeLong number + 1
+    TakeLong Application.Caption
+    TakeValues values(0)
+    TakeLong pointer
+    TakeLongPtr number
+    TakeLongLong number
+    TakeValues number
+    TakeAny text
+    TakeByValue "allowed"
+    TakeRest number, "allowed"
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
+	if len(diagnostics) != 11 {
+		t.Fatalf("VBA206 diagnostics = %+v, want eleven", diagnostics)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "VBA206" || diagnostic.Severity != "warning" || diagnostic.Confidence != "high" {
+			t.Fatalf("unexpected ByRef diagnostic: %+v", diagnostic)
+		}
+	}
+	for _, want := range []string{
+		"has type String, but ByRef parameter `value` requires Long",
+		"is a literal",
+		"is parenthesized. VBA evaluates it into a temporary value",
+		"is an expression rather than a writable variable",
+		"is a property or member expression",
+		"is an array element or indexed expression",
+		"requires LongPtr",
+		"requires LongLong",
+		"requires Long()",
+	} {
+		if !hasDiagnosticMessage(diagnostics, want) {
+			t.Fatalf("missing %q in %+v", want, diagnostics)
+		}
+	}
+}
+
+func TestByRefArgumentDiagnosticsAvoidUncertainTypesAndExternalCalls(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+
+Public Sub Run()
+    Dim unknown
+    Dim dynamicValue As Object
+    Dim flexible As Variant
+    TakeLong unknown
+    TakeLong dynamicValue
+    TakeLong flexible
+    Debug.Print dynamicValue
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	if diagnostics := analyzer.ByRefArgumentDiagnostics(doc); len(diagnostics) != 0 {
+		t.Fatalf("uncertain or external calls must not make certain ByRef claims: %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsPreferCurrentModuleProcedure(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "TakeValue") {
+			return nil, nil
+		}
+		return []Symbol{
+			{Name: "TakeValue", Kind: "sub", Module: "Main", Parameters: []Parameter{{Name: "value", Type: "Long", Passing: "ByRef"}}},
+			{Name: "TakeValue", Kind: "sub", Module: "Other", Parameters: []Parameter{{Name: "value", Type: "String", Passing: "ByRef"}}},
+		}, nil
+	}
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: `Option Explicit
+Public Sub Run()
+    Dim text As String
+    TakeValue text
+End Sub
+`}
+	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "requires Long") {
+		t.Fatalf("current-module ByRef diagnostic = %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsClassifyDecimalLiteralsAndExpressions(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeDouble(ByRef value As Double)
+End Sub
+
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+
+Public Sub Run()
+    Dim number As Long
+    TakeDouble 1.5
+    TakeLong number + 1.5
+End Sub
+`
+	diagnostics := analyzer.ByRefArgumentDiagnostics(Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source})
+	if len(diagnostics) != 2 {
+		t.Fatalf("decimal ByRef diagnostics = %+v, want two", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `1.5` for ByRef parameter `value` is a literal") || hasDiagnosticMessage(diagnostics, "Argument `1.5` has type Long") {
+		t.Fatalf("decimal literal type was misclassified: %+v", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `number + 1.5` for ByRef parameter `value` is an expression rather than a writable variable") {
+		t.Fatalf("decimal expression was misclassified as member access: %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsCheckPtrSafePointerWidths(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Private Declare PtrSafe Function FindWindow Lib "user32" Alias "FindWindowA" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+Private Declare PtrSafe Function FindWindowEx Lib "user32" Alias "FindWindowExA" (ByVal hWndParent As LongPtr, ByVal hWndChildAfter As Long, ByVal lpszClass As String, ByVal lpszWindow As String) As LongPtr
+Private Declare PtrSafe Function GetWindowLongPtr Lib "user32" Alias "GetWindowLongPtrA" (ByVal hWnd As Long, ByVal nIndex As Long) As LongPtr
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Api.bas"), Source: source}
+	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
+	if len(diagnostics) != 3 {
+		t.Fatalf("PtrSafe VBA206 diagnostics = %+v, want three", diagnostics)
+	}
+	for _, want := range []string{"FindWindow` returns a pointer-sized value", "FindWindowEx` parameter `hWndChildAfter`", "GetWindowLongPtr` parameter `hWnd`"} {
+		if !hasDiagnosticMessage(diagnostics, want) {
+			t.Fatalf("missing %q in %+v", want, diagnostics)
+		}
+	}
+}
+
+func TestByRefArgumentDiagnosticsPtrSafeWhitespaceAndFallbackConfidence(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Private Declare  PtrSafe Function CustomHandle Lib "custom" (ByVal handle As Long) As LongPtr
+`
+	diagnostics := analyzer.ByRefArgumentDiagnostics(Document{Path: filepath.Join(t.TempDir(), "Api.bas"), Source: source})
+	if len(diagnostics) != 1 || diagnostics[0].Confidence != "medium" || !strings.Contains(diagnostics[0].Message, "parameter `handle`") {
+		t.Fatalf("PtrSafe fallback diagnostic = %+v", diagnostics)
+	}
+}
+
 func TestArgumentDiagnosticsReportArrayObjectMismatchForArrayParametersAndImplicitVariantArrays(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
