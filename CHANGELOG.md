@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Made `VBA206` a default-enabled, real-time non-blocking warning. It now
+  detects unsafe resolved project-local `ByRef` arguments, including explicit
+  type mismatches, temporary values, indirect member/array expressions, and
+  common `PtrSafe` pointer-width declaration mistakes.
+
 ## v0.28.0
 
 - Added default-enabled batch `VBA221` warnings for direct calls to local

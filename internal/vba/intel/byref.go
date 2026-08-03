@@ -2,7 +2,14 @@ package intel
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+)
+
+var (
+	memberExpressionPattern = regexp.MustCompile(`[A-Za-z0-9_)\]]\.[A-Za-z_]`)
+	ptrSafeDeclarePattern   = regexp.MustCompile(`(?i)\bdeclare\s+ptrsafe\b`)
+	numericByRefLiteral     = regexp.MustCompile(`^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][+-]?\d+)?[&^!#@]?$`)
 )
 
 // ByRefArgumentDiagnostics reports unsafe calls to resolved project-local
@@ -97,6 +104,21 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, target string, 
 		}
 		matches = append(matches, sym)
 	}
+	if !qualified {
+		module := moduleNameForDocument(doc)
+		var local []Symbol
+		for _, sym := range matches {
+			if strings.EqualFold(sym.Module, module) {
+				local = append(local, sym)
+			}
+		}
+		if len(local) == 1 {
+			return signatureFromSymbol(local[0]), true, nil
+		}
+		if len(local) > 1 {
+			return Signature{}, false, nil
+		}
+	}
 	if len(matches) != 1 {
 		return Signature{}, false, nil
 	}
@@ -134,7 +156,7 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 		}
 		return Diagnostic{}, false
 	}
-	if strings.Contains(expr, ".") {
+	if looksMemberExpression(expr) {
 		return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is a property or member expression. Any mutation is indirect and may be surprising; pass a writable variable instead.", expr, param.Name)), true
 	}
 	if looksIndexedExpression(expr) {
@@ -172,25 +194,32 @@ func byRefLiteralType(expr string) (string, bool) {
 		return "Variant", true
 	}
 	if isNumericByRefLiteral(expr) {
-		return "Long", true
+		return numericByRefLiteralType(expr), true
 	}
 	return "", false
 }
 
 func isNumericByRefLiteral(expr string) bool {
-	if expr == "" {
-		return false
-	}
-	for index, r := range expr {
-		if (r == '-' || r == '+') && index == 0 {
-			continue
-		}
-		if (r < '0' || r > '9') && r != '.' && r != '&' && r != '^' && r != '!' && r != '#' && r != '@' {
-			return false
-		}
-	}
-	return true
+	return numericByRefLiteral.MatchString(strings.TrimSpace(expr))
 }
+
+func numericByRefLiteralType(expr string) string {
+	lower := strings.ToLower(strings.TrimSpace(expr))
+	switch {
+	case strings.Contains(lower, "@"):
+		return "Currency"
+	case strings.Contains(lower, "#") || strings.Contains(lower, ".") || strings.ContainsAny(lower, "ed"):
+		return "Double"
+	case strings.Contains(lower, "!"):
+		return "Single"
+	case strings.Contains(lower, "^"):
+		return "LongLong"
+	default:
+		return "Long"
+	}
+}
+
+func looksMemberExpression(expr string) bool { return memberExpressionPattern.MatchString(expr) }
 
 func looksIndexedExpression(expr string) bool {
 	open := strings.Index(expr, "(")
@@ -246,32 +275,40 @@ func (a Analyzer) ptrSafeDeclareDiagnostics(doc Document) []Diagnostic {
 			continue
 		}
 		line := symbol.Range.Start.Line
-		if line < 0 || line >= len(lines) || !strings.Contains(strings.ToLower(lines[line]), "declare ptrsafe") {
+		if line < 0 || line >= len(lines) {
+			continue
+		}
+		declaration := lines[line]
+		if end := min(len(lines)-1, symbol.Range.End.Line); end > line {
+			declaration = strings.Join(lines[line:end+1], " ")
+		}
+		if !ptrSafeDeclarePattern.MatchString(declaration) {
 			continue
 		}
 		contract := winAPIPointerContracts[strings.ToLower(symbol.Name)]
 		if contract.returnPointer && longUsedForPointer(symbol.ReturnType) {
-			out = append(out, byRefDeclareDiagnostic(line, lines[line], fmt.Sprintf("PtrSafe Declare `%s` returns a pointer-sized value but declares `Long`. Use `LongPtr`.", symbol.Name)))
+			out = append(out, byRefDeclareDiagnostic(line, lines[line], fmt.Sprintf("PtrSafe Declare `%s` returns a pointer-sized value but declares `Long`. Use `LongPtr`.", symbol.Name), "high"))
 		}
 		for _, parameter := range symbol.Parameters {
-			if !pointerLikeDeclareParameter(parameter.Name, contract) || !longUsedForPointer(parameter.Type) {
+			pointerLike, confidence := pointerLikeDeclareParameter(parameter.Name, contract)
+			if !pointerLike || !longUsedForPointer(parameter.Type) {
 				continue
 			}
-			out = append(out, byRefDeclareDiagnostic(line, lines[line], fmt.Sprintf("PtrSafe Declare `%s` parameter `%s` is pointer-sized but declares `Long`. Use `LongPtr`.", symbol.Name, parameter.Name)))
+			out = append(out, byRefDeclareDiagnostic(line, lines[line], fmt.Sprintf("PtrSafe Declare `%s` parameter `%s` is pointer-sized but declares `Long`. Use `LongPtr`.", symbol.Name, parameter.Name), confidence))
 		}
 	}
 	return out
 }
 
-func pointerLikeDeclareParameter(name string, contract winAPIPointerContract) bool {
+func pointerLikeDeclareParameter(name string, contract winAPIPointerContract) (bool, string) {
 	if contract.parameters != nil && contract.parameters[strings.ToLower(name)] {
-		return true
+		return true, "high"
 	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "hwnd", "hinstance", "hmodule", "hicon", "hcursor", "hmenu", "hbitmap", "hbrush", "handle", "wparam", "lparam", "dwnewlong", "lpaddress":
-		return true
+		return true, "medium"
 	default:
-		return false
+		return false, ""
 	}
 }
 
@@ -279,13 +316,13 @@ func longUsedForPointer(typ string) bool {
 	return byRefCanonicalType(typ) == "long"
 }
 
-func byRefDeclareDiagnostic(lineNo int, line, message string) Diagnostic {
+func byRefDeclareDiagnostic(lineNo int, line, message, confidence string) Diagnostic {
 	return Diagnostic{
 		Code:       "VBA206",
 		Severity:   "warning",
 		Source:     "xlflow",
 		Rule:       "VBA206",
-		Confidence: "high",
+		Confidence: confidence,
 		Message:    message,
 		Range:      Range{Start: Position{Line: lineNo}, End: Position{Line: lineNo, Character: utf16Len(line)}},
 	}

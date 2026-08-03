@@ -71,6 +71,19 @@ End Sub
 	t.Fatalf("VBA215 diagnostic missing: %+v", diagnostics)
 }
 
+func TestChangedProcedureNamesDetectsByRefSignatureEdits(t *testing.T) {
+	before := map[string]procedureSignature{
+		"helper.takevalue.sub": {name: "TakeValue", fingerprint: "sub||public|value:long:false:byref:false:false"},
+	}
+	after := map[string]procedureSignature{
+		"helper.takevalue.sub": {name: "TakeValue", fingerprint: "sub||public|value:string:false:byref:false:false"},
+	}
+	changed := changedProcedureNames(before, after)
+	if len(changed) != 1 || changed[0] != "TakeValue" {
+		t.Fatalf("changed procedure names = %+v, want TakeValue", changed)
+	}
+}
+
 func TestLSPDiagnosticsIncludeWorksheetRootFindings(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

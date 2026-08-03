@@ -49,6 +49,7 @@ type Analyzer struct {
 	Config                config.Config
 	PathFilter            func(string) bool
 	typeDB                *vbadb.DB
+	byRefSymbols          []intel.Symbol
 	errorGuardAliases     map[string]bool
 	errorValueWrappers    map[string]bool
 	eventSafeProcedures   map[string]bool
@@ -298,6 +299,13 @@ func (a Analyzer) RunResult() (Result, error) {
 		}
 		analysis.typeDB = typeDB
 	}
+	if analysis.Config.Analyze.DetectByRefArgumentMismatch {
+		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
+		if err != nil {
+			return Result{}, err
+		}
+		analysis.byRefSymbols = byRefSymbols
+	}
 	var findings []Finding
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
@@ -333,7 +341,12 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 	if !a.Config.Analyze.DetectByRefArgumentMismatch || a.typeDB == nil {
 		return nil
 	}
-	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).ByRefArgumentDiagnostics(file.intelDocument())
+	diagnostics := (intel.Analyzer{
+		RootDir:                  a.RootDir,
+		Config:                   a.Config,
+		DB:                       a.typeDB,
+		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+	}).ByRefArgumentDiagnostics(file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil
 	}
@@ -364,6 +377,27 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 		out = append(out, finding)
 	}
 	return out
+}
+
+// projectByRefSymbols builds the batch project's procedure index once. VBA206
+// resolves every call through this immutable slice instead of rediscovering the
+// entire source tree through symbols.Inspect for each call site.
+func projectByRefSymbols(rootDir string, cfg config.Config) ([]intel.Symbol, error) {
+	return (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
+}
+
+func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+	needle := strings.ToLower(strings.TrimSpace(query.Text))
+	if query.Mode != intel.WorkspaceSymbolQueryExact || needle == "" {
+		return nil, nil
+	}
+	out := make([]intel.Symbol, 0)
+	for _, sym := range a.byRefSymbols {
+		if strings.EqualFold(sym.Name, needle) {
+			out = append(out, sym)
+		}
+	}
+	return out, nil
 }
 
 func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
