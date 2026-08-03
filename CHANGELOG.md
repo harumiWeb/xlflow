@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated `tree-sitter-vba` to v0.11.1 so VBE-exported procedure `Attribute`
+  statements, including `Load` and `Name` targets, parse without recovery nodes.
 - Made `VBA206` a default-enabled, real-time non-blocking warning. It now
   detects unsafe resolved project-local `ByRef` arguments, including explicit
   type mismatches, temporary values, indirect member/array expressions, and

@@ -63,6 +63,45 @@ func TestParserParsesNestedInlineLoopsWithSharedNextVariables(t *testing.T) {
 	}
 }
 
+func TestParserParsesVBEProcedureAttributesWithContextualNames(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	result := parser.Parse("Exported.cls", []byte(`Attribute VB_Name = "Exported"
+Public Function Load() As String
+Attribute Load.VB_Description = "Loads the document."
+End Function
+
+Public Property Get Name() As String
+Attribute Name.VB_Description = "Returns the name."
+End Property
+`))
+	defer result.Close()
+
+	if result.HasError || result.HasMissing {
+		t.Fatalf("unexpected recovery state: error=%t missing=%t tree=%s", result.HasError, result.HasMissing, result.Root.ToSexp())
+	}
+	attributes := map[string]bool{}
+	Walk(result.Root, func(node *tree_sitter.Node) bool {
+		if node.Kind() != "attribute_statement" {
+			return true
+		}
+		name := node.ChildByFieldName("name")
+		if name != nil {
+			attributes[name.Utf8Text(result.Source)] = name.Kind() == "qualified_member_expression"
+		}
+		return true
+	})
+	for _, want := range []string{"Load.VB_Description", "Name.VB_Description"} {
+		if !attributes[want] {
+			t.Fatalf("procedure Attribute %q was not parsed as a qualified member expression: %+v", want, attributes)
+		}
+	}
+}
+
 func TestParsedDocumentOwnsRecoveryStateAndClosesAfterReaders(t *testing.T) {
 	doc, err := ParseDocument("Broken.bas", []byte("Public Function Foo(ByVal x As String\nEnd Function\n"))
 	if err != nil {

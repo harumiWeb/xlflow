@@ -994,7 +994,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA206
 
-**Unsafe ByRef argument.** A resolved project-local ByRef call has an explicit type mismatch, a temporary value, or an indirect argument whose mutation may be lost or surprising. Parentheses around one VBA argument force expression evaluation into a temporary value, so callee changes do not update the original variable.
+**Unsafe ByRef argument.** A resolved project-local ByRef call receives an incompatible type, a temporary value, or an indirect property, member, or array expression whose mutation may be lost or surprising.
 
 | Property                    | Value                            |
 | --------------------------- | -------------------------------- |
