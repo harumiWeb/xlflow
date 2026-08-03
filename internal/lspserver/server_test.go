@@ -773,6 +773,33 @@ func TestProtocolDiagnosticUsesRegistryDocumentationURL(t *testing.T) {
 	}
 }
 
+func TestLSPDiagnosticsReportUnsafeProjectLocalByRefArgument(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	source := `Option Explicit
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+Public Sub Run()
+    Dim text As String
+    TakeLong (text)
+End Sub
+`
+	var diagnostics []intel.Diagnostic
+	for _, diagnostic := range s.analyzer.Diagnostics(intel.Document{URI: pathToFileURI(path), Path: path, Source: source}) {
+		if diagnostic.Code == "VBA206" {
+			diagnostics = append(diagnostics, diagnostic)
+		}
+	}
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "temporary value") {
+		t.Fatalf("LSP VBA206 diagnostics = %+v", diagnostics)
+	}
+}
+
 func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

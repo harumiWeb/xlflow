@@ -1033,6 +1033,122 @@ End Sub
 	}
 }
 
+func TestByRefArgumentDiagnosticsUseResolvedProjectSignatures(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+
+Public Sub TakeString(ByRef value As String)
+End Sub
+
+Public Sub TakeValues(ByRef values() As Long)
+End Sub
+
+Public Sub TakeLongPtr(ByRef value As LongPtr)
+End Sub
+
+Public Sub TakeLongLong(ByRef value As LongLong)
+End Sub
+
+Public Sub TakeAny(ByRef value As Any)
+End Sub
+
+Public Sub TakeByValue(ByVal value As Long)
+End Sub
+
+Public Sub TakeRest(ByRef first As Long, ParamArray rest())
+End Sub
+
+Public Sub Run()
+    Dim number As Long
+    Dim pointer As LongPtr
+    Dim text As String
+    Dim values() As Long
+    TakeLong text
+    TakeLong value:=text
+    TakeString "literal"
+    TakeLong (number)
+    TakeLong number + 1
+    TakeLong Application.Caption
+    TakeValues values(0)
+    TakeLong pointer
+    TakeLongPtr number
+    TakeLongLong number
+    TakeValues number
+    TakeAny text
+    TakeByValue "allowed"
+    TakeRest number, "allowed"
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
+	if len(diagnostics) != 11 {
+		t.Fatalf("VBA206 diagnostics = %+v, want eleven", diagnostics)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "VBA206" || diagnostic.Severity != "warning" || diagnostic.Confidence != "high" {
+			t.Fatalf("unexpected ByRef diagnostic: %+v", diagnostic)
+		}
+	}
+	for _, want := range []string{
+		"has type String, but ByRef parameter `value` requires Long",
+		"is a literal",
+		"is parenthesized. VBA evaluates it into a temporary value",
+		"is an expression rather than a writable variable",
+		"is a property or member expression",
+		"is an array element or indexed expression",
+		"requires LongPtr",
+		"requires LongLong",
+		"requires Long()",
+	} {
+		if !hasDiagnosticMessage(diagnostics, want) {
+			t.Fatalf("missing %q in %+v", want, diagnostics)
+		}
+	}
+}
+
+func TestByRefArgumentDiagnosticsAvoidUncertainTypesAndExternalCalls(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+
+Public Sub Run()
+    Dim unknown
+    Dim dynamicValue As Object
+    Dim flexible As Variant
+    TakeLong unknown
+    TakeLong dynamicValue
+    TakeLong flexible
+    Debug.Print dynamicValue
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	if diagnostics := analyzer.ByRefArgumentDiagnostics(doc); len(diagnostics) != 0 {
+		t.Fatalf("uncertain or external calls must not make certain ByRef claims: %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsCheckPtrSafePointerWidths(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Private Declare PtrSafe Function FindWindow Lib "user32" Alias "FindWindowA" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+Private Declare PtrSafe Function FindWindowEx Lib "user32" Alias "FindWindowExA" (ByVal hWndParent As LongPtr, ByVal hWndChildAfter As Long, ByVal lpszClass As String, ByVal lpszWindow As String) As LongPtr
+Private Declare PtrSafe Function GetWindowLongPtr Lib "user32" Alias "GetWindowLongPtrA" (ByVal hWnd As Long, ByVal nIndex As Long) As LongPtr
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Api.bas"), Source: source}
+	diagnostics := analyzer.ByRefArgumentDiagnostics(doc)
+	if len(diagnostics) != 3 {
+		t.Fatalf("PtrSafe VBA206 diagnostics = %+v, want three", diagnostics)
+	}
+	for _, want := range []string{"FindWindow` returns a pointer-sized value", "FindWindowEx` parameter `hWndChildAfter`", "GetWindowLongPtr` parameter `hWnd`"} {
+		if !hasDiagnosticMessage(diagnostics, want) {
+			t.Fatalf("missing %q in %+v", want, diagnostics)
+		}
+	}
+}
+
 func TestArgumentDiagnosticsReportArrayObjectMismatchForArrayParametersAndImplicitVariantArrays(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit

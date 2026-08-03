@@ -126,6 +126,7 @@ type Parameter struct {
 	Name          string
 	Type          string
 	IsArray       bool
+	Passing       string
 	Optional      bool
 	ParamArray    bool
 	Documentation string
@@ -276,6 +277,10 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 		return nil
 	}
 	out = append(out, a.argumentDiagnostics(doc)...)
+	if ctx.Err() != nil {
+		return nil
+	}
+	out = append(out, a.ByRefArgumentDiagnostics(doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -1461,7 +1466,7 @@ func parametersFromDB(params []vbadb.ParamInfo) []Parameter {
 	}
 	out := make([]Parameter, 0, len(params))
 	for _, param := range params {
-		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Optional: param.Optional || param.ParamArray, ParamArray: param.ParamArray})
+		out = append(out, Parameter{Name: param.Name, Type: firstNonEmpty(param.Type, "Variant"), Passing: "ByVal", Optional: param.Optional || param.ParamArray, ParamArray: param.ParamArray})
 	}
 	return out
 }
@@ -5389,6 +5394,7 @@ func symbolParameters(params []symbols.Parameter) []Parameter {
 			Name:       param.Name,
 			Type:       firstNonEmpty(param.Type, "Variant"),
 			IsArray:    param.IsArray,
+			Passing:    firstNonEmpty(param.Passing, "ByRef"),
 			Optional:   param.Optional,
 			ParamArray: param.ParamArray,
 		})
