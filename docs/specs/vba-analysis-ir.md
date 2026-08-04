@@ -210,10 +210,21 @@ document revision. The cache:
   candidate data; and
 - is retired with the snapshot and never closes the parsed document itself.
 
-An incremental edit creates a new parsed-document snapshot and therefore a new
-IR cache. Reusing unchanged procedure objects across revisions is not part of
-this contract. A project-symbol change may reuse syntax IR and replace only its
-resolution overlay.
+An incremental edit creates a new parsed-document snapshot and a new
+single-flight document result, but a successor within the same open lifecycle
+inherits an immutable store of completed procedure fragments. Fragment identity
+includes procedure kind/name/ordinal, exact procedure source, and module
+context. Materialization rebases every `ast.Range` from the declaration start,
+orders procedures by current source, and reassigns document declaration IDs.
+Canceled, panicked, recovered, ambiguous, and in-progress builds are retryable
+and are never inherited. A full replacement within the same lifecycle may
+reuse fragments; close/reopen may not.
+
+Module declarations and conditional-compilation directives are hashed
+separately from procedure bodies. A module-context change invalidates semantic
+IR and CFG reuse. A conditional-compilation change, overlapping/recovered
+procedure boundary, or non-unique catalog mapping falls back to a complete
+module build.
 
 ## Compatibility and Layer Boundaries
 

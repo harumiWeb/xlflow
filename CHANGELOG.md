@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added procedure-scoped incremental LSP diagnostics with 300 ms Fast and
+  two-second idle Full publication, request-scoped workspace resolution,
+  reusable IR/CFG procedure fragments, indexed source positions, and stage
+  performance counters. Large-module Full analysis no longer repeats
+  workspace symbol copies or line-prefix scans, while generation, suppression,
+  diagnostic range, and close/reopen safety are preserved.
 - Fixed `VB014` false positives when valid VBA identifiers such as `nextChar`,
   `nextSlot`, or `NextHashCapacity` begin with the `Next` keyword text.
 - Improved LSP responsiveness for very large VBA modules by removing a

@@ -15,6 +15,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/suppression"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
@@ -48,14 +49,20 @@ type WorkspaceSymbolQuery struct {
 
 type WorkspaceSymbolQueryFunc func(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error)
 
+// WorkspaceSymbolsSnapshotFunc returns one coherent symbol snapshot for a
+// request. Diagnostics use it to avoid rebuilding and cloning the effective
+// workspace symbol set for every call site.
+type WorkspaceSymbolsSnapshotFunc func(open []Document) ([]Symbol, error)
+
 type Analyzer struct {
-	RootDir                  string
-	Config                   config.Config
-	DB                       *vbadb.DB
-	DocumentSymbolsFunc      DocumentSymbolsFunc
-	WorkspaceSymbolsFunc     func(open []Document, query string) ([]Symbol, error)
-	WorkspaceSymbolQueryFunc WorkspaceSymbolQueryFunc
-	RealtimeFindingsFunc     RealtimeFindingsFunc
+	RootDir                      string
+	Config                       config.Config
+	DB                           *vbadb.DB
+	DocumentSymbolsFunc          DocumentSymbolsFunc
+	WorkspaceSymbolsFunc         func(open []Document, query string) ([]Symbol, error)
+	WorkspaceSymbolQueryFunc     WorkspaceSymbolQueryFunc
+	WorkspaceSymbolsSnapshotFunc WorkspaceSymbolsSnapshotFunc
+	RealtimeFindingsFunc         RealtimeFindingsFunc
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
@@ -208,6 +215,10 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 }
 
 func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	return a.DiagnosticsRequestContext(ctx, DiagnosticRequest{Document: doc, Mode: DiagnosticModeFull}).Diagnostics
+}
+
+func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Diagnostic {
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -216,7 +227,9 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 		return []Diagnostic{lineDiagnostic("VBA000", "error", 0, err.Error())}
 	}
 	defer closeParsed()
+	finishStage := analysisstats.Measure(ctx, "lint")
 	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintParsedContext(ctx, parsed)
+	finishStage(len(issues), err)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -236,14 +249,18 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
+	finishStage = analysisstats.Measure(ctx, "procedure_ir")
 	procedureIR, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed)
+	finishStage(len(procedureIR.Procedures), err)
 	if ctx.Err() != nil {
 		return nil
 	}
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
+	finishStage = analysisstats.Measure(ctx, "cfg")
 	controlFlow, err := controlFlowForDocumentContext(ctx, doc, procedureIR)
+	finishStage(len(controlFlow.Graphs), err)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -251,7 +268,9 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
 	if a.RealtimeFindingsFunc != nil {
+		finishStage = analysisstats.Measure(ctx, "analyze")
 		findings, err := a.RealtimeFindingsFunc(ctx, a.RootDir, a.Config, parsed, procedureIR, controlFlow)
+		finishStage(len(findings), err)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -282,35 +301,59 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.argumentDiagnosticsContext(ctx, doc)...)
+	finishStage = analysisstats.Measure(ctx, "argument_diagnostics")
+	stageDiagnostics := a.argumentDiagnosticsContext(ctx, doc)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.ByRefArgumentDiagnosticsContext(ctx, doc)...)
+	finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
+	stageDiagnostics = a.ByRefArgumentDiagnosticsContext(ctx, doc)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.unknownMemberDiagnosticsContext(ctx, doc)...)
+	finishStage = analysisstats.Measure(ctx, "member_diagnostics")
+	stageDiagnostics = a.unknownMemberDiagnosticsContext(ctx, doc)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.propertyAccessDiagnosticsContext(ctx, doc)...)
+	finishStage = analysisstats.Measure(ctx, "property_diagnostics")
+	stageDiagnostics = a.propertyAccessDiagnosticsContext(ctx, doc)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.assignmentDiagnosticsContext(ctx, doc)...)
+	finishStage = analysisstats.Measure(ctx, "assignment_diagnostics")
+	stageDiagnostics = a.assignmentDiagnosticsContext(ctx, doc)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.unresolvedMemberReceiverDiagnosticsContext(ctx, doc)...)
+	finishStage = analysisstats.Measure(ctx, "receiver_diagnostics")
+	stageDiagnostics = a.unresolvedMemberReceiverDiagnosticsContext(ctx, doc)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.documentationDiagnosticsParsed(doc, parsed)...)
+	finishStage = analysisstats.Measure(ctx, "documentation_diagnostics")
+	stageDiagnostics = a.documentationDiagnosticsParsed(doc, parsed)
+	finishStage(len(stageDiagnostics), ctx.Err())
+	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	return applyDocumentInlineSuppressions(a.RootDir, doc, out)
+	finishStage = analysisstats.Measure(ctx, "suppression")
+	out = applyDocumentInlineSuppressions(a.RootDir, doc, out)
+	finishStage(len(out), ctx.Err())
+	return out
 }
 
 func applyDocumentInlineSuppressions(root string, doc Document, diagnostics []Diagnostic) []Diagnostic {
@@ -743,7 +786,7 @@ func (a Analyzer) unresolvedExternalMemberReference(doc Document, pos Position, 
 	if startByte > len(line) {
 		startByte = len(line)
 	}
-	offset := byteOffsetForPosition(doc.Source, pos)
+	offset := byteOffsetForDocumentPosition(doc, pos)
 	var receiverType string
 	var ok bool
 	beforeWord := strings.TrimRight(line[:startByte], " \t")
@@ -855,7 +898,7 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	if word == "" {
 		return nil, nil
 	}
-	if hover, ok := a.memberHover(doc, word, r, byteOffsetForPosition(doc.Source, pos)); ok {
+	if hover, ok := a.memberHover(doc, word, r, byteOffsetForDocumentPosition(doc, pos)); ok {
 		return hover, nil
 	}
 	if a.unresolvedExternalMemberReference(doc, pos, word) {
@@ -873,7 +916,14 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	if hover, ok, err := a.documentedSymbolHover(doc, pos, open, word, r); err != nil || ok {
 		return hover, err
 	}
-	if inferred, ok := a.inferWordTypeInfoAt(doc, word, byteOffsetForPosition(doc.Source, pos)); ok {
+	if syms, err := a.definitionSymbols(doc, pos, open, word); err != nil {
+		return nil, err
+	} else if len(syms) > 0 && procedureHoverSymbol(syms[0]) {
+		sym := syms[0]
+		detail := firstNonEmpty(sym.Detail, sym.Kind+" "+sym.Name)
+		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, nil
+	}
+	if inferred, ok := a.inferWordTypeInfoAt(doc, word, byteOffsetForDocumentPosition(doc, pos)); ok {
 		typ := inferred.Type
 		if dbType, found := a.DB.ResolveType(typ); found {
 			return &Hover{Contents: variableHover(word, dbType.Name, inferred.Source), Range: r}, nil
@@ -906,6 +956,15 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		}
 	}
 	return nil, nil
+}
+
+func procedureHoverSymbol(symbol Symbol) bool {
+	switch strings.ToLower(symbol.Kind) {
+	case "sub", "function", "property", "property_get", "property_let", "property_set":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a Analyzer) documentedSymbolHover(doc Document, pos Position, open []Document, word string, r Range) (*Hover, bool, error) {
@@ -1114,8 +1173,8 @@ func (a Analyzer) procedureNameConstantCodeActions(doc Document, selection Range
 			continue
 		}
 		editRange := Range{
-			Start: positionForByteOffset(doc.Source, fix.StartByte),
-			End:   positionForByteOffset(doc.Source, fix.EndByte),
+			Start: positionForDocumentByteOffset(doc, fix.StartByte),
+			End:   positionForDocumentByteOffset(doc, fix.EndByte),
 		}
 		if !rangeIntersects(selection, editRange) {
 			continue
@@ -1415,7 +1474,7 @@ func (a Analyzer) resolveCallSignatureAtContext(doc Document, target string, pos
 		if !hasReceiver {
 			memberName = strings.TrimSpace(strings.TrimPrefix(target, "."))
 		}
-		if receiverType, ok := a.withBlockTypeAtContext(doc, pos, byteOffsetForPosition(doc.Source, pos), typeContext); ok {
+		if receiverType, ok := a.withBlockTypeAtContext(doc, pos, byteOffsetForDocumentPosition(doc, pos), typeContext); ok {
 			if hasReceiver {
 				if typ, ok := a.resolveRelativeMemberExpressionType(receiverType, receiver); ok {
 					receiverType = typ
@@ -1435,7 +1494,7 @@ func (a Analyzer) resolveCallSignatureAtContext(doc Document, target string, pos
 		}
 	}
 	if receiver, memberName, ok := splitCallTarget(target); ok {
-		receiverType, ok := a.resolveDocumentExpressionTypeAtContext(doc, receiver, byteOffsetForPosition(doc.Source, pos), typeContext)
+		receiverType, ok := a.resolveDocumentExpressionTypeAtContext(doc, receiver, byteOffsetForDocumentPosition(doc, pos), typeContext)
 		if ok {
 			if strings.EqualFold(receiverType, "Object") && sheetsDefaultExpression(receiver) {
 				receiverType = "Excel.Worksheet"
@@ -1668,7 +1727,7 @@ func (a Analyzer) arrayObjectArgumentDiagnostics(doc Document, pos Position, lin
 		if !ok || param.ParamArray || param.IsArray || !strings.EqualFold(param.Type, "Object") || !isIdentifier(arg.Text) {
 			continue
 		}
-		inferred, ok := a.inferWordTypeInfoAt(doc, arg.Text, byteOffsetForPosition(doc.Source, pos))
+		inferred, ok := a.inferWordTypeInfoAt(doc, arg.Text, byteOffsetForDocumentPosition(doc, pos))
 		if !ok || !inferred.IsArray {
 			continue
 		}
@@ -1839,7 +1898,7 @@ func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context
 			if !ok || strings.TrimSpace(receiver) == "" || strings.HasPrefix(strings.TrimSpace(receiver), ".") {
 				continue
 			}
-			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})); ok {
 				continue
 			}
 			base := memberReceiverBase(receiver)
@@ -1883,7 +1942,7 @@ func (a Analyzer) unknownMemberDiagnosticsContext(ctx context.Context, doc Docum
 				continue
 			}
 			seen[key] = true
-			if diag, ok := a.unknownMemberDiagnosticForExpression(doc, lineNo, line, expr, match[2], byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+			if diag, ok := a.unknownMemberDiagnosticForExpression(doc, lineNo, line, expr, match[2], byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})); ok {
 				out = append(out, diag)
 			}
 		}
@@ -2151,7 +2210,7 @@ func (a Analyzer) memberAccessInfo(doc Document, lineNo int, line, expr string) 
 	if !ok {
 		return memberAccessInfo{}, false
 	}
-	offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+	offset := byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})
 	receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, offset)
 	if !ok || lowConfidenceDiagnosticType(receiverType) {
 		return memberAccessInfo{}, false
@@ -2215,7 +2274,7 @@ func (a Analyzer) assignmentDiagnosticsContext(ctx context.Context, doc Document
 		if lhsExpr == "" {
 			continue
 		}
-		offset := byteOffsetForPosition(doc.Source, Position{Line: lineNo, Character: utf16Len(line)})
+		offset := byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})
 		rhsExpr := strings.TrimSpace(code[eq+1:])
 		if diag, ok := a.noReturnValueDiagnostic(doc, lineNo, line, rhsExpr); ok {
 			out = append(out, diag)
@@ -3676,7 +3735,7 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 			if !isObjectFallbackType(inferred.Type) {
 				return inferred, true
 			}
-		} else if currentProcedureNameAt(doc, positionForByteOffset(doc.Source, offset), ctx) != "" {
+		} else if currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), ctx) != "" {
 			return inferredType{}, false
 		}
 	}
@@ -3701,7 +3760,7 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 	if lookupOffset < 0 {
 		lookupOffset = len(doc.Source)
 	}
-	lookupPosition := positionForByteOffset(doc.Source, lookupOffset)
+	lookupPosition := positionForDocumentByteOffset(doc, lookupOffset)
 	if assignment, ok := index.nearestAssignment(word, currentProcedureNameAt(doc, lookupPosition, ctx), lookupPosition); ok {
 		if match := newAssignmentExprRe.FindStringSubmatch(assignment.expression); len(match) == 2 {
 			return inferredType{Type: match[1], Source: "inferred from Set New"}, true
@@ -3722,7 +3781,7 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 }
 
 func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offset int, ctx *documentTypeContext) (inferredType, bool) {
-	pos := positionForByteOffset(doc.Source, offset)
+	pos := positionForDocumentByteOffset(doc, offset)
 	currentProcedure := currentProcedureNameAt(doc, pos, ctx)
 	var syms []Symbol
 	if ctx != nil {
@@ -4395,7 +4454,7 @@ func (a Analyzer) memberCompletions(receiverType, prefix string) []Completion {
 }
 
 func (a Analyzer) resolveMemberCompletionReceiverType(doc Document, pos Position, receiverExpr string) (string, bool) {
-	offset := byteOffsetForPosition(doc.Source, pos)
+	offset := byteOffsetForDocumentPosition(doc, pos)
 	if strings.HasPrefix(strings.TrimSpace(receiverExpr), ".") {
 		receiverType, ok := a.withBlockTypeAt(doc, pos, offset)
 		if !ok {
@@ -4403,7 +4462,60 @@ func (a Analyzer) resolveMemberCompletionReceiverType(doc Document, pos Position
 		}
 		return a.resolveRelativeMemberExpressionType(receiverType, receiverExpr)
 	}
+	if receiverType, ok := a.lightweightProcedureExpressionType(doc, pos, receiverExpr); ok {
+		return receiverType, true
+	}
 	return a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+}
+
+// lightweightProcedureExpressionType keeps the first interactive request from
+// forcing full-document symbol extraction. It parses only the current
+// procedure and resolves any remaining member chain through the type database.
+func (a Analyzer) lightweightProcedureExpressionType(doc Document, pos Position, expr string) (string, bool) {
+	procedureRange, ok := currentProcedureRangeForDocument(doc, pos)
+	if !ok {
+		return "", false
+	}
+	start := byteOffsetForDocumentPosition(doc, procedureRange.Start)
+	end := byteOffsetForDocumentPosition(doc, procedureRange.End)
+	if end < len(doc.Source) {
+		_, end = rawLineBounds(doc.Source, end)
+	}
+	if start < 0 || end <= start || end > len(doc.Source) {
+		return "", false
+	}
+	parts := splitMemberExpression(expr)
+	if len(parts) == 0 {
+		return "", false
+	}
+	base := strings.TrimSpace(parts[0])
+	if index := strings.Index(base, "("); index >= 0 {
+		base = strings.TrimSpace(base[:index])
+	}
+	fragment := doc
+	fragment.Source = doc.Source[start:end]
+	fragment.Snapshot = nil
+	symbols, err := a.DocumentSymbols(fragment)
+	if err != nil {
+		return "", false
+	}
+	current := ""
+	for _, symbol := range symbols {
+		if strings.EqualFold(symbol.Name, base) && symbol.ReturnType != "" && (isLocalSymbol(symbol) || strings.EqualFold(symbol.Kind, "parameter")) {
+			current = symbol.ReturnType
+			break
+		}
+	}
+	if current == "" {
+		return "", false
+	}
+	if isObjectFallbackType(current) {
+		return "", false
+	}
+	if len(parts) == 1 {
+		return current, true
+	}
+	return a.resolveRelativeMemberExpressionType(current, "."+strings.Join(parts[1:], "."))
 }
 
 func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string) (string, bool) {
@@ -5005,7 +5117,7 @@ func (a Analyzer) withBlockMemberCompletionContext(doc Document, pos Position, p
 	if strings.TrimSpace(beforeDot) != "" && !withRelativeDotPrefix(beforeDot) {
 		return "", "", false
 	}
-	typ, ok := a.withBlockTypeAt(doc, pos, byteOffsetForPosition(doc.Source, pos))
+	typ, ok := a.withBlockTypeAt(doc, pos, byteOffsetForDocumentPosition(doc, pos))
 	if !ok {
 		return "", "", false
 	}
@@ -5598,6 +5710,13 @@ func byteOffsetForPosition(source string, pos Position) int {
 	return len(source)
 }
 
+func byteOffsetForDocumentPosition(doc Document, pos Position) int {
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		return snapshot.byteOffset(pos)
+	}
+	return byteOffsetForPosition(doc.Source, pos)
+}
+
 func positionForByteOffset(source string, offset int) Position {
 	if offset <= 0 {
 		return Position{}
@@ -5618,6 +5737,13 @@ func positionForByteOffset(source string, offset int) Position {
 		}
 		lineStart = nextLineStart
 	}
+}
+
+func positionForDocumentByteOffset(doc Document, offset int) Position {
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		return snapshot.position(offset)
+	}
+	return positionForByteOffset(doc.Source, offset)
 }
 
 // rawLineBounds returns the end of the current line's text and the start of

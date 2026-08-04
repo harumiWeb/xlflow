@@ -91,6 +91,30 @@ func TestIssue491SyntheticLargeClassFixture(t *testing.T) {
 	}
 }
 
+func TestIssue491LightweightProcedureSymbols(t *testing.T) {
+	fixture := makeIssue491BenchmarkFixture(t)
+	s := newLSPBenchmarkServer(t, fixture)
+	doc, err := s.docs.getOrRead(fixture.largeURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbols, handled := s.analyzer.LightweightDocumentSymbols(doc, intel.WorkspaceSymbolQuery{Text: "MassiveProcedure0001", Mode: intel.WorkspaceSymbolQueryExact})
+	if !handled || len(symbols) == 0 || symbols[0].Name != "MassiveProcedure0001" {
+		t.Fatalf("lightweight symbols = %+v, handled=%t", symbols, handled)
+	}
+	callLine := benchmarkSourceLine(fixture.largeSource, "        Call MassiveProcedure0001(value + 1)")
+	var captured intel.WorkspaceSymbolQuery
+	original := s.analyzer.WorkspaceSymbolQueryFunc
+	s.analyzer.WorkspaceSymbolQueryFunc = func(open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+		captured = query
+		return original(open, query)
+	}
+	_, _ = s.analyzer.SignatureHelp(doc, intel.Position{Line: callLine, Character: 42}, s.docs.openDocuments())
+	if captured.Text != "MassiveProcedure0001" {
+		t.Fatalf("signature query = %+v, want MassiveProcedure0001", captured)
+	}
+}
+
 func TestIssue491SmallFixtureDiagnosticContract(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "Issue491Contract.cls")
@@ -154,6 +178,30 @@ func TestIssue491DiagnosticsStopsWithinBudgetAfterCancellationCheckpoint(t *test
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("obsolete diagnostics did not stop within 250ms of the cancellation checkpoint")
+	}
+}
+
+func TestIssue494BodyEditReuses1199ProcedureArtifacts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large structural artifact-reuse regression")
+	}
+	fixture := makeIssue491BenchmarkFixture(t)
+	s := newLSPBenchmarkServer(t, fixture)
+	doc, err := s.docs.getOrRead(fixture.largeURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.analyzer.DiagnosticsContext(context.Background(), doc)
+	line := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
+	column := len("    Debug.Print cellRef.Address")
+	changed, applied, err := s.docs.applyChanges(fixture.largeURI, []documentContentChange{{rng: protocolRange(line, column, line, column), text: " "}}, 2)
+	if err != nil || !applied {
+		t.Fatalf("change = (applied=%v, err=%v)", applied, err)
+	}
+	_ = s.analyzer.DiagnosticsContext(context.Background(), changed)
+	stats := changed.Snapshot.ProcedureArtifactStats()
+	if stats.IRBuild != 1 || stats.IRReuse != issue491ProcedureCount-1 || stats.CFGBuild != 1 || stats.CFGReuse != issue491ProcedureCount-1 {
+		t.Fatalf("artifact stats = %+v, want one build and %d reuses per artifact", stats, issue491ProcedureCount-1)
 	}
 }
 
@@ -253,6 +301,56 @@ func BenchmarkLSPIssue491LargeClass(b *testing.B) {
 		}
 		b.ReportMetric(float64(doc.Snapshot.ParseCount()-before)/float64(b.N), "parses/op")
 		b.ReportMetric(float64(doc.Snapshot.FullHashCount()-beforeHashes)/float64(b.N), "full-hashes/op")
+	})
+
+	b.Run("Diagnostics/EditFast", func(b *testing.B) {
+		s := newLSPBenchmarkServer(b, fixture)
+		doc, err := s.docs.getOrRead(fixture.largeURI)
+		if err != nil {
+			b.Fatal(err)
+		}
+		baseline := s.analyzer.DiagnosticsRequestContext(context.Background(), intel.DiagnosticRequest{Document: doc, Mode: intel.DiagnosticModeFull})
+		line := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
+		column := len("    Debug.Print cellRef.Address")
+		change := []documentContentChange{{rng: protocolRange(line, column, line, column), text: " "}}
+		changed, applied, err := s.docs.applyChanges(fixture.largeURI, change, 2)
+		if err != nil || !applied {
+			b.Fatalf("change = (applied=%v, err=%v)", applied, err)
+		}
+		request := intel.DiagnosticRequest{
+			Document: changed, Mode: intel.DiagnosticModeFast, PreviousCache: baseline.Cache,
+			Changes: intel.ProcedureChangeSet{Ranges: []intel.Range{{Start: intel.Position{Line: line, Character: column}, End: intel.Position{Line: line, Character: column + 1}}}},
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = s.analyzer.DiagnosticsRequestContext(context.Background(), request)
+		}
+	})
+
+	b.Run("Diagnostics/EditFullArtifactReuse", func(b *testing.B) {
+		s := newLSPBenchmarkServer(b, fixture)
+		doc, err := s.docs.getOrRead(fixture.largeURI)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = s.analyzer.DiagnosticsContext(context.Background(), doc)
+		line := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
+		column := len("    Debug.Print cellRef.Address")
+		changed, applied, err := s.docs.applyChanges(fixture.largeURI, []documentContentChange{{rng: protocolRange(line, column, line, column), text: " "}}, 2)
+		if err != nil || !applied {
+			b.Fatalf("change = (applied=%v, err=%v)", applied, err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = s.analyzer.DiagnosticsContext(context.Background(), changed)
+		}
+		stats := changed.Snapshot.ProcedureArtifactStats()
+		b.ReportMetric(float64(stats.IRBuild), "ir-builds")
+		b.ReportMetric(float64(stats.IRReuse), "ir-reuses")
+		b.ReportMetric(float64(stats.CFGBuild), "cfg-builds")
+		b.ReportMetric(float64(stats.CFGReuse), "cfg-reuses")
 	})
 
 	b.Run("Diagnostics/Canceled", func(b *testing.B) {
@@ -385,7 +483,7 @@ func benchmarkIssue491Interactive(b *testing.B, fixture lspBenchmarkFixture) {
 	b.Run("Interactive/SignatureHelp", func(b *testing.B) {
 		params := &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.largeURI)},
-			Position:     protocol.Position{Line: protocol.UInteger(callLine), Character: 46},
+			Position:     protocol.Position{Line: protocol.UInteger(callLine), Character: 42},
 		}}
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -420,7 +518,7 @@ func benchmarkIssue491OpenImmediateInteractive(b *testing.B, fixture lspBenchmar
 		{name: "SignatureHelp", run: func(s *Server) error {
 			_, err := s.signatureHelp(nil, &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.largeURI)},
-				Position:     protocol.Position{Line: protocol.UInteger(callLine), Character: 46},
+				Position:     protocol.Position{Line: protocol.UInteger(callLine), Character: 42},
 			}})
 			return err
 		}},

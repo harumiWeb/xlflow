@@ -33,13 +33,39 @@ func TestDiagnosticsChangesCoalesceToLatestDebouncedGeneration(t *testing.T) {
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 2)
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 3)
 	created := timers.snapshot()
-	if len(created) != 2 {
-		t.Fatalf("timers = %d, want 2", len(created))
+	if len(created) != 4 {
+		t.Fatalf("timers = %d, want 4 (Fast and Full for each change)", len(created))
 	}
 	created[0].Fire()
 	wantNoVersion(t, versions)
-	created[1].Fire()
+	created[2].Fire()
 	wantVersion(t, versions, 3)
+}
+
+func TestDidChangeSchedulesFastThenIdleFullDiagnostics(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	runs := make(chan int32, 4)
+	s.diagnostics = func(_ context.Context, doc intel.Document) []intel.Diagnostic {
+		runs <- doc.Version
+		return nil
+	}
+	ctx := diagnosticTestContext(nil)
+	uri := openDiagnosticsTestDocument(t, s, ctx, 1)
+	wantVersion(t, runs, 1)
+
+	changeDiagnosticsTestDocument(t, s, ctx, uri, 2)
+	created := timers.snapshot()
+	if len(created) != 2 {
+		t.Fatalf("timers = %d, want Fast and Full", len(created))
+	}
+	if created[0].delay != diagnosticsDebounce || created[1].delay != diagnosticsFullIdleDelay {
+		t.Fatalf("timer delays = %v, %v", created[0].delay, created[1].delay)
+	}
+	created[0].Fire()
+	wantVersion(t, runs, 2)
+	created[1].Fire()
+	wantVersion(t, runs, 2)
 }
 
 func TestDidOpenReturnsBeforeBackgroundAnalysisCompletes(t *testing.T) {
@@ -336,7 +362,7 @@ func TestDiagnosticsKeepsOneWorkerAndRunsOnlyLatestReadyGeneration(t *testing.T)
 	wantVersion(t, started, 2)
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 3)
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 4)
-	timers.snapshot()[2].Fire()
+	timers.snapshot()[4].Fire()
 	wantNoVersion(t, started)
 	close(release)
 	wantVersion(t, started, 4)
@@ -368,7 +394,7 @@ func TestDiagnosticsDiscardsGenerationChangedImmediatelyBeforePublish(t *testing
 	waitClosed(t, hookStarted, "publish hook")
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 3)
 	close(releaseHook)
-	timers.snapshot()[1].Fire()
+	timers.snapshot()[2].Fire()
 
 	params := notifications.waitForCount(t, 1)
 	if len(params) != 1 || len(params[0].Diagnostics) != 1 || params[0].Diagnostics[0].Message != "version 3" {
@@ -525,7 +551,7 @@ func TestDiagnosticsSlowDocumentDoesNotBlockAnotherDocument(t *testing.T) {
 	timers.snapshot()[0].Fire()
 	wantURI(t, started, uriA)
 	changeDiagnosticsTestDocument(t, s, ctx, uriB, 2)
-	timers.snapshot()[1].Fire()
+	timers.snapshot()[2].Fire()
 	wantURI(t, started, uriB)
 	close(releaseA)
 }
@@ -551,7 +577,7 @@ func TestDiagnosticsShutdownStopsTimersCancelsAndWaitsForWorkers(t *testing.T) {
 	timers.snapshot()[0].Fire()
 	waitClosed(t, started, "diagnostics worker")
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 3)
-	pending := timers.snapshot()[1]
+	pending := timers.snapshot()[2]
 
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -574,8 +600,8 @@ type fakeDiagnosticTimers struct {
 	timers []*fakeDiagnosticTimer
 }
 
-func (f *fakeDiagnosticTimers) AfterFunc(_ time.Duration, callback func()) diagnosticTimer {
-	timer := &fakeDiagnosticTimer{callback: callback, stoppedCh: make(chan struct{})}
+func (f *fakeDiagnosticTimers) AfterFunc(delay time.Duration, callback func()) diagnosticTimer {
+	timer := &fakeDiagnosticTimer{delay: delay, callback: callback, stoppedCh: make(chan struct{})}
 	f.mu.Lock()
 	f.timers = append(f.timers, timer)
 	f.mu.Unlock()
@@ -590,6 +616,7 @@ func (f *fakeDiagnosticTimers) snapshot() []*fakeDiagnosticTimer {
 
 type fakeDiagnosticTimer struct {
 	mu        sync.Mutex
+	delay     time.Duration
 	callback  func()
 	stopped   bool
 	stoppedCh chan struct{}
@@ -674,6 +701,12 @@ func newDiagnosticsTestServer(t *testing.T) (*Server, *fakeDiagnosticTimers, fun
 	timers := &fakeDiagnosticTimers{}
 	s.diagnosticsAfterFunc = timers.AfterFunc
 	s.diagnosticsOpenDelay = 0
+	// Scheduler tests replace the legacy diagnostic seam after construction.
+	// Route both phases through that dynamic seam unless a test explicitly
+	// exercises the real Fast/Full analyzer.
+	s.diagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		return intel.DiagnosticResult{Diagnostics: s.diagnostics(ctx, request.Document)}
+	}
 	return s, timers, cleanup
 }
 

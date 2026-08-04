@@ -19,6 +19,8 @@ var (
 // case-insensitive.
 type documentIndex struct {
 	source         string
+	lineStarts     []int
+	lineEnds       []int
 	procedures     []ProcedureInfo
 	procedureLines []int
 
@@ -47,8 +49,11 @@ type withBlockRange struct {
 func indexName(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 
 func buildDocumentIndex(source string, lines []string, procedures []ProcedureInfo, procedureLines []int, symbols []Symbol) *documentIndex {
+	lineStarts, lineEnds := buildSourceLineMap(source)
 	idx := &documentIndex{
 		source:         source,
+		lineStarts:     lineStarts,
+		lineEnds:       lineEnds,
 		procedures:     append([]ProcedureInfo(nil), procedures...),
 		procedureLines: append([]int(nil), procedureLines...),
 		symbolsByName:  make(map[string][]Symbol),
@@ -92,7 +97,7 @@ func (idx *documentIndex) initAssignments() {
 			}
 			exprOffset := match[4] + strings.Index(raw, expr)
 			name := idx.source[match[2]:match[3]]
-			position := positionForByteOffset(idx.source, match[0])
+			position := positionForSourceMap(idx.source, idx.lineStarts, idx.lineEnds, match[0])
 			idx.assignmentsByName[indexName(name)] = append(idx.assignmentsByName[indexName(name)], typedAssignment{
 				name:       name,
 				procedure:  procedureNameAt(idx.procedures, idx.procedureLines, position),

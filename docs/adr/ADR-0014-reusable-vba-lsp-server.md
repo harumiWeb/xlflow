@@ -67,6 +67,20 @@ xlflow-owned source formats.
   to publish derived workspace or diagnostic results. Superseding changes,
   close, reopen, and shutdown cancel obsolete work; canceled derived-artifact
   builds remain retryable and are never cached as completed results.
+- After a change, publish procedure-scoped Fast diagnostics after the 300 ms
+  edit debounce, then build the matching workspace overlay and replace the Fast
+  result with Full diagnostics after two seconds of editor idle. A Full result
+  outranks Fast for the same generation, and neither phase may publish across a
+  generation or lifecycle boundary. Opening a document schedules only the cold
+  overlay and Full pass.
+- Anchor reusable procedure diagnostics to a procedure identity and source
+  fragment. Fast publication may rebase unchanged procedure-local diagnostics
+  to the current procedure start, but must omit interprocedural results until
+  Full analysis revalidates them and must reapply current inline suppressions.
+- Build one immutable workspace-resolution view per diagnostic request. Pending
+  overlays remain masked in the workspace index while current open-document
+  declarations are merged into that request view without synchronous overlay
+  publication.
 - On unreconcilable edit coordinates or invalid version ordering, retain the
   last valid snapshot until a later full-document replacement can resynchronize
   it. When a valid new source cannot use an old tree, parse it completely and

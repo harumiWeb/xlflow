@@ -1547,6 +1547,10 @@ func (l Linter) unusedLocalVariableIssuesContext(ctx context.Context, path, sour
 	if !l.Config.Lint.DetectUnusedLocalVariables {
 		return nil, nil
 	}
+	references, err := buildProcedureLocalReferenceIndexContext(ctx, source, file.Symbols, nil)
+	if err != nil {
+		return nil, err
+	}
 	var issues []Issue
 	for i, sym := range file.Symbols {
 		if i&0x3f == 0 {
@@ -1560,11 +1564,7 @@ func (l Linter) unusedLocalVariableIssuesContext(ctx context.Context, path, sour
 		if isIgnoredLocalName(sym.Name) {
 			continue
 		}
-		referenced, err := localNameReferencedContext(ctx, source, sym, procedureEndLineForSymbol(file.Symbols, sym))
-		if err != nil {
-			return nil, err
-		}
-		if referenced {
+		if references[i] {
 			continue
 		}
 		issue := l.issueForSymbol(sym, "VB020", "warning", "Procedure-local variable is declared but never referenced.")
@@ -1706,50 +1706,6 @@ func isIgnoredLocalName(name string) bool {
 	return name == "" || name == "_" || strings.HasPrefix(name, "unused") || strings.HasPrefix(name, "ignore")
 }
 
-func procedureEndLineForSymbol(all []symbols.Symbol, sym symbols.Symbol) int {
-	if sym.Parent == "" {
-		return sym.EndLine
-	}
-	for _, candidate := range all {
-		if !procedureSymbolKind(candidate.Kind) {
-			continue
-		}
-		if !strings.EqualFold(candidate.Name, sym.Parent) {
-			continue
-		}
-		if candidate.StartLine <= sym.StartLine && sym.StartLine <= candidate.EndLine {
-			return candidate.EndLine
-		}
-	}
-	return sym.EndLine
-}
-
-func localNameReferencedContext(ctx context.Context, source string, sym symbols.Symbol, endLine int) (bool, error) {
-	lines := normalizedSourceLines(source)
-	needle := sym.Name
-	for i := sym.StartLine - 1; i < len(lines); i++ {
-		if i&0xff == 0 {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-		}
-		lineNo := i + 1
-		if sym.Parent != "" && endLine > 0 && lineNo > endLine {
-			break
-		}
-		line := normalizedCodeLine(lines[i])
-		for _, statement := range splitStatements(line) {
-			if lineNo == sym.StartLine && isLocalDeclarationStatement(statement) {
-				continue
-			}
-			if hasLocalReadUse(statement, needle) {
-				return true, nil
-			}
-		}
-	}
-	return false, ctx.Err()
-}
-
 func isLocalDeclarationStatement(statement string) bool {
 	fields := lowerFields(statement)
 	if len(fields) == 0 {
@@ -1760,26 +1716,6 @@ func isLocalDeclarationStatement(statement string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func hasLocalReadUse(code, symbol string) bool {
-	lowerCode := strings.ToLower(code)
-	lowerSymbol := strings.ToLower(symbol)
-	for offset := 0; ; {
-		index := strings.Index(lowerCode[offset:], lowerSymbol)
-		if index < 0 {
-			return false
-		}
-		index += offset
-		end := index + len(symbol)
-		if isIdentifierBoundary(code, index-1) &&
-			isIdentifierBoundary(code, end) &&
-			!isQualifiedIdentifier(code, index) &&
-			!isLocalAssignmentTargetOccurrence(code, index, end) {
-			return true
-		}
-		offset = end
 	}
 }
 

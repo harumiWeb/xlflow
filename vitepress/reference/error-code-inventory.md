@@ -10,10 +10,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
 - `argument_count`
+- `argument_diagnostics`
 - `argument_list`
 - `array_bounds`
 - `as_type_clause`
 - `assignable_to`
+- `assignment_diagnostics`
 - `assignment_statement`
 - `atomic_create`
 - `atomic_replace`
@@ -68,6 +70,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `builtin_like`
 - `button_not_found`
 - `by_kind`
+- `byref_diagnostics`
 - `byref_modifier`
 - `byval_modifier`
 - `call_expression`
@@ -80,6 +83,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `case_expression`
 - `cell_diffs`
 - `cells_updated`
+- `cfg_builds`
+- `cfg_reuses`
 - `changed_only`
 - `changed_paths`
 - `changes_application_state`
@@ -205,6 +210,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `doctor_workbook_skipped`
 - `document_changed_concurrently`
 - `document_not_open`
+- `documentation_diagnostics`
 - `dotnet_missing`
 - `dotnet_runtime`
 - `dotnet_runtime_missing`
@@ -444,6 +450,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `max_total_size_mb`
 - `member_access`
 - `member_call`
+- `member_diagnostics`
 - `member_expression`
 - `merge_range`
 - `merged_ranges`
@@ -549,6 +556,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_call`
 - `procedure_declaration`
 - `procedure_exit`
+- `procedure_ir`
+- `procedure_ir_builds`
+- `procedure_ir_reuses`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -567,6 +577,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `project_init`
 - `project_name`
 - `property_declaration`
+- `property_diagnostics`
 - `property_get`
 - `property_get_declaration`
 - `property_let`
@@ -591,6 +602,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `read_only`
 - `read_write`
 - `reason_not_runnable`
+- `receiver_diagnostics`
 - `recorded_at`
 - `recover_workbook`
 - `recovery_actions`
@@ -863,6 +875,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `worksheet_calculate`
 - `worksheet_change`
 - `worksheet_selectionchange`
+- `workspace_resolution_views`
 - `write_only`
 - `writes_cells`
 - `wsl_path`

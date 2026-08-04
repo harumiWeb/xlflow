@@ -60,9 +60,14 @@ without exceptional edges, when the rule's contract calls for it; uncertainty
 within that selected view still participates.
 
 Cache the document CFG lazily on the immutable `AnalysisSnapshot`, using the
-same revision ownership, concurrency, error caching, and defensive-copy
-contract as the procedure IR cache. An incremental edit creates a new cache and
-does not reuse graph fragments or IDs across revisions.
+same ownership, concurrency, retryable-cancellation, and defensive-copy
+contract as procedure IR. A successor in the same lifecycle may reuse a
+completed procedure graph fragment when both its procedure source and module
+semantic context match. The module-context component is required because CFG
+assignment facts contain resolved symbol scopes. Source ranges are rebased to
+the current procedure while graph and block IDs remain deterministic within
+that procedure. Recovery ambiguity, conditional-compilation changes, module
+context changes, and close/reopen force safe rebuilds.
 
 Migrate `VBA204` as the first CFG consumer. It detects handler fallthrough by
 normal-flow reachability of the handler label rather than by scanning preceding
@@ -105,9 +110,10 @@ configuration key, JSON shape, diagnostic ID, or LSP capability is added.
 5. **Mix exceptional flow and uncertainty into one edge kind** - Rejected
    because a transition can be exceptional but precisely known, or normal but
    uncertain; consumers need both dimensions.
-6. **Reuse graph fragments across incremental revisions** - Rejected because
-   statement and graph IDs are revision-local, and reuse would complicate
-   snapshot lifetime and stale-publication guarantees.
+6. **Reuse graph fragments by source hash alone** - Rejected because module
+   declarations can change resolved scopes without changing a procedure body.
+   Reuse therefore also requires the module semantic context and the existing
+   generation-safe snapshot lifecycle.
 
 ## Evidence
 

@@ -509,7 +509,7 @@ func (b *semanticBuilder) addMemberTokens() {
 			receiverExpr := strings.TrimSpace(line[match[2]:match[3]])
 			memberName := line[match[4]:match[5]]
 			pos := Position{Line: lineNo, Character: utf16Len(line[:match[4]])}
-			offset := byteOffsetForPosition(b.doc.Source, pos)
+			offset := byteOffsetForDocumentPosition(b.doc, pos)
 			receiverType, ok := b.analyzer.resolveDocumentExpressionTypeAtContext(b.doc, receiverExpr, offset, b.typeContext)
 			if !ok {
 				if strings.HasPrefix(strings.TrimSpace(receiverExpr), ".") {

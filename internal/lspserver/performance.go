@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 )
 
@@ -12,6 +13,30 @@ type performanceMeasurement struct {
 	operation string
 	document  intel.Document
 	started   time.Time
+}
+
+func (s *Server) logDiagnosticStages(doc intel.Document, generation uint64, mode intel.DiagnosticMode, recorder *analysisstats.Recorder) {
+	if !s.opts.PerformanceLog || recorder == nil {
+		return
+	}
+	phase := "full"
+	if mode == intel.DiagnosticModeFast {
+		phase = "fast"
+	}
+	stages, counters := recorder.Snapshot()
+	for _, stage := range stages {
+		s.logger.Printf(
+			"performance operation=%q uri=%q path=%q version=%d generation=%d phase=%q stage=%q elapsed_ms=%.3f wait_ms=%.3f result_count=%d outcome=%q",
+			"diagnostics/stage", doc.URI, doc.Path, doc.Version, generation, phase, stage.Name,
+			float64(stage.Elapsed)/float64(time.Millisecond), float64(stage.Wait)/float64(time.Millisecond), stage.ResultCount, stage.Outcome,
+		)
+	}
+	for name, value := range counters {
+		s.logger.Printf(
+			"performance operation=%q uri=%q path=%q version=%d generation=%d phase=%q stage=%q elapsed_ms=0 wait_ms=0 result_count=%d outcome=%q",
+			"diagnostics/stage", doc.URI, doc.Path, doc.Version, generation, phase, name, value, "counter",
+		)
+	}
 }
 
 func (s *Server) startPerformance(operation string, doc intel.Document) *performanceMeasurement {

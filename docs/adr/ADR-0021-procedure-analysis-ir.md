@@ -52,10 +52,14 @@ conversion remains in the LSP adapter; the IR does not import LSP protocol
 types.
 
 Make the immutable `AnalysisSnapshot` the LSP ownership and cache boundary.
-Each snapshot lazily constructs at most one syntax IR from its owned parsed
-document, supports concurrent readers, and returns defensive copies. A new
-incrementally parsed snapshot gets its own IR; issue #426 does not splice
-procedure IR fragments across revisions.
+Each snapshot lazily constructs syntax IR from its owned parsed document,
+supports concurrent readers, and returns defensive copies. A successor in the
+same open-document lifecycle may inherit completed Go-owned procedure fragments
+keyed by procedure kind/name/ordinal, exact source hash, and module-context
+hash. Ranges are rebased from the fragment declaration start and document-wide
+declaration IDs are deterministically reassigned when materialized. In-flight,
+canceled, panicked, recovered, or ambiguous fragments are not inherited;
+close/reopen always starts with an empty artifact store.
 
 Centralize procedure-kind and event-handler classification in the IR. `Sub`,
 `Function`, and `Property Get/Let/Set` bodies are procedures. A module-level
@@ -90,6 +94,8 @@ change its JSON shape or resolution meaning.
   call resolution can be refreshed without another CST walk.
 - Positive: cached analysis values are safe after the parsed document closes
   because the IR contains no borrowed parser state.
+- Positive: a body-only edit rebuilds only changed procedure IR while safely
+  rebasing unchanged fragments after preceding line insertions or deletions.
 - Positive: partial syntax facts remain available for editor scenarios while
   strict batch consumers can continue to fail closed.
 - Positive: CFG and effect work get an explicit, narrow input boundary instead

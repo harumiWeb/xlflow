@@ -178,8 +178,13 @@ its immutable revision. The cache:
 - returns defensive copies; and
 - retires with the snapshot without retaining parser state.
 
-An incremental edit creates a new snapshot and a new CFG cache. Procedure graph
-fragments, blocks, edges, and IDs are not reused across revisions.
+An incremental successor may reuse completed procedure graph fragments when the
+procedure source hash and module-context hash both match. Cached ranges are
+rebased from the procedure declaration to its current location; graph, block,
+and edge IDs remain procedure-local and deterministic. Module declaration or
+conditional-compilation changes, parser recovery ambiguity, and close/reopen
+invalidate reuse. Canceled or failed graph builds remain retryable and are not
+published into the inherited store.
 
 ## Compatibility and Layer Boundaries
 
