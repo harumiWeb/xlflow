@@ -1,6 +1,7 @@
 package symbols
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,6 +114,9 @@ type SourceOptions struct {
 }
 
 type extractor struct {
+	ctx         context.Context
+	err         error
+	visited     uint64
 	opts        Options
 	rootDir     string
 	source      []byte
@@ -319,6 +323,14 @@ func RelatedSourcePaths(rootDir string, cfg config.Config, path string) ([]strin
 }
 
 func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
+	return InspectSourceContext(context.Background(), opts, source)
+}
+
+// InspectSourceContext is the cancellable variant of InspectSource.
+func InspectSourceContext(ctx context.Context, opts SourceOptions, source []byte) (FileResult, error) {
+	if err := ctx.Err(); err != nil {
+		return FileResult{}, err
+	}
 	path := opts.Path
 	if strings.TrimSpace(path) == "" {
 		path = "Untitled.bas"
@@ -328,12 +340,22 @@ func InspectSource(opts SourceOptions, source []byte) (FileResult, error) {
 		return FileResult{}, err
 	}
 	defer doc.Close()
-	return InspectParsed(opts, doc)
+	return InspectParsedContext(ctx, opts, doc)
 }
 
 // InspectParsed extracts symbols from a caller-owned parsed VBA document. It
 // does not close doc or retain tree-sitter nodes after its read callback.
 func InspectParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
+	return InspectParsedContext(context.Background(), opts, doc)
+}
+
+// InspectParsedContext extracts symbols with cooperative cancellation. A
+// cancellation returned from inside ParsedDocument.Read releases the tree read
+// lease before this function returns.
+func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
+	if err := ctx.Err(); err != nil {
+		return FileResult{}, err
+	}
 	rootDir := opts.RootDir
 	if rootDir == "" {
 		rootDir = "."
@@ -343,7 +365,7 @@ func InspectParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, 
 		return FileResult{}, err
 	}
 	var result FileResult
-	err = doc.Read(func(view vbaast.ParsedView) error {
+	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		path := opts.Path
 		if strings.TrimSpace(path) == "" {
 			path = view.Path
@@ -361,6 +383,7 @@ func InspectParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, 
 		}
 		moduleName, attrs := moduleMetadata(path, view.Source)
 		ext := extractor{
+			ctx: ctx,
 			opts: Options{
 				RootDir:        rootDir,
 				IncludePrivate: opts.IncludePrivate,
@@ -374,12 +397,16 @@ func InspectParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, 
 			moduleKind:  moduleKind,
 			attrs:       attrs,
 		}
+		symbols := ext.extract(view.Root)
+		if ext.err != nil {
+			return ext.err
+		}
 		result = FileResult{
 			Path:       rel,
 			ModuleName: moduleName,
 			ModuleKind: moduleKind,
 			Parse:      ParseSummary{HasError: view.HasError, HasMissing: view.HasMissing},
-			Symbols:    ext.extract(view.Root),
+			Symbols:    symbols,
 		}
 		return nil
 	})
@@ -530,6 +557,9 @@ func (e *extractor) extract(root *tree_sitter.Node) []Symbol {
 	if root == nil {
 		return nil
 	}
+	if e.ctx == nil {
+		e.ctx = context.Background()
+	}
 	moduleRange := vbaast.NodeRange(root)
 	e.symbols = append(e.symbols, Symbol{
 		Name:        e.moduleName,
@@ -550,16 +580,32 @@ func (e *extractor) extract(root *tree_sitter.Node) []Symbol {
 	}
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		e.visit(root.NamedChild(i), "")
+		if e.err != nil {
+			return nil
+		}
 	}
 	for i := range e.symbols {
+		if i&0xff == 0 {
+			if err := e.ctx.Err(); err != nil {
+				e.err = err
+				return nil
+			}
+		}
 		e.symbols[i].ModuleKind = e.moduleKind
 	}
 	return e.symbols
 }
 
 func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
-	if node == nil {
+	if node == nil || e.err != nil {
 		return
+	}
+	e.visited++
+	if e.visited&0xff == 0 {
+		if err := e.ctx.Err(); err != nil {
+			e.err = err
+			return
+		}
 	}
 	switch node.Kind() {
 	case "sub_declaration", "function_declaration", "property_declaration", "property_get_declaration", "property_let_declaration", "property_set_declaration":
@@ -628,6 +674,9 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		}
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if e.err != nil {
+			return
+		}
 		child := node.NamedChild(i)
 		if child == nil {
 			continue

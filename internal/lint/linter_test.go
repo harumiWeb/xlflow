@@ -1,18 +1,86 @@
 package lint
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
+
+func TestLintParsedContextReturnsCancellationWithoutPartialIssues(t *testing.T) {
+	doc, err := vbaast.ParseDocument("Main.bas", []byte("Sub Main()\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	issues, err := (Linter{}).LintParsedContext(ctx, doc)
+	if !errors.Is(err, context.Canceled) || issues != nil {
+		t.Fatalf("canceled result = (%+v, %v)", issues, err)
+	}
+}
+
+func TestLintParsedContextCancelsInFlightAndReleasesParsedDocument(t *testing.T) {
+	var source strings.Builder
+	for i := 0; i < 1200; i++ {
+		source.WriteString("Private Sub Work" + strconv.Itoa(i) + "()\n")
+		source.WriteString("  Dim value As Long\n")
+		source.WriteString("  value = " + strconv.Itoa(i) + "\n")
+		source.WriteString("End Sub\n")
+	}
+	doc, err := vbaast.ParseDocument("Large.bas", []byte(source.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+
+	ctx := &lintCheckpointContext{cancelAt: 16}
+	issues, err := (Linter{}).LintParsedContext(ctx, doc)
+	if !errors.Is(err, context.Canceled) || issues != nil {
+		t.Fatalf("in-flight canceled result = (%+v, %v)", issues, err)
+	}
+	if ctx.checks < ctx.cancelAt {
+		t.Fatalf("cancellation checks = %d, want at least %d", ctx.checks, ctx.cancelAt)
+	}
+
+	readDone := make(chan error, 1)
+	go func() { readDone <- doc.Read(func(vbaast.ParsedView) error { return nil }) }()
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatalf("read after cancellation: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ParsedDocument.Read remained locked after cancellation")
+	}
+}
+
+type lintCheckpointContext struct {
+	checks   int
+	cancelAt int
+}
+
+func (c *lintCheckpointContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *lintCheckpointContext) Done() <-chan struct{}       { return nil }
+func (c *lintCheckpointContext) Value(any) any               { return nil }
+func (c *lintCheckpointContext) Err() error {
+	c.checks++
+	if c.checks >= c.cancelAt {
+		return context.Canceled
+	}
+	return nil
+}
 
 func TestLinterFindsMVPRules(t *testing.T) {
 	dir := t.TempDir()
@@ -623,6 +691,11 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 		t.Fatalf("Loop Until candidates = %+v, reliable=%t", candidates, reliable)
 	}
 
+	nextPrefixedIdentifiers := "Sub Main()\n  nextChar = Mid$(text, position, 1)\n  NextHashCapacity = result\n  nextSlot = (slot + 1) And mask\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(nextPrefixedIdentifiers); !reliable || len(candidates) != 0 {
+		t.Fatalf("Next-prefixed identifier candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
 	continuation := "Sub Main()\n  If ready _\n      And enabled Then\n    Debug.Print \"x\"\nEnd Sub\n"
 	candidates, reliable := unmatchedBlockCandidates(continuation)
 	if !reliable || len(candidates) != 1 || candidates[0].kind != "if" || candidates[0].openingLine != 2 || candidates[0].expectedLine != 5 {
@@ -659,6 +732,18 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 	comment := "Sub Main()\n  ' If ready Then\n  Rem For Each item In items\nEnd Sub\n"
 	if candidates, reliable := unmatchedBlockCandidates(comment); !reliable || len(candidates) != 0 {
 		t.Fatalf("comment source candidates = %+v, reliable=%t", candidates, reliable)
+	}
+}
+
+func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "classes", "Example.cls")
+	source := []byte("Option Explicit\nPrivate Sub ReadNext()\n  Dim nextChar As String\n  Dim nextSlot As Long\n  nextChar = Mid$(text, position, 1)\n  nextSlot = (slot + 1) And mask\nEnd Sub\nPrivate Function NextHashCapacity() As Long\n  NextHashCapacity = 1\nEnd Function\n")
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("Next-prefixed identifiers should not trigger VB014: %+v", got)
 	}
 }
 

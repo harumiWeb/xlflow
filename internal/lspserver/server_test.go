@@ -179,9 +179,13 @@ func TestWorkspaceSymbolCacheUsesOpenDocumentOverlay(t *testing.T) {
 	defer cleanup()
 
 	uri := pathToFileURI(path)
-	if _, err := s.docs.open(uri, "Option Explicit\nSub OpenName()\nEnd Sub\n"); err != nil {
+	ctx := &glsp.Context{Notify: func(string, any) {}}
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: "Option Explicit\nSub OpenName()\nEnd Sub\n",
+	}}); err != nil {
 		t.Fatal(err)
 	}
+	waitForWorkspaceSymbol(t, s.analysis, "OpenName")
 	openSymbols, err := s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: "OpenName"})
 	if err != nil {
 		t.Fatal(err)
@@ -197,9 +201,13 @@ func TestWorkspaceSymbolCacheUsesOpenDocumentOverlay(t *testing.T) {
 		t.Fatalf("saved symbol should be hidden by open document overlay: %+v", savedSymbols)
 	}
 
-	if _, err := s.docs.change(uri, "Option Explicit\nSub ChangedName()\nEnd Sub\n"); err != nil {
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Version: 2},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEvent{Text: "Option Explicit\nSub ChangedName()\nEnd Sub\n"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
+	waitForWorkspaceSymbol(t, s.analysis, "ChangedName")
 	changedSymbols, err := s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: "ChangedName"})
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +295,9 @@ End Function
 	uri := pathToFileURI(path)
 	source := "Option Explicit\nSub Test()\n    Utils.Bu\nEnd Sub\n"
 	if _, err := s.docs.open(uri, source); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.analysis.waitReady(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -738,6 +749,10 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	args, ok := lenses[0].Command.Arguments[0].(map[string]any)
 	if !ok || args["name"] != "UnsavedRun" || args["moduleName"] != "Main" || args["qualifiedName"] != "Main.UnsavedRun" || args["kind"] != "sub" {
 		t.Fatalf("code lens args = %#v", lenses[0].Command.Arguments)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	var shutdown any
@@ -1688,9 +1703,13 @@ func TestPrepareRenameAndRenameReturnWorkspaceEdit(t *testing.T) {
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	uri := pathToFileURI(path)
 	source := "Option Explicit\nPrivate Sub Test()\n    Dim lastRow As Long\n    lastRow = 1\nEnd Sub\n"
-	if _, err := s.docs.open(uri, source); err != nil {
+	ctx := &glsp.Context{Notify: func(string, any) {}}
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: source,
+	}}); err != nil {
 		t.Fatal(err)
 	}
+	waitForWorkspaceSymbol(t, s.analysis, "Test")
 
 	prepare, err := s.prepareRename(nil, &protocol.PrepareRenameParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{

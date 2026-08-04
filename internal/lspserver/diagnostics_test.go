@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -39,6 +40,36 @@ func TestDiagnosticsChangesCoalesceToLatestDebouncedGeneration(t *testing.T) {
 	wantNoVersion(t, versions)
 	created[1].Fire()
 	wantVersion(t, versions, 3)
+}
+
+func TestDidOpenReturnsBeforeBackgroundAnalysisCompletes(t *testing.T) {
+	s, _, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic {
+		close(started)
+		<-release
+		return nil
+	}
+	ctx := diagnosticTestContext(nil)
+	uri := pathToFileURI(filepath.Join(s.opts.RootDir, "Main.bas"))
+	returned := make(chan error, 1)
+	go func() {
+		returned <- s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+			URI: protocol.DocumentUri(uri), Version: 1, Text: diagnosticSource(1),
+		}})
+	}()
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("didOpen waited for background analysis")
+	}
+	waitClosed(t, started, "background diagnostics")
+	close(release)
 }
 
 func TestLSPDiagnosticsIncludeVBA215FromSharedRealtimeAnalysis(t *testing.T) {
@@ -81,6 +112,85 @@ func TestChangedProcedureNamesDetectsByRefSignatureEdits(t *testing.T) {
 	changed := changedProcedureNames(before, after)
 	if len(changed) != 1 || changed[0] != "TakeValue" {
 		t.Fatalf("changed procedure names = %+v, want TakeValue", changed)
+	}
+}
+
+func TestFirstOpenProcedureRemovalSchedulesDependentCallerDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	callerPath := filepath.Join(modules, "Caller.bas")
+	callerSource := "Attribute VB_Name = \"Caller\"\nOption Explicit\nPublic Sub Run()\n  Dim text As String\n  TakeLong (text)\nEnd Sub\n"
+	calleePath := filepath.Join(modules, "Callee.bas")
+	diskCallee := "Attribute VB_Name = \"Callee\"\nOption Explicit\nPublic Sub TakeLong(ByRef value As Long)\nEnd Sub\n"
+	unsavedCallee := "Attribute VB_Name = \"Callee\"\nOption Explicit\nPublic Sub TakeText(ByRef value As String)\nEnd Sub\n"
+	if err := os.WriteFile(callerPath, []byte(callerSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(calleePath, []byte(diskCallee), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectByRefArgumentMismatch = true
+	s, cleanup, err := New(Options{RootDir: root, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	runs := make(chan string, 16)
+	s.diagnostics = func(_ context.Context, doc intel.Document) []intel.Diagnostic {
+		runs <- filepath.Base(doc.Path)
+		return nil
+	}
+	ctx := diagnosticTestContext(nil)
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(pathToFileURI(callerPath)), Version: 1, Text: callerSource,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wantDiagnosticRun(t, runs, "Caller.bas")
+	drainDiagnosticRuns(runs)
+
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(pathToFileURI(calleePath)), Version: 1, Text: unsavedCallee,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wantDiagnosticRun(t, runs, "Callee.bas")
+	wantDiagnosticRun(t, runs, "Caller.bas")
+	drainDiagnosticRuns(runs)
+	if err := s.didClose(ctx, &protocol.DidCloseTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(pathToFileURI(calleePath))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wantDiagnosticRun(t, runs, "Caller.bas")
+}
+
+func wantDiagnosticRun(t *testing.T, runs <-chan string, want string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-runs:
+			if got == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for diagnostics on %s", want)
+		}
+	}
+}
+
+func drainDiagnosticRuns(runs <-chan string) {
+	for {
+		select {
+		case <-runs:
+		default:
+			return
+		}
 	}
 }
 
@@ -281,6 +391,7 @@ func TestDiagnosticsCloseMakesEmptyPublishFinal(t *testing.T) {
 		return diagnosticVersionResult(context.Background(), doc)
 	}
 	uri := openDiagnosticsTestDocument(t, s, ctx, 1)
+	notifications.waitForCount(t, 1)
 	notifications.clear()
 	changeDiagnosticsTestDocument(t, s, ctx, uri, 2)
 	timers.snapshot()[0].Fire()
@@ -562,6 +673,7 @@ func newDiagnosticsTestServer(t *testing.T) (*Server, *fakeDiagnosticTimers, fun
 	}
 	timers := &fakeDiagnosticTimers{}
 	s.diagnosticsAfterFunc = timers.AfterFunc
+	s.diagnosticsOpenDelay = 0
 	return s, timers, cleanup
 }
 

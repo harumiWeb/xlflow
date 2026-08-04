@@ -74,7 +74,7 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 			}
 			continue
 		}
-		if strings.HasPrefix(lower, "next") || strings.HasPrefix(lower, "loop while") || strings.HasPrefix(lower, "loop until") {
+		if hasVBAKeywordPrefix(lower, "next") || strings.HasPrefix(lower, "loop while") || strings.HasPrefix(lower, "loop until") {
 			return nil, false
 		}
 
@@ -529,6 +529,22 @@ func validDoConditionOpener(lower, prefix string) bool {
 
 func hasNonEmptySuffix(text, prefix string) bool {
 	return strings.HasPrefix(text, prefix) && strings.TrimSpace(strings.TrimPrefix(text, prefix)) != ""
+}
+
+// hasVBAKeywordPrefix distinguishes a statement keyword from identifiers that
+// merely start with the same text, such as nextChar or NextHashCapacity.
+func hasVBAKeywordPrefix(text, keyword string) bool {
+	if !strings.HasPrefix(text, keyword) {
+		return false
+	}
+	suffix := text[len(keyword):]
+	if suffix == "" {
+		return true
+	}
+	for _, r := range suffix {
+		return r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("$%&!#@^", r)
+	}
+	return true
 }
 
 func isVBAControlVariable(text string) bool {

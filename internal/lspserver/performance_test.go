@@ -3,6 +3,7 @@ package lspserver
 import (
 	"bytes"
 	"errors"
+	"log"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -165,11 +166,27 @@ func TestWorkspaceSymbolIndexPerformanceReportsInitialBuild(t *testing.T) {
 	if _, err := s.cachedWorkspaceSymbols(nil, ""); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.analysis.waitReady(); err != nil {
+		t.Fatal(err)
+	}
 	logOutput := output.String()
 	if !strings.Contains(logOutput, `operation="workspaceSymbols/index/initial"`) ||
 		!strings.Contains(logOutput, `file_count=0`) ||
 		!strings.Contains(logOutput, `elapsed_ms=`) {
 		t.Fatalf("workspace index performance log missing initial build fields:\n%s", logOutput)
+	}
+}
+
+func TestWorkspaceOverlayPerformanceReportsGenerationAndDiscard(t *testing.T) {
+	var output bytes.Buffer
+	s := &Server{opts: Options{PerformanceLog: true}, logger: log.New(&output, "", 0)}
+	doc := intel.Document{URI: "file:///work/Main.bas", Path: "work/Main.bas", Source: "Sub Run()\nEnd Sub\n", Version: 7}
+	s.logWorkspaceOverlayPerformance(doc, 12, time.Now(), nil, true)
+	got := output.String()
+	for _, field := range []string{`operation="workspaceSymbols/overlay"`, `generation=12`, `outcome="discarded"`, `discarded=true`} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("overlay performance log missing %s:\n%s", field, got)
+		}
 	}
 }
 

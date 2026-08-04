@@ -37,7 +37,18 @@ func (s *Server) prepareCallHierarchy(_ *glsp.Context, params *protocol.CallHier
 		return []protocol.CallHierarchyItem{}, nil
 	}
 	if s.docs.isOpen(string(params.TextDocument.URI)) {
-		s.updateWorkspaceSymbolOverlay(doc)
+		syms, symbolsErr := s.analyzer.DocumentSymbols(doc)
+		if symbolsErr != nil {
+			return nil, symbolsErr
+		}
+		position := fromProtocolPosition(params.Position)
+		for _, symbol := range syms {
+			if callHierarchyProcedureSymbol(symbol) && callHierarchyRangeContains(symbol.Range, position) {
+				procedure := callHierarchyProcedure{ID: callHierarchyIDForSymbol(s.opts.RootDir, doc.Path, symbol), Symbol: symbol}
+				return []protocol.CallHierarchyItem{s.callHierarchyItem(procedure)}, nil
+			}
+		}
+		return []protocol.CallHierarchyItem{}, nil
 	}
 	procedure, ok, err := s.analysis.callHierarchyProcedureAt(doc.Path, fromProtocolPosition(params.Position))
 	if err != nil {
@@ -169,7 +180,7 @@ func (s *Server) callHierarchyItem(procedure callHierarchyProcedure) protocol.Ca
 }
 
 func (x *workspaceAnalysisIndex) callHierarchyProcedureAt(path string, position intel.Position) (callHierarchyProcedure, bool, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return callHierarchyProcedure{}, false, err
 	}
 	if !filepath.IsAbs(path) {
@@ -191,7 +202,7 @@ func (x *workspaceAnalysisIndex) callHierarchyProcedureAt(path string, position 
 }
 
 func (x *workspaceAnalysisIndex) callHierarchyProcedureForID(id callHierarchySymbolID) (callHierarchyProcedure, bool, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return callHierarchyProcedure{}, false, err
 	}
 	id = normalizeCallHierarchyID(id)

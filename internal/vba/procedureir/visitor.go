@@ -36,6 +36,7 @@ type singleVisitor struct {
 	document    DocumentIR
 	callFacts   [][]callFact
 	moduleScope map[string]SymbolScope
+	visited     uint64
 }
 
 func (b *documentBuilder) buildSinglePass(root *tree_sitter.Node) DocumentIR {
@@ -50,13 +51,23 @@ func (b *documentBuilder) buildSinglePass(root *tree_sitter.Node) DocumentIR {
 	if root != nil {
 		v.visit(root, visitContext{procedure: -1, callIndex: -1})
 	}
+	if b.err != nil {
+		return DocumentIR{}
+	}
 	v.finalize()
 	return v.document
 }
 
 func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
-	if node == nil {
+	if node == nil || v.builder.err != nil {
 		return
+	}
+	v.visited++
+	if v.visited&0xff == 0 {
+		if err := v.builder.ctx.Err(); err != nil {
+			v.builder.err = err
+			return
+		}
 	}
 
 	if isProcedureNode(node.Kind()) {
@@ -116,6 +127,9 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 	}
 
 	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if v.builder.err != nil {
+			return
+		}
 		child := node.NamedChild(i)
 		if child == nil {
 			continue
@@ -487,6 +501,9 @@ func (v *singleVisitor) visitBlock(node *tree_sitter.Node, ctx visitContext) {
 	activeParent := ctx.statementID
 	stack := []ifFrame{}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if v.builder.err != nil {
+			return
+		}
 		child := node.NamedChild(i)
 		if child == nil {
 			continue
@@ -531,6 +548,9 @@ func (v *singleVisitor) visitBlock(node *tree_sitter.Node, ctx visitContext) {
 
 func (v *singleVisitor) visitArgumentList(node *tree_sitter.Node, ctx visitContext) {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if v.builder.err != nil {
+			return
+		}
 		child := node.NamedChild(i)
 		if child == nil {
 			continue
@@ -541,6 +561,9 @@ func (v *singleVisitor) visitArgumentList(node *tree_sitter.Node, ctx visitConte
 
 func (v *singleVisitor) visitNamedArgument(node *tree_sitter.Node, ctx visitContext) {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if v.builder.err != nil {
+			return
+		}
 		child := node.NamedChild(i)
 		if child == nil {
 			continue

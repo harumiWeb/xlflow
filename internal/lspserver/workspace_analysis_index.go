@@ -1,6 +1,7 @@
 package lspserver
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -26,17 +27,26 @@ import (
 type workspaceAnalysisIndex struct {
 	root   string
 	config config.Config
-	parse  func(symbols.SourceFile, []byte) (indexedFileAnalysis, error)
+	parse  func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
 	log    func(fileCount int, started time.Time, err error)
+	// nonBlockingQueries allows LSP requests to observe the coherently indexed
+	// subset while the initial background scan is still running. Direct index
+	// users retain the historical wait-for-ready behavior by default.
+	nonBlockingQueries bool
 
-	mu         sync.RWMutex
-	startOnce  sync.Once
-	ready      chan struct{}
-	readyErr   error
-	disk       map[string]indexedFileAnalysis
-	overlays   map[string]indexedFileAnalysis
+	mu        sync.RWMutex
+	startOnce sync.Once
+	ready     chan struct{}
+	readyErr  error
+	disk      map[string]indexedFileAnalysis
+	overlays  map[string]indexedFileAnalysis
+	// pending masks both the saved file and the last published overlay while a
+	// newer in-memory document generation is being analyzed.  Workspace
+	// queries therefore remain conservative instead of returning stale data.
+	pending    map[string]uint64
 	effective  map[string]indexedFileAnalysis
 	generation map[string]uint64
+	diskParses map[string]*diskParse
 	exactName  map[string][]symbolRef
 	qualified  map[string][]symbolRef
 	moduleName map[string][]symbolRef
@@ -48,6 +58,20 @@ type workspaceAnalysisIndex struct {
 	byCaller   map[string][]callRef
 	byBaseName map[string][]callRef
 	byText     map[string][]callRef
+}
+
+type diskParse struct {
+	generation uint64
+	cancel     context.CancelFunc
+}
+
+type diskRefresh struct {
+	key        string
+	path       string
+	generation uint64
+	ctx        context.Context
+	cancel     context.CancelFunc
+	active     *diskParse
 }
 
 type indexedFileAnalysis struct {
@@ -79,11 +103,11 @@ type workspaceCallQuery struct {
 	CalleeText string
 }
 
-func newWorkspaceAnalysisIndex(root string, cfg config.Config, parse func(symbols.SourceFile, []byte) (indexedFileAnalysis, error), logInitial func(int, time.Time, error)) *workspaceAnalysisIndex {
+func newWorkspaceAnalysisIndex(root string, cfg config.Config, parse func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error), logInitial func(int, time.Time, error)) *workspaceAnalysisIndex {
 	return &workspaceAnalysisIndex{
 		root: root, config: cfg, parse: parse, log: logInitial, ready: make(chan struct{}),
-		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, effective: map[string]indexedFileAnalysis{},
-		generation: map[string]uint64{}, exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{}, moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
+		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, pending: map[string]uint64{}, effective: map[string]indexedFileAnalysis{},
+		generation: map[string]uint64{}, diskParses: map[string]*diskParse{}, exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{}, moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
 		byCaller: map[string][]callRef{}, byBaseName: map[string][]callRef{}, byText: map[string][]callRef{},
 	}
 }
@@ -99,6 +123,22 @@ func (x *workspaceAnalysisIndex) waitReady() error {
 	err := x.readyErr
 	x.mu.RUnlock()
 	return err
+}
+
+func (x *workspaceAnalysisIndex) queryReady() error {
+	if !x.nonBlockingQueries {
+		return x.waitReady()
+	}
+	x.start()
+	select {
+	case <-x.ready:
+		x.mu.RLock()
+		err := x.readyErr
+		x.mu.RUnlock()
+		return err
+	default:
+		return nil
+	}
 }
 
 func (x *workspaceAnalysisIndex) buildInitial() {
@@ -145,7 +185,33 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 		observed++
 		x.generation[key] = observed
 	}
+	// An open document is authoritative. Its pending or published overlay masks
+	// disk state, and didClose will perform a fresh disk read before restoring
+	// the path. Avoid analyzing the same large module once from disk and again
+	// from the editor snapshot.
+	if x.pending[key] != 0 {
+		x.mu.Unlock()
+		return nil
+	}
+	if _, open := x.overlays[key]; open {
+		x.mu.Unlock()
+		return nil
+	}
+	if active := x.diskParses[key]; active != nil {
+		active.cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	active := &diskParse{generation: observed, cancel: cancel}
+	x.diskParses[key] = active
 	x.mu.Unlock()
+	defer func() {
+		cancel()
+		x.mu.Lock()
+		if x.diskParses[key] == active {
+			delete(x.diskParses, key)
+		}
+		x.mu.Unlock()
+	}()
 
 	source, err := os.ReadFile(file.Path)
 	if err != nil {
@@ -161,8 +227,11 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 	if exists && current.version == version && current.moduleKind == file.ModuleKind {
 		return nil
 	}
-	entry, err := x.parse(file, source)
+	entry, err := x.parse(ctx, file, source)
 	if err != nil {
+		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	entry.version = version
@@ -173,7 +242,7 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 		return nil
 	}
 	x.disk[key] = entry
-	if _, open := x.overlays[key]; !open {
+	if _, open := x.overlays[key]; !open && x.pending[key] == 0 {
 		x.replaceEffectiveLocked(key, entry)
 	}
 	return nil
@@ -186,8 +255,12 @@ func (x *workspaceAnalysisIndex) removePath(path string) error {
 	}
 	x.mu.Lock()
 	x.generation[key]++
+	if active := x.diskParses[key]; active != nil {
+		active.cancel()
+		delete(x.diskParses, key)
+	}
 	delete(x.disk, key)
-	if _, open := x.overlays[key]; !open {
+	if _, open := x.overlays[key]; !open && x.pending[key] == 0 {
 		x.removeEffectiveLocked(key)
 	}
 	x.mu.Unlock()
@@ -204,32 +277,168 @@ func (x *workspaceAnalysisIndex) setOverlay(doc intel.Document, analysis indexed
 	analysis.moduleKind = doc.ModuleKind
 	x.mu.Lock()
 	x.generation[key]++
+	if active := x.diskParses[key]; active != nil {
+		active.cancel()
+		delete(x.diskParses, key)
+	}
+	delete(x.pending, key)
 	x.overlays[key] = analysis
 	x.replaceEffectiveLocked(key, analysis)
 	x.mu.Unlock()
 }
 
-// clearOverlay restores a freshly read disk entry. Reloading instead of merely
-// exposing the last watcher value closes editor/watcher ordering races.
-func (x *workspaceAnalysisIndex) clearOverlay(path string) error {
+// beginOverlay reserves an open-document generation and removes any older
+// effective entry. The returned analysis is the entry that workspace queries
+// observed immediately before the reservation (either disk or overlay), and
+// is used only to compare procedure signatures after publication.
+func (x *workspaceAnalysisIndex) beginOverlay(doc intel.Document, generation uint64) (indexedFileAnalysis, bool) {
+	key := documentSymbolKey(doc)
+	if key == "" || generation == 0 {
+		return indexedFileAnalysis{}, false
+	}
+	x.mu.Lock()
+	previous, ok := x.effective[key]
+	x.generation[key]++
+	if active := x.diskParses[key]; active != nil {
+		active.cancel()
+		delete(x.diskParses, key)
+	}
+	x.pending[key] = generation
+	delete(x.overlays, key)
+	x.removeEffectiveLocked(key)
+	x.mu.Unlock()
+	return previous, ok
+}
+
+// publishOverlay atomically publishes only the generation most recently
+// reserved by beginOverlay. Superseded and close/reopen workers are rejected.
+func (x *workspaceAnalysisIndex) publishOverlay(doc intel.Document, generation uint64, analysis indexedFileAnalysis) bool {
+	key := documentSymbolKey(doc)
+	if key == "" {
+		return false
+	}
+	analysis.path = doc.Path
+	analysis.version = documentVersion(doc)
+	analysis.moduleKind = doc.ModuleKind
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.pending[key] != generation {
+		return false
+	}
+	delete(x.pending, key)
+	x.overlays[key] = analysis
+	x.replaceEffectiveLocked(key, analysis)
+	return true
+}
+
+// abandonOverlay ends a terminal overlay build without exposing saved symbols
+// for the still-open buffer. An empty overlay marker keeps watcher disk updates
+// masked until the next document generation or didClose.
+func (x *workspaceAnalysisIndex) abandonOverlay(doc intel.Document, generation uint64) bool {
+	key := documentSymbolKey(doc)
+	if key == "" {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.pending[key] != generation {
+		return false
+	}
+	delete(x.pending, key)
+	x.overlays[key] = indexedFileAnalysis{
+		path:       doc.Path,
+		version:    documentVersion(doc),
+		moduleKind: doc.ModuleKind,
+	}
+	x.removeEffectiveLocked(key)
+	return true
+}
+
+// clearOverlay restores a freshly parsed disk entry. The path stays absent
+// from the effective index for the entire refresh, so neither a stale cached
+// disk entry nor the closing overlay can leak into concurrent queries. On a
+// read or parse error the path remains absent.
+func (x *workspaceAnalysisIndex) clearOverlay(path string) (indexedFileAnalysis, bool, error) {
+	refresh := x.beginClearOverlay(path)
+	if refresh == nil {
+		return indexedFileAnalysis{}, false, nil
+	}
+	return x.finishClearOverlay(refresh)
+}
+
+func (x *workspaceAnalysisIndex) beginClearOverlay(path string) *diskRefresh {
 	key := symbolFileKey(path)
 	if key == "" {
 		return nil
 	}
 	x.mu.Lock()
 	x.generation[key]++
-	delete(x.overlays, key)
-	if disk, ok := x.disk[key]; ok {
-		x.replaceEffectiveLocked(key, disk)
-	} else {
-		x.removeEffectiveLocked(key)
+	observed := x.generation[key]
+	if active := x.diskParses[key]; active != nil {
+		active.cancel()
+		delete(x.diskParses, key)
 	}
+	delete(x.pending, key)
+	delete(x.overlays, key)
+	delete(x.disk, key)
+	x.removeEffectiveLocked(key)
+	ctx, cancel := context.WithCancel(context.Background())
+	active := &diskParse{generation: observed, cancel: cancel}
+	x.diskParses[key] = active
 	x.mu.Unlock()
-	return x.updatePath(path)
+	return &diskRefresh{key: key, path: path, generation: observed, ctx: ctx, cancel: cancel, active: active}
+}
+
+func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (indexedFileAnalysis, bool, error) {
+	if refresh == nil {
+		return indexedFileAnalysis{}, false, nil
+	}
+	defer func() {
+		refresh.cancel()
+		x.mu.Lock()
+		if x.diskParses[refresh.key] == refresh.active {
+			delete(x.diskParses, refresh.key)
+		}
+		x.mu.Unlock()
+	}()
+
+	file, included, err := symbols.SourceFileForPath(x.root, x.config, refresh.path)
+	if err != nil {
+		return indexedFileAnalysis{}, false, err
+	}
+	if !included {
+		return indexedFileAnalysis{}, false, nil
+	}
+	source, err := os.ReadFile(file.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return indexedFileAnalysis{}, false, nil
+		}
+		return indexedFileAnalysis{}, false, err
+	}
+	entry, err := x.parse(refresh.ctx, file, source)
+	if err != nil {
+		if errors.Is(err, context.Canceled) && refresh.ctx.Err() != nil {
+			return indexedFileAnalysis{}, false, nil
+		}
+		return indexedFileAnalysis{}, false, err
+	}
+	entry.path = file.Path
+	entry.version = sourceVersion(source)
+	entry.moduleKind = file.ModuleKind
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.generation[refresh.key] != refresh.generation || x.diskParses[refresh.key] != refresh.active {
+		return indexedFileAnalysis{}, false, nil
+	}
+	x.disk[refresh.key] = entry
+	x.replaceEffectiveLocked(refresh.key, entry)
+	return entry, true, nil
 }
 
 func (x *workspaceAnalysisIndex) searchContains(query string) ([]intel.Symbol, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 	query = normalizeSymbolQuery(query)
@@ -250,7 +459,7 @@ func (x *workspaceAnalysisIndex) searchContains(query string) ([]intel.Symbol, e
 }
 
 func (x *workspaceAnalysisIndex) searchExact(name string) ([]intel.Symbol, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 	x.mu.RLock()
@@ -259,7 +468,7 @@ func (x *workspaceAnalysisIndex) searchExact(name string) ([]intel.Symbol, error
 }
 
 func (x *workspaceAnalysisIndex) searchPrefix(prefix string) ([]intel.Symbol, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 	prefix = normalizeSymbolQuery(prefix)
@@ -277,7 +486,7 @@ func (x *workspaceAnalysisIndex) searchPrefix(prefix string) ([]intel.Symbol, er
 }
 
 func (x *workspaceAnalysisIndex) searchQualified(name string) ([]intel.Symbol, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 	x.mu.RLock()
@@ -286,7 +495,7 @@ func (x *workspaceAnalysisIndex) searchQualified(name string) ([]intel.Symbol, e
 }
 
 func (x *workspaceAnalysisIndex) searchModule(name string) ([]intel.Symbol, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 	x.mu.RLock()
@@ -295,7 +504,7 @@ func (x *workspaceAnalysisIndex) searchModule(name string) ([]intel.Symbol, erro
 }
 
 func (x *workspaceAnalysisIndex) searchKind(kind string) ([]intel.Symbol, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 	x.mu.RLock()
@@ -308,7 +517,7 @@ func (x *workspaceAnalysisIndex) searchKind(kind string) ([]intel.Symbol, error)
 // This guarantees each result observes one workspace revision while keeping
 // potentially expensive resolution out of mutation critical sections.
 func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([]calls.Call, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return nil, err
 	}
 
@@ -363,7 +572,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 // parse. Call hierarchy currently uses queryResolvedCalls directly; impact and
 // future graph features can consume this snapshot.
 func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error) {
-	if err := x.waitReady(); err != nil {
+	if err := x.queryReady(); err != nil {
 		return callgraph.Snapshot{}, err
 	}
 	x.mu.RLock()
@@ -678,6 +887,9 @@ func qualifiedSymbolName(sym intel.Symbol) string {
 }
 
 func documentVersion(doc intel.Document) string {
+	if doc.Snapshot != nil && doc.Snapshot.Matches(doc) {
+		return doc.Snapshot.SourceHash()
+	}
 	return sourceVersion([]byte(doc.Source))
 }
 

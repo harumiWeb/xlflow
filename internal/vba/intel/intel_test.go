@@ -4474,7 +4474,7 @@ End Sub
 }
 
 func withRealtimeFindings(analyzer Analyzer, findings []RealtimeFinding) Analyzer {
-	analyzer.RealtimeFindingsFunc = func(_ string, _ config.Config, _ *vbaast.ParsedDocument, _ procedureir.DocumentIR, _ vbacfg.Document) ([]RealtimeFinding, error) {
+	analyzer.RealtimeFindingsFunc = func(_ context.Context, _ string, _ config.Config, _ *vbaast.ParsedDocument, _ procedureir.DocumentIR, _ vbacfg.Document) ([]RealtimeFinding, error) {
 		return append([]RealtimeFinding(nil), findings...), nil
 	}
 	return analyzer
