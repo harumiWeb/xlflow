@@ -687,8 +687,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `skipped_reasons`
 - `source_applied`
 - `source_artifacts`
+- `source_bytes`
 - `source_file`
 - `source_files`
+- `source_lines`
 - `source_newer_than_workbook`
 - `source_of_truth`
 - `source_out_of_sync`

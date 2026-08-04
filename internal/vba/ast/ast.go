@@ -2,6 +2,7 @@ package ast
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"sync"
@@ -44,11 +45,11 @@ type ParsedView struct {
 // for this document. Close is idempotent, rejects new reads, and releases the
 // tree exactly once after every in-flight read callback returns.
 type ParsedDocument struct {
-	mu      sync.Mutex
-	treeMu  sync.Mutex
-	result  *ParseResult
-	readers int
-	closed  bool
+	mu       sync.Mutex
+	treeGate chan struct{}
+	result   *ParseResult
+	readers  int
+	closed   bool
 }
 
 // ParseDocument parses immutable source into a document-owned tree. The
@@ -91,7 +92,9 @@ func parseDocument(path string, source []byte, oldTree *tree_sitter.Tree) (*Pars
 		tree.Close()
 		return nil, ErrIncrementalParseUnavailable
 	}
-	return &ParsedDocument{result: &ParseResult{
+	treeGate := make(chan struct{}, 1)
+	treeGate <- struct{}{}
+	return &ParsedDocument{treeGate: treeGate, result: &ParseResult{
 		Path: path, Source: copySource, Tree: tree, Root: root,
 		HasError: root.HasError(), HasMissing: HasMissing(root),
 	}}, nil
@@ -101,8 +104,18 @@ func parseDocument(path string, source []byte, oldTree *tree_sitter.Tree) (*Pars
 // read-only view. Callers must finish all tree and node work before visit
 // returns; retaining nodes beyond the callback is invalid.
 func (d *ParsedDocument) Read(visit func(ParsedView) error) error {
+	return d.ReadContext(context.Background(), visit)
+}
+
+// ReadContext is the cancellable form of Read. Cancellation while another
+// reader owns the tree lease releases this caller's read reservation without
+// waiting for the active tree walk to finish.
+func (d *ParsedDocument) ReadContext(ctx context.Context, visit func(ParsedView) error) error {
 	if d == nil {
 		return ErrParsedDocumentClosed
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	d.mu.Lock()
 	if d.closed || d.result == nil {
@@ -113,9 +126,17 @@ func (d *ParsedDocument) Read(visit func(ParsedView) error) error {
 	result := d.result
 	d.mu.Unlock()
 
-	d.treeMu.Lock()
-	defer d.treeMu.Unlock()
+	select {
+	case <-ctx.Done():
+		d.releaseRead()
+		return ctx.Err()
+	case <-d.treeGate:
+	}
+	defer func() { d.treeGate <- struct{}{} }()
 	defer d.releaseRead()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return visit(ParsedView{
 		Path:       result.Path,
 		Source:     result.Source,
@@ -167,13 +188,13 @@ func (d *ParsedDocument) cloneEditedTree(edits []tree_sitter.InputEdit) (*tree_s
 	result := d.result
 	d.mu.Unlock()
 
-	d.treeMu.Lock()
+	<-d.treeGate
+	defer func() { d.treeGate <- struct{}{} }()
+	defer d.releaseRead()
 	clone := result.Tree.Clone()
 	for index := range edits {
 		clone.Edit(&edits[index])
 	}
-	d.treeMu.Unlock()
-	d.releaseRead()
 	if clone == nil {
 		return nil, ErrIncrementalParseUnavailable
 	}

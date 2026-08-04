@@ -38,17 +38,12 @@ func (l Linter) ProcedureNameConstantFixesParsedContext(ctx context.Context, doc
 		return nil, nil
 	}
 	var fixes []ProcedureNameConstantFix
-	err := doc.Read(func(view vbaast.ParsedView) error {
+	err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		var scanErr error
 		fixes, scanErr = procedureNameConstantFixesContext(ctx, view.Root, view.Source, l.Config.Lint.ProcedureNameConstant)
 		return scanErr
 	})
 	return fixes, err
-}
-
-func (l Linter) procedureNameConstantIssues(path string, root *tree_sitter.Node, source []byte) []Issue {
-	issues, _ := l.procedureNameConstantIssuesContext(context.Background(), path, root, source)
-	return issues
 }
 
 func (l Linter) procedureNameConstantIssuesContext(ctx context.Context, path string, root *tree_sitter.Node, source []byte) ([]Issue, error) {
@@ -72,11 +67,6 @@ func (l Linter) procedureNameConstantIssuesContext(ctx context.Context, path str
 	return issues, ctx.Err()
 }
 
-func procedureNameConstantFixes(root *tree_sitter.Node, source []byte, cfg config.ProcedureNameConstantConfig) []ProcedureNameConstantFix {
-	fixes, _ := procedureNameConstantFixesContext(context.Background(), root, source, cfg)
-	return fixes
-}
-
 func procedureNameConstantFixesContext(ctx context.Context, root *tree_sitter.Node, source []byte, cfg config.ProcedureNameConstantConfig) ([]ProcedureNameConstantFix, error) {
 	if root == nil || !cfg.Enabled || strings.TrimSpace(cfg.ConstantName) == "" {
 		return nil, nil
@@ -87,11 +77,6 @@ func procedureNameConstantFixesContext(ctx context.Context, root *tree_sitter.No
 		return nil, err
 	}
 	return fixes, ctx.Err()
-}
-
-func collectProcedureNameConstantFixes(node *tree_sitter.Node, source []byte, constantName string, fixes *[]ProcedureNameConstantFix) {
-	visited := uint64(0)
-	_ = collectProcedureNameConstantFixesContext(context.Background(), node, source, constantName, fixes, &visited)
 }
 
 func collectProcedureNameConstantFixesContext(ctx context.Context, node *tree_sitter.Node, source []byte, constantName string, fixes *[]ProcedureNameConstantFix, visited *uint64) error {
@@ -140,11 +125,6 @@ func procedureNameConstantProcedureName(node *tree_sitter.Node, source []byte) s
 		return cleanIdentifier(name.Utf8Text(source))
 	}
 	return ""
-}
-
-func collectProcedureLocalConstantFixes(node *tree_sitter.Node, source []byte, constantName, procedureName string, fixes *[]ProcedureNameConstantFix) {
-	visited := uint64(0)
-	_ = collectProcedureLocalConstantFixesContext(context.Background(), node, source, constantName, procedureName, fixes, &visited)
 }
 
 func collectProcedureLocalConstantFixesContext(ctx context.Context, node *tree_sitter.Node, source []byte, constantName, procedureName string, fixes *[]ProcedureNameConstantFix, visited *uint64) error {

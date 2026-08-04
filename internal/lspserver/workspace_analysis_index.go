@@ -65,6 +65,15 @@ type diskParse struct {
 	cancel     context.CancelFunc
 }
 
+type diskRefresh struct {
+	key        string
+	path       string
+	generation uint64
+	ctx        context.Context
+	cancel     context.CancelFunc
+	active     *diskParse
+}
+
 type indexedFileAnalysis struct {
 	path           string
 	version        string
@@ -322,14 +331,45 @@ func (x *workspaceAnalysisIndex) publishOverlay(doc intel.Document, generation u
 	return true
 }
 
+// abandonOverlay ends a terminal overlay build without exposing saved symbols
+// for the still-open buffer. An empty overlay marker keeps watcher disk updates
+// masked until the next document generation or didClose.
+func (x *workspaceAnalysisIndex) abandonOverlay(doc intel.Document, generation uint64) bool {
+	key := documentSymbolKey(doc)
+	if key == "" {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.pending[key] != generation {
+		return false
+	}
+	delete(x.pending, key)
+	x.overlays[key] = indexedFileAnalysis{
+		path:       doc.Path,
+		version:    documentVersion(doc),
+		moduleKind: doc.ModuleKind,
+	}
+	x.removeEffectiveLocked(key)
+	return true
+}
+
 // clearOverlay restores a freshly parsed disk entry. The path stays absent
 // from the effective index for the entire refresh, so neither a stale cached
 // disk entry nor the closing overlay can leak into concurrent queries. On a
 // read or parse error the path remains absent.
 func (x *workspaceAnalysisIndex) clearOverlay(path string) (indexedFileAnalysis, bool, error) {
+	refresh := x.beginClearOverlay(path)
+	if refresh == nil {
+		return indexedFileAnalysis{}, false, nil
+	}
+	return x.finishClearOverlay(refresh)
+}
+
+func (x *workspaceAnalysisIndex) beginClearOverlay(path string) *diskRefresh {
 	key := symbolFileKey(path)
 	if key == "" {
-		return indexedFileAnalysis{}, false, nil
+		return nil
 	}
 	x.mu.Lock()
 	x.generation[key]++
@@ -342,9 +382,27 @@ func (x *workspaceAnalysisIndex) clearOverlay(path string) (indexedFileAnalysis,
 	delete(x.overlays, key)
 	delete(x.disk, key)
 	x.removeEffectiveLocked(key)
+	ctx, cancel := context.WithCancel(context.Background())
+	active := &diskParse{generation: observed, cancel: cancel}
+	x.diskParses[key] = active
 	x.mu.Unlock()
+	return &diskRefresh{key: key, path: path, generation: observed, ctx: ctx, cancel: cancel, active: active}
+}
 
-	file, included, err := symbols.SourceFileForPath(x.root, x.config, path)
+func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (indexedFileAnalysis, bool, error) {
+	if refresh == nil {
+		return indexedFileAnalysis{}, false, nil
+	}
+	defer func() {
+		refresh.cancel()
+		x.mu.Lock()
+		if x.diskParses[refresh.key] == refresh.active {
+			delete(x.diskParses, refresh.key)
+		}
+		x.mu.Unlock()
+	}()
+
+	file, included, err := symbols.SourceFileForPath(x.root, x.config, refresh.path)
 	if err != nil {
 		return indexedFileAnalysis{}, false, err
 	}
@@ -358,8 +416,11 @@ func (x *workspaceAnalysisIndex) clearOverlay(path string) (indexedFileAnalysis,
 		}
 		return indexedFileAnalysis{}, false, err
 	}
-	entry, err := x.parse(context.Background(), file, source)
+	entry, err := x.parse(refresh.ctx, file, source)
 	if err != nil {
+		if errors.Is(err, context.Canceled) && refresh.ctx.Err() != nil {
+			return indexedFileAnalysis{}, false, nil
+		}
 		return indexedFileAnalysis{}, false, err
 	}
 	entry.path = file.Path
@@ -368,11 +429,11 @@ func (x *workspaceAnalysisIndex) clearOverlay(path string) (indexedFileAnalysis,
 
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if x.generation[key] != observed {
+	if x.generation[refresh.key] != refresh.generation || x.diskParses[refresh.key] != refresh.active {
 		return indexedFileAnalysis{}, false, nil
 	}
-	x.disk[key] = entry
-	x.replaceEffectiveLocked(key, entry)
+	x.disk[refresh.key] = entry
+	x.replaceEffectiveLocked(refresh.key, entry)
 	return entry, true, nil
 }
 

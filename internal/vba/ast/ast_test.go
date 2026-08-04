@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -136,6 +137,42 @@ func TestParsedDocumentOwnsRecoveryStateAndClosesAfterReaders(t *testing.T) {
 		t.Fatal("tree was not released after the final reader")
 	}
 	doc.Close()
+}
+
+func TestParsedDocumentReadContextCancelsWhileWaitingForTree(t *testing.T) {
+	doc, err := ParseDocument("Main.bas", []byte("Sub Main()\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- doc.Read(func(ParsedView) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	visited := false
+	if err := doc.ReadContext(ctx, func(ParsedView) error {
+		visited = true
+		return nil
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued read error = %v, want context.Canceled", err)
+	}
+	if visited {
+		t.Fatal("canceled queued read invoked its callback")
+	}
+	close(release)
+	if err := <-holderDone; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestParseDocumentIncrementalClonesAndPreservesPreviousTree(t *testing.T) {

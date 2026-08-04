@@ -42,7 +42,7 @@ func BuildParsedContext(ctx context.Context, opts BuildOptions, doc *vbaast.Pars
 		return DocumentIR{}, err
 	}
 	var result DocumentIR
-	err := doc.Read(func(view vbaast.ParsedView) error {
+	err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -64,7 +64,10 @@ func BuildParsedContext(ctx context.Context, opts BuildOptions, doc *vbaast.Pars
 		result = builder.build(view.Root)
 		return builder.err
 	})
-	return result, err
+	if err != nil {
+		return DocumentIR{}, err
+	}
+	return result, nil
 }
 
 type documentBuilder struct {

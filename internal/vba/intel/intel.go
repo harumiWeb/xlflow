@@ -1530,10 +1530,6 @@ func signatureFromSymbol(sym Symbol) Signature {
 	return Signature{Label: label, Parameters: params, Documentation: doccomments.Markdown(sym.Documentation, ""), DocumentationModel: sym.Documentation, projectLocal: true}
 }
 
-func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
-	return a.argumentDiagnosticsContext(context.Background(), doc)
-}
-
 func (a Analyzer) argumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	var out []Diagnostic
 	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
@@ -1826,10 +1822,6 @@ func (a Analyzer) documentationDiagnosticsParsed(doc Document, parsed *ast.Parse
 	return out
 }
 
-func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic {
-	return a.unresolvedMemberReceiverDiagnosticsContext(context.Background(), doc)
-}
-
 func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if !hasOptionExplicit(doc.Source) {
 		return nil
@@ -1863,10 +1855,6 @@ func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context
 		}
 	}
 	return out
-}
-
-func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
-	return a.unknownMemberDiagnosticsContext(context.Background(), doc)
 }
 
 func (a Analyzer) unknownMemberDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
@@ -2084,10 +2072,6 @@ func codeWithoutStringLiterals(line string) string {
 	return b.String()
 }
 
-func (a Analyzer) propertyAccessDiagnostics(doc Document) []Diagnostic {
-	return a.propertyAccessDiagnosticsContext(context.Background(), doc)
-}
-
 func (a Analyzer) propertyAccessDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if a.DB == nil {
 		return nil
@@ -2203,10 +2187,6 @@ func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprSt
 			End:   Position{Line: lineNo, Character: utf16Len(line[:max(0, min(end, len(line)))])},
 		},
 	}
-}
-
-func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
-	return a.assignmentDiagnosticsContext(context.Background(), doc)
 }
 
 func (a Analyzer) assignmentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {

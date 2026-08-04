@@ -531,7 +531,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 		return nil, err
 	}
 	var findings []Finding
-	err = doc.Read(func(view vbaast.ParsedView) error {
+	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		file := parsedFile{
 			Path:   view.Path,
 			Lines:  normalizedSourceLines(string(view.Source)),
@@ -644,7 +644,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		}
 	}
 	var findings []Finding
-	err := doc.Read(func(view vbaast.ParsedView) error {
+	err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -741,11 +741,6 @@ func realtimeFindings(findings []Finding) []Finding {
 		}
 	}
 	return out
-}
-
-func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string) []Finding {
-	findings, _ := a.sourceRealtimeProcedureFindingsContext(context.Background(), file, proc, moduleDecls, worksheetCodenames)
-	return findings
 }
 
 func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string) ([]Finding, error) {

@@ -30,8 +30,8 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 	// A newly opened document's workspace overlay is intentionally absent while
 	// background analysis is pending, but file-local diagnostics must still be
 	// complete. Build this list once rather than cloning it for every call site.
-	localSymbols, _ := a.DocumentSymbols(doc)
-	if ctx.Err() != nil {
+	localSymbols, err := a.DocumentSymbolsContext(ctx, doc)
+	if err != nil || ctx.Err() != nil {
 		return nil
 	}
 	localSymbolsByName := make(map[string][]Symbol, len(localSymbols))

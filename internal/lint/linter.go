@@ -231,17 +231,13 @@ func (l Linter) lintSourceContext(ctx context.Context, path string, source []byt
 	return l.lintParsedContext(ctx, doc, includeFilesystemRules)
 }
 
-func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bool) ([]Issue, error) {
-	return l.lintParsedContext(context.Background(), doc, includeFilesystemRules)
-}
-
 func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocument, includeFilesystemRules bool) ([]Issue, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	var path string
 	var source []byte
-	if err := doc.Read(func(view vbaast.ParsedView) error {
+	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -275,7 +271,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := doc.Read(func(view vbaast.ParsedView) error {
+	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		lintCtx := astLintContext{ctx: ctx, linter: l, path: path, source: source}
 		lintCtx.lint(view.Root)
 		if lintCtx.err != nil {
@@ -392,10 +388,6 @@ func hasVBNameAttribute(source string) bool {
 		return strings.Index(value[1:], `"`) > 0
 	}
 	return false
-}
-
-func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
-	return l.textSafetyIssuesContext(context.Background(), path, source)
 }
 
 func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source string) ([]Issue, error) {
@@ -679,11 +671,6 @@ func (c *astLintContext) genericParseIssue(detail parserRecoveryDetail) Issue {
 	return issue
 }
 
-func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) []Issue {
-	issues, _ := l.flowIssuesContext(context.Background(), path, source, root)
-	return issues
-}
-
 func (l Linter) flowIssuesContext(ctx context.Context, path string, source string, root *tree_sitter.Node) ([]Issue, error) {
 	cfg := l.Config.Lint
 	if !cfg.DetectConfusingCallSyntax &&
@@ -713,11 +700,6 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		}
 	}
 	return issues, ctx.Err()
-}
-
-func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_sitter.Node, file symbols.FileResult) []Issue {
-	issues, _ := l.undeclaredVariableIssuesContext(context.Background(), path, source, root, file)
-	return issues
 }
 
 func (l Linter) undeclaredVariableIssuesContext(ctx context.Context, path string, source string, root *tree_sitter.Node, file symbols.FileResult) ([]Issue, error) {
@@ -1561,11 +1543,6 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 	return issues
 }
 
-func (l Linter) unusedLocalVariableIssues(path, source string, file symbols.FileResult) []Issue {
-	issues, _ := l.unusedLocalVariableIssuesContext(context.Background(), path, source, file)
-	return issues
-}
-
 func (l Linter) unusedLocalVariableIssuesContext(ctx context.Context, path, source string, file symbols.FileResult) ([]Issue, error) {
 	if !l.Config.Lint.DetectUnusedLocalVariables {
 		return nil, nil
@@ -1745,11 +1722,6 @@ func procedureEndLineForSymbol(all []symbols.Symbol, sym symbols.Symbol) int {
 		}
 	}
 	return sym.EndLine
-}
-
-func localNameReferenced(source string, sym symbols.Symbol, endLine int) bool {
-	referenced, _ := localNameReferencedContext(context.Background(), source, sym, endLine)
-	return referenced
 }
 
 func localNameReferencedContext(ctx context.Context, source string, sym symbols.Symbol, endLine int) (bool, error) {

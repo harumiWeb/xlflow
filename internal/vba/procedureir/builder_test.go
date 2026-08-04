@@ -4,12 +4,27 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
+
+type cancelAfterChecksContext struct{ remaining int }
+
+func (c *cancelAfterChecksContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *cancelAfterChecksContext) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterChecksContext) Value(any) any               { return nil }
+func (c *cancelAfterChecksContext) Err() error {
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
 
 func TestBuildSourceContextReturnsCancellationWithoutPartialIR(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -17,6 +32,27 @@ func TestBuildSourceContextReturnsCancellationWithoutPartialIR(t *testing.T) {
 	result, err := BuildSourceContext(ctx, BuildOptions{Path: "Main.bas"}, []byte("Sub Main()\nEnd Sub\n"))
 	if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(result, DocumentIR{}) {
 		t.Fatalf("canceled result = (%+v, %v)", result, err)
+	}
+}
+
+func TestBuildParsedContextDiscardsPartiallyBuiltIR(t *testing.T) {
+	var source strings.Builder
+	for i := 0; i < 400; i++ {
+		source.WriteString("Sub Procedure")
+		source.WriteString(strconv.Itoa(i))
+		source.WriteString("()\n  Dim value As Long\n  value = 1\nEnd Sub\n")
+	}
+	doc, err := vbaast.ParseDocument("Main.bas", []byte(source.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	result, err := BuildParsedContext(&cancelAfterChecksContext{remaining: 4}, BuildOptions{Path: "Main.bas"}, doc)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("build error = %v, want context.Canceled", err)
+	}
+	if !reflect.DeepEqual(result, DocumentIR{}) {
+		t.Fatalf("canceled build returned partial IR: %+v", result)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -388,15 +389,6 @@ type procedureSignature struct {
 	fingerprint string
 }
 
-func (s *Server) procedureSignatures(doc intel.Document) map[string]procedureSignature {
-	syms, err := s.analyzer.DocumentSymbols(doc)
-	if err != nil {
-		s.logger.Printf("procedure signature lookup failed for %q: %v", doc.Path, err)
-		return nil
-	}
-	return procedureSignaturesFromSymbols(syms)
-}
-
 func procedureSignaturesFromSymbols(syms []intel.Symbol) map[string]procedureSignature {
 	out := make(map[string]procedureSignature)
 	for _, sym := range syms {
@@ -487,26 +479,49 @@ func (s *Server) scheduleByRefDependentDiagnostics(ctx *glsp.Context, changedURI
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
 	unlock := s.lockDocumentLifecycle(uri)
-	defer unlock()
 	closingSignatures := s.closeDiagnostics(ctx, uri)
 	if doc, err := s.docs.getOrRead(uri); err == nil && s.documentKind(doc) == DocumentKindVBA {
 		s.semanticTokens.close(doc)
 	}
 	s.docs.close(uri)
 	s.semanticTokens.invalidateWorkspace()
-	if path, err := fileURIToPath(uri); err == nil && !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path) {
-		disk, restored, err := s.analysis.clearOverlay(path)
-		if err != nil {
-			s.logger.Printf("workspace analysis index close refresh failed for %q: %v", path, err)
-		} else {
-			var diskSignatures map[string]procedureSignature
-			if restored {
-				diskSignatures = procedureSignaturesFromSymbols(disk.symbols)
-			}
-			s.scheduleByRefDependentDiagnostics(ctx, uri, changedProcedureNames(closingSignatures, diskSignatures))
-		}
+	path, pathErr := fileURIToPath(uri)
+	refreshDisk := pathErr == nil && !isUserFormSpecPath(s.opts.RootDir, s.opts.Config.Src.Forms, path)
+	unlock()
+	if refreshDisk {
+		s.scheduleCloseOverlayRefresh(ctx, uri, path, closingSignatures)
 	}
 	return nil
+}
+
+func (s *Server) scheduleCloseOverlayRefresh(ctx *glsp.Context, uri, path string, closingSignatures map[string]procedureSignature) {
+	s.diagMu.Lock()
+	if s.diagStopped {
+		s.diagMu.Unlock()
+		return
+	}
+	s.diagWorkers.Add(1)
+	s.diagMu.Unlock()
+	go func() {
+		defer s.diagWorkers.Done()
+		unlock := s.lockDocumentLifecycle(uri)
+		if s.docs.isOpen(uri) {
+			unlock()
+			return
+		}
+		refresh := s.analysis.beginClearOverlay(path)
+		unlock()
+		disk, restored, err := s.analysis.finishClearOverlay(refresh)
+		if err != nil {
+			s.logger.Printf("workspace analysis index close refresh failed for %q: %v", path, err)
+			return
+		}
+		var diskSignatures map[string]procedureSignature
+		if restored {
+			diskSignatures = procedureSignaturesFromSymbols(disk.symbols)
+		}
+		s.scheduleByRefDependentDiagnostics(ctx, uri, changedProcedureNames(closingSignatures, diskSignatures))
+	}()
 }
 
 func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChangeWatchedFilesParams) error {
@@ -1353,6 +1368,9 @@ func (s *Server) runDocumentAnalysis(
 			published = s.analysis.publishOverlay(doc, generation, analysis)
 		}
 		s.logWorkspaceOverlayPerformance(doc, generation, started, err, !published)
+		if !published && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
+			s.analysis.abandonOverlay(doc, generation)
+		}
 		if published {
 			s.overlayPublications.Add(1)
 			newSignatures := procedureSignaturesFromSymbols(analysis.symbols)
@@ -1385,17 +1403,6 @@ func (s *Server) finishDocumentAnalysis(uri string, state *diagnosticState) {
 	if ready {
 		s.launchDiagnostics(uri, state)
 	}
-}
-
-func (s *Server) runDiagnostics(
-	runCtx context.Context,
-	uri string,
-	state *diagnosticState,
-	generation uint64,
-	doc intel.Document,
-	notify *glsp.Context,
-) {
-	s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify)
 }
 
 func (s *Server) runDiagnosticsBody(
@@ -1599,10 +1606,6 @@ func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.Sourc
 	return s.analyzeIndexedDocumentContext(ctx, doc)
 }
 
-func (s *Server) analyzeIndexedDocument(doc intel.Document) (indexedFileAnalysis, error) {
-	return s.analyzeIndexedDocumentContext(context.Background(), doc)
-}
-
 func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Document) (indexedFileAnalysis, error) {
 	snapshot := doc.Snapshot
 	if snapshot == nil || !snapshot.Matches(doc) {
@@ -1722,9 +1725,58 @@ func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]
 	return s.cachedWorkspaceSymbolQuery(open, intel.WorkspaceSymbolQuery{Text: query, Mode: intel.WorkspaceSymbolQueryContains})
 }
 
-func (s *Server) cachedWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
 	// Open-document overlays are produced only by the lifecycle pipeline.
-	// Queries must never synchronously rebuild them or expose a stale disk entry.
+	// Queries never synchronously publish them; current snapshot symbols are
+	// merged here so interactive handlers remain available while publication is
+	// pending and stale disk/overlay entries stay hidden.
+	indexed, err := s.queryWorkspaceSymbolIndex(query)
+	if err != nil {
+		return nil, err
+	}
+	openKeys := make(map[string]bool, len(open)*2)
+	for _, doc := range open {
+		for _, key := range workspaceSymbolPathKeys(s.opts.RootDir, doc.Path) {
+			openKeys[key] = true
+		}
+	}
+	out := indexed[:0]
+	for _, sym := range indexed {
+		if hasWorkspaceSymbolPathKey(openKeys, workspaceSymbolPathKeys(s.opts.RootDir, sym.File)) {
+			continue
+		}
+		out = append(out, sym)
+	}
+	for _, doc := range open {
+		if s.documentKind(doc) != DocumentKindVBA {
+			continue
+		}
+		syms, symbolErr := s.analyzer.DocumentSymbols(doc)
+		if symbolErr != nil {
+			continue
+		}
+		for _, sym := range syms {
+			if workspaceSymbolMatchesQuery(sym, query) {
+				out = append(out, sym)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].File != out[j].File {
+			return out[i].File < out[j].File
+		}
+		if out[i].Range.Start.Line != out[j].Range.Start.Line {
+			return out[i].Range.Start.Line < out[j].Range.Start.Line
+		}
+		if out[i].Range.Start.Character != out[j].Range.Start.Character {
+			return out[i].Range.Start.Character < out[j].Range.Start.Character
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func (s *Server) queryWorkspaceSymbolIndex(query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
 	switch query.Mode {
 	case intel.WorkspaceSymbolQueryExact:
 		return s.analysis.searchExact(query.Text)
@@ -1739,6 +1791,50 @@ func (s *Server) cachedWorkspaceSymbolQuery(_ []intel.Document, query intel.Work
 	default:
 		return s.analysis.searchContains(query.Text)
 	}
+}
+
+func workspaceSymbolMatchesQuery(sym intel.Symbol, query intel.WorkspaceSymbolQuery) bool {
+	text := normalizeSymbolQuery(query.Text)
+	name := normalizeSymbolQuery(sym.Name)
+	qualified := normalizeSymbolQuery(qualifiedSymbolName(sym))
+	switch query.Mode {
+	case intel.WorkspaceSymbolQueryExact:
+		return name == text
+	case intel.WorkspaceSymbolQueryPrefix:
+		return strings.HasPrefix(name, text) || strings.HasPrefix(qualified, text)
+	case intel.WorkspaceSymbolQueryQualified:
+		return qualified == text
+	case intel.WorkspaceSymbolQueryModule:
+		return normalizeSymbolQuery(sym.Module) == text
+	case intel.WorkspaceSymbolQueryKind:
+		return normalizeSymbolQuery(sym.Kind) == text
+	default:
+		return strings.Contains(name, text) || strings.Contains(qualified, text)
+	}
+}
+
+func workspaceSymbolPathKeys(root, path string) []string {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	keys := []string{symbolFileKey(path)}
+	if filepath.IsAbs(path) {
+		if rel, err := filepath.Rel(root, path); err == nil {
+			keys = append(keys, symbolFileKey(rel))
+		}
+	} else {
+		keys = append(keys, symbolFileKey(filepath.Join(root, filepath.FromSlash(path))))
+	}
+	return keys
+}
+
+func hasWorkspaceSymbolPathKey(set map[string]bool, keys []string) bool {
+	for _, key := range keys {
+		if key != "" && set[key] {
+			return true
+		}
+	}
+	return false
 }
 
 func documentSymbolKey(doc intel.Document) string {

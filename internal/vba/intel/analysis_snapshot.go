@@ -297,6 +297,14 @@ func (s *AnalysisSnapshot) SourceSymbolsContext(ctx context.Context, load func(c
 		wait := make(chan struct{})
 		s.symbolsWait = wait
 		s.symbolsMu.Unlock()
+		defer func() {
+			s.symbolsMu.Lock()
+			if s.symbolsWait == wait {
+				s.symbolsWait = nil
+				close(wait)
+			}
+			s.symbolsMu.Unlock()
+		}()
 		result, err := load(ctx)
 		if err == nil {
 			err = ctx.Err()
@@ -305,8 +313,6 @@ func (s *AnalysisSnapshot) SourceSymbolsContext(ctx context.Context, load func(c
 		if !isRetryableContextError(err) {
 			s.symbols, s.symbolsErr, s.symbolsDone = cloneAnalysisSymbols(result), err, true
 		}
-		s.symbolsWait = nil
-		close(wait)
 		s.symbolsMu.Unlock()
 		return cloneAnalysisSymbols(result), false, err
 	}
@@ -370,6 +376,14 @@ func (s *AnalysisSnapshot) ProcedureIRContext(ctx context.Context, load func(con
 		wait := make(chan struct{})
 		s.procedureIRWait = wait
 		s.procedureIRMu.Unlock()
+		defer func() {
+			s.procedureIRMu.Lock()
+			if s.procedureIRWait == wait {
+				s.procedureIRWait = nil
+				close(wait)
+			}
+			s.procedureIRMu.Unlock()
+		}()
 		result, err := load(ctx)
 		if err == nil {
 			err = ctx.Err()
@@ -378,8 +392,6 @@ func (s *AnalysisSnapshot) ProcedureIRContext(ctx context.Context, load func(con
 		if !isRetryableContextError(err) {
 			s.procedureIR, s.procedureIRErr, s.procedureIRDone = procedureir.Clone(result), err, true
 		}
-		s.procedureIRWait = nil
-		close(wait)
 		s.procedureIRMu.Unlock()
 		return procedureir.Clone(result), false, err
 	}
@@ -422,6 +434,14 @@ func (s *AnalysisSnapshot) ControlFlowGraphsContext(ctx context.Context, load fu
 		wait := make(chan struct{})
 		s.controlFlowWait = wait
 		s.controlFlowMu.Unlock()
+		defer func() {
+			s.controlFlowMu.Lock()
+			if s.controlFlowWait == wait {
+				s.controlFlowWait = nil
+				close(wait)
+			}
+			s.controlFlowMu.Unlock()
+		}()
 		result, err := load(ctx)
 		if err == nil {
 			err = ctx.Err()
@@ -430,8 +450,6 @@ func (s *AnalysisSnapshot) ControlFlowGraphsContext(ctx context.Context, load fu
 		if !isRetryableContextError(err) {
 			s.controlFlow, s.controlFlowErr, s.controlFlowDone = vbacfg.CloneDocument(result), err, true
 		}
-		s.controlFlowWait = nil
-		close(wait)
 		s.controlFlowMu.Unlock()
 		return vbacfg.CloneDocument(result), false, err
 	}
@@ -557,10 +575,6 @@ func parsedDocumentForDocument(doc Document) (*ast.ParsedDocument, func(), error
 	return parsed, parsed.Close, nil
 }
 
-func procedureIRForDocument(doc Document, rootDir string, parsed *ast.ParsedDocument) (procedureir.DocumentIR, error) {
-	return procedureIRForDocumentContext(context.Background(), doc, rootDir, parsed)
-}
-
 func procedureIRForDocumentContext(ctx context.Context, doc Document, rootDir string, parsed *ast.ParsedDocument) (procedureir.DocumentIR, error) {
 	load := func(loadCtx context.Context) (procedureir.DocumentIR, error) {
 		return procedureir.BuildParsedContext(loadCtx, procedureir.BuildOptions{
@@ -574,10 +588,6 @@ func procedureIRForDocumentContext(ctx context.Context, doc Document, rootDir st
 		return result, err
 	}
 	return load(ctx)
-}
-
-func controlFlowForDocument(doc Document, ir procedureir.DocumentIR) (vbacfg.Document, error) {
-	return controlFlowForDocumentContext(context.Background(), doc, ir)
 }
 
 func controlFlowForDocumentContext(ctx context.Context, doc Document, ir procedureir.DocumentIR) (vbacfg.Document, error) {

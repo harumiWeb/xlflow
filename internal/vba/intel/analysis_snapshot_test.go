@@ -474,6 +474,74 @@ func TestAnalysisSnapshotProcedureIRCanceledBuildIsRetryable(t *testing.T) {
 	}
 }
 
+func TestAnalysisSnapshotPanickingBuildReleasesSingleFlight(t *testing.T) {
+	assertPanics := func(t *testing.T, run func()) {
+		t.Helper()
+		deferred := false
+		func() {
+			defer func() { deferred = recover() != nil }()
+			run()
+		}()
+		if !deferred {
+			t.Fatal("loader did not panic")
+		}
+	}
+
+	t.Run("symbols", func(t *testing.T) {
+		snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+		assertPanics(t, func() {
+			_, _, _ = snapshot.SourceSymbolsContext(context.Background(), func(context.Context) ([]Symbol, error) {
+				panic("symbols")
+			})
+		})
+		if snapshot.symbolsWait != nil {
+			t.Fatal("panicking symbol build left wait channel installed")
+		}
+		got, hit, err := snapshot.SourceSymbolsContext(context.Background(), func(context.Context) ([]Symbol, error) {
+			return []Symbol{{Name: "Main"}}, nil
+		})
+		if err != nil || hit || len(got) != 1 || got[0].Name != "Main" {
+			t.Fatalf("symbol retry = (%+v, hit=%t, err=%v)", got, hit, err)
+		}
+	})
+
+	t.Run("procedure IR", func(t *testing.T) {
+		snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+		assertPanics(t, func() {
+			_, _, _ = snapshot.ProcedureIRContext(context.Background(), func(context.Context) (procedureir.DocumentIR, error) {
+				panic("procedure IR")
+			})
+		})
+		if snapshot.procedureIRWait != nil {
+			t.Fatal("panicking procedure IR build left wait channel installed")
+		}
+		got, hit, err := snapshot.ProcedureIRContext(context.Background(), func(context.Context) (procedureir.DocumentIR, error) {
+			return procedureir.DocumentIR{Path: "Main.bas"}, nil
+		})
+		if err != nil || hit || got.Path != "Main.bas" {
+			t.Fatalf("procedure IR retry = (%+v, hit=%t, err=%v)", got, hit, err)
+		}
+	})
+
+	t.Run("control flow", func(t *testing.T) {
+		snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+		assertPanics(t, func() {
+			_, _, _ = snapshot.ControlFlowGraphsContext(context.Background(), func(context.Context) (vbacfg.Document, error) {
+				panic("control flow")
+			})
+		})
+		if snapshot.controlFlowWait != nil {
+			t.Fatal("panicking control-flow build left wait channel installed")
+		}
+		got, hit, err := snapshot.ControlFlowGraphsContext(context.Background(), func(context.Context) (vbacfg.Document, error) {
+			return vbacfg.Document{Path: "Main.bas"}, nil
+		})
+		if err != nil || hit || got.Path != "Main.bas" {
+			t.Fatalf("control-flow retry = (%+v, hit=%t, err=%v)", got, hit, err)
+		}
+	})
+}
+
 func TestAnalysisSnapshotSourceSymbolsCanceledBuildIsRetryable(t *testing.T) {
 	snapshot := NewAnalysisSnapshot(Document{Source: "Sub Main()\nEnd Sub\n", Version: 1})
 	started := make(chan struct{})

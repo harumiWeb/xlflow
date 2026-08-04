@@ -365,7 +365,7 @@ func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.P
 		return FileResult{}, err
 	}
 	var result FileResult
-	err = doc.Read(func(view vbaast.ParsedView) error {
+	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		path := opts.Path
 		if strings.TrimSpace(path) == "" {
 			path = view.Path

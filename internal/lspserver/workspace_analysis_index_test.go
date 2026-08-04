@@ -198,6 +198,85 @@ func TestWorkspaceAnalysisIndexPendingOverlayMasksAndRejectsStalePublish(t *test
 	}
 }
 
+func TestWorkspaceAnalysisIndexAbandonOverlayClearsReservationAndKeepsDiskMasked(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub DiskName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{symbols: []intel.Symbol{{Name: "DiskName", File: file.Path}}}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, ModuleKind: "standard", Version: 1, Source: "Sub OpenName()\nEnd Sub\n"}
+	index.beginOverlay(doc, 1)
+	if !index.abandonOverlay(doc, 1) {
+		t.Fatal("current failed overlay was not abandoned")
+	}
+	key := documentSymbolKey(doc)
+	index.mu.RLock()
+	pending := index.pending[key]
+	_, masked := index.overlays[key]
+	index.mu.RUnlock()
+	if pending != 0 || !masked {
+		t.Fatalf("abandoned state = (pending=%d, masked=%t)", pending, masked)
+	}
+	if err := index.updatePath(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := index.searchExact("DiskName"); err != nil || len(got) != 0 {
+		t.Fatalf("watcher exposed saved symbols after terminal overlay failure: %+v, %v", got, err)
+	}
+}
+
+func TestWorkspaceAnalysisIndexPendingOverlayCancelsCloseRefresh(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub DiskName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{symbols: []intel.Symbol{{Name: "DiskName", File: file.Path}}}, nil
+	}, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	index.parse = func(ctx context.Context, _ symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return indexedFileAnalysis{}, ctx.Err()
+	}
+	refresh := index.beginClearOverlay(path)
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := index.finishClearOverlay(refresh)
+		done <- err
+	}()
+	<-started
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, ModuleKind: "standard", Version: 1, Source: "Sub OpenName()\nEnd Sub\n"}
+	index.beginOverlay(doc, 1)
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("new overlay did not cancel the close refresh parse")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("canceled close refresh = %v", err)
+	}
+}
+
 func TestWorkspaceAnalysisIndexPendingOverlayCancelsInitialDiskParse(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "src", "modules", "Main.bas")
@@ -374,8 +453,8 @@ func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.analysis.searchExact("OpenName"); len(got) != 0 {
-		t.Fatalf("pending change leaked old overlay: %#v", got)
+	if got, _ := s.analysis.searchExact("SavedName"); len(got) != 0 {
+		t.Fatalf("pending change leaked saved symbols: %#v", got)
 	}
 	waitForWorkspaceCall(t, s.analysis, "ChangedTarget")
 	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: "OpenTarget"}); err != nil || len(got) != 0 {
@@ -399,12 +478,8 @@ func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	if err := s.didClose(ctx, &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.analysis.searchExact("DiskChanged"); len(got) != 1 {
-		t.Fatalf("disk source not restored after close: %#v", got)
-	}
-	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: "DiskTarget"}); err != nil || len(got) != 1 {
-		t.Fatalf("disk calls not restored after close = %+v, %v", got, err)
-	}
+	waitForWorkspaceSymbol(t, s.analysis, "DiskChanged")
+	waitForWorkspaceCall(t, s.analysis, "DiskTarget")
 	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: "ChangedTarget"}); err != nil || len(got) != 0 {
 		t.Fatalf("closed overlay call remains = %+v, %v", got, err)
 	}
@@ -420,6 +495,40 @@ func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{}); err != nil || len(got) != 0 {
 		t.Fatalf("deleted calls remain = %+v, %v", got, err)
 	}
+}
+
+func TestCachedWorkspaceSymbolQueryUsesCurrentSnapshotWhileOverlayPending(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub SavedName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.analysisPermits = make(chan struct{}, 1)
+	s.analysisPermits <- struct{}{}
+	ctx := &glsp.Context{Notify: func(string, any) {}}
+	uri := pathToFileURI(path)
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: "Sub CurrentName()\nEnd Sub\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	open := s.docs.openDocuments()
+	got, err := s.cachedWorkspaceSymbolQuery(open, intel.WorkspaceSymbolQuery{Text: "CurrentName", Mode: intel.WorkspaceSymbolQueryExact})
+	if err != nil || len(got) != 1 || got[0].Name != "CurrentName" {
+		t.Fatalf("current snapshot symbols while overlay pending = %+v, %v", got, err)
+	}
+	if stale, err := s.cachedWorkspaceSymbolQuery(open, intel.WorkspaceSymbolQuery{Text: "SavedName", Mode: intel.WorkspaceSymbolQueryExact}); err != nil || len(stale) != 0 {
+		t.Fatalf("saved symbols leaked while overlay pending = %+v, %v", stale, err)
+	}
+	<-s.analysisPermits
 }
 
 func waitForWorkspaceSymbol(t *testing.T, index *workspaceAnalysisIndex, name string) {
