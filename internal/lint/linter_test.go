@@ -691,6 +691,11 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 		t.Fatalf("Loop Until candidates = %+v, reliable=%t", candidates, reliable)
 	}
 
+	nextPrefixedIdentifiers := "Sub Main()\n  nextChar = Mid$(text, position, 1)\n  NextHashCapacity = result\n  nextSlot = (slot + 1) And mask\nEnd Sub\n"
+	if candidates, reliable := unmatchedBlockCandidates(nextPrefixedIdentifiers); !reliable || len(candidates) != 0 {
+		t.Fatalf("Next-prefixed identifier candidates = %+v, reliable=%t", candidates, reliable)
+	}
+
 	continuation := "Sub Main()\n  If ready _\n      And enabled Then\n    Debug.Print \"x\"\nEnd Sub\n"
 	candidates, reliable := unmatchedBlockCandidates(continuation)
 	if !reliable || len(candidates) != 1 || candidates[0].kind != "if" || candidates[0].openingLine != 2 || candidates[0].expectedLine != 5 {
@@ -727,6 +732,18 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 	comment := "Sub Main()\n  ' If ready Then\n  Rem For Each item In items\nEnd Sub\n"
 	if candidates, reliable := unmatchedBlockCandidates(comment); !reliable || len(candidates) != 0 {
 		t.Fatalf("comment source candidates = %+v, reliable=%t", candidates, reliable)
+	}
+}
+
+func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "src", "classes", "Example.cls")
+	source := []byte("Option Explicit\nPrivate Sub ReadNext()\n  Dim nextChar As String\n  Dim nextSlot As Long\n  nextChar = Mid$(text, position, 1)\n  nextSlot = (slot + 1) And mask\nEnd Sub\nPrivate Function NextHashCapacity() As Long\n  NextHashCapacity = 1\nEnd Function\n")
+	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("Next-prefixed identifiers should not trigger VB014: %+v", got)
 	}
 }
 

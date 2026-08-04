@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VB014` false positives when valid VBA identifiers such as `nextChar`,
+  `nextSlot`, or `NextHashCapacity` begin with the `Next` keyword text.
 - Improved LSP responsiveness for very large VBA modules by removing a
   superlinear real-time diagnostic traversal, making document open analysis
   asynchronous, preventing stale workspace overlays from publishing after
