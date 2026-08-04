@@ -14,6 +14,8 @@ All notable changes to xlflow will be documented in this file.
   diagnostic range, and close/reopen safety are preserved. Obsolete IR/CFG
   fragment revisions are pruned after successful rebuilds so repeated edits do
   not accumulate unreachable large-module artifacts.
+- Fixed new-project helper scaffolds to avoid unused `VB004` inline-suppression
+  warnings during `xlflow lint`.
 - Fixed `VB014` false positives when valid VBA identifiers such as `nextChar`,
   `nextSlot`, or `NextHashCapacity` begin with the `Next` keyword text.
 - Improved LSP responsiveness for very large VBA modules by removing a

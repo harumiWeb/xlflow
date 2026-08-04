@@ -870,7 +870,6 @@ Public Sub AssertMatches(ByVal pattern As Variant, ByVal actual As Variant, Opti
   Dim patternError As String
   Dim testFailed As Boolean
   Dim testError As String
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   Set regex = CreateObject("VBScript.RegExp")
   createError = CStr(Err.Number) & ": " & Err.Description
@@ -881,7 +880,6 @@ Public Sub AssertMatches(ByVal pattern As Variant, ByVal actual As Variant, Opti
     RaiseAssertFailure message, "VBScript.RegExp is not available: " & createError, source
   End If
 
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   regex.Pattern = CStr(pattern)
   patternError = CStr(Err.Number) & ": " & Err.Description
@@ -897,7 +895,6 @@ Public Sub AssertMatches(ByVal pattern As Variant, ByVal actual As Variant, Opti
   regex.MultiLine = False
 
   Dim matched As Boolean
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   matched = regex.Test(CStr(actual))
   testError = CStr(Err.Number) & ": " & Err.Description
@@ -973,7 +970,6 @@ Public Sub AssertRangeEquals(ByVal expected As Variant, ByVal actualRange As Obj
   Dim actualValues As Variant
   Dim rangeProbeFailed As Boolean
   Dim rangeError As String
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   rowCount = CLng(actualRange.Rows.Count)
   rangeError = CStr(Err.Number) & ": " & Err.Description
@@ -984,7 +980,6 @@ Public Sub AssertRangeEquals(ByVal expected As Variant, ByVal actualRange As Obj
     RaiseAssertFailure message, "actualRange must expose Range members Rows, Columns, Cells, and Value2: " & rangeError, source
   End If
 
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   columnCount = CLng(actualRange.Columns.Count)
   rangeError = CStr(Err.Number) & ": " & Err.Description
@@ -995,7 +990,6 @@ Public Sub AssertRangeEquals(ByVal expected As Variant, ByVal actualRange As Obj
     RaiseAssertFailure message, "actualRange must expose Range members Rows, Columns, Cells, and Value2: " & rangeError, source
   End If
 
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   actualValues = actualRange.Value2
   rangeError = CStr(Err.Number) & ": " & Err.Description
@@ -1239,7 +1233,6 @@ Private Function ArrayDimensionCount(ByVal value As Variant) As Long
   Dim lowerBound As Long ' xlflow:disable-line VB020
   Dim probeFailed As Boolean
   For dimension = 1 To 60
-    ' xlflow:disable-next-line VB004
     On Error Resume Next
     Err.Clear
     lowerBound = LBound(value, dimension)
@@ -1257,7 +1250,6 @@ Private Function RangeCellLabel(ByVal actualRange As Object, ByVal rowIndex As L
   Dim address As String
   Dim sheetName As String
   Dim probeFailed As Boolean
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   address = actualRange.Cells(rowIndex, columnIndex).Address(False, False)
   probeFailed = Err.Number <> 0
@@ -1268,7 +1260,6 @@ Private Function RangeCellLabel(ByVal actualRange As Object, ByVal rowIndex As L
     Exit Function
   End If
 
-  ' xlflow:disable-next-line VB004
   On Error Resume Next
   sheetName = actualRange.Worksheet.Name
   probeFailed = Err.Number <> 0
