@@ -828,6 +828,26 @@ func TestNewScaffoldUIHelperLintsCleanly(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldLintsWithoutIssuesOrWarnings(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	result, err := lint.Linter{
+		RootDir: dir,
+		Config:  config.Default(),
+	}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("new scaffold should have no lint issues: %+v", result.Issues)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("new scaffold should have no lint warnings: %+v", result.Warnings)
+	}
+}
+
 func TestNewScaffoldUIHelperAnalyzesCleanly(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
