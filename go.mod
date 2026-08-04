@@ -16,7 +16,7 @@ require (
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/sys v0.46.0
-	golang.org/x/text v0.38.0
+	golang.org/x/text v0.39.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

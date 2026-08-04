@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.29.0
+
 - Added procedure-scoped incremental LSP diagnostics with 300 ms Fast and
   two-second idle Full publication, request-scoped workspace resolution,
   reusable IR/CFG procedure fragments, indexed source positions, and stage
@@ -24,6 +26,8 @@ All notable changes to xlflow will be documented in this file.
   detects unsafe resolved project-local `ByRef` arguments, including explicit
   type mismatches, temporary values, indirect member/array expressions, and
   common `PtrSafe` pointer-width declaration mistakes.
+- Updated `golang.org/x/text` to v0.39.0 to include the latest invalid-input
+  handling security fix.
 
 ## v0.28.0
 
