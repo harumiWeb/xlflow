@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -27,55 +28,99 @@ type ProcedureNameConstantFix struct {
 // ProcedureNameConstantFixesParsed reports source edits for configured local
 // procedure-name constants. It never modifies the source document.
 func (l Linter) ProcedureNameConstantFixesParsed(doc *vbaast.ParsedDocument) ([]ProcedureNameConstantFix, error) {
+	return l.ProcedureNameConstantFixesParsedContext(context.Background(), doc)
+}
+
+// ProcedureNameConstantFixesParsedContext is the cancellable variant of
+// ProcedureNameConstantFixesParsed.
+func (l Linter) ProcedureNameConstantFixesParsedContext(ctx context.Context, doc *vbaast.ParsedDocument) ([]ProcedureNameConstantFix, error) {
 	if !l.Config.Lint.ProcedureNameConstant.Enabled {
 		return nil, nil
 	}
 	var fixes []ProcedureNameConstantFix
 	err := doc.Read(func(view vbaast.ParsedView) error {
-		fixes = procedureNameConstantFixes(view.Root, view.Source, l.Config.Lint.ProcedureNameConstant)
-		return nil
+		var scanErr error
+		fixes, scanErr = procedureNameConstantFixesContext(ctx, view.Root, view.Source, l.Config.Lint.ProcedureNameConstant)
+		return scanErr
 	})
 	return fixes, err
 }
 
 func (l Linter) procedureNameConstantIssues(path string, root *tree_sitter.Node, source []byte) []Issue {
-	fixes := procedureNameConstantFixes(root, source, l.Config.Lint.ProcedureNameConstant)
+	issues, _ := l.procedureNameConstantIssuesContext(context.Background(), path, root, source)
+	return issues
+}
+
+func (l Linter) procedureNameConstantIssuesContext(ctx context.Context, path string, root *tree_sitter.Node, source []byte) ([]Issue, error) {
+	fixes, err := procedureNameConstantFixesContext(ctx, root, source, l.Config.Lint.ProcedureNameConstant)
+	if err != nil {
+		return nil, err
+	}
 	issues := make([]Issue, 0, len(fixes))
-	for _, fix := range fixes {
+	for i, fix := range fixes {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		issue := l.issueAt(path, sourceByteRange(source, fix.StartByte, fix.EndByte), procedureNameConstantRuleID, "warning", fmt.Sprintf("Local constant %q is %q but its enclosing procedure is %q.", fix.ConstantName, fix.CurrentValue, fix.ExpectedName))
 		issue.Kind = "procedure_name_constant"
 		issue.Symbol = fix.ConstantName
 		issue.Suggestion = fmt.Sprintf("Update the string literal to %q.", fix.ExpectedName)
 		issues = append(issues, issue)
 	}
-	return issues
+	return issues, ctx.Err()
 }
 
 func procedureNameConstantFixes(root *tree_sitter.Node, source []byte, cfg config.ProcedureNameConstantConfig) []ProcedureNameConstantFix {
-	if root == nil || !cfg.Enabled || strings.TrimSpace(cfg.ConstantName) == "" {
-		return nil
-	}
-	var fixes []ProcedureNameConstantFix
-	collectProcedureNameConstantFixes(root, source, cfg.ConstantName, &fixes)
+	fixes, _ := procedureNameConstantFixesContext(context.Background(), root, source, cfg)
 	return fixes
 }
 
+func procedureNameConstantFixesContext(ctx context.Context, root *tree_sitter.Node, source []byte, cfg config.ProcedureNameConstantConfig) ([]ProcedureNameConstantFix, error) {
+	if root == nil || !cfg.Enabled || strings.TrimSpace(cfg.ConstantName) == "" {
+		return nil, nil
+	}
+	var fixes []ProcedureNameConstantFix
+	visited := uint64(0)
+	if err := collectProcedureNameConstantFixesContext(ctx, root, source, cfg.ConstantName, &fixes, &visited); err != nil {
+		return nil, err
+	}
+	return fixes, ctx.Err()
+}
+
 func collectProcedureNameConstantFixes(node *tree_sitter.Node, source []byte, constantName string, fixes *[]ProcedureNameConstantFix) {
+	visited := uint64(0)
+	_ = collectProcedureNameConstantFixesContext(context.Background(), node, source, constantName, fixes, &visited)
+}
+
+func collectProcedureNameConstantFixesContext(ctx context.Context, node *tree_sitter.Node, source []byte, constantName string, fixes *[]ProcedureNameConstantFix, visited *uint64) error {
 	if node == nil {
-		return
+		return nil
+	}
+	*visited++
+	if *visited&0xff == 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 	if procedureNameConstantProcedure(node.Kind()) {
 		procedureName := procedureNameConstantProcedureName(node, source)
 		if procedureName != "" {
 			for i := uint(0); i < node.NamedChildCount(); i++ {
-				collectProcedureLocalConstantFixes(node.NamedChild(i), source, constantName, procedureName, fixes)
+				if err := collectProcedureLocalConstantFixesContext(ctx, node.NamedChild(i), source, constantName, procedureName, fixes, visited); err != nil {
+					return err
+				}
 			}
 		}
-		return
+		return nil
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
-		collectProcedureNameConstantFixes(node.NamedChild(i), source, constantName, fixes)
+		if err := collectProcedureNameConstantFixesContext(ctx, node.NamedChild(i), source, constantName, fixes, visited); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func procedureNameConstantProcedure(kind string) bool {
@@ -98,11 +143,22 @@ func procedureNameConstantProcedureName(node *tree_sitter.Node, source []byte) s
 }
 
 func collectProcedureLocalConstantFixes(node *tree_sitter.Node, source []byte, constantName, procedureName string, fixes *[]ProcedureNameConstantFix) {
+	visited := uint64(0)
+	_ = collectProcedureLocalConstantFixesContext(context.Background(), node, source, constantName, procedureName, fixes, &visited)
+}
+
+func collectProcedureLocalConstantFixesContext(ctx context.Context, node *tree_sitter.Node, source []byte, constantName, procedureName string, fixes *[]ProcedureNameConstantFix, visited *uint64) error {
 	if node == nil {
-		return
+		return nil
+	}
+	*visited++
+	if *visited&0xff == 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 	if procedureNameConstantProcedure(node.Kind()) {
-		return
+		return nil
 	}
 	if node.Kind() == "const_declaration" {
 		for i := uint(0); i < node.NamedChildCount(); i++ {
@@ -129,14 +185,17 @@ func collectProcedureLocalConstantFixes(node *tree_sitter.Node, source []byte, c
 				ExpectedName: procedureName,
 			})
 		}
-		return
+		return nil
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child != nil && !procedureNameConstantProcedure(child.Kind()) {
-			collectProcedureLocalConstantFixes(child, source, constantName, procedureName, fixes)
+			if err := collectProcedureLocalConstantFixesContext(ctx, child, source, constantName, procedureName, fixes, visited); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func procedureNameConstantDeclaratorName(node *tree_sitter.Node, source []byte) string {

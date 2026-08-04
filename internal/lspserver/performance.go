@@ -86,6 +86,24 @@ func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation u
 	)
 }
 
+func (s *Server) logWorkspaceOverlayPerformance(doc intel.Document, generation uint64, started time.Time, err error, discarded bool) {
+	if !s.opts.PerformanceLog {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	} else if discarded {
+		outcome = "discarded"
+	}
+	s.logger.Printf(
+		"performance operation=%q uri=%q path=%q version=%d generation=%d bytes=%d lines=%d elapsed_ms=%.3f outcome=%q discarded=%t",
+		"workspaceSymbols/overlay", doc.URI, doc.Path, doc.Version, generation,
+		len(doc.Source), sourceLineCount(doc.Source),
+		float64(time.Since(started))/float64(time.Millisecond), outcome, discarded,
+	)
+}
+
 func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time.Time, err error) {
 	if !s.opts.PerformanceLog {
 		return

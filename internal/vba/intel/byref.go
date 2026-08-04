@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -17,11 +18,32 @@ var (
 // late-bound calls: their signatures are not evidence strong enough to make a
 // ByRef compatibility claim.
 func (a Analyzer) ByRefArgumentDiagnostics(doc Document) []Diagnostic {
+	return a.ByRefArgumentDiagnosticsContext(context.Background(), doc)
+}
+
+// ByRefArgumentDiagnosticsContext is the cancellable form used by realtime LSP analysis.
+func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if !a.Config.Analyze.DetectByRefArgumentMismatch {
 		return nil
 	}
+	// Resolve calls in the current module directly from its immutable snapshot.
+	// A newly opened document's workspace overlay is intentionally absent while
+	// background analysis is pending, but file-local diagnostics must still be
+	// complete. Build this list once rather than cloning it for every call site.
+	localSymbols, _ := a.DocumentSymbols(doc)
+	if ctx.Err() != nil {
+		return nil
+	}
+	localSymbolsByName := make(map[string][]Symbol, len(localSymbols))
+	for _, symbol := range localSymbols {
+		key := strings.ToLower(strings.TrimSpace(symbol.Name))
+		localSymbolsByName[key] = append(localSymbolsByName[key], symbol)
+	}
 	var out []Diagnostic
-	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		if i&0x3f == 0 && ctx.Err() != nil {
+			return nil
+		}
 		calls := callsOnLine(logicalLine.Text)
 		for _, call := range calls {
 			if byRefCallIsShadowedByWholeArgumentForm(call, calls) {
@@ -29,7 +51,7 @@ func (a Analyzer) ByRefArgumentDiagnostics(doc Document) []Diagnostic {
 			}
 			callRange := logicalLine.callRange(call)
 			call.DiagnosticRange = &callRange
-			sig, resolved, err := a.resolveProjectLocalCallSignature(doc, call.Target, callRange.Start)
+			sig, resolved, err := a.resolveProjectLocalCallSignature(doc, localSymbolsByName, call.Target, callRange.Start)
 			if err != nil || !resolved || !sig.projectLocal {
 				continue
 			}
@@ -47,6 +69,9 @@ func (a Analyzer) ByRefArgumentDiagnostics(doc Document) []Diagnostic {
 				}
 			}
 		}
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 	return append(out, a.ptrSafeDeclareDiagnostics(doc)...)
 }
@@ -75,7 +100,7 @@ func byRefCallIsShadowedByWholeArgumentForm(call parsedCall, calls []parsedCall)
 // procedure symbol. Unlike general signature help, it neither falls back to a
 // built-in/member signature nor selects an arbitrary overload: VBA206 needs a
 // concrete callee declaration before it can make a ByRef claim.
-func (a Analyzer) resolveProjectLocalCallSignature(doc Document, target string, pos Position) (Signature, bool, error) {
+func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByName map[string][]Symbol, target string, pos Position) (Signature, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" || strings.HasPrefix(target, ".") {
 		return Signature{}, false, nil
@@ -85,12 +110,41 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, target string, 
 	if qualified {
 		query = member
 	}
+	currentProcedure := currentProcedureNameForDocument(doc, pos)
+	module := moduleNameForDocument(doc)
+	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
+	localMatches := matchingProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, receiver, member, qualified)
+	if !qualified {
+		localMatches = symbolsInModule(localMatches, module)
+	}
+	if len(localMatches) == 1 {
+		return signatureFromSymbol(localMatches[0]), true, nil
+	}
+	if len(localMatches) > 1 {
+		return Signature{}, false, nil
+	}
 	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false, err
 	}
-	currentProcedure := currentProcedureNameForDocument(doc, pos)
-	var matches []Symbol
+	matches := matchingProjectCallSymbols(a, doc, currentProcedure, syms, target, receiver, member, qualified)
+	if !qualified {
+		local := symbolsInModule(matches, module)
+		if len(local) == 1 {
+			return signatureFromSymbol(local[0]), true, nil
+		}
+		if len(local) > 1 {
+			return Signature{}, false, nil
+		}
+	}
+	if len(matches) != 1 {
+		return Signature{}, false, nil
+	}
+	return signatureFromSymbol(matches[0]), true, nil
+}
+
+func matchingProjectCallSymbols(a Analyzer, doc Document, currentProcedure string, syms []Symbol, target, receiver, member string, qualified bool) []Symbol {
+	matches := make([]Symbol, 0, len(syms))
 	for _, sym := range syms {
 		if !callableCompletionSymbol(sym) || !a.visibleCompletionSymbol(doc, currentProcedure, sym) {
 			continue
@@ -104,25 +158,17 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, target string, 
 		}
 		matches = append(matches, sym)
 	}
-	if !qualified {
-		module := moduleNameForDocument(doc)
-		var local []Symbol
-		for _, sym := range matches {
-			if strings.EqualFold(sym.Module, module) {
-				local = append(local, sym)
-			}
-		}
-		if len(local) == 1 {
-			return signatureFromSymbol(local[0]), true, nil
-		}
-		if len(local) > 1 {
-			return Signature{}, false, nil
+	return matches
+}
+
+func symbolsInModule(syms []Symbol, module string) []Symbol {
+	local := make([]Symbol, 0, len(syms))
+	for _, sym := range syms {
+		if strings.EqualFold(sym.Module, module) {
+			local = append(local, sym)
 		}
 	}
-	if len(matches) != 1 {
-		return Signature{}, false, nil
-	}
-	return signatureFromSymbol(matches[0]), true, nil
+	return local
 }
 
 func isByRefParameter(param Parameter) bool {

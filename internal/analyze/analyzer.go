@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -190,6 +191,8 @@ type sourceProcedure struct {
 	ReturnType   string
 	StartLine    int
 	EndLine      int
+	StartByte    int
+	EndByte      int
 	Params       []parameterInfo
 	Declarations []procedureir.Declaration
 	Statements   []procedureir.Statement
@@ -401,16 +404,29 @@ func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.Work
 }
 
 func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
+	out, _ := a.statefulExcelCallArgumentFindingsContext(context.Background(), file)
+	return out
+}
+
+func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, file parsedFile) ([]Finding, error) {
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.typeDB == nil {
-		return nil
+		return nil, nil
 	}
-	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnostics(file.intelDocument())
+	diagnostics, err := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnosticsContext(ctx, file.intelDocument())
+	if err != nil {
+		return nil, err
+	}
 	if len(diagnostics) == 0 {
-		return nil
+		return nil, nil
 	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	out := make([]Finding, 0, len(diagnostics))
-	for _, diagnostic := range diagnostics {
+	for i, diagnostic := range diagnostics {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		for _, candidate := range procedures {
@@ -434,7 +450,7 @@ func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
 		finding.EndColumn = diagnostic.Range.End.Character + 1
 		out = append(out, finding)
 	}
-	return out
+	return out, ctx.Err()
 }
 
 func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
@@ -484,6 +500,12 @@ func (file parsedFile) intelDocument() intel.Document {
 }
 
 func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
+	return SourceNonShortCircuitObjectGuardFindingsContext(context.Background(), rootDir, path, cfg, source)
+}
+
+// SourceNonShortCircuitObjectGuardFindingsContext is the cancellable variant
+// of SourceNonShortCircuitObjectGuardFindings.
+func SourceNonShortCircuitObjectGuardFindingsContext(ctx context.Context, rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
 	if !cfg.Analyze.DetectNonShortCircuitObjectGuard {
 		return nil, nil
 	}
@@ -492,13 +514,19 @@ func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.C
 		return nil, err
 	}
 	defer doc.Close()
-	return SourceNonShortCircuitObjectGuardFindingsParsed(rootDir, cfg, doc)
+	return SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx, rootDir, cfg, doc)
 }
 
 // SourceNonShortCircuitObjectGuardFindingsParsed analyzes a caller-owned
 // parsed VBA document without closing it or retaining tree-sitter nodes.
 func SourceNonShortCircuitObjectGuardFindingsParsed(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
-	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: rootDir}, doc)
+	return SourceNonShortCircuitObjectGuardFindingsParsedContext(context.Background(), rootDir, cfg, doc)
+}
+
+// SourceNonShortCircuitObjectGuardFindingsParsedContext is the cancellable
+// variant of SourceNonShortCircuitObjectGuardFindingsParsed.
+func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
+	ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{RootDir: rootDir}, doc)
 	if err != nil {
 		return nil, err
 	}
@@ -514,11 +542,10 @@ func SourceNonShortCircuitObjectGuardFindingsParsed(rootDir string, cfg config.C
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
 		procedures := sourceProceduresFromIR(ir)
-		for _, proc := range procedures {
-			findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, proc)...)
-		}
-		if len(procedures) == 0 {
-			findings = append(findings, analyzer.nonShortCircuitObjectGuardFindings(file, sourceProcedure{StartLine: 1, EndLine: len(file.Lines)})...)
+		var scanErr error
+		findings, scanErr = analyzer.nonShortCircuitObjectGuardDocumentFindings(ctx, file, procedures, nil)
+		if scanErr != nil {
+			return scanErr
 		}
 		sortFindings(findings)
 		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
@@ -529,6 +556,12 @@ func SourceNonShortCircuitObjectGuardFindingsParsed(rootDir string, cfg config.C
 }
 
 func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
+	return SourceRealtimeFindingsContext(context.Background(), rootDir, path, cfg, source)
+}
+
+// SourceRealtimeFindingsContext is the cancellable variant of
+// SourceRealtimeFindings.
+func SourceRealtimeFindingsContext(ctx context.Context, rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
@@ -537,31 +570,53 @@ func SourceRealtimeFindings(rootDir, path string, cfg config.Config, source []by
 		return nil, err
 	}
 	defer doc.Close()
-	return SourceRealtimeFindingsParsed(rootDir, cfg, doc)
+	return SourceRealtimeFindingsParsedContext(ctx, rootDir, cfg, doc)
 }
 
 // SourceRealtimeFindingsParsed runs real-time source analysis against a
 // caller-owned parsed VBA document. It does not close doc or retain nodes.
 func SourceRealtimeFindingsParsed(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
-	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: rootDir}, doc)
+	return SourceRealtimeFindingsParsedContext(context.Background(), rootDir, cfg, doc)
+}
+
+// SourceRealtimeFindingsParsedContext is the cancellable variant of
+// SourceRealtimeFindingsParsed.
+func SourceRealtimeFindingsParsedContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument) ([]Finding, error) {
+	ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{RootDir: rootDir}, doc)
 	if err != nil {
 		return nil, err
 	}
-	return SourceRealtimeFindingsParsedIR(rootDir, cfg, doc, ir)
+	return SourceRealtimeFindingsParsedIRContext(ctx, rootDir, cfg, doc, ir)
 }
 
 // SourceRealtimeFindingsParsedIR runs real-time source analysis with a
 // caller-supplied procedure IR built from doc. It lets immutable LSP snapshots
 // reuse their cached IR without reparsing or rewalking procedure syntax.
 func SourceRealtimeFindingsParsedIR(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR) ([]Finding, error) {
-	return SourceRealtimeFindingsParsedIRCFG(rootDir, cfg, doc, ir, vbacfg.BuildDocument(ir))
+	return SourceRealtimeFindingsParsedIRContext(context.Background(), rootDir, cfg, doc, ir)
+}
+
+// SourceRealtimeFindingsParsedIRContext is the cancellable variant of
+// SourceRealtimeFindingsParsedIR.
+func SourceRealtimeFindingsParsedIRContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR) ([]Finding, error) {
+	controlFlow, err := vbacfg.BuildDocumentContext(ctx, ir)
+	if err != nil {
+		return nil, err
+	}
+	return SourceRealtimeFindingsParsedIRCFGContext(ctx, rootDir, cfg, doc, ir, controlFlow)
 }
 
 // SourceRealtimeFindingsParsedIRCFG runs real-time source analysis with
 // caller-supplied procedure IR and control-flow graphs. Immutable LSP
 // snapshots use this entry point to reuse both cached analysis layers.
 func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]Finding, error) {
-	return SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir, cfg, doc, ir, controlFlow, nil)
+	return SourceRealtimeFindingsParsedIRCFGContext(context.Background(), rootDir, cfg, doc, ir, controlFlow)
+}
+
+// SourceRealtimeFindingsParsedIRCFGContext is the cancellable variant of
+// SourceRealtimeFindingsParsedIRCFG.
+func SourceRealtimeFindingsParsedIRCFGContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx, rootDir, cfg, doc, ir, controlFlow, nil)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDB runs real-time source analysis
@@ -569,6 +624,15 @@ func SourceRealtimeFindingsParsedIRCFG(rootDir string, cfg config.Config, doc *v
 // database; standalone callers load the built-in database only when VBA215 is
 // enabled.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(context.Background(), rootDir, cfg, doc, ir, controlFlow, typeDB)
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBContext is the cancellable
+// variant of SourceRealtimeFindingsParsedIRCFGWithTypeDB.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB) ([]Finding, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
@@ -581,6 +645,9 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 	}
 	var findings []Finding
 	err := doc.Read(func(view vbaast.ParsedView) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		file := parsedFile{
 			Path:   view.Path,
 			Lines:  normalizedSourceLines(string(view.Source)),
@@ -595,14 +662,45 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 		procedures := sourceProceduresFromIR(ir, controlFlow)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
 		if len(procedures) == 0 {
-			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines)}}
+			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
-		for _, proc := range procedures {
-			findings = append(findings, analyzer.sourceRealtimeProcedureFindings(file, proc, moduleDecls, worksheetCodenames)...)
+		for i, proc := range procedures {
+			if i&0x1f == 0 {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+			}
+			procedureFindings, err := analyzer.sourceRealtimeProcedureFindingsContext(ctx, file, proc, moduleDecls, worksheetCodenames)
+			if err != nil {
+				return err
+			}
+			findings = append(findings, procedureFindings...)
 		}
-		findings = append(findings, analyzer.statefulExcelCallArgumentFindings(file)...)
-		findings = append(findings, analyzer.excelAPIFailureContractFindings(file)...)
-		findings = append(findings, analyzer.errorValueWrapperFindings(file)...)
+		if cfg.Analyze.DetectNonShortCircuitObjectGuard {
+			guardFindings, err := analyzer.nonShortCircuitObjectGuardDocumentFindings(ctx, file, procedures, nil)
+			if err != nil {
+				return err
+			}
+			findings = append(findings, guardFindings...)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		statefulFindings, err := analyzer.statefulExcelCallArgumentFindingsContext(ctx, file)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, statefulFindings...)
+		contractFindings, err := analyzer.excelAPIFailureContractFindingsContext(ctx, file)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, contractFindings...)
+		wrapperFindings, err := analyzer.errorValueWrapperFindingsContext(ctx, file)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, wrapperFindings...)
 		findings = realtimeFindings(findings)
 		sortFindings(findings)
 		directives, _ := suppression.DirectivesForSource(rootDir, view.Path, string(view.Source))
@@ -646,6 +744,14 @@ func realtimeFindings(findings []Finding) []Finding {
 }
 
 func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string) []Finding {
+	findings, _ := a.sourceRealtimeProcedureFindingsContext(context.Background(), file, proc, moduleDecls, worksheetCodenames)
+	return findings
+}
+
+func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string) ([]Finding, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	decls := cloneDeclarations(moduleDecls)
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
@@ -657,13 +763,15 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(worksheetCodenames)
 	var findings []Finding
-	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
-		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
-	}
 	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		lineNo := i + 1
 		stmt := normalizedCodeLine(file.Lines[i])
 		worksheetStmt, worksheetStatementStart := worksheetLogicalStatement(file.Lines, i, proc.EndLine-1)
@@ -715,7 +823,7 @@ func (a Analyzer) sourceRealtimeProcedureFindings(file parsedFile, proc sourcePr
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
-	return findings
+	return findings, ctx.Err()
 }
 
 func (a Analyzer) files() ([]string, error) {
@@ -813,6 +921,10 @@ func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext, projec
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
 	}
+	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
+		guardFindings, _ := a.nonShortCircuitObjectGuardDocumentFindings(context.Background(), file, procedures, nil)
+		findings = append(findings, guardFindings...)
+	}
 	return findings
 }
 
@@ -832,9 +944,6 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	functionAssigned := false
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
-	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
-		findings = append(findings, a.nonShortCircuitObjectGuardFindings(file, proc)...)
-	}
 	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
@@ -1016,6 +1125,8 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			ReturnType:   procedure.Symbol.ReturnType,
 			StartLine:    procedure.Symbol.DeclarationRange.StartLine,
 			EndLine:      procedure.Symbol.DeclarationRange.EndLine,
+			StartByte:    procedure.Symbol.DeclarationRange.StartByte,
+			EndByte:      procedure.Symbol.DeclarationRange.EndByte,
 			Params:       params,
 			Declarations: append([]procedureir.Declaration(nil), procedure.Declarations...),
 			Statements:   append([]procedureir.Statement(nil), procedure.Statements...),
@@ -2410,17 +2521,55 @@ func (a Analyzer) objectSetFinding(file parsedFile, proc sourceProcedure, line i
 	return a.simpleFinding(file, proc, line, code, "warning", msg, reason, suggestion)
 }
 
-func (a Analyzer) nonShortCircuitObjectGuardFindings(file parsedFile, proc sourceProcedure) []Finding {
+// vba212ScanStats is deliberately caller-owned so tests and benchmarks can
+// assert structural work without a process-global instrumentation hook.
+type vba212ScanStats struct {
+	RootTraversals int
+	NodesVisited   int
+}
+
+// nonShortCircuitObjectGuardDocumentFindings walks the CST exactly once. Each
+// candidate expression is attributed to its owning procedure through the
+// byte ranges already recorded by procedure IR. This avoids the former
+// procedures x document-nodes traversal while preserving outer-expression
+// priority and per-procedure diagnostics.
+func (a Analyzer) nonShortCircuitObjectGuardDocumentFindings(ctx context.Context, file parsedFile, procedures []sourceProcedure, stats *vba212ScanStats) ([]Finding, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(procedures) == 0 {
+		procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
+	}
+	// IR is source ordered today, but sorting the local copy keeps ownership
+	// deterministic for recovered trees and synthetic test IR.
+	procedures = append([]sourceProcedure(nil), procedures...)
+	sort.SliceStable(procedures, func(i, j int) bool {
+		return procedures[i].StartByte < procedures[j].StartByte
+	})
+
 	seen := map[string]bool{}
 	var findings []Finding
-	var visit func(*tree_sitter.Node)
-	visit = func(node *tree_sitter.Node) {
+	if stats != nil {
+		stats.RootTraversals++
+	}
+	visited := 0
+	var visit func(*tree_sitter.Node) error
+	visit = func(node *tree_sitter.Node) error {
 		if node == nil {
-			return
+			return nil
 		}
-		r := vbaast.NodeRange(node)
-		if r.StartLine >= proc.StartLine && (proc.EndLine == 0 || r.StartLine <= proc.EndLine) &&
-			isBooleanBinaryExpression(node) && hasTopLevelAndOrOperator(node, file.Source) {
+		visited++
+		if stats != nil {
+			stats.NodesVisited = visited
+		}
+		if visited&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		proc, owned := vba212ProcedureAtByte(procedures, int(node.StartByte()), int(node.EndByte()))
+		if owned && isBooleanBinaryExpression(node) && hasTopLevelAndOrOperator(node, file.Source) {
+			r := vbaast.NodeRange(node)
 			guards := map[string]string{}
 			accesses := map[string]string{}
 			collectNothingGuards(node, file.Source, guards)
@@ -2429,7 +2578,7 @@ func (a Analyzer) nonShortCircuitObjectGuardFindings(file parsedFile, proc sourc
 				if _, ok := accesses[key]; !ok {
 					continue
 				}
-				dedupeKey := strconvItoa(r.StartLine) + ":" + key
+				dedupeKey := strconvItoa(proc.StartByte) + ":" + strconvItoa(r.StartLine) + ":" + key
 				if seen[dedupeKey] {
 					continue
 				}
@@ -2445,14 +2594,38 @@ func (a Analyzer) nonShortCircuitObjectGuardFindings(file parsedFile, proc sourc
 					"Split the Nothing guard and the member access into separate If statements.",
 				))
 			}
-			return
+			// Preserve the previous outer-expression preference: once a boolean
+			// expression is analyzed its nested boolean expressions are not.
+			return nil
 		}
 		for i := uint(0); i < node.NamedChildCount(); i++ {
-			visit(node.NamedChild(i))
+			if err := visit(node.NamedChild(i)); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
-	visit(file.Root)
-	return findings
+	if err := visit(file.Root); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return findings, nil
+}
+
+func vba212ProcedureAtByte(procedures []sourceProcedure, startByte, endByte int) (sourceProcedure, bool) {
+	i := sort.Search(len(procedures), func(i int) bool {
+		return procedures[i].StartByte > startByte
+	}) - 1
+	if i < 0 {
+		return sourceProcedure{}, false
+	}
+	proc := procedures[i]
+	if startByte < proc.StartByte || endByte > proc.EndByte {
+		return sourceProcedure{}, false
+	}
+	return proc, true
 }
 
 func isBooleanBinaryExpression(node *tree_sitter.Node) bool {

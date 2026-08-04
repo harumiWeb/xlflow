@@ -1,12 +1,14 @@
 package intel
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -45,7 +47,9 @@ type AnalysisSnapshot struct {
 	procedures     []ProcedureInfo
 	procedureLines []int
 
-	symbolsOnce sync.Once
+	symbolsMu   sync.Mutex
+	symbolsWait chan struct{}
+	symbolsDone bool
 	symbols     []Symbol
 	symbolsErr  error
 
@@ -53,11 +57,15 @@ type AnalysisSnapshot struct {
 	callSites     calls.FileResult
 	callSitesErr  error
 
-	procedureIROnce sync.Once
+	procedureIRMu   sync.Mutex
+	procedureIRWait chan struct{}
+	procedureIRDone bool
 	procedureIR     procedureir.DocumentIR
 	procedureIRErr  error
 
-	controlFlowOnce sync.Once
+	controlFlowMu   sync.Mutex
+	controlFlowWait chan struct{}
+	controlFlowDone bool
 	controlFlow     vbacfg.Document
 	controlFlowErr  error
 
@@ -73,6 +81,7 @@ type AnalysisSnapshot struct {
 	parsedErr      error
 	parseDocument  func(string, []byte) (*ast.ParsedDocument, error)
 	parseCount     atomic.Uint64
+	fullHashCount  atomic.Uint64
 
 	retired atomic.Bool
 }
@@ -150,9 +159,21 @@ func (s *AnalysisSnapshot) SourceHash() string {
 }
 
 func (s *AnalysisSnapshot) sameRevision(doc Document) bool {
-	return s != nil && s.uri == doc.URI && s.path == doc.Path &&
-		s.version == doc.Version && s.moduleKind == doc.ModuleKind &&
-		s.sourceHash == sha256.Sum256([]byte(doc.Source))
+	if s == nil || s.retired.Load() || s.uri != doc.URI || s.path != doc.Path ||
+		s.version != doc.Version || s.moduleKind != doc.ModuleKind ||
+		len(s.source) != len(doc.Source) {
+		return false
+	}
+	// A Document returned by this snapshot retains the immutable source
+	// string's backing storage. Comparing that identity avoids hashing the
+	// entire source on every cache lookup while length keeps substring aliases
+	// from being mistaken for this revision. Independently allocated strings
+	// still use the digest so Matches preserves its value semantics.
+	if unsafe.StringData(s.source) == unsafe.StringData(doc.Source) {
+		return true
+	}
+	s.fullHashCount.Add(1)
+	return s.sourceHash == sha256.Sum256([]byte(doc.Source))
 }
 
 // Matches reports whether doc describes the exact immutable revision captured by the snapshot.
@@ -243,18 +264,52 @@ func (s *AnalysisSnapshot) procedureAt(pos Position) (string, *Range) {
 
 // SourceSymbols returns snapshot-scoped source symbols and whether the lazy value was already initialized.
 func (s *AnalysisSnapshot) SourceSymbols(load DocumentSymbolLoader) ([]Symbol, bool, error) {
+	return s.SourceSymbolsContext(context.Background(), func(context.Context) ([]Symbol, error) { return load() })
+}
+
+// SourceSymbolsContext is a retryable single-flight cache. Cancellation is
+// scoped to the active build and is not retained as a revision-wide result.
+func (s *AnalysisSnapshot) SourceSymbolsContext(ctx context.Context, load func(context.Context) ([]Symbol, error)) ([]Symbol, bool, error) {
 	if s == nil {
-		syms, err := load()
+		syms, err := load(ctx)
 		return cloneAnalysisSymbols(syms), false, err
 	}
-	initialized := true
-	s.symbolsOnce.Do(func() {
-		initialized = false
-		syms, err := load()
-		s.symbols = cloneAnalysisSymbols(syms)
-		s.symbolsErr = err
-	})
-	return cloneAnalysisSymbols(s.symbols), initialized, s.symbolsErr
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		s.symbolsMu.Lock()
+		if s.symbolsDone {
+			result, err := cloneAnalysisSymbols(s.symbols), s.symbolsErr
+			s.symbolsMu.Unlock()
+			return result, true, err
+		}
+		if s.symbolsWait != nil {
+			wait := s.symbolsWait
+			s.symbolsMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, false, ctx.Err()
+			case <-wait:
+			}
+			continue
+		}
+		wait := make(chan struct{})
+		s.symbolsWait = wait
+		s.symbolsMu.Unlock()
+		result, err := load(ctx)
+		if err == nil {
+			err = ctx.Err()
+		}
+		s.symbolsMu.Lock()
+		if !isRetryableContextError(err) {
+			s.symbols, s.symbolsErr, s.symbolsDone = cloneAnalysisSymbols(result), err, true
+		}
+		s.symbolsWait = nil
+		close(wait)
+		s.symbolsMu.Unlock()
+		return cloneAnalysisSymbols(result), false, err
+	}
 }
 
 // RawCallSites returns snapshot-scoped syntax-local call sites and whether the
@@ -281,18 +336,53 @@ func (s *AnalysisSnapshot) RawCallSites(load func() (calls.FileResult, error)) (
 // errors are cached for this immutable revision. The returned IR is a deep
 // copy and can be modified by the caller.
 func (s *AnalysisSnapshot) ProcedureIR(load func() (procedureir.DocumentIR, error)) (procedureir.DocumentIR, bool, error) {
+	return s.ProcedureIRContext(context.Background(), func(context.Context) (procedureir.DocumentIR, error) { return load() })
+}
+
+// ProcedureIRContext is a retryable single-flight cache. Cancellation is a
+// property of one build attempt, not of the immutable revision, so canceled
+// attempts wake waiters without storing a value or permanent error.
+func (s *AnalysisSnapshot) ProcedureIRContext(ctx context.Context, load func(context.Context) (procedureir.DocumentIR, error)) (procedureir.DocumentIR, bool, error) {
 	if s == nil {
-		result, err := load()
+		result, err := load(ctx)
 		return procedureir.Clone(result), false, err
 	}
-	initialized := true
-	s.procedureIROnce.Do(func() {
-		initialized = false
-		result, err := load()
-		s.procedureIR = procedureir.Clone(result)
-		s.procedureIRErr = err
-	})
-	return procedureir.Clone(s.procedureIR), initialized, s.procedureIRErr
+	for {
+		if err := ctx.Err(); err != nil {
+			return procedureir.DocumentIR{}, false, err
+		}
+		s.procedureIRMu.Lock()
+		if s.procedureIRDone {
+			result, err := procedureir.Clone(s.procedureIR), s.procedureIRErr
+			s.procedureIRMu.Unlock()
+			return result, true, err
+		}
+		if s.procedureIRWait != nil {
+			wait := s.procedureIRWait
+			s.procedureIRMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return procedureir.DocumentIR{}, false, ctx.Err()
+			case <-wait:
+			}
+			continue
+		}
+		wait := make(chan struct{})
+		s.procedureIRWait = wait
+		s.procedureIRMu.Unlock()
+		result, err := load(ctx)
+		if err == nil {
+			err = ctx.Err()
+		}
+		s.procedureIRMu.Lock()
+		if !isRetryableContextError(err) {
+			s.procedureIR, s.procedureIRErr, s.procedureIRDone = procedureir.Clone(result), err, true
+		}
+		s.procedureIRWait = nil
+		close(wait)
+		s.procedureIRMu.Unlock()
+		return procedureir.Clone(result), false, err
+	}
 }
 
 // ControlFlowGraphs returns the snapshot-scoped procedure control-flow graphs
@@ -300,18 +390,55 @@ func (s *AnalysisSnapshot) ProcedureIR(load func() (procedureir.DocumentIR, erro
 // and build errors are cached for this immutable revision. The returned
 // document is a deep copy and can be modified by the caller.
 func (s *AnalysisSnapshot) ControlFlowGraphs(load func() (vbacfg.Document, error)) (vbacfg.Document, bool, error) {
+	return s.ControlFlowGraphsContext(context.Background(), func(context.Context) (vbacfg.Document, error) { return load() })
+}
+
+// ControlFlowGraphsContext has the same retryable cancellation contract as ProcedureIRContext.
+func (s *AnalysisSnapshot) ControlFlowGraphsContext(ctx context.Context, load func(context.Context) (vbacfg.Document, error)) (vbacfg.Document, bool, error) {
 	if s == nil {
-		result, err := load()
+		result, err := load(ctx)
 		return vbacfg.CloneDocument(result), false, err
 	}
-	initialized := true
-	s.controlFlowOnce.Do(func() {
-		initialized = false
-		result, err := load()
-		s.controlFlow = vbacfg.CloneDocument(result)
-		s.controlFlowErr = err
-	})
-	return vbacfg.CloneDocument(s.controlFlow), initialized, s.controlFlowErr
+	for {
+		if err := ctx.Err(); err != nil {
+			return vbacfg.Document{}, false, err
+		}
+		s.controlFlowMu.Lock()
+		if s.controlFlowDone {
+			result, err := vbacfg.CloneDocument(s.controlFlow), s.controlFlowErr
+			s.controlFlowMu.Unlock()
+			return result, true, err
+		}
+		if s.controlFlowWait != nil {
+			wait := s.controlFlowWait
+			s.controlFlowMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return vbacfg.Document{}, false, ctx.Err()
+			case <-wait:
+			}
+			continue
+		}
+		wait := make(chan struct{})
+		s.controlFlowWait = wait
+		s.controlFlowMu.Unlock()
+		result, err := load(ctx)
+		if err == nil {
+			err = ctx.Err()
+		}
+		s.controlFlowMu.Lock()
+		if !isRetryableContextError(err) {
+			s.controlFlow, s.controlFlowErr, s.controlFlowDone = vbacfg.CloneDocument(result), err, true
+		}
+		s.controlFlowWait = nil
+		close(wait)
+		s.controlFlowMu.Unlock()
+		return vbacfg.CloneDocument(result), false, err
+	}
+}
+
+func isRetryableContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // documentIndex returns the immutable lookup index for this snapshot. The
@@ -331,7 +458,7 @@ func (s *AnalysisSnapshot) documentIndex(load DocumentSymbolLoader) (*documentIn
 			return
 		}
 		// SourceSymbols returns a defensive copy to public callers. The snapshot
-		// owns s.symbols and never mutates it after symbolsOnce completes, so the
+		// owns s.symbols and never mutates it after the successful build completes, so the
 		// internal index can safely avoid a second full clone.
 		s.index = buildDocumentIndex(s.source, s.lines, s.procedures, s.procedureLines, s.symbols)
 	})
@@ -386,6 +513,16 @@ func (s *AnalysisSnapshot) ParseCount() uint64 {
 	return s.parseCount.Load()
 }
 
+// FullHashCount reports how many revision comparisons required hashing an
+// independently backed source string. It exists for diagnostics benchmarking
+// and regression tests; creating the snapshot's canonical digest is excluded.
+func (s *AnalysisSnapshot) FullHashCount() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.fullHashCount.Load()
+}
+
 // Retire marks the snapshot as no longer owned by its publisher.
 // It is idempotent and is the cleanup boundary for future owned resources.
 func (s *AnalysisSnapshot) Retire() {
@@ -421,29 +558,37 @@ func parsedDocumentForDocument(doc Document) (*ast.ParsedDocument, func(), error
 }
 
 func procedureIRForDocument(doc Document, rootDir string, parsed *ast.ParsedDocument) (procedureir.DocumentIR, error) {
-	load := func() (procedureir.DocumentIR, error) {
-		return procedureir.BuildParsed(procedureir.BuildOptions{
+	return procedureIRForDocumentContext(context.Background(), doc, rootDir, parsed)
+}
+
+func procedureIRForDocumentContext(ctx context.Context, doc Document, rootDir string, parsed *ast.ParsedDocument) (procedureir.DocumentIR, error) {
+	load := func(loadCtx context.Context) (procedureir.DocumentIR, error) {
+		return procedureir.BuildParsedContext(loadCtx, procedureir.BuildOptions{
 			RootDir:    rootDir,
 			Path:       doc.Path,
 			ModuleKind: doc.ModuleKind,
 		}, parsed)
 	}
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
-		result, _, err := snapshot.ProcedureIR(load)
+		result, _, err := snapshot.ProcedureIRContext(ctx, load)
 		return result, err
 	}
-	return load()
+	return load(ctx)
 }
 
 func controlFlowForDocument(doc Document, ir procedureir.DocumentIR) (vbacfg.Document, error) {
-	load := func() (vbacfg.Document, error) {
-		return vbacfg.BuildDocument(ir), nil
+	return controlFlowForDocumentContext(context.Background(), doc, ir)
+}
+
+func controlFlowForDocumentContext(ctx context.Context, doc Document, ir procedureir.DocumentIR) (vbacfg.Document, error) {
+	load := func(loadCtx context.Context) (vbacfg.Document, error) {
+		return vbacfg.BuildDocumentContext(loadCtx, ir)
 	}
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
-		result, _, err := snapshot.ControlFlowGraphs(load)
+		result, _, err := snapshot.ControlFlowGraphsContext(ctx, load)
 		return result, err
 	}
-	return load()
+	return load(ctx)
 }
 
 func documentLines(doc Document) []string {

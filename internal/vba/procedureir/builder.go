@@ -1,6 +1,7 @@
 package procedureir
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 
@@ -9,6 +10,14 @@ import (
 )
 
 func BuildSource(opts BuildOptions, source []byte) (DocumentIR, error) {
+	return BuildSourceContext(context.Background(), opts, source)
+}
+
+// BuildSourceContext builds procedure IR and cooperatively stops when ctx is canceled.
+func BuildSourceContext(ctx context.Context, opts BuildOptions, source []byte) (DocumentIR, error) {
+	if err := ctx.Err(); err != nil {
+		return DocumentIR{}, err
+	}
 	path := opts.Path
 	if strings.TrimSpace(path) == "" {
 		path = "Untitled.bas"
@@ -18,17 +27,31 @@ func BuildSource(opts BuildOptions, source []byte) (DocumentIR, error) {
 		return DocumentIR{}, err
 	}
 	defer doc.Close()
-	return BuildParsed(opts, doc)
+	return BuildParsedContext(ctx, opts, doc)
 }
 
 func BuildParsed(opts BuildOptions, doc *vbaast.ParsedDocument) (DocumentIR, error) {
+	return BuildParsedContext(context.Background(), opts, doc)
+}
+
+// BuildParsedContext builds procedure IR from a caller-owned parse tree.
+// Cancellation is checked while the tree is locked so obsolete LSP work can
+// release ParsedDocument.Read promptly without publishing a partial result.
+func BuildParsedContext(ctx context.Context, opts BuildOptions, doc *vbaast.ParsedDocument) (DocumentIR, error) {
+	if err := ctx.Err(); err != nil {
+		return DocumentIR{}, err
+	}
 	var result DocumentIR
 	err := doc.Read(func(view vbaast.ParsedView) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		path := firstNonEmpty(opts.Path, view.Path, "Untitled.bas")
 		moduleName := firstNonEmpty(opts.ModuleName, moduleNameFromSource(path, view.Source))
 		moduleKind := firstNonEmpty(opts.ModuleKind, moduleKindFromPath(path))
 		display := displayPath(opts.RootDir, path)
 		builder := documentBuilder{
+			ctx:        ctx,
 			source:     view.Source,
 			file:       display,
 			moduleName: moduleName,
@@ -39,12 +62,14 @@ func BuildParsed(opts BuildOptions, doc *vbaast.ParsedDocument) (DocumentIR, err
 			nextDeclarationID: 1,
 		}
 		result = builder.build(view.Root)
-		return nil
+		return builder.err
 	})
 	return result, err
 }
 
 type documentBuilder struct {
+	ctx               context.Context
+	err               error
 	source            []byte
 	file              string
 	moduleName        string

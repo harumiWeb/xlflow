@@ -1,11 +1,14 @@
 package lspserver
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -34,7 +37,7 @@ func TestWorkspaceAnalysisIndexParsesOnceAndUpdatesOnlyChangedFile(t *testing.T)
 	}
 
 	counts := map[string]int{}
-	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
 		counts[file.Path]++
 		name := strings.Fields(string(source))[1]
 		name = strings.TrimSuffix(name, "()")
@@ -104,7 +107,7 @@ func TestCallGraphSnapshotUsesEffectiveTypeReferenceFacts(t *testing.T) {
 	if err := os.WriteFile(path, []byte("DiskType"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
 		name := strings.TrimSpace(string(source))
 		return indexedFileAnalysis{
 			path: file.Path, moduleKind: file.ModuleKind,
@@ -135,7 +138,7 @@ func TestCallGraphSnapshotPreservesPrivateProcedureVisibility(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	parse := func(file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
 		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 		entry := indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Kind: "module", Module: name, ModuleKind: "standard", File: file.Path}, {Name: map[string]string{"A": "Run", "B": "Work"}[name], Kind: "sub", Module: name, ModuleKind: "standard", File: file.Path, Range: intel.Range{Start: intel.Position{Line: 1}}}}}
 		if name == "A" {
@@ -152,6 +155,183 @@ func TestCallGraphSnapshotPreservesPrivateProcedureVisibility(t *testing.T) {
 	}
 	if len(snapshot.Calls) != 1 || snapshot.Calls[0].Resolution.Status != "unresolved" {
 		t.Fatalf("private cross-module call was resolved: %+v", snapshot.Calls)
+	}
+}
+
+func TestWorkspaceAnalysisIndexPendingOverlayMasksAndRejectsStalePublish(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub DiskName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: "DiskName", File: file.Path}}}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, ModuleKind: "standard", Version: 1, Source: "Sub OpenName()\nEnd Sub\n"}
+	index.beginOverlay(doc, 1)
+	if got, _ := index.searchExact("DiskName"); len(got) != 0 {
+		t.Fatalf("pending overlay exposed disk symbols: %+v", got)
+	}
+	doc.Version = 2
+	doc.Source = "Sub LatestName()\nEnd Sub\n"
+	index.beginOverlay(doc, 2)
+	stale := indexedFileAnalysis{symbols: []intel.Symbol{{Name: "StaleName", File: path}}}
+	if index.publishOverlay(doc, 1, stale) {
+		t.Fatal("stale overlay generation was published")
+	}
+	latest := indexedFileAnalysis{symbols: []intel.Symbol{{Name: "LatestName", File: path}}}
+	if !index.publishOverlay(doc, 2, latest) {
+		t.Fatal("latest overlay generation was rejected")
+	}
+	if got, _ := index.searchExact("LatestName"); len(got) != 1 {
+		t.Fatalf("latest overlay missing: %+v", got)
+	}
+	if got, _ := index.searchExact("StaleName"); len(got) != 0 {
+		t.Fatalf("stale overlay visible: %+v", got)
+	}
+}
+
+func TestWorkspaceAnalysisIndexPendingOverlayCancelsInitialDiskParse(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub DiskName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	parse := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return indexedFileAnalysis{}, ctx.Err()
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	index.start()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("initial disk parse did not start")
+	}
+
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, ModuleKind: "standard", Version: 1, Source: "Sub OpenName()\nEnd Sub\n"}
+	index.beginOverlay(doc, 1)
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("pending overlay did not cancel the initial disk parse")
+	}
+	if err := index.waitReady(); err != nil {
+		t.Fatalf("canceled masked disk parse failed initial scan: %v", err)
+	}
+	if got, err := index.searchExact("DiskName"); err != nil || len(got) != 0 {
+		t.Fatalf("canceled disk analysis leaked through pending overlay: %+v, %v", got, err)
+	}
+	if !index.publishOverlay(doc, 1, indexedFileAnalysis{symbols: []intel.Symbol{{Name: "OpenName", File: path}}}) {
+		t.Fatal("current overlay was rejected after canceling disk parse")
+	}
+	if got, err := index.searchExact("OpenName"); err != nil || len(got) != 1 {
+		t.Fatalf("published overlay missing: %+v, %v", got, err)
+	}
+}
+
+func TestWorkspaceAnalysisIndexCloseRefreshStaysMaskedUntilFreshDiskPublish(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub DiskName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{symbols: []intel.Symbol{{Name: "DiskName", File: file.Path}}}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, ModuleKind: "standard", Version: 1, Source: "Sub OpenName()\nEnd Sub\n"}
+	index.setOverlay(doc, indexedFileAnalysis{symbols: []intel.Symbol{{Name: "OpenName", File: path}}})
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	index.parse = func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		close(started)
+		<-release
+		return indexedFileAnalysis{symbols: []intel.Symbol{{Name: "FreshDiskName", File: file.Path}}}, nil
+	}
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, _, err := index.clearOverlay(path)
+		refreshDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("close refresh parse did not start")
+	}
+	for _, name := range []string{"OpenName", "DiskName", "FreshDiskName"} {
+		if got, err := index.searchExact(name); err != nil || len(got) != 0 {
+			t.Fatalf("%s visible during close refresh: %+v, %v", name, got, err)
+		}
+	}
+	close(release)
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := index.searchExact("FreshDiskName"); err != nil || len(got) != 1 {
+		t.Fatalf("fresh disk symbols missing after refresh: %+v, %v", got, err)
+	}
+}
+
+func TestServerDiskAnalysisUsesBackgroundAnalysisPermit(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.analysisPermits = make(chan struct{}, 1)
+	s.analysisPermits <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = s.parseIndexedFileContext(ctx, symbols.SourceFile{
+		Path: filepath.Join(root, "src", "modules", "Main.bas"), ModuleKind: "standard",
+	}, []byte("Sub Main()\nEnd Sub\n"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("disk analysis waiting on full permit = %v, want context.Canceled", err)
+	}
+	if got := len(s.analysisPermits); got != 1 {
+		t.Fatalf("disk analysis changed occupied permit count to %d, want 1", got)
+	}
+	<-s.analysisPermits
+}
+
+func TestDocumentVersionReusesMatchingSnapshotHash(t *testing.T) {
+	snapshot := intel.NewAnalysisSnapshot(intel.Document{URI: "file:///Main.bas", Path: "Main.bas", Source: "abc", ModuleKind: "standard", Version: 1})
+	defer snapshot.Retire()
+	doc := snapshot.Document()
+	before := snapshot.FullHashCount()
+	if got := documentVersion(doc); got != snapshot.SourceHash() {
+		t.Fatalf("document version = %q, want snapshot hash %q", got, snapshot.SourceHash())
+	}
+	if got := snapshot.FullHashCount() - before; got != 0 {
+		t.Fatalf("same-snapshot full hashes = %d, want 0", got)
+	}
+	stale := doc
+	stale.Source = "abd"
+	if sameScheduledDocument(doc, stale) {
+		t.Fatal("source-mutated snapshot view was treated as the same scheduled document")
 	}
 }
 
@@ -178,12 +358,11 @@ func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: protocol.DocumentUri(uri), Version: 1, Text: "Sub OpenName()\n  OpenTarget\nEnd Sub\n"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.analysis.searchExact("OpenName"); len(got) != 1 {
-		t.Fatalf("open overlay missing: %#v", got)
+	if got, _ := s.analysis.searchExact("SavedName"); len(got) != 0 {
+		t.Fatalf("pending open leaked saved symbol: %#v", got)
 	}
-	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: "OpenTarget"}); err != nil || len(got) != 1 {
-		t.Fatalf("open call overlay = %+v, %v", got, err)
-	}
+	waitForWorkspaceSymbol(t, s.analysis, "OpenName")
+	waitForWorkspaceCall(t, s.analysis, "OpenTarget")
 	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
 			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
@@ -195,9 +374,10 @@ func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: "ChangedTarget"}); err != nil || len(got) != 1 {
-		t.Fatalf("changed call overlay = %+v, %v", got, err)
+	if got, _ := s.analysis.searchExact("OpenName"); len(got) != 0 {
+		t.Fatalf("pending change leaked old overlay: %#v", got)
 	}
+	waitForWorkspaceCall(t, s.analysis, "ChangedTarget")
 	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{CalleeBase: "OpenTarget"}); err != nil || len(got) != 0 {
 		t.Fatalf("superseded open call remains = %+v, %v", got, err)
 	}
@@ -240,6 +420,32 @@ func TestWorkspaceAnalysisIndexWatcherAndOpenOverlay(t *testing.T) {
 	if got, err := s.analysis.queryResolvedCalls(workspaceCallQuery{}); err != nil || len(got) != 0 {
 		t.Fatalf("deleted calls remain = %+v, %v", got, err)
 	}
+}
+
+func waitForWorkspaceSymbol(t *testing.T, index *workspaceAnalysisIndex, name string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, err := index.searchExact(name); err == nil && len(got) == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	got, err := index.searchExact(name)
+	t.Fatalf("workspace symbol %q was not published: %+v, %v", name, got, err)
+}
+
+func waitForWorkspaceCall(t *testing.T, index *workspaceAnalysisIndex, name string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, err := index.queryResolvedCalls(workspaceCallQuery{CalleeBase: name}); err == nil && len(got) == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	got, err := index.queryResolvedCalls(workspaceCallQuery{CalleeBase: name})
+	t.Fatalf("workspace call %q was not published: %+v, %v", name, got, err)
 }
 
 func TestWorkspaceAnalysisIndexUserFormSidecarCallLifecycle(t *testing.T) {
@@ -396,7 +602,7 @@ func TestWorkspaceAnalysisIndexReresolvesCallsWithoutReparsingCaller(t *testing.
 
 	var mu sync.Mutex
 	counts := map[string]int{}
-	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
 		mu.Lock()
 		counts[file.Path]++
 		mu.Unlock()
@@ -474,7 +680,7 @@ func TestWorkspaceAnalysisIndexCallPostingsExcludeModuleCallsFromCallerAndSort(t
 			t.Fatal(err)
 		}
 	}
-	parse := func(file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
 		module := strings.TrimSuffix(filepath.Base(file.Path), ".bas")
 		caller := &calls.Caller{Name: "Run", Kind: "sub", QualifiedName: module + ".Run"}
 		if module == "B" {
@@ -516,7 +722,7 @@ func TestWorkspaceAnalysisIndexRejectsStaleDiskCandidateAfterOverlay(t *testing.
 	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
 		name := string(source)
 		if name == "Stale" {
 			close(entered)
@@ -569,7 +775,7 @@ func TestWorkspaceAnalysisIndexRejectsStaleDiskCandidateAfterDelete(t *testing.T
 	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
 		name := string(source)
 		if name == "Stale" {
 			close(entered)
@@ -618,7 +824,7 @@ func TestWorkspaceAnalysisIndexKeepsEffectiveEntryAfterParseFailure(t *testing.T
 	if err := os.WriteFile(path, []byte("Working"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	parse := func(file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
 		name := string(source)
 		if name == "Broken" {
 			return indexedFileAnalysis{}, os.ErrInvalid
@@ -656,7 +862,7 @@ func BenchmarkWorkspaceAnalysisIndexWarmCallQuery(b *testing.B) {
 	if err := os.WriteFile(path, []byte("benchmark"), 0o644); err != nil {
 		b.Fatal(err)
 	}
-	parse := func(file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
 		return indexedFileAnalysis{
 			path:    file.Path,
 			symbols: []intel.Symbol{{Name: "Target", Module: "Main", Kind: "sub"}},

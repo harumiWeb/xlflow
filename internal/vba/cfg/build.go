@@ -1,6 +1,7 @@
 package cfg
 
 import (
+	"context"
 	"sort"
 	"strings"
 
@@ -9,11 +10,24 @@ import (
 
 // BuildDocument builds one independent graph per procedure in source order.
 func BuildDocument(in procedureir.DocumentIR) Document {
+	out, _ := BuildDocumentContext(context.Background(), in)
+	return out
+}
+
+// BuildDocumentContext builds graphs with cooperative cancellation between procedures.
+func BuildDocumentContext(ctx context.Context, in procedureir.DocumentIR) (Document, error) {
 	out := Document{Path: in.Path, Graphs: make([]Graph, len(in.Procedures))}
 	for i := range in.Procedures {
-		out.Graphs[i] = Build(in.Procedures[i])
+		if err := ctx.Err(); err != nil {
+			return Document{}, err
+		}
+		graph, err := BuildContext(ctx, in.Procedures[i])
+		if err != nil {
+			return Document{}, err
+		}
+		out.Graphs[i] = graph
 	}
-	return out
+	return out, nil
 }
 
 type loopFrame struct {
@@ -22,6 +36,8 @@ type loopFrame struct {
 }
 
 type builder struct {
+	ctx       context.Context
+	err       error
 	procedure procedureir.ProcedureIR
 	graph     Graph
 	blockByID map[int]BlockID
@@ -33,8 +49,19 @@ type builder struct {
 
 // Build constructs a deterministic conservative graph for one procedure.
 func Build(in procedureir.ProcedureIR) Graph {
+	out, _ := BuildContext(context.Background(), in)
+	return out
+}
+
+// BuildContext constructs one graph and stops without returning partial data
+// when ctx is canceled.
+func BuildContext(ctx context.Context, in procedureir.ProcedureIR) (Graph, error) {
+	if err := ctx.Err(); err != nil {
+		return Graph{}, err
+	}
 	in = procedureir.CloneProcedureIR(in)
 	b := &builder{
+		ctx:       ctx,
 		procedure: in,
 		blockByID: map[int]BlockID{},
 		stmtByID:  map[int]procedureir.Statement{},
@@ -42,6 +69,9 @@ func Build(in procedureir.ProcedureIR) Graph {
 		labels:    map[string][]BlockID{},
 	}
 	b.initialize()
+	if b.canceled() {
+		return Graph{}, b.err
+	}
 	top := b.children[0]
 	entry := b.graph.NormalExit
 	if len(top) > 0 {
@@ -49,9 +79,32 @@ func Build(in procedureir.ProcedureIR) Graph {
 	}
 	b.add(b.graph.Entry, entry, EdgeFallthrough, EdgeNormal, false, nil)
 	b.addUnknownRecoveryFlow()
+	if b.canceled() {
+		return Graph{}, b.err
+	}
 	b.addExceptionalEdges()
+	if b.canceled() {
+		return Graph{}, b.err
+	}
 	b.finish()
-	return b.graph
+	if b.err != nil {
+		return Graph{}, b.err
+	}
+	if err := ctx.Err(); err != nil {
+		return Graph{}, err
+	}
+	return b.graph, nil
+}
+
+func (b *builder) canceled() bool {
+	if b.err != nil {
+		return true
+	}
+	if err := b.ctx.Err(); err != nil {
+		b.err = err
+		return true
+	}
+	return false
 }
 
 func (b *builder) initialize() {
@@ -77,6 +130,9 @@ func (b *builder) initialize() {
 	})
 	assignments := map[int][]Variable{}
 	for _, access := range b.procedure.Accesses {
+		if b.canceled() {
+			return
+		}
 		if access.StatementID == 0 ||
 			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
 			continue
@@ -85,6 +141,9 @@ func (b *builder) initialize() {
 			Variable{Scope: access.Scope, Name: access.Name})
 	}
 	for i := range statements {
+		if i&0xff == 0 && b.canceled() {
+			return
+		}
 		statement := statements[i]
 		id := BlockID(len(b.graph.Blocks) + 1)
 		copyStatement := statement
@@ -127,6 +186,9 @@ func appendVariable(in []Variable, variable Variable) []Variable {
 }
 
 func (b *builder) buildSequence(ids []int, continuation BlockID, loops []loopFrame) BlockID {
+	if b.canceled() {
+		return continuation
+	}
 	next := continuation
 	for i := len(ids) - 1; i >= 0; i-- {
 		next = b.buildStatement(ids[i], next, loops)
@@ -135,6 +197,9 @@ func (b *builder) buildSequence(ids []int, continuation BlockID, loops []loopFra
 }
 
 func (b *builder) buildStatement(statementID int, next BlockID, loops []loopFrame) BlockID {
+	if b.canceled() {
+		return next
+	}
 	statement := b.stmtByID[statementID]
 	block := b.blockByID[statementID]
 	control := statement.Control
@@ -484,10 +549,16 @@ const (
 )
 
 func (b *builder) addExceptionalEdges() {
+	if b.canceled() {
+		return
+	}
 	modes := map[BlockID]map[errorMode]bool{b.graph.Entry: {errorDisabled: true}}
 	b.propagateErrorModes(modes)
 	baseEdges := append([]Edge(nil), b.edges...)
 	for _, block := range b.graph.Blocks {
+		if b.canceled() {
+			return
+		}
 		if !b.isFaultSite(block) {
 			continue
 		}
@@ -523,6 +594,9 @@ func (b *builder) addExceptionalEdges() {
 	// the conservative outward failure transition to every normal-flow block
 	// reachable from a configured handler target.
 	for _, statement := range b.procedure.Statements {
+		if b.canceled() {
+			return
+		}
 		if statement.Control == nil || statement.Control.Transfer != procedureir.TransferOnErrorGoto {
 			continue
 		}
@@ -550,6 +624,9 @@ func (b *builder) propagateErrorModes(modes map[BlockID]map[errorMode]bool) {
 	queue := []BlockID{b.graph.Entry}
 	queued := map[BlockID]bool{b.graph.Entry: true}
 	for len(queue) > 0 {
+		if b.canceled() {
+			return
+		}
 		current := queue[0]
 		queue = queue[1:]
 		queued[current] = false

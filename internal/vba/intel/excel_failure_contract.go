@@ -1,6 +1,9 @@
 package intel
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // ExcelAPIFailureContract describes how an Excel member signals that a result
 // is unavailable. It intentionally models the member contract, rather than
@@ -32,16 +35,29 @@ type ExcelAPIFailureCall struct {
 // from source text, so late-bound Object members and unrelated project methods
 // with the same name are ignored.
 func (a Analyzer) ResolvedExcelAPIFailureCalls(doc Document) []ExcelAPIFailureCall {
+	out, _ := a.ResolvedExcelAPIFailureCallsContext(context.Background(), doc)
+	return out
+}
+
+func (a Analyzer) ResolvedExcelAPIFailureCallsContext(ctx context.Context, doc Document) ([]ExcelAPIFailureCall, error) {
 	if a.DB == nil {
-		return nil
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	index, ok := a.documentIndexFor(doc)
 	if !ok || index == nil {
-		return nil
+		return nil, nil
 	}
 	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	out := make([]ExcelAPIFailureCall, 0)
-	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		calls := callsOnLine(logicalLine.Text)
 		for _, call := range calls {
 			if !excelAPIFailureCallCandidate(call.Target) {
@@ -67,7 +83,7 @@ func (a Analyzer) ResolvedExcelAPIFailureCalls(doc Document) []ExcelAPIFailureCa
 			})
 		}
 	}
-	return out
+	return out, ctx.Err()
 }
 
 // excelAPIFailureCallCandidate avoids resolving every VBA call in a document.
@@ -100,9 +116,22 @@ func discardedCallResult(call parsedCall) bool {
 // to VBA218 diagnostics. Callers that have control-flow information can use
 // ResolvedExcelAPIFailureCalls directly to apply additional safe-path guards.
 func (a Analyzer) ExcelAPIFailureContractDiagnostics(doc Document) []Diagnostic {
-	calls := a.ResolvedExcelAPIFailureCalls(doc)
+	out, _ := a.ExcelAPIFailureContractDiagnosticsContext(context.Background(), doc)
+	return out
+}
+
+func (a Analyzer) ExcelAPIFailureContractDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
+	calls, err := a.ResolvedExcelAPIFailureCallsContext(ctx, doc)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Diagnostic, 0, len(calls))
-	for _, call := range calls {
+	for i, call := range calls {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if call.Contract == ExcelAPIFailureReturnsErrorValue && call.DirectIsError {
 			continue
 		}
@@ -116,7 +145,7 @@ func (a Analyzer) ExcelAPIFailureContractDiagnostics(doc Document) []Diagnostic 
 			Confidence: "high",
 		})
 	}
-	return out
+	return out, ctx.Err()
 }
 
 func excelAPIFailureContract(sig Signature) (ExcelAPIFailureContract, string, bool) {

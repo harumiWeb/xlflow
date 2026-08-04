@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -195,43 +196,73 @@ func (l Linter) lintFile(path string) ([]Issue, error) {
 // LintSource runs file-local lint rules against source content supplied by a
 // caller such as the LSP, where the editor buffer may not exist on disk yet.
 func (l Linter) LintSource(path string, source []byte) ([]Issue, error) {
-	return l.lintSource(path, source, false)
+	return l.LintSourceContext(context.Background(), path, source)
+}
+
+// LintSourceContext runs file-local rules with cooperative cancellation.
+func (l Linter) LintSourceContext(ctx context.Context, path string, source []byte) ([]Issue, error) {
+	return l.lintSourceContext(ctx, path, source, false)
 }
 
 // LintParsed runs file-local lint rules against a caller-owned parsed VBA
 // document. It does not close doc or retain tree-sitter nodes beyond each read.
 func (l Linter) LintParsed(doc *vbaast.ParsedDocument) ([]Issue, error) {
-	return l.lintParsed(doc, false)
+	return l.LintParsedContext(context.Background(), doc)
+}
+
+// LintParsedContext runs file-local rules against a caller-owned parse tree.
+func (l Linter) LintParsedContext(ctx context.Context, doc *vbaast.ParsedDocument) ([]Issue, error) {
+	return l.lintParsedContext(ctx, doc, false)
 }
 
 func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bool) ([]Issue, error) {
+	return l.lintSourceContext(context.Background(), path, source, includeFilesystemRules)
+}
+
+func (l Linter) lintSourceContext(ctx context.Context, path string, source []byte, includeFilesystemRules bool) ([]Issue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	doc, err := vbaast.ParseDocument(path, source)
 	if err != nil {
 		return nil, err
 	}
 	defer doc.Close()
-	return l.lintParsed(doc, includeFilesystemRules)
+	return l.lintParsedContext(ctx, doc, includeFilesystemRules)
 }
 
 func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bool) ([]Issue, error) {
+	return l.lintParsedContext(context.Background(), doc, includeFilesystemRules)
+}
+
+func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocument, includeFilesystemRules bool) ([]Issue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var path string
 	var source []byte
 	if err := doc.Read(func(view vbaast.ParsedView) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		path = view.Path
 		source = append([]byte(nil), view.Source...)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	issues, err := l.textSafetyIssues(path, string(source))
+	issues, err := l.textSafetyIssuesContext(ctx, path, string(source))
 	if err != nil {
 		return nil, err
 	}
 	issues = append(issues, l.standardModuleAttributeIssues(path, string(source))...)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	var sourceSymbols *symbols.FileResult
 	if sourceHasOptionExplicit(string(source)) || l.Config.Lint.DetectUnusedLocalVariables {
-		file, inspectErr := symbols.InspectParsed(symbols.SourceOptions{
+		file, inspectErr := symbols.InspectParsedContext(ctx, symbols.SourceOptions{
 			RootDir:        l.RootDir,
 			Path:           path,
 			IncludePrivate: true,
@@ -241,19 +272,41 @@ func (l Linter) lintParsed(doc *vbaast.ParsedDocument, includeFilesystemRules bo
 			sourceSymbols = &file
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := doc.Read(func(view vbaast.ParsedView) error {
-		ctx := astLintContext{linter: l, path: path, source: source}
-		ctx.lint(view.Root)
-		issues = append(issues, ctx.issues...)
+		lintCtx := astLintContext{ctx: ctx, linter: l, path: path, source: source}
+		lintCtx.lint(view.Root)
+		if lintCtx.err != nil {
+			return lintCtx.err
+		}
+		issues = append(issues, lintCtx.issues...)
 		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) ||
 			shouldReportStructuralParseIssue(string(source)) {
-			issues = append(issues, ctx.parseIssues(view.Root)...)
+			issues = append(issues, lintCtx.parseIssues(view.Root)...)
 		}
-		issues = append(issues, l.flowIssues(path, string(source), view.Root)...)
-		issues = append(issues, l.procedureNameConstantIssues(path, view.Root, source)...)
+		flowIssues, flowErr := l.flowIssuesContext(ctx, path, string(source), view.Root)
+		if flowErr != nil {
+			return flowErr
+		}
+		issues = append(issues, flowIssues...)
+		nameIssues, nameErr := l.procedureNameConstantIssuesContext(ctx, path, view.Root, source)
+		if nameErr != nil {
+			return nameErr
+		}
+		issues = append(issues, nameIssues...)
 		if sourceSymbols != nil {
-			issues = append(issues, l.undeclaredVariableIssues(path, string(source), view.Root, *sourceSymbols)...)
-			issues = append(issues, l.unusedLocalVariableIssues(path, string(source), *sourceSymbols)...)
+			undeclared, undeclaredErr := l.undeclaredVariableIssuesContext(ctx, path, string(source), view.Root, *sourceSymbols)
+			if undeclaredErr != nil {
+				return undeclaredErr
+			}
+			issues = append(issues, undeclared...)
+			unused, unusedErr := l.unusedLocalVariableIssuesContext(ctx, path, string(source), *sourceSymbols)
+			if unusedErr != nil {
+				return unusedErr
+			}
+			issues = append(issues, unused...)
 		}
 		return nil
 	}); err != nil {
@@ -342,6 +395,10 @@ func hasVBNameAttribute(source string) bool {
 }
 
 func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
+	return l.textSafetyIssuesContext(context.Background(), path, source)
+}
+
+func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source string) ([]Issue, error) {
 	var issues []Issue
 	procedures := make([]procedureFrame, 0)
 	inTypeBlock := false
@@ -350,6 +407,11 @@ func (l Linter) textSafetyIssues(path string, source string) ([]Issue, error) {
 	continuationCount := 0
 	lines := strings.Split(strings.ReplaceAll(source, "\r\n", "\n"), "\n")
 	for i, line := range lines {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		lineNo := i + 1
 		code := gui.StripComment(line)
 		detectionCode := maskStringLiterals(code)
@@ -439,6 +501,9 @@ func (l Linter) lineContinuationOverflowIssue(path string, lineNo int, logicalLi
 }
 
 type astLintContext struct {
+	ctx               context.Context
+	err               error
+	visited           uint64
 	linter            Linter
 	path              string
 	source            []byte
@@ -455,8 +520,15 @@ func (c *astLintContext) lint(root *tree_sitter.Node) {
 }
 
 func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType bool) {
-	if node == nil {
+	if node == nil || c.err != nil {
 		return
+	}
+	c.visited++
+	if c.visited&0xff == 0 {
+		if err := c.ctx.Err(); err != nil {
+			c.err = err
+			return
+		}
 	}
 	kind := node.Kind()
 	switch kind {
@@ -481,6 +553,9 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 		defer func() { c.withDepth-- }()
 	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if c.err != nil {
+			return
+		}
 		c.visit(node.NamedChild(i), inProcedure, inType)
 	}
 }
@@ -605,16 +680,26 @@ func (c *astLintContext) genericParseIssue(detail parserRecoveryDetail) Issue {
 }
 
 func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) []Issue {
+	issues, _ := l.flowIssuesContext(context.Background(), path, source, root)
+	return issues
+}
+
+func (l Linter) flowIssuesContext(ctx context.Context, path string, source string, root *tree_sitter.Node) ([]Issue, error) {
 	cfg := l.Config.Lint
 	if !cfg.DetectConfusingCallSyntax &&
 		!cfg.DetectForEachControlType &&
 		!cfg.DetectDangerousResume {
-		return nil
+		return nil, nil
 	}
 	lines := normalizedSourceLines(source)
 	procedures := sourceProceduresFromAST(root, []byte(source))
 	var issues []Issue
-	for _, proc := range procedures {
+	for i, proc := range procedures {
+		if i&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		decls := procedureDeclarations(lines, proc)
 		handlerLabels := onErrorHandlerLabels(lines, proc)
 		if cfg.DetectConfusingCallSyntax {
@@ -627,20 +712,35 @@ func (l Linter) flowIssues(path string, source string, root *tree_sitter.Node) [
 			issues = append(issues, l.dangerousResumeIssues(path, lines, proc, handlerLabels)...)
 		}
 	}
-	return issues
+	return issues, ctx.Err()
 }
 
 func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_sitter.Node, file symbols.FileResult) []Issue {
+	issues, _ := l.undeclaredVariableIssuesContext(context.Background(), path, source, root, file)
+	return issues
+}
+
+func (l Linter) undeclaredVariableIssuesContext(ctx context.Context, path string, source string, root *tree_sitter.Node, file symbols.FileResult) ([]Issue, error) {
 	if !sourceHasOptionExplicit(source) {
-		return nil
+		return nil, nil
 	}
 	scope := declarationScopeFromSymbols(file.Symbols)
 	lines := normalizedSourceLines(source)
 	scope.addTextDeclarations(lines, sourceProceduresFromAST(root, []byte(source)))
 	var issues []Issue
-	for _, proc := range scope.procedures {
+	for procIndex, proc := range scope.procedures {
+		if procIndex&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		declared := scope.declaredForProcedure(proc.Name)
 		for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
+			if i&0xff == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			lineNo := i + 1
 			code := maskStringLiterals(gui.StripComment(lines[i]))
 			for _, statement := range splitStatements(code) {
@@ -663,7 +763,7 @@ func (l Linter) undeclaredVariableIssues(path string, source string, root *tree_
 			}
 		}
 	}
-	return issues
+	return issues, ctx.Err()
 }
 
 type declarationScope struct {
@@ -1462,25 +1562,39 @@ func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {
 }
 
 func (l Linter) unusedLocalVariableIssues(path, source string, file symbols.FileResult) []Issue {
+	issues, _ := l.unusedLocalVariableIssuesContext(context.Background(), path, source, file)
+	return issues
+}
+
+func (l Linter) unusedLocalVariableIssuesContext(ctx context.Context, path, source string, file symbols.FileResult) ([]Issue, error) {
 	if !l.Config.Lint.DetectUnusedLocalVariables {
-		return nil
+		return nil, nil
 	}
 	var issues []Issue
-	for _, sym := range file.Symbols {
+	for i, sym := range file.Symbols {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if sym.Kind != "local_variable" && (sym.Kind != "const" || sym.Parent == "") {
 			continue
 		}
 		if isIgnoredLocalName(sym.Name) {
 			continue
 		}
-		if localNameReferenced(source, sym, procedureEndLineForSymbol(file.Symbols, sym)) {
+		referenced, err := localNameReferencedContext(ctx, source, sym, procedureEndLineForSymbol(file.Symbols, sym))
+		if err != nil {
+			return nil, err
+		}
+		if referenced {
 			continue
 		}
 		issue := l.issueForSymbol(sym, "VB020", "warning", "Procedure-local variable is declared but never referenced.")
 		issue.Symbol = sym.Name
 		issues = append(issues, issue)
 	}
-	return issues
+	return issues, ctx.Err()
 }
 
 func (l Linter) parameterShadowingIssues(file symbols.FileResult, moduleNames, procedureNames map[string]symbols.Symbol) []Issue {
@@ -1634,9 +1748,19 @@ func procedureEndLineForSymbol(all []symbols.Symbol, sym symbols.Symbol) int {
 }
 
 func localNameReferenced(source string, sym symbols.Symbol, endLine int) bool {
+	referenced, _ := localNameReferencedContext(context.Background(), source, sym, endLine)
+	return referenced
+}
+
+func localNameReferencedContext(ctx context.Context, source string, sym symbols.Symbol, endLine int) (bool, error) {
 	lines := normalizedSourceLines(source)
 	needle := sym.Name
 	for i := sym.StartLine - 1; i < len(lines); i++ {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+		}
 		lineNo := i + 1
 		if sym.Parent != "" && endLine > 0 && lineNo > endLine {
 			break
@@ -1647,11 +1771,11 @@ func localNameReferenced(source string, sym symbols.Symbol, endLine int) bool {
 				continue
 			}
 			if hasLocalReadUse(statement, needle) {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, ctx.Err()
 }
 
 func isLocalDeclarationStatement(statement string) bool {

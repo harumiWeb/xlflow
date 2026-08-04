@@ -73,7 +73,7 @@ type RealtimeFinding struct {
 // RealtimeFindingsFunc supplies analyzer-family findings for an already parsed
 // document. The LSP injects the source analyzer here; keeping it as a callback
 // lets batch analysis reuse typed VBA call resolution without an import cycle.
-type RealtimeFindingsFunc func(rootDir string, cfg config.Config, doc *ast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]RealtimeFinding, error)
+type RealtimeFindingsFunc func(ctx context.Context, rootDir string, cfg config.Config, doc *ast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]RealtimeFinding, error)
 
 type Document struct {
 	URI        string
@@ -216,7 +216,7 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 		return []Diagnostic{lineDiagnostic("VBA000", "error", 0, err.Error())}
 	}
 	defer closeParsed()
-	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintParsed(parsed)
+	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintParsedContext(ctx, parsed)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -236,16 +236,22 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	procedureIR, err := procedureIRForDocument(doc, a.RootDir, parsed)
+	procedureIR, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed)
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
-	controlFlow, err := controlFlowForDocument(doc, procedureIR)
+	controlFlow, err := controlFlowForDocumentContext(ctx, doc, procedureIR)
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
 	}
 	if a.RealtimeFindingsFunc != nil {
-		findings, err := a.RealtimeFindingsFunc(a.RootDir, a.Config, parsed, procedureIR, controlFlow)
+		findings, err := a.RealtimeFindingsFunc(ctx, a.RootDir, a.Config, parsed, procedureIR, controlFlow)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -276,27 +282,27 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.argumentDiagnostics(doc)...)
+	out = append(out, a.argumentDiagnosticsContext(ctx, doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.ByRefArgumentDiagnostics(doc)...)
+	out = append(out, a.ByRefArgumentDiagnosticsContext(ctx, doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.unknownMemberDiagnostics(doc)...)
+	out = append(out, a.unknownMemberDiagnosticsContext(ctx, doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.propertyAccessDiagnostics(doc)...)
+	out = append(out, a.propertyAccessDiagnosticsContext(ctx, doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.assignmentDiagnostics(doc)...)
+	out = append(out, a.assignmentDiagnosticsContext(ctx, doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
-	out = append(out, a.unresolvedMemberReceiverDiagnostics(doc)...)
+	out = append(out, a.unresolvedMemberReceiverDiagnosticsContext(ctx, doc)...)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -371,6 +377,17 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 	return a.documentSymbolsParsed(doc, parsed)
 }
 
+// DocumentSymbolsContext extracts source symbols with cooperative CST-walk
+// cancellation while preserving the snapshot's retryable lazy cache.
+func (a Analyzer) DocumentSymbolsContext(ctx context.Context, doc Document) ([]Symbol, error) {
+	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if err != nil {
+		return nil, err
+	}
+	defer closeParsed()
+	return a.documentSymbolsParsedContext(ctx, doc, parsed)
+}
+
 func (a Analyzer) documentSymbolsParsed(doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
 	load := func() ([]Symbol, error) {
 		return a.inspectDocumentSourceSymbols(doc, parsed)
@@ -394,8 +411,40 @@ func (a Analyzer) documentSymbolsParsed(doc Document, parsed *ast.ParsedDocument
 	return out, nil
 }
 
+func (a Analyzer) documentSymbolsParsedContext(ctx context.Context, doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	load := func() ([]Symbol, error) {
+		return a.inspectDocumentSourceSymbols(doc, parsed)
+	}
+	var sourceSymbols []Symbol
+	var err error
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		sourceSymbols, _, err = snapshot.SourceSymbolsContext(ctx, func(loadCtx context.Context) ([]Symbol, error) {
+			return a.inspectDocumentSourceSymbolsContext(loadCtx, doc, parsed)
+		})
+	} else if a.DocumentSymbolsFunc != nil {
+		sourceSymbols, err = a.DocumentSymbolsFunc(doc, load)
+	} else {
+		sourceSymbols, err = a.inspectDocumentSourceSymbolsContext(ctx, doc, parsed)
+	}
+	if err != nil {
+		return nil, err
+	}
+	controls := a.formControlSymbols(doc)
+	out := make([]Symbol, 0, len(sourceSymbols)+len(controls))
+	out = append(out, sourceSymbols...)
+	out = append(out, controls...)
+	return out, nil
+}
+
 func (a Analyzer) inspectDocumentSourceSymbols(doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
-	file, err := symbols.InspectParsed(symbols.SourceOptions{
+	return a.inspectDocumentSourceSymbolsContext(context.Background(), doc, parsed)
+}
+
+func (a Analyzer) inspectDocumentSourceSymbolsContext(ctx context.Context, doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
+	file, err := symbols.InspectParsedContext(ctx, symbols.SourceOptions{
 		RootDir:        a.RootDir,
 		Path:           doc.Path,
 		ModuleKind:     doc.ModuleKind,
@@ -1482,8 +1531,15 @@ func signatureFromSymbol(sym Symbol) Signature {
 }
 
 func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
+	return a.argumentDiagnosticsContext(context.Background(), doc)
+}
+
+func (a Analyzer) argumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	var out []Diagnostic
-	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		if i&0x3f == 0 && ctx.Err() != nil {
+			return nil
+		}
 		for _, call := range callsOnLine(logicalLine.Text) {
 			callRange := logicalLine.callRange(call)
 			call.DiagnosticRange = &callRange
@@ -1504,16 +1560,31 @@ func (a Analyzer) argumentDiagnostics(doc Document) []Diagnostic {
 // Diagnostics so batch and real-time analysis can share this typed path without
 // duplicating the rest of language-server diagnostics.
 func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnostic {
+	out, _ := a.StatefulExcelCallArgumentDiagnosticsContext(context.Background(), doc)
+	return out
+}
+
+// StatefulExcelCallArgumentDiagnosticsContext is the cancellable form used by
+// realtime analysis of large modules.
+func (a Analyzer) StatefulExcelCallArgumentDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, error) {
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.DB == nil {
-		return nil
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	index, ok := a.documentIndexFor(doc)
 	if !ok || index == nil {
-		return nil
+		return nil, nil
 	}
 	typeContext := newDocumentTypeContext(doc, documentLines(doc), nil, index)
 	var out []Diagnostic
-	for _, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+	for i, logicalLine := range logicalLinesForCallAnalysis(doc.Source) {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		for _, call := range callsOnLine(logicalLine.Text) {
 			wanted := statefulExcelCallParameters(statefulExcelCallMember(call.Target))
 			if len(wanted) == 0 {
@@ -1540,7 +1611,7 @@ func (a Analyzer) StatefulExcelCallArgumentDiagnostics(doc Document) []Diagnosti
 			})
 		}
 	}
-	return out
+	return out, ctx.Err()
 }
 
 func statefulExcelCallMember(target string) string {
@@ -1756,6 +1827,10 @@ func (a Analyzer) documentationDiagnosticsParsed(doc Document, parsed *ast.Parse
 }
 
 func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic {
+	return a.unresolvedMemberReceiverDiagnosticsContext(context.Background(), doc)
+}
+
+func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if !hasOptionExplicit(doc.Source) {
 		return nil
 	}
@@ -1763,6 +1838,9 @@ func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic
 	lines := documentLines(doc)
 	seen := map[string]bool{}
 	for lineNo, line := range lines {
+		if lineNo&0x3f == 0 && ctx.Err() != nil {
+			return nil
+		}
 		code := stripLineComment(line)
 		for _, call := range callsOnLine(code) {
 			receiver, _, ok := splitCallTarget(call.Target)
@@ -1788,6 +1866,10 @@ func (a Analyzer) unresolvedMemberReceiverDiagnostics(doc Document) []Diagnostic
 }
 
 func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
+	return a.unknownMemberDiagnosticsContext(context.Background(), doc)
+}
+
+func (a Analyzer) unknownMemberDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if a.DB == nil {
 		return nil
 	}
@@ -1795,6 +1877,9 @@ func (a Analyzer) unknownMemberDiagnostics(doc Document) []Diagnostic {
 	seen := map[string]bool{}
 	lines := documentLines(doc)
 	for lineNo, line := range lines {
+		if lineNo&0x3f == 0 && ctx.Err() != nil {
+			return nil
+		}
 		code := stripLineComment(line)
 		if isDeclarationLineForTypeDiagnostics(code) {
 			continue
@@ -2000,12 +2085,19 @@ func codeWithoutStringLiterals(line string) string {
 }
 
 func (a Analyzer) propertyAccessDiagnostics(doc Document) []Diagnostic {
+	return a.propertyAccessDiagnosticsContext(context.Background(), doc)
+}
+
+func (a Analyzer) propertyAccessDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if a.DB == nil {
 		return nil
 	}
 	var out []Diagnostic
 	lines := documentLines(doc)
 	for lineNo, line := range lines {
+		if lineNo&0x3f == 0 && ctx.Err() != nil {
+			return nil
+		}
 		code := stripLineComment(line)
 		if isDeclarationLineForTypeDiagnostics(code) {
 			continue
@@ -2114,12 +2206,19 @@ func propertyAccessDiagnostic(code, rule string, lineNo int, line string, exprSt
 }
 
 func (a Analyzer) assignmentDiagnostics(doc Document) []Diagnostic {
+	return a.assignmentDiagnosticsContext(context.Background(), doc)
+}
+
+func (a Analyzer) assignmentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	if a.DB == nil {
 		return nil
 	}
 	var out []Diagnostic
 	lines := documentLines(doc)
 	for lineNo, line := range lines {
+		if lineNo&0x3f == 0 && ctx.Err() != nil {
+			return nil
+		}
 		code := stripLineComment(line)
 		if isDeclarationLineForTypeDiagnostics(code) {
 			continue

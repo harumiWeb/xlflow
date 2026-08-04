@@ -1,6 +1,7 @@
 package procedureir
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -9,6 +10,15 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
+
+func TestBuildSourceContextReturnsCancellationWithoutPartialIR(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := BuildSourceContext(ctx, BuildOptions{Path: "Main.bas"}, []byte("Sub Main()\nEnd Sub\n"))
+	if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(result, DocumentIR{}) {
+		t.Fatalf("canceled result = (%+v, %v)", result, err)
+	}
+}
 
 func TestBuildSourceNormalizesProceduresStatementsCallsAndScopes(t *testing.T) {
 	t.Parallel()

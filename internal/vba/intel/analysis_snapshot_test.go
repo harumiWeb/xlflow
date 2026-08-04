@@ -1,8 +1,10 @@
 package intel
 
 import (
+	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -54,6 +56,139 @@ func TestAnalysisSnapshotIdentityLinesAndProcedures(t *testing.T) {
 	}
 	if name, scope := currentProcedureForDocument(view, Position{Line: 2}); name != "First" || scope == nil || scope.End.Line != 3 {
 		t.Fatalf("procedure lookup = (%q, %+v)", name, scope)
+	}
+}
+
+func TestAnalysisSnapshotMatchesSameBackingWithoutFullHash(t *testing.T) {
+	doc := Document{
+		URI: "file:///Main.bas", Path: "Main.bas", Version: 7,
+		ModuleKind: "standard", Source: strings.Repeat("Sub Main()\nEnd Sub\n", 64),
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+
+	if !snapshot.Matches(snapshot.Document()) {
+		t.Fatal("snapshot document did not match its immutable revision")
+	}
+	if got := snapshot.FullHashCount(); got != 0 {
+		t.Fatalf("full hash count = %d, want 0 for shared backing storage", got)
+	}
+}
+
+func TestAnalysisSnapshotMatchesSeparateAllocationWithHashFallback(t *testing.T) {
+	doc := Document{
+		URI: "file:///Main.bas", Path: "Main.bas", Version: 7,
+		ModuleKind: "standard", Source: strings.Repeat("Sub Main()\nEnd Sub\n", 64),
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	separate := doc
+	separate.Source = strings.Clone(doc.Source)
+
+	if !snapshot.Matches(separate) {
+		t.Fatal("equal source in separate backing storage did not match")
+	}
+	if got := snapshot.FullHashCount(); got != 1 {
+		t.Fatalf("full hash count = %d, want 1", got)
+	}
+}
+
+func TestAnalysisSnapshotRejectsChangedOrMismatchedRevision(t *testing.T) {
+	doc := Document{
+		URI: "file:///Main.bas", Path: "Main.bas", Version: 7,
+		ModuleKind: "standard", Source: "Sub Main()\n  Debug.Print 1\nEnd Sub\n",
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+
+	changed := doc
+	changed.Source = strings.Clone("Sub Main()\n  Debug.Print 2\nEnd Sub\n")
+	if snapshot.Matches(changed) {
+		t.Fatal("same-length changed source matched the old snapshot")
+	}
+	if got := snapshot.FullHashCount(); got != 1 {
+		t.Fatalf("full hash count after same-length source change = %d, want 1", got)
+	}
+
+	longer := doc
+	longer.Source += "' changed\n"
+	metadataChanges := []Document{
+		longer,
+		{URI: "file:///Other.bas", Path: doc.Path, Version: doc.Version, ModuleKind: doc.ModuleKind, Source: doc.Source},
+		{URI: doc.URI, Path: "Other.bas", Version: doc.Version, ModuleKind: doc.ModuleKind, Source: doc.Source},
+		{URI: doc.URI, Path: doc.Path, Version: doc.Version + 1, ModuleKind: doc.ModuleKind, Source: doc.Source},
+		{URI: doc.URI, Path: doc.Path, Version: doc.Version, ModuleKind: "class", Source: doc.Source},
+	}
+	for i, candidate := range metadataChanges {
+		if snapshot.Matches(candidate) {
+			t.Fatalf("metadata candidate %d matched the old snapshot", i)
+		}
+	}
+	if got := snapshot.FullHashCount(); got != 1 {
+		t.Fatalf("metadata or length mismatch performed a full hash: count = %d", got)
+	}
+}
+
+func TestAnalysisSnapshotMatchesEmptySourceWithoutFullHash(t *testing.T) {
+	doc := Document{URI: "file:///Empty.bas", Path: "Empty.bas", Version: 1}
+	snapshot := NewAnalysisSnapshot(doc)
+	if !snapshot.Matches(doc) {
+		t.Fatal("empty source did not match")
+	}
+	if got := snapshot.FullHashCount(); got != 0 {
+		t.Fatalf("full hash count = %d, want 0", got)
+	}
+}
+
+func TestAnalysisSnapshotMatchesConcurrentReaders(t *testing.T) {
+	doc := Document{
+		URI: "file:///Main.bas", Path: "Main.bas", Version: 1,
+		Source: strings.Repeat("Sub Main()\nEnd Sub\n", 64),
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	shared := snapshot.Document()
+	separate := doc
+	separate.Source = strings.Clone(doc.Source)
+
+	const readers = 32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			if !snapshot.Matches(shared) {
+				t.Error("shared source did not match")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			if !snapshot.Matches(separate) {
+				t.Error("separately allocated equal source did not match")
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := snapshot.FullHashCount(); got != readers {
+		t.Fatalf("full hash count = %d, want %d", got, readers)
+	}
+}
+
+func TestAnalysisSnapshotRetireInvalidatesRevisionIdentity(t *testing.T) {
+	doc := Document{URI: "file:///Main.bas", Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n", Version: 1}
+	closed := NewAnalysisSnapshot(doc)
+	closedView := closed.Document()
+	closed.Retire()
+	if closed.Matches(closedView) || analysisSnapshotForDocument(closedView) != nil {
+		t.Fatal("retired snapshot remained usable as a current revision")
+	}
+
+	reopened := NewAnalysisSnapshot(doc)
+	if !reopened.Matches(reopened.Document()) {
+		t.Fatal("reopened snapshot did not match its own revision")
+	}
+	if closed.Matches(reopened.Document()) {
+		t.Fatal("retired snapshot matched a reopened document")
 	}
 }
 
@@ -318,6 +453,78 @@ func TestAnalysisSnapshotCachesDeterministicProcedureIRError(t *testing.T) {
 	}
 }
 
+func TestAnalysisSnapshotProcedureIRCanceledBuildIsRetryable(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "Sub Main()\nEnd Sub\n", Version: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var loads atomic.Int32
+	_, hit, err := snapshot.ProcedureIRContext(ctx, func(context.Context) (procedureir.DocumentIR, error) {
+		loads.Add(1)
+		return procedureir.DocumentIR{}, context.Canceled
+	})
+	if !errors.Is(err, context.Canceled) || hit || loads.Load() != 0 {
+		t.Fatalf("pre-canceled build = (loads=%d, hit=%v, err=%v)", loads.Load(), hit, err)
+	}
+	result, hit, err := snapshot.ProcedureIRContext(context.Background(), func(context.Context) (procedureir.DocumentIR, error) {
+		loads.Add(1)
+		return procedureir.DocumentIR{Path: "Main.bas"}, nil
+	})
+	if err != nil || hit || result.Path != "Main.bas" || loads.Load() != 1 {
+		t.Fatalf("retry = (result=%+v, loads=%d, hit=%v, err=%v)", result, loads.Load(), hit, err)
+	}
+}
+
+func TestAnalysisSnapshotSourceSymbolsCanceledBuildIsRetryable(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "Sub Main()\nEnd Sub\n", Version: 1})
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := snapshot.SourceSymbolsContext(ctx, func(loadCtx context.Context) ([]Symbol, error) {
+			close(started)
+			<-loadCtx.Done()
+			return nil, loadCtx.Err()
+		})
+		done <- err
+	}()
+	<-started
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled symbol build error = %v", err)
+	}
+	want := []Symbol{{Name: "Main", Kind: "sub"}}
+	got, hit, err := snapshot.SourceSymbols(func() ([]Symbol, error) { return want, nil })
+	if err != nil || hit || !reflect.DeepEqual(got, want) {
+		t.Fatalf("symbol retry = (got=%+v, hit=%v, err=%v)", got, hit, err)
+	}
+}
+
+func TestAnalysisSnapshotProcedureIRRunningCancellationDoesNotPoisonCache(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "Sub Main()\nEnd Sub\n", Version: 1})
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := snapshot.ProcedureIRContext(ctx, func(loadCtx context.Context) (procedureir.DocumentIR, error) {
+			close(started)
+			<-loadCtx.Done()
+			return procedureir.DocumentIR{}, loadCtx.Err()
+		})
+		done <- err
+	}()
+	<-started
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("build error = %v", err)
+	}
+	result, hit, err := snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		return procedureir.DocumentIR{Path: "retried.bas"}, nil
+	})
+	if err != nil || hit || result.Path != "retried.bas" {
+		t.Fatalf("retry = (result=%+v, hit=%v, err=%v)", result, hit, err)
+	}
+}
+
 func TestAnalysisSnapshotControlFlowIsLazyConcurrentAndDefensive(t *testing.T) {
 	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n", Version: 1})
 	var loads atomic.Int32
@@ -388,6 +595,24 @@ func TestAnalysisSnapshotCachesDeterministicControlFlowError(t *testing.T) {
 	}
 	if loads.Load() != 1 {
 		t.Fatalf("loads = %d, want 1", loads.Load())
+	}
+}
+
+func TestAnalysisSnapshotControlFlowCanceledBuildIsRetryable(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Source: "Sub Main()\nEnd Sub\n", Version: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, hit, err := snapshot.ControlFlowGraphsContext(ctx, func(context.Context) (vbacfg.Document, error) {
+		return vbacfg.Document{}, context.Canceled
+	})
+	if !errors.Is(err, context.Canceled) || hit {
+		t.Fatalf("canceled build = (hit=%v, err=%v)", hit, err)
+	}
+	result, hit, err := snapshot.ControlFlowGraphs(func() (vbacfg.Document, error) {
+		return vbacfg.Document{Path: "retried.bas"}, nil
+	})
+	if err != nil || hit || result.Path != "retried.bas" {
+		t.Fatalf("retry = (result=%+v, hit=%v, err=%v)", result, hit, err)
 	}
 }
 

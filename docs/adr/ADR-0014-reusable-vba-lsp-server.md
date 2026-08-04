@@ -54,6 +54,19 @@ xlflow-owned source formats.
   snapshot rejects new readers and closes its tree only after active readers
   complete. Candidate snapshots publish only when their captured document
   generation and lifecycle still match the open document.
+- Keep `didOpen` and `didChange` non-blocking with respect to derived analysis.
+  They synchronously register the current immutable snapshot, reserve
+  its document generation, and schedule background workspace-overlay and
+  diagnostics work; they do not wait for that work to finish.
+- While an open document's workspace overlay is pending, mask both its saved
+  filesystem entry and its previously published overlay. Workspace-wide queries
+  may therefore omit that document temporarily, but must not return stale
+  symbols or calls. Document-local requests continue to read the current
+  immutable snapshot directly.
+- Permit only the latest matching document generation, lifecycle, and snapshot
+  to publish derived workspace or diagnostic results. Superseding changes,
+  close, reopen, and shutdown cancel obsolete work; canceled derived-artifact
+  builds remain retryable and are never cached as completed results.
 - On unreconcilable edit coordinates or invalid version ordering, retain the
   last valid snapshot until a later full-document replacement can resynchronize
   it. When a valid new source cannot use an old tree, parse it completely and
@@ -79,6 +92,8 @@ The VS Code extension should remain a thin language client that launches:
   stdio transport.
 - Positive: Unsaved editor buffers can be diagnosed and queried without writing
   temporary source files.
+- Positive: Opening or changing a very large VBA module does not make document
+  lifecycle notifications wait for full workspace and diagnostic analysis.
 - Negative: The main binary now carries LSP protocol and JSON-RPC dependencies.
 - Negative: URI, path normalization, and UTF-16 position conversion become part
   of xlflow's long-lived compatibility surface.
@@ -87,6 +102,9 @@ The VS Code extension should remain a thin language client that launches:
 - Negative: Incremental parsing needs temporary cloned trees and eagerly parses
   changed revisions; this trades a small per-edit allocation for safely
   reusing unchanged syntax structure without exposing mutable trees to readers.
+- Negative: Workspace-wide queries are conservatively incomplete while an open
+  document's newest overlay is still being built, and results become complete
+  only after background publication succeeds.
 - Negative: Each supported non-VBA document kind needs an explicit analyzer
   adapter and must not fall through to VBA symbols, semantic tokens, or edits.
 - Negative: The curated COM database requires maintenance until a TypeLib

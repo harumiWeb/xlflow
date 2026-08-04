@@ -1,12 +1,23 @@
 package cfg
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestBuildDocumentContextReturnsCancellationWithoutPartialGraphs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := BuildDocumentContext(ctx, procedureir.DocumentIR{Path: "Main.bas", Procedures: []procedureir.ProcedureIR{{}}})
+	if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(result, Document{}) {
+		t.Fatalf("canceled result = (%+v, %v)", result, err)
+	}
+}
 
 func TestBuildDocumentIsDeterministicAndCloneIsDefensive(t *testing.T) {
 	t.Parallel()

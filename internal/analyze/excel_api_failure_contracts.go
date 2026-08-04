@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"regexp"
 	"strings"
 
@@ -18,12 +19,20 @@ var (
 // diagnostics to analyzer findings and applies the procedure-local safeguards
 // that need source control-flow context.
 func (a Analyzer) excelAPIFailureContractFindings(file parsedFile) []Finding {
+	out, _ := a.excelAPIFailureContractFindingsContext(context.Background(), file)
+	return out
+}
+
+func (a Analyzer) excelAPIFailureContractFindingsContext(ctx context.Context, file parsedFile) ([]Finding, error) {
 	if !a.Config.Analyze.DetectExcelAPIFailureContracts || a.typeDB == nil {
-		return nil
+		return nil, nil
 	}
-	diagnostics := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).ExcelAPIFailureContractDiagnostics(file.intelDocument())
+	diagnostics, err := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).ExcelAPIFailureContractDiagnosticsContext(ctx, file.intelDocument())
+	if err != nil {
+		return nil, err
+	}
 	if len(diagnostics) == 0 {
-		return nil
+		return nil, nil
 	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	aliases := a.errorGuardAliases
@@ -31,7 +40,12 @@ func (a Analyzer) excelAPIFailureContractFindings(file parsedFile) []Finding {
 		aliases = isErrorGuardAliases(file.Lines)
 	}
 	out := make([]Finding, 0, len(diagnostics))
-	for _, diagnostic := range diagnostics {
+	for i, diagnostic := range diagnostics {
+		if i&0x3f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := procedureForLine(procedures, line, len(file.Lines))
 		if isExceptionContractDiagnostic(diagnostic.Message) && exceptionContractHasErrorStrategy(file.Lines, proc, line) {
@@ -49,7 +63,7 @@ func (a Analyzer) excelAPIFailureContractFindings(file parsedFile) []Finding {
 		finding.EndColumn = diagnostic.Range.End.Character + 1
 		out = append(out, finding)
 	}
-	return out
+	return out, ctx.Err()
 }
 
 func procedureForLine(procedures []sourceProcedure, line, lineCount int) sourceProcedure {
@@ -174,15 +188,20 @@ func projectIsErrorGuardAliases(files []parsedFile) map[string]bool {
 // The wrapper's own exception is handled, but an unchecked returned sentinel
 // remains unsafe at the caller.
 func (a Analyzer) errorValueWrapperFindings(file parsedFile) []Finding {
+	out, _ := a.errorValueWrapperFindingsContext(context.Background(), file)
+	return out
+}
+
+func (a Analyzer) errorValueWrapperFindingsContext(ctx context.Context, file parsedFile) ([]Finding, error) {
 	if !a.Config.Analyze.DetectExcelAPIFailureContracts {
-		return nil
+		return nil, nil
 	}
 	wrappers := a.errorValueWrappers
 	if wrappers == nil {
 		wrappers = errorValueWrappersForFile(file, false)
 	}
 	if len(wrappers) == 0 {
-		return nil
+		return nil, nil
 	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	aliases := a.errorGuardAliases
@@ -190,7 +209,12 @@ func (a Analyzer) errorValueWrapperFindings(file parsedFile) []Finding {
 		aliases = isErrorGuardAliases(file.Lines)
 	}
 	var findings []Finding
-	for _, irProcedure := range file.IR.Procedures {
+	for i, irProcedure := range file.IR.Procedures {
+		if i&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		proc := procedureForLine(procedures, irProcedure.Symbol.DeclarationRange.StartLine+1, len(file.Lines))
 		for _, call := range irProcedure.Calls {
 			if !wrapperCallMatches(call, wrappers) {
@@ -212,7 +236,7 @@ func (a Analyzer) errorValueWrapperFindings(file parsedFile) []Finding {
 			findings = append(findings, finding)
 		}
 	}
-	return findings
+	return findings, ctx.Err()
 }
 
 func projectErrorValueWrappers(files []parsedFile) map[string]bool {
