@@ -104,3 +104,47 @@ func TestFastDiagnosticsRebasesUnchangedProcedureDiagnostics(t *testing.T) {
 	}
 	t.Fatalf("unchanged procedure diagnostic was not preserved: %+v", result.Diagnostics)
 }
+
+func TestFastDiagnosticsFallsBackForBroadInvalidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		oldSource  string
+		newSource  string
+		changeLine int
+		want       int
+	}{
+		{
+			name:       "module declaration",
+			oldSource:  "Public sharedValue As Long\nSub A()\nEnd Sub\nSub B()\nEnd Sub\n",
+			newSource:  "Public sharedValue As String\nSub A()\nEnd Sub\nSub B()\nEnd Sub\n",
+			changeLine: 0,
+			want:       2,
+		},
+		{
+			name:       "conditional compilation inside procedure",
+			oldSource:  "Sub A()\n#If VBA7 Then\n#End If\nEnd Sub\nSub B()\nEnd Sub\n",
+			newSource:  "Sub A()\n#If Win64 Then\n#End If\nEnd Sub\nSub B()\nEnd Sub\n",
+			changeLine: 1,
+			want:       2,
+		},
+		{
+			name:       "procedure signature",
+			oldSource:  "Sub A()\nEnd Sub\nSub B()\nEnd Sub\n",
+			newSource:  "Sub A(ByVal value As Long)\nEnd Sub\nSub B()\nEnd Sub\n",
+			changeLine: 0,
+			want:       1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			oldCatalog := procedureCatalogForDocument(Document{Path: "Module1.bas", Source: test.oldSource, ModuleKind: "standard"})
+			cache := buildDiagnosticCache(oldCatalog, nil)
+			newCatalog := procedureCatalogForDocument(Document{Path: "Module1.bas", Source: test.newSource, ModuleKind: "standard"})
+			changed := changedProcedureEntries(newCatalog, cache, ProcedureChangeSet{Ranges: []Range{{Start: Position{Line: test.changeLine}, End: Position{Line: test.changeLine}}}})
+			if len(changed) != test.want {
+				t.Fatalf("changed procedures = %d, want %d: %+v", len(changed), test.want, changed)
+			}
+		})
+	}
+}

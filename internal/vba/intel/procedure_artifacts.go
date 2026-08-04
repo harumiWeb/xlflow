@@ -66,7 +66,17 @@ func (s *AnalysisSnapshot) seedProcedureArtifacts(ir procedureir.DocumentIR) {
 	}
 	s.artifacts.mu.Lock()
 	defer s.artifacts.mu.Unlock()
+	currentKeys := make(map[procedureArtifactKey]struct{}, len(catalog.Entries))
+	for _, entry := range catalog.Entries {
+		currentKeys[artifactKey(entry, catalog)] = struct{}{}
+	}
+	for existing := range s.artifacts.ir {
+		if _, current := currentKeys[existing]; !current {
+			delete(s.artifacts.ir, existing)
+		}
+	}
 	for i, entry := range catalog.Entries {
+		key := artifactKey(entry, catalog)
 		procedure := ir.Procedures[i]
 		fragment := procedureIRFragment{base: procedure.Symbol.DeclarationRange, procedure: procedureir.CloneProcedureIR(procedure)}
 		for _, reference := range ir.TypeReferences {
@@ -74,7 +84,7 @@ func (s *AnalysisSnapshot) seedProcedureArtifacts(ir procedureir.DocumentIR) {
 				fragment.typeReferences = append(fragment.typeReferences, reference)
 			}
 		}
-		s.artifacts.ir[artifactKey(entry, catalog)] = fragment
+		s.artifacts.ir[key] = fragment
 	}
 }
 
@@ -183,13 +193,23 @@ func (s *AnalysisSnapshot) seedCFGArtifacts(ir procedureir.DocumentIR, document 
 		return
 	}
 	catalog := procedureCatalogForDocument(s.Document())
-	if len(catalog.Entries) != len(document.Graphs) {
+	if !catalog.ReuseSafe || len(catalog.Entries) != len(document.Graphs) {
 		return
 	}
 	s.artifacts.mu.Lock()
 	defer s.artifacts.mu.Unlock()
+	currentKeys := make(map[procedureArtifactKey]struct{}, len(catalog.Entries))
+	for _, entry := range catalog.Entries {
+		currentKeys[artifactKey(entry, catalog)] = struct{}{}
+	}
+	for existing := range s.artifacts.cfg {
+		if _, current := currentKeys[existing]; !current {
+			delete(s.artifacts.cfg, existing)
+		}
+	}
 	for i, entry := range catalog.Entries {
-		s.artifacts.cfg[artifactKey(entry, catalog)] = vbacfg.Clone(document.Graphs[i])
+		key := artifactKey(entry, catalog)
+		s.artifacts.cfg[key] = vbacfg.Clone(document.Graphs[i])
 	}
 }
 
@@ -198,7 +218,7 @@ func (s *AnalysisSnapshot) incrementalCFG(ctx context.Context, ir procedureir.Do
 		return vbacfg.Document{}, false, nil
 	}
 	catalog := procedureCatalogForDocument(s.Document())
-	if len(catalog.Entries) != len(ir.Procedures) {
+	if !catalog.ReuseSafe || len(catalog.Entries) != len(ir.Procedures) {
 		return vbacfg.Document{}, false, nil
 	}
 	result := vbacfg.Document{Path: ir.Path, Graphs: make([]vbacfg.Graph, 0, len(ir.Procedures))}

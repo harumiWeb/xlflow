@@ -275,7 +275,7 @@ func NewDiagnosticCache(doc Document, diagnostics []Diagnostic) *DiagnosticCache
 }
 
 func changedProcedureEntries(catalog ProcedureCatalog, previous *DiagnosticCache, changes ProcedureChangeSet) []ProcedureCatalogEntry {
-	if previous == nil || !catalog.ReuseSafe || !previous.Catalog.ReuseSafe || catalog.ModuleContextHash != previous.Catalog.ModuleContextHash || catalog.ConditionalHash != previous.Catalog.ConditionalHash {
+	if previous == nil {
 		if len(changes.Ranges) > 0 {
 			var selected []ProcedureCatalogEntry
 			for _, entry := range catalog.Entries {
@@ -290,6 +290,9 @@ func changedProcedureEntries(catalog ProcedureCatalog, previous *DiagnosticCache
 				return selected
 			}
 		}
+		return append([]ProcedureCatalogEntry(nil), catalog.Entries...)
+	}
+	if !catalog.ReuseSafe || !previous.Catalog.ReuseSafe || catalog.ModuleContextHash != previous.Catalog.ModuleContextHash || catalog.ConditionalHash != previous.Catalog.ConditionalHash {
 		return append([]ProcedureCatalogEntry(nil), catalog.Entries...)
 	}
 	old := make(map[ProcedureIdentity]ProcedureCatalogEntry, len(previous.Catalog.Entries))

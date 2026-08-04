@@ -218,7 +218,10 @@ context. Materialization rebases every `ast.Range` from the declaration start,
 orders procedures by current source, and reassigns document declaration IDs.
 Canceled, panicked, recovered, ambiguous, and in-progress builds are retryable
 and are never inherited. A full replacement within the same lifecycle may
-reuse fragments; close/reopen may not.
+reuse fragments; close/reopen may not. After a successful IR or CFG build, the
+store retains only the current cache key for each procedure identity. Obsolete
+source or module-context variants are pruned so repeated edits cannot grow the
+successor store with unreachable revision artifacts.
 
 Module declarations and conditional-compilation directives are hashed
 separately from procedure bodies. A module-context change invalidates semantic

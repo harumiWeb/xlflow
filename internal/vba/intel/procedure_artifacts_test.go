@@ -2,6 +2,7 @@ package intel
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -83,5 +84,83 @@ func TestCloseReopenSnapshotDoesNotInheritProcedureArtifacts(t *testing.T) {
 	defer second.Retire()
 	if len(second.artifacts.ir) != 0 || len(second.artifacts.cfg) != 0 {
 		t.Fatal("fresh close/reopen snapshot inherited procedure artifacts")
+	}
+}
+
+func TestProcedureArtifactStorePrunesObsoleteRevisions(t *testing.T) {
+	newSource := func(value int) string {
+		if value == 25 {
+			return fmt.Sprintf("Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\n  Dim x As Long\n  x = %d\nEnd Sub\n", value)
+		}
+		return fmt.Sprintf("Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\n  Dim x As Long\n  x = %d\nEnd Sub\nSub B()\n  Dim y As Long\n  y = 2\nEnd Sub\n", value)
+	}
+
+	var previous *AnalysisSnapshot
+	for revision := 1; revision <= 25; revision++ {
+		source := newSource(revision)
+		doc := Document{Path: "Module1.bas", Source: source, ModuleKind: "standard", Version: int32(revision)}
+		parsed, err := vbaast.ParseDocument(doc.Path, []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := NewSuccessorAnalysisSnapshotWithParsedDocument(doc, parsed, previous)
+		if previous != nil {
+			previous.Retire()
+		}
+		doc = current.Document()
+		ir, err := procedureIRForDocumentContext(context.Background(), doc, ".", parsed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := controlFlowForDocumentContext(context.Background(), doc, ir); err != nil {
+			t.Fatal(err)
+		}
+		current.artifacts.mu.RLock()
+		irCount, cfgCount := len(current.artifacts.ir), len(current.artifacts.cfg)
+		current.artifacts.mu.RUnlock()
+		want := 2
+		if revision == 25 {
+			want = 1
+		}
+		if irCount != want || cfgCount != want {
+			current.Retire()
+			t.Fatalf("revision %d artifact counts = (IR %d, CFG %d), want (%d, %d)", revision, irCount, cfgCount, want, want)
+		}
+		previous = current
+	}
+	previous.Retire()
+}
+
+func TestRecoveredSnapshotDoesNotReuseCFGFragments(t *testing.T) {
+	validSource := "Sub A()\n  If True Then\n  End If\nEnd Sub\nSub B()\nEnd Sub\n"
+	validDoc := Document{Path: "Module1.bas", Source: validSource, ModuleKind: "standard", Version: 1}
+	validSnapshot := NewAnalysisSnapshot(validDoc)
+	validDoc = validSnapshot.Document()
+	parsed, err := validSnapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ir, err := procedureIRForDocumentContext(context.Background(), validDoc, ".", parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controlFlowForDocumentContext(context.Background(), validDoc, ir); err != nil {
+		t.Fatal(err)
+	}
+
+	recoveredSource := "Public Function A(ByVal value As String\nEnd Function\nSub B()\nEnd Sub\n"
+	recoveredDoc := Document{Path: validDoc.Path, Source: recoveredSource, ModuleKind: validDoc.ModuleKind, Version: 2}
+	recoveredParsed, err := vbaast.ParseDocument(recoveredDoc.Path, []byte(recoveredSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveredSnapshot := NewSuccessorAnalysisSnapshotWithParsedDocument(recoveredDoc, recoveredParsed, validSnapshot)
+	validSnapshot.Retire()
+	defer recoveredSnapshot.Retire()
+	if procedureCatalogForDocument(recoveredSnapshot.Document()).ReuseSafe {
+		t.Fatal("recovered procedure catalog unexpectedly allowed fragment reuse")
+	}
+	if _, reused, err := recoveredSnapshot.incrementalCFG(context.Background(), ir); err != nil || reused {
+		t.Fatalf("recovered CFG reuse = (reused=%v, err=%v), want conservative fallback", reused, err)
 	}
 }
