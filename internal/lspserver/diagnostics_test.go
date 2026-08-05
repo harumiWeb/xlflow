@@ -73,7 +73,10 @@ func TestFastDiagnosticsAreCompletelyReplacedByFullDiagnostics(t *testing.T) {
 	defer cleanup()
 	notifications := &diagnosticNotificationRecorder{}
 	ctx := diagnosticTestContext(notifications)
-	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+	s.diagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		if request.Mode == intel.DiagnosticModeFull {
+			return intel.DiagnosticResult{Diagnostics: s.diagnostics(ctx, request.Document)}
+		}
 		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{Code: "FAST", Severity: "warning", Message: fmt.Sprintf("fast %d", request.Document.Version)}}}
 	}
 	s.diagnostics = func(_ context.Context, doc intel.Document) []intel.Diagnostic {
@@ -107,7 +110,10 @@ func TestEditingCancelsRunningFullBeforeLatestFastPublishes(t *testing.T) {
 	ctx := diagnosticTestContext(notifications)
 	fullStarted := make(chan struct{})
 	fullCanceled := make(chan struct{})
-	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+	s.diagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		if request.Mode == intel.DiagnosticModeFull {
+			return intel.DiagnosticResult{Diagnostics: s.diagnostics(ctx, request.Document)}
+		}
 		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{Code: "FAST", Severity: "warning", Message: fmt.Sprintf("fast %d", request.Document.Version)}}}
 	}
 	s.diagnostics = func(runCtx context.Context, doc intel.Document) []intel.Diagnostic {
@@ -241,6 +247,9 @@ func TestFirstOpenProcedureRemovalSchedulesDependentCallerDiagnostics(t *testing
 	s.diagnostics = func(_ context.Context, doc intel.Document) []intel.Diagnostic {
 		runs <- filepath.Base(doc.Path)
 		return nil
+	}
+	s.diagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		return intel.DiagnosticResult{Diagnostics: s.diagnostics(ctx, request.Document)}
 	}
 	ctx := diagnosticTestContext(nil)
 	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{

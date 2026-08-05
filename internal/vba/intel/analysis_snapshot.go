@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -46,9 +47,11 @@ type AnalysisSnapshot struct {
 	lineStarts []int
 	lineEnds   []int
 
-	proceduresOnce sync.Once
-	procedures     []ProcedureInfo
-	procedureLines []int
+	proceduresOnce       sync.Once
+	procedures           []ProcedureInfo
+	procedureLines       []int
+	procedureCatalogOnce sync.Once
+	procedureCatalog     ProcedureCatalog
 
 	symbolsMu   sync.Mutex
 	symbolsWait chan struct{}
@@ -372,10 +375,13 @@ func (s *AnalysisSnapshot) SourceSymbolsContext(ctx context.Context, load func(c
 		if s.symbolsWait != nil {
 			wait := s.symbolsWait
 			s.symbolsMu.Unlock()
+			finishWait := analysisstats.MeasureWait(ctx, "symbols_singleflight")
 			select {
 			case <-ctx.Done():
+				finishWait(ctx.Err())
 				return nil, false, ctx.Err()
 			case <-wait:
+				finishWait(nil)
 			}
 			continue
 		}
@@ -451,10 +457,13 @@ func (s *AnalysisSnapshot) ProcedureIRContext(ctx context.Context, load func(con
 		if s.procedureIRWait != nil {
 			wait := s.procedureIRWait
 			s.procedureIRMu.Unlock()
+			finishWait := analysisstats.MeasureWait(ctx, "procedure_ir_singleflight")
 			select {
 			case <-ctx.Done():
+				finishWait(ctx.Err())
 				return procedureir.DocumentIR{}, false, ctx.Err()
 			case <-wait:
+				finishWait(nil)
 			}
 			continue
 		}
@@ -512,10 +521,13 @@ func (s *AnalysisSnapshot) ControlFlowGraphsContext(ctx context.Context, load fu
 		if s.controlFlowWait != nil {
 			wait := s.controlFlowWait
 			s.controlFlowMu.Unlock()
+			finishWait := analysisstats.MeasureWait(ctx, "cfg_singleflight")
 			select {
 			case <-ctx.Done():
+				finishWait(ctx.Err())
 				return vbacfg.Document{}, false, ctx.Err()
 			case <-wait:
+				finishWait(nil)
 			}
 			continue
 		}

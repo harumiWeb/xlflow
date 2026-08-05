@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 )
@@ -42,12 +43,14 @@ type ProcedureIdentity struct {
 }
 
 type ProcedureCatalogEntry struct {
-	Identity      ProcedureIdentity
-	SignatureHash [sha256.Size]byte
-	SourceHash    [sha256.Size]byte
-	Range         Range
-	StartByte     int
-	EndByte       int
+	Identity             ProcedureIdentity
+	SignatureHash        [sha256.Size]byte
+	SourceHash           [sha256.Size]byte
+	Range                Range
+	StartByte            int
+	DeclarationStartByte int
+	StartColumn          int
+	EndByte              int
 }
 
 type ProcedureCatalog struct {
@@ -107,6 +110,10 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 	changed := changedProcedureEntries(catalog, request.PreviousCache, request.Changes)
 	changedKeys := make(map[ProcedureIdentity]bool, len(changed))
 	out := make([]Diagnostic, 0)
+	modulePreamble := ""
+	if len(catalog.Entries) > 0 {
+		modulePreamble = doc.Source[:catalog.Entries[0].StartByte]
+	}
 	for _, entry := range changed {
 		if ctx.Err() != nil {
 			return nil
@@ -114,17 +121,19 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 		changedKeys[entry.Identity] = true
 		fragment := doc
 		fragment.Snapshot = nil
-		fragment.Source = doc.Source[entry.StartByte:entry.EndByte]
-		fragmentRange := Range{Start: Position{}, End: Position{Line: strings.Count(fragment.Source, "\n") + 1}}
-		fragmentEntry := entry
-		fragmentEntry.Range = fragmentRange
+		fragment.Source = modulePreamble + doc.Source[entry.StartByte:entry.EndByte]
+		fragmentCatalog := procedureCatalogForDocumentMode(fragment, false)
+		if len(fragmentCatalog.Entries) != 1 {
+			continue
+		}
+		fragmentEntry := fragmentCatalog.Entries[0]
 		for _, diagnostic := range a.diagnosticsFullContext(ctx, fragment) {
 			if fastDiagnosticForProcedure(diagnostic, fragmentEntry) {
-				out = append(out, rebaseDiagnostic(diagnostic, fragmentRange.Start, entry.Range.Start))
+				out = append(out, rebaseDiagnostic(diagnostic, fragmentEntry.Range.Start, entry.Range.Start))
 			}
 		}
 	}
-	if previous := request.PreviousCache; previous != nil && catalog.ReuseSafe && previous.Catalog.ReuseSafe && previous.Catalog.ConditionalHash == catalog.ConditionalHash {
+	if previous := request.PreviousCache; previous != nil && catalog.ReuseSafe && previous.Catalog.ReuseSafe && previous.Catalog.ModuleContextHash == catalog.ModuleContextHash && previous.Catalog.ConditionalHash == catalog.ConditionalHash {
 		current := make(map[ProcedureIdentity]ProcedureCatalogEntry, len(catalog.Entries))
 		for _, entry := range catalog.Entries {
 			current[entry.Identity] = entry
@@ -155,6 +164,12 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 }
 
 func procedureCatalogForDocument(doc Document) ProcedureCatalog {
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		snapshot.procedureCatalogOnce.Do(func() {
+			snapshot.procedureCatalog = procedureCatalogForDocumentMode(doc, true)
+		})
+		return snapshot.procedureCatalog
+	}
 	return procedureCatalogForDocumentMode(doc, true)
 }
 
@@ -175,6 +190,11 @@ func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) Procedure
 			continue
 		}
 		declaration := firstProcedureDeclarationLine(doc.Source[start:end])
+		declarationStart := start
+		for declarationStart < end && (doc.Source[declarationStart] == ' ' || doc.Source[declarationStart] == '\t') {
+			declarationStart++
+		}
+		lineStart := strings.LastIndexByte(doc.Source[:declarationStart], '\n') + 1
 		kind := procedureDeclarationKind(declaration)
 		key := strings.ToLower(strings.TrimSpace(procedure.Name)) + "|" + kind
 		ordinal := ordinals[key]
@@ -183,7 +203,7 @@ func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) Procedure
 			Identity:      ProcedureIdentity{CanonicalName: strings.ToLower(strings.TrimSpace(procedure.Name)), Kind: kind, Ordinal: ordinal},
 			SignatureHash: sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(declaration)))),
 			SourceHash:    sha256.Sum256([]byte(doc.Source[start:end])), Range: procedure.Range,
-			StartByte: start, EndByte: end,
+			StartByte: start, DeclarationStartByte: declarationStart, StartColumn: declarationStart - lineStart + 1, EndByte: end,
 		})
 		lastByte = end
 	}
@@ -256,12 +276,18 @@ func procedureDeclarationKind(declaration string) string {
 func buildDiagnosticCache(catalog ProcedureCatalog, diagnostics []Diagnostic) *DiagnosticCache {
 	cache := &DiagnosticCache{Catalog: catalog, Procedures: make(map[ProcedureIdentity]cachedProcedureDiagnostics)}
 	for _, entry := range catalog.Entries {
-		anchored := cachedProcedureDiagnostics{Entry: entry}
-		for _, diagnostic := range diagnostics {
-			if rangeContainedBy(diagnostic.Range, entry.Range) {
-				anchored.Diagnostics = append(anchored.Diagnostics, diagnostic)
-			}
+		cache.Procedures[entry.Identity] = cachedProcedureDiagnostics{Entry: entry}
+	}
+	for _, diagnostic := range diagnostics {
+		index := sort.Search(len(catalog.Entries), func(i int) bool {
+			return comparePosition(catalog.Entries[i].Range.Start, diagnostic.Range.Start) > 0
+		}) - 1
+		if index < 0 || !rangeContainedBy(diagnostic.Range, catalog.Entries[index].Range) {
+			continue
 		}
+		entry := catalog.Entries[index]
+		anchored := cache.Procedures[entry.Identity]
+		anchored.Diagnostics = append(anchored.Diagnostics, diagnostic)
 		cache.Procedures[entry.Identity] = anchored
 	}
 	return cache
@@ -312,7 +338,7 @@ func fastDiagnosticForProcedure(diagnostic Diagnostic, entry ProcedureCatalogEnt
 	if interproceduralDiagnostic(diagnostic.Code) {
 		return false
 	}
-	if rangeContainedBy(diagnostic.Range, entry.Range) {
+	if metadata, ok := staticrules.Lookup(diagnostic.Code); ok && metadata.Scope == staticrules.ScopeProcedureLocal && rangeContainedBy(diagnostic.Range, entry.Range) {
 		return true
 	}
 	switch diagnostic.Code {

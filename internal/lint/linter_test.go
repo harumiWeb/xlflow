@@ -1784,6 +1784,26 @@ End Sub
 	}
 }
 
+func TestLinterUnusedLocalVariableCountsEarlierConstOnSameLine(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Const firstValue As Long = 1: Const secondValue As Long = firstValue
+  Debug.Print secondValue
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedLocalVariables = true
+
+	issues, err := Linter{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB020"); len(got) != 0 {
+		t.Fatalf("same-line constant references should count as reads: %+v", got)
+	}
+}
+
 func TestLinterUnusedLocalVariableIgnoresWriteOnlyAssignments(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit

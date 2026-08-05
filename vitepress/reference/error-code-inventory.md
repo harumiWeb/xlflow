@@ -85,6 +85,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cells_updated`
 - `cfg_builds`
 - `cfg_reuses`
+- `cfg_singleflight`
 - `changed_only`
 - `changed_paths`
 - `changes_application_state`
@@ -559,6 +560,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_ir`
 - `procedure_ir_builds`
 - `procedure_ir_reuses`
+- `procedure_ir_singleflight`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -731,6 +733,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `style_included`
 - `sub_declaration`
 - `suppresses_errors`
+- `symbols_singleflight`
 - `sync_source`
 - `systemprofile_desktop`
 - `systemprofile_desktop_missing`

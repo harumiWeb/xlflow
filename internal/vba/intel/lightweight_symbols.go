@@ -12,6 +12,10 @@ func (a Analyzer) LightweightDocumentSymbols(doc Document, query WorkspaceSymbol
 	needle := strings.TrimSpace(query.Text)
 	if query.Mode == WorkspaceSymbolQueryQualified {
 		if index := strings.LastIndex(needle, "."); index >= 0 {
+			qualifier := strings.TrimSpace(needle[:index])
+			if qualifier == "" || !strings.EqualFold(qualifier, moduleNameForDocument(doc)) {
+				return nil, true
+			}
 			needle = needle[index+1:]
 		}
 	}

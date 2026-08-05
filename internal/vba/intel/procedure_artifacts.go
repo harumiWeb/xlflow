@@ -53,7 +53,7 @@ func artifactKey(entry ProcedureCatalogEntry, catalog ProcedureCatalog) procedur
 }
 
 func astBase(entry ProcedureCatalogEntry) vbaast.Range {
-	return vbaast.Range{StartLine: entry.Range.Start.Line + 1, StartColumn: 1, StartByte: entry.StartByte}
+	return vbaast.Range{StartLine: entry.Range.Start.Line + 1, StartColumn: entry.StartColumn, StartByte: entry.DeclarationStartByte}
 }
 
 func (s *AnalysisSnapshot) seedProcedureArtifacts(ir procedureir.DocumentIR) {
@@ -75,9 +75,16 @@ func (s *AnalysisSnapshot) seedProcedureArtifacts(ir procedureir.DocumentIR) {
 			delete(s.artifacts.ir, existing)
 		}
 	}
-	for i, entry := range catalog.Entries {
+	proceduresByStart := make(map[int]procedureir.ProcedureIR, len(ir.Procedures))
+	for _, procedure := range ir.Procedures {
+		proceduresByStart[procedure.Symbol.DeclarationRange.StartByte] = procedure
+	}
+	for _, entry := range catalog.Entries {
 		key := artifactKey(entry, catalog)
-		procedure := ir.Procedures[i]
+		procedure, ok := proceduresByStart[entry.DeclarationStartByte]
+		if !ok {
+			continue
+		}
 		fragment := procedureIRFragment{base: procedure.Symbol.DeclarationRange, procedure: procedureir.CloneProcedureIR(procedure)}
 		for _, reference := range ir.TypeReferences {
 			if reference.Caller != nil && reference.Range.StartByte >= procedure.Symbol.DeclarationRange.StartByte && reference.Range.EndByte <= procedure.Symbol.DeclarationRange.EndByte {
@@ -144,7 +151,7 @@ func (s *AnalysisSnapshot) incrementalProcedureIR(ctx context.Context, rootDir s
 			s.procedureIRReuseCount.Add(1)
 			continue
 		}
-		procedure, ok := builtByStart[entry.StartByte]
+		procedure, ok := builtByStart[entry.DeclarationStartByte]
 		if !ok {
 			return procedureir.DocumentIR{}, false, nil
 		}
@@ -207,9 +214,17 @@ func (s *AnalysisSnapshot) seedCFGArtifacts(ir procedureir.DocumentIR, document 
 			delete(s.artifacts.cfg, existing)
 		}
 	}
-	for i, entry := range catalog.Entries {
+	graphsByStart := make(map[int]vbacfg.Graph, len(document.Graphs))
+	for _, graph := range document.Graphs {
+		graphsByStart[graph.Procedure.DeclarationRange.StartByte] = graph
+	}
+	for _, entry := range catalog.Entries {
 		key := artifactKey(entry, catalog)
-		s.artifacts.cfg[key] = vbacfg.Clone(document.Graphs[i])
+		graph, ok := graphsByStart[entry.DeclarationStartByte]
+		if !ok {
+			continue
+		}
+		s.artifacts.cfg[key] = vbacfg.Clone(graph)
 	}
 }
 
@@ -222,18 +237,33 @@ func (s *AnalysisSnapshot) incrementalCFG(ctx context.Context, ir procedureir.Do
 		return vbacfg.Document{}, false, nil
 	}
 	result := vbacfg.Document{Path: ir.Path, Graphs: make([]vbacfg.Graph, 0, len(ir.Procedures))}
+	cached := make(map[procedureArtifactKey]vbacfg.Graph, len(catalog.Entries))
 	s.artifacts.mu.RLock()
-	defer s.artifacts.mu.RUnlock()
-	for i, entry := range catalog.Entries {
+	for _, entry := range catalog.Entries {
+		key := artifactKey(entry, catalog)
+		if graph, ok := s.artifacts.cfg[key]; ok {
+			cached[key] = graph
+		}
+	}
+	s.artifacts.mu.RUnlock()
+	proceduresByStart := make(map[int]procedureir.ProcedureIR, len(ir.Procedures))
+	for _, procedure := range ir.Procedures {
+		proceduresByStart[procedure.Symbol.DeclarationRange.StartByte] = procedure
+	}
+	for _, entry := range catalog.Entries {
 		if err := ctx.Err(); err != nil {
 			return vbacfg.Document{}, false, err
 		}
-		if graph, ok := s.artifacts.cfg[artifactKey(entry, catalog)]; ok {
-			result.Graphs = append(result.Graphs, vbacfg.RebaseGraph(graph, graph.Procedure.DeclarationRange, ir.Procedures[i].Symbol.DeclarationRange))
+		procedure, ok := proceduresByStart[entry.DeclarationStartByte]
+		if !ok {
+			return vbacfg.Document{}, false, nil
+		}
+		if graph, ok := cached[artifactKey(entry, catalog)]; ok {
+			result.Graphs = append(result.Graphs, vbacfg.RebaseGraph(graph, graph.Procedure.DeclarationRange, procedure.Symbol.DeclarationRange))
 			s.cfgReuseCount.Add(1)
 			continue
 		}
-		graph, err := vbacfg.BuildContext(ctx, ir.Procedures[i])
+		graph, err := vbacfg.BuildContext(ctx, procedure)
 		if err != nil {
 			return vbacfg.Document{}, false, err
 		}

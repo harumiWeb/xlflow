@@ -86,3 +86,22 @@ func Measure(ctx context.Context, name string) func(int, error) {
 		}
 	}
 }
+
+// MeasureWait records time spent waiting for a shared artifact owned by
+// another analysis request. It is separate from compute elapsed time so stage
+// logs can distinguish contention from actual analysis work.
+func MeasureWait(ctx context.Context, name string) func(error) {
+	started := time.Now()
+	return func(err error) {
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		if ctx != nil && ctx.Err() != nil {
+			outcome = "canceled"
+		}
+		if recorder := FromContext(ctx); recorder != nil {
+			recorder.Record(Stage{Name: name, Wait: time.Since(started), Outcome: outcome})
+		}
+	}
+}

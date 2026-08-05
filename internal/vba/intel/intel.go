@@ -303,56 +303,56 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 	}
 	finishStage = analysisstats.Measure(ctx, "argument_diagnostics")
 	stageDiagnostics := a.argumentDiagnosticsContext(ctx, doc)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
 	stageDiagnostics = a.ByRefArgumentDiagnosticsContext(ctx, doc)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "member_diagnostics")
 	stageDiagnostics = a.unknownMemberDiagnosticsContext(ctx, doc)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "property_diagnostics")
 	stageDiagnostics = a.propertyAccessDiagnosticsContext(ctx, doc)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "assignment_diagnostics")
 	stageDiagnostics = a.assignmentDiagnosticsContext(ctx, doc)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "receiver_diagnostics")
 	stageDiagnostics = a.unresolvedMemberReceiverDiagnosticsContext(ctx, doc)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "documentation_diagnostics")
 	stageDiagnostics = a.documentationDiagnosticsParsed(doc, parsed)
-	finishStage(len(stageDiagnostics), ctx.Err())
+	finishStage(len(stageDiagnostics), nil)
 	out = append(out, stageDiagnostics...)
 	if ctx.Err() != nil {
 		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "suppression")
 	out = applyDocumentInlineSuppressions(a.RootDir, doc, out)
-	finishStage(len(out), ctx.Err())
+	finishStage(len(out), nil)
 	return out
 }
 
@@ -913,12 +913,14 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	if constant, ok := a.DB.ResolveConstant(word); ok {
 		return &Hover{Contents: constantHover(constant), Range: r}, nil
 	}
-	if hover, ok, err := a.documentedSymbolHover(doc, pos, open, word, r); err != nil || ok {
-		return hover, err
-	}
-	if syms, err := a.definitionSymbols(doc, pos, open, word); err != nil {
+	syms, err := a.definitionSymbols(doc, pos, open, word)
+	if err != nil {
 		return nil, err
-	} else if len(syms) > 0 && procedureHoverSymbol(syms[0]) {
+	}
+	if hover, ok := documentedSymbolHover(syms, r); ok {
+		return hover, nil
+	}
+	if len(syms) > 0 && procedureHoverSymbol(syms[0]) {
 		sym := syms[0]
 		detail := firstNonEmpty(sym.Detail, sym.Kind+" "+sym.Name)
 		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, nil
@@ -930,20 +932,8 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		}
 		return &Hover{Contents: variableHover(word, typ, inferred.Source), Range: r}, nil
 	}
-	syms, err := a.definitionSymbols(doc, pos, open, word)
-	if err != nil {
-		return nil, err
-	}
 	if len(syms) > 0 {
 		sym := syms[0]
-		if !doccomments.HasDocumentation(sym.Documentation) {
-			for _, candidate := range syms[1:] {
-				if strings.EqualFold(candidate.Name, sym.Name) && doccomments.HasDocumentation(candidate.Documentation) {
-					sym = candidate
-					break
-				}
-			}
-		}
 		detail := sym.Detail
 		if detail == "" {
 			detail = sym.Kind + " " + sym.Name
@@ -958,6 +948,17 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 	return nil, nil
 }
 
+func documentedSymbolHover(syms []Symbol, r Range) (*Hover, bool) {
+	for _, sym := range syms {
+		if !doccomments.HasDocumentation(sym.Documentation) {
+			continue
+		}
+		detail := firstNonEmpty(sym.Detail, sym.Kind+" "+sym.Name)
+		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, true
+	}
+	return nil, false
+}
+
 func procedureHoverSymbol(symbol Symbol) bool {
 	switch strings.ToLower(symbol.Kind) {
 	case "sub", "function", "property", "property_get", "property_let", "property_set":
@@ -965,24 +966,6 @@ func procedureHoverSymbol(symbol Symbol) bool {
 	default:
 		return false
 	}
-}
-
-func (a Analyzer) documentedSymbolHover(doc Document, pos Position, open []Document, word string, r Range) (*Hover, bool, error) {
-	syms, err := a.definitionSymbols(doc, pos, open, word)
-	if err != nil {
-		return nil, false, err
-	}
-	for _, sym := range syms {
-		if !doccomments.HasDocumentation(sym.Documentation) {
-			continue
-		}
-		detail := sym.Detail
-		if detail == "" {
-			detail = sym.Kind + " " + sym.Name
-		}
-		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, true, nil
-	}
-	return nil, false, nil
 }
 
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {

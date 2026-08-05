@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1109,7 +1110,7 @@ func semanticTokenDeltaEdits(previous, current []protocol.UInteger) []protocol.S
 func semanticTokenResponseSize(response any) int {
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return int(^uint(0) >> 1)
+		return math.MaxInt
 	}
 	return len(encoded)
 }
@@ -1234,7 +1235,7 @@ func diagnosticChangeSet(changes []documentContentChange) intel.ProcedureChangeS
 	result := intel.ProcedureChangeSet{}
 	for _, change := range changes {
 		if change.rng == nil {
-			return intel.ProcedureChangeSet{Ranges: []intel.Range{{Start: intel.Position{}, End: intel.Position{Line: int(^uint(0) >> 1)}}}}
+			return intel.ProcedureChangeSet{Ranges: []intel.Range{{Start: intel.Position{}, End: intel.Position{Line: math.MaxInt}}}}
 		}
 		start := intel.Position{Line: int(change.rng.Start.Line), Character: int(change.rng.Start.Character)}
 		end := intel.Position{Line: int(change.rng.End.Line), Character: int(change.rng.End.Character)}
@@ -1517,13 +1518,10 @@ func (s *Server) runDiagnosticsBody(
 	changes := state.changes
 	state.mu.Unlock()
 	var result intel.DiagnosticResult
-	if mode == intel.DiagnosticModeFast && s.documentKind(doc) == DocumentKindVBA && s.diagnosticsRequest != nil {
+	if s.documentKind(doc) == DocumentKindVBA && s.diagnosticsRequest != nil {
 		result = s.diagnosticsRequest(runCtx, intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder})
 	} else {
 		result.Diagnostics = s.documentDiagnostics(runCtx, doc)
-		if mode == intel.DiagnosticModeFull && s.documentKind(doc) == DocumentKindVBA && runCtx.Err() == nil {
-			result.Cache = intel.NewDiagnosticCache(doc, result.Diagnostics)
-		}
 	}
 	diagnostics := result.Diagnostics
 	out := make([]protocol.Diagnostic, 0, len(diagnostics))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestSuccessorReusesUnchangedProcedureIRAndCFG(t *testing.T) {
-	oldSource := "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\n  Dim x As Long\n  x = 1\nEnd Sub\nSub B()\n  Dim y As Long\n  y = 2\nEnd Sub\n"
+	oldSource := "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\n  Dim x As Long\n  x = 1\nEnd Sub\n  Sub B()\n  Dim y As Long\n  y = 2\n  End Sub\n"
 	oldDoc := Document{Path: "Module1.bas", Source: oldSource, ModuleKind: "standard", Version: 1}
 	oldSnapshot := NewAnalysisSnapshot(oldDoc)
 	oldDoc = oldSnapshot.Document()
@@ -28,7 +29,7 @@ func TestSuccessorReusesUnchangedProcedureIRAndCFG(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newSource := "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\n  Dim x As Long\n  x = 10\nEnd Sub\nSub B()\n  Dim y As Long\n  y = 2\nEnd Sub\n"
+	newSource := "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\n  Dim x As Long\n  x = 10\nEnd Sub\n  Sub B()\n  Dim y As Long\n  y = 2\n  End Sub\n"
 	newDoc := Document{Path: oldDoc.Path, Source: newSource, ModuleKind: oldDoc.ModuleKind, Version: 2}
 	newParsed, err := vbaast.ParseDocument(newDoc.Path, []byte(newSource))
 	if err != nil {
@@ -66,6 +67,39 @@ func TestSuccessorReusesUnchangedProcedureIRAndCFG(t *testing.T) {
 	}
 	if stats.CFGBuild != 1 || stats.CFGReuse != 1 {
 		t.Fatalf("CFG stats = %+v, want build=1 reuse=1", stats)
+	}
+}
+
+func TestProcedureArtifactSeedingMatchesDeclarationsByStartByte(t *testing.T) {
+	source := "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub A()\nEnd Sub\nSub B()\nEnd Sub\n"
+	doc := Document{Path: "Module1.bas", Source: source, ModuleKind: "standard", Version: 1}
+	snapshot := NewAnalysisSnapshot(doc)
+	defer snapshot.Retire()
+
+	ir, err := procedureir.BuildSourceContext(context.Background(), procedureir.BuildOptions{RootDir: ".", Path: doc.Path, ModuleKind: doc.ModuleKind}, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := vbacfg.BuildDocumentContext(context.Background(), ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ir.Procedures[0], ir.Procedures[1] = ir.Procedures[1], ir.Procedures[0]
+	cfg.Graphs[0], cfg.Graphs[1] = cfg.Graphs[1], cfg.Graphs[0]
+	snapshot.seedProcedureArtifacts(ir)
+	snapshot.seedCFGArtifacts(ir, cfg)
+
+	catalog := procedureCatalogForDocument(snapshot.Document())
+	for _, entry := range catalog.Entries {
+		key := artifactKey(entry, catalog)
+		fragment, ok := snapshot.artifacts.ir[key]
+		if !ok || !strings.EqualFold(fragment.procedure.Symbol.Name, entry.Identity.CanonicalName) {
+			t.Fatalf("IR artifact for %s = (%+v, %t)", entry.Identity, fragment.procedure.Symbol, ok)
+		}
+		graph, ok := snapshot.artifacts.cfg[key]
+		if !ok || !strings.EqualFold(graph.Procedure.Name, entry.Identity.CanonicalName) {
+			t.Fatalf("CFG artifact for %s = (%+v, %t)", entry.Identity, graph.Procedure, ok)
+		}
 	}
 }
 

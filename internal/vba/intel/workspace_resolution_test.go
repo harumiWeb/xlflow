@@ -32,6 +32,32 @@ func TestWorkspaceResolutionViewQueriesIndexedSnapshot(t *testing.T) {
 	}
 }
 
+func TestLightweightDocumentSymbolsHonorsQualifiedModule(t *testing.T) {
+	doc := Document{Path: "CurrentModule.bas", Source: "Public Sub Run()\nEnd Sub\n", ModuleKind: "standard"}
+	analyzer := Analyzer{DB: vbadb.New()}
+	if symbols, handled := analyzer.LightweightDocumentSymbols(doc, WorkspaceSymbolQuery{Text: "OtherModule.Run", Mode: WorkspaceSymbolQueryQualified}); !handled || len(symbols) != 0 {
+		t.Fatalf("foreign qualified query = (%+v, %t), want handled without current-module symbols", symbols, handled)
+	}
+	if symbols, handled := analyzer.LightweightDocumentSymbols(doc, WorkspaceSymbolQuery{Text: "CurrentModule.Run", Mode: WorkspaceSymbolQueryQualified}); !handled || len(symbols) != 1 || symbols[0].Name != "Run" {
+		t.Fatalf("current qualified query = (%+v, %t), want Run", symbols, handled)
+	}
+}
+
+func TestFastDiagnosticsDoNotReportMissingModulePreambleFromProcedureFragment(t *testing.T) {
+	source := "Attribute VB_Name = \"Module1\"\nOption Explicit\nPublic Sub Run()\n  Debug.Print 1\nEnd Sub\n"
+	doc := Document{Path: "Module1.bas", Source: source, ModuleKind: "standard", Version: 2}
+	result := Analyzer{DB: vbadb.New()}.DiagnosticsRequestContext(context.Background(), DiagnosticRequest{
+		Document: doc,
+		Mode:     DiagnosticModeFast,
+		Changes:  ProcedureChangeSet{Ranges: []Range{{Start: Position{Line: 3}, End: Position{Line: 3}}}},
+	})
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "VB001" || diagnostic.Code == "VB031" {
+			t.Fatalf("Fast procedure fragment leaked module-level %s: %+v", diagnostic.Code, result.Diagnostics)
+		}
+	}
+}
+
 func TestDiagnosticsBuildsOneWorkspaceResolutionSnapshot(t *testing.T) {
 	source := "Sub Caller()\n  Target\nEnd Sub\n\nSub Target()\nEnd Sub\n"
 	doc := Document{Path: "Module1.bas", URI: "file:///Module1.bas", Source: source, ModuleKind: "standard", Version: 1}

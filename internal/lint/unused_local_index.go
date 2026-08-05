@@ -100,11 +100,11 @@ func buildProcedureLocalReferenceIndexContext(ctx context.Context, source string
 				}
 			}
 			line := normalizedCodeLine(lines[lineNo-1])
-			for _, statement := range splitStatements(line) {
+			for _, statement := range splitStatementsWithColumns(line) {
 				if stats != nil {
 					stats.StatementsVisited++
 				}
-				indexLocalReads(statement, lineNo, procedure.locals, allSymbols, referenced, stats)
+				indexLocalReads(statement.text, statement.start, lineNo, procedure.locals, allSymbols, referenced, stats)
 			}
 		}
 	}
@@ -132,7 +132,7 @@ func containingProcedureIndex(procedures []localReferenceProcedure, local symbol
 	return -1
 }
 
-func indexLocalReads(statement string, lineNo int, locals map[string][]int, allSymbols []symbols.Symbol, referenced []bool, stats *unusedLocalReferenceIndexStats) {
+func indexLocalReads(statement string, statementStart, lineNo int, locals map[string][]int, allSymbols []symbols.Symbol, referenced []bool, stats *unusedLocalReferenceIndexStats) {
 	declaration := isLocalDeclarationStatement(statement)
 	for start := 0; start < len(statement); {
 		if !isLocalReferenceIdentifierByte(statement[start]) {
@@ -152,7 +152,11 @@ func indexLocalReads(statement string, lineNo int, locals map[string][]int, allS
 			!isLocalAssignmentTargetOccurrence(statement, start, end) {
 			for _, symbolIndex := range indices {
 				sym := allSymbols[symbolIndex]
-				if lineNo < sym.StartLine || (declaration && lineNo == sym.StartLine) {
+				identifierStart := statementStart + start + 1
+				identifierEnd := statementStart + end + 1
+				hasDeclarationColumns := sym.StartColumn > 0 && sym.EndColumn > sym.StartColumn
+				isDeclarationName := declaration && lineNo == sym.StartLine && (!hasDeclarationColumns || identifierStart < sym.EndColumn && identifierEnd > sym.StartColumn)
+				if lineNo < sym.StartLine || isDeclarationName {
 					continue
 				}
 				referenced[symbolIndex] = true
