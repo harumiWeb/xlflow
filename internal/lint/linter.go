@@ -589,7 +589,8 @@ func (c *astLintContext) hasNarrowOnErrorReset(startLine int) bool {
 	}
 	lines := normalizedSourceLines(string(c.source))
 	seen := 0
-	for i := startLine; i < len(lines) && seen < 5; i++ {
+	sawErrNumberCheck := false
+	for i := startLine; i < len(lines) && seen < 16; i++ {
 		stmt := normalizedCodeLine(lines[i])
 		if stmt == "" {
 			continue
@@ -597,7 +598,14 @@ func (c *astLintContext) hasNarrowOnErrorReset(startLine int) bool {
 		seen++
 		lower := strings.ToLower(stmt)
 		if lower == "on error goto 0" {
-			return true
+			// Preserve the original short-block allowance, and also accept a
+			// bounded probe that explicitly observes Err.Number before restoring
+			// normal error handling. This covers common conversion/capacity probes
+			// without hiding broad best-effort cleanup scopes.
+			return seen <= 5 || sawErrNumberCheck
+		}
+		if strings.Contains(lower, "err.number") {
+			sawErrNumberCheck = true
 		}
 	}
 	return false
@@ -934,14 +942,19 @@ func cleanUndeclaredTarget(text string) (string, bool, bool) {
 		return "", false, false
 	}
 	name := cleanIdentifier(text)
-	if name == "" || isStatementKeyword(name) {
-		return "", false, false
-	}
-	r := rune(name[0])
-	if r >= '0' && r <= '9' {
+	if name == "" || !isBareVBAIdentifier(name) || isStatementKeyword(name) {
 		return "", false, false
 	}
 	return name, hadParens, true
+}
+
+func isBareVBAIdentifier(name string) bool {
+	for index, r := range name {
+		if !isVBAIdentifierRune(r) || (index == 0 && unicode.IsDigit(r)) {
+			return false
+		}
+	}
+	return name != ""
 }
 
 func sourceColumnForName(line string, name string) int {
@@ -1092,8 +1105,14 @@ func confusingParenthesizedCall(stmt string) (string, bool) {
 	if len(fields) < 2 || !strings.HasPrefix(fields[1], "(") {
 		return "", false
 	}
+	if strings.Contains(fields[0], "(") {
+		// A token such as Mid$(text, is already a function call. The next
+		// parenthesized expression is an argument, not VBA's ambiguous
+		// whitespace-separated call syntax.
+		return "", false
+	}
 	name := cleanIdentifier(fields[0])
-	if name == "" || isStatementKeyword(name) || strings.Contains(stmt, "=") || strings.Contains(name, ".") {
+	if name == "" || !isBareVBAIdentifier(name) || isStatementKeyword(name) || strings.Contains(stmt, "=") || strings.Contains(name, ".") {
 		return "", false
 	}
 	return name, true

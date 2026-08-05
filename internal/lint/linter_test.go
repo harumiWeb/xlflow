@@ -486,6 +486,77 @@ End Sub
 	}
 }
 
+func TestLinterAcceptsBoundedErrNumberProbes(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+  Dim capacity As Long
+  On Error Resume Next
+  capacity = UBound(Array()) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    capacity = 0
+  End If
+  On Error GoTo 0
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB004"); len(got) != 0 {
+		t.Fatalf("bounded Err.Number probe should not trigger VB004: %+v", got)
+	}
+}
+
+func TestLinterReportsUnobservedOnErrorCleanupScopes(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+  On Error Resume Next
+  Debug.Print 1
+  Debug.Print 2
+  Debug.Print 3
+  Debug.Print 4
+  Debug.Print 5
+  Debug.Print 6
+  On Error GoTo 0
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB004"); len(got) != 1 {
+		t.Fatalf("unobserved cleanup scope should retain VB004: %+v", got)
+	}
+}
+
+func TestConfusingParenthesizedCallIgnoresFunctionArguments(t *testing.T) {
+	if name, ok := confusingParenthesizedCall("Mid$(alphabet, (block \\ 64) + 1, 1)"); ok || name != "" {
+		t.Fatalf("Mid$ argument expression = (%q, %t), want no VB022", name, ok)
+	}
+	if name, ok := confusingParenthesizedCall("Run (value)"); !ok || name != "Run" {
+		t.Fatalf("ambiguous call = (%q, %t), want Run", name, ok)
+	}
+}
+
 func TestLinterReportsParserRecovery(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
@@ -2005,6 +2076,27 @@ End Function
 		t.Fatalf("unexpected For index issue: %+v", index)
 	}
 	assertIssue(t, PushBlockingIssues(issues), "VB029", 10)
+}
+
+func TestLinterDoesNotTreatMultilineComparisonArgumentsAsAssignments(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Private Function EqualsText(ByVal leftValue As String, ByVal rightValue As String) As Boolean
+  EqualsText = (StrComp( _
+    leftValue, _
+    rightValue, _
+    vbTextCompare) = 0)
+End Function
+`)
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB029"); len(got) != 0 {
+		t.Fatalf("multiline comparison argument should not trigger VB029: %+v", got)
+	}
 }
 
 func TestLinterAllowsModuleVariablesDeclaredInsideConditionalCompilationBlocks(t *testing.T) {

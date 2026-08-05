@@ -6,6 +6,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## v0.29.0
 
+- Fixed `VB004` false positives for bounded `On Error Resume Next` probes that
+  check `Err.Number` and restore normal handling, `VB022` false positives for
+  intrinsic function argument expressions, and `VB029` false positives for
+  multiline comparison arguments such as `vbTextCompare) = 0`.
 - Added procedure-scoped incremental LSP diagnostics with 300 ms Fast and
   two-second idle Full publication, request-scoped workspace resolution,
   reusable IR/CFG procedure fragments, indexed source positions, and stage
