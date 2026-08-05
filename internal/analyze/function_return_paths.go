@@ -117,6 +117,9 @@ func returnPathIsRaiseBlock(graph vbacfg.Graph, id vbacfg.BlockID) bool {
 		return false
 	}
 	text := strings.ToLower(strings.TrimSpace(statement.Text))
+	if strings.HasPrefix(text, "call ") || strings.HasPrefix(text, "call\t") {
+		text = strings.TrimSpace(text[len("call"):])
+	}
 	if !strings.HasPrefix(text, "err.raise") {
 		return false
 	}

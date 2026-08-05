@@ -1131,6 +1131,28 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 }
 
+func TestWriteOmitsVBA210HintWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Analyze.DetectFunctionReturnPath = true
+
+	path := filepath.Join(dir, FileName)
+	if err := Write(path, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "detect_function_return_path = true") {
+		t.Fatalf("generated config should preserve enabled VBA210:\n%s", text)
+	}
+	if strings.Contains(text, "Uncomment the following setting to check Function and Property Get return paths.") {
+		t.Fatalf("generated config should omit the inactive VBA210 hint when enabled:\n%s", text)
+	}
+}
+
 func TestWriteProcedureNameConstantConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Default()

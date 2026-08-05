@@ -2877,6 +2877,10 @@ Public Function RaiseOnly() As Long
   Err.Raise 5
 End Function
 
+Public Function CallRaiseOnly() As Long
+  Call Err.Raise(5)
+End Function
+
 Public Function ObjectValueAssignment() As Range
   ObjectValueAssignment = Sheet1.Range("A1")
 End Function
@@ -2927,7 +2931,7 @@ End Sub
 	if len(want) != 0 {
 		t.Fatalf("missing VBA210 procedures: %v; findings=%+v", want, got)
 	}
-	for _, procedure := range []string{"BranchSafe", "DominatingAssignment", "SharedCleanup", "SafeHandler", "ReraisedHandler", "RaiseOnly", "ObjectSetAssignment", "LetValue", "Writable", "ObjectWritable", "NoReturn"} {
+	for _, procedure := range []string{"BranchSafe", "DominatingAssignment", "SharedCleanup", "SafeHandler", "ReraisedHandler", "RaiseOnly", "CallRaiseOnly", "ObjectSetAssignment", "LetValue", "Writable", "ObjectWritable", "NoReturn"} {
 		for _, finding := range got {
 			if finding.Procedure == procedure {
 				t.Fatalf("unexpected VBA210 for %s: %+v", procedure, finding)
