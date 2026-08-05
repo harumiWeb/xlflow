@@ -1145,7 +1145,8 @@ func TestWriteOmitsVBA210HintWhenEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	if !strings.Contains(text, "detect_function_return_path = true") {
+	if strings.Contains(text, "\n# detect_function_return_path = true") ||
+		!strings.Contains(text, "\ndetect_function_return_path = true") {
 		t.Fatalf("generated config should preserve enabled VBA210:\n%s", text)
 	}
 	if strings.Contains(text, "Uncomment the following setting to check Function and Property Get return paths.") {
