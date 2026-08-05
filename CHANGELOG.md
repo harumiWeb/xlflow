@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Strengthened opt-in `VBA210` return-path analysis to cover `Function` and
+  `Property Get` CFG exits, early exits, error-handler paths, shared cleanup,
+  dominating assignments, object/value return assignment syntax, and
+  non-returning `Err.Raise` error paths.
+
 ## v0.29.0
 
 - Fixed `VB004` false positives for bounded `On Error Resume Next` probes that

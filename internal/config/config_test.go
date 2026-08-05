@@ -1067,6 +1067,15 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 			t.Fatalf("generated config missing %q:\n%s", want, text)
 		}
 	}
+	for _, want := range []string{
+		"# Optional dataflow-sensitive analyzer rules are disabled by default.",
+		"# Uncomment the following setting to check Function and Property Get return paths.",
+		"# detect_function_return_path = true # VBA210",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
 
 	loaded, err := Load(dir)
 	if err != nil {

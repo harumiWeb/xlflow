@@ -1863,6 +1863,7 @@ End Function
 
 Private Function JoinStringArray(ByVal Values As Variant, ByVal Separator As String) As String
 	Dim i As Long
+	JoinStringArray = ""
 	For i = LBound(Values) To UBound(Values)
 		If i > LBound(Values) Then
 			JoinStringArray = JoinStringArray & Separator

@@ -789,9 +789,18 @@ func renderAnalyzeConfig(cfg AnalyzeConfig) string {
 		b.WriteString("]\n")
 	}
 	optIn := legacyOptInAnalyzeRulesForWrite(cfg)
+	optInSet := map[string]bool{}
+	for _, rule := range optIn {
+		optInSet[rule.Key] = true
+	}
+	b.WriteString("\n")
+	b.WriteString("# Optional dataflow-sensitive analyzer rules are disabled by default.\n")
+	b.WriteString("# Uncomment the following setting to check Function and Property Get return paths.\n")
+	if !optInSet["detect_function_return_path"] {
+		b.WriteString("# detect_function_return_path = true # VBA210\n")
+	}
 	if len(optIn) > 0 {
-		b.WriteString("\n")
-		b.WriteString("# Legacy opt-in analyzer settings. Prefer disabled_rules for disabling recommended rules.\n")
+		b.WriteString("\n# Enabled optional analyzer settings.\n")
 		for _, rule := range optIn {
 			b.WriteString(rule.Key)
 			b.WriteString(" = true\n")

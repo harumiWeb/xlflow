@@ -2791,6 +2791,179 @@ End Sub
 	assertFinding(t, findings, "VBA210", 4)
 }
 
+func TestAnalyzerVBA210UsesCFGReturnPaths(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function MissingReturn() As Long
+End Function
+
+Public Property Get MissingProperty() As Long
+End Property
+
+Public Property Get EarlyProperty() As Long
+  Exit Property
+  EarlyProperty = 1
+End Property
+
+Public Property Get LetValue() As Long
+  Let LetValue = 1
+End Property
+
+Public Function EarlyExit() As Long
+  Exit Function
+  EarlyExit = 1
+End Function
+
+Public Function BranchMissing(ByVal flag As Boolean) As Long
+  If flag Then
+    BranchMissing = 1
+  Else
+    Debug.Print "not assigned"
+  End If
+End Function
+
+Public Function BranchSafe(ByVal flag As Boolean) As Long
+  If flag Then
+    BranchSafe = 1
+  Else
+    BranchSafe = 0
+  End If
+End Function
+
+Public Function DominatingAssignment(ByVal flag As Boolean) As Long
+  DominatingAssignment = 0
+  If flag Then Exit Function
+  DominatingAssignment = 1
+End Function
+
+Public Function SharedCleanup(ByVal flag As Boolean) As Long
+  On Error GoTo Handler
+  If flag Then GoTo Cleanup
+  Debug.Print "work"
+Cleanup:
+  SharedCleanup = 0
+  Exit Function
+Handler:
+  GoTo Cleanup
+End Function
+
+Public Function UnsafeHandler() As Long
+  On Error GoTo Handler
+  Err.Raise 5
+  UnsafeHandler = 1
+  Exit Function
+Handler:
+  Exit Function
+End Function
+
+Public Function SafeHandler() As Long
+  On Error GoTo Handler
+  Err.Raise 5
+  SafeHandler = 1
+  Exit Function
+Handler:
+  SafeHandler = 0
+End Function
+
+Public Function ReraisedHandler() As Long
+  On Error GoTo Handler
+  ReraisedHandler = 1
+  Exit Function
+Handler:
+  Err.Raise 5
+End Function
+
+Public Function RaiseOnly() As Long
+  Err.Raise 5
+End Function
+
+Public Function ObjectValueAssignment() As Range
+  ObjectValueAssignment = Sheet1.Range("A1")
+End Function
+
+Public Function ObjectSetAssignment() As Range
+  Set ObjectSetAssignment = Sheet1.Range("A1")
+End Function
+
+Public Function ValueSetAssignment() As Long
+  Set ValueSetAssignment = CreateObject("Scripting.Dictionary")
+End Function
+
+Public Function CommentOnly() As Long
+  ' CommentOnly = 1
+  Debug.Print "CommentOnly = 1"
+End Function
+
+Public Property Let Writable(ByVal value As Long)
+End Property
+
+Public Property Set ObjectWritable(ByVal value As Object)
+End Property
+
+Public Sub NoReturn()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnPath = true
+
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA210")
+	want := map[string]bool{
+		"MissingReturn":      true,
+		"MissingProperty":    true,
+		"EarlyProperty":      true,
+		"EarlyExit":          true,
+		"BranchMissing":      true,
+		"UnsafeHandler":      true,
+		"ValueSetAssignment": true,
+		"CommentOnly":        true,
+	}
+	for _, finding := range got {
+		delete(want, finding.Procedure)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing VBA210 procedures: %v; findings=%+v", want, got)
+	}
+	for _, procedure := range []string{"BranchSafe", "DominatingAssignment", "SharedCleanup", "SafeHandler", "ReraisedHandler", "RaiseOnly", "ObjectSetAssignment", "LetValue", "Writable", "ObjectWritable", "NoReturn"} {
+		for _, finding := range got {
+			if finding.Procedure == procedure {
+				t.Fatalf("unexpected VBA210 for %s: %+v", procedure, finding)
+			}
+		}
+	}
+	var unsafeHandler Finding
+	for _, finding := range got {
+		if finding.Procedure == "UnsafeHandler" {
+			unsafeHandler = finding
+			break
+		}
+	}
+	if unsafeHandler.Procedure != "UnsafeHandler" || !strings.Contains(unsafeHandler.Reason, "error-handler path") {
+		t.Fatalf("missing error-handler witness: %+v", got)
+	}
+	if !strings.Contains(unsafeHandler.Reason, "line ") {
+		t.Fatalf("VBA210 reason should identify the representative exit: %+v", unsafeHandler)
+	}
+	for _, finding := range got {
+		switch finding.Procedure {
+		case "EarlyExit":
+			if !strings.Contains(finding.Message, "Exit Function") {
+				t.Fatalf("missing Exit Function witness: %+v", finding)
+			}
+		case "EarlyProperty":
+			if !strings.Contains(finding.Message, "Exit Property") {
+				t.Fatalf("missing Exit Property witness: %+v", finding)
+			}
+		}
+	}
+	if gotObject := findingsByCode(findings, "VBA103"); len(gotObject) != 1 || gotObject[0].Procedure != "ObjectValueAssignment" {
+		t.Fatalf("expected only the object syntax diagnostic for ObjectValueAssignment: %+v", gotObject)
+	}
+}
+
 func TestAnalyzerByRefMismatchHandlesLowercaseCallKeyword(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
