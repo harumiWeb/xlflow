@@ -193,7 +193,7 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 		return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is a newly created object expression. Pass a writable variable to observe any ByRef replacement.", expr, param.Name)), true
 	}
 	if isIdentifier(expr) {
-		inferred, ok := a.inferWordTypeInfoAt(doc, expr, byteOffsetForPosition(doc.Source, pos))
+		inferred, ok := a.inferWordTypeInfoAt(doc, expr, byteOffsetForDocumentPosition(doc, pos))
 		if !ok || lowConfidenceDiagnosticType(inferred.Type) {
 			return Diagnostic{}, false
 		}

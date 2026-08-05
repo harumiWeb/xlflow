@@ -589,7 +589,8 @@ func (c *astLintContext) hasNarrowOnErrorReset(startLine int) bool {
 	}
 	lines := normalizedSourceLines(string(c.source))
 	seen := 0
-	for i := startLine; i < len(lines) && seen < 5; i++ {
+	sawErrNumberCheck := false
+	for i := startLine; i < len(lines) && seen < 16; i++ {
 		stmt := normalizedCodeLine(lines[i])
 		if stmt == "" {
 			continue
@@ -597,7 +598,14 @@ func (c *astLintContext) hasNarrowOnErrorReset(startLine int) bool {
 		seen++
 		lower := strings.ToLower(stmt)
 		if lower == "on error goto 0" {
-			return true
+			// Preserve the original short-block allowance, and also accept a
+			// bounded probe that explicitly observes Err.Number before restoring
+			// normal error handling. This covers common conversion/capacity probes
+			// without hiding broad best-effort cleanup scopes.
+			return seen <= 5 || sawErrNumberCheck
+		}
+		if strings.Contains(lower, "err.number") {
+			sawErrNumberCheck = true
 		}
 	}
 	return false
@@ -934,14 +942,19 @@ func cleanUndeclaredTarget(text string) (string, bool, bool) {
 		return "", false, false
 	}
 	name := cleanIdentifier(text)
-	if name == "" || isStatementKeyword(name) {
-		return "", false, false
-	}
-	r := rune(name[0])
-	if r >= '0' && r <= '9' {
+	if name == "" || !isBareVBAIdentifier(name) || isStatementKeyword(name) {
 		return "", false, false
 	}
 	return name, hadParens, true
+}
+
+func isBareVBAIdentifier(name string) bool {
+	for index, r := range name {
+		if !isVBAIdentifierRune(r) || (index == 0 && unicode.IsDigit(r)) {
+			return false
+		}
+	}
+	return name != ""
 }
 
 func sourceColumnForName(line string, name string) int {
@@ -1092,8 +1105,14 @@ func confusingParenthesizedCall(stmt string) (string, bool) {
 	if len(fields) < 2 || !strings.HasPrefix(fields[1], "(") {
 		return "", false
 	}
+	if strings.Contains(fields[0], "(") {
+		// A token such as Mid$(text, is already a function call. The next
+		// parenthesized expression is an argument, not VBA's ambiguous
+		// whitespace-separated call syntax.
+		return "", false
+	}
 	name := cleanIdentifier(fields[0])
-	if name == "" || isStatementKeyword(name) || strings.Contains(stmt, "=") || strings.Contains(name, ".") {
+	if name == "" || !isBareVBAIdentifier(name) || isStatementKeyword(name) || strings.Contains(stmt, "=") || strings.Contains(name, ".") {
 		return "", false
 	}
 	return name, true
@@ -1547,6 +1566,10 @@ func (l Linter) unusedLocalVariableIssuesContext(ctx context.Context, path, sour
 	if !l.Config.Lint.DetectUnusedLocalVariables {
 		return nil, nil
 	}
+	references, err := buildProcedureLocalReferenceIndexContext(ctx, source, file.Symbols, nil)
+	if err != nil {
+		return nil, err
+	}
 	var issues []Issue
 	for i, sym := range file.Symbols {
 		if i&0x3f == 0 {
@@ -1560,11 +1583,7 @@ func (l Linter) unusedLocalVariableIssuesContext(ctx context.Context, path, sour
 		if isIgnoredLocalName(sym.Name) {
 			continue
 		}
-		referenced, err := localNameReferencedContext(ctx, source, sym, procedureEndLineForSymbol(file.Symbols, sym))
-		if err != nil {
-			return nil, err
-		}
-		if referenced {
+		if references[i] {
 			continue
 		}
 		issue := l.issueForSymbol(sym, "VB020", "warning", "Procedure-local variable is declared but never referenced.")
@@ -1706,50 +1725,6 @@ func isIgnoredLocalName(name string) bool {
 	return name == "" || name == "_" || strings.HasPrefix(name, "unused") || strings.HasPrefix(name, "ignore")
 }
 
-func procedureEndLineForSymbol(all []symbols.Symbol, sym symbols.Symbol) int {
-	if sym.Parent == "" {
-		return sym.EndLine
-	}
-	for _, candidate := range all {
-		if !procedureSymbolKind(candidate.Kind) {
-			continue
-		}
-		if !strings.EqualFold(candidate.Name, sym.Parent) {
-			continue
-		}
-		if candidate.StartLine <= sym.StartLine && sym.StartLine <= candidate.EndLine {
-			return candidate.EndLine
-		}
-	}
-	return sym.EndLine
-}
-
-func localNameReferencedContext(ctx context.Context, source string, sym symbols.Symbol, endLine int) (bool, error) {
-	lines := normalizedSourceLines(source)
-	needle := sym.Name
-	for i := sym.StartLine - 1; i < len(lines); i++ {
-		if i&0xff == 0 {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-		}
-		lineNo := i + 1
-		if sym.Parent != "" && endLine > 0 && lineNo > endLine {
-			break
-		}
-		line := normalizedCodeLine(lines[i])
-		for _, statement := range splitStatements(line) {
-			if lineNo == sym.StartLine && isLocalDeclarationStatement(statement) {
-				continue
-			}
-			if hasLocalReadUse(statement, needle) {
-				return true, nil
-			}
-		}
-	}
-	return false, ctx.Err()
-}
-
 func isLocalDeclarationStatement(statement string) bool {
 	fields := lowerFields(statement)
 	if len(fields) == 0 {
@@ -1760,26 +1735,6 @@ func isLocalDeclarationStatement(statement string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func hasLocalReadUse(code, symbol string) bool {
-	lowerCode := strings.ToLower(code)
-	lowerSymbol := strings.ToLower(symbol)
-	for offset := 0; ; {
-		index := strings.Index(lowerCode[offset:], lowerSymbol)
-		if index < 0 {
-			return false
-		}
-		index += offset
-		end := index + len(symbol)
-		if isIdentifierBoundary(code, index-1) &&
-			isIdentifierBoundary(code, end) &&
-			!isQualifiedIdentifier(code, index) &&
-			!isLocalAssignmentTargetOccurrence(code, index, end) {
-			return true
-		}
-		offset = end
 	}
 }
 

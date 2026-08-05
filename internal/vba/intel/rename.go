@@ -286,7 +286,7 @@ func (a Analyzer) isExternalRenameTarget(doc Document, word string, wordRange Ra
 	beforeWord := strings.TrimRight(line[:startByte], " \t")
 	if strings.HasSuffix(beforeWord, ".") {
 		receiverExpr := expressionBefore(strings.TrimSuffix(beforeWord, "."))
-		offset := byteOffsetForPosition(doc.Source, pos)
+		offset := byteOffsetForDocumentPosition(doc, pos)
 		if receiverExpr == "" {
 			if receiverType, ok := a.withBlockTypeAt(doc, pos, offset); ok {
 				if _, ok := a.DB.ResolveMember(receiverType, word); ok {

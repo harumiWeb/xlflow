@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ import (
 	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -43,6 +45,7 @@ const serverName = "xlflow-vba-lsp"
 
 const diagnosticsDebounce = 300 * time.Millisecond
 const diagnosticsOpenDelay = 750 * time.Millisecond
+const diagnosticsFullIdleDelay = 2 * time.Second
 const diagnosticsLargeFileLines = 10_000
 
 type BuildInfo struct {
@@ -73,8 +76,10 @@ type Server struct {
 	semanticTokenGenerator   func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig           intel.CodeLensConfig
 	diagnostics              func(context.Context, intel.Document) []intel.Diagnostic
+	diagnosticsRequest       func(context.Context, intel.DiagnosticRequest) intel.DiagnosticResult
 	diagnosticsDebounce      time.Duration
 	diagnosticsOpenDelay     time.Duration
+	diagnosticsFullIdleDelay time.Duration
 	diagnosticsAfterFunc     func(time.Duration, func()) diagnosticTimer
 	beforeDiagnosticsPublish func()
 
@@ -100,8 +105,13 @@ type diagnosticState struct {
 	latest              intel.Document
 	notify              *glsp.Context
 	timer               diagnosticTimer
+	fullTimer           diagnosticTimer
 	running             bool
 	ready               bool
+	readyMode           intel.DiagnosticMode
+	runningMode         intel.DiagnosticMode
+	publishedMode       intel.DiagnosticMode
+	hasPublished        bool
 	open                bool
 	cancel              context.CancelFunc
 	buildOverlay        bool
@@ -109,6 +119,9 @@ type diagnosticState struct {
 	dependentPending    bool
 	publishedSignatures map[string]procedureSignature
 	baselineKnown       bool
+	diagnosticCache     *intel.DiagnosticCache
+	changes             intel.ProcedureChangeSet
+	overlayGeneration   uint64
 }
 
 func Check(opts Options) error {
@@ -181,10 +194,13 @@ func New(opts Options) (*Server, func(), error) {
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.analyzer.WorkspaceSymbolQueryFunc = s.cachedWorkspaceSymbolQuery
+	s.analyzer.WorkspaceSymbolsSnapshotFunc = s.cachedWorkspaceSymbolsSnapshot
 	s.semanticTokenGenerator = s.analyzer.SemanticTokens
 	s.diagnostics = s.analyzer.DiagnosticsContext
+	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
 	s.diagnosticsDebounce = diagnosticsDebounce
 	s.diagnosticsOpenDelay = diagnosticsOpenDelay
+	s.diagnosticsFullIdleDelay = diagnosticsFullIdleDelay
 	s.diagnosticsAfterFunc = func(delay time.Duration, callback func()) diagnosticTimer {
 		return time.AfterFunc(delay, callback)
 	}
@@ -380,7 +396,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	if s.documentKind(change.document) == DocumentKindVBA {
 		s.semanticTokens.invalidateWorkspace()
 	}
-	s.scheduleDiagnostics(ctx, change.document)
+	s.scheduleDiagnostics(ctx, change.document, diagnosticChangeSet(changes))
 	return nil
 }
 
@@ -1094,7 +1110,7 @@ func semanticTokenDeltaEdits(previous, current []protocol.UInteger) []protocol.S
 func semanticTokenResponseSize(response any) int {
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		return int(^uint(0) >> 1)
+		return math.MaxInt
 	}
 	return len(encoded)
 }
@@ -1174,6 +1190,9 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 	state.latest = doc
 	state.notify = ctx
 	state.ready = openDelay <= 0
+	state.readyMode = intel.DiagnosticModeFull
+	state.hasPublished = false
+	state.changes = intel.ProcedureChangeSet{}
 	state.open = true
 	state.buildOverlay = s.documentKind(doc) == DocumentKindVBA
 	if state.buildOverlay {
@@ -1190,6 +1209,10 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 		state.timer.Stop()
 		state.timer = nil
 	}
+	if state.fullTimer != nil {
+		state.fullTimer.Stop()
+		state.fullTimer = nil
+	}
 	if state.cancel != nil {
 		state.cancel()
 	}
@@ -1199,7 +1222,7 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 		state.mu.Lock()
 		if state.open && state.generation == generation && state.timer == nil {
 			state.timer = s.diagnosticsAfterFunc(openDelay, func() {
-				s.diagnosticsReady(doc.URI, state, generation)
+				s.diagnosticsReady(doc.URI, state, generation, intel.DiagnosticModeFull)
 			})
 		}
 		state.mu.Unlock()
@@ -1208,15 +1231,32 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 	return s.launchDiagnostics(doc.URI, state)
 }
 
-func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document) {
-	s.scheduleDocumentAnalysis(ctx, doc, true)
+func diagnosticChangeSet(changes []documentContentChange) intel.ProcedureChangeSet {
+	result := intel.ProcedureChangeSet{}
+	for _, change := range changes {
+		if change.rng == nil {
+			return intel.ProcedureChangeSet{Ranges: []intel.Range{{Start: intel.Position{}, End: intel.Position{Line: math.MaxInt}}}}
+		}
+		start := intel.Position{Line: int(change.rng.Start.Line), Character: int(change.rng.Start.Character)}
+		end := intel.Position{Line: int(change.rng.End.Line), Character: int(change.rng.End.Character)}
+		insertedLines := strings.Count(change.text, "\n")
+		if insertedLines > 0 {
+			end.Line = max(end.Line, start.Line+insertedLines)
+		}
+		result.Ranges = append(result.Ranges, intel.Range{Start: start, End: end})
+	}
+	return result
+}
+
+func (s *Server) scheduleDiagnostics(ctx *glsp.Context, doc intel.Document, changes intel.ProcedureChangeSet) {
+	s.scheduleDocumentAnalysis(ctx, doc, true, changes)
 }
 
 func (s *Server) scheduleDiagnosticsOnly(ctx *glsp.Context, doc intel.Document) {
-	s.scheduleDocumentAnalysis(ctx, doc, false)
+	s.scheduleDocumentAnalysis(ctx, doc, false, intel.ProcedureChangeSet{})
 }
 
-func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document, buildOverlay bool) {
+func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document, buildOverlay bool, changes intel.ProcedureChangeSet) {
 	s.diagMu.Lock()
 	if s.diagStopped {
 		s.diagMu.Unlock()
@@ -1245,9 +1285,17 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 	}
 	state.generation++
 	generation := state.generation
+	fastFull := buildOverlay && s.documentKind(doc) == DocumentKindVBA
 	state.latest = doc
 	state.notify = ctx
 	state.ready = false
+	state.readyMode = intel.DiagnosticModeFull
+	if fastFull {
+		state.readyMode = intel.DiagnosticModeFast
+	}
+	state.publishedMode = intel.DiagnosticModeFull
+	state.hasPublished = false
+	state.changes = changes
 	state.open = true
 	state.buildOverlay = buildOverlay && s.documentKind(doc) == DocumentKindVBA
 	if state.buildOverlay {
@@ -1259,24 +1307,43 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 	if state.timer != nil {
 		state.timer.Stop()
 	}
+	if state.fullTimer != nil {
+		state.fullTimer.Stop()
+	}
 	if state.cancel != nil {
 		state.cancel()
 	}
 	state.timer = s.diagnosticsAfterFunc(s.diagnosticsDebounce, func() {
-		s.diagnosticsReady(doc.URI, state, generation)
+		mode := intel.DiagnosticModeFull
+		if fastFull {
+			mode = intel.DiagnosticModeFast
+		}
+		s.diagnosticsReady(doc.URI, state, generation, mode)
 	})
+	if fastFull {
+		state.fullTimer = s.diagnosticsAfterFunc(s.diagnosticsFullIdleDelay, func() {
+			s.diagnosticsReady(doc.URI, state, generation, intel.DiagnosticModeFull)
+		})
+	}
 	state.mu.Unlock()
 	s.diagMu.Unlock()
 }
 
-func (s *Server) diagnosticsReady(uri string, state *diagnosticState, generation uint64) {
+func (s *Server) diagnosticsReady(uri string, state *diagnosticState, generation uint64, mode intel.DiagnosticMode) {
 	state.mu.Lock()
 	if !state.open || state.generation != generation {
 		state.mu.Unlock()
 		return
 	}
-	state.timer = nil
+	if mode == intel.DiagnosticModeFast {
+		state.timer = nil
+	} else {
+		state.fullTimer = nil
+	}
 	state.ready = true
+	if mode == intel.DiagnosticModeFull || state.readyMode != intel.DiagnosticModeFull {
+		state.readyMode = mode
+	}
 	state.mu.Unlock()
 	s.launchDiagnostics(uri, state)
 }
@@ -1297,9 +1364,11 @@ func (s *Server) launchDiagnostics(uri string, state *diagnosticState) <-chan st
 	notify := state.notify
 	generation := state.generation
 	buildOverlay := state.buildOverlay
+	mode := state.readyMode
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.ready = false
 	state.running = true
+	state.runningMode = mode
 	state.buildOverlay = false
 	state.runningOverlay = buildOverlay
 	state.cancel = cancel
@@ -1310,7 +1379,7 @@ func (s *Server) launchDiagnostics(uri string, state *diagnosticState) <-chan st
 
 	go func() {
 		defer close(done)
-		s.runDocumentAnalysis(runCtx, uri, state, generation, doc, notify, buildOverlay)
+		s.runDocumentAnalysis(runCtx, uri, state, generation, doc, notify, buildOverlay, mode)
 	}()
 	return done
 }
@@ -1334,6 +1403,7 @@ func (s *Server) runDocumentAnalysis(
 	doc intel.Document,
 	notify *glsp.Context,
 	buildOverlay bool,
+	mode intel.DiagnosticMode,
 ) {
 	defer s.diagWorkers.Done()
 	select {
@@ -1344,7 +1414,11 @@ func (s *Server) runDocumentAnalysis(
 		return
 	}
 
-	if buildOverlay {
+	if mode == intel.DiagnosticModeFast {
+		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode)
+	}
+
+	if buildOverlay && runCtx.Err() == nil {
 		state.mu.Lock()
 		baselineKnown := state.baselineKnown
 		state.mu.Unlock()
@@ -1378,13 +1452,17 @@ func (s *Server) runDocumentAnalysis(
 			oldSignatures := state.publishedSignatures
 			if state.open && state.generation == generation {
 				state.publishedSignatures = newSignatures
+				state.overlayGeneration = generation
 			}
 			state.mu.Unlock()
 			s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
 		}
 	}
 	// Overlay failure deliberately does not suppress file-local diagnostics.
-	s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify)
+	if mode == intel.DiagnosticModeFull && runCtx.Err() == nil {
+		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode)
+	}
+	s.completeDocumentAnalysis(uri, state, generation, mode)
 }
 
 func (s *Server) analysisGenerationCurrent(state *diagnosticState, generation uint64, doc intel.Document) bool {
@@ -1405,6 +1483,24 @@ func (s *Server) finishDocumentAnalysis(uri string, state *diagnosticState) {
 	}
 }
 
+func (s *Server) completeDocumentAnalysis(uri string, state *diagnosticState, generation uint64, mode intel.DiagnosticMode) {
+	state.mu.Lock()
+	state.running = false
+	state.runningOverlay = false
+	state.cancel = nil
+	if mode == intel.DiagnosticModeFull && state.open && state.generation == generation && state.dependentPending {
+		state.dependentPending = false
+		state.generation++
+		state.ready = true
+		state.readyMode = intel.DiagnosticModeFull
+	}
+	ready := state.open && state.ready
+	state.mu.Unlock()
+	if ready {
+		s.launchDiagnostics(uri, state)
+	}
+}
+
 func (s *Server) runDiagnosticsBody(
 	runCtx context.Context,
 	uri string,
@@ -1412,9 +1508,22 @@ func (s *Server) runDiagnosticsBody(
 	generation uint64,
 	doc intel.Document,
 	notify *glsp.Context,
+	mode intel.DiagnosticMode,
 ) {
 	measurement := s.startPerformance("diagnostics", doc)
-	diagnostics := s.documentDiagnostics(runCtx, doc)
+	recorder := analysisstats.NewRecorder()
+	runCtx = analysisstats.WithRecorder(runCtx, recorder)
+	state.mu.Lock()
+	previousCache := state.diagnosticCache
+	changes := state.changes
+	state.mu.Unlock()
+	var result intel.DiagnosticResult
+	if s.documentKind(doc) == DocumentKindVBA && s.diagnosticsRequest != nil {
+		result = s.diagnosticsRequest(runCtx, intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder})
+	} else {
+		result.Diagnostics = s.documentDiagnostics(runCtx, doc)
+	}
+	diagnostics := result.Diagnostics
 	out := make([]protocol.Diagnostic, 0, len(diagnostics))
 	for _, diag := range diagnostics {
 		out = append(out, toProtocolDiagnostic(diag))
@@ -1424,28 +1533,23 @@ func (s *Server) runDiagnosticsBody(
 	}
 
 	state.mu.Lock()
-	discarded := !state.open || state.generation != generation || runCtx.Err() != nil || state.dependentPending
+	discarded := !state.open || state.generation != generation || runCtx.Err() != nil || (mode == intel.DiagnosticModeFull && state.dependentPending) || (mode == intel.DiagnosticModeFast && state.hasPublished && state.publishedMode == intel.DiagnosticModeFull)
 	if !discarded && notify != nil {
 		notify.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
 			URI:         protocol.DocumentUri(doc.URI),
 			Diagnostics: out,
 		})
 	}
-	state.running = false
-	state.runningOverlay = false
-	state.cancel = nil
-	if state.open && state.generation == generation && state.dependentPending {
-		state.dependentPending = false
-		state.generation++
-		state.ready = true
+	if !discarded {
+		state.publishedMode = mode
+		state.hasPublished = true
+		if mode == intel.DiagnosticModeFull && result.Cache != nil {
+			state.diagnosticCache = result.Cache
+		}
 	}
-	ready := state.open && state.ready
 	state.mu.Unlock()
 	measurement.finishDiagnostics(len(out), generation, discarded)
-
-	if ready {
-		s.launchDiagnostics(uri, state)
-	}
+	s.logDiagnosticStages(doc, generation, mode, recorder)
 }
 
 func toProtocolDiagnostic(diag intel.Diagnostic) protocol.Diagnostic {
@@ -1543,9 +1647,17 @@ func (state *diagnosticState) close() {
 	state.dependentPending = false
 	state.publishedSignatures = nil
 	state.baselineKnown = false
+	state.diagnosticCache = nil
+	state.hasPublished = false
+	state.overlayGeneration = 0
+	state.changes = intel.ProcedureChangeSet{}
 	if state.timer != nil {
 		state.timer.Stop()
 		state.timer = nil
+	}
+	if state.fullTimer != nil {
+		state.fullTimer.Stop()
+		state.fullTimer = nil
 	}
 	if state.cancel != nil {
 		state.cancel()
@@ -1725,6 +1837,47 @@ func (s *Server) cachedWorkspaceSymbols(open []intel.Document, query string) ([]
 	return s.cachedWorkspaceSymbolQuery(open, intel.WorkspaceSymbolQuery{Text: query, Mode: intel.WorkspaceSymbolQueryContains})
 }
 
+func (s *Server) cachedWorkspaceSymbolsSnapshot(open []intel.Document) ([]intel.Symbol, error) {
+	indexed, err := s.analysis.symbolSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	openKeys := make(map[string]bool, len(open)*2)
+	for _, doc := range open {
+		for _, key := range workspaceSymbolPathKeys(s.opts.RootDir, doc.Path) {
+			openKeys[key] = true
+		}
+	}
+	out := indexed[:0]
+	for _, sym := range indexed {
+		if !hasWorkspaceSymbolPathKey(openKeys, workspaceSymbolPathKeys(s.opts.RootDir, sym.File)) {
+			out = append(out, sym)
+		}
+	}
+	for _, doc := range open {
+		if s.documentKind(doc) != DocumentKindVBA {
+			continue
+		}
+		syms, symbolErr := s.analyzer.DocumentSymbols(doc)
+		if symbolErr == nil {
+			out = append(out, syms...)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].File != out[j].File {
+			return out[i].File < out[j].File
+		}
+		if out[i].Range.Start.Line != out[j].Range.Start.Line {
+			return out[i].Range.Start.Line < out[j].Range.Start.Line
+		}
+		if out[i].Range.Start.Character != out[j].Range.Start.Character {
+			return out[i].Range.Start.Character < out[j].Range.Start.Character
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
 func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
 	// Open-document overlays are produced only by the lifecycle pipeline.
 	// Queries never synchronously publish them; current snapshot symbols are
@@ -1751,7 +1904,11 @@ func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.W
 		if s.documentKind(doc) != DocumentKindVBA {
 			continue
 		}
-		syms, symbolErr := s.analyzer.DocumentSymbols(doc)
+		syms, handled := s.analyzer.LightweightDocumentSymbols(doc, query)
+		var symbolErr error
+		if !handled {
+			syms, symbolErr = s.analyzer.DocumentSymbols(doc)
+		}
 		if symbolErr != nil {
 			continue
 		}
@@ -2173,7 +2330,7 @@ func (d *documents) applyChangesWithResult(uri string, changes []documentContent
 		} else {
 			fallbackReason = "incremental_parse_unavailable"
 		}
-		snapshot, err = fullyParsedSnapshot(doc)
+		snapshot, err = fullyParsedSnapshot(doc, entry.snapshot)
 	}
 	if err != nil || snapshot == nil {
 		return documentChangeResult{document: entry.snapshot.Document(), parseMode: "retained", fallbackReason: "full_parse_failed"}, nil
@@ -2181,8 +2338,12 @@ func (d *documents) applyChangesWithResult(uri string, changes []documentContent
 	return d.publishChangedSnapshot(uri, key, entry, snapshot, index, parseMode, fallbackReason)
 }
 
-func fullyParsedSnapshot(doc intel.Document) (*intel.AnalysisSnapshot, error) {
-	snapshot := intel.NewAnalysisSnapshot(doc)
+func fullyParsedSnapshot(doc intel.Document, previous *intel.AnalysisSnapshot) (*intel.AnalysisSnapshot, error) {
+	parsed, err := vbaast.ParseDocument(doc.Path, []byte(doc.Source))
+	if err != nil {
+		return nil, err
+	}
+	snapshot := intel.NewSuccessorAnalysisSnapshotWithParsedDocument(doc, parsed, previous)
 	if _, err := snapshot.ParsedDocument(); err != nil {
 		snapshot.Retire()
 		return nil, err

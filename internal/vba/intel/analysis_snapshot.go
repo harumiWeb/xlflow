@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -42,10 +44,14 @@ type AnalysisSnapshot struct {
 	source     string
 	sourceHash [sha256.Size]byte
 	lines      []string
+	lineStarts []int
+	lineEnds   []int
 
-	proceduresOnce sync.Once
-	procedures     []ProcedureInfo
-	procedureLines []int
+	proceduresOnce       sync.Once
+	procedures           []ProcedureInfo
+	procedureLines       []int
+	procedureCatalogOnce sync.Once
+	procedureCatalog     ProcedureCatalog
 
 	symbolsMu   sync.Mutex
 	symbolsWait chan struct{}
@@ -76,12 +82,17 @@ type AnalysisSnapshot struct {
 	semanticOnce        sync.Once
 	semanticIdentifiers [][]byteSpan
 
-	parsedMu       sync.Mutex
-	parsedDocument *ast.ParsedDocument
-	parsedErr      error
-	parseDocument  func(string, []byte) (*ast.ParsedDocument, error)
-	parseCount     atomic.Uint64
-	fullHashCount  atomic.Uint64
+	parsedMu              sync.Mutex
+	parsedDocument        *ast.ParsedDocument
+	parsedErr             error
+	parseDocument         func(string, []byte) (*ast.ParsedDocument, error)
+	parseCount            atomic.Uint64
+	fullHashCount         atomic.Uint64
+	procedureIRBuildCount atomic.Uint64
+	procedureIRReuseCount atomic.Uint64
+	cfgBuildCount         atomic.Uint64
+	cfgReuseCount         atomic.Uint64
+	artifacts             *procedureArtifactStore
 
 	retired atomic.Bool
 }
@@ -91,6 +102,7 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 	source := doc.Source
 	normalized := strings.ReplaceAll(source, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lineStarts, lineEnds := buildSourceLineMap(source)
 	return &AnalysisSnapshot{
 		uri:           doc.URI,
 		path:          doc.Path,
@@ -99,8 +111,71 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 		source:        source,
 		sourceHash:    sha256.Sum256([]byte(source)),
 		lines:         strings.Split(normalized, "\n"),
+		lineStarts:    lineStarts,
+		lineEnds:      lineEnds,
 		parseDocument: ast.ParseDocument,
+		artifacts:     newProcedureArtifactStore(),
 	}
+}
+
+func buildSourceLineMap(source string) ([]int, []int) {
+	starts := []int{0}
+	ends := make([]int, 0, strings.Count(source, "\n")+1)
+	for i := 0; i < len(source); i++ {
+		switch source[i] {
+		case '\n':
+			ends = append(ends, i)
+			starts = append(starts, i+1)
+		case '\r':
+			ends = append(ends, i)
+			if i+1 < len(source) && source[i+1] == '\n' {
+				i++
+			}
+			starts = append(starts, i+1)
+		}
+	}
+	ends = append(ends, len(source))
+	return starts, ends
+}
+
+func (s *AnalysisSnapshot) byteOffset(pos Position) int {
+	if s == nil || pos.Line < 0 {
+		return 0
+	}
+	if pos.Line >= len(s.lineStarts) {
+		return len(s.source)
+	}
+	start, end := s.lineStarts[pos.Line], s.lineEnds[pos.Line]
+	index := byteIndexForUTF16(s.source[start:end], pos.Character)
+	return start + min(index, end-start)
+}
+
+func (s *AnalysisSnapshot) position(offset int) Position {
+	if s == nil || offset <= 0 {
+		return Position{}
+	}
+	if offset >= len(s.source) {
+		line := len(s.lineStarts) - 1
+		return Position{Line: line, Character: utf16Len(s.source[s.lineStarts[line]:s.lineEnds[line]])}
+	}
+	line := sort.Search(len(s.lineStarts), func(i int) bool { return s.lineStarts[i] > offset }) - 1
+	line = max(0, line)
+	end := min(offset, s.lineEnds[line])
+	return Position{Line: line, Character: utf16Len(s.source[s.lineStarts[line]:end])}
+}
+
+func positionForSourceMap(source string, lineStarts, lineEnds []int, offset int) Position {
+	if offset <= 0 || len(lineStarts) == 0 {
+		return Position{}
+	}
+	if offset >= len(source) {
+		line := len(lineStarts) - 1
+		return Position{Line: line, Character: utf16Len(source[lineStarts[line]:lineEnds[line]])}
+	}
+	line := sort.Search(len(lineStarts), func(i int) bool { return lineStarts[i] > offset }) - 1
+	line = max(0, line)
+	end := min(offset, lineEnds[line])
+	return Position{Line: line, Character: utf16Len(source[lineStarts[line]:end])}
 }
 
 // NewAnalysisSnapshotWithParsedDocument captures doc and seeds it with a
@@ -130,7 +205,20 @@ func NewIncrementalAnalysisSnapshot(doc Document, previous *AnalysisSnapshot, ed
 	if err != nil || next == nil {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
-	return NewAnalysisSnapshotWithParsedDocument(doc, next), nil
+	snapshot := NewAnalysisSnapshotWithParsedDocument(doc, next)
+	snapshot.artifacts = previous.artifacts.clone()
+	return snapshot, nil
+}
+
+// NewSuccessorAnalysisSnapshotWithParsedDocument creates a full-replacement
+// revision that may inherit only completed immutable procedure artifacts from
+// the same open-document lifecycle.
+func NewSuccessorAnalysisSnapshotWithParsedDocument(doc Document, parsed *ast.ParsedDocument, previous *AnalysisSnapshot) *AnalysisSnapshot {
+	snapshot := NewAnalysisSnapshotWithParsedDocument(doc, parsed)
+	if previous != nil && !previous.Retired() {
+		snapshot.artifacts = previous.artifacts.clone()
+	}
+	return snapshot
 }
 
 // Document returns a document view associated with this snapshot.
@@ -287,10 +375,13 @@ func (s *AnalysisSnapshot) SourceSymbolsContext(ctx context.Context, load func(c
 		if s.symbolsWait != nil {
 			wait := s.symbolsWait
 			s.symbolsMu.Unlock()
+			finishWait := analysisstats.MeasureWait(ctx, "symbols_singleflight")
 			select {
 			case <-ctx.Done():
+				finishWait(ctx.Err())
 				return nil, false, ctx.Err()
 			case <-wait:
+				finishWait(nil)
 			}
 			continue
 		}
@@ -366,10 +457,13 @@ func (s *AnalysisSnapshot) ProcedureIRContext(ctx context.Context, load func(con
 		if s.procedureIRWait != nil {
 			wait := s.procedureIRWait
 			s.procedureIRMu.Unlock()
+			finishWait := analysisstats.MeasureWait(ctx, "procedure_ir_singleflight")
 			select {
 			case <-ctx.Done():
+				finishWait(ctx.Err())
 				return procedureir.DocumentIR{}, false, ctx.Err()
 			case <-wait:
+				finishWait(nil)
 			}
 			continue
 		}
@@ -393,6 +487,9 @@ func (s *AnalysisSnapshot) ProcedureIRContext(ctx context.Context, load func(con
 			s.procedureIR, s.procedureIRErr, s.procedureIRDone = procedureir.Clone(result), err, true
 		}
 		s.procedureIRMu.Unlock()
+		if err == nil {
+			s.seedProcedureArtifacts(result)
+		}
 		return procedureir.Clone(result), false, err
 	}
 }
@@ -424,10 +521,13 @@ func (s *AnalysisSnapshot) ControlFlowGraphsContext(ctx context.Context, load fu
 		if s.controlFlowWait != nil {
 			wait := s.controlFlowWait
 			s.controlFlowMu.Unlock()
+			finishWait := analysisstats.MeasureWait(ctx, "cfg_singleflight")
 			select {
 			case <-ctx.Done():
+				finishWait(ctx.Err())
 				return vbacfg.Document{}, false, ctx.Err()
 			case <-wait:
+				finishWait(nil)
 			}
 			continue
 		}
@@ -577,6 +677,11 @@ func parsedDocumentForDocument(doc Document) (*ast.ParsedDocument, func(), error
 
 func procedureIRForDocumentContext(ctx context.Context, doc Document, rootDir string, parsed *ast.ParsedDocument) (procedureir.DocumentIR, error) {
 	load := func(loadCtx context.Context) (procedureir.DocumentIR, error) {
+		if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+			if result, reused, err := snapshot.incrementalProcedureIR(loadCtx, rootDir); err != nil || reused {
+				return result, err
+			}
+		}
 		return procedureir.BuildParsedContext(loadCtx, procedureir.BuildOptions{
 			RootDir:    rootDir,
 			Path:       doc.Path,
@@ -592,10 +697,18 @@ func procedureIRForDocumentContext(ctx context.Context, doc Document, rootDir st
 
 func controlFlowForDocumentContext(ctx context.Context, doc Document, ir procedureir.DocumentIR) (vbacfg.Document, error) {
 	load := func(loadCtx context.Context) (vbacfg.Document, error) {
+		if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+			if result, reused, err := snapshot.incrementalCFG(loadCtx, ir); err != nil || reused {
+				return result, err
+			}
+		}
 		return vbacfg.BuildDocumentContext(loadCtx, ir)
 	}
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
 		result, _, err := snapshot.ControlFlowGraphsContext(ctx, load)
+		if err == nil {
+			snapshot.seedCFGArtifacts(ir, result)
+		}
 		return result, err
 	}
 	return load(ctx)

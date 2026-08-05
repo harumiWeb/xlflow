@@ -53,7 +53,7 @@ This file is provided for attribution and licence review. It is not a substitute
 | `golang.org/x/crypto`                   |                               `v0.53.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/crypto/+/v0.53.0:LICENSE`              |
 | `golang.org/x/net`                      |                               `v0.56.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/net/+/v0.56.0:LICENSE`                 |
 | `golang.org/x/sys`                      |                               `v0.46.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/sys/+/v0.46.0:LICENSE`                 |
-| `golang.org/x/text`                     |                               `v0.38.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.38.0:LICENSE`                |
+| `golang.org/x/text`                     |                               `v0.39.0` | BSD-3-Clause | `https://cs.opensource.google/go/x/text/+/v0.39.0:LICENSE`                |
 
 ## Scanner output notes
 

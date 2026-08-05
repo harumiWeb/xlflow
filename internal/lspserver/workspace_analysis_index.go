@@ -458,6 +458,15 @@ func (x *workspaceAnalysisIndex) searchContains(query string) ([]intel.Symbol, e
 	return out, nil
 }
 
+func (x *workspaceAnalysisIndex) symbolSnapshot() ([]intel.Symbol, error) {
+	if err := x.queryReady(); err != nil {
+		return nil, err
+	}
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.symbolsForRefsLocked(x.all), nil
+}
+
 func (x *workspaceAnalysisIndex) searchExact(name string) ([]intel.Symbol, error) {
 	if err := x.queryReady(); err != nil {
 		return nil, err

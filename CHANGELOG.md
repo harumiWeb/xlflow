@@ -4,6 +4,22 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.29.0
+
+- Fixed `VB004` false positives for bounded `On Error Resume Next` probes that
+  check `Err.Number` and restore normal handling, `VB022` false positives for
+  intrinsic function argument expressions, and `VB029` false positives for
+  multiline comparison arguments such as `vbTextCompare) = 0`.
+- Added procedure-scoped incremental LSP diagnostics with 300 ms Fast and
+  two-second idle Full publication, request-scoped workspace resolution,
+  reusable IR/CFG procedure fragments, indexed source positions, and stage
+  performance counters. Large-module Full analysis no longer repeats
+  workspace symbol copies or line-prefix scans, while generation, suppression,
+  diagnostic range, and close/reopen safety are preserved. Obsolete IR/CFG
+  fragment revisions are pruned after successful rebuilds so repeated edits do
+  not accumulate unreachable large-module artifacts.
+- Fixed Fast LSP procedure diagnostics to retain enclosing conditional-
+  compilation branches when a procedure follows an earlier module procedure.
 - Fixed new-project helper scaffolds to avoid unused `VB004` inline-suppression
   warnings during `xlflow lint`.
 - Fixed `VB014` false positives when valid VBA identifiers such as `nextChar`,
@@ -18,6 +34,8 @@ All notable changes to xlflow will be documented in this file.
   detects unsafe resolved project-local `ByRef` arguments, including explicit
   type mismatches, temporary values, indirect member/array expressions, and
   common `PtrSafe` pointer-width declaration mistakes.
+- Updated `golang.org/x/text` to v0.39.0 to include the latest invalid-input
+  handling security fix.
 
 ## v0.28.0
 
