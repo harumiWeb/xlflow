@@ -762,6 +762,17 @@ End Property
 	}
 }
 
+func TestExplicitLetReturnSlotResolvesAsLocalWrite(t *testing.T) {
+	doc, err := BuildSource(BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, []byte(`Public Function Compute() As Long
+    Let Compute = 2
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAccess(t, doc.Procedures[0].Accesses, "Compute", ScopeLocal, AccessWrite)
+}
+
 func TestReDimAccessModes(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Resize()

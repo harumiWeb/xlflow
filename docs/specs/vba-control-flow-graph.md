@@ -165,7 +165,32 @@ structured branches and jumps. The existing cleanup-label exception, inline
 suppression, diagnostic position, message, reason, suggestion, severity,
 ordering, CLI JSON, and LSP UTF-16 range remain compatibility requirements.
 
-Generic lint and `VBA210` are not CFG consumers under issue #427.
+## `VBA210` Integration
+
+`VBA210` consumes the procedure CFG for `Function` and `Property Get`
+procedures. It checks every reachable path to `NormalExit`, including explicit
+`Exit Function` / `Exit Property`, structured branches, error-handler paths that
+return normally, and shared cleanup or finalization labels. Exceptional,
+termination, and unknown exits are not themselves return exits, but exceptional
+edges remain in the conservative query so an error handler that later reaches
+`NormalExit` is included.
+
+The implicit procedure-name return slot is a local variable in ProcedureIR.
+Default VBA initialization does not satisfy the rule. An object return requires
+`Set <ProcedureName> = ...`; a known value return requires ordinary assignment
+or `Let`. `Variant`, `Any`, and unresolved return types do not receive a
+syntactic type assertion. Invalid assignment syntax is not counted as a valid
+return assignment; the existing `VBA103` and `VB037` diagnostics remain the
+syntax-specific diagnostics for the batch and source-intelligence surfaces.
+Known non-returning `Err.Raise` statements are followed only through their
+exceptional edge; their normal textual continuation is not a return path.
+
+The analyzer uses conservative definite assignment, so an assignment that
+dominates the normal exit or occurs in a shared cleanup block satisfies every
+path. When a guarantee cannot be established, `VBA210` retains one
+procedure-local finding and includes a deterministic representative exit
+witness where possible. The rule remains opt-in, batch-only, and does not add a
+new public diagnostic ID.
 
 ## Snapshot Cache
 

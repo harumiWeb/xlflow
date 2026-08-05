@@ -898,7 +898,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA207`: `Dictionary` or `Collection` access without an obvious existence guard
 - `VBA208`: `ReDim Preserve` is used on a multi-dimensional array
 - `VBA209`: object or array comparison mistake
-- `VBA210`: function may exit without assigning its return value
+- `VBA210`: a `Function` or `Property Get` may reach normal exit without a valid return assignment on every reachable path
 - `VBA211`: expanded known Excel object/member mismatch
 - `VBA212`: object `Nothing` guard and dereference are combined in a non-short-circuit boolean expression
 - `VBA213`: direct `Scripting.Dictionary` iteration is used as if it yielded values or objects

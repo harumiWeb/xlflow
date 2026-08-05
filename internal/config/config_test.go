@@ -1067,6 +1067,15 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 			t.Fatalf("generated config missing %q:\n%s", want, text)
 		}
 	}
+	for _, want := range []string{
+		"# Optional dataflow-sensitive analyzer rules are disabled by default.",
+		"# Uncomment the following setting to check Function and Property Get return paths.",
+		"# detect_function_return_path = true # VBA210",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
 
 	loaded, err := Load(dir)
 	if err != nil {
@@ -1119,6 +1128,29 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.DetectExcelAPIFailureContracts {
 		t.Fatal("expected detect_excel_api_failure_contracts=false after Write/Load")
+	}
+}
+
+func TestWriteOmitsVBA210HintWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Analyze.DetectFunctionReturnPath = true
+
+	path := filepath.Join(dir, FileName)
+	if err := Write(path, cfg); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, "\n# detect_function_return_path = true") ||
+		!strings.Contains(text, "\ndetect_function_return_path = true") {
+		t.Fatalf("generated config should preserve enabled VBA210:\n%s", text)
+	}
+	if strings.Contains(text, "Uncomment the following setting to check Function and Property Get return paths.") {
+		t.Fatalf("generated config should omit the inactive VBA210 hint when enabled:\n%s", text)
 	}
 }
 

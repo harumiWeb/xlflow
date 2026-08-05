@@ -993,8 +993,8 @@
     },
     {
       "id": "VBA210",
-      "title": "Missing function return assignment",
-      "description": "A function may exit without assigning its return value.",
+      "title": "Missing Function or Property Get return assignment",
+      "description": "A Function or Property Get may reach normal exit without a valid return assignment on every path.",
       "family": "analyze",
       "category": "correctness",
       "default_severity": "warning",

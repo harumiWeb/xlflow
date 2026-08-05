@@ -99,7 +99,7 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 	v.addTypeReference(node, ctx)
 	if procedure != nil && ctx.inBody {
 		if kind, ok := statementKind(node); ok {
-			if kind == StatementCall && isIndexedAssignmentNode(node, v.builder.source) {
+			if kind == StatementCall && (isIndexedAssignmentNode(node, v.builder.source) || isLetAssignmentNode(node, v.builder.source)) {
 				kind = StatementAssignment
 			}
 			ctx.statementID = v.addStatement(procedure, node, ctx.statementID, ctx.branch, kind)
@@ -655,7 +655,13 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 	case "comparison_expression":
 		if statement := statementByID(v.procedure(ctx.procedure), ctx.statementID); statement != nil &&
 			statement.SyntaxKind == "call_statement" && statement.Kind == StatementAssignment {
-			childCtx.accessMode = AccessRead
+			letAssignment := isDirectLetAssignmentText(statement.Text)
+			if letAssignment && sameNode(child, childByFieldNameAny(parent, "left", "target")) {
+				childCtx.accessMode = AccessWrite
+				statement.Target = expressionStub(child, ctx.statementID, v.builder.source)
+			} else {
+				childCtx.accessMode = AccessRead
+			}
 			if sameNode(child, childByFieldNameAny(parent, "right", "value")) {
 				statement.Value = expressionStub(child, ctx.statementID, v.builder.source)
 			}
@@ -835,6 +841,26 @@ func isIndexedAssignmentNode(node *tree_sitter.Node, source []byte) bool {
 	}
 	tail := string(source[callee.EndByte():node.EndByte()])
 	return hasIndexedAssignmentTail(tail)
+}
+
+func isLetAssignmentNode(node *tree_sitter.Node, source []byte) bool {
+	if node == nil || node.Kind() != "call_statement" {
+		return false
+	}
+	return isDirectLetAssignmentText(nodeText(node, source)) || isLetIndexedAssignmentNode(node, source)
+}
+
+func isDirectLetAssignmentText(text string) bool {
+	text = strings.TrimSpace(text)
+	if len(text) < len("Let ") || !strings.EqualFold(text[:len("Let ")], "Let ") {
+		return false
+	}
+	tail := strings.TrimSpace(text[len("Let "):])
+	equal := strings.IndexByte(tail, '=')
+	if equal <= 0 {
+		return false
+	}
+	return !strings.ContainsAny(strings.TrimSpace(tail[:equal]), "()")
 }
 
 func isLetIndexedAssignmentNode(node *tree_sitter.Node, source []byte) bool {

@@ -854,9 +854,11 @@ func TestNewScaffoldUIHelperAnalyzesCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	uiPath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowUI.bas")
+	cfg := config.Default()
+	cfg.Analyze.DetectFunctionReturnPath = true
 	findings, err := analyze.Analyzer{
 		RootDir: dir,
-		Config:  config.Default(),
+		Config:  cfg,
 		PathFilter: func(path string) bool {
 			return filepath.Clean(path) == filepath.Clean(uiPath)
 		},

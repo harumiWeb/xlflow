@@ -185,21 +185,22 @@ type parsedFile struct {
 }
 
 type sourceProcedure struct {
-	Kind         string
-	Name         string
-	ModuleKind   string
-	ReturnType   string
-	StartLine    int
-	EndLine      int
-	StartByte    int
-	EndByte      int
-	Params       []parameterInfo
-	Declarations []procedureir.Declaration
-	Statements   []procedureir.Statement
-	Calls        []procedureir.CallSite
-	Accesses     []procedureir.VariableAccess
-	Graph        *vbacfg.Graph
-	Effects      *effects.ProcedureSummary
+	Kind          string
+	ProcedureKind procedureir.ProcedureKind
+	Name          string
+	ModuleKind    string
+	ReturnType    string
+	StartLine     int
+	EndLine       int
+	StartByte     int
+	EndByte       int
+	Params        []parameterInfo
+	Declarations  []procedureir.Declaration
+	Statements    []procedureir.Statement
+	Calls         []procedureir.CallSite
+	Accesses      []procedureir.VariableAccess
+	Graph         *vbacfg.Graph
+	Effects       *effects.ProcedureSummary
 }
 
 type sourceDeclaration struct {
@@ -936,7 +937,6 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	maybeInitializedByCall := map[string]bool{}
 	findAssignments := map[string]int{}
 	guardedFinds := map[string]bool{}
-	functionAssigned := false
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
 	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
@@ -1003,9 +1003,6 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 			}
 			if m := setAssignRe.FindStringSubmatch(stmt); len(m) > 0 {
 				initialized[strings.ToLower(m[1])] = true
-				if strings.EqualFold(m[1], proc.Name) {
-					functionAssigned = true
-				}
 			}
 			if name, ok := rangeFindAssignment(stmt); ok {
 				findAssignments[strings.ToLower(name)] = lineNo
@@ -1014,9 +1011,6 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		}
 		if m := assignRe.FindStringSubmatch(stmt); len(m) > 0 {
 			target := strings.ToLower(m[1])
-			if proc.Name != "" && strings.EqualFold(target, proc.Name) {
-				functionAssigned = true
-			}
 			if proc.Name != "" && strings.EqualFold(target, proc.Name) && isObjectType(proc.ReturnType) {
 				findings = append(findings, a.objectSetFinding(file, proc, lineNo, "VBA103", m[1], proc.ReturnType))
 				continue
@@ -1068,9 +1062,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		findings = append(findings, a.leakedOnErrorResumeNextFindings(file, proc)...)
 	}
-	if a.Config.Analyze.DetectFunctionReturnPath && proc.Kind == "Function" && proc.Name != "" && !functionAssigned {
-		findings = append(findings, a.simpleFinding(file, proc, proc.StartLine, "VBA210", "warning", proc.Name+" may exit without assigning its return value.", "Functions return the default value when no assignment to the function name is reached.", "Assign "+proc.Name+" on every successful return path, or make the default return explicit."))
-	}
+	findings = append(findings, a.functionReturnPathFindings(file, proc)...)
 	return findings
 }
 
@@ -1114,19 +1106,20 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			}
 		}
 		source := sourceProcedure{
-			Kind:         kind,
-			Name:         procedure.Symbol.Name,
-			ModuleKind:   document.ModuleKind,
-			ReturnType:   procedure.Symbol.ReturnType,
-			StartLine:    procedure.Symbol.DeclarationRange.StartLine,
-			EndLine:      procedure.Symbol.DeclarationRange.EndLine,
-			StartByte:    procedure.Symbol.DeclarationRange.StartByte,
-			EndByte:      procedure.Symbol.DeclarationRange.EndByte,
-			Params:       params,
-			Declarations: append([]procedureir.Declaration(nil), procedure.Declarations...),
-			Statements:   append([]procedureir.Statement(nil), procedure.Statements...),
-			Calls:        append([]procedureir.CallSite(nil), procedure.Calls...),
-			Accesses:     append([]procedureir.VariableAccess(nil), procedure.Accesses...),
+			Kind:          kind,
+			ProcedureKind: procedure.Symbol.Kind,
+			Name:          procedure.Symbol.Name,
+			ModuleKind:    document.ModuleKind,
+			ReturnType:    procedure.Symbol.ReturnType,
+			StartLine:     procedure.Symbol.DeclarationRange.StartLine,
+			EndLine:       procedure.Symbol.DeclarationRange.EndLine,
+			StartByte:     procedure.Symbol.DeclarationRange.StartByte,
+			EndByte:       procedure.Symbol.DeclarationRange.EndByte,
+			Params:        params,
+			Declarations:  append([]procedureir.Declaration(nil), procedure.Declarations...),
+			Statements:    append([]procedureir.Statement(nil), procedure.Statements...),
+			Calls:         append([]procedureir.CallSite(nil), procedure.Calls...),
+			Accesses:      append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			graph := controlFlow[0].Graphs[procedureIndex]
