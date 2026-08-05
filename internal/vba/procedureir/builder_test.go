@@ -913,6 +913,7 @@ func assertControl(
 	}
 	if found == nil {
 		t.Fatalf("missing statement containing %q in %+v", text, statements)
+		return
 	}
 	if found.Control == nil {
 		t.Fatalf("%q has no control metadata: %+v", text, *found)

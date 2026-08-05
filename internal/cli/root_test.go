@@ -685,6 +685,7 @@ func TestLSPPerformanceLogFlagIsOptIn(t *testing.T) {
 	flag := cmd.Flags().Lookup("performance-log")
 	if flag == nil {
 		t.Fatal("lsp --performance-log flag is not registered")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Fatalf("performance-log default = %q, want false", flag.DefValue)
