@@ -111,8 +111,10 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 	changedKeys := make(map[ProcedureIdentity]bool, len(changed))
 	out := make([]Diagnostic, 0)
 	modulePreamble := ""
+	modulePreambleEnd := 0
 	if len(catalog.Entries) > 0 {
-		modulePreamble = doc.Source[:catalog.Entries[0].StartByte]
+		modulePreambleEnd = catalog.Entries[0].StartByte
+		modulePreamble = doc.Source[:modulePreambleEnd]
 	}
 	for _, entry := range changed {
 		if ctx.Err() != nil {
@@ -121,7 +123,7 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 		changedKeys[entry.Identity] = true
 		fragment := doc
 		fragment.Snapshot = nil
-		fragment.Source = modulePreamble + doc.Source[entry.StartByte:entry.EndByte]
+		fragment.Source = fastDiagnosticFragmentSource(doc.Source, modulePreamble, modulePreambleEnd, entry)
 		fragmentCatalog := procedureCatalogForDocumentMode(fragment, false)
 		if len(fragmentCatalog.Entries) != 1 {
 			continue
@@ -161,6 +163,68 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 		return out[i].Code < out[j].Code
 	})
 	return out
+}
+
+type conditionalFragmentFrame struct {
+	opening      string
+	openingStart int
+	current      string
+	currentStart int
+}
+
+// fastDiagnosticFragmentSource preserves declarations before the first
+// procedure and the conditional-compilation branch that encloses entry. The
+// matching synthetic #End If directives make the isolated fragment a complete
+// conditional-compilation unit for the parser.
+func fastDiagnosticFragmentSource(source, modulePreamble string, modulePreambleEnd int, entry ProcedureCatalogEntry) string {
+	var stack []conditionalFragmentFrame
+	offset := 0
+	for _, line := range strings.SplitAfter(source, "\n") {
+		if offset >= entry.StartByte {
+			break
+		}
+		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "#if "):
+			stack = append(stack, conditionalFragmentFrame{opening: line, openingStart: offset, current: line, currentStart: offset})
+		case strings.HasPrefix(lower, "#elseif ") || lower == "#else":
+			if len(stack) > 0 {
+				stack[len(stack)-1].current = line
+				stack[len(stack)-1].currentStart = offset
+			}
+		case lower == "#end if" || lower == "#endif":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+		offset += len(line)
+	}
+
+	var prefix strings.Builder
+	for _, frame := range stack {
+		if frame.openingStart >= modulePreambleEnd {
+			prefix.WriteString(frame.opening)
+		}
+		if frame.currentStart >= modulePreambleEnd && frame.currentStart != frame.openingStart {
+			prefix.WriteString(frame.current)
+		}
+	}
+	fragment := modulePreamble + prefix.String() + source[entry.StartByte:entry.EndByte]
+	if len(stack) == 0 {
+		return fragment
+	}
+	lineEnding := "\n"
+	if strings.Contains(source, "\r\n") {
+		lineEnding = "\r\n"
+	}
+	if !strings.HasSuffix(fragment, "\n") && !strings.HasSuffix(fragment, "\r") {
+		fragment += lineEnding
+	}
+	for range stack {
+		fragment += "#End If" + lineEnding
+	}
+	return fragment
 }
 
 func procedureCatalogForDocument(doc Document) ProcedureCatalog {

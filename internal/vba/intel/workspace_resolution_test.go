@@ -2,6 +2,7 @@ package intel
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -55,6 +56,25 @@ func TestFastDiagnosticsDoNotReportMissingModulePreambleFromProcedureFragment(t 
 		if diagnostic.Code == "VB001" || diagnostic.Code == "VB031" {
 			t.Fatalf("Fast procedure fragment leaked module-level %s: %+v", diagnostic.Code, result.Diagnostics)
 		}
+	}
+}
+
+func TestFastDiagnosticsPreserveConditionalContextForLaterProcedure(t *testing.T) {
+	source := "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub Before()\nEnd Sub\n#If VBA7 Then\nSub Changed()\n  Dim unused As Long\nEnd Sub\n#End If\n"
+	doc := Document{Path: "Module1.bas", Source: source, ModuleKind: "standard", Version: 2}
+	catalog := procedureCatalogForDocument(doc)
+	if len(catalog.Entries) != 2 {
+		t.Fatalf("procedure catalog entries = %d, want 2", len(catalog.Entries))
+	}
+	entry := catalog.Entries[1]
+	preambleEnd := catalog.Entries[0].StartByte
+	fragment := fastDiagnosticFragmentSource(source, source[:preambleEnd], preambleEnd, entry)
+	if !strings.Contains(fragment, "#If VBA7 Then\nSub Changed()") || strings.Count(fragment, "#End If") != 1 {
+		t.Fatalf("conditional fragment = %q, want enclosing #If/#End If", fragment)
+	}
+	fragmentCatalog := procedureCatalogForDocumentMode(Document{Path: doc.Path, Source: fragment, ModuleKind: doc.ModuleKind}, false)
+	if len(fragmentCatalog.Entries) != 1 || fragmentCatalog.Entries[0].Identity.CanonicalName != "changed" {
+		t.Fatalf("fragment procedure catalog = %+v, want only Changed", fragmentCatalog.Entries)
 	}
 }
 
