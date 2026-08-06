@@ -109,6 +109,49 @@ End Sub
 	}
 }
 
+func TestVBA225UsesNearestNonSmallLoop(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  For i = 1 To 100
+    For j = 1 To 2
+      Cells(i, j).Value2 = j
+    Next j
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || got[0].Line != 5 || got[0].Severity != "warning" {
+		t.Fatalf("small inner loop should roll up to outer loop: %+v", got)
+	}
+}
+
+func TestVBA225IgnoresStringAndCommentText(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  For i = 1 To 100
+    Debug.Print "Cells(i, 1).Value2"
+    ' Range("A1").Value2 is only a comment
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("string/comment Excel text should not produce VBA225: %+v", got)
+	}
+}
+
 func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -120,6 +163,7 @@ Public Sub Run()
     cell.Value2 = cell.Offset(0, 1).Value2
     cell.NumberFormat = "0"
     cell.Borders.LineStyle = 1
+    cell.Interior.Color = 16777215
     Debug.Print Application.WorksheetFunction.Sum(cell)
   Next cell
 End Sub
@@ -233,7 +277,7 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA225")
-	if len(got) != 1 || !strings.Contains(got[0].Message, "ReadCellThroughHelper") || !strings.Contains(got[0].Message, "read") {
+	if len(got) != 1 || !strings.Contains(got[0].Message, "ReadCellThroughHelper") || !strings.Contains(got[0].Message, "read") || !strings.Contains(got[0].Message, "value2") {
 		t.Fatalf("helper VBA225 findings = %+v, want one transitive helper finding", got)
 	}
 

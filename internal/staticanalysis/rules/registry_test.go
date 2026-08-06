@@ -95,7 +95,7 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		t.Fatalf("unexpected VBA224 metadata: %+v, %v", dataFlow, ok)
 	}
 	loopAccess, ok := Lookup("VBA225")
-	if !ok || loopAccess.DefaultSeverity != SeverityWarning || loopAccess.PreflightBlocking || !loopAccess.InlineSuppressible || !loopAccess.Realtime || loopAccess.Scope != ScopeInterprocedural || loopAccess.Precision != PrecisionMedium || loopAccess.Category != CategoryPerformance {
+	if !ok || loopAccess.DefaultSeverity != SeverityWarning || !loopAccess.DefaultEnabled || !loopAccess.Configurable || loopAccess.ConfigurationKey != "detect_excel_cell_access_in_loops" || loopAccess.PreflightBlocking || !loopAccess.InlineSuppressible || !loopAccess.Realtime || loopAccess.Scope != ScopeInterprocedural || loopAccess.Precision != PrecisionMedium || loopAccess.Category != CategoryPerformance {
 		t.Fatalf("unexpected VBA225 metadata: %+v, %v", loopAccess, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {

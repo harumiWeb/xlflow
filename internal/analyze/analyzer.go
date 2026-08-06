@@ -201,6 +201,7 @@ type sourceProcedure struct {
 	Params        []parameterInfo
 	Declarations  []procedureir.Declaration
 	Statements    []procedureir.Statement
+	Expressions   []procedureir.Expression
 	Calls         []procedureir.CallSite
 	Accesses      []procedureir.VariableAccess
 	Graph         *vbacfg.Graph
@@ -1158,6 +1159,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			Params:        params,
 			Declarations:  append([]procedureir.Declaration(nil), procedure.Declarations...),
 			Statements:    append([]procedureir.Statement(nil), procedure.Statements...),
+			Expressions:   append([]procedureir.Expression(nil), procedure.Expressions...),
 			Calls:         append([]procedureir.CallSite(nil), procedure.Calls...),
 			Accesses:      append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}

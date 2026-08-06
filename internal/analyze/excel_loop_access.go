@@ -25,7 +25,6 @@ var (
 	constIntegerRe      = regexp.MustCompile(`(?i)^\s*(?:public\s+|private\s+|friend\s+|static\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*=\s*(.+?)\s*$`)
 	excelCellCallRe     = regexp.MustCompile(`(?i)(^|[^a-z0-9_.])cells\s*\(`)
 	directExcelLookupRe = regexp.MustCompile(`(?i)(^|[^a-z0-9_.])(?:range|worksheets|sheets)\s*\(`)
-	excelMemberAccessRe = regexp.MustCompile(`(?i)([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)`)
 	forEachRangeRe      = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+?)\s*$`)
 	forBoundsRe         = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.+?)\s+to\s+(.+?)(?:\s+step\s+(.+?))?\s*$`)
 	literalRangeRe      = regexp.MustCompile(`(?i)\b(?:range|cells)\s*\(\s*"([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?"\s*\)`)
@@ -75,6 +74,11 @@ type excelLoopRegion struct {
 type excelAccessSummary struct {
 	Categories map[string]bool
 	Members    map[string]bool
+}
+
+type excelRangeVariables struct {
+	Range   map[string]bool
+	PerCell map[string]bool
 }
 
 type excelLoopAccessIndex struct {
@@ -210,10 +214,21 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		}
 		summary, ok := excelHelperSummary(file, call, summaries)
 		if ok && len(summary.Categories) > 0 {
+			memberNames := sortedStringSet(summary.Members)
 			for category := range summary.Categories {
-				byStatement[call.StatementID] = append(byStatement[call.StatementID], excelLoopAccess{
-					Category: category, Line: call.Range.StartLine, Helper: call.Callee.Text,
-				})
+				read := category == excelAccessRead || category == excelAccessRangeLookup || category == excelAccessWorksheetCall
+				write := category == excelAccessWrite || category == excelAccessFormatting
+				if len(memberNames) == 0 {
+					byStatement[call.StatementID] = append(byStatement[call.StatementID], excelLoopAccess{
+						Category: category, Line: call.Range.StartLine, Helper: call.Callee.Text, Read: read, Write: write,
+					})
+					continue
+				}
+				for _, member := range memberNames {
+					byStatement[call.StatementID] = append(byStatement[call.StatementID], excelLoopAccess{
+						Category: category, Member: member, Line: call.Range.StartLine, Helper: call.Callee.Text, Read: read, Write: write,
+					})
+				}
 			}
 		}
 	}
@@ -228,10 +243,17 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		if len(candidates) == 0 {
 			continue
 		}
-		region := candidates[len(candidates)-1]
-		if region.Small {
+		selected := -1
+		for i := len(candidates) - 1; i >= 0; i-- {
+			if !candidates[i].Small {
+				selected = i
+				break
+			}
+		}
+		if selected < 0 {
 			continue
 		}
+		region := candidates[selected]
 		grouped[region.StatementID] = append(grouped[region.StatementID], accesses...)
 	}
 
@@ -269,6 +291,10 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 			message += " (" + strings.Join(categoryNames, ", ") + ")"
 		}
 		message += "."
+		memberNames := sortedStringSet(members)
+		if len(memberNames) > 0 {
+			message += " Members: " + strings.Join(memberNames, ", ") + "."
+		}
 		if region.Depth >= 2 {
 			message += " Nested loop depth: " + strconv.Itoa(region.Depth) + "."
 		}
@@ -391,6 +417,9 @@ func excelHelperProcedureKey(file parsedFile, call procedureir.CallSite) (string
 
 func excelLoopRegions(proc sourceProcedure) []excelLoopRegion {
 	constants := excelIntegerConstants(proc)
+	adjacency := excelCFGAdjacency(proc.Graph)
+	blockByStatement := excelCFGBlocksByStatement(proc.Graph)
+	statementByBlock := excelCFGStatementsByBlock(proc.Graph)
 	children := map[int][]int{}
 	statements := map[int]procedureir.Statement{}
 	for _, statement := range proc.Statements {
@@ -414,10 +443,10 @@ func excelLoopRegions(proc sourceProcedure) []excelLoopRegion {
 			}
 		}
 		visit(statement.ID)
-		if !excelLoopCFGValid(proc, statement.ID, body) {
+		if !excelLoopCFGValid(proc, statement.ID, body, adjacency, blockByStatement) {
 			continue
 		}
-		reachableBody, ok := excelLoopReachableStatements(proc, statement.ID, body)
+		reachableBody, ok := excelLoopReachableStatements(proc, statement.ID, body, adjacency, blockByStatement, statementByBlock)
 		if !ok {
 			continue
 		}
@@ -469,17 +498,48 @@ func excelIntegerConstants(proc sourceProcedure) map[string]int {
 	return constants
 }
 
-func excelLoopCFGValid(proc sourceProcedure, loopID int, body map[int]bool) bool {
+func excelCFGAdjacency(graph *vbacfg.Graph) map[vbacfg.BlockID][]vbacfg.Edge {
+	adjacency := map[vbacfg.BlockID][]vbacfg.Edge{}
+	if graph == nil {
+		return adjacency
+	}
+	for _, edge := range graph.Edges {
+		adjacency[edge.From] = append(adjacency[edge.From], edge)
+	}
+	return adjacency
+}
+
+func excelCFGBlocksByStatement(graph *vbacfg.Graph) map[int]vbacfg.BlockID {
+	blocks := map[int]vbacfg.BlockID{}
+	if graph == nil {
+		return blocks
+	}
+	for _, block := range graph.Blocks {
+		if block.StatementID != 0 {
+			blocks[block.StatementID] = block.ID
+		}
+	}
+	return blocks
+}
+
+func excelCFGStatementsByBlock(graph *vbacfg.Graph) map[vbacfg.BlockID]int {
+	statements := map[vbacfg.BlockID]int{}
+	if graph == nil {
+		return statements
+	}
+	for _, block := range graph.Blocks {
+		if block.StatementID != 0 {
+			statements[block.ID] = block.StatementID
+		}
+	}
+	return statements
+}
+
+func excelLoopCFGValid(proc sourceProcedure, loopID int, body map[int]bool, adjacency map[vbacfg.BlockID][]vbacfg.Edge, blockByStatement map[int]vbacfg.BlockID) bool {
 	if proc.Graph == nil {
 		return false
 	}
 	graph := proc.Graph
-	blockByStatement := map[int]vbacfg.BlockID{}
-	for _, block := range graph.Blocks {
-		if block.StatementID != 0 {
-			blockByStatement[block.StatementID] = block.ID
-		}
-	}
 	header, ok := blockByStatement[loopID]
 	if !ok {
 		return false
@@ -496,7 +556,12 @@ func excelLoopCFGValid(proc sourceProcedure, loopID int, body map[int]bool) bool
 		}
 	}
 	hasBody, hasBack, hasExit := false, false, false
-	for _, edge := range graph.Edges {
+	var loopEdges []vbacfg.Edge
+	for from := range bodyBlocks {
+		loopEdges = append(loopEdges, adjacency[from]...)
+	}
+	loopEdges = append(loopEdges, adjacency[header]...)
+	for _, edge := range loopEdges {
 		if edge.Uncertain {
 			if edge.Kind == vbacfg.EdgeLoopBody || edge.Kind == vbacfg.EdgeLoopBack || edge.Kind == vbacfg.EdgeLoopExit {
 				return false
@@ -509,7 +574,7 @@ func excelLoopCFGValid(proc sourceProcedure, loopID int, body map[int]bool) bool
 				hasBody = true
 			}
 		case vbacfg.EdgeLoopBack:
-			if edge.To == header || bodyBlocks[edge.From] && bodyBlocks[edge.To] {
+			if edge.To == header || (bodyBlocks[edge.From] && bodyBlocks[edge.To]) {
 				hasBack = true
 			}
 		case vbacfg.EdgeLoopExit:
@@ -527,7 +592,7 @@ func excelLoopCFGValid(proc sourceProcedure, loopID int, body map[int]bool) bool
 	// For a nested For, the CFG builder can represent the inner exit as a
 	// loop-back edge to the enclosing loop header. In that shape the back edge
 	// itself closes the definite loop boundary even without a separate exit edge.
-	for _, edge := range graph.Edges {
+	for _, edge := range loopEdges {
 		if !edge.Uncertain && edge.Kind == vbacfg.EdgeLoopBack && edge.To == header {
 			return true
 		}
@@ -535,19 +600,9 @@ func excelLoopCFGValid(proc sourceProcedure, loopID int, body map[int]bool) bool
 	return false
 }
 
-func excelLoopReachableStatements(proc sourceProcedure, loopID int, body map[int]bool) (map[int]bool, bool) {
+func excelLoopReachableStatements(proc sourceProcedure, loopID int, body map[int]bool, adjacency map[vbacfg.BlockID][]vbacfg.Edge, blockByStatement map[int]vbacfg.BlockID, statementByBlock map[vbacfg.BlockID]int) (map[int]bool, bool) {
 	if proc.Graph == nil {
 		return nil, false
-	}
-	graph := proc.Graph
-	blockByStatement := map[int]vbacfg.BlockID{}
-	statementByBlock := map[vbacfg.BlockID]int{}
-	for _, block := range graph.Blocks {
-		if block.StatementID == 0 {
-			continue
-		}
-		blockByStatement[block.StatementID] = block.ID
-		statementByBlock[block.ID] = block.StatementID
 	}
 	header, ok := blockByStatement[loopID]
 	if !ok {
@@ -565,7 +620,7 @@ func excelLoopReachableStatements(proc sourceProcedure, loopID int, body map[int
 	for len(discovery) > 0 {
 		from := discovery[0]
 		discovery = discovery[1:]
-		for _, edge := range graph.Edges {
+		for _, edge := range adjacency[from] {
 			if edge.From != from || edge.Uncertain || edge.Class != vbacfg.EdgeNormal {
 				continue
 			}
@@ -597,7 +652,7 @@ func excelLoopReachableStatements(proc sourceProcedure, loopID int, body map[int
 	for len(queue) > 0 {
 		from := queue[0]
 		queue = queue[1:]
-		for _, edge := range graph.Edges {
+		for _, edge := range adjacency[from] {
 			if edge.From != from || edge.Uncertain || edge.Class != vbacfg.EdgeNormal {
 				continue
 			}
@@ -645,9 +700,6 @@ func isExcelLoopKind(kind procedureir.StatementKind) bool {
 func excelLoopIsSmall(text string, constants map[string]int) bool {
 	text = excelLoopHeaderText(text)
 	match := forBoundsRe.FindStringSubmatch(strings.TrimSpace(text))
-	if len(match) == 0 {
-		match = nil
-	}
 	if len(match) > 0 {
 		start, err1 := constantIntegerExpression(match[1], constants)
 		end, err2 := constantIntegerExpression(match[2], constants)
@@ -669,7 +721,8 @@ func excelLoopIsSmall(text string, constants map[string]int) bool {
 		}
 	}
 	if match := forEachRangeRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) > 0 {
-		return literalRangeCellCount(match[2]) > 0 && literalRangeCellCount(match[2]) <= 3
+		count := literalRangeCellCount(match[2])
+		return count > 0 && count <= 3
 	}
 	return false
 }
@@ -830,11 +883,11 @@ func excelColumnNumber(value string) int {
 	return total
 }
 
-func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) map[string]bool {
-	vars := map[string]bool{}
+func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) excelRangeVariables {
+	vars := excelRangeVariables{Range: map[string]bool{}, PerCell: map[string]bool{}}
 	for _, declaration := range proc.Declarations {
 		if isExcelRangeType(declaration.Type) {
-			vars[strings.ToLower(declaration.Name)] = true
+			vars.Range[strings.ToLower(declaration.Name)] = true
 		}
 	}
 	for _, statement := range proc.Statements {
@@ -844,26 +897,29 @@ func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb
 		}
 		receiver := strings.TrimSpace(strings.Split(strings.ToLower(match[2]), ".cells")[0])
 		if isExcelRangeExpression(file, db, receiver, statement.Range.StartLine-1, rootDir, cfg) {
-			vars[strings.ToLower(match[1])] = true
+			name := strings.ToLower(match[1])
+			vars.Range[name] = true
+			vars.PerCell[name] = true
 		}
 	}
 	return vars
 }
 
-func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, db *vbadb.DB, rangeVars map[string]bool, rootDir string, cfg config.Config) []excelLoopAccess {
+func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, db *vbadb.DB, rangeVars excelRangeVariables, rootDir string, cfg config.Config) []excelLoopAccess {
 	line := statement.Range.StartLine
-	text := statement.Text
+	rawText := statement.Text
+	text := rawText
 	if isExcelLoopKind(statement.Kind) {
 		text = excelLoopHeaderText(text)
 	}
+	text = sanitizeExcelStatementText(text)
 	lower := strings.ToLower(text)
 	var out []excelLoopAccess
-	for _, match := range excelMemberAccessRe.FindAllStringSubmatchIndex(text, -1) {
-		if len(match) < 4 {
+	for _, expression := range statementMemberExpressions(statement, proc.Expressions) {
+		receiver, member, memberEnd, ok := splitExcelMemberAccess(expression.Text)
+		if !ok {
 			continue
 		}
-		receiver := strings.TrimSpace(text[match[2]:match[3]])
-		member := strings.TrimSpace(text[match[4]:match[5]])
 		memberLower := strings.ToLower(member)
 		if strings.EqualFold(receiver, "Application") && memberLower == "worksheetfunction" {
 			out = append(out, excelLoopAccess{Category: excelAccessWorksheetCall, Member: member, Line: line, Read: true})
@@ -872,21 +928,18 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 		typ, resolved := resolveExcelExpressionType(file, db, receiver, line-1, rootDir, cfg)
 		perCell := isPerCellExcelExpression(file, db, receiver, rangeVars, line-1, rootDir, cfg)
 		if !resolved && !perCell {
-			if strings.Contains(strings.ToLower(receiver), ".font") || strings.Contains(strings.ToLower(receiver), ".interior") {
-				continue
-			} else {
-				continue
-			}
+			continue
 		}
-		if rangeVars[strings.ToLower(strings.TrimSpace(receiver))] {
+		if rangeVars.Range[strings.ToLower(strings.TrimSpace(receiver))] {
 			typ = "Excel.Range"
 		}
 		if perCell {
 			typ = "Excel.Range"
 		}
+		assignmentEnd := expressionMemberEnd(statement, expression, memberEnd, len(text))
 		if cellValueMembers[memberLower] && isExcelRangeType(typ) {
 			access := excelLoopAccess{Category: excelAccessRead, Member: member, Line: line, Read: true}
-			if assignmentOperatorBefore(text, match[1]) {
+			if assignmentOperatorAfter(text, assignmentEnd) {
 				access.Read = false
 				access.Write = true
 				access.Category = excelAccessWrite
@@ -897,7 +950,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 			continue
 		}
 		if formattingMembers[memberLower] && perCell {
-			out = append(out, excelLoopAccess{Category: excelAccessFormatting, Member: member, Line: line, Write: assignmentOperatorBefore(text, match[1])})
+			out = append(out, excelLoopAccess{Category: excelAccessFormatting, Member: member, Line: line, Write: assignmentOperatorAfter(text, assignmentEnd)})
 			continue
 		}
 		if rangeLookupMembers[memberLower] && isExcelWorksheetOrRangeType(typ) {
@@ -918,13 +971,12 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 		out = append(out, excelLoopAccess{Category: excelAccessRangeLookup, Member: "Cells", Line: line, Read: true})
 	}
 	directRangeLookup := directExcelLookupRe.MatchString(text)
-	if directRangeLookup && literalRangeCellCount(text) <= 1 {
+	if directRangeLookup && literalRangeCellCount(rawText) <= 1 {
 		out = append(out, excelLoopAccess{Category: excelAccessRangeLookup, Member: "Range/Worksheet", Line: line, Read: true})
 	}
 	if statement.Kind == procedureir.StatementForEach && strings.Contains(lower, ".cells") {
 		out = append(out, excelLoopAccess{Category: excelAccessRangeLookup, Member: "Cells", Line: line, Read: true})
 	}
-	_ = proc
 	return deduplicateExcelAccesses(out)
 }
 
@@ -950,9 +1002,9 @@ func isExcelWorksheetOrRangeType(typ string) bool {
 	return isExcelRangeType(lower) || strings.Contains(lower, "worksheet") || strings.Contains(lower, "worksheets") || strings.Contains(lower, "excel.application")
 }
 
-func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, rangeVars map[string]bool, line int, rootDir string, cfg config.Config) bool {
+func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, rangeVars excelRangeVariables, line int, rootDir string, cfg config.Config) bool {
 	lower := strings.ToLower(strings.TrimSpace(expression))
-	if rangeVars[lower] {
+	if rangeVars.PerCell[lower] {
 		return true
 	}
 	if strings.HasPrefix(lower, "cells(") {
@@ -962,25 +1014,173 @@ func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, 
 		count := literalRangeCellCount(lower)
 		return count == 0 || count == 1
 	}
-	if !strings.Contains(lower, ".cells(") && !strings.Contains(lower, ".offset(") {
-		return false
-	}
 	root := lower
 	if dot := strings.IndexByte(root, '.'); dot >= 0 {
 		root = strings.TrimSpace(root[:dot])
 	}
-	if rangeVars[root] {
+	if rangeVars.PerCell[root] && containsPerCellFormattingMember(lower) {
+		return true
+	}
+	if !strings.Contains(lower, ".cells(") && !strings.Contains(lower, ".offset(") {
+		return false
+	}
+	if rangeVars.PerCell[root] || rangeVars.Range[root] {
 		return true
 	}
 	typ, ok := resolveExcelExpressionType(file, db, root, line, rootDir, cfg)
 	return ok && isExcelWorksheetOrRangeType(typ)
 }
 
-func assignmentOperatorBefore(text string, end int) bool {
+func statementMemberExpressions(statement procedureir.Statement, expressions []procedureir.Expression) []procedureir.Expression {
+	byID := make(map[int]procedureir.Expression, len(expressions))
+	for _, expression := range expressions {
+		byID[expression.ID] = expression
+	}
+	seen := map[int]bool{}
+	var out []procedureir.Expression
+	var visit func(int)
+	visit = func(id int) {
+		if seen[id] {
+			return
+		}
+		expression, ok := byID[id]
+		if !ok {
+			return
+		}
+		seen[id] = true
+		if !expression.Recovered && expression.Kind == procedureir.ExpressionMember {
+			out = append(out, expression)
+		}
+		for _, childID := range expression.Children {
+			visit(childID)
+		}
+	}
+	for _, id := range statement.ExpressionIDs {
+		visit(id)
+	}
+	if len(out) == 0 {
+		for _, expression := range expressions {
+			if expression.StatementID == statement.ID && !expression.Recovered && expression.Kind == procedureir.ExpressionMember {
+				out = append(out, expression)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Range.StartByte < out[j].Range.StartByte
+	})
+	return out
+}
+
+func splitExcelMemberAccess(text string) (string, string, int, bool) {
+	lastDot := -1
+	depth := 0
+	inString := false
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '.':
+			if !inString && depth == 0 {
+				lastDot = i
+			}
+		}
+	}
+	if lastDot < 0 {
+		return "", "", 0, false
+	}
+	memberStart := lastDot + 1
+	for memberStart < len(text) && (text[memberStart] == ' ' || text[memberStart] == '\t') {
+		memberStart++
+	}
+	memberEnd := memberStart
+	if memberEnd >= len(text) || !isVBAIdentifierStart(text[memberEnd]) {
+		return "", "", 0, false
+	}
+	for memberEnd < len(text) && isVBAIdentifierPart(text[memberEnd]) {
+		memberEnd++
+	}
+	return strings.TrimSpace(text[:lastDot]), text[memberStart:memberEnd], memberEnd, true
+}
+
+func expressionMemberEnd(statement procedureir.Statement, expression procedureir.Expression, memberEnd, textLength int) int {
+	offset := expression.Range.StartByte - statement.Range.StartByte
+	if offset < 0 || offset+memberEnd > textLength {
+		return textLength
+	}
+	return offset + memberEnd
+}
+
+func sanitizeExcelStatementText(text string) string {
+	bytes := []byte(text)
+	inString := false
+	for i := 0; i < len(bytes); i++ {
+		if inString {
+			bytes[i] = ' '
+			if text[i] == '"' {
+				if i+1 < len(bytes) && text[i+1] == '"' {
+					bytes[i+1] = ' '
+					i++
+				} else {
+					inString = false
+				}
+			}
+			continue
+		}
+		if text[i] == '"' {
+			bytes[i] = ' '
+			inString = true
+			continue
+		}
+		if text[i] == '\'' {
+			for j := i; j < len(bytes); j++ {
+				bytes[j] = ' '
+			}
+			break
+		}
+	}
+	trimmed := strings.TrimSpace(string(bytes))
+	if len(trimmed) >= 4 && strings.EqualFold(trimmed[:4], "rem ") {
+		return strings.Repeat(" ", len(text))
+	}
+	return string(bytes)
+}
+
+func containsPerCellFormattingMember(expression string) bool {
+	for _, member := range []string{".font", ".interior", ".borders", ".numberformat", ".style", ".alignment"} {
+		if strings.Contains(expression, member) {
+			return true
+		}
+	}
+	return false
+}
+
+func assignmentOperatorAfter(text string, end int) bool {
 	if end < 0 || end > len(text) {
 		return false
 	}
-	for i := end; i < len(text); i++ {
+	segmentEnd := len(text)
+	if colon := strings.IndexByte(text[end:], ':'); colon >= 0 {
+		segmentEnd = end + colon
+	}
+	lower := strings.ToLower(text)
+	then := vbaKeywordPosition(lower, "then", end, segmentEnd)
+	conditionalHeader := hasVBAKeywordPrefix(lower, "if") || hasVBAKeywordPrefix(lower, "elseif") || hasVBAKeywordPrefix(lower, "while") || hasVBAKeywordPrefix(lower, "do while") || hasVBAKeywordPrefix(lower, "do until")
+	if conditionalHeader && (then < 0 || end < then) {
+		return false
+	}
+	for i := end; i < segmentEnd; i++ {
 		if text[i] != '=' {
 			continue
 		}
@@ -993,6 +1193,29 @@ func assignmentOperatorBefore(text string, end int) bool {
 		return true
 	}
 	return false
+}
+
+func hasVBAKeywordPrefix(text, keyword string) bool {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, keyword) {
+		return false
+	}
+	return len(text) == len(keyword) || !isVBAIdentifierPart(text[len(keyword)])
+}
+
+func vbaKeywordPosition(text, keyword string, start, end int) int {
+	for i := start; i+len(keyword) <= end; i++ {
+		if !strings.EqualFold(text[i:i+len(keyword)], keyword) {
+			continue
+		}
+		beforeOK := i == 0 || !isVBAIdentifierPart(text[i-1])
+		after := i + len(keyword)
+		afterOK := after >= len(text) || !isVBAIdentifierPart(text[after])
+		if beforeOK && afterOK {
+			return i
+		}
+	}
+	return -1
 }
 
 func deduplicateExcelAccesses(accesses []excelLoopAccess) []excelLoopAccess {
