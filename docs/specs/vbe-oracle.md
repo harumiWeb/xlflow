@@ -141,7 +141,10 @@ the rule registry's supported surfaces are used for this comparison.
 The corpus validator also checks that every bound rule has rejected positive
 evidence and an accepted negative control. Existing historical `unbound` and
 `partially-bound` fixtures remain visible in the report and do not fail CI by
-themselves; malformed relationships and incomplete `bound` rules do fail.
+themselves; malformed relationships and incomplete `bound` rules do fail. A
+valid pair attached to a `partially-bound` rejected fixture is informational
+until that parent fixture becomes `bound`, but its controls must still forbid
+one of the parent's declared rule codes.
 
 ## Binding coverage report
 
