@@ -11,7 +11,7 @@ import (
 
 var (
 	secretConnectionFieldRe  = regexp.MustCompile(`(?i)(^|[;,&[:space:]])(password|pwd|user[[:space:]]*id|uid|username|account[[:space:]]*key|client[[:space:]]*secret|access[[:space:]]*token)[[:space:]]*=[[:space:]]*([^;,&]+)`)
-	secretAuthSchemeRe       = regexp.MustCompile(`(?i)\b(bearer|basic)[[:space:]]+([^,;[:space:]]+)`)
+	secretAuthSchemeRe       = regexp.MustCompile(`(?i)\b(bearer|basic)[[:space:]]+([A-Za-z0-9._~+/=-]{16,})`)
 	secretURLCredentialRe    = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*://[^/[:space:]@:]+:([^@[:space:]/]+)@`)
 	secretPrivateKeyRe       = regexp.MustCompile(`(?i)-----begin([[:space:]][a-z0-9-]+)? private key-----`)
 	secretKnownTokenRe       = regexp.MustCompile(`(?i)\b(AKIA|ASIA)[0-9A-Z]{16}\b|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}`)
