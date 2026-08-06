@@ -70,6 +70,8 @@ var (
 	rangeValueSetRe          = regexp.MustCompile(`(?i)^\s*Set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$`)
 	rangeValueRedimRe        = regexp.MustCompile(`(?i)^\s*(?:ReDim|Erase)\s+(?:Preserve\s+)?([A-Za-z_][A-Za-z0-9_]*)\b`)
 	rangeValueForEachRe      = regexp.MustCompile(`(?i)^\s*For\s+Each\s+([A-Za-z_][A-Za-z0-9_]*)\s+In\b`)
+	rangeValueForVariableRe  = regexp.MustCompile(`(?i)^\s*For\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	rangeValueIdentifierRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
 func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -99,6 +101,10 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 	states := map[vbacfg.BlockID]rangeValueFlowState{
 		proc.Graph.Entry: newRangeValueFlowState(),
 	}
+	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(proc.Graph.Blocks))
+	for _, block := range proc.Graph.Blocks {
+		blocks[block.ID] = block
+	}
 	queue := []vbacfg.BlockID{proc.Graph.Entry}
 	queued := map[vbacfg.BlockID]bool{proc.Graph.Entry: true}
 	findings := map[string]Finding{}
@@ -107,7 +113,7 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 		queue = queue[1:]
 		queued[id] = false
 		in := states[id]
-		block, ok := rangeValueBlock(*proc.Graph, id)
+		block, ok := blocks[id]
 		out := cloneRangeValueFlowState(in)
 		if ok && block.Statement != nil {
 			issues, next := rangeValueStatement(in, *block.Statement, facts)
@@ -147,15 +153,6 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 		return out[i].Message < out[j].Message
 	})
 	return out
-}
-
-func rangeValueBlock(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
-	for _, block := range graph.Blocks {
-		if block.ID == id {
-			return block, true
-		}
-	}
-	return vbacfg.Block{}, false
 }
 
 func appendRangeValueFindings(findings []Finding, file parsedFile, proc sourceProcedure, statement procedureir.Statement, issues []rangeValueIssue, analyzer Analyzer) []Finding {
@@ -237,15 +234,6 @@ func mergeRangeValueFlowState(existing, incoming rangeValueFlowState, hasExistin
 			changed = true
 		}
 	}
-	for name := range incoming.arrayGuards {
-		if !out.arrayGuards[name] {
-			continue
-		}
-		if !existing.arrayGuards[name] {
-			delete(out.arrayGuards, name)
-			changed = true
-		}
-	}
 	return out, changed
 }
 
@@ -283,7 +271,7 @@ func rangeValueFactsForProcedure(proc sourceProcedure) rangeValueFacts {
 					min, max = max, min
 				}
 				name := ""
-				if matchName := regexp.MustCompile(`(?i)^\s*For\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`).FindStringSubmatch(text); len(matchName) == 2 {
+				if matchName := rangeValueForVariableRe.FindStringSubmatch(text); len(matchName) == 2 {
 					name = strings.ToLower(matchName[1])
 				}
 				if name != "" {
@@ -300,17 +288,26 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 	var issues []rangeValueIssue
 	raw := rangeValueStatementText(statement)
 	code := normalizedCodeLine(raw)
+	boundMatches := rangeValueBoundRe.FindAllStringSubmatch(code, -1)
 	for _, name := range sortedRangeValueNames(state.values) {
 		shape := state.values[name]
 		for _, match := range rangeValueIndexedUses(code, name) {
 			args := splitArgs(match)
 			switch len(args) {
 			case 1:
-				issues = append(issues, rangeValueIssue{
-					message:    fmt.Sprintf("Range.Value result %s is used with one array index.", name),
-					reason:     "A multi-cell Range.Value or Range.Value2 result is always a two-dimensional array, while a single-cell result is a scalar.",
-					suggestion: fmt.Sprintf("Use %s(row, column) for a multi-cell range, or handle the single-cell case before indexing.", name),
-				})
+				if shape.kind == rangeValueShapeScalar {
+					issues = append(issues, rangeValueIssue{
+						message:    fmt.Sprintf("Single-cell Range.Value result %s is indexed as an array.", name),
+						reason:     "A definite single-cell Range.Value or Range.Value2 result is a scalar Variant, not an array.",
+						suggestion: fmt.Sprintf("Use %s directly instead of indexing the scalar result.", name),
+					})
+				} else {
+					issues = append(issues, rangeValueIssue{
+						message:    fmt.Sprintf("Range.Value result %s is used with one array index.", name),
+						reason:     "A multi-cell Range.Value or Range.Value2 result is always a two-dimensional array, while a single-cell result is a scalar.",
+						suggestion: fmt.Sprintf("Use %s(row, column) for a multi-cell range, or handle the single-cell case before indexing.", name),
+					})
+				}
 			case 2:
 				if shape.kind == rangeValueShapeScalar {
 					issues = append(issues, rangeValueIssue{
@@ -331,7 +328,7 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 				}
 			}
 		}
-		for _, match := range rangeValueBoundRe.FindAllStringSubmatch(code, -1) {
+		for _, match := range boundMatches {
 			if !strings.EqualFold(match[2], name) {
 				continue
 			}
@@ -373,6 +370,7 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 			}
 		}
 		if targetName := rangeValueBareName(left); targetName != "" {
+			delete(state.arrayGuards, targetName)
 			if source, ok := rangeValueSourceShape(right, state, facts); ok {
 				state.values[targetName] = source
 				delete(state.ranges, targetName)
@@ -389,7 +387,6 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 				} else {
 					delete(state.values, targetName)
 				}
-				delete(state.arrayGuards, targetName)
 			}
 		}
 	}
@@ -551,7 +548,7 @@ func rangeValueAssignment(text string) (string, string, bool) {
 func rangeValueBareName(text string) string {
 	text = strings.TrimSpace(text)
 	text = strings.TrimPrefix(strings.TrimPrefix(text, "Let "), "let ")
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(text) {
+	if !rangeValueIdentifierRe.MatchString(text) {
 		return ""
 	}
 	return strings.ToLower(text)
@@ -560,7 +557,11 @@ func rangeValueBareName(text string) string {
 func rangeValueTargetReceiver(text string) (string, bool) {
 	text = strings.TrimSpace(text)
 	match := rangeValueMemberRe.FindStringIndex(text)
-	if match == nil || !strings.HasSuffix(strings.ToLower(strings.TrimSpace(text)), "value") && !strings.HasSuffix(strings.ToLower(strings.TrimSpace(text)), "value2") {
+	if match == nil {
+		return "", false
+	}
+	member := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(text[match[0]:])), " ", "")
+	if member != ".value" && member != ".value2" {
 		return "", false
 	}
 	receiver := strings.TrimSpace(text[:match[0]])

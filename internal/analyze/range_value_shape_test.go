@@ -10,27 +10,33 @@ import (
 )
 
 func TestVBA226DetectsOneDimensionalRangeValueUse(t *testing.T) {
-	dir := t.TempDir()
-	writeModule(t, dir, "Main.bas", `Option Explicit
+	for _, member := range []string{"Value", "Value2"} {
+		t.Run(member, func(t *testing.T) {
+			dir := t.TempDir()
+			source := `Option Explicit
 Public Sub Run()
   Dim values As Variant
-  values = Range("A1:A10").Value2
+  values = Range("A1:A10").MEMBER
   Debug.Print values(1)
   Debug.Print UBound(values)
   Debug.Print values(1, 1)
 End Sub
-`)
+`
+			source = strings.Replace(source, "MEMBER", member, 1)
+			writeModule(t, dir, "Main.bas", source)
 
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := findingsByCode(findings, "VBA226")
-	if len(got) != 2 {
-		t.Fatalf("VBA226 findings = %+v, want one-dimensional access and omitted-bound dimension", got)
-	}
-	if !strings.Contains(got[0].Message, "one array index") && !strings.Contains(got[1].Message, "one array index") {
-		t.Fatalf("missing one-dimensional access diagnostic: %+v", got)
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := findingsByCode(findings, "VBA226")
+			if len(got) != 2 {
+				t.Fatalf("VBA226 findings = %+v, want one-dimensional access and omitted-bound dimension", got)
+			}
+			if !strings.Contains(got[0].Message, "one array index") && !strings.Contains(got[1].Message, "one array index") {
+				t.Fatalf("missing one-dimensional access diagnostic: %+v", got)
+			}
+		})
 	}
 }
 
@@ -183,6 +189,28 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA226"); len(got) != 1 {
 		t.Fatalf("branch-merged scalar/array shape should be uncertain: %+v", got)
+	}
+}
+
+func TestVBA226ClearsArrayGuardAfterReassignment(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:B2").Value2
+  If IsArray(values) Then
+    values = Range("A1:" & lastCell).Value2
+    Debug.Print values(1, 1)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA226"); len(got) != 1 {
+		t.Fatalf("reassigned uncertain value should not retain the old IsArray guard: %+v", got)
 	}
 }
 
