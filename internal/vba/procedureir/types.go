@@ -18,13 +18,22 @@ type ParseSummary struct {
 }
 
 type DocumentIR struct {
-	Path           string          `json:"path"`
-	ModuleName     string          `json:"moduleName"`
-	ModuleKind     string          `json:"moduleKind"`
-	Parse          ParseSummary    `json:"parse"`
-	Declarations   []Declaration   `json:"declarations"`
-	Procedures     []ProcedureIR   `json:"procedures"`
-	TypeReferences []TypeReference `json:"-"`
+	Path             string            `json:"path"`
+	ModuleName       string            `json:"moduleName"`
+	ModuleKind       string            `json:"moduleKind"`
+	ModuleAttributes []ModuleAttribute `json:"moduleAttributes,omitempty"`
+	Parse            ParseSummary      `json:"parse"`
+	Declarations     []Declaration     `json:"declarations"`
+	Procedures       []ProcedureIR     `json:"procedures"`
+	TypeReferences   []TypeReference   `json:"-"`
+}
+
+// ModuleAttribute is a raw exported-module attribute such as VB_Exposed.
+// Keeping the name and value in the IR avoids coupling consumers to the
+// parser's attribute-node representation.
+type ModuleAttribute struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type ProcedureIR struct {
@@ -75,6 +84,7 @@ type Declaration struct {
 	ID         int          `json:"id"`
 	Name       string       `json:"name"`
 	Type       string       `json:"type,omitempty"`
+	Parameters []Parameter  `json:"parameters,omitempty"`
 	Scope      SymbolScope  `json:"scope"`
 	Visibility string       `json:"visibility,omitempty"`
 	Kind       string       `json:"kind"`

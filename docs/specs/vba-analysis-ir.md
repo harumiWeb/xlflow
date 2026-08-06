@@ -35,6 +35,7 @@ the same source attribute/path fallback as existing source inspectors.
 `DocumentIR` records:
 
 - path, module name/identity, and module kind;
+- exported module attributes such as `VB_Exposed`;
 - parse recovery flags corresponding to tree-sitter `HasError` and
   `HasMissing`;
 - module-level declarations; and
@@ -52,7 +53,8 @@ For a procedure with no body block, the body range is a zero-width range at
 the start of its `End Sub`, `End Function`, or `End Property` statement.
 
 A module-level `Event Foo(...)` declaration is a declaration and must not create
-a `ProcedureIR`. `Declare Sub` and `Declare Function` are declarations without
+a `ProcedureIR`; its parameter list is retained on the declaration. Type and
+Enum declarations are also retained as module-level declarations. `Declare Sub` and `Declare Function` are declarations without
 VBA bodies; they may participate in symbol or call resolution but are not
 procedure bodies.
 

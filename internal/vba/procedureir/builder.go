@@ -59,6 +59,7 @@ func BuildParsedContext(ctx context.Context, opts BuildOptions, doc *vbaast.Pars
 			parse: ParseSummary{
 				HasError: view.HasError, HasMissing: view.HasMissing,
 			},
+			moduleAttributes:  parseModuleAttributes(view.Source),
 			nextDeclarationID: 1,
 		}
 		result = builder.build(view.Root)
@@ -78,6 +79,7 @@ type documentBuilder struct {
 	moduleName        string
 	moduleKind        string
 	parse             ParseSummary
+	moduleAttributes  []ModuleAttribute
 	nextDeclarationID int
 }
 
@@ -175,10 +177,28 @@ func (b *documentBuilder) simpleDeclaration(node *tree_sitter.Node, scope Symbol
 	declVisibility := visibilityOfNode(node, b.source)
 	return Declaration{
 		ID: b.takeDeclarationID(), Name: name, Type: typeText(node, b.source),
-		Scope: declarationScope(scope, declVisibility), Visibility: declVisibility,
+		Parameters: b.parameters(node),
+		Scope:      declarationScope(scope, declVisibility), Visibility: declVisibility,
 		Kind: strings.TrimSuffix(node.Kind(), "_statement"), Range: vbaast.NodeRange(node),
 		Recovered: recovered(node),
 	}, true
+}
+
+func parseModuleAttributes(source []byte) []ModuleAttribute {
+	var out []ModuleAttribute
+	for _, line := range strings.Split(string(source), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if len(line) < len("Attribute ") || !strings.EqualFold(line[:len("Attribute ")], "Attribute ") {
+			continue
+		}
+		body := strings.TrimSpace(line[len("Attribute "):])
+		name, value, ok := strings.Cut(body, "=")
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		out = append(out, ModuleAttribute{Name: strings.TrimSpace(name), Value: strings.TrimSpace(value)})
+	}
+	return out
 }
 
 func (b *documentBuilder) takeDeclarationID() int {
