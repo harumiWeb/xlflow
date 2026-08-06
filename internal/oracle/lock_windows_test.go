@@ -16,7 +16,7 @@ import (
 
 func TestFileBatchLockRejectsConcurrentProcessAndReleasesAfterCrash(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "vbe-oracle.lock")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestOracleBatchLockHelper$")
+	cmd := exec.Command(os.Args[0], "-test.timeout=0", "-test.run=^TestOracleBatchLockHelper$")
 	cmd.Env = append(os.Environ(),
 		"XLFLOW_ORACLE_LOCK_HELPER=1",
 		"XLFLOW_ORACLE_LOCK_PATH="+lockPath,
@@ -99,5 +99,7 @@ func TestOracleBatchLockHelper(t *testing.T) {
 	}
 	defer release()
 	fmt.Println("READY")
-	select {}
+	timer := time.NewTimer(10 * time.Minute)
+	defer timer.Stop()
+	<-timer.C
 }
