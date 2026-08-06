@@ -1242,6 +1242,24 @@
       "configuration_key": "detect_hardcoded_secrets",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA224",
+      "title": "Untrusted data reaches a sensitive API",
+      "description": "Conservative procedure-local analysis found potentially untrusted data flowing into a sensitive API.",
+      "family": "analyze",
+      "category": "security",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba224",
+      "configurable": true,
+      "configuration_key": "detect_untrusted_data_flow",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

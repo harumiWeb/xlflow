@@ -253,6 +253,7 @@ func TestDiagnosticsIncludeAnalyzerRealtimeRuntimeRiskRules(t *testing.T) {
 		{Code: "VBA204", Severity: "warning", Line: 12, Message: "Normal execution can fall through into an error handler."},
 		{Code: "VBA208", Severity: "warning", Line: 9, Message: "ReDim Preserve is used on a multi-dimensional array."},
 		{Code: "VBA209", Severity: "warning", Line: 10, Message: "deck is compared to Nothing with =."},
+		{Code: "VBA224", Severity: "warning", Line: 14, Message: "Conservative analysis found InputBox flowing to Shell."},
 	})
 	doc := Document{
 		Path: filepath.Join(t.TempDir(), "Main.bas"),
@@ -274,7 +275,7 @@ End Sub
 	}
 
 	diagnostics := analyzer.Diagnostics(doc)
-	for _, code := range []string{"VBA201", "VBA204", "VBA208", "VBA209"} {
+	for _, code := range []string{"VBA201", "VBA204", "VBA208", "VBA209", "VBA224"} {
 		if got := diagnosticsByCode(diagnostics, code); len(got) != 1 {
 			t.Fatalf("%s diagnostic count = %d, want 1; all diagnostics: %+v", code, len(got), diagnostics)
 		}

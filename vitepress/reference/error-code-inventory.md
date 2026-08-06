@@ -110,6 +110,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `column_width`
 - `com_activation`
 - `combining_mark`
+- `command_line_argument`
 - `command_reads_saved_file`
 - `comparison_expression`
 - `compile_vba`
@@ -143,6 +144,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `created_parent_dirs`
 - `current_version`
 - `customer_name`
+- `data_flow`
+- `database_result`
 - `debug_log`
 - `debug_stream_init_failed`
 - `declaration_spacing`
@@ -163,6 +166,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `deprecated_analyze_rule_config`
 - `deprecated_lint_rule_config`
 - `designer_write_failed`
+- `destructive_file_operation`
 - `detect_application_state_call_effects`
 - `detect_application_state_restore`
 - `detect_byref_argument_mismatch`
@@ -191,6 +195,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
 - `detect_unstable_last_row_patterns`
+- `detect_untrusted_data_flow`
 - `detect_unused_local_variables`
 - `detect_unused_private_procedures`
 - `detect_worksheet_root_mismatch`
@@ -242,6 +247,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `end_statement`
 - `enum_declaration`
 - `enum_group`
+- `environment_variable`
 - `event_declaration`
 - `event_statement`
 - `example_cell`
@@ -280,6 +286,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `external_sub_declaration`
 - `fail_fast_with_max_failures`
 - `failed_entries`
+- `file_input`
 - `file_picker`
 - `files_changed`
 - `files_to_change`
@@ -720,6 +727,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `spec_schema_invalid`
 - `spec_validation_failed`
 - `spill_reference`
+- `sql_execution`
 - `src_newer_than_workbook`
 - `src_paths`
 - `stack_trace`
@@ -787,6 +795,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unknown_command`
 - `unknown_exit`
 - `unknown_inline_suppression_rule`
+- `unknown_transformation`
 - `unnamed_control_placeholder`
 - `unsafe_backup_file_path`
 - `unsafe_original_workbook_path`
@@ -877,13 +886,17 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `workbook_sheetchange`
 - `workbook_vbproject_access`
 - `workbook_vbproject_access_error`
+- `workbooks_open`
 - `worker_pid`
 - `worksheet_calculate`
+- `worksheet_cell`
 - `worksheet_change`
 - `worksheet_selectionchange`
 - `workspace_resolution_views`
 - `write_only`
 - `writes_cells`
+- `wscript_shell_exec`
+- `wscript_shell_run`
 - `wsl_path`
 - `wsl_path_translation_failed`
 - `wsl_project_path_unsupported`

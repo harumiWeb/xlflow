@@ -11,6 +11,9 @@ All notable changes to xlflow will be documented in this file.
   private, unexposed, ambiguous, or unresolved types. The rule covers
   procedures, properties, custom events, and `VB_Exposed` classes/interfaces,
   while excluding host-required event handlers and remaining non-blocking.
+- Added default-enabled `VBA224` conservative procedure-local source-to-sink
+  analysis with shared batch/LSP diagnostics, explicit source/sink/path JSON
+  context, narrow sanitizer contracts, and non-blocking inline suppression.
 - Strengthened opt-in `VBA210` return-path analysis to cover `Function` and
   `Property Get` CFG exits, early exits, error-handler paths, shared cleanup,
   dominating assignments, object/value return assignment syntax, and

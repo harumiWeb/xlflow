@@ -103,6 +103,7 @@ Public Sub Run()
   password = "%PASSWORD%"
   password = Environ$("PASSWORD")
   Debug.Print "Password=example"
+  XlflowAssert.AssertEquals 2, 1 + 1, "basic arithmetic should work"
   Debug.Print "ordinary text"
 End Sub
 `)
