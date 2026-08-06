@@ -176,6 +176,9 @@ End Sub
 	if len(got) != 1 || !strings.Contains(got[0].Message, "read") || !strings.Contains(got[0].Message, "write") || !strings.Contains(got[0].Message, "formatting") || !strings.Contains(got[0].Message, "worksheet function") {
 		t.Fatalf("For Each VBA225 findings = %+v, want all access categories", got)
 	}
+	if !strings.Contains(got[0].Message, "color") {
+		t.Fatalf("For Each VBA225 finding = %+v, want Interior.Color member", got[0])
+	}
 }
 
 func TestVBA225SupportsDoAndWhileLoops(t *testing.T) {
