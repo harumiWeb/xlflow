@@ -22,6 +22,17 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	corpus := make([]Case, 0, len(manifest.Cases))
+	for _, entry := range manifest.Cases {
+		c, _, err := LoadCase(root, entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		corpus = append(corpus, c)
+	}
+	if _, err := ValidateBindingCoverage(corpus); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Default()
 	db, err := vbadb.LoadBuiltin()
 	if err != nil {
@@ -38,8 +49,6 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				if c.Analysis.BindingStatus != BindingNotApplicable {
 					t.Fatalf("control fixture binding_status = %q, want %q", c.Analysis.BindingStatus, BindingNotApplicable)
 				}
-			} else if c.Analysis.BindingStatus != BindingUnbound {
-				t.Fatalf("fixture binding_status = %q, want initial migration status %q", c.Analysis.BindingStatus, BindingUnbound)
 			}
 			projectRoot := t.TempDir()
 			modulesRoot := filepath.Join(projectRoot, "src", "modules")
@@ -95,5 +104,29 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestOracleBindingCoverage(t *testing.T) {
+	manifestPath := filepath.Join("..", "..", "testdata", "vbe-oracle", "manifest.json")
+	manifest, root, err := LoadManifest(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus := make([]Case, 0, len(manifest.Cases))
+	for _, entry := range manifest.Cases {
+		c, _, err := LoadCase(root, entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		corpus = append(corpus, c)
+	}
+	report, err := ValidateBindingCoverage(corpus)
+	t.Log("\n" + report.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.AssertedFixtures != 23 || report.UnboundFixtures != 21 || report.NotApplicable != 2 {
+		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 }

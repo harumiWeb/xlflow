@@ -152,6 +152,7 @@ type AnalysisExpectation struct {
 	BindingStatus        string                  `json:"binding_status"`
 	RuleCodes            []string                `json:"rule_codes,omitempty"`
 	BindingNote          *string                 `json:"binding_note,omitempty"`
+	NegativeControls     []string                `json:"negative_controls,omitempty"`
 	ExpectedDiagnostics  []DiagnosticExpectation `json:"expected_diagnostics,omitempty"`
 	ForbiddenDiagnostics []DiagnosticExpectation `json:"forbidden_diagnostics,omitempty"`
 }

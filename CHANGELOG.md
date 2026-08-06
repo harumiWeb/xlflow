@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added Excel-free VBE oracle binding coverage validation. Rejected fixtures
+  can now declare accepted `negative_controls`; bound rules require rejected
+  positive evidence and accepted forbidden coverage across all declared
+  analyzer surfaces, while historical unbound fixtures remain visible in a
+  deterministic coverage report.
 - Extended the VBE oracle binding contract to resolve diagnostic codes against
   the shared static-analysis registry and validate supported surfaces and
   severities. The public `xlflow rules --json` metadata now includes additive

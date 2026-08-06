@@ -137,6 +137,21 @@ The oracle is developer-only and local. Never invoke it from production xlflow
 commands, ordinary tests, or GitHub Actions. See
 `docs/specs/vbe-oracle.md` for the complete workflow and contract.
 
+When binding a compile-error diagnostic to oracle evidence, first search the
+existing fixtures and use confirmed VBA behavior rather than general-language
+assumptions. Bind both sides of the VBE boundary: rejected fixtures must carry
+expected diagnostics and `analysis.negative_controls` pointing to accepted
+fixtures whose forbidden contracts protect the same rule on every declared
+surface. Do not change VBE evidence merely to make analyzer tests pass.
+
+Run the known controls and focused cases sequentially. A timeout, unknown modal,
+failed Compile invocation, worker/COM failure, or unconfirmed cleanup is an
+infrastructure failure and a stop-the-line condition; do not promote evidence
+or change analyzer behavior after such a result. Report executed oracle case
+IDs and bound rule codes in the PR. If an asserted VBE case has no matching
+diagnostic implementation, keep it `unbound` or `partially-bound` with a clear
+note and create a follow-up issue rather than silently leaving the gap.
+
 ## - In final reports, retain the absolute paths of used `tmp_workspaces`, the execution commands, test results, and any unverified items.
 
 ## 3. Documentation Retention Policy
