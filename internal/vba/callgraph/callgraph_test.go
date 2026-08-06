@@ -146,6 +146,111 @@ func TestAnalyzeUsesConfiguredModuleKindsAndStableCycles(t *testing.T) {
 	}
 }
 
+func TestAnalyzeReachabilitySeparatesConfirmedPossibleAndUnreachableClusters(t *testing.T) {
+	input := &calls.Result{
+		Symbols: []symbols.Symbol{
+			{Name: "Run", Kind: "sub", Visibility: "Public", Module: "Main", File: "Main.bas", StartLine: 1, StartColumn: 1},
+			privateSymbol("Main", "Main.bas", "ConfirmedHelper", 4),
+			privateSymbol("Main", "Main.bas", "DynamicOnly", 7),
+			privateSymbol("Main", "Main.bas", "Isolated", 10),
+			privateSymbol("Dead", "Dead.bas", "DeadCaller", 1),
+			privateSymbol("Dead", "Dead.bas", "DeadTarget", 4),
+		},
+		Calls: []calls.Call{
+			matched("Main", "Main.bas", "Run", "Main", "Main.bas", "ConfirmedHelper", 4, 2),
+			matched("Dead", "Dead.bas", "DeadCaller", "Dead", "Dead.bas", "DeadTarget", 4, 2),
+		},
+		DynamicReferences: []calls.DynamicReference{
+			{File: "Main.bas", Module: "Main", Caller: &calls.Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"}, API: "application.run", Target: "Main.DynamicOnly", Kind: "static"},
+			{File: "Dead.bas", Module: "Dead", Caller: &calls.Caller{Name: "DeadCaller", Kind: "sub", QualifiedName: "Dead.DeadCaller"}, API: "application.onkey", Kind: "unknown"},
+		},
+	}
+
+	got := AnalyzeReachability(SnapshotFromResult(input), ReachabilityRequest{
+		Roots: []Root{{Target: "Main.Run", Confidence: RootConfirmed, Reason: "test"}},
+	})
+	if !hasReachabilityNode(got.Confirmed, "Main.Run") || !hasReachabilityNode(got.Confirmed, "Main.ConfirmedHelper") {
+		t.Fatalf("confirmed reachability = %#v", got.Confirmed)
+	}
+	if !hasReachabilityNode(got.Possible, "Main.DynamicOnly") {
+		t.Fatalf("possible dynamic target = %#v", got.Possible)
+	}
+	if hasReachabilityNode(got.Possible, "Dead.DeadTarget") || hasReachabilityNode(got.Confirmed, "Dead.DeadTarget") {
+		t.Fatalf("unreachable dynamic caller leaked into reachability: possible=%#v confirmed=%#v", got.Possible, got.Confirmed)
+	}
+	if !hasReachabilityNode(got.Unreachable, "Main.Isolated") || !hasReachabilityNode(got.Unreachable, "Dead.DeadCaller") || !hasReachabilityNode(got.Unreachable, "Dead.DeadTarget") {
+		t.Fatalf("unreachable private procedures = %#v", got.Unreachable)
+	}
+	if len(got.Clusters) != 2 || !hasClusterSize(got.Clusters, 1) || !hasClusterSize(got.Clusters, 2) {
+		t.Fatalf("unreachable clusters = %#v", got.Clusters)
+	}
+}
+
+func TestAnalyzeReachabilityTreatsAmbiguousRootsAsPossible(t *testing.T) {
+	input := SnapshotFromResult(&calls.Result{Symbols: []symbols.Symbol{
+		privateSymbol("One", "One.bas", "Run", 1),
+		privateSymbol("Two", "Two.bas", "Run", 1),
+	}})
+	got := AnalyzeReachability(input, ReachabilityRequest{Roots: []Root{{Target: "Run", Confidence: RootConfirmed}}})
+	if len(got.Confirmed) != 0 || len(got.Possible) != 2 || len(got.Unreachable) != 0 {
+		t.Fatalf("ambiguous roots = confirmed:%#v possible:%#v unreachable:%#v", got.Confirmed, got.Possible, got.Unreachable)
+	}
+	input = SnapshotFromResult(&calls.Result{Symbols: []symbols.Symbol{
+		privateSymbol("Other", "Other.bas", "Run", 1),
+	}})
+	got = AnalyzeReachability(input, ReachabilityRequest{Roots: []Root{{Target: "Missing.Run", Confidence: RootConfirmed}}})
+	if len(got.Confirmed) != 0 || len(got.Possible) != 1 || got.Possible[0].ID.QualifiedName != "Other.Run" {
+		t.Fatalf("unresolved qualified root = confirmed:%#v possible:%#v", got.Confirmed, got.Possible)
+	}
+}
+
+func TestAnalyzeReachabilityHandlesRecursiveDiamondWithoutDuplicates(t *testing.T) {
+	input := &calls.Result{
+		Symbols: []symbols.Symbol{
+			{Name: "Run", Kind: "sub", Visibility: "Public", Module: "Main", File: "Main.bas", StartLine: 1, StartColumn: 1},
+			privateSymbol("Main", "Main.bas", "Left", 4),
+			privateSymbol("Main", "Main.bas", "Right", 7),
+			privateSymbol("Main", "Main.bas", "Join", 10),
+		},
+		Calls: []calls.Call{
+			matched("Main", "Main.bas", "Run", "Main", "Main.bas", "Left", 4, 2),
+			matched("Main", "Main.bas", "Run", "Main", "Main.bas", "Right", 7, 3),
+			matched("Main", "Main.bas", "Left", "Main", "Main.bas", "Right", 7, 5),
+			matched("Main", "Main.bas", "Right", "Main", "Main.bas", "Left", 4, 8),
+			matched("Main", "Main.bas", "Left", "Main", "Main.bas", "Join", 10, 6),
+			matched("Main", "Main.bas", "Right", "Main", "Main.bas", "Join", 10, 9),
+		},
+	}
+	got := AnalyzeReachability(SnapshotFromResult(input), ReachabilityRequest{Roots: []Root{{Target: "Main.Run", Confidence: RootConfirmed}}})
+	if len(got.Confirmed) != 4 || len(got.Possible) != 0 || len(got.Unreachable) != 0 {
+		t.Fatalf("recursive diamond reachability = confirmed:%#v possible:%#v unreachable:%#v", got.Confirmed, got.Possible, got.Unreachable)
+	}
+}
+
+func privateSymbol(module, file, name string, line int) symbols.Symbol {
+	sym := symbol(module, file, name, line)
+	sym.Visibility = "Private"
+	return sym
+}
+
+func hasReachabilityNode(nodes []Node, qualifiedName string) bool {
+	for _, node := range nodes {
+		if node.ID.QualifiedName == qualifiedName {
+			return true
+		}
+	}
+	return false
+}
+
+func hasClusterSize(clusters [][]Node, size int) bool {
+	for _, cluster := range clusters {
+		if len(cluster) == size {
+			return true
+		}
+	}
+	return false
+}
+
 func symbol(module, file, name string, line int) symbols.Symbol {
 	return symbols.Symbol{Name: name, Kind: "sub", Module: module, File: file, StartLine: line, StartColumn: 1}
 }

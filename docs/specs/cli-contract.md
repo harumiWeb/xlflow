@@ -840,7 +840,7 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB018`: local declarations or parameters shadow module-level names, procedure names, or same-scope declarations
 - `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`
 - `VB020`: unused procedure-local variable
-- `VB021`: unused private procedure, excluding known event/callback naming patterns
+- `VB021`: private procedure unreachable from known project roots; confirmed call edges, host events, tests, and conservative dynamic callback possibilities are considered
 - `VB022`: confusing parenthesized call syntax such as `Foo (bar)`
 - `VB023`: `For Each` control variable is undeclared or obviously incompatible
 - `VB026`: `Resume` is used outside a likely error-handler context

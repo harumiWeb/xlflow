@@ -223,6 +223,12 @@ func Discover(opts Options) (*Result, error) {
 }
 
 func isNamedTestProcedure(sym symbols.Symbol) bool {
+	return IsTestProcedure(sym)
+}
+
+// IsTestProcedure reports whether a symbol follows the source-defined VBA test
+// procedure naming convention used by test discovery.
+func IsTestProcedure(sym symbols.Symbol) bool {
 	if sym.Kind != "sub" {
 		return false
 	}
