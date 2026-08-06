@@ -51,7 +51,7 @@ func (l fileBatchLock) Acquire(ctx context.Context) (func(), error) {
 	)
 	if err != nil {
 		_ = file.Close()
-		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_IO_PENDING) {
+		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 			return nil, errOracleAlreadyRunning
 		}
 		return nil, fmt.Errorf("acquire VBE oracle lock: %w", err)

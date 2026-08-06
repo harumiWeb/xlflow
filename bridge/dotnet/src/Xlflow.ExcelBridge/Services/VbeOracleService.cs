@@ -169,6 +169,11 @@ public sealed class VbeOracleService : IVbeOracleService
                 cancellationToken,
                 selectionLocator);
             observation = ClassifyInvocation(invocation, stopwatch.Elapsed, excelMetadata);
+            if (invocation.Dialog is not null &&
+                !string.Equals(invocation.Dialog.Kind, "compile", StringComparison.OrdinalIgnoreCase))
+            {
+                remainingWindows = 1;
+            }
             if (observation.Outcome == "accepted")
             {
                 var lingeringDialogs = new DialogWatcher().CaptureOracleDialogs(
@@ -599,7 +604,7 @@ public sealed class VbeOracleService : IVbeOracleService
             observation,
             processId,
             cleanupConfirmed: false,
-            OracleCleanupDiagnostics.NotAttempted with { Confirmed = false, FailureStage = stage });
+            cleanupDiagnostics: OracleCleanupDiagnostics.NotAttempted with { Confirmed = false, FailureStage = "not-attempted" });
     }
 
     private static Dictionary<string, object?> CleanupPayload(OracleCleanupDiagnostics cleanup)

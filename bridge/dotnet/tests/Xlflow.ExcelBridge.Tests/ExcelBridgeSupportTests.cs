@@ -198,6 +198,7 @@ public sealed class ExcelBridgeSupportTests
         Assert.Equal(2, exitCalls);
         Assert.Single(result.OwnedProcesses);
         Assert.True(result.OwnedProcesses[0].ExitConfirmed);
+        Assert.Equal(0, result.RemainingProcesses);
         Assert.Null(result.FailureStage);
     }
 
@@ -213,13 +214,14 @@ public sealed class ExcelBridgeSupportTests
             () => ++discoverCalls == 1
                 ? new[] { owned, unrelated }
                 : Array.Empty<OwnedExcelProcess>(),
-            _ => true,
-            _ => { });
+            (_, _) => true,
+            ownershipPredicate: candidate => ExcelBridgeSupport.SameOwnedProcess(candidate, owned),
+            delay: _ => { });
 
         Assert.False(result.Confirmed);
         Assert.Equal("unexpected-process", result.FailureStage);
         Assert.Single(result.OwnedProcesses);
-        Assert.Equal(1, result.RemainingProcesses);
+        Assert.Equal(0, result.RemainingProcesses);
     }
 
     [Fact]

@@ -9,12 +9,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestFileBatchLockRejectsConcurrentProcessAndReleasesAfterCrash(t *testing.T) {
-	lockPath := t.TempDir() + "\\vbe-oracle.lock"
+	lockPath := filepath.Join(t.TempDir(), "vbe-oracle.lock")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestOracleBatchLockHelper$")
 	cmd.Env = append(os.Environ(),
 		"XLFLOW_ORACLE_LOCK_HELPER=1",
@@ -28,16 +29,10 @@ func TestFileBatchLockRejectsConcurrentProcessAndReleasesAfterCrash(t *testing.T
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper: %v", err)
 	}
-	killed := false
-	defer func() {
-		if !killed && cmd.Process != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-		}
-	}()
-
 	ready := make(chan string, 1)
+	scanDone := make(chan struct{})
 	go func() {
+		defer close(scanDone)
 		scanner := bufio.NewScanner(stdout)
 		if scanner.Scan() {
 			ready <- scanner.Text()
@@ -45,12 +40,26 @@ func TestFileBatchLockRejectsConcurrentProcessAndReleasesAfterCrash(t *testing.T
 		}
 		ready <- ""
 	}()
+	killed := false
+	stopHelper := func() {
+		if killed {
+			return
+		}
+		killed = true
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		<-scanDone
+		_ = cmd.Wait()
+	}
+	defer stopHelper()
 	select {
 	case line := <-ready:
 		if line != "READY" {
 			t.Fatalf("helper output = %q", line)
 		}
 	case <-time.After(10 * time.Second):
+		stopHelper()
 		t.Fatal("helper did not acquire oracle lock")
 	}
 
@@ -59,13 +68,10 @@ func TestFileBatchLockRejectsConcurrentProcessAndReleasesAfterCrash(t *testing.T
 		t.Fatalf("contention error = %v, want oracle_already_running", err)
 	}
 
-	if err := cmd.Process.Kill(); err != nil {
-		t.Fatalf("kill helper: %v", err)
-	}
-	if err := cmd.Wait(); err == nil {
+	stopHelper()
+	if cmd.ProcessState == nil || cmd.ProcessState.Success() {
 		t.Fatal("killed helper unexpectedly exited successfully")
 	}
-	killed = true
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {

@@ -102,6 +102,12 @@ Task Manager for the recorded owned PID and any dialogs, confirm that no
 oracle-owned Excel remains, and rerun the controls. Do not remove lock files
 manually and do not promote fixtures from that report.
 
+`failure_stage` is `null` after confirmed cleanup. Infrastructure responses
+that did not start Excel use `not-attempted`; cleanup failures use
+`unexpected-process`, `process-exit-confirmation`, or `temporary-directory`.
+The execution stage for platform, startup, import, and compile failures is
+reported separately in `last_stage`.
+
 ## Fixture format
 
 The manifest has `schema_version: 1`, a `controls` object with `accept` and

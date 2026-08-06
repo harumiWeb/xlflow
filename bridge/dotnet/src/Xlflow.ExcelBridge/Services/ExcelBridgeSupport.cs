@@ -179,6 +179,8 @@ internal sealed record ComFailureInfo(bool Fatal, string HResult, int Number, st
 internal static class ExcelBridgeSupport
 {
     private const int ObjIdNativeOm = unchecked((int)0xFFFFFFF0);
+    private static readonly TimeSpan OracleProcessExitBudget = TimeSpan.FromMilliseconds(11_500);
+    private static readonly TimeSpan OracleCleanupDrainBudget = TimeSpan.FromSeconds(45);
     private static readonly Guid DispatchGuid = new("00020400-0000-0000-C000-000000000046");
     internal static CultureInfo ComInvokeCulture => CultureInfo.CurrentCulture;
 
@@ -1627,8 +1629,10 @@ internal static class ExcelBridgeSupport
             ownedProcesses,
             baselineProcesses,
             CaptureOwnedExcelProcesses,
-            EnsureOwnedExcelProcessExited,
-            delay: duration => Thread.Sleep(duration));
+            EnsureOwnedExcelProcessExitedWithin,
+            ownershipPredicate: null,
+            delay: duration => Thread.Sleep(duration),
+            drainBudget: OracleCleanupDrainBudget);
     }
 
     // This overload keeps the process-state decision deterministic and
@@ -1641,6 +1645,28 @@ internal static class ExcelBridgeSupport
         Func<OwnedExcelProcess, bool> ensureExited,
         Action<TimeSpan>? delay = null)
     {
+        return ConfirmOracleProcessCleanup(
+            ownedProcesses,
+            baselineProcesses,
+            discoverProcesses,
+            (process, _) => ensureExited(process),
+            ownershipPredicate: null,
+            delay,
+            drainBudget: null);
+    }
+
+    internal static OracleCleanupDiagnostics ConfirmOracleProcessCleanup(
+        IList<OwnedExcelProcess> ownedProcesses,
+        IReadOnlyList<OwnedExcelProcess> baselineProcesses,
+        Func<IReadOnlyList<OwnedExcelProcess>> discoverProcesses,
+        Func<OwnedExcelProcess, TimeSpan, bool> ensureExited,
+        Func<OwnedExcelProcess, bool>? ownershipPredicate = null,
+        Action<TimeSpan>? delay = null,
+        TimeSpan? drainBudget = null)
+    {
+        ownershipPredicate ??= process => IsOracleOwnedProcess(process, ownedProcesses);
+        var maxDrainBudget = drainBudget.GetValueOrDefault(OracleCleanupDrainBudget);
+        var drainStopwatch = Stopwatch.StartNew();
         var diagnostics = new Dictionary<string, OracleCleanupProcessDiagnostic>(StringComparer.Ordinal);
         foreach (var process in ownedProcesses)
         {
@@ -1663,7 +1689,7 @@ internal static class ExcelBridgeSupport
             var unexpectedProcessesThisAttempt = 0;
             foreach (var process in discoverProcesses())
             {
-                if (IsOracleOwnedProcess(process, ownedProcesses))
+                if (ownershipPredicate(process))
                 {
                     if (!ownedProcesses.Any(existing => SameOwnedProcess(existing, process)))
                     {
@@ -1689,7 +1715,9 @@ internal static class ExcelBridgeSupport
             allOwnedExited = true;
             foreach (var ownedProcess in ownedProcesses)
             {
-                var exited = ensureExited(ownedProcess);
+                var remainingBudget = maxDrainBudget - drainStopwatch.Elapsed;
+                var exited = remainingBudget > TimeSpan.Zero &&
+                    ensureExited(ownedProcess, remainingBudget > OracleProcessExitBudget ? OracleProcessExitBudget : remainingBudget);
                 var key = ProcessDiagnosticKey(ownedProcess);
                 var prior = diagnostics.TryGetValue(key, out var existing)
                     ? existing
@@ -1702,16 +1730,20 @@ internal static class ExcelBridgeSupport
                 allOwnedExited &= exited;
             }
 
-            remainingProcesses = Math.Max(
-                remainingProcesses,
-                unexpectedProcessesThisAttempt + diagnostics.Values.Count(item => !item.ExitConfirmed));
+            remainingProcesses = unexpectedProcessesThisAttempt + diagnostics.Values.Count(item => !item.ExitConfirmed);
             if (!unexpectedProcessObserved && allOwnedExited && !discovered)
             {
                 break;
             }
             if (attempt < 2)
             {
-                delay?.Invoke(TimeSpan.FromMilliseconds(250));
+                var remainingBudget = maxDrainBudget - drainStopwatch.Elapsed;
+                if (remainingBudget > TimeSpan.Zero)
+                {
+                    delay?.Invoke(remainingBudget > TimeSpan.FromMilliseconds(250)
+                        ? TimeSpan.FromMilliseconds(250)
+                        : remainingBudget);
+                }
             }
         }
 
@@ -1832,15 +1864,21 @@ internal static class ExcelBridgeSupport
 
     private static bool EnsureOwnedExcelProcessExited(OwnedExcelProcess ownedProcess)
     {
-        if (ownedProcess.ProcessId <= 0)
+        return EnsureOwnedExcelProcessExitedWithin(ownedProcess, OracleProcessExitBudget);
+    }
+
+    private static bool EnsureOwnedExcelProcessExitedWithin(OwnedExcelProcess ownedProcess, TimeSpan budget)
+    {
+        if (ownedProcess.ProcessId <= 0 || budget <= TimeSpan.Zero)
         {
             return false;
         }
 
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             using var process = Process.GetProcessById(ownedProcess.ProcessId);
-            if (process.WaitForExit(1500))
+            if (process.WaitForExit(ToWaitMilliseconds(budget, TimeSpan.FromMilliseconds(1500))))
             {
                 return true;
             }
@@ -1858,7 +1896,8 @@ internal static class ExcelBridgeSupport
             // ownership check bounded, but allow the dedicated process time
             // to acknowledge the termination before reporting infrastructure
             // failure.
-            return process.WaitForExit(10000);
+            var remaining = budget - stopwatch.Elapsed;
+            return process.WaitForExit(ToWaitMilliseconds(remaining, TimeSpan.FromSeconds(10)));
         }
         catch (ArgumentException)
         {
@@ -1869,6 +1908,12 @@ internal static class ExcelBridgeSupport
             // The process may already have exited, or Windows may refuse termination.
             return !IsExcelProcessRunning(ownedProcess.ProcessId);
         }
+    }
+
+    private static int ToWaitMilliseconds(TimeSpan value, TimeSpan maximum)
+    {
+        var milliseconds = (value < maximum ? value : maximum).TotalMilliseconds;
+        return (int)Math.Clamp(Math.Ceiling(Math.Max(0, milliseconds)), 0, int.MaxValue);
     }
 
     public static bool IsExcelProcessRunning(int processId)
