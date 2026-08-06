@@ -173,19 +173,20 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState) abstra
 		return state
 	}
 	statement := *block.Statement
-	if statement.Recovered || statement.Kind == procedureir.StatementRecovered {
+	recovered := statement.Recovered || statement.Kind == procedureir.StatementRecovered
+	if recovered {
 		if target := assignmentTarget(statement); target != "" {
 			state.vars[target] = a.unknownValue(statement.Range, statement.ID, "recovered statement")
 		}
 	}
-	if target := assignmentTarget(statement); target != "" && statement.Value != nil {
+	if target := assignmentTarget(statement); !recovered && target != "" && statement.Value != nil {
 		assigned := a.evalExpression(*statement.Value, state)
 		assigned = appendPath(assigned, PathStep{Kind: "assignment", Label: statement.Text, Range: statement.Range, StatementID: statement.ID})
 		state.vars[target] = assigned
 	}
 	for _, call := range a.callsByStatement[statement.ID] {
 		a.applySourceWrite(call, state)
-		a.inspectSink(call, statement, state)
+		a.inspectSink(call, state)
 	}
 	return state
 }
@@ -339,9 +340,13 @@ func (a *procedureAnalyzer) callArguments(call procedureir.CallSite, state abstr
 	return args
 }
 
-func (a *procedureAnalyzer) inspectSink(call procedureir.CallSite, statement procedureir.Statement, state abstractState) {
-	for _, target := range sinkTargets(call, a.knownShellObjects) {
-		args := a.callArguments(call, state)
+func (a *procedureAnalyzer) inspectSink(call procedureir.CallSite, state abstractState) {
+	targets := sinkTargets(call, a.knownShellObjects)
+	if len(targets) == 0 {
+		return
+	}
+	args := a.callArguments(call, state)
+	for _, target := range targets {
 		if target.argument < 0 || target.argument >= len(args) {
 			continue
 		}
@@ -366,12 +371,17 @@ func (a *procedureAnalyzer) inspectSink(call procedureir.CallSite, statement pro
 				Reason:  "The value is untrusted or crossed an unknown transformation before reaching a sensitive API.",
 			}
 			key := fmt.Sprintf("%s\x00%d\x00%s", sink.Kind, sink.StatementID, sourceKey(origin.source))
-			if previous, ok := a.findings[key]; !ok || betterPath(finding.Path, previous.Path) {
+			if previous, ok := a.findings[key]; !ok {
 				a.findings[key] = finding
+			} else {
+				if betterPath(finding.Path, previous.Path) {
+					previous.Path = append([]PathStep(nil), finding.Path...)
+				}
+				previous.State = joinStateValue(previous.State, finding.State)
+				a.findings[key] = previous
 			}
 		}
 	}
-	_ = statement
 }
 
 type sinkTarget struct {
@@ -471,7 +481,7 @@ func sourceMember(text string) (SourceKind, string, bool) {
 	if strings.Contains(lower, "recordset") && (strings.Contains(lower, ".fields") || strings.Contains(lower, ".value")) {
 		return SourceDatabaseResult, "database result", true
 	}
-	if strings.Contains(lower, "wscript.arguments") || strings.Contains(lower, ".arguments") && strings.Contains(lower, "wscript") {
+	if strings.Contains(lower, "wscript.arguments") || (strings.Contains(lower, ".arguments") && strings.Contains(lower, "wscript")) {
 		return SourceCommandLine, "command-line argument", true
 	}
 	if strings.Contains(lower, "wscript.shell.environment") {
@@ -489,17 +499,39 @@ func receiverText(call procedureir.CallSite) string {
 
 func looksDatabaseReceiver(receiver, full string) bool {
 	text := strings.ToLower(receiver + " " + full)
-	for _, marker := range []string{"conn", "connection", "command", "database", "currentdb", "db", "recordset", "ado", "adodb", "docmd", "sql"} {
+	for _, marker := range []string{"conn", "connection", "command", "database", "currentdb", "recordset", "ado", "adodb", "docmd"} {
 		if strings.Contains(text, marker) {
 			return true
 		}
 	}
-	for _, name := range []string{"cn", "cmd", "rs"} {
+	for _, marker := range []string{"db", "sql"} {
+		if containsIdentifierToken(text, marker) {
+			return true
+		}
+	}
+	for _, name := range []string{"cn", "cmd", "rs", "db"} {
 		if receiver == name {
 			return true
 		}
 	}
 	return false
+}
+
+func containsIdentifierToken(text, token string) bool {
+	for start := 0; start <= len(text)-len(token); start++ {
+		if !strings.HasPrefix(text[start:], token) {
+			continue
+		}
+		end := start + len(token)
+		if (start == 0 || !isIdentifierByte(text[start-1])) && (end == len(text) || !isIdentifierByte(text[end])) {
+			return true
+		}
+	}
+	return false
+}
+
+func isIdentifierByte(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '_'
 }
 
 func looksHTTPReceiver(receiver, full string) bool {
@@ -572,7 +604,12 @@ func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state ab
 }
 
 func (a *procedureAnalyzer) nearestSelector(statement procedureir.Statement) string {
+	visited := map[int]bool{}
 	for current := statement.ParentID; current != 0; {
+		if visited[current] {
+			break
+		}
+		visited[current] = true
 		parent, ok := a.statements[current]
 		if !ok {
 			break
@@ -730,8 +767,9 @@ func joinState(a, b abstractState, initialized bool) (abstractState, bool) {
 		if !rightOK {
 			right = unknownStandaloneValue()
 		}
-		merged, valueChanged := joinValue(left, right, true)
-		if !leftOK || !rightOK || valueChanged {
+		merged, _ := joinValue(left, right, true)
+		previous, hadPrevious := a.vars[key]
+		if !hadPrevious || !isSameValue(previous, merged) {
 			result.vars[key] = merged
 			changed = true
 		}

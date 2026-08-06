@@ -3,6 +3,7 @@ package analyze
 import (
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -124,9 +125,9 @@ Public Sub Run(raw As String)
         Shell raw
     Else
         Shell raw
-End If
+    End If
 End Sub
-	`
+`
 	writeModule(t, dir, "Main.bas", source)
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
@@ -183,9 +184,9 @@ Public Sub Run(raw As String)
         Shell raw
     Case Else
         Shell raw
-End Select
+    End Select
 End Sub
-	`
+`
 	writeModule(t, dir, "Main.bas", source)
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
@@ -237,6 +238,34 @@ End Sub
 	if len(got) != 11 {
 		t.Fatalf("catalog findings = %d, %+v", len(got), got)
 	}
+	kindSet := map[string]bool{}
+	for _, finding := range got {
+		if finding.DataFlow == nil {
+			t.Fatalf("catalog finding lacks data flow context = %+v", finding)
+		}
+		kindSet[finding.DataFlow.Sink.Kind] = true
+	}
+	kinds := make([]string, 0, len(kindSet))
+	for kind := range kindSet {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	wantKinds := []string{"destructive_file_operation", "http_request_header", "http_request_url", "save_as", "shell", "sql_execution", "workbooks_open", "wscript_shell_exec", "wscript_shell_run"}
+	if !sameStrings(kinds, wantKinds) {
+		t.Fatalf("catalog sink kinds = %v, want %v", kinds, wantKinds)
+	}
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestVBA224DoesNotMatchUnrelatedMembersOrUnreachableCode(t *testing.T) {
