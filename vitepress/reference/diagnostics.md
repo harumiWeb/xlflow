@@ -76,6 +76,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA222`](#vba222) | analyze | warning  | project-wide    | yes     | Public API type safety                             |
 | [`VBA223`](#vba223) | analyze | warning  | file-local      | yes     | Likely hardcoded secret                            |
 | [`VBA224`](#vba224) | analyze | warning  | procedure-local | yes     | Untrusted data reaches a sensitive API             |
+| [`VBA225`](#vba225) | analyze | warning  | interprocedural | yes     | Excel cell access inside loop                      |
 
 ## VB001
 
@@ -1336,3 +1337,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                           |
 | Real-time editor diagnostic | yes                          |
 | Fix available               | no                           |
+
+## VBA225
+
+**Excel cell access inside loop.** A loop repeatedly accesses Excel cells or related object-model members, causing avoidable COM round trips.
+
+| Property                    | Value                               |
+| --------------------------- | ----------------------------------- |
+| Family                      | `analyze`                           |
+| Category                    | `performance`                       |
+| Default severity            | `warning`                           |
+| Scope                       | `interprocedural`                   |
+| Precision                   | `medium`                            |
+| Enabled by default          | yes                                 |
+| Configuration               | `detect_excel_cell_access_in_loops` |
+| Inline suppression          | yes                                 |
+| Blocks source preflight     | no                                  |
+| Real-time editor diagnostic | yes                                 |
+| Fix available               | no                                  |

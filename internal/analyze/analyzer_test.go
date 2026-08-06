@@ -55,6 +55,293 @@ func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	}
 }
 
+func TestVBA225DetectsIndexedCellReadsWritesAndFormatting(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim rng As Range
+  Dim i As Long
+  Set rng = Range("A1:C100")
+  For i = 1 To 100
+    Debug.Print rng.Cells(i, 1).Value2
+    rng.Cells(i, 2).Value = i
+    rng.Cells(i, 3).Formula = "=1"
+    rng.Cells(i, 1).Font.Bold = True
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 {
+		t.Fatalf("VBA225 findings = %+v, want one aggregated loop finding", got)
+	}
+	if got[0].Severity != "warning" || !strings.Contains(got[0].Message, "read") || !strings.Contains(got[0].Message, "write") || !strings.Contains(got[0].Message, "formatting") || !strings.Contains(got[0].Reason, "COM") {
+		t.Fatalf("unexpected VBA225 finding: %+v", got[0])
+	}
+}
+
+func TestVBA225NestedSeverityAndSmallLoopExemption(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  For i = 1 To 100
+    For j = 1 To 100
+      Cells(i, j).Value2 = j
+    Next j
+  Next i
+  For i = 1 To 1 + 2
+    Cells(i, 1).Value2 = i
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || got[0].Severity != "error" || !strings.Contains(got[0].Message, "Nested loop depth: 2") {
+		t.Fatalf("nested VBA225 findings = %+v, want one depth-2 error", got)
+	}
+}
+
+func TestVBA225UsesNearestNonSmallLoop(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  For i = 1 To 100
+    For j = 1 To 2
+      Cells(i, j).Value2 = j
+    Next j
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || got[0].Line != 5 || got[0].Severity != "warning" {
+		t.Fatalf("small inner loop should roll up to outer loop: %+v", got)
+	}
+}
+
+func TestVBA225IgnoresStringAndCommentText(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  For i = 1 To 100
+    Debug.Print "Cells(i, 1).Value2"
+    ' Range("A1").Value2 is only a comment
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("string/comment Excel text should not produce VBA225: %+v", got)
+	}
+}
+
+func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim rng As Range
+  Dim cell As Range
+  Set rng = Range("A1:Z100")
+  For Each cell In rng.Cells
+    cell.Value2 = cell.Offset(0, 1).Value2
+    cell.NumberFormat = "0"
+    cell.Borders.LineStyle = 1
+    cell.Interior.Color = 16777215
+    Debug.Print Application.WorksheetFunction.Sum(cell)
+  Next cell
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "read") || !strings.Contains(got[0].Message, "write") || !strings.Contains(got[0].Message, "formatting") || !strings.Contains(got[0].Message, "worksheet function") {
+		t.Fatalf("For Each VBA225 findings = %+v, want all access categories", got)
+	}
+	if !strings.Contains(got[0].Message, "color") {
+		t.Fatalf("For Each VBA225 finding = %+v, want Interior.Color member", got[0])
+	}
+}
+
+func TestVBA225SupportsDoAndWhileLoops(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  i = 1
+  Do While i <= 100
+    Cells(i, 1).Value2 = i
+    i = i + 1
+  Loop
+  While i <= 200
+    Cells(i, 1).Formula = "=1"
+    i = i + 1
+  Wend
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 2 {
+		t.Fatalf("Do/While VBA225 findings = %+v, want two loop findings", got)
+	}
+}
+
+func TestVBA225BulkOperationsAndSuppression(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim rng As Range
+  Dim values As Variant
+  Dim i As Long
+  Set rng = Range("A1:A100")
+  values = rng.Value2
+  rng.Value2 = values
+  rng.Font.Bold = True
+  For i = 1 To 100
+    values = Range("A1:A100").Value2
+    Range("B1:B100").Value2 = values
+    Range("A1:A100").NumberFormat = "0"
+  Next i
+  ' xlflow:disable-next-line VBA225
+  For i = 1 To 100
+    Debug.Print rng.Cells(i, 1).Value2
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("suppressed VBA225 findings = %+v", got)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, config.Default(), []byte(`Option Explicit
+Public Sub Run()
+  Dim rng As Range
+  Dim i As Long
+  Set rng = Range("A1:A100")
+  For i = 1 To 100
+    Debug.Print rng.Cells(i, 1).Value2
+  Next i
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA225"); len(got) != 1 {
+		t.Fatalf("realtime VBA225 findings = %+v, want one", got)
+	}
+}
+
+func TestVBA225TracksUniqueAndTransitiveHelpers(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Sub ReadCell(ByVal rng As Range, ByVal i As Long)
+  Debug.Print rng.Cells(i, 1).Value2
+End Sub
+
+Public Sub ReadCellThroughHelper(ByVal rng As Range, ByVal i As Long)
+  ReadCell rng, i
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim rng As Range
+  Dim i As Long
+  Set rng = Range("A1:A100")
+  For i = 1 To 100
+    ReadCellThroughHelper rng, i
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "ReadCellThroughHelper") || !strings.Contains(got[0].Message, "read") || !strings.Contains(got[0].Message, "value2") {
+		t.Fatalf("helper VBA225 findings = %+v, want one transitive helper finding", got)
+	}
+
+	realtimePath := filepath.Join(dir, "src", "modules", "Realtime.bas")
+	realtimeSource := []byte(`Option Explicit
+Private Sub ReadLocal(ByVal rng As Range, ByVal i As Long)
+  Debug.Print rng.Cells(i, 1).Value2
+End Sub
+
+Public Sub Run()
+  Dim rng As Range
+  Dim i As Long
+  Set rng = Range("A1:A100")
+  For i = 1 To 100
+    ReadLocal rng, i
+  Next i
+End Sub
+`)
+	if err := os.MkdirAll(filepath.Dir(realtimePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, realtimePath, config.Default(), realtimeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA225"); len(got) != 1 || !strings.Contains(got[0].Message, "ReadLocal") {
+		t.Fatalf("realtime helper VBA225 findings = %+v, want one local helper finding", got)
+	}
+}
+
+func TestVBA225SkipsAmbiguousHelpers(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "First.bas", `Option Explicit
+Public Sub ReadCell(ByVal rng As Range, ByVal i As Long)
+  Debug.Print rng.Cells(i, 1).Value2
+End Sub
+`)
+	writeModule(t, dir, "Second.bas", `Option Explicit
+Public Sub ReadCell(ByVal rng As Range, ByVal i As Long)
+  Debug.Print rng.Cells(i, 1).Value2
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim rng As Range
+  Dim i As Long
+  Set rng = Range("A1:A100")
+  For i = 1 To 100
+    ReadCell rng, i
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 0 {
+		t.Fatalf("ambiguous helper VBA225 findings = %+v, want none", got)
+	}
+}
+
 func TestAnalyzerDetectsProcedureLocalResourceLeaks(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Resources.bas", `Option Explicit

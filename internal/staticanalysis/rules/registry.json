@@ -1260,6 +1260,24 @@
       "configuration_key": "detect_untrusted_data_flow",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA225",
+      "title": "Excel cell access inside loop",
+      "description": "A loop repeatedly accesses Excel cells or related object-model members, causing avoidable COM round trips.",
+      "family": "analyze",
+      "category": "performance",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "interprocedural",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba225",
+      "configurable": true,
+      "configuration_key": "detect_excel_cell_access_in_loops",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

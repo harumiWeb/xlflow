@@ -57,6 +57,7 @@ type Analyzer struct {
 	errorValueWrappers    map[string]bool
 	eventSafeProcedures   map[string]bool
 	applicationStateLeaks *applicationStateLeakIndex
+	excelLoopAccess       *excelLoopAccessIndex
 }
 
 var (
@@ -200,6 +201,7 @@ type sourceProcedure struct {
 	Params        []parameterInfo
 	Declarations  []procedureir.Declaration
 	Statements    []procedureir.Statement
+	Expressions   []procedureir.Expression
 	Calls         []procedureir.CallSite
 	Accesses      []procedureir.VariableAccess
 	Graph         *vbacfg.Graph
@@ -234,7 +236,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectByRefArgumentMismatch
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectByRefArgumentMismatch || a.Config.Analyze.DetectExcelCellAccessInLoops
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
@@ -320,6 +322,9 @@ func (a Analyzer) RunResult() (Result, error) {
 			}
 			analysis.typeDB = typeDB
 		}
+	}
+	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
+		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
 	}
 	if analysis.Config.Analyze.DetectByRefArgumentMismatch {
 		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
@@ -648,8 +653,8 @@ func SourceRealtimeFindingsParsedIRCFGContext(ctx context.Context, rootDir strin
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDB runs real-time source analysis
 // with an optional caller-owned type database. LSP callers pass their loaded
-// database; standalone callers load the built-in database only when VBA215 is
-// enabled.
+// database; standalone callers load the built-in database when a typed Excel
+// rule is enabled.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB) ([]Finding, error) {
 	return SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(context.Background(), rootDir, cfg, doc, ir, controlFlow, typeDB)
 }
@@ -663,7 +668,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts) && typeDB == nil {
+	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -740,7 +745,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -846,6 +851,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	findings = append(findings, a.dataFlowFindings(file, proc)...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectExcelCellAccessInLoops {
+		findings = append(findings, a.excelLoopAccessFindings(file, proc)...)
 	}
 	return findings, ctx.Err()
 }
@@ -1086,6 +1094,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
+	if a.Config.Analyze.DetectExcelCellAccessInLoops {
+		findings = append(findings, a.excelLoopAccessFindings(file, proc)...)
+	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
@@ -1148,6 +1159,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			Params:        params,
 			Declarations:  append([]procedureir.Declaration(nil), procedure.Declarations...),
 			Statements:    append([]procedureir.Statement(nil), procedure.Statements...),
+			Expressions:   append([]procedureir.Expression(nil), procedure.Expressions...),
 			Calls:         append([]procedureir.CallSite(nil), procedure.Calls...),
 			Accesses:      append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
