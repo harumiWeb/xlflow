@@ -19,7 +19,16 @@
     "diagnostic_meaning": "compile-error"
   },
   "analysis": {
-    "binding_status": "unbound"
+    "binding_status": "bound",
+    "rule_codes": ["VBA206"],
+    "negative_controls": ["byref-compatible", "byref-bare-variable"],
+    "expected_diagnostics": [
+      {
+        "code": "VBA206",
+        "severity": "warning",
+        "surfaces": ["analyze", "lsp"]
+      }
+    ]
   },
   "provenance": {
     "status": "asserted",

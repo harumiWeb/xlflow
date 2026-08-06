@@ -19,7 +19,15 @@
     "diagnostic_meaning": "specification"
   },
   "analysis": {
-    "binding_status": "unbound"
+    "binding_status": "bound",
+    "rule_codes": ["VB037"],
+    "forbidden_diagnostics": [
+      {
+        "code": "VB037",
+        "severity": "warning",
+        "surfaces": ["lsp"]
+      }
+    ]
   },
   "provenance": {
     "status": "asserted",
