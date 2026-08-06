@@ -745,7 +745,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -844,6 +844,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		if a.Config.Analyze.DetectObjectArrayComparison {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
+	}
+	if a.Config.Analyze.DetectRangeValueArrayShape {
+		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
@@ -1102,6 +1105,9 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	}
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		findings = append(findings, a.leakedOnErrorResumeNextFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectRangeValueArrayShape {
+		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
 	findings = append(findings, a.functionReturnPathFindings(file, proc)...)
 	return findings

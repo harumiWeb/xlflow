@@ -21,6 +21,10 @@ All notable changes to xlflow will be documented in this file.
 - Added default-enabled `VBA224` conservative procedure-local source-to-sink
   analysis with shared batch/LSP diagnostics, explicit source/sink/path JSON
   context, narrow sanitizer contracts, and non-blocking inline suppression.
+- Added default-enabled `VBA226` warnings for unsafe `Range.Value` / `Value2`
+  scalar, one-dimensional, dimension/order, bounds, and destination-shape
+  assumptions, with conservative procedure-local shape tracking in batch and
+  real-time analysis.
 - Improved opt-in `VB021` to analyze project call-graph roots, host events, tests,
   `WithEvents` handlers, UserForm metadata, and dynamic callbacks before
   reporting unreachable private procedures.

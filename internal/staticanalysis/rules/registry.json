@@ -1278,6 +1278,24 @@
       "configuration_key": "detect_excel_cell_access_in_loops",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA226",
+      "title": "Unsafe Range.Value array shape assumption",
+      "description": "A Range.Value or Range.Value2 result is consumed as a scalar or one-dimensional array, or assigned to an incompatible range shape.",
+      "family": "analyze",
+      "category": "runtime-safety",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba226",
+      "configurable": true,
+      "configuration_key": "detect_range_value_array_shape",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }
