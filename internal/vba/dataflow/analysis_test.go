@@ -106,18 +106,21 @@ func TestJoinStateUsesConservativeStateAndShortestPath(t *testing.T) {
 
 func TestRecoveredAssignmentDoesNotRestoreACleanValue(t *testing.T) {
 	procedure := procedureir.ProcedureIR{
-		Symbol: procedureir.ProcedureSymbol{Name: "Run", Kind: procedureir.ProcedureSub, DeclarationRange: lineRange(1), BodyRange: lineRange(4)},
+		Symbol: procedureir.ProcedureSymbol{Name: "Run", Kind: procedureir.ProcedureSub, DeclarationRange: lineRange(1), BodyRange: lineRange(5)},
 		Statements: []procedureir.Statement{
-			{ID: 1, Kind: procedureir.StatementAssignment, Text: `raw = "fixed"`, Recovered: true, Range: lineRange(2), Target: expr(1, 1, procedureir.ExpressionIdentifier, "raw", 2), Value: expr(2, 1, procedureir.ExpressionLiteral, `"fixed"`, 2)},
-			{ID: 2, Kind: procedureir.StatementCall, Text: "Shell raw", Range: lineRange(3), ExpressionIDs: []int{3}},
+			{ID: 1, Kind: procedureir.StatementAssignment, Text: `raw = "initial"`, Range: lineRange(2), Target: expr(1, 1, procedureir.ExpressionIdentifier, "raw", 2), Value: expr(2, 1, procedureir.ExpressionLiteral, `"initial"`, 2)},
+			{ID: 2, Kind: procedureir.StatementAssignment, Text: `raw = "fixed"`, Recovered: true, Range: lineRange(3), Target: expr(3, 2, procedureir.ExpressionIdentifier, "raw", 3), Value: expr(4, 2, procedureir.ExpressionLiteral, `"fixed"`, 3)},
+			{ID: 3, Kind: procedureir.StatementCall, Text: "Shell raw", Range: lineRange(4), ExpressionIDs: []int{5}},
 		},
 		Expressions: []procedureir.Expression{
 			*expr(1, 1, procedureir.ExpressionIdentifier, "raw", 2),
-			*expr(2, 1, procedureir.ExpressionLiteral, `"fixed"`, 2),
-			{ID: 3, Kind: procedureir.ExpressionCall, Text: "Shell raw", Range: lineRange(3), StatementID: 2, Children: []int{4}},
-			{ID: 4, Kind: procedureir.ExpressionIdentifier, Text: "raw", Range: lineRange(3), StatementID: 2},
+			*expr(2, 1, procedureir.ExpressionLiteral, `"initial"`, 2),
+			*expr(3, 2, procedureir.ExpressionIdentifier, "raw", 3),
+			*expr(4, 2, procedureir.ExpressionLiteral, `"fixed"`, 3),
+			{ID: 5, Kind: procedureir.ExpressionCall, Text: "Shell raw", Range: lineRange(4), StatementID: 3, Children: []int{6}},
+			{ID: 6, Kind: procedureir.ExpressionIdentifier, Text: "raw", Range: lineRange(4), StatementID: 3},
 		},
-		Calls: []procedureir.CallSite{{ID: 1, Callee: procedureir.Callee{Text: "Shell", BaseName: "Shell"}, Arguments: procedureir.Arguments{ExpressionIDs: []int{4}}, Range: lineRange(3), StatementID: 2, ExpressionID: 3}},
+		Calls: []procedureir.CallSite{{ID: 1, Callee: procedureir.Callee{Text: "Shell", BaseName: "Shell"}, Arguments: procedureir.Arguments{ExpressionIDs: []int{6}}, Range: lineRange(4), StatementID: 3, ExpressionID: 5}},
 	}
 	result := AnalyzeProcedure(procedure, cfg.Build(procedure), Options{})
 	if len(result.Findings) != 1 || result.Findings[0].State != StateUnknown {
