@@ -1601,11 +1601,13 @@ internal static class ExcelBridgeSupport
             var unexpectedProcess = false;
             foreach (var process in CaptureOwnedExcelProcesses())
             {
-                if (IsOracleOwnedProcess(process, ownedProcesses) &&
-                    !ownedProcesses.Any(existing => SameOwnedProcess(existing, process)))
+                if (IsOracleOwnedProcess(process, ownedProcesses))
                 {
-                    ownedProcesses.Add(process);
-                    discovered = true;
+                    if (!ownedProcesses.Any(existing => SameOwnedProcess(existing, process)))
+                    {
+                        ownedProcesses.Add(process);
+                        discovered = true;
+                    }
                 }
                 else if (!baselineProcesses.Any(existing => SameOwnedProcess(existing, process)))
                 {
