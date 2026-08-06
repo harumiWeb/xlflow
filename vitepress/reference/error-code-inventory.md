@@ -174,6 +174,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `destructive_file_operation`
 - `detect_application_state_call_effects`
 - `detect_application_state_restore`
+- `detect_array_lifecycle_safety`
 - `detect_byref_argument_mismatch`
 - `detect_confusing_call_syntax`
 - `detect_dangerous_resume`

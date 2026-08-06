@@ -31,6 +31,10 @@ All notable changes to xlflow will be documented in this file.
   scalar, one-dimensional, dimension/order, bounds, and destination-shape
   assumptions, with conservative procedure-local shape tracking in batch and
   real-time analysis.
+- Added default-enabled `VBA227` array lifecycle and dimension-safety warnings
+  with CFG allocation/erase tracking, conservative Variant handling, object-array
+  missing-`Set` checks, and project-local array return summaries. Existing
+  `VBA208`, `VBA209`, and `VBA226` ownership and finding contracts remain stable.
 - Improved opt-in `VB021` to analyze project call-graph roots, host events, tests,
   `WithEvents` handlers, UserForm metadata, and dynamic callbacks before
   reporting unreachable private procedures.

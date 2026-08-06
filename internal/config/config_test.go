@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "vba224", "VBA225", "VBA226", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "vba224", "VBA225", "VBA226", "VBA227", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -472,11 +472,14 @@ disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "V
 	if cfg.Analyze.DetectRangeValueArrayShape {
 		t.Fatal("expected VBA226/detect_range_value_array_shape to be disabled")
 	}
+	if cfg.Analyze.DetectArrayLifecycleSafety {
+		t.Fatal("expected VBA227/detect_array_lifecycle_safety to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226,VBA227" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226,VBA227", got)
 	}
 }
 

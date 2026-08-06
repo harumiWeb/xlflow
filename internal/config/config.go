@@ -151,6 +151,7 @@ type AnalyzeConfig struct {
 	DetectUntrustedDataFlow             bool     `toml:"detect_untrusted_data_flow"`
 	DetectExcelCellAccessInLoops        bool     `toml:"detect_excel_cell_access_in_loops"`
 	DetectRangeValueArrayShape          bool     `toml:"detect_range_value_array_shape"`
+	DetectArrayLifecycleSafety          bool     `toml:"detect_array_lifecycle_safety"`
 }
 
 type lintRuleAdapter struct {
@@ -226,6 +227,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA224": {Get: func(c AnalyzeConfig) bool { return c.DetectUntrustedDataFlow }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUntrustedDataFlow = v }},
 	"VBA225": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelCellAccessInLoops }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelCellAccessInLoops = v }},
 	"VBA226": {Get: func(c AnalyzeConfig) bool { return c.DetectRangeValueArrayShape }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRangeValueArrayShape = v }},
+	"VBA227": {Get: func(c AnalyzeConfig) bool { return c.DetectArrayLifecycleSafety }, Set: func(c *AnalyzeConfig, v bool) { c.DetectArrayLifecycleSafety = v }},
 }
 
 var (

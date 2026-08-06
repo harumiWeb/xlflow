@@ -79,7 +79,6 @@ var (
 	workbooksOpenBranchBoundaryRe = regexp.MustCompile(`(?i):|\bthen\b|\belse\b`)
 	setAssignmentPrefixRe         = regexp.MustCompile(`(?i)^\s*set\s+.+?\s*=\s*$`)
 	thisWorkbookRe                = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_.$])\bThisWorkbook\b`)
-	redimPreserveRe               = regexp.MustCompile(`(?i)^\s*redim\s+preserve\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)`)
 	forEachDirectRe               = regexp.MustCompile(`(?i)^\s*for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
 	forStartRe                    = regexp.MustCompile(`(?i)^\s*for\b`)
 	nextRe                        = regexp.MustCompile(`(?i)^\s*next\b`)
@@ -158,6 +157,7 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 
 type analysisContext struct {
 	functionReturns    map[string]string
+	arrayReturns       map[string]arrayValue
 	procedures         map[string]procedureSignature
 	worksheetCodenames map[string]string
 }
@@ -697,13 +697,14 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
+		analysisCtx := analyzer.buildContext([]parsedFile{file})
 		for i, proc := range procedures {
 			if i&0x1f == 0 {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
 			}
-			procedureFindings, err := analyzer.sourceRealtimeProcedureFindingsContext(ctx, file, proc, moduleDecls, worksheetCodenames)
+			procedureFindings, err := analyzer.sourceRealtimeProcedureFindingsContext(ctx, file, proc, moduleDecls, worksheetCodenames, analysisCtx)
 			if err != nil {
 				return err
 			}
@@ -745,7 +746,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -776,7 +777,7 @@ func realtimeFindings(findings []Finding) []Finding {
 	return out
 }
 
-func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string) ([]Finding, error) {
+func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string, analysisCtx analysisContext) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -838,16 +839,11 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
 		}
-		if a.Config.Analyze.DetectRedimPreserveDimension {
-			findings = append(findings, a.redimPreserveFindings(file, proc, lineNo, stmt)...)
-		}
-		if a.Config.Analyze.DetectObjectArrayComparison {
-			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
-		}
 	}
 	if a.Config.Analyze.DetectRangeValueArrayShape {
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
+	findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
@@ -921,6 +917,7 @@ func (a Analyzer) shouldIncludeFile(path string) bool {
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx := analysisContext{
 		functionReturns:    map[string]string{},
+		arrayReturns:       map[string]arrayValue{},
 		procedures:         map[string]procedureSignature{},
 		worksheetCodenames: map[string]string{},
 	}
@@ -941,6 +938,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 			ctx.procedures[strings.ToLower(file.Module+"."+proc.Name)] = ctx.procedures[strings.ToLower(proc.Name)]
 		}
 	}
+	ctx.arrayReturns = inferArrayReturnSummaries(files)
 	return ctx
 }
 
@@ -1075,15 +1073,13 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		if a.Config.Analyze.DetectDictionaryCollectionGuard {
 			findings = append(findings, a.dictionaryCollectionFindings(file, proc, lineNo, stmt, decls)...)
 		}
-		if a.Config.Analyze.DetectRedimPreserveDimension {
-			findings = append(findings, a.redimPreserveFindings(file, proc, lineNo, stmt)...)
-		}
 		if a.Config.Analyze.DetectObjectArrayComparison {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
 		markCallInitialized(stmt, decls, ctx, maybeInitializedByCall)
 		_ = lower
 	}
+	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	if a.Config.Analyze.DetectApplicationStateRestore {
 		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}
@@ -1194,7 +1190,7 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 		if len(m) == 0 {
 			continue
 		}
-		for _, part := range strings.Split(m[1], ",") {
+		for _, part := range splitArgs(m[1]) {
 			name, typ, array, newExpr := declarationNameAndType(part)
 			if name == "" {
 				continue
@@ -1231,7 +1227,7 @@ func moduleDeclarations(lines []string, procedures []sourceProcedure) map[string
 		if len(m) == 0 {
 			continue
 		}
-		for _, part := range strings.Split(m[1], ",") {
+		for _, part := range splitArgs(m[1]) {
 			name, typ, array, newExpr := declarationNameAndType(part)
 			if name == "" {
 				continue
@@ -1588,23 +1584,12 @@ func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDecla
 	return strings.EqualFold(cleanIdentifier(rhs), itemKey)
 }
 
-func (a Analyzer) redimPreserveFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string) []Finding {
-	m := redimPreserveRe.FindStringSubmatch(stmt)
-	if len(m) == 0 || !strings.Contains(m[2], ",") {
-		return nil
-	}
-	return []Finding{a.simpleFinding(file, proc, lineNo, "VBA208", "warning", "ReDim Preserve is used on a multi-dimensional array.", "VBA can only Preserve the last dimension of an array; changing earlier dimensions raises a runtime error.", "Only change the last dimension, or copy values into a newly sized array explicitly.")}
-}
-
 func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration) []Finding {
 	lower := strings.ToLower(stmt)
 	var findings []Finding
 	for key, decl := range decls {
 		if decl.Object && strings.Contains(lower, key+" = nothing") {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+decl.Name+" Is Nothing Then` or `If Not "+decl.Name+" Is Nothing Then`."))
-		}
-		if decl.Array && identifierComparedAsOperand(lower, key, proc) {
-			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself."))
 		}
 	}
 	return findings

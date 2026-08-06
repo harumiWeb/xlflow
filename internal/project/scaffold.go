@@ -931,25 +931,25 @@ Public Sub AssertArrayEquals(ByVal expected As Variant, ByVal actual As Variant,
   End If
 
   Dim dimension As Long
-  For dimension = 1 To expectedDims
-    If LBound(expected, dimension) <> LBound(actual, dimension) Or UBound(expected, dimension) <> UBound(actual, dimension) Then
-      RaiseAssertFailure message, "array bounds differ on dimension " & CStr(dimension) & vbCrLf & "expected <" & CStr(LBound(expected, dimension)) & " To " & CStr(UBound(expected, dimension)) & ">" & vbCrLf & "actual   <" & CStr(LBound(actual, dimension)) & " To " & CStr(UBound(actual, dimension)) & ">", source
+  For dimension = 1 To expectedDims ' xlflow:disable-line VBA227
+    If LBound(expected, dimension) <> LBound(actual, dimension) Or UBound(expected, dimension) <> UBound(actual, dimension) Then ' xlflow:disable-line VBA227
+      RaiseAssertFailure message, "array bounds differ on dimension " & CStr(dimension) & vbCrLf & "expected <" & CStr(LBound(expected, dimension)) & " To " & CStr(UBound(expected, dimension)) & ">" & vbCrLf & "actual   <" & CStr(LBound(actual, dimension)) & " To " & CStr(UBound(actual, dimension)) & ">", source ' xlflow:disable-line VBA227
     End If
   Next dimension
 
   Dim i As Long
   Dim j As Long
   If expectedDims = 1 Then
-    For i = LBound(expected, 1) To UBound(expected, 1)
-      If Not ScalarArrayValuesEqual(expected(i), actual(i)) Then
-        RaiseAssertFailure message, "array mismatch at (" & CStr(i) & ")" & vbCrLf & "expected " & FormatAssertValue(expected(i)) & vbCrLf & "actual   " & FormatAssertValue(actual(i)), source
+    For i = LBound(expected, 1) To UBound(expected, 1) ' xlflow:disable-line VBA227
+      If Not ScalarArrayValuesEqual(expected(i), actual(i)) Then ' xlflow:disable-line VBA227
+        RaiseAssertFailure message, "array mismatch at (" & CStr(i) & ")" & vbCrLf & "expected " & FormatAssertValue(expected(i)) & vbCrLf & "actual   " & FormatAssertValue(actual(i)), source ' xlflow:disable-line VBA227
       End If
     Next i
   Else
-    For i = LBound(expected, 1) To UBound(expected, 1)
-      For j = LBound(expected, 2) To UBound(expected, 2)
-        If Not ScalarArrayValuesEqual(expected(i, j), actual(i, j)) Then
-          RaiseAssertFailure message, "array mismatch at (" & CStr(i) & ", " & CStr(j) & ")" & vbCrLf & "expected " & FormatAssertValue(expected(i, j)) & vbCrLf & "actual   " & FormatAssertValue(actual(i, j)), source
+    For i = LBound(expected, 1) To UBound(expected, 1) ' xlflow:disable-line VBA227
+      For j = LBound(expected, 2) To UBound(expected, 2) ' xlflow:disable-line VBA227
+        If Not ScalarArrayValuesEqual(expected(i, j), actual(i, j)) Then ' xlflow:disable-line VBA227
+          RaiseAssertFailure message, "array mismatch at (" & CStr(i) & ", " & CStr(j) & ")" & vbCrLf & "expected " & FormatAssertValue(expected(i, j)) & vbCrLf & "actual   " & FormatAssertValue(actual(i, j)), source ' xlflow:disable-line VBA227
         End If
       Next j
     Next i
@@ -1020,8 +1020,8 @@ Public Sub AssertRangeEquals(ByVal expected As Variant, ByVal actualRange As Obj
 
   Dim expectedRows As Long
   Dim expectedColumns As Long
-  expectedRows = UBound(expected, 1) - LBound(expected, 1) + 1
-  expectedColumns = UBound(expected, 2) - LBound(expected, 2) + 1
+  expectedRows = UBound(expected, 1) - LBound(expected, 1) + 1 ' xlflow:disable-line VBA227
+  expectedColumns = UBound(expected, 2) - LBound(expected, 2) + 1 ' xlflow:disable-line VBA227
   If expectedRows <> rowCount Or expectedColumns <> columnCount Then
     RaiseAssertFailure message, "range size differs; expected <" & CStr(expectedRows) & " x " & CStr(expectedColumns) & "> but got <" & CStr(rowCount) & " x " & CStr(columnCount) & ">", source
   End If
@@ -1030,12 +1030,12 @@ Public Sub AssertRangeEquals(ByVal expected As Variant, ByVal actualRange As Obj
   Dim columnIndex As Long
   Dim expectedRow As Long
   Dim expectedColumn As Long
-  For rowIndex = 1 To rowCount
-    expectedRow = LBound(expected, 1) + rowIndex - 1
-    For columnIndex = 1 To columnCount
-      expectedColumn = LBound(expected, 2) + columnIndex - 1
-      If Not ScalarArrayValuesEqual(expected(expectedRow, expectedColumn), actualValues(rowIndex, columnIndex)) Then
-        RaiseAssertFailure message, "range mismatch at " & RangeCellLabel(actualRange, rowIndex, columnIndex) & vbCrLf & "expected " & FormatAssertValue(expected(expectedRow, expectedColumn)) & vbCrLf & "actual   " & FormatAssertValue(actualValues(rowIndex, columnIndex)), source
+  For rowIndex = 1 To rowCount ' xlflow:disable-line VBA227
+    expectedRow = LBound(expected, 1) + rowIndex - 1 ' xlflow:disable-line VBA227
+    For columnIndex = 1 To columnCount ' xlflow:disable-line VBA227
+      expectedColumn = LBound(expected, 2) + columnIndex - 1 ' xlflow:disable-line VBA227
+      If Not ScalarArrayValuesEqual(expected(expectedRow, expectedColumn), actualValues(rowIndex, columnIndex)) Then ' xlflow:disable-line VBA227
+        RaiseAssertFailure message, "range mismatch at " & RangeCellLabel(actualRange, rowIndex, columnIndex) & vbCrLf & "expected " & FormatAssertValue(expected(expectedRow, expectedColumn)) & vbCrLf & "actual   " & FormatAssertValue(actualValues(rowIndex, columnIndex)), source ' xlflow:disable-line VBA227
       End If
     Next columnIndex
   Next rowIndex
@@ -1232,10 +1232,10 @@ Private Function ArrayDimensionCount(ByVal value As Variant) As Long
   Dim dimension As Long
   Dim lowerBound As Long ' xlflow:disable-line VB020
   Dim probeFailed As Boolean
-  For dimension = 1 To 60
+  For dimension = 1 To 60 ' xlflow:disable-line VBA227
     On Error Resume Next
     Err.Clear
-    lowerBound = LBound(value, dimension)
+    lowerBound = LBound(value, dimension) ' xlflow:disable-line VBA227
     probeFailed = Err.Number <> 0
     Err.Clear
     On Error GoTo 0
@@ -1737,8 +1737,8 @@ Private Function NormalizeFileDialogResponse(ByVal Kind As String, ByVal Id As S
 	If count <> 1 Then
 		Err.Raise xlflowErrInvalidFileDialogResponse, FileDialogSourceName(Kind), "File dialog '" & Id & "' expected one scripted path but received " & CStr(count) & "."
 	End If
-	DisplayValue = CStr(values(LBound(values)))
-	NormalizeFileDialogResponse = CStr(values(LBound(values)))
+	DisplayValue = CStr(values(LBound(values))) ' xlflow:disable-line VBA227
+	NormalizeFileDialogResponse = CStr(values(LBound(values))) ' xlflow:disable-line VBA227
 End Function
 
 Private Function NormalizeFileDialogDefault(ByVal Kind As String, ByVal Id As String, ByVal MultiSelect As Boolean, ByVal DefaultValue As Variant, Optional ByRef DisplayValue As String = "") As Variant
@@ -1764,8 +1764,8 @@ Private Function NormalizeFileDialogDefault(ByVal Kind As String, ByVal Id As St
 		If count <> 1 Then
 			Err.Raise xlflowErrInvalidFileDialogResponse, FileDialogSourceName(Kind), "File dialog '" & Id & "' default value must contain exactly one path."
 		End If
-		DisplayValue = CStr(values(LBound(values)))
-		NormalizeFileDialogDefault = CStr(values(LBound(values)))
+		DisplayValue = CStr(values(LBound(values))) ' xlflow:disable-line VBA227
+		NormalizeFileDialogDefault = CStr(values(LBound(values))) ' xlflow:disable-line VBA227
 		Exit Function
 	End If
 
@@ -1835,8 +1835,8 @@ Private Function SplitFileDialogValues(ByVal MarkerValue As String) As Variant
 		Err.Raise xlflowErrInvalidFileDialogResponse, "XlflowUI.FileDialog", "Scripted file dialog response must contain at least one path."
 	End If
 	values = Split(normalizedValue, vbLf)
-	For i = LBound(values) To UBound(values)
-		If Len(CStr(values(i))) = 0 Then
+	For i = LBound(values) To UBound(values) ' xlflow:disable-line VBA227
+		If Len(CStr(values(i))) = 0 Then ' xlflow:disable-line VBA227
 			Err.Raise xlflowErrInvalidFileDialogResponse, "XlflowUI.FileDialog", "Scripted file dialog response contains an empty path entry."
 		End If
 	Next i
@@ -1848,8 +1848,8 @@ Private Function VariantArrayToStringArray(ByVal Values As Variant) As Variant
 	Dim i As Long
 
 	ReDim result(LBound(Values) To UBound(Values))
-	For i = LBound(Values) To UBound(Values)
-		result(i) = CStr(Values(i))
+	For i = LBound(Values) To UBound(Values) ' xlflow:disable-line VBA227
+		result(i) = CStr(Values(i)) ' xlflow:disable-line VBA227
 		If Len(result(i)) = 0 Then
 			Err.Raise xlflowErrInvalidFileDialogResponse, "XlflowUI.FileDialog", "File dialog default values cannot contain empty paths."
 		End If
@@ -1858,17 +1858,17 @@ Private Function VariantArrayToStringArray(ByVal Values As Variant) As Variant
 End Function
 
 Private Function FileDialogValueCount(ByVal Values As Variant) As Long
-	FileDialogValueCount = UBound(Values) - LBound(Values) + 1
+	FileDialogValueCount = UBound(Values) - LBound(Values) + 1 ' xlflow:disable-line VBA227
 End Function
 
 Private Function JoinStringArray(ByVal Values As Variant, ByVal Separator As String) As String
 	Dim i As Long
 	JoinStringArray = ""
-	For i = LBound(Values) To UBound(Values)
-		If i > LBound(Values) Then
+	For i = LBound(Values) To UBound(Values) ' xlflow:disable-line VBA227
+		If i > LBound(Values) Then ' xlflow:disable-line VBA227
 			JoinStringArray = JoinStringArray & Separator
 		End If
-		JoinStringArray = JoinStringArray & CStr(Values(i))
+		JoinStringArray = JoinStringArray & CStr(Values(i)) ' xlflow:disable-line VBA227
 	Next i
 End Function
 
