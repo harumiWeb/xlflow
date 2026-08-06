@@ -388,14 +388,16 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 var documentEventSuffixes = map[string]map[string]struct{}{
 	"workbook": {
 		"activate": {}, "addininstall": {}, "addinuninstall": {}, "aftersave": {},
+		"afterxmlexport": {}, "afterxmlimport": {},
 		"beforeclose": {}, "beforeprint": {}, "beforesave": {}, "deactivate": {},
+		"beforexmlexport": {}, "beforexmlimport": {},
 		"newchart": {}, "newsheet": {}, "open": {}, "pivottablecloseconnection": {},
 		"pivottableopenconnection": {}, "sheetactivate": {}, "sheetbeforedoubleclick": {},
 		"sheetbeforerightclick": {}, "sheetcalculate": {}, "sheetchange": {},
 		"sheetdeactivate": {}, "sheetfollowhyperlink": {},
 		"sheetpivottableaftervaluechange": {}, "sheetpivottablebeforeallocatechanges": {},
 		"sheetpivottablebeforecommitchanges": {}, "sheetpivottablebeforediscardchanges": {},
-		"sheetpivottableupdate": {}, "sheetselectionchange": {}, "sheettableupdate": {},
+		"sheetpivottableupdate": {}, "sheetpivottablechangesync": {}, "sheetselectionchange": {}, "sheettableupdate": {},
 		"sync": {}, "windowactivate": {}, "windowdeactivate": {}, "windowresize": {},
 		"modelchange": {},
 	},
