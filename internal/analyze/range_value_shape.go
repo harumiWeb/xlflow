@@ -1,0 +1,694 @@
+package analyze
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+)
+
+// VBA's Range.Value and Range.Value2 contract is deliberately represented by
+// a small shape lattice. A one-cell range returns a scalar; every known
+// multi-cell range returns a two-dimensional, one-based Variant array. Any
+// path or expression that prevents us from proving one of those facts is
+// unknown and must not be treated as a one-dimensional array.
+type rangeValueShapeKind uint8
+
+const (
+	rangeValueShapeUnknown rangeValueShapeKind = iota
+	rangeValueShapeScalar
+	rangeValueShapeArray2D
+)
+
+type rangeValueShape struct {
+	kind rangeValueShapeKind
+	rows int
+	cols int
+}
+
+type rangeShape struct {
+	known bool
+	rows  int
+	cols  int
+}
+
+type rangeValueFlowState struct {
+	values      map[string]rangeValueShape
+	ranges      map[string]rangeShape
+	arrayGuards map[string]bool
+}
+
+type rangeValueFacts struct {
+	rangeVariables map[string]bool
+	intervals      map[string]rangeValueInterval
+	constants      map[string]int
+}
+
+type rangeValueInterval struct {
+	known bool
+	min   int
+	max   int
+}
+
+type rangeValueIssue struct {
+	message    string
+	reason     string
+	suggestion string
+}
+
+var (
+	rangeValueRangeLiteralRe = regexp.MustCompile(`(?i)\bRange\s*\(\s*"([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?"\s*\)`)
+	rangeValueRangePairRe    = regexp.MustCompile(`(?i)\bRange\s*\(\s*"([A-Z]+)([0-9]+)"\s*,\s*"([A-Z]+)([0-9]+)"\s*\)`)
+	rangeValueCellsLiteralRe = regexp.MustCompile(`(?i)\bCells\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)`)
+	rangeValueMemberRe       = regexp.MustCompile(`(?i)\.\s*(Value2?|Formula)\s*$`)
+	rangeValueBoundRe        = regexp.MustCompile(`(?i)\b([UL])Bound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([^)]*))?\)`)
+	rangeValueGuardRe        = regexp.MustCompile(`(?i)^\s*If\s+(Not\s+)?IsArray\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s+Then\b`)
+	rangeValueSetRe          = regexp.MustCompile(`(?i)^\s*Set\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$`)
+	rangeValueRedimRe        = regexp.MustCompile(`(?i)^\s*(?:ReDim|Erase)\s+(?:Preserve\s+)?([A-Za-z_][A-Za-z0-9_]*)\b`)
+	rangeValueForEachRe      = regexp.MustCompile(`(?i)^\s*For\s+Each\s+([A-Za-z_][A-Za-z0-9_]*)\s+In\b`)
+	rangeValueForVariableRe  = regexp.MustCompile(`(?i)^\s*For\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	rangeValueIdentifierRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
+func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure) []Finding {
+	if !a.Config.Analyze.DetectRangeValueArrayShape || len(proc.Statements) == 0 {
+		return nil
+	}
+	facts := rangeValueFactsForProcedure(proc)
+	if proc.Graph == nil {
+		state := newRangeValueFlowState()
+		var findings []Finding
+		for _, statement := range proc.Statements {
+			issues, next := rangeValueStatement(state, statement, facts)
+			findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
+			state = next
+		}
+		return findings
+	}
+
+	reachable := map[vbacfg.BlockID]bool{}
+	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
+		reachable[id] = true
+	}
+	if !reachable[proc.Graph.Entry] {
+		return nil
+	}
+
+	states := map[vbacfg.BlockID]rangeValueFlowState{
+		proc.Graph.Entry: newRangeValueFlowState(),
+	}
+	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(proc.Graph.Blocks))
+	for _, block := range proc.Graph.Blocks {
+		blocks[block.ID] = block
+	}
+	queue := []vbacfg.BlockID{proc.Graph.Entry}
+	queued := map[vbacfg.BlockID]bool{proc.Graph.Entry: true}
+	findings := map[string]Finding{}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		queued[id] = false
+		in := states[id]
+		block, ok := blocks[id]
+		out := cloneRangeValueFlowState(in)
+		if ok && block.Statement != nil {
+			issues, next := rangeValueStatement(in, *block.Statement, facts)
+			out = next
+			for _, issue := range issues {
+				finding := a.simpleFinding(file, proc, block.Statement.Range.StartLine, "VBA226", "warning", issue.message, issue.reason, issue.suggestion)
+				key := fmt.Sprintf("%d:%s", block.Statement.ID, issue.message)
+				findings[key] = finding
+			}
+		}
+		for _, edge := range proc.Graph.Edges {
+			if edge.From != id || edge.Class != vbacfg.EdgeNormal || !reachable[edge.To] {
+				continue
+			}
+			next := cloneRangeValueFlowState(out)
+			applyRangeValueGuard(next, block.Statement, edge)
+			merged, changed := mergeRangeValueFlowState(states[edge.To], next, states[edge.To].values != nil || states[edge.To].ranges != nil || states[edge.To].arrayGuards != nil)
+			if !changed {
+				continue
+			}
+			states[edge.To] = merged
+			if !queued[edge.To] {
+				queue = append(queue, edge.To)
+				queued[edge.To] = true
+			}
+		}
+	}
+
+	out := make([]Finding, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, finding)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Line != out[j].Line {
+			return out[i].Line < out[j].Line
+		}
+		return out[i].Message < out[j].Message
+	})
+	return out
+}
+
+func appendRangeValueFindings(findings []Finding, file parsedFile, proc sourceProcedure, statement procedureir.Statement, issues []rangeValueIssue, analyzer Analyzer) []Finding {
+	for _, issue := range issues {
+		findings = append(findings, analyzer.simpleFinding(file, proc, statement.Range.StartLine, "VBA226", "warning", issue.message, issue.reason, issue.suggestion))
+	}
+	return findings
+}
+
+func newRangeValueFlowState() rangeValueFlowState {
+	return rangeValueFlowState{
+		values:      map[string]rangeValueShape{},
+		ranges:      map[string]rangeShape{},
+		arrayGuards: map[string]bool{},
+	}
+}
+
+func cloneRangeValueFlowState(in rangeValueFlowState) rangeValueFlowState {
+	out := newRangeValueFlowState()
+	for name, shape := range in.values {
+		out.values[name] = shape
+	}
+	for name, shape := range in.ranges {
+		out.ranges[name] = shape
+	}
+	for name, guarded := range in.arrayGuards {
+		out.arrayGuards[name] = guarded
+	}
+	return out
+}
+
+func mergeRangeValueFlowState(existing, incoming rangeValueFlowState, hasExisting bool) (rangeValueFlowState, bool) {
+	if !hasExisting {
+		return cloneRangeValueFlowState(incoming), true
+	}
+	out := cloneRangeValueFlowState(existing)
+	changed := false
+	for name, shape := range incoming.values {
+		prior, ok := out.values[name]
+		if !ok {
+			out.values[name] = rangeValueShape{kind: rangeValueShapeUnknown}
+			changed = true
+			continue
+		}
+		merged := mergeRangeValueShape(prior, shape)
+		if merged != prior {
+			out.values[name] = merged
+			changed = true
+		}
+	}
+	for name := range out.values {
+		if _, ok := incoming.values[name]; !ok && out.values[name].kind != rangeValueShapeUnknown {
+			out.values[name] = rangeValueShape{kind: rangeValueShapeUnknown}
+			changed = true
+		}
+	}
+	for name, shape := range incoming.ranges {
+		prior, ok := out.ranges[name]
+		if !ok {
+			out.ranges[name] = rangeShape{}
+			changed = true
+			continue
+		}
+		merged := mergeRangeShape(prior, shape)
+		if merged != prior {
+			out.ranges[name] = merged
+			changed = true
+		}
+	}
+	for name := range out.ranges {
+		if _, ok := incoming.ranges[name]; !ok && out.ranges[name].known {
+			out.ranges[name] = rangeShape{}
+			changed = true
+		}
+	}
+	for name := range out.arrayGuards {
+		if !incoming.arrayGuards[name] {
+			delete(out.arrayGuards, name)
+			changed = true
+		}
+	}
+	return out, changed
+}
+
+func mergeRangeValueShape(a, b rangeValueShape) rangeValueShape {
+	if a == b {
+		return a
+	}
+	return rangeValueShape{kind: rangeValueShapeUnknown}
+}
+
+func mergeRangeShape(a, b rangeShape) rangeShape {
+	if a == b {
+		return a
+	}
+	return rangeShape{}
+}
+
+func rangeValueFactsForProcedure(proc sourceProcedure) rangeValueFacts {
+	facts := rangeValueFacts{rangeVariables: map[string]bool{}, intervals: map[string]rangeValueInterval{}, constants: map[string]int{}}
+	for _, declaration := range proc.Declarations {
+		if isExcelRangeType(declaration.Type) {
+			facts.rangeVariables[strings.ToLower(declaration.Name)] = true
+		}
+	}
+	constants := excelIntegerConstants(proc)
+	facts.constants = constants
+	for _, statement := range proc.Statements {
+		text := strings.TrimSpace(excelLoopHeaderText(statement.Text))
+		if match := forBoundsRe.FindStringSubmatch(text); len(match) > 0 {
+			start, startErr := constantIntegerExpression(match[1], constants)
+			end, endErr := constantIntegerExpression(match[2], constants)
+			if startErr == nil && endErr == nil {
+				min, max := start, end
+				if min > max {
+					min, max = max, min
+				}
+				name := ""
+				if matchName := rangeValueForVariableRe.FindStringSubmatch(text); len(matchName) == 2 {
+					name = strings.ToLower(matchName[1])
+				}
+				if name != "" {
+					facts.intervals[name] = rangeValueInterval{known: true, min: min, max: max}
+				}
+			}
+		}
+	}
+	return facts
+}
+
+func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statement, facts rangeValueFacts) ([]rangeValueIssue, rangeValueFlowState) {
+	state = cloneRangeValueFlowState(state)
+	var issues []rangeValueIssue
+	raw := rangeValueStatementText(statement)
+	code := normalizedCodeLine(raw)
+	boundMatches := rangeValueBoundRe.FindAllStringSubmatch(code, -1)
+	for _, name := range sortedRangeValueNames(state.values) {
+		shape := state.values[name]
+		for _, match := range rangeValueIndexedUses(code, name) {
+			args := splitArgs(match)
+			switch len(args) {
+			case 1:
+				if shape.kind == rangeValueShapeScalar {
+					issues = append(issues, rangeValueIssue{
+						message:    fmt.Sprintf("Single-cell Range.Value result %s is indexed as an array.", name),
+						reason:     "A definite single-cell Range.Value or Range.Value2 result is a scalar Variant, not an array.",
+						suggestion: fmt.Sprintf("Use %s directly instead of indexing the scalar result.", name),
+					})
+				} else {
+					issues = append(issues, rangeValueIssue{
+						message:    fmt.Sprintf("Range.Value result %s is used with one array index.", name),
+						reason:     "A multi-cell Range.Value or Range.Value2 result is always a two-dimensional array, while a single-cell result is a scalar.",
+						suggestion: fmt.Sprintf("Use %s(row, column) for a multi-cell range, or handle the single-cell case before indexing.", name),
+					})
+				}
+			case 2:
+				if shape.kind == rangeValueShapeScalar {
+					issues = append(issues, rangeValueIssue{
+						message:    fmt.Sprintf("Single-cell Range.Value result %s is indexed as an array.", name),
+						reason:     "A definite single-cell Range.Value or Range.Value2 result is a scalar Variant, not an array.",
+						suggestion: fmt.Sprintf("Use %s directly, or guard dynamic ranges with IsArray before using two-dimensional indexes.", name),
+					})
+				} else if shape.kind == rangeValueShapeUnknown && !state.arrayGuards[name] {
+					issues = append(issues, rangeValueIssue{
+						message:    fmt.Sprintf("Range.Value result %s may be a scalar before two-dimensional indexing.", name),
+						reason:     "The range size is dynamic, so Range.Value can return either a scalar or a two-dimensional array on different executions.",
+						suggestion: fmt.Sprintf("Guard %s with IsArray and use explicit row and column dimensions.", name),
+					})
+				} else if shape.kind == rangeValueShapeArray2D {
+					if issue := rangeValueBoundsIssue(name, args, shape, state, facts); issue != nil {
+						issues = append(issues, *issue)
+					}
+				}
+			}
+		}
+		for _, match := range boundMatches {
+			if !strings.EqualFold(match[2], name) {
+				continue
+			}
+			dimension := strings.TrimSpace(match[3])
+			if dimension == "" {
+				issues = append(issues, rangeValueIssue{
+					message:    fmt.Sprintf("UBound/LBound(%s) omits the array dimension.", name),
+					reason:     "Range.Value and Range.Value2 return two-dimensional arrays for multi-cell ranges, so an omitted dimension hides whether rows or columns are being inspected.",
+					suggestion: fmt.Sprintf("Specify the dimension explicitly, for example UBound(%s, 1) or UBound(%s, 2).", name, name),
+				})
+				continue
+			}
+			if shape.kind == rangeValueShapeScalar || (shape.kind == rangeValueShapeUnknown && !state.arrayGuards[name]) {
+				issues = append(issues, rangeValueIssue{
+					message:    fmt.Sprintf("%s may not be an array when its bounds are read.", name),
+					reason:     "A single-cell or dynamic Range.Value result is not proven to be an array at this point.",
+					suggestion: fmt.Sprintf("Guard %s with IsArray before calling LBound or UBound.", name),
+				})
+				continue
+			}
+			if dimensionValue, err := constantIntegerExpression(dimension, facts.constantValues()); err == nil && (dimensionValue < 1 || dimensionValue > 2) {
+				issues = append(issues, rangeValueIssue{
+					message:    fmt.Sprintf("%s uses unsupported array dimension %d for %s.", match[1]+"Bound", dimensionValue, name),
+					reason:     "Range.Value and Range.Value2 arrays expose row and column dimensions only.",
+					suggestion: fmt.Sprintf("Use dimension 1 for rows or dimension 2 for columns when reading %s bounds.", name),
+				})
+			}
+		}
+	}
+
+	if left, right, ok := rangeValueAssignment(raw); ok {
+		if target, ok := rangeValueTargetReceiver(left); ok {
+			if sourceName := rangeValueBareName(right); sourceName != "" {
+				if source, found := state.values[sourceName]; found {
+					if issue := rangeValueDestinationIssue(target, source, state, facts); issue != nil {
+						issues = append(issues, *issue)
+					}
+				}
+			}
+		}
+		if targetName := rangeValueBareName(left); targetName != "" {
+			delete(state.arrayGuards, targetName)
+			if source, ok := rangeValueSourceShape(right, state, facts); ok {
+				state.values[targetName] = source
+				delete(state.ranges, targetName)
+			} else if sourceName := rangeValueBareName(right); sourceName != "" {
+				if source, found := state.values[sourceName]; found {
+					state.values[targetName] = source
+				} else {
+					state.values[targetName] = rangeValueShape{kind: rangeValueShapeUnknown}
+				}
+				delete(state.ranges, targetName)
+			} else {
+				if _, wasTracked := state.values[targetName]; wasTracked {
+					state.values[targetName] = rangeValueShape{kind: rangeValueShapeUnknown}
+				} else {
+					delete(state.values, targetName)
+				}
+			}
+		}
+	}
+
+	if match := rangeValueSetRe.FindStringSubmatch(raw); len(match) == 3 {
+		name := strings.ToLower(match[1])
+		if shape, ok := rangeValueRangeShape(match[2], state); ok {
+			state.ranges[name] = shape
+		} else {
+			state.ranges[name] = rangeShape{}
+		}
+		delete(state.values, name)
+		delete(state.arrayGuards, name)
+	}
+	if match := rangeValueRedimRe.FindStringSubmatch(raw); len(match) == 2 {
+		name := strings.ToLower(match[1])
+		delete(state.values, name)
+		delete(state.arrayGuards, name)
+	}
+	if match := rangeValueForEachRe.FindStringSubmatch(raw); len(match) == 2 {
+		name := strings.ToLower(match[1])
+		delete(state.values, name)
+		delete(state.arrayGuards, name)
+	}
+	return deduplicateRangeValueIssues(issues), state
+}
+
+func (f rangeValueFacts) constantValues() map[string]int {
+	return f.constants
+}
+
+func sortedRangeValueNames(values map[string]rangeValueShape) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func rangeValueIndexedUses(code, name string) []string {
+	re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `\s*\(([^()]*)\)`)
+	matches := re.FindAllStringSubmatch(code, -1)
+	out := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) == 2 {
+			out = append(out, match[1])
+		}
+	}
+	return out
+}
+
+func rangeValueStatementText(statement procedureir.Statement) string {
+	text := statement.Text
+	switch statement.Kind {
+	case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo,
+		procedureir.StatementWhile, procedureir.StatementIf, procedureir.StatementElseIf,
+		procedureir.StatementElse, procedureir.StatementSelect, procedureir.StatementCase,
+		procedureir.StatementWith:
+		text = excelLoopHeaderText(text)
+	}
+	return strings.TrimSpace(text)
+}
+
+func rangeValueBoundsIssue(name string, args []string, shape rangeValueShape, state rangeValueFlowState, facts rangeValueFacts) *rangeValueIssue {
+	if len(args) != 2 {
+		return nil
+	}
+	row := rangeValueIndexInterval(args[0], state, facts)
+	column := rangeValueIndexInterval(args[1], state, facts)
+	if row.known && (row.min < 1 || row.max > shape.rows) {
+		return &rangeValueIssue{
+			message:    fmt.Sprintf("%s indexes row dimension outside 1..%d.", name, shape.rows),
+			reason:     "Range.Value arrays use row-first, column-second indexing and the inferred row range exceeds the source range.",
+			suggestion: fmt.Sprintf("Keep the first index within 1..%d and the second within 1..%d.", shape.rows, shape.cols),
+		}
+	}
+	if column.known && (column.min < 1 || column.max > shape.cols) {
+		return &rangeValueIssue{
+			message:    fmt.Sprintf("%s indexes column dimension outside 1..%d.", name, shape.cols),
+			reason:     "Range.Value arrays use row-first, column-second indexing and the inferred column range exceeds the source range.",
+			suggestion: fmt.Sprintf("Keep the first index within 1..%d and the second within 1..%d.", shape.rows, shape.cols),
+		}
+	}
+	return nil
+}
+
+func rangeValueIndexInterval(text string, state rangeValueFlowState, facts rangeValueFacts) rangeValueInterval {
+	text = strings.TrimSpace(text)
+	if value, err := constantIntegerExpression(text, facts.constantValues()); err == nil {
+		return rangeValueInterval{known: true, min: value, max: value}
+	}
+	if interval, ok := facts.intervals[strings.ToLower(cleanIdentifier(text))]; ok {
+		return interval
+	}
+	match := rangeValueBoundRe.FindStringSubmatch(text)
+	if len(match) == 4 {
+		shape, ok := state.values[strings.ToLower(match[2])]
+		if !ok || shape.kind != rangeValueShapeArray2D {
+			return rangeValueInterval{}
+		}
+		dimension, err := constantIntegerExpression(strings.TrimSpace(match[3]), facts.constantValues())
+		if err != nil {
+			return rangeValueInterval{}
+		}
+		if dimension == 1 {
+			if match[1] == "L" || match[1] == "l" {
+				return rangeValueInterval{known: true, min: 1, max: 1}
+			}
+			return rangeValueInterval{known: true, min: 1, max: shape.rows}
+		}
+		if dimension == 2 {
+			if match[1] == "L" || match[1] == "l" {
+				return rangeValueInterval{known: true, min: 1, max: 1}
+			}
+			return rangeValueInterval{known: true, min: 1, max: shape.cols}
+		}
+	}
+	return rangeValueInterval{}
+}
+
+func rangeValueAssignment(text string) (string, string, bool) {
+	text = strings.TrimSpace(text)
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "if ") || strings.HasPrefix(lower, "elseif ") || strings.HasPrefix(lower, "for ") || strings.HasPrefix(lower, "while ") {
+		return "", "", false
+	}
+	inString, depth := false, 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '=':
+			if inString || depth != 0 || (i > 0 && (text[i-1] == '<' || text[i-1] == '>')) || (i+1 < len(text) && text[i+1] == '>') {
+				continue
+			}
+			left := strings.TrimSpace(strings.TrimPrefix(text[:i], "Let "))
+			if left == "" {
+				return "", "", false
+			}
+			return left, strings.TrimSpace(text[i+1:]), true
+		}
+	}
+	return "", "", false
+}
+
+func rangeValueBareName(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(strings.TrimPrefix(text, "Let "), "let ")
+	if !rangeValueIdentifierRe.MatchString(text) {
+		return ""
+	}
+	return strings.ToLower(text)
+}
+
+func rangeValueTargetReceiver(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	match := rangeValueMemberRe.FindStringIndex(text)
+	if match == nil {
+		return "", false
+	}
+	member := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(text[match[0]:])), " ", "")
+	if member != ".value" && member != ".value2" {
+		return "", false
+	}
+	receiver := strings.TrimSpace(text[:match[0]])
+	return receiver, receiver != ""
+}
+
+func rangeValueSourceShape(text string, state rangeValueFlowState, facts rangeValueFacts) (rangeValueShape, bool) {
+	receiver, ok := rangeValueValueReceiver(text)
+	if ok {
+		if shape, recognized := rangeValueShapeFromReceiver(receiver, state, facts); recognized {
+			if shape.known && shape.rows == 1 && shape.cols == 1 {
+				return rangeValueShape{kind: rangeValueShapeScalar}, true
+			}
+			if shape.known {
+				return rangeValueShape{kind: rangeValueShapeArray2D, rows: shape.rows, cols: shape.cols}, true
+			}
+			return rangeValueShape{kind: rangeValueShapeUnknown}, true
+		}
+	}
+	return rangeValueShape{}, false
+}
+
+func rangeValueValueReceiver(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	match := rangeValueMemberRe.FindStringIndex(text)
+	if match == nil {
+		return "", false
+	}
+	member := strings.ToLower(strings.TrimSpace(text[match[0]:]))
+	if !strings.HasPrefix(member, ".value") {
+		return "", false
+	}
+	return strings.TrimSpace(text[:match[0]]), true
+}
+
+func rangeValueShapeFromReceiver(receiver string, state rangeValueFlowState, facts rangeValueFacts) (rangeShape, bool) {
+	if shape, ok := rangeValueRangeShape(receiver, state); ok {
+		return shape, true
+	}
+	if facts.rangeVariables[strings.ToLower(strings.TrimSpace(receiver))] {
+		return rangeShape{}, true
+	}
+	return rangeShape{}, false
+}
+
+func rangeValueRangeShape(text string, state rangeValueFlowState) (rangeShape, bool) {
+	text = strings.TrimSpace(text)
+	if shape, ok := state.ranges[strings.ToLower(text)]; ok {
+		return shape, true
+	}
+	if match := rangeValueRangeLiteralRe.FindStringSubmatch(text); len(match) == 5 {
+		startCol := excelColumnNumber(match[1])
+		startRow, _ := strconv.Atoi(match[2])
+		endCol, endRow := startCol, startRow
+		if match[3] != "" {
+			endCol = excelColumnNumber(match[3])
+			endRow, _ = strconv.Atoi(match[4])
+		}
+		if startCol > 0 && endCol >= startCol && endRow >= startRow {
+			return rangeShape{known: true, rows: endRow - startRow + 1, cols: endCol - startCol + 1}, true
+		}
+	}
+	if match := rangeValueRangePairRe.FindStringSubmatch(text); len(match) == 5 {
+		startCol := excelColumnNumber(match[1])
+		startRow, _ := strconv.Atoi(match[2])
+		endCol := excelColumnNumber(match[3])
+		endRow, _ := strconv.Atoi(match[4])
+		if startCol > 0 && endCol >= startCol && endRow >= startRow {
+			return rangeShape{known: true, rows: endRow - startRow + 1, cols: endCol - startCol + 1}, true
+		}
+	}
+	if match := rangeValueCellsLiteralRe.FindStringSubmatch(text); len(match) == 3 {
+		return rangeShape{known: true, rows: 1, cols: 1}, true
+	}
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "range(") || strings.Contains(lower, ".range(") || strings.Contains(lower, "cells(") || strings.Contains(lower, ".resize(") {
+		return rangeShape{}, true
+	}
+	return rangeShape{}, false
+}
+
+func rangeValueDestinationIssue(target string, source rangeValueShape, state rangeValueFlowState, facts rangeValueFacts) *rangeValueIssue {
+	if source.kind != rangeValueShapeArray2D {
+		return nil
+	}
+	destination, recognized := rangeValueShapeFromReceiver(target, state, facts)
+	if !recognized || !destination.known {
+		return nil
+	}
+	if destination.rows == source.rows && destination.cols == source.cols {
+		return nil
+	}
+	return &rangeValueIssue{
+		message:    fmt.Sprintf("Two-dimensional Range.Value array (%d x %d) is assigned to an incompatible range shape (%d x %d).", source.rows, source.cols, destination.rows, destination.cols),
+		reason:     "Excel Range.Value assignments require the destination shape to match the two-dimensional array when the values are transferred as a block.",
+		suggestion: fmt.Sprintf("Resize the destination to %d rows by %d columns, or construct an array with the destination's shape.", source.rows, source.cols),
+	}
+}
+
+func applyRangeValueGuard(state rangeValueFlowState, statement *procedureir.Statement, edge vbacfg.Edge) {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+		return
+	}
+	match := rangeValueGuardRe.FindStringSubmatch(rangeValueStatementText(*statement))
+	if len(match) != 3 {
+		return
+	}
+	negated := strings.TrimSpace(match[1]) != ""
+	trueBranch := edge.Kind == vbacfg.EdgeBranchTrue
+	arrayBranch := (trueBranch && !negated) || (!trueBranch && negated)
+	name := strings.ToLower(match[2])
+	if arrayBranch {
+		state.arrayGuards[name] = true
+	} else {
+		delete(state.arrayGuards, name)
+	}
+}
+
+func deduplicateRangeValueIssues(issues []rangeValueIssue) []rangeValueIssue {
+	seen := map[string]bool{}
+	out := make([]rangeValueIssue, 0, len(issues))
+	for _, issue := range issues {
+		if seen[issue.message] {
+			continue
+		}
+		seen[issue.message] = true
+		out = append(out, issue)
+	}
+	return out
+}

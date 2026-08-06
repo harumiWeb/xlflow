@@ -77,6 +77,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA223`](#vba223) | analyze | warning  | file-local      | yes     | Likely hardcoded secret                            |
 | [`VBA224`](#vba224) | analyze | warning  | procedure-local | yes     | Untrusted data reaches a sensitive API             |
 | [`VBA225`](#vba225) | analyze | warning  | interprocedural | yes     | Excel cell access inside loop                      |
+| [`VBA226`](#vba226) | analyze | warning  | procedure-local | yes     | Unsafe Range.Value array shape assumption          |
 
 ## VB001
 
@@ -1355,3 +1356,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                  |
 | Real-time editor diagnostic | yes                                 |
 | Fix available               | no                                  |
+
+## VBA226
+
+**Unsafe Range.Value array shape assumption.** A Range.Value or Range.Value2 result is consumed as a scalar or one-dimensional array, or assigned to an incompatible range shape.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `runtime-safety`                 |
+| Default severity            | `warning`                        |
+| Scope                       | `procedure-local`                |
+| Precision                   | `medium`                         |
+| Enabled by default          | yes                              |
+| Configuration               | `detect_range_value_array_shape` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |
