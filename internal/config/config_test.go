@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -460,11 +460,14 @@ disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "V
 	if cfg.Analyze.DetectPublicAPITypeSafety {
 		t.Fatal("expected VBA222/detect_public_api_type_safety to be disabled")
 	}
+	if cfg.Analyze.DetectHardcodedSecrets {
+		t.Fatal("expected VBA223/detect_hardcoded_secrets to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223", got)
 	}
 }
 

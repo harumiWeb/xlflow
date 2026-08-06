@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA223` security warnings for likely hardcoded VBA
+  credentials, with structural matching, placeholder filtering, fixed
+  `[REDACTED]` diagnostics, and independent configuration/inline suppression.
 - Added default-enabled batch `VBA222` warnings for public APIs that expose
   private, unexposed, ambiguous, or unresolved types. The rule covers
   procedures, properties, custom events, and `VB_Exposed` classes/interfaces,

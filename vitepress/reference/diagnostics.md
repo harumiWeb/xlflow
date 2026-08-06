@@ -74,6 +74,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA220`](#vba220) | analyze | warning  | interprocedural | yes     | Event handler re-entry hazard                      |
 | [`VBA221`](#vba221) | analyze | warning  | interprocedural | yes     | Application state changed by local helper          |
 | [`VBA222`](#vba222) | analyze | warning  | project-wide    | yes     | Public API type safety                             |
+| [`VBA223`](#vba223) | analyze | warning  | file-local      | yes     | Likely hardcoded secret                            |
 
 ## VB001
 
@@ -1298,3 +1299,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                              |
 | Real-time editor diagnostic | no                              |
 | Fix available               | no                              |
+
+## VBA223
+
+**Likely hardcoded secret.** A credential-like value appears directly in VBA source.
+
+| Property                    | Value                      |
+| --------------------------- | -------------------------- |
+| Family                      | `analyze`                  |
+| Category                    | `security`                 |
+| Default severity            | `warning`                  |
+| Scope                       | `file-local`               |
+| Precision                   | `high`                     |
+| Enabled by default          | yes                        |
+| Configuration               | `detect_hardcoded_secrets` |
+| Inline suppression          | yes                        |
+| Blocks source preflight     | no                         |
+| Real-time editor diagnostic | yes                        |
+| Fix available               | no                         |

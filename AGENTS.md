@@ -166,22 +166,34 @@ Before generating or modifying code, perform the following steps according to th
 
 ## grepai usage
 
-Use `grepai` for semantic code discovery before broad file reads.
+Use `grepai` proactively for semantic code discovery before broad file reads. It
+is especially valuable when the task is unfamiliar, spans multiple packages,
+describes behavior rather than an exact symbol, or requires architecture and
+caller/callee discovery. Do not wait until exact search has already produced a
+large candidate set; use semantic search to narrow the search space first.
 
 Recommended flow:
 
-1. Use `grepai search "<task intent>"` to find candidate files.
-2. Use `grepai trace callers "<symbol>"` or `grepai trace callees "<symbol>"` to identify likely call sites.
-3. Treat trace results as candidates, not ground truth.
-4. Verify important symbols and call sites with exact search:
+1. Check `rtk grepai status` before searching. If the index is missing or stale,
+   start `rtk grepai watch` in a separate terminal and wait for the current
+   worktree to be indexed.
+2. Use `rtk grepai search "<task intent>"` to find candidate files and concepts.
+3. Use `rtk grepai trace callers "<symbol>"` or `rtk grepai trace callees "<symbol>"`
+   to identify likely call sites and dependencies.
+4. Treat search and trace results as candidates, not ground truth. Confirm the
+   important paths with exact search:
    - `rtk rg "<symbol>"`
    - `rtk rg "new <TypeName>"`
    - `rtk rg "<methodName>"`
-5. Read only the files confirmed by grepai + exact search.
+5. Read only the files confirmed by semantic and exact search, then rerun
+   `grepai` after a substantial refactor if the index may have changed.
+
+Use exact `rtk rg` directly when the identifier, config key, diagnostic ID, or
+file path is already known; grepai is not a replacement for exact validation.
 
 Branch/index safety:
 
-- Prefer running `grepai watch` in a separate terminal.
+- Always prefer running `grepai watch` in a separate terminal for multi-step work.
 - After `git switch`, validate important grepai hits with `rtk rg` before editing.
 - If grepai returns files or symbols that do not exist in the current branch, treat the index as stale and restart `grepai watch`.
 
@@ -201,6 +213,19 @@ Use `rtk rg` for:
 - test names
 
 Do not rely on grepai trace alone for complete impact analysis.
+
+## Formatting and pre-commit
+
+- The pre-commit hook must remain non-mutating. It checks only staged files and
+  must not run `task fmt` or `goimports -w` automatically.
+- Use `pnpm format:check` for the staged-file format check. Use `task fmt`
+  explicitly when repository-wide formatting is intentional, then review the
+  complete diff before committing.
+- Keep Go formatting and import checks read-only in hooks. Do not run overlapping
+  formatters in parallel because `gofmt` and `goimports` can both rewrite Go
+  files.
+- Generated documentation is checked in read-only mode by the lint/docs checks;
+  regenerate it explicitly after changing its source registry.
 
 <!-- headroom:rtk-instructions -->
 

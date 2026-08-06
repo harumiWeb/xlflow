@@ -687,6 +687,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)
 		procedures := sourceProceduresFromIR(ir, controlFlow)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		findings = append(findings, analyzer.hardcodedSecretFindings(file, procedures)...)
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
@@ -738,7 +739,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -935,6 +936,7 @@ func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext, projec
 	var findings []Finding
 	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
+	findings = append(findings, a.hardcodedSecretFindings(file, procedures)...)
 	for _, proc := range procedures {
 		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
 	}
