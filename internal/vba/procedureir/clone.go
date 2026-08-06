@@ -2,7 +2,11 @@ package procedureir
 
 func Clone(in DocumentIR) DocumentIR {
 	out := in
+	out.ModuleAttributes = append([]ModuleAttribute(nil), in.ModuleAttributes...)
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
+	for i := range out.Declarations {
+		out.Declarations[i].Parameters = append([]Parameter(nil), in.Declarations[i].Parameters...)
+	}
 	out.TypeReferences = make([]TypeReference, len(in.TypeReferences))
 	for i := range in.TypeReferences {
 		out.TypeReferences[i] = in.TypeReferences[i]
@@ -37,6 +41,9 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 	out := in
 	out.Symbol.Parameters = append([]Parameter(nil), in.Symbol.Parameters...)
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
+	for i := range out.Declarations {
+		out.Declarations[i].Parameters = append([]Parameter(nil), in.Declarations[i].Parameters...)
+	}
 	out.Statements = make([]Statement, len(in.Statements))
 	for i := range in.Statements {
 		out.Statements[i] = in.Statements[i]

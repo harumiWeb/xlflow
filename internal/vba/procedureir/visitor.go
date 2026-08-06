@@ -43,7 +43,8 @@ func (b *documentBuilder) buildSinglePass(root *tree_sitter.Node) DocumentIR {
 	v := singleVisitor{
 		builder: b,
 		document: DocumentIR{
-			Path: b.file, ModuleName: b.moduleName, ModuleKind: b.moduleKind, Parse: b.parse,
+			Path: b.file, ModuleName: b.moduleName, ModuleKind: b.moduleKind,
+			ModuleAttributes: append([]ModuleAttribute(nil), b.moduleAttributes...), Parse: b.parse,
 			Declarations: []Declaration{}, Procedures: []ProcedureIR{}, TypeReferences: []TypeReference{},
 		},
 		moduleScope: map[string]SymbolScope{},
@@ -89,8 +90,14 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 	}
 	if procedure == nil {
 		switch node.Kind() {
-		case "declare_statement", "declare_sub_statement", "declare_function_statement", "event_statement", "event_declaration":
+		case "declare_statement", "declare_sub_statement", "declare_function_statement", "event_statement", "event_declaration", "type_declaration", "enum_declaration":
 			if declaration, ok := v.builder.simpleDeclaration(node, ScopeModule); ok {
+				switch node.Kind() {
+				case "type_declaration":
+					declaration.Kind = "type"
+				case "enum_declaration":
+					declaration.Kind = "enum"
+				}
 				v.document.Declarations = append(v.document.Declarations, declaration)
 			}
 		}

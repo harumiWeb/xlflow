@@ -206,10 +206,57 @@ End Sub
 	if len(doc.Procedures) != 1 || doc.Procedures[0].Symbol.Name != "Run" {
 		t.Fatalf("Event declaration was treated as a procedure: %#v", doc.Procedures)
 	}
+	if len(doc.Declarations) == 0 || len(doc.Declarations[0].Parameters) != 1 || doc.Declarations[0].Parameters[0].Type != "Long" {
+		t.Fatalf("Event parameters were not retained in the IR: %#v", doc.Declarations)
+	}
 	assertTypeReference(t, doc.TypeReferences, "implements", "IFoo")
 	assertTypeReference(t, doc.TypeReferences, "uses_type", "IService")
 	assertTypeReference(t, doc.TypeReferences, "uses_type", "Widget")
 	assertTypeReference(t, doc.TypeReferences, "constructs", "Widget")
+}
+
+func TestModuleAttributesAndPublicTypesAreRetained(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Contract.cls", ModuleKind: "class"}, []byte(`Attribute VB_Name = "Contract"
+Attribute VB_Exposed = True
+Private Type PrivatePayload
+    Value As Long
+End Type
+Public Type PublicPayload
+    Value As Long
+End Type
+Public Enum StatusCode
+    StatusOK = 1
+End Enum
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !moduleAttributeValue(doc, "VB_Exposed", "True") {
+		t.Fatalf("module attributes = %#v", doc.ModuleAttributes)
+	}
+	seen := map[string]string{}
+	for _, declaration := range doc.Declarations {
+		seen[declaration.Name] = declaration.Kind + ":" + declaration.Visibility
+	}
+	for name, want := range map[string]string{
+		"PrivatePayload": "type:Private",
+		"PublicPayload":  "type:Public",
+		"StatusCode":     "enum:Public",
+	} {
+		if seen[name] != want {
+			t.Fatalf("declaration %s = %q, want %q; all=%#v", name, seen[name], want, seen)
+		}
+	}
+}
+
+func moduleAttributeValue(doc DocumentIR, name, want string) bool {
+	for _, attribute := range doc.ModuleAttributes {
+		if strings.EqualFold(attribute.Name, name) && strings.EqualFold(strings.Trim(attribute.Value, `"`), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestStatementHierarchyAndErrorHandlingKinds(t *testing.T) {
