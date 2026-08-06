@@ -19,7 +19,8 @@
     "diagnostic_meaning": "specification"
   },
   "analysis": {
-    "binding_status": "unbound"
+    "binding_status": "unbound",
+    "binding_note": "VBE accepts the parenthesized Function call in expression context and the current analyzer emits no compile-error-equivalent diagnostic for this accepted form. No binding contract is applicable in issue #511."
   },
   "provenance": {
     "status": "asserted",

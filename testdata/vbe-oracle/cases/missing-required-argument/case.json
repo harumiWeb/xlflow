@@ -19,7 +19,16 @@
     "diagnostic_meaning": "compile-error"
   },
   "analysis": {
-    "binding_status": "unbound"
+    "binding_status": "bound",
+    "rule_codes": ["VB030"],
+    "negative_controls": ["optional-argument-omitted", "known-named-argument"],
+    "expected_diagnostics": [
+      {
+        "code": "VB030",
+        "severity": "warning",
+        "surfaces": ["lsp"]
+      }
+    ]
   },
   "provenance": {
     "status": "asserted",

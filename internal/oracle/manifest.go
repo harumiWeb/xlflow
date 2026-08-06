@@ -427,6 +427,9 @@ func validateAnalysisBinding(c Case) error {
 	hasForbidden := len(analysis.ForbiddenDiagnostics) > 0
 	switch analysis.BindingStatus {
 	case BindingUnbound:
+		if hasExpected || hasForbidden {
+			return fmt.Errorf("oracle case %q: unbound fixture cannot declare analyzer diagnostic contracts", c.ID)
+		}
 		if len(analysis.RuleCodes) > 0 && analysis.BindingNote == nil {
 			return fmt.Errorf("oracle case %q: unbound fixture with rule codes requires analysis.binding_note", c.ID)
 		}
@@ -466,18 +469,21 @@ func validateAnalysisBinding(c Case) error {
 			return fmt.Errorf("oracle case %q: not-applicable fixture cannot declare analyzer bindings", c.ID)
 		}
 	}
-	if analysis.BindingStatus != BindingNotApplicable {
+	if analysis.BindingStatus == BindingBound || analysis.BindingStatus == BindingPartiallyBound {
 		contracts := append(append([]DiagnosticExpectation(nil), analysis.ExpectedDiagnostics...), analysis.ForbiddenDiagnostics...)
-		for _, code := range analysis.RuleCodes {
-			if !diagnosticCodeDeclared(code, contracts) {
-				return fmt.Errorf("oracle case %q: analysis rule code %q is not declared by an expected or forbidden diagnostic contract", c.ID, code)
+		if analysis.BindingStatus == BindingBound {
+			for _, code := range analysis.RuleCodes {
+				if !diagnosticCodeDeclared(code, contracts) {
+					return fmt.Errorf("oracle case %q: analysis rule code %q is not declared by an expected or forbidden diagnostic contract", c.ID, code)
+				}
 			}
 		}
-		if analysis.BindingStatus == BindingBound {
-			for _, expectation := range contracts {
-				if _, ok := seenCodes[expectation.Code]; !ok {
+		for _, expectation := range contracts {
+			if _, ok := seenCodes[expectation.Code]; !ok {
+				if analysis.BindingStatus == BindingBound {
 					return fmt.Errorf("oracle case %q: bound diagnostic code %q is not declared by analysis.rule_codes", c.ID, expectation.Code)
 				}
+				return fmt.Errorf("oracle case %q: partially-bound diagnostic code %q is not declared by analysis.rule_codes", c.ID, expectation.Code)
 			}
 		}
 	}
