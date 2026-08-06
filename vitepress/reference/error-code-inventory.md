@@ -47,7 +47,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `base_workbook`
 - `before_dialog_action`
 - `binary_expression`
-- `binding_status`
 - `block_kind`
 - `branch_false`
 - `branch_true`

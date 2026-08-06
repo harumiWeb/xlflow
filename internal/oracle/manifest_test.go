@@ -18,7 +18,7 @@ func writeFixture(t *testing.T, expected string) (string, Manifest) {
 	if err := os.WriteFile(filepath.Join(caseDir, "Main.bas"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	caseJSON := Case{SchemaVersion: SchemaVersion, ID: "sample", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas", Entry: true}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: expected, EvidencePhase: EvidenceUnknown, DiagnosticMeaning: MeaningObservation}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}, Provenance: Provenance{Status: "pending"}}
+	caseJSON := Case{SchemaVersion: SchemaVersion, ID: "sample", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas", Entry: true}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: expected, EvidencePhase: EvidenceUnknown, DiagnosticMeaning: MeaningObservation}, Analysis: AnalysisExpectation{BindingStatus: BindingNotApplicable}, Provenance: Provenance{Status: "pending"}}
 	body, _ := json.Marshal(caseJSON)
 	if err := os.WriteFile(filepath.Join(caseDir, "case.json"), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -172,6 +172,12 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.Analysis.RuleCodes = []string{"VBA001"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA002"}}
 		}, wantErr: true},
+		{name: "rejected bound code cannot be forbidden-only", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA002"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}, wantErr: true},
 		{name: "bound rejected needs expected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.RuleCodes = []string{"VBA001"}
@@ -181,6 +187,14 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.RuleCodes = []string{"VBA001"}
+		}, wantErr: true},
+		{name: "accepted bound code cannot be expected-only", prepare: func(c *Case) {
+			c.VBE.Expected = ExpectedAccepted
+			c.VBE.DiagnosticMeaning = MeaningSpecification
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA002"}}
 		}, wantErr: true},
 		{name: "bound observe rejected", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedObserve

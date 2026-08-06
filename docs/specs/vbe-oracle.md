@@ -96,9 +96,9 @@ The supported states are:
 - `partially-bound`: at least one rule is connected, but coverage is incomplete;
   `rule_codes` and a non-empty `binding_note` are required.
 - `bound`: the fixture is fully connected to declared rules. It requires at
-  least one rule code, each code must appear in an expected or forbidden
-  diagnostic contract, and the contract must match the VBE result (`expected`
-  for rejected cases, `forbidden` for accepted cases).
+  least one rule code, and every declared code must appear in the contract that
+  matches the VBE result (`expected` for rejected cases, `forbidden` for
+  accepted cases).
 - `not-applicable`: the fixture is intentionally a harness control or language
   observation and cannot declare rule codes or diagnostic contracts.
 

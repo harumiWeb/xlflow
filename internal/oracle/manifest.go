@@ -435,17 +435,23 @@ func validateAnalysisBinding(c Case) error {
 		if len(analysis.RuleCodes) == 0 {
 			return fmt.Errorf("oracle case %q: bound fixture requires analysis.rule_codes", c.ID)
 		}
-		if c.VBE.Expected == ExpectedObserve {
+		var boundExpectations []DiagnosticExpectation
+		switch c.VBE.Expected {
+		case ExpectedRejected:
+			if !hasExpected {
+				return fmt.Errorf("oracle case %q: bound rejected fixture requires expected diagnostics", c.ID)
+			}
+			boundExpectations = analysis.ExpectedDiagnostics
+		case ExpectedAccepted:
+			if !hasForbidden {
+				return fmt.Errorf("oracle case %q: bound accepted fixture requires forbidden diagnostics", c.ID)
+			}
+			boundExpectations = analysis.ForbiddenDiagnostics
+		default:
 			return fmt.Errorf("oracle case %q: bound fixture requires asserted VBE evidence", c.ID)
 		}
-		if c.VBE.Expected == ExpectedRejected && !hasExpected {
-			return fmt.Errorf("oracle case %q: bound rejected fixture requires expected diagnostics", c.ID)
-		}
-		if c.VBE.Expected == ExpectedAccepted && !hasForbidden {
-			return fmt.Errorf("oracle case %q: bound accepted fixture requires forbidden diagnostics", c.ID)
-		}
 		for _, code := range analysis.RuleCodes {
-			if !diagnosticCodeDeclared(code, analysis.ExpectedDiagnostics) && !diagnosticCodeDeclared(code, analysis.ForbiddenDiagnostics) {
+			if !diagnosticCodeDeclared(code, boundExpectations) {
 				return fmt.Errorf("oracle case %q: bound rule code %q is not declared by an analysis contract", c.ID, code)
 			}
 		}
