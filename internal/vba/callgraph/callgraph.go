@@ -39,6 +39,7 @@ type Node struct {
 	ID         ID     `json:"id"`
 	Name       string `json:"name"`
 	ModuleKind string `json:"module_kind"`
+	Visibility string `json:"-"`
 }
 
 // Location identifies a source call site. Lines and columns follow the
@@ -122,9 +123,34 @@ type Symbol struct {
 // CLI batch inspection and the LSP's incremental workspace index can produce
 // this value without exposing their storage implementation to graph traversal.
 type Snapshot struct {
-	Symbols        []Symbol
-	Calls          []calls.Call
-	TypeReferences []calls.TypeReference
+	Symbols           []Symbol
+	Calls             []calls.Call
+	TypeReferences    []calls.TypeReference
+	DynamicReferences []calls.DynamicReference
+}
+
+type RootConfidence string
+
+const (
+	RootConfirmed RootConfidence = "confirmed"
+	RootPossible  RootConfidence = "possible"
+)
+
+type Root struct {
+	Target     string
+	Confidence RootConfidence
+	Reason     string
+}
+
+type ReachabilityRequest struct {
+	Roots []Root
+}
+
+type ReachabilityResult struct {
+	Confirmed   []Node
+	Possible    []Node
+	Unreachable []Node
+	Clusters    [][]Node
 }
 
 // AmbiguousTargetError gives callers the exact stable candidates rather than
@@ -136,6 +162,7 @@ func (e *AmbiguousTargetError) Error() string { return "impact target is ambiguo
 type graph struct {
 	nodes       map[string]Node
 	byQualified map[string][]string
+	byName      map[string][]string
 	out         map[string][]Edge
 	in          map[string][]Edge
 	uncertain   map[string][]calls.Call
@@ -149,7 +176,7 @@ func Analyze(input *calls.Result, request Request) (Result, error) {
 }
 
 func snapshotFromResult(input *calls.Result) Snapshot {
-	snapshot := Snapshot{Calls: input.Calls, TypeReferences: input.TypeReferences, Symbols: make([]Symbol, 0, len(input.Symbols))}
+	snapshot := Snapshot{Calls: input.Calls, TypeReferences: input.TypeReferences, DynamicReferences: input.DynamicReferences, Symbols: make([]Symbol, 0, len(input.Symbols))}
 	for _, sym := range input.Symbols {
 		kind := input.ModuleKinds[sym.File]
 		if kind == "" {
@@ -162,6 +189,14 @@ func snapshotFromResult(input *calls.Result) Snapshot {
 		})
 	}
 	return snapshot
+}
+
+// SnapshotFromResult adapts the shared calls result for graph consumers.
+func SnapshotFromResult(input *calls.Result) Snapshot {
+	if input == nil {
+		return Snapshot{}
+	}
+	return snapshotFromResult(input)
 }
 
 func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {
@@ -249,7 +284,7 @@ func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {
 }
 
 func build(input Snapshot) graph {
-	g := graph{nodes: map[string]Node{}, byQualified: map[string][]string{}, out: map[string][]Edge{}, in: map[string][]Edge{}, uncertain: map[string][]calls.Call{}}
+	g := graph{nodes: map[string]Node{}, byQualified: map[string][]string{}, byName: map[string][]string{}, out: map[string][]Edge{}, in: map[string][]Edge{}, uncertain: map[string][]calls.Call{}}
 	moduleKinds := map[string]string{}
 	for _, sym := range input.Symbols {
 		if sym.Kind == "module" {
@@ -272,9 +307,13 @@ func build(input Snapshot) graph {
 		g.nodes[key] = node
 		qualified := strings.ToLower(node.ID.QualifiedName)
 		g.byQualified[qualified] = append(g.byQualified[qualified], key)
+		g.byName[strings.ToLower(node.Name)] = append(g.byName[strings.ToLower(node.Name)], key)
 	}
 	for qualified := range g.byQualified {
 		sort.Strings(g.byQualified[qualified])
+	}
+	for name := range g.byName {
+		sort.Strings(g.byName[name])
 	}
 	for _, call := range input.Calls {
 		if call.Caller == nil {
@@ -316,17 +355,222 @@ func build(input Snapshot) graph {
 	return g
 }
 
-func (g graph) callerKey(call calls.Call) (string, bool) {
-	if call.Caller == nil {
-		return "", false
+// AnalyzeReachability walks the confirmed project call graph from explicit
+// roots and separately propagates targets discovered through dynamic callback
+// references. Dynamic dispatch never becomes a confirmed graph edge.
+func AnalyzeReachability(input Snapshot, request ReachabilityRequest) ReachabilityResult {
+	g := build(input)
+	confirmed := map[string]bool{}
+	possible := map[string]bool{}
+
+	for _, root := range request.Roots {
+		keys, exact := g.rootKeysWithExact(root.Target)
+		if len(keys) == 0 {
+			continue
+		}
+		if root.Confidence == RootPossible || !exact || len(keys) != 1 {
+			for _, key := range keys {
+				possible[key] = true
+			}
+			continue
+		}
+		confirmed[keys[0]] = true
 	}
-	for _, key := range g.byQualified[strings.ToLower(call.Caller.QualifiedName)] {
+
+	refsByCaller := map[string][]calls.DynamicReference{}
+	for _, ref := range input.DynamicReferences {
+		if key := dynamicCallerKey(g, ref); key != "" {
+			refsByCaller[key] = append(refsByCaller[key], ref)
+		}
+	}
+
+	propagateConfirmed(g, confirmed)
+	changed := true
+	for changed {
+		changed = false
+		for key := range confirmed {
+			if propagateDynamicReferences(g, refsByCaller[key], confirmed, possible) {
+				changed = true
+			}
+		}
+		for key := range possible {
+			if confirmed[key] {
+				delete(possible, key)
+				changed = true
+				continue
+			}
+			for _, edge := range g.out[key] {
+				next := edge.Callee.String()
+				if !confirmed[next] && !possible[next] {
+					possible[next] = true
+					changed = true
+				}
+			}
+			if propagateDynamicReferences(g, refsByCaller[key], confirmed, possible) {
+				changed = true
+			}
+		}
+		propagateConfirmed(g, confirmed)
+	}
+
+	result := ReachabilityResult{Confirmed: []Node{}, Possible: []Node{}, Unreachable: []Node{}, Clusters: [][]Node{}}
+	for key, node := range g.nodes {
+		switch {
+		case confirmed[key]:
+			result.Confirmed = append(result.Confirmed, node)
+		case possible[key]:
+			result.Possible = append(result.Possible, node)
+		case strings.EqualFold(node.Visibility, "Private"):
+			result.Unreachable = append(result.Unreachable, node)
+		}
+	}
+	sortNodes(result.Confirmed)
+	sortNodes(result.Possible)
+	sortNodes(result.Unreachable)
+	result.Clusters = unreachablePrivateClusters(g, result.Unreachable)
+	return result
+}
+
+func propagateConfirmed(g graph, confirmed map[string]bool) {
+	queue := make([]string, 0, len(confirmed))
+	for key := range confirmed {
+		queue = append(queue, key)
+	}
+	for len(queue) > 0 {
+		key := queue[0]
+		queue = queue[1:]
+		for _, edge := range g.out[key] {
+			next := edge.Callee.String()
+			if !confirmed[next] {
+				confirmed[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+}
+
+func propagateDynamicReferences(g graph, refs []calls.DynamicReference, confirmed, possible map[string]bool) bool {
+	changed := false
+	for _, ref := range refs {
+		if ref.Target == "" || ref.Kind != "static" {
+			for key := range g.nodes {
+				if !confirmed[key] && !possible[key] {
+					possible[key] = true
+					changed = true
+				}
+			}
+			continue
+		}
+		keys := g.dynamicKeys(ref.Target)
+		for _, key := range keys {
+			if !confirmed[key] && !possible[key] {
+				possible[key] = true
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func dynamicCallerKey(g graph, ref calls.DynamicReference) string {
+	if ref.Caller == nil {
+		return ""
+	}
+	key, ok := g.lookupCallerKey(ref.Caller.QualifiedName, ref.Caller.Kind, ref.File)
+	if !ok {
+		return ""
+	}
+	return key
+}
+
+func (g graph) lookupCallerKey(qualifiedName, kind, file string) (string, bool) {
+	for _, key := range g.byQualified[strings.ToLower(qualifiedName)] {
 		node := g.nodes[key]
-		if node.ID.Kind == call.Caller.Kind && node.ID.File == call.File {
+		if node.ID.Kind == kind && node.ID.File == file {
 			return key, true
 		}
 	}
 	return "", false
+}
+
+func (g graph) rootKeys(target string) []string {
+	keys, _ := g.rootKeysWithExact(target)
+	return keys
+}
+
+func (g graph) rootKeysWithExact(target string) ([]string, bool) {
+	target = normalizeDynamicTarget(target)
+	if target == "" {
+		return nil, false
+	}
+	if keys := g.byQualified[strings.ToLower(target)]; len(keys) > 0 {
+		return append([]string(nil), keys...), true
+	}
+	if index := strings.LastIndex(target, "."); index >= 0 {
+		if keys := g.byName[strings.ToLower(target[index+1:])]; len(keys) > 0 {
+			return append([]string(nil), keys...), false
+		}
+	}
+	return append([]string(nil), g.byName[strings.ToLower(target)]...), true
+}
+
+func (g graph) dynamicKeys(target string) []string {
+	return g.rootKeys(target)
+}
+
+func normalizeDynamicTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if index := strings.LastIndex(target, "!"); index >= 0 {
+		target = target[index+1:]
+	}
+	target = strings.Trim(strings.TrimSpace(target), "'")
+	return strings.TrimSpace(target)
+}
+
+func unreachablePrivateClusters(g graph, nodes []Node) [][]Node {
+	keys := map[string]bool{}
+	for _, node := range nodes {
+		keys[node.ID.String()] = true
+	}
+	seen := map[string]bool{}
+	clusters := make([][]Node, 0)
+	for _, node := range nodes {
+		start := node.ID.String()
+		if seen[start] {
+			continue
+		}
+		seen[start] = true
+		queue := []string{start}
+		cluster := []Node{}
+		for len(queue) > 0 {
+			key := queue[0]
+			queue = queue[1:]
+			cluster = append(cluster, g.nodes[key])
+			for _, edge := range append(append([]Edge{}, g.out[key]...), g.in[key]...) {
+				next := edge.Callee.String()
+				if edge.Caller.String() != key {
+					next = edge.Caller.String()
+				}
+				if keys[next] && !seen[next] {
+					seen[next] = true
+					queue = append(queue, next)
+				}
+			}
+		}
+		sortNodes(cluster)
+		clusters = append(clusters, cluster)
+	}
+	sort.Slice(clusters, func(i, j int) bool {
+		return clusters[i][0].ID.String() < clusters[j][0].ID.String()
+	})
+	return clusters
+}
+
+func (g graph) callerKey(call calls.Call) (string, bool) {
+	if call.Caller == nil {
+		return "", false
+	}
+	return g.lookupCallerKey(call.Caller.QualifiedName, call.Caller.Kind, call.File)
 }
 
 func (g graph) walk(root string, downstream bool, maxDepth int) (map[string]int, map[string]Edge) {
@@ -389,7 +633,7 @@ func procedureKind(kind string) bool {
 	return false
 }
 func nodeFromSymbol(sym Symbol, moduleKind string) Node {
-	return Node{ID: ID{Module: sym.Module, QualifiedName: sym.Module + "." + sym.Name, Kind: sym.Kind, File: sym.File, Line: sym.Line, Column: sym.Column}, Name: sym.Name, ModuleKind: moduleKind}
+	return Node{ID: ID{Module: sym.Module, QualifiedName: sym.Module + "." + sym.Name, Kind: sym.Kind, File: sym.File, Line: sym.Line, Column: sym.Column}, Name: sym.Name, ModuleKind: moduleKind, Visibility: sym.Visibility}
 }
 func moduleKindForFile(file string) string {
 	if strings.EqualFold(filepath.Ext(file), ".cls") {

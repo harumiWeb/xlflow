@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -93,6 +94,106 @@ End Sub
 	doc.Close()
 	if parsedResult.CallSites[0].File != "Main.bas" || parsedResult.CallSites[0].Range.StartLine == 0 {
 		t.Fatalf("extracted values changed after document close: %+v", parsedResult.CallSites[0])
+	}
+}
+
+func TestInspectExtractsKnownDynamicReferencesWithoutChangingCallJSON(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	moduleDir := filepath.Join(dir, cfg.Src.Modules)
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(moduleDir, "Main.bas"), `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Application.OnKey "{LEFT}", "Main.MoveLeft"
+    Application.OnTime Now, Procedure:="Main.Tick"
+    Application.Run "Main.Dispatch" & ""
+    CallByName Me, "Main.ByNameTarget", VbMethod
+    Application.OnKey "{RIGHT}", callbackName
+    Application.OnKey Key:="{UP}", Procedure:="Main.MoveUp"
+    Application.Run Macro:="Main.Dispatch"
+    CallByName Me, ProcName:="Main.ByNameTarget", CallType:=VbMethod
+End Sub
+Private Sub MoveLeft()
+End Sub
+Private Sub Tick()
+End Sub
+Private Sub Dispatch()
+End Sub
+Private Sub ByNameTarget()
+End Sub
+Private Sub MoveUp()
+End Sub
+Private callbackName As String
+`)
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "DynamicReferences") || strings.Contains(string(encoded), "dynamicReferences") {
+		t.Fatalf("inspect calls JSON leaked internal dynamic references: %s", encoded)
+	}
+	if len(result.DynamicReferences) != 8 {
+		t.Fatalf("dynamic references = %+v, want eight known API arguments", result.DynamicReferences)
+	}
+	find := func(api string, index int, target string) (DynamicReference, bool) {
+		for _, ref := range result.DynamicReferences {
+			if ref.API == api && ref.ArgumentIndex == index && ref.Target == target {
+				return ref, true
+			}
+		}
+		return DynamicReference{}, false
+	}
+	if ref, ok := find("application.onkey", 1, "Main.MoveLeft"); !ok || ref.Kind != "static" {
+		t.Fatalf("OnKey reference = %+v", ref)
+	}
+	if ref, ok := find("application.onkey", 1, "Main.MoveUp"); !ok || ref.Kind != "static" || !strings.EqualFold(ref.ArgumentName, "Procedure") {
+		t.Fatalf("named OnKey reference = %+v", ref)
+	}
+	if ref, ok := find("application.ontime", 1, "Main.Tick"); !ok || ref.Kind != "static" {
+		t.Fatalf("OnTime reference = %+v", ref)
+	}
+	if ref, ok := find("application.run", 0, "Main.Dispatch"); !ok || ref.Kind != "static" {
+		t.Fatalf("Run reference = %+v", ref)
+	}
+	namedRun := false
+	namedCallByName := false
+	for _, ref := range result.DynamicReferences {
+		if ref.API == "application.run" && strings.EqualFold(ref.ArgumentName, "Macro") {
+			namedRun = ref.Target == "Main.Dispatch" && ref.Kind == "static"
+		}
+		if ref.API == "callbyname" && strings.EqualFold(ref.ArgumentName, "ProcName") {
+			namedCallByName = ref.Target == "Main.ByNameTarget" && ref.Kind == "static"
+		}
+	}
+	if !namedRun || !namedCallByName {
+		t.Fatalf("named dynamic references = %+v", result.DynamicReferences)
+	}
+	if ref, ok := find("callbyname", 1, "Main.ByNameTarget"); !ok || ref.Kind != "static" {
+		t.Fatalf("CallByName reference = %+v", ref)
+	}
+	for _, ref := range result.DynamicReferences {
+		if ref.API == "application.onkey" && ref.ArgumentIndex == 1 && ref.Target == "" {
+			if ref.Expression == "" || ref.Kind != "unknown" {
+				t.Fatalf("unknown dynamic reference = %+v", ref)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing unknown OnKey reference: %+v", result.DynamicReferences)
+}
+
+func TestStaticStringExpressionHandlesEscapedQuotesInParentheses(t *testing.T) {
+	target, kind := staticStringExpression(`("Main.""Run")`)
+	if kind != "static" || target != `Main."Run` {
+		t.Fatalf("parenthesized escaped-quote literal = %q/%q", target, kind)
 	}
 }
 

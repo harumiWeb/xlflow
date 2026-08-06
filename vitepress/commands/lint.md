@@ -57,7 +57,7 @@ The summary below explains the lint findings in workflow terms.
 | `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                             |
 | `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                                        |
 | `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                           |
-| `VB021` | warning  | Private procedure is not called from parsed source.                                                                                  |
+| `VB021` | warning  | Private procedure is unreachable from known project roots; dynamic callbacks are treated conservatively.                             |
 | `VB022` | warning  | Confusing parenthesized call syntax such as `Foo (bar)`.                                                                             |
 | `VB023` | warning  | `For Each` control variable is undeclared or obviously incompatible.                                                                 |
 | `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                             |

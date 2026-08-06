@@ -78,6 +78,7 @@
 - Registry-backed documentation generators must validate canonical item shapes and field types before sorting or rendering, and documentation coverage checks must match exact formatted tokens rather than incidental substrings.
 - Preserve source-plan path contracts across process boundaries. When a planner publishes project-root-relative paths, the receiving bridge must resolve them against an explicit project root rather than requiring callers to rewrite the plan ad hoc.
 - For destructive output paths, lexical project-root containment is insufficient: resolve the nearest existing ancestor and reject paths whose canonical identity escapes through a symlink or junction.
+- When enabling project-wide VB021 on a scaffold, treat public or implicitly public standard-module `Sub`, `Function`, and `Property` procedures as possible roots and regression-test the complete scaffold; excluding scaffold modules by name would hide real dead-code findings.
 - Treat matching xlflow session metadata as a liveness hint, not proof of ownership: verify the recorded Excel process and workbook before blocking an output path, and ensure human command renderers include top-level operational warnings returned by the bridge.
 - When the owned VBA parser makes an intentional breaking CST change, preserve lint behavior as the compatibility contract. Move recovery-only checks such as VB014 to an explicit source-structure gate when the new CST accepts fragments, and update shared consumers such as the formatter in the same change.
 
@@ -111,3 +112,4 @@
 - For regex-backed VBA diagnostics, evaluate each repeated call occurrence within its single-line `If` branch, accept valid non-identifier `Set` lvalues, and keep remediation valid for the enclosing workbook context such as add-ins.
 - For CFG-based resource ownership, start only from entry-reachable acquisitions, preserve pre-acquisition scalar-handle equivalences, apply assignments only on normal edges, and treat Function-return ownership transfer as complete only at a successful normal exit.
 - In Go tests, add an explicit `return` after `t.Fatal`/`t.Fatalf` nil guards before dereferencing the guarded pointer; newer staticcheck versions may report SA5011 otherwise.
+- Do not classify host callbacks from an event-like prefix alone. Use a centralized known-event allowlist or verified metadata, and add negative tests for underscore-named helpers in host modules.

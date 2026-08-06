@@ -328,7 +328,7 @@
     {
       "id": "VB021",
       "title": "Unused private procedure",
-      "description": "A private procedure has no resolved project-local caller.",
+      "description": "A private procedure is unreachable from known project roots.",
       "family": "lint",
       "category": "maintainability",
       "default_severity": "warning",

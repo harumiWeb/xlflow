@@ -848,6 +848,28 @@ func TestNewScaffoldLintsWithoutIssuesOrWarnings(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldLintsWithoutVB021IssuesWhenOptedIn(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	result, err := lint.Linter{RootDir: dir, Config: cfg}.RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vb021 []lint.Issue
+	for _, issue := range result.Issues {
+		if issue.Code == "VB021" {
+			vb021 = append(vb021, issue)
+		}
+	}
+	if len(vb021) != 0 {
+		t.Fatalf("new scaffold should have no VB021 issues when opted in: %+v", vb021)
+	}
+}
+
 func TestNewScaffoldUIHelperAnalyzesCleanly(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {

@@ -815,7 +815,7 @@ real-time eligibility for the lint and analyzer rules described below. The
 generated diagnostic catalog and `xlflow rules --json` are projections of that
 registry; this section defines command behavior and compatibility.
 
-Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). When xlflow can confidently identify an unclosed block, VB014 also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`; its primary location is the point where the closer is expected, while the metadata identifies the unmatched opener. Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
+Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). `VB021` may use the same optional `context` field on one representative declaration of an unreachable private call cluster; the value lists the cluster's qualified procedure names while each declaration retains its own issue location. When xlflow can confidently identify an unclosed block, VB014 also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`; its primary location is the point where the closer is expected, while the metadata identifies the unmatched opener. Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
 
 Analyzer finding objects use the same core location and remediation fields. `VBA214` additionally includes `scope_end_line`: `line` identifies the `On Error Resume Next` start, and `scope_end_line` identifies the path-specific restoration or exit boundary.
 
@@ -840,7 +840,7 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB018`: local declarations or parameters shadow module-level names, procedure names, or same-scope declarations
 - `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`
 - `VB020`: unused procedure-local variable
-- `VB021`: unused private procedure, excluding known event/callback naming patterns
+- `VB021`: private procedure unreachable from known project roots; confirmed call edges, host events, tests, externally callable public standard-module APIs as possible roots, and conservative dynamic callback possibilities are considered
 - `VB022`: confusing parenthesized call syntax such as `Foo (bar)`
 - `VB023`: `For Each` control variable is undeclared or obviously incompatible
 - `VB026`: `Resume` is used outside a likely error-handler context

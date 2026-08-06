@@ -36,6 +36,11 @@ type Result struct {
 	// TypeReferences are syntax-local project-type facts retained for higher
 	// level projections without changing inspect calls JSON.
 	TypeReferences []TypeReference `json:"-"`
+	// DynamicReferences contains known API calls whose procedure target is
+	// carried as data rather than a statically resolved VBA call. It is an
+	// internal analysis fact and is intentionally omitted from inspect calls
+	// JSON.
+	DynamicReferences []DynamicReference `json:"-"`
 }
 
 type ResultSummary struct {
@@ -123,6 +128,22 @@ type Arguments struct {
 type NamedArgument struct {
 	Name      string `json:"name"`
 	ValueText string `json:"valueText"`
+}
+
+// DynamicReference records a callback or macro name passed through a known
+// dynamic-dispatch API. Target is populated only when the expression can be
+// folded to a static string; an empty Target means the expression is unknown.
+type DynamicReference struct {
+	File          string
+	Module        string
+	Caller        *Caller
+	API           string
+	ArgumentIndex int
+	ArgumentName  string
+	Expression    string
+	Target        string
+	Kind          string
+	Range         vbaast.Range
 }
 
 type Resolution struct {
@@ -251,7 +272,7 @@ func Inspect(opts Options) (*Result, error) {
 			doc.Close()
 			return nil, err
 		}
-		callFile, err := ExtractParsed(SourceOptions{
+		callFile, dynamicReferences, err := extractParsedWithDynamic(SourceOptions{
 			RootDir:    absRoot,
 			Path:       file.Path,
 			ModuleKind: file.ModuleKind,
@@ -268,6 +289,7 @@ func Inspect(opts Options) (*Result, error) {
 		}
 		allSites = append(allSites, callFile.CallSites...)
 		result.TypeReferences = append(result.TypeReferences, callFile.TypeReferences...)
+		result.DynamicReferences = append(result.DynamicReferences, dynamicReferences...)
 		if callFile.Parse.HasError {
 			result.Summary.ParseErrors++
 		}
@@ -319,13 +341,18 @@ func ExtractSource(opts SourceOptions, source []byte) (FileResult, error) {
 // document. It does not close doc or retain tree-sitter nodes after Read
 // returns.
 func ExtractParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
+	result, _, err := extractParsedWithDynamic(opts, doc)
+	return result, err
+}
+
+func extractParsedWithDynamic(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, []DynamicReference, error) {
 	rootDir := opts.RootDir
 	if strings.TrimSpace(rootDir) == "" {
 		rootDir = "."
 	}
 	rootDir, err := filepath.Abs(rootDir)
 	if err != nil {
-		return FileResult{}, err
+		return FileResult{}, nil, err
 	}
 	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{
 		RootDir:    rootDir,
@@ -333,9 +360,17 @@ func ExtractParsed(opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, 
 		ModuleKind: opts.ModuleKind,
 	}, doc)
 	if err != nil {
-		return FileResult{}, err
+		return FileResult{}, nil, err
 	}
-	return ExtractIR(ir), nil
+	refs := []DynamicReference{}
+	for _, procedure := range ir.Procedures {
+		for _, site := range procedure.Calls {
+			refs = append(refs, dynamicReferencesForIR(site, procedure.Expressions, symbols.ParseSummary{
+				HasError: ir.Parse.HasError, HasMissing: ir.Parse.HasMissing,
+			})...)
+		}
+	}
+	return ExtractIR(ir), refs, nil
 }
 
 // ExtractIR projects syntax-local calls and type references from the shared
@@ -380,7 +415,7 @@ func callSiteFromIR(site procedureir.CallSite, parse symbols.ParseSummary) CallS
 	for i, argument := range site.Arguments.Named {
 		named[i] = NamedArgument{Name: argument.Name, ValueText: argument.ValueText}
 	}
-	return CallSite{
+	call := CallSite{
 		File: site.File, Module: site.Module, Caller: caller,
 		Callee: Callee{
 			Text: site.Callee.Text, BaseName: site.Callee.BaseName,
@@ -389,6 +424,22 @@ func callSiteFromIR(site procedureir.CallSite, parse symbols.ParseSummary) CallS
 		Arguments: Arguments{Count: site.Arguments.Count, Named: named},
 		Range:     site.Range, Parse: parse,
 	}
+	return call
+}
+
+func argumentTexts(ids []int, expressions []procedureir.Expression) []string {
+	if len(ids) == 0 || len(expressions) == 0 {
+		return nil
+	}
+	byID := make(map[int]string, len(expressions))
+	for _, expression := range expressions {
+		byID[expression.ID] = expression.Text
+	}
+	texts := make([]string, len(ids))
+	for i, id := range ids {
+		texts[i] = byID[id]
+	}
+	return texts
 }
 
 func typeReferenceFromIR(reference procedureir.TypeReference, parse symbols.ParseSummary) TypeReference {
@@ -884,6 +935,201 @@ func (r Resolver) resolveCallee(site CallSite) Resolution {
 		return Resolution{Status: "builtin_like"}
 	}
 	return Resolution{Status: "unresolved"}
+}
+
+type dynamicArgumentSpec struct {
+	index int
+	name  string
+}
+
+// dynamicArgumentSpecs is deliberately data-driven so adding another known
+// callback API does not require changing the call graph or linter.
+var dynamicArgumentSpecs = map[string][]dynamicArgumentSpec{
+	"application.ontime": {{index: 1, name: "procedure"}},
+	"application.onkey":  {{index: 1, name: "procedure"}},
+	"application.run":    {{index: 0, name: "macro"}},
+	"callbyname":         {{index: 1, name: "procname"}},
+}
+
+func dynamicReferencesForIR(site procedureir.CallSite, expressions []procedureir.Expression, parse symbols.ParseSummary) []DynamicReference {
+	call := Call{CallSite: callSiteFromIR(site, parse)}
+	api := dynamicAPIName(call)
+	if call.Caller == nil || len(dynamicArgumentSpecs[api]) == 0 {
+		return nil
+	}
+	return dynamicReferencesForCall(call, argumentTexts(site.Arguments.ExpressionIDs, expressions))
+}
+
+func dynamicReferencesForCall(call Call, texts []string) []DynamicReference {
+	api := dynamicAPIName(call)
+	specs := dynamicArgumentSpecs[api]
+	if api == "" || len(specs) == 0 || call.Caller == nil {
+		return nil
+	}
+	refs := make([]DynamicReference, 0, len(specs))
+	for _, spec := range specs {
+		index, name, expression, ok := dynamicArgument(call, spec, texts)
+		if !ok {
+			continue
+		}
+		target, kind := staticStringExpression(expression)
+		refs = append(refs, DynamicReference{
+			File: call.File, Module: call.Module, Caller: cloneCaller(call.Caller),
+			API: api, ArgumentIndex: index, ArgumentName: name,
+			Expression: expression, Target: target, Kind: kind, Range: call.Range,
+		})
+	}
+	return refs
+}
+
+func dynamicAPIName(call Call) string {
+	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
+	if member == "" {
+		member = strings.ToLower(strings.TrimSpace(call.Callee.BaseName))
+	}
+	if member == "callbyname" {
+		if call.Callee.Receiver == nil || strings.EqualFold(lastNamePart(*call.Callee.Receiver), "vba") {
+			return "callbyname"
+		}
+	}
+	if call.Callee.Receiver == nil || !strings.EqualFold(lastNamePart(*call.Callee.Receiver), "application") {
+		return ""
+	}
+	switch member {
+	case "ontime", "onkey", "run":
+		return "application." + member
+	default:
+		return ""
+	}
+}
+
+func dynamicArgument(call Call, spec dynamicArgumentSpec, texts []string) (int, string, string, bool) {
+	if spec.name != "" {
+		for _, argument := range call.Arguments.Named {
+			if strings.EqualFold(argument.Name, spec.name) {
+				return spec.index, argument.Name, argument.ValueText, true
+			}
+		}
+	}
+	if spec.index < 0 || spec.index >= call.Arguments.Count {
+		return 0, "", "", false
+	}
+	if spec.index < len(texts) {
+		return spec.index, "", texts[spec.index], true
+	}
+	return spec.index, "", "", true
+}
+
+func staticStringExpression(expression string) (string, string) {
+	expression = trimOuterParentheses(strings.TrimSpace(expression))
+	if expression == "" {
+		return "", "unknown"
+	}
+	if body, ok := quotedStringBody(expression); ok {
+		return body, "static"
+	}
+	parts := splitTopLevelConcatenation(expression)
+	if len(parts) <= 1 {
+		return "", "unknown"
+	}
+	var value strings.Builder
+	for _, part := range parts {
+		piece, kind := staticStringExpression(part)
+		if kind != "static" {
+			return "", "unknown"
+		}
+		value.WriteString(piece)
+	}
+	return value.String(), "static"
+}
+
+func quotedStringBody(expression string) (string, bool) {
+	if len(expression) < 2 || expression[0] != '"' || expression[len(expression)-1] != '"' {
+		return "", false
+	}
+	var body strings.Builder
+	for i := 1; i < len(expression)-1; i++ {
+		if expression[i] != '"' {
+			body.WriteByte(expression[i])
+			continue
+		}
+		if i+1 < len(expression)-1 && expression[i+1] == '"' {
+			body.WriteByte('"')
+			i++
+			continue
+		}
+		return "", false
+	}
+	return body.String(), true
+}
+
+func trimOuterParentheses(value string) string {
+	for len(value) >= 2 && value[0] == '(' && value[len(value)-1] == ')' && balancedOuterParentheses(value) {
+		value = strings.TrimSpace(value[1 : len(value)-1])
+	}
+	return value
+}
+
+func balancedOuterParentheses(value string) bool {
+	depth := 0
+	inString := false
+	for i := 0; i < len(value); i++ {
+		if value[i] == '"' {
+			if inString && i+1 < len(value) && value[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch value[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 && i != len(value)-1 {
+				return false
+			}
+		}
+	}
+	return !inString && depth == 0
+}
+
+func splitTopLevelConcatenation(value string) []string {
+	parts := []string{}
+	start, depth := 0, 0
+	inString := false
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '"':
+			if inString && i+1 < len(value) && value[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '&':
+			if !inString && depth == 0 {
+				parts = append(parts, strings.TrimSpace(value[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return []string{value}
+	}
+	parts = append(parts, strings.TrimSpace(value[start:]))
+	return parts
 }
 
 // visibleCandidates excludes private procedures outside the caller's module.

@@ -15,7 +15,9 @@ import (
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	"github.com/harumiWeb/xlflow/internal/vba/reachability"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -1500,7 +1502,11 @@ func (l Linter) projectIssues() ([]Issue, error) {
 		if err != nil {
 			return nil, err
 		}
-		issues = append(issues, l.unusedPrivateProcedureIssues(result, callResult)...)
+		unusedIssues, err := l.unusedPrivateProcedureIssues(result, callResult)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, unusedIssues...)
 	}
 	return issues, nil
 }
@@ -1625,33 +1631,57 @@ func (l Linter) parameterShadowingIssues(file symbols.FileResult, moduleNames, p
 	return issues
 }
 
-func (l Linter) unusedPrivateProcedureIssues(symbolResult *symbols.Result, callResult *calls.Result) []Issue {
+func (l Linter) unusedPrivateProcedureIssues(symbolResult *symbols.Result, callResult *calls.Result) ([]Issue, error) {
 	if symbolResult == nil {
-		return nil
+		return nil, nil
 	}
-	called := map[string]bool{}
-	if callResult != nil {
-		for _, call := range callResult.Calls {
-			called[strings.ToLower(call.Callee.BaseName)] = true
-			called[strings.ToLower(call.Callee.Member)] = true
-			called[strings.ToLower(call.Callee.Text)] = true
+	analysis, err := reachability.Analyze(reachability.Options{
+		RootDir: l.RootDir,
+		Config:  l.Config,
+		Symbols: symbolResult,
+		Calls:   callResult,
+	})
+	if err != nil {
+		return nil, err
+	}
+	unreachable := map[string]bool{}
+	for _, node := range analysis.Unreachable {
+		unreachable[node.ID.String()] = true
+	}
+	clusterByNode := map[string]string{}
+	for _, cluster := range analysis.Clusters {
+		if len(cluster) < 2 {
+			continue
 		}
+		names := make([]string, 0, len(cluster))
+		for _, node := range cluster {
+			names = append(names, node.ID.QualifiedName)
+		}
+		context := "Unreachable private call cluster: " + strings.Join(names, ", ")
+		clusterByNode[cluster[0].ID.String()] = context
 	}
 	var issues []Issue
 	for _, file := range symbolResult.Files {
 		for _, sym := range file.Symbols {
-			if !procedureSymbolKind(sym.Kind) || !strings.EqualFold(sym.Visibility, "Private") || isKnownCallbackProcedure(sym.Name) {
+			if !procedureSymbolKind(sym.Kind) || !strings.EqualFold(sym.Visibility, "Private") {
 				continue
 			}
-			if called[strings.ToLower(sym.Name)] || called[strings.ToLower(sym.Module+"."+sym.Name)] {
+			key := callgraph.ID{
+				Module: sym.Module, QualifiedName: sym.Module + "." + sym.Name,
+				Kind: sym.Kind, File: sym.File, Line: sym.StartLine, Column: sym.StartColumn,
+			}.String()
+			if !unreachable[key] {
 				continue
 			}
-			issue := l.issueForSymbol(sym, "VB021", "warning", "Private procedure is not called from parsed source.")
+			issue := l.issueForSymbol(sym, "VB021", "warning", "Private procedure is not reachable from any known project root.")
 			issue.Symbol = sym.Name
+			if context := clusterByNode[key]; context != "" {
+				issue.Context = context
+			}
 			issues = append(issues, issue)
 		}
 	}
-	return issues
+	return issues, nil
 }
 
 func (l Linter) issueForSymbol(sym symbols.Symbol, code, severity, message string) Issue {
@@ -1752,19 +1782,6 @@ func isLocalAssignmentTargetOccurrence(code string, index, end int) bool {
 	}
 	switch strings.ToLower(fields[len(fields)-1]) {
 	case "set", "let", "then", "else":
-		return true
-	default:
-		return false
-	}
-}
-
-func isKnownCallbackProcedure(name string) bool {
-	lower := strings.ToLower(name)
-	if strings.Contains(lower, "_") {
-		return true
-	}
-	switch lower {
-	case "auto_open", "auto_close", "workbook_open", "workbook_beforeclose":
 		return true
 	default:
 		return false

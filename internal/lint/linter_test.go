@@ -1834,6 +1834,337 @@ End Sub
 	}
 }
 
+func TestLinterVB021UsesRootedReachabilityAndClusters(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Used()
+End Sub
+
+Private Sub UnusedRoot()
+  UnusedA
+End Sub
+
+Private Sub UnusedA()
+  UnusedB
+End Sub
+
+Private Sub UnusedB()
+End Sub
+
+Private Sub Foo_Bar()
+End Sub
+
+Private Sub Isolated()
+End Sub
+
+Public Sub Run()
+  Used
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 5 {
+		t.Fatalf("VB021 issues = %d, want five unreachable private procedures: %+v", len(got), got)
+	}
+	for _, name := range []string{"UnusedRoot", "UnusedA", "UnusedB", "Foo_Bar", "Isolated"} {
+		found := false
+		for _, issue := range got {
+			if issue.Symbol == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing VB021 for %s: %+v", name, got)
+		}
+	}
+	for _, issue := range got {
+		if issue.Symbol == "Used" {
+			t.Fatalf("called private procedure was reported: %+v", issue)
+		}
+	}
+	clusterContext := ""
+	for _, issue := range got {
+		if strings.Contains(issue.Context, "Unreachable private call cluster:") {
+			clusterContext = issue.Context
+			break
+		}
+	}
+	for _, name := range []string{"Main.UnusedRoot", "Main.UnusedA", "Main.UnusedB"} {
+		if !strings.Contains(clusterContext, name) {
+			t.Fatalf("cluster context %q does not include %s", clusterContext, name)
+		}
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"context":"Unreachable private call cluster:`) {
+		t.Fatalf("VB021 cluster context missing from JSON: %s", encoded)
+	}
+}
+
+func TestLinterVB021KeepsInlineSuppressionLineBased(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+' xlflow:disable-next-line VB021
+Private Sub Suppressed()
+End Sub
+
+Private Sub Reported()
+End Sub
+
+Public Sub Run()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	result, err := (Linter{RootDir: dir, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(result.Issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "Reported" {
+		t.Fatalf("VB021 inline suppression = %+v", got)
+	}
+	if got[0].Line != 6 {
+		t.Fatalf("VB021 declaration line = %d, want 6", got[0].Line)
+	}
+}
+
+func TestLinterVB021RecognizesTestProceduresAsRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Tests.bas", `Option Explicit
+Public Sub TestWorkflow(ByVal input As Long)
+  TestHelper
+End Sub
+
+Private Sub TestHelper()
+End Sub
+
+Private Sub TestOrphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "TestOrphan" {
+		t.Fatalf("test root reachability = %+v", got)
+	}
+}
+
+func TestLinterVB021HandlesDynamicReachabilityConservatively(t *testing.T) {
+	t.Run("known target from reachable caller", func(t *testing.T) {
+		dir := t.TempDir()
+		writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Application.Run "Main.DynamicTarget"
+End Sub
+
+Private Sub DynamicTarget()
+End Sub
+
+Private Sub Orphan()
+  Application.Run "Main.OtherTarget"
+End Sub
+
+Private Sub OtherTarget()
+End Sub
+`)
+		cfg := config.Default()
+		cfg.Lint.DetectUnusedPrivateProcedures = true
+		issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := issuesByCode(issues, "VB021")
+		if len(got) != 2 {
+			t.Fatalf("VB021 issues = %d, want unreachable caller and target: %+v", len(got), got)
+		}
+		for _, issue := range got {
+			if issue.Symbol == "DynamicTarget" {
+				t.Fatalf("known dynamic target should be possibly reachable: %+v", got)
+			}
+		}
+	})
+
+	t.Run("unknown target from reachable caller", func(t *testing.T) {
+		dir := t.TempDir()
+		writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private callbackName As String
+
+Public Sub Run()
+  Application.OnKey "{F1}", callbackName
+End Sub
+
+Private Sub CandidateA()
+End Sub
+
+Private Sub CandidateB()
+End Sub
+`)
+		cfg := config.Default()
+		cfg.Lint.DetectUnusedPrivateProcedures = true
+		issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issuesByCode(issues, "VB021"); len(got) != 0 {
+			t.Fatalf("unknown dynamic call from reachable root should suppress VB021: %+v", got)
+		}
+	})
+}
+
+func TestLinterVB021TreatsPublicStandardModuleAPIsAsPossibleRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Api.bas", `Option Explicit
+Public Function PublicApi(ByVal value As String) As String
+  PublicApi = PrivateHelper(value)
+End Function
+
+Private Function PrivateHelper(ByVal value As String) As String
+  PrivateHelper = value
+End Function
+
+Private Sub Orphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "Orphan" {
+		t.Fatalf("public standard-module API reachability = %+v", got)
+	}
+}
+
+func TestLinterVB021RecognizesEventsAndWithEventsHandlers(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	files := map[string]string{
+		"src/workbook/ThisWorkbook.cls": `VERSION 1.0 CLASS
+Attribute VB_Name = "ThisWorkbook"
+Private Sub Workbook_Open()
+  WorkbookHelper
+End Sub
+Private Sub WorkbookHelper()
+End Sub
+Private Sub Workbook_Helper()
+End Sub
+Private Sub DocOrphan()
+End Sub
+`,
+		"src/workbook/Sheet1.cls": `VERSION 1.0 CLASS
+Attribute VB_Name = "Sheet1"
+Private Sub Worksheet_Change(ByVal Target As Range)
+  WorksheetHelper
+End Sub
+Private Sub WorksheetHelper()
+End Sub
+Private Sub Worksheet_Helper()
+End Sub
+Private Sub SheetOrphan()
+End Sub
+`,
+		"src/classes/Watcher.cls": `VERSION 1.0 CLASS
+Attribute VB_Name = "Watcher"
+Public WithEvents App As Excel.Application
+Private Sub App_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+  EventHelper
+End Sub
+Private Sub EventHelper()
+End Sub
+Private Sub EventOrphan()
+End Sub
+`,
+		"src/forms/UserForm1.frm": `VERSION 5.00
+Begin VB.UserForm UserForm1
+   Begin VB.CommandButton cmdOK
+   End
+End
+Attribute VB_Name = "UserForm1"
+`,
+		"src/forms/code/UserForm1.bas": `Attribute VB_Name = "UserForm1"
+Private Sub UserForm_Initialize()
+  FormHelper
+End Sub
+Private Sub cmdOK_Click()
+  FormClickHelper
+End Sub
+Private Sub FormHelper()
+End Sub
+Private Sub FormClickHelper()
+End Sub
+Private Sub FormOrphan()
+End Sub
+`,
+		"src/modules/Main.bas": `Attribute VB_Name = "Main"
+Private Sub Auto_Open()
+  AutoHelper
+End Sub
+Private Sub AutoHelper()
+End Sub
+Private Sub AutoOrphan()
+End Sub
+Private Sub Foo_Bar()
+End Sub
+`,
+	}
+	for name, body := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	for _, name := range []string{"DocOrphan", "SheetOrphan", "Workbook_Helper", "Worksheet_Helper", "EventOrphan", "FormOrphan", "AutoOrphan", "Foo_Bar"} {
+		found := false
+		for _, issue := range got {
+			if issue.Symbol == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing event/root VB021 for %s: %+v", name, got)
+		}
+	}
+	for _, name := range []string{"WorkbookHelper", "WorksheetHelper", "EventHelper", "FormHelper", "FormClickHelper", "AutoHelper", "App_SheetChange", "Workbook_Open", "Worksheet_Change", "UserForm_Initialize", "cmdOK_Click", "Auto_Open"} {
+		for _, issue := range got {
+			if issue.Symbol == name {
+				t.Fatalf("rooted event procedure was reported: %s (%+v)", name, got)
+			}
+		}
+	}
+}
+
 func TestLinterUnusedLocalVariableUsesProcedureBounds(t *testing.T) {
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit

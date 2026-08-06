@@ -403,7 +403,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB021
 
-**Unused private procedure.** A private procedure has no resolved project-local caller.
+**Unused private procedure.** A private procedure is unreachable from known project roots.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |
