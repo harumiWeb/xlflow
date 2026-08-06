@@ -415,11 +415,14 @@ parallel-safe, does not require Excel, and is not subject to workbook wait or
 recovery policy.
 
 Each item publishes the canonical rule `id`, `title`, `description`, `family`,
-`category`, `default_severity`, `scope`, `precision`, `default_enabled`, `configurable`,
-`configuration_key`, `inline_suppressible`, `preflight_blocking`, `realtime`,
-`fix_available`, and `documentation_url`. `configuration_key` is empty for a
-non-configurable rule. Version 1 evolves additively: new rule entries and fields
-may be added, clients must ignore fields and IDs they do not recognize, and a
+`category`, `default_severity`, `supported_severities`, `surfaces`, `scope`,
+`precision`, `default_enabled`, `configurable`, `configuration_key`,
+`inline_suppressible`, `preflight_blocking`, `realtime`, `fix_available`, and
+`documentation_url`. `configuration_key` is empty for a non-configurable rule.
+`surfaces` identifies the supported `lint`, `analyze`, and `lsp` projections;
+`supported_severities` includes every severity the rule may emit, including
+conditional severity escalation. Version 1 evolves additively: new rule entries
+and fields may be added, clients must ignore fields and IDs they do not recognize, and a
 field removal or incompatible meaning change requires a new `schema_version`.
 Unavailable, failed, malformed, or unsupported-version metadata must be treated
 as unknown; a client must not infer that an unknown rule is suppressible.

@@ -28,6 +28,8 @@ automation needs the complete metadata contract.
         "id": "VB001",
         "family": "lint",
         "default_severity": "error",
+        "supported_severities": ["error"],
+        "surfaces": ["lint", "lsp"],
         "scope": "file-local",
         "default_enabled": true,
         "configurable": true,

@@ -26,9 +26,12 @@ and documentation adapters to project the same facts.
 Create a protocol-neutral registry under `internal/staticanalysis/rules`. Its
 canonical data is an embedded JSON file owned by that package. Each normal
 `VB...` or `VBA...` static-analysis rule records its stable ID, title,
-description, family, category, severity, scope, precision, default-enabled
-state, configuration binding, inline-suppression policy, preflight policy,
-real-time eligibility, fix availability, and documentation URL.
+description, family, category, default and supported severities, supported
+`lint`/`analyze`/`lsp` surfaces, scope, precision, default-enabled state,
+configuration binding, inline-suppression policy, preflight policy, real-time
+eligibility, fix availability, and documentation URL. Surface metadata remains
+consistent with family and real-time eligibility, while supported severities
+also describe conditional escalation such as nested-loop analysis findings.
 
 The Go package validates the complete registry at load time and exposes sorted,
 defensive projections through lookup, enumeration, and family filtering. It

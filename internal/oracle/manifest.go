@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
 const (
@@ -408,6 +410,9 @@ func validateAnalysisBinding(c Case) error {
 		if strings.TrimSpace(code) == "" || code != strings.TrimSpace(code) {
 			return fmt.Errorf("oracle case %q has an empty or padded analysis rule code", c.ID)
 		}
+		if _, err := canonicalRuleMetadata(code); err != nil {
+			return fmt.Errorf("oracle case %q has invalid analysis rule code %q: %w", c.ID, code, err)
+		}
 		if _, ok := seenCodes[code]; ok {
 			return fmt.Errorf("oracle case %q repeats analysis rule code %q", c.ID, code)
 		}
@@ -460,6 +465,21 @@ func validateAnalysisBinding(c Case) error {
 			return fmt.Errorf("oracle case %q: not-applicable fixture cannot declare analyzer bindings", c.ID)
 		}
 	}
+	if analysis.BindingStatus != BindingNotApplicable {
+		contracts := append(append([]DiagnosticExpectation(nil), analysis.ExpectedDiagnostics...), analysis.ForbiddenDiagnostics...)
+		for _, code := range analysis.RuleCodes {
+			if !diagnosticCodeDeclared(code, contracts) {
+				return fmt.Errorf("oracle case %q: analysis rule code %q is not declared by an expected or forbidden diagnostic contract", c.ID, code)
+			}
+		}
+		if analysis.BindingStatus == BindingBound {
+			for _, expectation := range contracts {
+				if _, ok := seenCodes[expectation.Code]; !ok {
+					return fmt.Errorf("oracle case %q: bound diagnostic code %q is not declared by analysis.rule_codes", c.ID, expectation.Code)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -474,17 +494,17 @@ func diagnosticCodeDeclared(code string, expectations []DiagnosticExpectation) b
 
 func validateDiagnosticExpectations(expectations []DiagnosticExpectation, kind, caseID string) error {
 	for _, expectation := range expectations {
-		if strings.TrimSpace(expectation.Code) == "" {
-			return fmt.Errorf("oracle case %q has an empty %s diagnostic code", caseID, kind)
+		rule, err := canonicalRuleMetadata(expectation.Code)
+		if err != nil {
+			return fmt.Errorf("oracle case %q has invalid %s diagnostic code %q: %w", caseID, kind, expectation.Code, err)
 		}
-		if severity := strings.TrimSpace(expectation.Severity); severity != "" && severity != "error" && severity != "warning" {
-			return fmt.Errorf("oracle case %q diagnostic %q has invalid severity %q", caseID, expectation.Code, expectation.Severity)
+		if severity := expectation.Severity; severity != "" && !ruleSupportsSeverity(rule, severity) {
+			return fmt.Errorf("oracle case %q diagnostic %q has unsupported severity %q", caseID, expectation.Code, severity)
 		}
 		seenSurfaces := map[string]struct{}{}
 		for _, surface := range expectation.Surfaces {
-			surface = strings.TrimSpace(surface)
-			if surface != "lint" && surface != "analyze" && surface != "lsp" {
-				return fmt.Errorf("oracle case %q diagnostic %q has invalid surface %q", caseID, expectation.Code, surface)
+			if !ruleSupportsSurface(rule, surface) {
+				return fmt.Errorf("oracle case %q diagnostic %q has unsupported surface %q", caseID, expectation.Code, surface)
 			}
 			if _, duplicate := seenSurfaces[surface]; duplicate {
 				return fmt.Errorf("oracle case %q diagnostic %q repeats surface %q", caseID, expectation.Code, surface)
@@ -498,6 +518,38 @@ func validateDiagnosticExpectations(expectations []DiagnosticExpectation, kind, 
 		}
 	}
 	return nil
+}
+
+func canonicalRuleMetadata(code string) (rules.RuleMetadata, error) {
+	if strings.TrimSpace(code) == "" {
+		return rules.RuleMetadata{}, errors.New("code is empty")
+	}
+	rule, ok := rules.Lookup(code)
+	if !ok {
+		return rules.RuleMetadata{}, errors.New("code is not in the static-analysis rule registry")
+	}
+	if code != rule.ID {
+		return rules.RuleMetadata{}, fmt.Errorf("code must use canonical registry ID %q", rule.ID)
+	}
+	return rule, nil
+}
+
+func ruleSupportsSurface(rule rules.RuleMetadata, surface string) bool {
+	for _, supported := range rule.Surfaces {
+		if surface == string(supported) {
+			return true
+		}
+	}
+	return false
+}
+
+func ruleSupportsSeverity(rule rules.RuleMetadata, severity string) bool {
+	for _, supported := range rule.SupportedSeverities {
+		if severity == string(supported) {
+			return true
+		}
+	}
+	return false
 }
 
 func confinedPath(root, relative string) (string, error) {

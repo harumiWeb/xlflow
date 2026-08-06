@@ -88,6 +88,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                    |
 | Category                    | `correctness`             |
 | Default severity            | `error`                   |
+| Supported severities        | `error`                   |
+| Surfaces                    | `lint`, `lsp`             |
 | Scope                       | `file-local`              |
 | Precision                   | `high`                    |
 | Enabled by default          | yes                       |
@@ -106,6 +108,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `reliability`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -124,6 +128,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `reliability`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -142,6 +148,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                        |
 | Category                    | `reliability`                 |
 | Default severity            | `warning`                     |
+| Supported severities        | `warning`                     |
+| Surfaces                    | `lint`, `lsp`                 |
 | Scope                       | `procedure-local`             |
 | Precision                   | `high`                        |
 | Enabled by default          | yes                           |
@@ -160,6 +168,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                    |
 | Category                    | `maintainability`         |
 | Default severity            | `warning`                 |
+| Supported severities        | `warning`                 |
+| Surfaces                    | `lint`, `lsp`             |
 | Scope                       | `file-local`              |
 | Precision                   | `high`                    |
 | Enabled by default          | yes                       |
@@ -178,6 +188,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                        |
 | Category                    | `maintainability`             |
 | Default severity            | `warning`                     |
+| Supported severities        | `warning`                     |
+| Surfaces                    | `lint`, `lsp`                 |
 | Scope                       | `file-local`                  |
 | Precision                   | `high`                        |
 | Enabled by default          | yes                           |
@@ -196,6 +208,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                     |
 | Category                    | `reliability`              |
 | Default severity            | `warning`                  |
+| Supported severities        | `warning`                  |
+| Surfaces                    | `lint`                     |
 | Scope                       | `file-local`               |
 | Precision                   | `high`                     |
 | Enabled by default          | yes                        |
@@ -214,6 +228,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -232,6 +248,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -250,6 +268,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -268,6 +288,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -286,6 +308,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -304,6 +328,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -322,6 +348,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `medium`         |
 | Enabled by default          | yes              |
@@ -340,6 +368,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -358,6 +388,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                   |
 | Category                    | `maintainability`        |
 | Default severity            | `warning`                |
+| Supported severities        | `warning`                |
+| Surfaces                    | `lint`                   |
 | Scope                       | `project-wide`           |
 | Precision                   | `medium`                 |
 | Enabled by default          | no                       |
@@ -376,6 +408,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                               |
 | Category                    | `correctness`                        |
 | Default severity            | `warning`                            |
+| Supported severities        | `warning`                            |
+| Surfaces                    | `lint`, `lsp`                        |
 | Scope                       | `file-local`                         |
 | Precision                   | `high`                               |
 | Enabled by default          | yes                                  |
@@ -394,6 +428,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                          |
 | Category                    | `maintainability`               |
 | Default severity            | `warning`                       |
+| Supported severities        | `warning`                       |
+| Surfaces                    | `lint`, `lsp`                   |
 | Scope                       | `procedure-local`               |
 | Precision                   | `high`                          |
 | Enabled by default          | yes                             |
@@ -412,6 +448,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                             |
 | Category                    | `maintainability`                  |
 | Default severity            | `warning`                          |
+| Supported severities        | `warning`                          |
+| Surfaces                    | `lint`                             |
 | Scope                       | `project-wide`                     |
 | Precision                   | `medium`                           |
 | Enabled by default          | no                                 |
@@ -430,6 +468,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                         |
 | Category                    | `maintainability`              |
 | Default severity            | `warning`                      |
+| Supported severities        | `warning`                      |
+| Surfaces                    | `lint`, `lsp`                  |
 | Scope                       | `procedure-local`              |
 | Precision                   | `high`                         |
 | Enabled by default          | yes                            |
@@ -448,6 +488,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                         |
 | Category                    | `correctness`                  |
 | Default severity            | `warning`                      |
+| Supported severities        | `warning`                      |
+| Surfaces                    | `lint`, `lsp`                  |
 | Scope                       | `procedure-local`              |
 | Precision                   | `high`                         |
 | Enabled by default          | yes                            |
@@ -466,6 +508,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                    |
 | Category                    | `reliability`             |
 | Default severity            | `warning`                 |
+| Supported severities        | `warning`                 |
+| Surfaces                    | `lint`, `lsp`             |
 | Scope                       | `procedure-local`         |
 | Precision                   | `medium`                  |
 | Enabled by default          | yes                       |
@@ -484,6 +528,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                         |
 | Category                    | `reliability`                  |
 | Default severity            | `warning`                      |
+| Supported severities        | `warning`                      |
+| Surfaces                    | `lint`, `lsp`                  |
 | Scope                       | `procedure-local`              |
 | Precision                   | `medium`                       |
 | Enabled by default          | no                             |
@@ -502,6 +548,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`           |
 | Scope                       | `project-wide`   |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -520,6 +568,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -538,6 +588,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -556,6 +608,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -574,6 +628,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -592,6 +648,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -610,6 +668,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -628,6 +688,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -646,6 +708,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -664,6 +728,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -682,6 +748,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -700,6 +768,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -718,6 +788,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `documentation`  |
 | Default severity            | `warning`        |
+| Supported severities        | `warning`        |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -736,6 +808,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `documentation`  |
 | Default severity            | `warning`        |
+| Supported severities        | `warning`        |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -754,6 +828,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `documentation`  |
 | Default severity            | `warning`        |
+| Supported severities        | `warning`        |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -772,6 +848,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`           |
 | Category                    | `documentation`  |
 | Default severity            | `warning`        |
+| Supported severities        | `warning`        |
+| Surfaces                    | `lint`, `lsp`    |
 | Scope                       | `file-local`     |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -790,6 +868,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `lint`                    |
 | Category                    | `maintainability`         |
 | Default severity            | `warning`                 |
+| Supported severities        | `warning`                 |
+| Surfaces                    | `lint`, `lsp`             |
 | Scope                       | `procedure-local`         |
 | Precision                   | `high`                    |
 | Enabled by default          | no                        |
@@ -808,6 +888,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`         |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `analyze`         |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -826,6 +908,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`         |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `analyze`         |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -844,6 +928,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`         |
 | Category                    | `type-safety`     |
 | Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `analyze`         |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -862,6 +948,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`         |
 | Category                    | `correctness`     |
 | Default severity            | `error`           |
+| Supported severities        | `error`           |
+| Surfaces                    | `analyze`         |
 | Scope                       | `procedure-local` |
 | Precision                   | `high`            |
 | Enabled by default          | yes               |
@@ -880,6 +968,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`        |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `analyze`        |
 | Scope                       | `project-wide`   |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -898,6 +988,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`        |
 | Category                    | `correctness`    |
 | Default severity            | `error`          |
+| Supported severities        | `error`          |
+| Surfaces                    | `analyze`        |
 | Scope                       | `project-wide`   |
 | Precision                   | `high`           |
 | Enabled by default          | yes              |
@@ -916,6 +1008,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                         |
 | Category                    | `reliability`                     |
 | Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
 | Scope                       | `procedure-local`                 |
 | Precision                   | `high`                            |
 | Enabled by default          | yes                               |
@@ -934,6 +1028,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                      |
 | Category                    | `reliability`                  |
 | Default severity            | `warning`                      |
+| Supported severities        | `warning`                      |
+| Surfaces                    | `analyze`                      |
 | Scope                       | `procedure-local`              |
 | Precision                   | `medium`                       |
 | Enabled by default          | yes                            |
@@ -952,6 +1048,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                          |
 | Category                    | `reliability`                      |
 | Default severity            | `warning`                          |
+| Supported severities        | `warning`                          |
+| Surfaces                    | `analyze`                          |
 | Scope                       | `interprocedural`                  |
 | Precision                   | `medium`                           |
 | Enabled by default          | yes                                |
@@ -970,6 +1068,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                          |
 | Category                    | `reliability`                      |
 | Default severity            | `warning`                          |
+| Supported severities        | `warning`                          |
+| Surfaces                    | `analyze`, `lsp`                   |
 | Scope                       | `procedure-local`                  |
 | Precision                   | `high`                             |
 | Enabled by default          | yes                                |
@@ -988,6 +1088,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                          |
 | Category                    | `reliability`                      |
 | Default severity            | `warning`                          |
+| Supported severities        | `warning`                          |
+| Surfaces                    | `analyze`                          |
 | Scope                       | `procedure-local`                  |
 | Precision                   | `high`                             |
 | Enabled by default          | yes                                |
@@ -1006,6 +1108,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                        |
 | Category                    | `runtime-safety`                 |
 | Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`, `lsp`                 |
 | Scope                       | `interprocedural`                |
 | Precision                   | `high`                           |
 | Enabled by default          | yes                              |
@@ -1024,6 +1128,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                            |
 | Category                    | `reliability`                        |
 | Default severity            | `warning`                            |
+| Supported severities        | `warning`                            |
+| Surfaces                    | `analyze`                            |
 | Scope                       | `procedure-local`                    |
 | Precision                   | `medium`                             |
 | Enabled by default          | no                                   |
@@ -1042,6 +1148,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                         |
 | Category                    | `correctness`                     |
 | Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
 | Scope                       | `procedure-local`                 |
 | Precision                   | `high`                            |
 | Enabled by default          | yes                               |
@@ -1060,6 +1168,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                        |
 | Category                    | `type-safety`                    |
 | Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`, `lsp`                 |
 | Scope                       | `procedure-local`                |
 | Precision                   | `high`                           |
 | Enabled by default          | yes                              |
@@ -1078,6 +1188,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                     |
 | Category                    | `correctness`                 |
 | Default severity            | `warning`                     |
+| Supported severities        | `warning`                     |
+| Surfaces                    | `analyze`                     |
 | Scope                       | `procedure-local`             |
 | Precision                   | `medium`                      |
 | Enabled by default          | no                            |
@@ -1096,6 +1208,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                             |
 | Category                    | `correctness`                         |
 | Default severity            | `error`                               |
+| Supported severities        | `error`                               |
+| Surfaces                    | `analyze`                             |
 | Scope                       | `procedure-local`                     |
 | Precision                   | `high`                                |
 | Enabled by default          | yes                                   |
@@ -1114,6 +1228,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                               |
 | Category                    | `reliability`                           |
 | Default severity            | `warning`                               |
+| Supported severities        | `warning`                               |
+| Surfaces                    | `analyze`, `lsp`                        |
 | Scope                       | `procedure-local`                       |
 | Precision                   | `high`                                  |
 | Enabled by default          | yes                                     |
@@ -1132,6 +1248,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                                 |
 | Category                    | `type-safety`                             |
 | Default severity            | `warning`                                 |
+| Supported severities        | `warning`                                 |
+| Surfaces                    | `analyze`, `lsp`                          |
 | Scope                       | `procedure-local`                         |
 | Precision                   | `medium`                                  |
 | Enabled by default          | no                                        |
@@ -1150,6 +1268,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                                   |
 | Category                    | `reliability`                               |
 | Default severity            | `warning`                                   |
+| Supported severities        | `warning`, `error`                          |
+| Surfaces                    | `analyze`                                   |
 | Scope                       | `procedure-local`                           |
 | Precision                   | `medium`                                    |
 | Enabled by default          | yes                                         |
@@ -1168,6 +1288,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                              |
 | Category                    | `reliability`                          |
 | Default severity            | `warning`                              |
+| Supported severities        | `warning`                              |
+| Surfaces                    | `analyze`, `lsp`                       |
 | Scope                       | `procedure-local`                      |
 | Precision                   | `high`                                 |
 | Enabled by default          | yes                                    |
@@ -1186,6 +1308,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                        |
 | Category                    | `reliability`                    |
 | Default severity            | `error`                          |
+| Supported severities        | `error`                          |
+| Surfaces                    | `analyze`, `lsp`                 |
 | Scope                       | `procedure-local`                |
 | Precision                   | `high`                           |
 | Enabled by default          | yes                              |
@@ -1204,6 +1328,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                           |
 | Category                    | `reliability`                       |
 | Default severity            | `warning`                           |
+| Supported severities        | `warning`                           |
+| Surfaces                    | `analyze`, `lsp`                    |
 | Scope                       | `procedure-local`                   |
 | Precision                   | `medium`                            |
 | Enabled by default          | yes                                 |
@@ -1222,6 +1348,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                            |
 | Category                    | `reliability`                        |
 | Default severity            | `warning`                            |
+| Supported severities        | `warning`                            |
+| Surfaces                    | `analyze`, `lsp`                     |
 | Scope                       | `interprocedural`                    |
 | Precision                   | `high`                               |
 | Enabled by default          | yes                                  |
@@ -1240,6 +1368,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`               |
 | Category                    | `reliability`           |
 | Default severity            | `warning`               |
+| Supported severities        | `warning`               |
+| Surfaces                    | `analyze`, `lsp`        |
 | Scope                       | `procedure-local`       |
 | Precision                   | `high`                  |
 | Enabled by default          | yes                     |
@@ -1258,6 +1388,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                      |
 | Category                    | `reliability`                  |
 | Default severity            | `warning`                      |
+| Supported severities        | `warning`                      |
+| Surfaces                    | `analyze`                      |
 | Scope                       | `interprocedural`              |
 | Precision                   | `medium`                       |
 | Enabled by default          | yes                            |
@@ -1276,6 +1408,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                               |
 | Category                    | `reliability`                           |
 | Default severity            | `warning`                               |
+| Supported severities        | `warning`                               |
+| Surfaces                    | `analyze`                               |
 | Scope                       | `interprocedural`                       |
 | Precision                   | `high`                                  |
 | Enabled by default          | yes                                     |
@@ -1294,6 +1428,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                       |
 | Category                    | `type-safety`                   |
 | Default severity            | `warning`                       |
+| Supported severities        | `warning`                       |
+| Surfaces                    | `analyze`                       |
 | Scope                       | `project-wide`                  |
 | Precision                   | `medium`                        |
 | Enabled by default          | yes                             |
@@ -1312,6 +1448,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                  |
 | Category                    | `security`                 |
 | Default severity            | `warning`                  |
+| Supported severities        | `warning`                  |
+| Surfaces                    | `analyze`, `lsp`           |
 | Scope                       | `file-local`               |
 | Precision                   | `high`                     |
 | Enabled by default          | yes                        |
@@ -1330,6 +1468,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                    |
 | Category                    | `security`                   |
 | Default severity            | `warning`                    |
+| Supported severities        | `warning`                    |
+| Surfaces                    | `analyze`, `lsp`             |
 | Scope                       | `procedure-local`            |
 | Precision                   | `medium`                     |
 | Enabled by default          | yes                          |
@@ -1348,6 +1488,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                           |
 | Category                    | `performance`                       |
 | Default severity            | `warning`                           |
+| Supported severities        | `warning`, `error`                  |
+| Surfaces                    | `analyze`, `lsp`                    |
 | Scope                       | `interprocedural`                   |
 | Precision                   | `medium`                            |
 | Enabled by default          | yes                                 |
@@ -1366,6 +1508,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Family                      | `analyze`                        |
 | Category                    | `runtime-safety`                 |
 | Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`, `lsp`                 |
 | Scope                       | `procedure-local`                |
 | Precision                   | `medium`                         |
 | Enabled by default          | yes                              |

@@ -102,9 +102,14 @@ The supported states are:
 - `not-applicable`: the fixture is intentionally a harness control or language
   observation and cannot declare rule codes or diagnostic contracts.
 
-Binding status is structural metadata only. Diagnostic code existence,
-severity, and supported analyzer surfaces are validated by the rule-catalogue
-and binding work tracked separately from this fixture-schema change. Until a
+Every declared rule code is resolved against the authoritative static-analysis
+rule registry. The registry validates the canonical diagnostic ID, supported
+`lint`/`analyze`/`lsp` surfaces, and supported severities; fixture validation
+rejects unknown or non-canonical codes, unsupported surfaces, and unsupported
+severities. When a fixture declares rule codes, each code must be used by an
+expected or forbidden diagnostic contract. Bound fixtures also require every
+contract code to be listed in `rule_codes`, with rejected cases using the
+expected contract and accepted cases using the forbidden contract. Until a
 fixture is connected to an implemented rule, keep it `unbound` and do not alter
 the VBE expectation to satisfy an analyzer test. Binding notes must be omitted
 when unnecessary; an explicitly empty or whitespace-only note is invalid.

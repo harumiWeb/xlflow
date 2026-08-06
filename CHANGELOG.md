@@ -4,13 +4,17 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Extended the VBE oracle binding contract to resolve diagnostic codes against
+  the shared static-analysis registry and validate supported surfaces and
+  severities. The public `xlflow rules --json` metadata now includes additive
+  `surfaces` and `supported_severities` fields.
 - Added the local-only Windows Excel/VBE oracle harness for focused static-
   analysis compile evidence, with sequential disposable workbooks, known
   accept/reject controls, observational and strict JSON modes, explicit
   promotion, provenance metadata, and deterministic Excel-free fixture
   contracts. Fixtures now also carry explicit diagnostic binding metadata so
   unbound, partially-bound, bound, and not-applicable evidence can be validated
-  independently of the later rule-catalogue and coverage work. The oracle is
+  independently of later binding-coverage work. The oracle is
   not invoked by production commands or GitHub Actions; contributors should run
   relevant cases locally when changing VBA semantics.
 - Added default-enabled `VBA223` security warnings for likely hardcoded VBA
