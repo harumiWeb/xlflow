@@ -100,6 +100,7 @@ func TestVBA223IgnoresPlaceholdersCommentsAndEnvironmentReferences(t *testing.T)
 Public Sub Run()
   Dim password As String
   password = "your-password"
+  password = "%PASSWORD%"
   password = Environ$("PASSWORD")
   Debug.Print "Password=example"
   Debug.Print "ordinary text"
@@ -112,6 +113,86 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA223"); len(got) != 0 {
 		t.Fatalf("placeholder/comment/environment findings = %+v, want none", got)
+	}
+}
+
+func TestVBA223DetectsModuleOnlyDeclarationsInBatchAndRealtime(t *testing.T) {
+	dir := t.TempDir()
+	secret := "module-only-secret"
+	source := `Option Explicit
+Private Const ApiKey As String = "__SECRET__"
+`
+	source = strings.ReplaceAll(source, "__SECRET__", secret)
+	writeModule(t, dir, "ModuleOnly.bas", source)
+	path := filepath.Join(dir, "src", "modules", "ModuleOnly.bas")
+	cfg := config.Default()
+
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchSecrets := findingsByCode(batch, "VBA223")
+	realtimeSecrets := findingsByCode(realtime, "VBA223")
+	if len(batchSecrets) != 1 || len(realtimeSecrets) != 1 {
+		t.Fatalf("module-only VBA223 findings = batch=%+v realtime=%+v, want one each", batchSecrets, realtimeSecrets)
+	}
+	if !reflect.DeepEqual(batchSecrets, realtimeSecrets) {
+		t.Fatalf("module-only batch/realtime VBA223 findings differ:\nbatch=%+v\nrealtime=%+v", batchSecrets, realtimeSecrets)
+	}
+}
+
+func TestVBA223DetectsCredentialContainingPercent(t *testing.T) {
+	dir := t.TempDir()
+	secret := "pa%ssword-value"
+	source := `Option Explicit
+Public Sub Run()
+  Dim password As String
+  password = "__SECRET__"
+End Sub
+`
+	source = strings.ReplaceAll(source, "__SECRET__", secret)
+	writeModule(t, dir, "Percent.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA223"); len(got) != 1 {
+		t.Fatalf("percent-containing credential findings = %+v, want one", got)
+	}
+}
+
+func TestVBA223RedactsRemCommentsInNearbyCode(t *testing.T) {
+	dir := t.TempDir()
+	commentSecret := "adjacent-comment-secret"
+	source := `Option Explicit
+Public Sub Run()
+  Dim password As String
+  password = "hardcoded-password-value": Rem password=__COMMENT_SECRET__
+End Sub
+`
+	source = strings.ReplaceAll(source, "__COMMENT_SECRET__", commentSecret)
+	writeModule(t, dir, "RemComment.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := findingsByCode(findings, "VBA223")
+	if len(secrets) != 1 {
+		t.Fatalf("Rem comment findings = %+v, want one", secrets)
+	}
+	for _, line := range secrets[0].NearbyCode {
+		if strings.Contains(line, commentSecret) {
+			t.Fatalf("nearby code contains Rem comment secret: %q", line)
+		}
+	}
+	if !strings.Contains(strings.Join(secrets[0].NearbyCode, "\n"), "[REDACTED]") {
+		t.Fatalf("nearby code does not contain fixed redaction: %+v", secrets[0].NearbyCode)
 	}
 }
 

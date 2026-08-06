@@ -662,10 +662,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)
 		procedures := sourceProceduresFromIR(ir, controlFlow)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		findings = append(findings, analyzer.hardcodedSecretFindings(file, procedures)...)
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
-		findings = append(findings, analyzer.hardcodedSecretFindings(file, procedures)...)
 		for i, proc := range procedures {
 			if i&0x1f == 0 {
 				if err := ctx.Err(); err != nil {

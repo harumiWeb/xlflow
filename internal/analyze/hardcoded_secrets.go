@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	secretConnectionFieldRe = regexp.MustCompile(`(?i)(^|[;,&[:space:]])(password|pwd|user[[:space:]]*id|uid|username|account[[:space:]]*key|client[[:space:]]*secret|access[[:space:]]*token)[[:space:]]*=[[:space:]]*([^;,&]+)`)
-	secretAuthSchemeRe      = regexp.MustCompile(`(?i)\b(bearer|basic)[[:space:]]+([^,;[:space:]]+)`)
-	secretURLCredentialRe   = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*://[^/[:space:]@:]+:([^@[:space:]/]+)@`)
-	secretPrivateKeyRe      = regexp.MustCompile(`(?i)-----begin([[:space:]][a-z0-9-]+)? private key-----`)
-	secretKnownTokenRe      = regexp.MustCompile(`(?i)\b(AKIA|ASIA)[0-9A-Z]{16}\b|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}`)
-	secretWebhookRe         = regexp.MustCompile(`(?i)(hooks\.slack\.com/services/|discord\.com/api/webhooks/|discordapp\.com/api/webhooks/|api\.telegram\.org/bot)[^[:space:]"']+`)
+	secretConnectionFieldRe  = regexp.MustCompile(`(?i)(^|[;,&[:space:]])(password|pwd|user[[:space:]]*id|uid|username|account[[:space:]]*key|client[[:space:]]*secret|access[[:space:]]*token)[[:space:]]*=[[:space:]]*([^;,&]+)`)
+	secretAuthSchemeRe       = regexp.MustCompile(`(?i)\b(bearer|basic)[[:space:]]+([^,;[:space:]]+)`)
+	secretURLCredentialRe    = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*://[^/[:space:]@:]+:([^@[:space:]/]+)@`)
+	secretPrivateKeyRe       = regexp.MustCompile(`(?i)-----begin([[:space:]][a-z0-9-]+)? private key-----`)
+	secretKnownTokenRe       = regexp.MustCompile(`(?i)\b(AKIA|ASIA)[0-9A-Z]{16}\b|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}`)
+	secretWebhookRe          = regexp.MustCompile(`(?i)(hooks\.slack\.com/services/|discord\.com/api/webhooks/|discordapp\.com/api/webhooks/|api\.telegram\.org/bot)[^[:space:]"']+`)
+	secretPercentExpansionRe = regexp.MustCompile(`(?i)%[a-z_][a-z0-9_]*%`)
 )
 
 var credentialVariableNames = []string{
@@ -179,7 +180,7 @@ func isSecretPlaceholder(raw string) bool {
 	if value == "" {
 		return true
 	}
-	if strings.Contains(value, "${") || strings.Contains(value, "%") || strings.Contains(value, "<") && strings.Contains(value, ">") {
+	if strings.Contains(value, "${") || secretPercentExpansionRe.MatchString(value) || strings.Contains(value, "<") && strings.Contains(value, ">") {
 		return true
 	}
 	if strings.HasPrefix(value, "your-") || strings.HasPrefix(value, "your_") || strings.HasPrefix(value, "replace-") || strings.HasPrefix(value, "replace_") {
@@ -353,6 +354,10 @@ func redactVBAStringsAndComments(line string) string {
 	inString := false
 	for i := 0; i < len(line); i++ {
 		if !inString {
+			if i+3 <= len(line) && strings.EqualFold(line[i:i+3], "rem") && (i == 0 || isVBACommentBoundary(line[i-1])) && (i+3 == len(line) || isVBACommentBoundary(line[i+3])) {
+				b.WriteString("Rem [REDACTED]")
+				return b.String()
+			}
 			switch line[i] {
 			case '\'':
 				b.WriteString("' [REDACTED]")
@@ -374,4 +379,8 @@ func redactVBAStringsAndComments(line string) string {
 		}
 	}
 	return b.String()
+}
+
+func isVBACommentBoundary(char byte) bool {
+	return char == ':' || char == ' ' || char == '\t'
 }
