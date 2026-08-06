@@ -162,6 +162,12 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 		{name: "unbound rule code needs note", prepare: func(c *Case) {
 			c.Analysis.RuleCodes = []string{"VBA101"}
 		}, wantErr: true},
+		{name: "unbound expected contract", prepare: func(c *Case) {
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+		}, wantErr: true},
+		{name: "unbound forbidden contract", prepare: func(c *Case) {
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+		}, wantErr: true},
 		{name: "partially-bound needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.BindingNote = analysisNote("pending")
@@ -258,9 +264,15 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 		errSubstr string
 	}{
 		{name: "canonical registry diagnostic", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.BindingNote = analysisNote("registry validation test")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "warning", Surfaces: []string{"analyze"}}}
 		}},
 		{name: "dynamic severity", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.RuleCodes = []string{"VBA214"}
+			c.Analysis.BindingNote = analysisNote("registry validation test")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA214", Severity: "error"}}
 		}},
 		{name: "unknown diagnostic code", prepare: func(c *Case) {

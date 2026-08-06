@@ -427,6 +427,9 @@ func validateAnalysisBinding(c Case) error {
 	hasForbidden := len(analysis.ForbiddenDiagnostics) > 0
 	switch analysis.BindingStatus {
 	case BindingUnbound:
+		if hasExpected || hasForbidden {
+			return fmt.Errorf("oracle case %q: unbound fixture cannot declare analyzer diagnostic contracts", c.ID)
+		}
 		if len(analysis.RuleCodes) > 0 && analysis.BindingNote == nil {
 			return fmt.Errorf("oracle case %q: unbound fixture with rule codes requires analysis.binding_note", c.ID)
 		}
