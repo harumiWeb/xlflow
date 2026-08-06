@@ -697,13 +697,13 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
+		analysisCtx := analyzer.buildContext([]parsedFile{file})
 		for i, proc := range procedures {
 			if i&0x1f == 0 {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
 			}
-			analysisCtx := analyzer.buildContext([]parsedFile{file})
 			procedureFindings, err := analyzer.sourceRealtimeProcedureFindingsContext(ctx, file, proc, moduleDecls, worksheetCodenames, analysisCtx)
 			if err != nil {
 				return err
@@ -843,7 +843,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if a.Config.Analyze.DetectRangeValueArrayShape {
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
-	findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx)...)
+	findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
@@ -1079,7 +1079,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		markCallInitialized(stmt, decls, ctx, maybeInitializedByCall)
 		_ = lower
 	}
-	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx)...)
+	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	if a.Config.Analyze.DetectApplicationStateRestore {
 		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}

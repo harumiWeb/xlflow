@@ -17,6 +17,13 @@ real-time analysis. Its configuration key is
 disabled_rules = ["VBA227"]
 ```
 
+Disabling `VBA227` suppresses only findings issued under `VBA227`. The shared
+array state still supplies independently controlled `VBA208` and `VBA209`
+findings, and it can still supply the always-enabled object-array `VBA101` /
+`VBA102` findings. Disable those rules separately when that compatibility
+behavior is intended; `VBA227` is not the switch for `ReDim Preserve` or array
+comparison safety.
+
 The rule uses the existing `Finding` fields and adds no JSON fields, CLI flags,
 or LSP capabilities.
 
@@ -57,23 +64,25 @@ warning.
 - `ReDim` on fixed-size arrays or non-array values;
 - known subscript-count mismatches and inconsistent loop lower-bound
   assumptions; and
-- object-array element assignments without `Set`, using the existing
-  `VBA101` / `VBA102` finding constructors.
+- unknown Variant array operations.
 
 `VBA208` remains the owner of `ReDim Preserve` safety. It warns when a
 non-final dimension changes and remains conservative when the prior shape is
 unknown. `VBA209` remains the owner of scalar object comparisons and receives
-array comparison findings from the common model. `VBA226` remains the owner of
-`Range.Value` / `Value2` shape diagnostics; Range-origin values are excluded
-from duplicate `VBA227` access and bound findings.
+array comparison findings from the common model. The common model also supplies
+object-array element assignments without `Set` to the existing `VBA101` /
+`VBA102` finding constructors. `VBA226` remains the owner of `Range.Value` /
+`Value2` shape diagnostics; Range-origin values are excluded from duplicate
+`VBA227` access and bound findings.
 
 ## Function and property summaries
 
 Batch analysis may use a unique project-local `Function` or `Property Get`
 summary when every observed normal return assignment returns an allocated
 array with a consistent shape. Real-time analysis restricts this summary to
-the current document. Mixed return kinds, missing assignments, recursion,
-ambiguous names, and external calls remain unknown.
+the active document; it does not resolve array-return summaries from another
+module. Mixed return kinds, missing assignments, recursion, ambiguous names,
+and external calls remain unknown.
 
 ## Boundaries
 

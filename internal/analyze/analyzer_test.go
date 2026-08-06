@@ -3473,6 +3473,167 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayLifecyclePreservesMatchingShapesAndMultiTargetTransitions(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal shouldAllocate As Boolean)
+  Dim values() As Long
+  Dim leftValues() As Long
+  Dim rightValues() As Long
+  If shouldAllocate Then
+    ReDim values(0 To 1)
+  Else
+    ReDim values(0 To 1)
+  End If
+  If UBound(values) <> 1 Then Debug.Print "bad"
+  values(1) = 1
+  Dim variantValues() As Variant
+  If shouldAllocate Then
+    ReDim variantValues(0 To 1)
+  Else
+    variantValues = Array(1, 2)
+  End If
+  If UBound(variantValues) <> 1 Then Debug.Print "bad"
+  variantValues(0) = 1
+  ReDim leftValues(1 To 2), rightValues(1 To 3)
+  leftValues(2) = 1
+  rightValues(3) = 1
+  Erase leftValues, rightValues
+  leftValues(1) = 1
+  rightValues(1) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 {
+		t.Fatalf("expected only the two accesses after Erase to report, got %+v", got)
+	}
+	for _, finding := range got {
+		if !strings.Contains(finding.Message, "leftValues") && !strings.Contains(finding.Message, "rightValues") {
+			t.Fatalf("unexpected VBA227 finding after multi-target Erase: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerArrayLifecycleKeepsAlwaysEnabledObjectArrayFindings(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim objects() As Worksheet
+  ReDim objects(0 To 0)
+  objects(0) = Worksheets(1)
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = false
+	cfg.Analyze.DetectRedimPreserveDimension = false
+	cfg.Analyze.DetectObjectArrayComparison = false
+
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA101"); len(got) != 1 {
+		t.Fatalf("always-enabled object-array missing-Set finding was suppressed: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayReturnSummariesRequireDefiniteAllocation(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function MaybeValues(ByVal shouldAllocate As Boolean) As Variant
+  Dim result() As Long
+  If shouldAllocate Then
+    ReDim result(0 To 0)
+  End If
+  MaybeValues = result
+End Function
+
+Private Function AlwaysValues(ByVal shouldAllocate As Boolean) As Variant
+  Dim result() As Long
+  If shouldAllocate Then
+    ReDim result(0 To 0)
+  Else
+    ReDim result(0 To 0)
+  End If
+  AlwaysValues = result
+End Function
+
+Public Sub Run()
+  Dim unsafe As Variant
+  Dim safe As Variant
+  unsafe = MaybeValues(True)
+  unsafe(0) = 1
+  safe = AlwaysValues(True)
+  safe(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 24 {
+		t.Fatalf("conditional allocation must remain unknown while matching branch allocations stay safe: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayReturnSummaryExcludesScalarRangeValue(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ReadScalar() As Variant
+  ReadScalar = Range("A1").Value
+End Function
+
+Public Sub Run()
+  Dim value As Variant
+  value = ReadScalar()
+  value(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("scalar Range.Value return must not be summarized as an allocated array: %+v", got)
+	}
+}
+
+func TestVBA227RealtimeArrayReturnSummariesAreDocumentLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Helper.bas", `Option Explicit
+Public Function BuildValues() As Variant
+  Dim result() As Long
+  ReDim result(0 To 0)
+  BuildValues = result
+End Function
+`)
+	source := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = BuildValues()
+  values(0) = 1
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("realtime analysis must not use another module's array-return summary: %+v", got)
+	}
+}
+
 func TestVBA227BatchAndRealtimeResultsMatch(t *testing.T) {
 	dir := t.TempDir()
 	source := `Option Explicit

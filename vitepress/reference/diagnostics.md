@@ -1522,7 +1522,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA227
 
-**Array lifecycle and dimension safety.** An array may be unallocated, accessed with an invalid dimension or bound, resized unsafely, or used without a provable array value.
+**Array lifecycle and dimension safety.** An array may be unallocated, accessed with an invalid dimension or bound, or used without a provable array value; real-time array-return summaries are limited to the active document.
 
 | Property                    | Value                           |
 | --------------------------- | ------------------------------- |

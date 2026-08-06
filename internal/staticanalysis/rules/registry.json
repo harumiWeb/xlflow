@@ -1444,7 +1444,7 @@
     {
       "id": "VBA227",
       "title": "Array lifecycle and dimension safety",
-      "description": "An array may be unallocated, accessed with an invalid dimension or bound, resized unsafely, or used without a provable array value.",
+      "description": "An array may be unallocated, accessed with an invalid dimension or bound, or used without a provable array value; real-time array-return summaries are limited to the active document.",
       "family": "analyze",
       "category": "runtime-safety",
       "default_severity": "warning",

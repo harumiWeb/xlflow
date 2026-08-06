@@ -64,18 +64,27 @@ type arrayUse struct {
 }
 
 var (
-	arrayRedimRe     = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?([A-Za-z_]\w*)\s*\((.*)\)\s*$`)
-	arrayEraseRe     = regexp.MustCompile(`(?i)^\s*erase\s+([A-Za-z_]\w*)\s*$`)
-	arrayBoundCallRe = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
-	arrayForBoundRe  = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayRedimRe       = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
+	arrayRedimClauseRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*)\)\s*$`)
+	arrayEraseRe       = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
+	arrayEraseNameRe   = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
+	arrayBoundCallRe   = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
+	arrayForBoundRe    = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
 )
 
-func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext) []Finding {
-	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison {
+func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
+	variables := arrayVariables(file, proc, moduleDecls)
+	if len(variables) == 0 {
 		return nil
 	}
-	variables := arrayVariables(file, proc)
-	if len(variables) == 0 {
+	objectArrayDiagnosticsApplicable := false
+	for _, variable := range variables {
+		if variable.isArray && variable.isObject {
+			objectArrayDiagnosticsApplicable = true
+			break
+		}
+	}
+	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison && !objectArrayDiagnosticsApplicable {
 		return nil
 	}
 	initial := arrayInitialState(variables)
@@ -84,6 +93,14 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	}
 
 	graph := proc.Graph
+	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
+	outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
+	for _, block := range graph.Blocks {
+		blocks[block.ID] = block
+	}
+	for _, edge := range graph.Edges {
+		outgoing[edge.From] = append(outgoing[edge.From], edge)
+	}
 	inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry: initial}
 	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
 	var findings []Finding
@@ -96,7 +113,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		}
 		delete(queued, id)
 		in := cloneArrayState(inStates[id])
-		block, ok := arrayBlock(*graph, id)
+		block, ok := blocks[id]
 		if !ok {
 			continue
 		}
@@ -120,10 +137,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 				}
 			}
 		}
-		for _, edge := range graph.Edges {
-			if edge.From != id {
-				continue
-			}
+		for _, edge := range outgoing[id] {
 			next := out
 			if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
 				next = in
@@ -151,15 +165,6 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 		}
 	}
 	return findings
-}
-
-func arrayBlock(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
-	for _, block := range graph.Blocks {
-		if block.ID == id {
-			return block, true
-		}
-	}
-	return vbacfg.Block{}, false
 }
 
 func mergeArrayState(states map[vbacfg.BlockID]arrayFlowState, id vbacfg.BlockID, incoming arrayFlowState) bool {
@@ -198,7 +203,7 @@ func meetArrayState(left, right arrayFlowState) arrayFlowState {
 }
 
 func meetArrayValue(left, right arrayValue) arrayValue {
-	out := arrayValue{kind: left.kind, knownArray: left.knownArray, origin: left.origin}
+	out := arrayValue{kind: left.kind, knownArray: left.knownArray, origin: left.origin, dimensions: append([]arrayDimension(nil), left.dimensions...)}
 	if left.kind != right.kind {
 		out.kind = arrayUnknown
 	}
@@ -289,29 +294,40 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		return state, findings
 	}
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
-		name := strings.ToLower(match[2])
-		variable, known := variables[name]
-		old := state[name]
-		dimensions := parseArrayDimensions(match[3], 0)
-		if !known || !variable.isArray || variable.fixed {
-			add("VBA227", match[2]+" is not a dynamic array and cannot be resized with ReDim.", "ReDim requires a dynamic array; fixed-size arrays and scalar values have no resizable allocation state.", "Declare the value as a dynamic array, or remove ReDim and use its declared bounds.")
-		} else if match[1] != "" && (len(old.dimensions) == 0 || !preserveDimensionsSafe(old.dimensions, dimensions)) {
-			add("VBA208", "ReDim Preserve may change a non-final or unknown array dimension.", "VBA can only preserve an array while changing its final dimension, and that cannot be proven when the prior shape is unknown.", "Only change the final dimension, or copy values into a newly sized array explicitly.")
-		}
-		if known && variable.isArray && !variable.fixed {
-			state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, origin: arrayOriginLocal}
+		for _, clause := range splitArgs(match[2]) {
+			clauseMatch := arrayRedimClauseRe.FindStringSubmatch(clause)
+			if len(clauseMatch) == 0 {
+				continue
+			}
+			name := strings.ToLower(clauseMatch[1])
+			variable, known := variables[name]
+			old := state[name]
+			dimensions := parseArrayDimensions(clauseMatch[2], 0)
+			if !known || !variable.isArray || variable.fixed {
+				add("VBA227", clauseMatch[1]+" is not a dynamic array and cannot be resized with ReDim.", "ReDim requires a dynamic array; fixed-size arrays and scalar values have no resizable allocation state.", "Declare the value as a dynamic array, or remove ReDim and use its declared bounds.")
+			} else if match[1] != "" && (len(old.dimensions) == 0 || !preserveDimensionsSafe(old.dimensions, dimensions)) {
+				add("VBA208", "ReDim Preserve may change a non-final or unknown array dimension.", "VBA can only preserve an array while changing its final dimension, and that cannot be proven when the prior shape is unknown.", "Only change the final dimension, or copy values into a newly sized array explicitly.")
+			}
+			if known && variable.isArray && !variable.fixed {
+				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, origin: arrayOriginLocal}
+			}
 		}
 		return state, findings
 	}
 	if match := arrayEraseRe.FindStringSubmatch(text); len(match) > 0 {
-		name := strings.ToLower(match[1])
-		if variable, ok := variables[name]; ok {
-			if variable.fixed {
-				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: append([]arrayDimension(nil), variable.dimensions...), origin: arrayOriginLocal}
-			} else if variable.isArray {
-				state[name] = arrayValue{kind: arrayUnallocated, knownArray: true, origin: arrayOriginLocal}
-			} else if variable.isVariant {
-				state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		for _, target := range splitArgs(match[1]) {
+			name := strings.ToLower(strings.TrimSpace(target))
+			if !arrayEraseNameRe.MatchString(name) {
+				continue
+			}
+			if variable, ok := variables[name]; ok {
+				if variable.fixed {
+					state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: append([]arrayDimension(nil), variable.dimensions...), origin: arrayOriginLocal}
+				} else if variable.isArray {
+					state[name] = arrayValue{kind: arrayUnallocated, knownArray: true, origin: arrayOriginLocal}
+				} else if variable.isVariant {
+					state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+				}
 			}
 		}
 		return state, findings
@@ -338,7 +354,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		if strings.TrimSpace(bound[3]) != "" {
 			dimension, _ = strconv.Atoi(strings.TrimSpace(bound[3]))
 		}
-		if dimension < 1 || dimension > len(value.dimensions) {
+		if dimension < 1 || len(value.dimensions) > 0 && dimension > len(value.dimensions) {
 			add("VBA227", bound[1]+" uses invalid dimension "+strconv.Itoa(dimension)+" for "+variable.name+".", "The requested dimension is outside the array dimensions known at this point.", "Use a valid dimension number for the array, or avoid assuming a shape that is not statically known.")
 		}
 	}
@@ -418,8 +434,8 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	return state, findings
 }
 
-func arrayVariables(file parsedFile, proc sourceProcedure) map[string]arrayVariable {
-	decls := cloneDeclarations(moduleDeclarations(file.Lines, []sourceProcedure{proc}))
+func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]arrayVariable {
+	decls := cloneDeclarations(moduleDecls)
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
 	}
@@ -622,6 +638,9 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 		return arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginRangeValue}, true
 	}
 	name := arrayCallName(rhs)
+	if name == "split" || name == "filter" {
+		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: []arrayDimension{{}}, origin: arrayOriginLocal}, true
+	}
 	if value, ok := state[name]; ok && value.kind == arrayAllocated && value.knownArray {
 		return value, true
 	}
@@ -657,21 +676,78 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 	}
 	candidates := map[string][]candidate{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		procedures := sourceProceduresFromIR(file.IR, file.CFG)
+		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		for _, proc := range procedures {
+			if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+				continue
+			}
 			if proc.Name == "" {
 				continue
 			}
-			variables := arrayVariables(file, proc)
-			state := arrayInitialState(variables)
+			variables := arrayVariables(file, proc, moduleDecls)
 			ctx := analysisContext{arrayReturns: map[string]arrayValue{}}
 			var returns []candidate
-			for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-				text := normalizedCodeLine(file.Lines[line-1])
-				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
-					value, known := arrayExpressionState(rhs, state, ctx)
-					returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray})
+			if proc.Graph == nil {
+				state := arrayInitialState(variables)
+				for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+					text := normalizedCodeLine(file.Lines[line-1])
+					if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
+						value, known := arrayExpressionState(rhs, state, ctx)
+						returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue})
+					}
+					state, _ = (Analyzer{}).arrayTransfer(file, proc, ctx, variables, state, text, line)
 				}
-				state, _ = (Analyzer{}).arrayTransfer(file, proc, ctx, variables, state, text, line)
+			} else {
+				graph := proc.Graph
+				blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
+				outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
+				for _, block := range graph.Blocks {
+					blocks[block.ID] = block
+				}
+				for _, edge := range graph.Edges {
+					outgoing[edge.From] = append(outgoing[edge.From], edge)
+				}
+				inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry: arrayInitialState(variables)}
+				queued := map[vbacfg.BlockID]bool{graph.Entry: true}
+				for len(queued) > 0 {
+					var id vbacfg.BlockID
+					for candidateID := range queued {
+						id = candidateID
+						break
+					}
+					delete(queued, id)
+					in := cloneArrayState(inStates[id])
+					block, ok := blocks[id]
+					if !ok {
+						continue
+					}
+					out := in
+					if block.Statement != nil {
+						line := block.Statement.Range.StartLine
+						if line == 0 {
+							line = block.Range.StartLine
+						}
+						text := block.Statement.Text
+						if strings.TrimSpace(text) == "" && line >= 1 && line <= len(file.Lines) {
+							text = file.Lines[line-1]
+						}
+						if lhs, rhs, indexed, assignmentOK := arrayAssignment(text); assignmentOK && !indexed && strings.EqualFold(lhs, proc.Name) {
+							value, known := arrayExpressionState(rhs, in, ctx)
+							returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue})
+						}
+						out, _ = (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line)
+					}
+					for _, edge := range outgoing[id] {
+						next := out
+						if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
+							next = in
+						}
+						if mergeArrayState(inStates, edge.To, next) {
+							queued[edge.To] = true
+						}
+					}
+				}
 			}
 			if len(returns) == 0 {
 				continue
