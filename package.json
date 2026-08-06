@@ -8,6 +8,7 @@
   "main": "index.js",
   "scripts": {
     "format": "oxfmt",
+    "format:check": "node scripts/dev/check-format.mjs",
     "test": "echo \"Error: no test specified\" && exit 1",
     "docs:dev": "vitepress dev vitepress",
     "docs:build": "vitepress build vitepress",
