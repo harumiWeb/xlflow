@@ -385,6 +385,29 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 	return text
 }
 
+var documentEventSuffixes = map[string]map[string]struct{}{
+	"workbook": {
+		"activate": {}, "addininstall": {}, "addinuninstall": {}, "aftersave": {},
+		"beforeclose": {}, "beforeprint": {}, "beforesave": {}, "deactivate": {},
+		"newchart": {}, "newsheet": {}, "open": {}, "pivottablecloseconnection": {},
+		"pivottableopenconnection": {}, "sheetactivate": {}, "sheetbeforedoubleclick": {},
+		"sheetbeforerightclick": {}, "sheetcalculate": {}, "sheetchange": {},
+		"sheetdeactivate": {}, "sheetfollowhyperlink": {},
+		"sheetpivottableaftervaluechange": {}, "sheetpivottablebeforeallocatechanges": {},
+		"sheetpivottablebeforecommitchanges": {}, "sheetpivottablebeforediscardchanges": {},
+		"sheetpivottableupdate": {}, "sheetselectionchange": {}, "sheettableupdate": {},
+		"sync": {}, "windowactivate": {}, "windowdeactivate": {}, "windowresize": {},
+		"modelchange": {},
+	},
+	"worksheet": {
+		"activate": {}, "beforedoubleclick": {}, "beforerightclick": {}, "calculate": {},
+		"change": {}, "deactivate": {}, "followhyperlink": {},
+		"pivottableaftervaluechange": {}, "pivottablebeforeallocatechanges": {},
+		"pivottablebeforecommitchanges": {}, "pivottablebeforediscardchanges": {},
+		"pivottableupdate": {}, "selectionchange": {}, "tableupdate": {},
+	},
+}
+
 // ClassifyEvent centralizes the event-procedure naming contract used by IR
 // consumers. Event declarations are not passed to this helper as procedures.
 func ClassifyEvent(moduleKind, name string) (bool, string) {
@@ -394,10 +417,10 @@ func ClassifyEvent(moduleKind, name string) (bool, string) {
 	}
 	switch strings.ToLower(moduleKind) {
 	case "document":
-		if strings.HasPrefix(lower, "workbook_") {
+		if isKnownDocumentEvent(lower, "workbook") {
 			return true, "workbook"
 		}
-		if strings.HasPrefix(lower, "worksheet_") {
+		if isKnownDocumentEvent(lower, "worksheet") {
 			return true, "worksheet"
 		}
 	case "form":
@@ -407,6 +430,15 @@ func ClassifyEvent(moduleKind, name string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+func isKnownDocumentEvent(name, kind string) bool {
+	prefix := kind + "_"
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	_, ok := documentEventSuffixes[kind][strings.TrimPrefix(name, prefix)]
+	return ok
 }
 
 func procedureEndNode(node *tree_sitter.Node) *tree_sitter.Node {

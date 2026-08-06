@@ -190,6 +190,13 @@ Private callbackName As String
 	t.Fatalf("missing unknown OnKey reference: %+v", result.DynamicReferences)
 }
 
+func TestStaticStringExpressionHandlesEscapedQuotesInParentheses(t *testing.T) {
+	target, kind := staticStringExpression(`("Main.""Run")`)
+	if kind != "static" || target != `Main."Run` {
+		t.Fatalf("parenthesized escaped-quote literal = %q/%q", target, kind)
+	}
+}
+
 func TestExtractParsedPreservesDefaultRootPathCompatibility(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Main.bas")
 	source := []byte("Public Sub Run()\n    Call Target\nEnd Sub\n")

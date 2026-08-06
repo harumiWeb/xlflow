@@ -196,6 +196,13 @@ func TestAnalyzeReachabilityTreatsAmbiguousRootsAsPossible(t *testing.T) {
 		t.Fatalf("ambiguous roots = confirmed:%#v possible:%#v unreachable:%#v", got.Confirmed, got.Possible, got.Unreachable)
 	}
 	input = SnapshotFromResult(&calls.Result{Symbols: []symbols.Symbol{
+		privateSymbol("Only", "Only.bas", "Run", 1),
+	}})
+	got = AnalyzeReachability(input, ReachabilityRequest{Roots: []Root{{Target: "Run", Confidence: RootConfirmed}}})
+	if len(got.Confirmed) != 1 || got.Confirmed[0].ID.QualifiedName != "Only.Run" || len(got.Possible) != 0 {
+		t.Fatalf("unique unqualified root = confirmed:%#v possible:%#v", got.Confirmed, got.Possible)
+	}
+	input = SnapshotFromResult(&calls.Result{Symbols: []symbols.Symbol{
 		privateSymbol("Other", "Other.bas", "Run", 1),
 	}})
 	got = AnalyzeReachability(input, ReachabilityRequest{Roots: []Root{{Target: "Missing.Run", Confidence: RootConfirmed}}})

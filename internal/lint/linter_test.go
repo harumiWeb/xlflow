@@ -1901,6 +1901,13 @@ End Sub
 			t.Fatalf("cluster context %q does not include %s", clusterContext, name)
 		}
 	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"context":"Unreachable private call cluster:`) {
+		t.Fatalf("VB021 cluster context missing from JSON: %s", encoded)
+	}
 }
 
 func TestLinterVB021KeepsInlineSuppressionLineBased(t *testing.T) {
@@ -2034,6 +2041,8 @@ Private Sub Workbook_Open()
 End Sub
 Private Sub WorkbookHelper()
 End Sub
+Private Sub Workbook_Helper()
+End Sub
 Private Sub DocOrphan()
 End Sub
 `,
@@ -2043,6 +2052,8 @@ Private Sub Worksheet_Change(ByVal Target As Range)
   WorksheetHelper
 End Sub
 Private Sub WorksheetHelper()
+End Sub
+Private Sub Worksheet_Helper()
 End Sub
 Private Sub SheetOrphan()
 End Sub
@@ -2106,7 +2117,7 @@ End Sub
 		t.Fatal(err)
 	}
 	got := issuesByCode(issues, "VB021")
-	for _, name := range []string{"DocOrphan", "SheetOrphan", "EventOrphan", "FormOrphan", "AutoOrphan", "Foo_Bar"} {
+	for _, name := range []string{"DocOrphan", "SheetOrphan", "Workbook_Helper", "Worksheet_Helper", "EventOrphan", "FormOrphan", "AutoOrphan", "Foo_Bar"} {
 		found := false
 		for _, issue := range got {
 			if issue.Symbol == name {

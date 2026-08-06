@@ -377,12 +377,19 @@ func AnalyzeReachability(input Snapshot, request ReachabilityRequest) Reachabili
 		confirmed[keys[0]] = true
 	}
 
+	refsByCaller := map[string][]calls.DynamicReference{}
+	for _, ref := range input.DynamicReferences {
+		if key := dynamicCallerKey(g, ref); key != "" {
+			refsByCaller[key] = append(refsByCaller[key], ref)
+		}
+	}
+
 	propagateConfirmed(g, confirmed)
 	changed := true
 	for changed {
 		changed = false
 		for key := range confirmed {
-			if propagateDynamicReferences(g, key, input.DynamicReferences, confirmed, possible) {
+			if propagateDynamicReferences(g, refsByCaller[key], confirmed, possible) {
 				changed = true
 			}
 		}
@@ -399,7 +406,7 @@ func AnalyzeReachability(input Snapshot, request ReachabilityRequest) Reachabili
 					changed = true
 				}
 			}
-			if propagateDynamicReferences(g, key, input.DynamicReferences, confirmed, possible) {
+			if propagateDynamicReferences(g, refsByCaller[key], confirmed, possible) {
 				changed = true
 			}
 		}
@@ -442,13 +449,9 @@ func propagateConfirmed(g graph, confirmed map[string]bool) {
 	}
 }
 
-func propagateDynamicReferences(g graph, callerKey string, refs []calls.DynamicReference, confirmed, possible map[string]bool) bool {
+func propagateDynamicReferences(g graph, refs []calls.DynamicReference, confirmed, possible map[string]bool) bool {
 	changed := false
 	for _, ref := range refs {
-		if dynamicCallerKey(g, ref) != callerKey {
-			continue
-		}
-		keys := g.dynamicKeys(ref.Target)
 		if ref.Target == "" || ref.Kind != "static" {
 			for key := range g.nodes {
 				if !confirmed[key] && !possible[key] {
@@ -458,6 +461,7 @@ func propagateDynamicReferences(g graph, callerKey string, refs []calls.DynamicR
 			}
 			continue
 		}
+		keys := g.dynamicKeys(ref.Target)
 		for _, key := range keys {
 			if !confirmed[key] && !possible[key] {
 				possible[key] = true
@@ -472,13 +476,21 @@ func dynamicCallerKey(g graph, ref calls.DynamicReference) string {
 	if ref.Caller == nil {
 		return ""
 	}
-	for _, key := range g.byQualified[strings.ToLower(ref.Caller.QualifiedName)] {
+	key, ok := g.lookupCallerKey(ref.Caller.QualifiedName, ref.Caller.Kind, ref.File)
+	if !ok {
+		return ""
+	}
+	return key
+}
+
+func (g graph) lookupCallerKey(qualifiedName, kind, file string) (string, bool) {
+	for _, key := range g.byQualified[strings.ToLower(qualifiedName)] {
 		node := g.nodes[key]
-		if node.ID.Kind == ref.Caller.Kind && node.ID.File == ref.File {
-			return key
+		if node.ID.Kind == kind && node.ID.File == file {
+			return key, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 func (g graph) rootKeys(target string) []string {
@@ -558,13 +570,7 @@ func (g graph) callerKey(call calls.Call) (string, bool) {
 	if call.Caller == nil {
 		return "", false
 	}
-	for _, key := range g.byQualified[strings.ToLower(call.Caller.QualifiedName)] {
-		node := g.nodes[key]
-		if node.ID.Kind == call.Caller.Kind && node.ID.File == call.File {
-			return key, true
-		}
-	}
-	return "", false
+	return g.lookupCallerKey(call.Caller.QualifiedName, call.Caller.Kind, call.File)
 }
 
 func (g graph) walk(root string, downstream bool, maxDepth int) (map[string]int, map[string]Edge) {

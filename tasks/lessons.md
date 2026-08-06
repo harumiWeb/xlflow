@@ -111,3 +111,4 @@
 - For regex-backed VBA diagnostics, evaluate each repeated call occurrence within its single-line `If` branch, accept valid non-identifier `Set` lvalues, and keep remediation valid for the enclosing workbook context such as add-ins.
 - For CFG-based resource ownership, start only from entry-reachable acquisitions, preserve pre-acquisition scalar-handle equivalences, apply assignments only on normal edges, and treat Function-return ownership transfer as complete only at a successful normal exit.
 - In Go tests, add an explicit `return` after `t.Fatal`/`t.Fatalf` nil guards before dereferencing the guarded pointer; newer staticcheck versions may report SA5011 otherwise.
+- Do not classify host callbacks from an event-like prefix alone. Use a centralized known-event allowlist or verified metadata, and add negative tests for underscore-named helpers in host modules.

@@ -953,6 +953,10 @@ var dynamicArgumentSpecs = map[string][]dynamicArgumentSpec{
 
 func dynamicReferencesForIR(site procedureir.CallSite, expressions []procedureir.Expression, parse symbols.ParseSummary) []DynamicReference {
 	call := Call{CallSite: callSiteFromIR(site, parse)}
+	api := dynamicAPIName(call)
+	if call.Caller == nil || len(dynamicArgumentSpecs[api]) == 0 {
+		return nil
+	}
 	return dynamicReferencesForCall(call, argumentTexts(site.Arguments.ExpressionIDs, expressions))
 }
 
@@ -1069,9 +1073,10 @@ func trimOuterParentheses(value string) string {
 func balancedOuterParentheses(value string) bool {
 	depth := 0
 	inString := false
-	for i, r := range value {
-		if r == '"' {
+	for i := 0; i < len(value); i++ {
+		if value[i] == '"' {
 			if inString && i+1 < len(value) && value[i+1] == '"' {
+				i++
 				continue
 			}
 			inString = !inString
@@ -1080,7 +1085,7 @@ func balancedOuterParentheses(value string) bool {
 		if inString {
 			continue
 		}
-		switch r {
+		switch value[i] {
 		case '(':
 			depth++
 		case ')':

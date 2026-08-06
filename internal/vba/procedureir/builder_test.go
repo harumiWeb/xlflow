@@ -127,6 +127,8 @@ func TestBuildSourceClassifiesPropertiesAndEvents(t *testing.T) {
 		{"property set", BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, "Public Property Set Value(ByVal rhs As Object)\nEnd Property\n", ProcedurePropertySet, false, ""},
 		{"workbook", BuildOptions{Path: "ThisWorkbook.cls", ModuleKind: "document"}, "Private Sub Workbook_Open()\nEnd Sub\n", ProcedureSub, true, "workbook"},
 		{"worksheet", BuildOptions{Path: "Sheet1.cls", ModuleKind: "document"}, "Private Sub Worksheet_Change(ByVal Target As Range)\nEnd Sub\n", ProcedureSub, true, "worksheet"},
+		{"workbook helper is not an event", BuildOptions{Path: "ThisWorkbook.cls", ModuleKind: "document"}, "Private Sub Workbook_Helper()\nEnd Sub\n", ProcedureSub, false, ""},
+		{"worksheet helper is not an event", BuildOptions{Path: "Sheet1.cls", ModuleKind: "document"}, "Private Sub Worksheet_Helper()\nEnd Sub\n", ProcedureSub, false, ""},
 		{"form", BuildOptions{Path: "Dialog.frm", ModuleKind: "form"}, "Private Sub Submit_Click()\nEnd Sub\n", ProcedureSub, true, "userform"},
 		{"form test", BuildOptions{Path: "Dialog.frm", ModuleKind: "form"}, "Private Sub Test_Click()\nEnd Sub\n", ProcedureSub, false, ""},
 		{"auto", BuildOptions{Path: "Module1.bas"}, "Public Sub Auto_Open()\nEnd Sub\n", ProcedureSub, true, "auto"},

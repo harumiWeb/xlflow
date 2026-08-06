@@ -16,7 +16,8 @@ The root set is built before private procedures are classified. It includes:
   modules;
 - test procedures in standard modules;
 - `Auto_Open` and `Auto_Close`;
-- `Workbook_*` and `Worksheet_*` procedures in document modules;
+- recognized `Workbook_*` and `Worksheet_*` host-event procedures in document
+  modules; the prefix alone does not make an arbitrary helper an event;
 - UserForm event procedures and control event procedures when form metadata is
   available; and
 - procedures whose names match a `WithEvents` field callback in the same class.
@@ -58,7 +59,10 @@ private-only connected component of the unreachable confirmed-edge graph is
 reported as one cluster context on its representative diagnostic; the
 declarations in the component still retain individual locations so existing
 inline suppression remains line-based. Dynamic references never become graph
-edges and therefore cannot create confirmed clusters.
+edges and therefore cannot create confirmed clusters. The representative's
+existing optional `context` field contains the cluster names; this is part of
+the existing issue JSON shape and does not replace the per-declaration issue
+locations.
 
 The diagnostic ID, warning severity, configuration key,
 `detect_unused_private_procedures` opt-in, inline suppression behavior, and
