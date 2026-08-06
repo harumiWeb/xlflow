@@ -25,20 +25,21 @@ import (
 )
 
 type Finding struct {
-	Code         string   `json:"code"`
-	Severity     string   `json:"severity"`
-	File         string   `json:"file"`
-	Module       string   `json:"module,omitempty"`
-	Procedure    string   `json:"procedure,omitempty"`
-	Line         int      `json:"line"`
-	Column       int      `json:"column,omitempty"`
-	EndLine      int      `json:"-"`
-	EndColumn    int      `json:"-"`
-	ScopeEndLine int      `json:"scope_end_line,omitempty"`
-	Message      string   `json:"message"`
-	Reason       string   `json:"reason"`
-	Suggestion   string   `json:"suggestion"`
-	NearbyCode   []string `json:"nearby_code,omitempty"`
+	Code         string           `json:"code"`
+	Severity     string           `json:"severity"`
+	File         string           `json:"file"`
+	Module       string           `json:"module,omitempty"`
+	Procedure    string           `json:"procedure,omitempty"`
+	Line         int              `json:"line"`
+	Column       int              `json:"column,omitempty"`
+	EndLine      int              `json:"-"`
+	EndColumn    int              `json:"-"`
+	ScopeEndLine int              `json:"scope_end_line,omitempty"`
+	Message      string           `json:"message"`
+	Reason       string           `json:"reason"`
+	Suggestion   string           `json:"suggestion"`
+	NearbyCode   []string         `json:"nearby_code,omitempty"`
+	DataFlow     *DataFlowContext `json:"data_flow,omitempty"`
 }
 
 type Result struct {
@@ -739,7 +740,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -842,6 +843,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
+	findings = append(findings, a.dataFlowFindings(file, proc)...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -1080,6 +1082,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectEventHandlerReentry {
 		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
 	}
+	findings = append(findings, a.dataFlowFindings(file, proc)...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}

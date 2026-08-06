@@ -133,7 +133,7 @@ exclude = ["src/modules/Tests/**"]
 		!cfg.Analyze.DetectApplicationStateRestore || !cfg.Analyze.DetectErrorHandlerFallthrough ||
 		!cfg.Analyze.ForbidUnqualifiedExcelObjects || !cfg.Analyze.DetectRedimPreserveDimension ||
 		!cfg.Analyze.DetectObjectArrayComparison || !cfg.Analyze.DetectExcelObjectMemberMismatch ||
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard || !cfg.Analyze.DetectPublicAPITypeSafety {
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard || !cfg.Analyze.DetectPublicAPITypeSafety || !cfg.Analyze.DetectUntrustedDataFlow {
 		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
 	}
 	if cfg.Analyze.DetectDictionaryCollectionGuard ||
@@ -409,7 +409,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "vba224", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -463,11 +463,14 @@ disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "V
 	if cfg.Analyze.DetectHardcodedSecrets {
 		t.Fatal("expected VBA223/detect_hardcoded_secrets to be disabled")
 	}
+	if cfg.Analyze.DetectUntrustedDataFlow {
+		t.Fatal("expected VBA224/detect_untrusted_data_flow to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224", got)
 	}
 }
 

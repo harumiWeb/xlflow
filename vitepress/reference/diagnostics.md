@@ -75,6 +75,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA221`](#vba221) | analyze | warning  | interprocedural | yes     | Application state changed by local helper          |
 | [`VBA222`](#vba222) | analyze | warning  | project-wide    | yes     | Public API type safety                             |
 | [`VBA223`](#vba223) | analyze | warning  | file-local      | yes     | Likely hardcoded secret                            |
+| [`VBA224`](#vba224) | analyze | warning  | procedure-local | yes     | Untrusted data reaches a sensitive API             |
 
 ## VB001
 
@@ -1317,3 +1318,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                         |
 | Real-time editor diagnostic | yes                        |
 | Fix available               | no                         |
+
+## VBA224
+
+**Untrusted data reaches a sensitive API.** Conservative procedure-local analysis found potentially untrusted data flowing into a sensitive API.
+
+| Property                    | Value                        |
+| --------------------------- | ---------------------------- |
+| Family                      | `analyze`                    |
+| Category                    | `security`                   |
+| Default severity            | `warning`                    |
+| Scope                       | `procedure-local`            |
+| Precision                   | `medium`                     |
+| Enabled by default          | yes                          |
+| Configuration               | `detect_untrusted_data_flow` |
+| Inline suppression          | yes                          |
+| Blocks source preflight     | no                           |
+| Real-time editor diagnostic | yes                          |
+| Fix available               | no                           |
