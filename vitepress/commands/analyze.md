@@ -75,6 +75,9 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA217` | warning       | A last-row calculation has an implicit root or unstable boundary strategy.   |
 | `VBA218` | warning       | An Excel API failure contract is consumed without its required guard.        |
 | `VBA219` | warning       | A local Workbook or VBA file handle can exit without a matching Close.       |
+| `VBA220` | warning       | An Excel or UserForm event handler can re-enter itself or a related event.    |
+| `VBA221` | warning       | A local helper can leave an Application property changed for its caller.      |
+| `VBA222` | warning       | A public API exposes an inaccessible, ambiguous, or unresolved type.          |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 

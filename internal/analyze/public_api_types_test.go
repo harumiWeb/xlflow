@@ -63,6 +63,12 @@ End Property
 Private Property Let Value(ByVal value As PrivatePayload)
 End Property
 
+Private Property Get InternalValue() As MissingPrivateType
+End Property
+
+Private Property Let InternalValue(ByVal value As MissingPrivateType)
+End Property
+
 Public Event Changed(ByVal value As PrivatePayload)
 `)
 
@@ -98,6 +104,9 @@ Public Event Changed(ByVal value As PrivatePayload)
 	if internal := findingsWithProcedure(got, "InternalMember"); len(internal) != 0 {
 		t.Fatalf("members of an unexposed class must not be treated as public API: %+v", internal)
 	}
+	if internal := findingsWithProcedure(got, "InternalValue"); len(internal) != 0 {
+		t.Fatalf("private property accessors must not be treated as public API: %+v", internal)
+	}
 	if blocking := findingsByCode(BlockingFindings(got), "VBA222"); len(blocking) != 0 {
 		t.Fatalf("VBA222 must not block preflight: %+v", blocking)
 	}
@@ -129,6 +138,35 @@ End Sub
 	got := findingsByCode(findings, "VBA222")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "ambiguous") || !strings.Contains(got[0].Message, "Duplicate") {
 		t.Fatalf("ambiguous project type finding = %+v", got)
+	}
+}
+
+func TestVBA222CarriesTypeDBLoadWarnings(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := filepath.Join(dir, "typelib")
+	if err := os.MkdirAll(typeDBDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(typeDBDir, "broken.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	writeModule(t, dir, "Main.bas", `Public Sub Run()
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, warning := range result.Warnings {
+		if warning["code"] == "type_db_load_warning" && strings.Contains(warning["message"].(string), "generated type database could not be loaded") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("type DB load warning was not carried into the analysis result: %+v", result.Warnings)
 	}
 }
 

@@ -1283,7 +1283,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA222
 
-**Public API type safety.** A public procedure, property, or event exposes an inaccessible or unresolved type.
+**Public API type safety.** A public API declaration or exposed type uses an inaccessible, ambiguous, or unresolved type.
 
 | Property                    | Value                           |
 | --------------------------- | ------------------------------- |

@@ -301,6 +301,9 @@ func (a Analyzer) propertyVisibilityFindings(file parsedFile, index *apiTypeInde
 		}
 		getter := file.IR.Procedures[group.get[0]].Symbol
 		writer := file.IR.Procedures[group.write[0]].Symbol
+		if !publicAPIProcedure(getter) && !publicAPIProcedure(writer) {
+			continue
+		}
 		if procedureVisibilityRank(getter.Visibility) == procedureVisibilityRank(writer.Visibility) {
 			continue
 		}

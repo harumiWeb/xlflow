@@ -769,6 +769,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_db_init`
 - `type_db_init_later`
 - `type_db_init_skipped`
+- `type_db_load_warning`
 - `type_db_missing`
 - `type_db_refresh`
 - `type_db_stale`

@@ -299,6 +299,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	if analysis.Config.Analyze.DetectEventHandlerReentry {
 		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
+	var warnings []map[string]any
 	if needsTypeDB {
 		if analysis.Config.Analyze.DetectPublicAPITypeSafety {
 			loaded, err := typedb.LoadForRuntime("")
@@ -306,6 +307,11 @@ func (a Analyzer) RunResult() (Result, error) {
 				return Result{}, err
 			}
 			analysis.typeDB = loaded.DB
+			for _, warning := range loaded.Warnings {
+				warnings = append(warnings, map[string]any{
+					"code": "type_db_load_warning", "message": warning,
+				})
+			}
 		} else {
 			typeDB, err := vbadb.LoadBuiltin()
 			if err != nil {
@@ -350,10 +356,11 @@ func (a Analyzer) RunResult() (Result, error) {
 		findings = append(findings, analysis.byRefArgumentFindings(file)...)
 	}
 	sortFindings(findings)
-	directives, warnings, err := suppression.DirectivesForFiles(a.RootDir, files)
+	directives, directiveWarnings, err := suppression.DirectivesForFiles(a.RootDir, files)
 	if err != nil {
 		return Result{}, err
 	}
+	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
 	return Result{Findings: findings, Warnings: warnings}, nil
