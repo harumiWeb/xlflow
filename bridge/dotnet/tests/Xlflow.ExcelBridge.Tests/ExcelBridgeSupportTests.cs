@@ -178,6 +178,59 @@ public sealed class ExcelBridgeSupportTests
         Assert.True(chart.PasteCalled);
     }
 
+    [Fact]
+    public void ConfirmOracleProcessCleanup_AllowsDelayedOwnedExit()
+    {
+        var owned = new OwnedExcelProcess(1234, new DateTime(2026, 8, 6, 10, 0, 0, DateTimeKind.Utc));
+        var discoverCalls = 0;
+        var exitCalls = 0;
+        var result = ExcelBridgeSupport.ConfirmOracleProcessCleanup(
+            new List<OwnedExcelProcess> { owned },
+            Array.Empty<OwnedExcelProcess>(),
+            () => ++discoverCalls == 1
+                ? new[] { owned }
+                : Array.Empty<OwnedExcelProcess>(),
+            _ => ++exitCalls >= 2,
+            _ => { });
+
+        Assert.True(result.Confirmed);
+        Assert.Equal(2, result.DrainAttempts);
+        Assert.Equal(2, exitCalls);
+        Assert.Single(result.OwnedProcesses);
+        Assert.True(result.OwnedProcesses[0].ExitConfirmed);
+        Assert.Null(result.FailureStage);
+    }
+
+    [Fact]
+    public void ConfirmOracleProcessCleanup_RemainsFailedAfterUnexpectedProcess()
+    {
+        var owned = new OwnedExcelProcess(1234, new DateTime(2026, 8, 6, 10, 0, 0, DateTimeKind.Utc));
+        var unrelated = new OwnedExcelProcess(5678, new DateTime(2026, 8, 6, 10, 1, 0, DateTimeKind.Utc));
+        var discoverCalls = 0;
+        var result = ExcelBridgeSupport.ConfirmOracleProcessCleanup(
+            new List<OwnedExcelProcess> { owned },
+            Array.Empty<OwnedExcelProcess>(),
+            () => ++discoverCalls == 1
+                ? new[] { owned, unrelated }
+                : Array.Empty<OwnedExcelProcess>(),
+            _ => true,
+            _ => { });
+
+        Assert.False(result.Confirmed);
+        Assert.Equal("unexpected-process", result.FailureStage);
+        Assert.Single(result.OwnedProcesses);
+        Assert.Equal(1, result.RemainingProcesses);
+    }
+
+    [Fact]
+    public void SameOwnedProcess_DoesNotMatchKnownStartTimeWithUnknownStartTime()
+    {
+        var known = new OwnedExcelProcess(1234, new DateTime(2026, 8, 6, 10, 0, 0, DateTimeKind.Utc));
+        var unknown = new OwnedExcelProcess(1234);
+
+        Assert.False(ExcelBridgeSupport.SameOwnedProcess(known, unknown));
+    }
+
     public sealed class FakeExcel
     {
         public FakeExcel(params FakeWorkbook[] workbooks)

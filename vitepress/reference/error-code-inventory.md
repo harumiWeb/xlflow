@@ -538,7 +538,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `operator_spacing`
 - `option_statement`
 - `optional_modifier`
+- `oracle_already_running`
 - `oracle_failure`
+- `oracle_lock_failed`
 - `original_error`
 - `original_workbook_path`
 - `output_file_exists`

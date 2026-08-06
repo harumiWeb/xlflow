@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Stabilized the local VBE oracle cleanup path by closing the disposable
+  workbook before quitting Excel, allowing delayed owned-process exit within a
+  bounded drain, preserving fail-closed behavior for unexpected Excel
+  processes, and emitting structured cleanup diagnostics. Oracle batches now
+  use a crash-released Windows cross-process lock and reject concurrent local
+  runs with `oracle_already_running`.
 - Added Excel-free VBE oracle binding coverage validation. Rejected fixtures
   can now declare accepted `negative_controls`; bound rules require rejected
   positive evidence and accepted forbidden coverage across all declared

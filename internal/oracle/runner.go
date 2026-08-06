@@ -18,7 +18,7 @@ import (
 const (
 	CommandName                  = "vbe-oracle"
 	DefaultTimeout               = 5 * time.Minute
-	bridgeShutdownMargin         = 30 * time.Second
+	bridgeShutdownMargin         = 60 * time.Second
 	OutcomeAccepted              = "accepted"
 	OutcomeRejected              = "rejected"
 	OutcomeInfrastructureFailure = "infrastructure_failure"
@@ -26,6 +26,13 @@ const (
 
 type BridgeExecutor interface {
 	Execute(context.Context, excelbridge.Request) (excelbridge.Response, error)
+}
+
+// BatchLock serializes the complete local oracle batch. Excel/VBE state is a
+// single-user resource, so locking individual cases would still allow the
+// controls and selected cases from two runs to interleave.
+type BatchLock interface {
+	Acquire(context.Context) (func(), error)
 }
 
 type Options struct {
@@ -36,6 +43,7 @@ type Options struct {
 	DiagnosticMeaning map[string]string
 	Timeout           time.Duration
 	Executor          BridgeExecutor
+	Lock              BatchLock
 	Now               func() time.Time
 }
 
@@ -67,6 +75,7 @@ type CaseResult struct {
 	ExcelProcessID   int                  `json:"excel_process_id,omitempty"`
 	Metadata         VerificationMetadata `json:"metadata,omitempty"`
 	Error            string               `json:"error,omitempty"`
+	Cleanup          map[string]any       `json:"cleanup,omitempty"`
 }
 
 type ExitError struct {
@@ -109,6 +118,7 @@ type bridgeObservation struct {
 	ExcelProcessID   int                  `json:"excel_process_id,omitempty"`
 	Metadata         VerificationMetadata `json:"metadata,omitempty"`
 	Excel            map[string]any       `json:"excel,omitempty"`
+	Cleanup          map[string]any       `json:"cleanup,omitempty"`
 	Error            string               `json:"error,omitempty"`
 	ErrorCode        string               `json:"error_code,omitempty"`
 }
@@ -158,6 +168,24 @@ func runValidated(ctx context.Context, opts Options) (Report, error) {
 	if opts.PromoteObserved && len(opts.CaseIDs) == 0 {
 		return failReport(&report, 2, "--promote-observed requires one or more explicit --case values", "promotion_invalid")
 	}
+	if opts.Lock == nil {
+		lock, lockErr := newBatchLock()
+		if lockErr != nil {
+			return failReport(&report, 3, lockErr.Error(), "oracle_lock_failed")
+		}
+		opts.Lock = lock
+	}
+	release, lockErr := opts.Lock.Acquire(ctx)
+	if lockErr != nil {
+		kind := "oracle_lock_failed"
+		message := lockErr.Error()
+		if errors.Is(lockErr, errOracleAlreadyRunning) {
+			kind = "oracle_already_running"
+			message = oracleAlreadyRunningMessage
+		}
+		return failReport(&report, 3, message, kind)
+	}
+	defer release()
 	// Controls always run first, even when --case selects another fixture.
 	controlIDs := []string{manifest.Controls.Accept, manifest.Controls.Reject}
 	seen := map[string]bool{}
@@ -298,7 +326,7 @@ func runEntry(parent context.Context, root string, entry ManifestEntry, timeout 
 	if metadata.Locale == "" {
 		metadata.Locale = stringValue(obs.Excel, "locale")
 	}
-	result := CaseResult{ID: c.ID, Expected: c.VBE.Expected, Outcome: obs.Outcome, EvidencePhase: obs.EvidencePhase, LastStage: obs.LastStage, CompileInvoked: obs.CompileInvoked, CleanupConfirmed: obs.CleanupConfirmed, DurationMS: obs.DurationMS, Dialog: obs.Dialog, Location: obs.Location, ExcelProcessID: obs.ExcelProcessID, Metadata: metadata, Error: obs.Error}
+	result := CaseResult{ID: c.ID, Expected: c.VBE.Expected, Outcome: obs.Outcome, EvidencePhase: obs.EvidencePhase, LastStage: obs.LastStage, CompileInvoked: obs.CompileInvoked, CleanupConfirmed: obs.CleanupConfirmed, DurationMS: obs.DurationMS, Dialog: obs.Dialog, Location: obs.Location, ExcelProcessID: obs.ExcelProcessID, Metadata: metadata, Cleanup: obs.Cleanup, Error: obs.Error}
 	if result.DurationMS == 0 {
 		result.DurationMS = time.Since(started).Milliseconds()
 	}

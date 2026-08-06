@@ -18,6 +18,14 @@ The command only terminates the Excel process it created and recorded. If a run
 reports an unconfirmed cleanup or an infrastructure failure, inspect Task
 Manager before starting another run and do not promote a fixture.
 
+The oracle acquires a per-user Windows cross-process lock for the complete
+batch, including the known controls, selected cases, and any promotion. A
+second local oracle process fails immediately with the structured
+`oracle_already_running` infrastructure error. The lock is an OS-owned file
+lock, so normal process termination and crash termination release it without
+stale-lock cleanup or user confirmation. The lock does not participate in
+normal xlflow workbook coordination.
+
 Dialog detection is tied to the target Excel process/VBE owner chain through
 the existing Win32/UI Automation watcher. The oracle does not use
 `SendKeys` or keyboard-focus scripting.
@@ -50,6 +58,49 @@ To run the health controls explicitly in strict mode:
   --case known-compile-reject `
   --strict
 ```
+
+The per-case timeout applies to the VBE probe. The runner reserves an
+additional bounded cleanup margin for the bridge to close the disposable
+workbook, quit Excel, release COM/UI references, drain owned-process shutdown,
+and emit structured output before the outer process deadline.
+
+## Cleanup diagnostics and recovery
+
+Each bridge observation includes a `cleanup` object. It reports the owned
+Excel process identity, whether exit was confirmed for each owned process, the
+number of drain attempts, remaining dialog/process counts, and the failure
+stage. Unrelated Excel processes are not listed and are never terminated.
+
+For example:
+
+```json
+{
+  "cleanup": {
+    "confirmed": false,
+    "owned_processes": [
+      {
+        "pid": 1234,
+        "start_time": "2026-08-06T10:00:00.0000000Z",
+        "exit_confirmed": false,
+        "ownership_basis": "captured-process-pid"
+      }
+    ],
+    "drain_attempts": 3,
+    "remaining_windows": 0,
+    "remaining_processes": 1,
+    "failure_stage": "process-exit-confirmation"
+  }
+}
+```
+
+A `unexpected-process` failure means that a newly observed Excel process
+could not be proven to belong to the oracle. It is intentionally left alone;
+the run remains failed even if that process disappears during a later drain.
+A `process-exit-confirmation` failure means the captured process could not be
+proven to have exited within the bounded drain. After either failure, inspect
+Task Manager for the recorded owned PID and any dialogs, confirm that no
+oracle-owned Excel remains, and rerun the controls. Do not remove lock files
+manually and do not promote fixtures from that report.
 
 ## Fixture format
 
