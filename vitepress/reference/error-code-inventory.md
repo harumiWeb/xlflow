@@ -183,6 +183,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_non_short_circuit_object_guard`
 - `detect_object_array_comparison`
 - `detect_object_use_before_set`
+- `detect_public_api_type_safety`
 - `detect_range_find_nothing_check`
 - `detect_redim_preserve_dimension`
 - `detect_resource_leaks`

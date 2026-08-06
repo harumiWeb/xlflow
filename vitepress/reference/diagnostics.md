@@ -73,6 +73,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA219`](#vba219) | analyze | warning  | procedure-local | yes     | Unreleased workbook or VBA file handle             |
 | [`VBA220`](#vba220) | analyze | warning  | interprocedural | yes     | Event handler re-entry hazard                      |
 | [`VBA221`](#vba221) | analyze | warning  | interprocedural | yes     | Application state changed by local helper          |
+| [`VBA222`](#vba222) | analyze | warning  | project-wide    | yes     | Public API type safety                             |
 
 ## VB001
 
@@ -1279,3 +1280,21 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                      |
 | Real-time editor diagnostic | no                                      |
 | Fix available               | no                                      |
+
+## VBA222
+
+**Public API type safety.** A public procedure, property, or event exposes an inaccessible or unresolved type.
+
+| Property                    | Value                           |
+| --------------------------- | ------------------------------- |
+| Family                      | `analyze`                       |
+| Category                    | `type-safety`                   |
+| Default severity            | `warning`                       |
+| Scope                       | `project-wide`                  |
+| Precision                   | `medium`                        |
+| Enabled by default          | yes                             |
+| Configuration               | `detect_public_api_type_safety` |
+| Inline suppression          | yes                             |
+| Blocks source preflight     | no                              |
+| Real-time editor diagnostic | no                              |
+| Fix available               | no                              |

@@ -13,6 +13,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/gui"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
@@ -169,6 +170,7 @@ type parameterInfo struct {
 	Name    string
 	Type    string
 	Passing string
+	Range   vbaast.Range
 }
 
 type parsedFile struct {
@@ -232,6 +234,7 @@ func (a Analyzer) RunResult() (Result, error) {
 		return Result{}, err
 	}
 	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectByRefArgumentMismatch
+	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		source, err := os.ReadFile(file)
@@ -296,12 +299,20 @@ func (a Analyzer) RunResult() (Result, error) {
 	if analysis.Config.Analyze.DetectEventHandlerReentry {
 		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
-	if needsTypedExcelAnalysis {
-		typeDB, err := vbadb.LoadBuiltin()
-		if err != nil {
-			return Result{}, err
+	if needsTypeDB {
+		if analysis.Config.Analyze.DetectPublicAPITypeSafety {
+			loaded, err := typedb.LoadForRuntime("")
+			if err != nil {
+				return Result{}, err
+			}
+			analysis.typeDB = loaded.DB
+		} else {
+			typeDB, err := vbadb.LoadBuiltin()
+			if err != nil {
+				return Result{}, err
+			}
+			analysis.typeDB = typeDB
 		}
-		analysis.typeDB = typeDB
 	}
 	if analysis.Config.Analyze.DetectByRefArgumentMismatch {
 		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
@@ -315,10 +326,17 @@ func (a Analyzer) RunResult() (Result, error) {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
 		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
 	}
+	var publicAPITypeIndex *apiTypeIndex
+	if analysis.Config.Analyze.DetectPublicAPITypeSafety {
+		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB)
+	}
 	for _, file := range parsedFiles {
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
 			file.Root = view.Root
 			findings = append(findings, analysis.analyzeParsedFile(file, ctx, projectEffects)...)
+			if publicAPITypeIndex != nil {
+				findings = append(findings, analysis.publicAPITypeFindings(file, publicAPITypeIndex)...)
+			}
 			findings = append(findings, analysis.errorValueWrapperFindings(file)...)
 			return nil
 		}); err != nil {
@@ -1102,7 +1120,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 		params := make([]parameterInfo, len(procedure.Symbol.Parameters))
 		for i, parameter := range procedure.Symbol.Parameters {
 			params[i] = parameterInfo{
-				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing,
+				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing, Range: parameter.Range,
 			}
 		}
 		source := sourceProcedure{
