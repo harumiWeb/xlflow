@@ -44,6 +44,12 @@ The rule consumes the normalized procedure IR and conservative normal CFG
 paths. It does not perform interprocedural shape propagation, open Excel, or
 block source preflight.
 
+The implementation now shares the analyzer's array lifecycle state transfer
+with issue #444's `VBA227` rule. This ADR remains the ownership boundary for
+Range.Value-specific shape diagnostics: Range-origin values may participate in
+the common allocation model, but `VBA226` continues to own their shape and
+destination diagnostics and duplicate lifecycle findings are suppressed.
+
 ## Consequences
 
 - Common vertical, horizontal, rectangular, and dynamic-range mistakes are

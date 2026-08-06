@@ -3371,6 +3371,137 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayLifecycleAndDimensionSafety(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function BuildValues() As Variant
+  Dim result() As Long
+  ReDim result(1 To 2, 1 To 2)
+  result(1, 1) = 1
+  BuildValues = result
+End Function
+
+Public Sub Run()
+  Dim fixed(1 To 2) As Long
+  Dim values() As Long
+  Dim unknown As Variant
+  Dim objects() As Worksheet
+  fixed(1) = 1
+  values(0) = 1
+  ReDim values(0 To 1, 0 To 1)
+  values(0, 0) = 1
+  ReDim Preserve values(1 To 3, 0 To 1)
+  Erase values
+  If LBound(values, 2) > 0 Then Debug.Print "bad"
+  unknown = ExternalArray()
+  unknown(0) = 1
+  values = BuildValues()
+  values(1, 1) = 2
+  ReDim fixed(1 To 3)
+  ReDim objects(0 To 0)
+  objects(0) = Worksheets(1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	for _, line := range []int{15, 20, 22, 25} {
+		found := false
+		for _, finding := range got {
+			if finding.Line == line {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected VBA227 on line %d, got %+v", line, got)
+		}
+	}
+	if got208 := findingsByCode(findings, "VBA208"); len(got208) != 1 || got208[0].Line != 18 {
+		t.Fatalf("expected one non-final ReDim Preserve warning, got %+v", got208)
+	}
+	if got101 := findingsByCode(findings, "VBA101"); len(got101) != 1 || got101[0].Line != 27 {
+		t.Fatalf("expected missing Set for object array element, got %+v", got101)
+	}
+	if got227 := findingsByCode(findings, "VBA227"); len(got227) != 4 {
+		t.Fatalf("unexpected VBA227 duplicates or safe-path findings: %+v", got227)
+	}
+}
+
+func TestAnalyzerArrayLifecycleSuppressesRangeValueDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1:B2").Value2
+  Debug.Print values(1, 1)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("Range.Value shape diagnostics must remain owned by VBA226: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayLifecycleUsesConservativeBranchAndVariantStates(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal shouldAllocate As Boolean)
+  Dim values() As Long
+  Dim value As Variant
+  If shouldAllocate Then ReDim values(0 To 0)
+  values(0) = 1
+  value = Array(1, 2)
+  value(0) = 1
+  value = 42
+  value(0) = 1
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 10 {
+		t.Fatalf("expected conservative branch and Variant diagnostics, got %+v", got)
+	}
+}
+
+func TestVBA227BatchAndRealtimeResultsMatch(t *testing.T) {
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  Dim values() As Long
+  values(0) = 1 ' xlflow:disable-line VBA227
+  ReDim values(0 To 1)
+  values(1) = 2
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := findingsByCode(realtime, "VBA227"), findingsByCode(batch, "VBA227"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("batch/realtime VBA227 findings differ:\nbatch=%+v\nrealtime=%+v", want, got)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("inline suppression should hide the only VBA227 finding: %+v", batch)
+	}
+}
+
 func TestAnalyzerArrayComparisonIgnoresElementsAndProcedureHeaders(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

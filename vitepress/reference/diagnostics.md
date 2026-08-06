@@ -78,6 +78,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA224`](#vba224) | analyze | warning  | procedure-local | yes     | Untrusted data reaches a sensitive API             |
 | [`VBA225`](#vba225) | analyze | warning  | interprocedural | yes     | Excel cell access inside loop                      |
 | [`VBA226`](#vba226) | analyze | warning  | procedure-local | yes     | Unsafe Range.Value array shape assumption          |
+| [`VBA227`](#vba227) | analyze | warning  | interprocedural | yes     | Array lifecycle and dimension safety               |
 
 ## VB001
 
@@ -1518,3 +1519,23 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                               |
 | Real-time editor diagnostic | yes                              |
 | Fix available               | no                               |
+
+## VBA227
+
+**Array lifecycle and dimension safety.** An array may be unallocated, accessed with an invalid dimension or bound, resized unsafely, or used without a provable array value.
+
+| Property                    | Value                           |
+| --------------------------- | ------------------------------- |
+| Family                      | `analyze`                       |
+| Category                    | `runtime-safety`                |
+| Default severity            | `warning`                       |
+| Supported severities        | `warning`                       |
+| Surfaces                    | `analyze`, `lsp`                |
+| Scope                       | `interprocedural`               |
+| Precision                   | `medium`                        |
+| Enabled by default          | yes                             |
+| Configuration               | `detect_array_lifecycle_safety` |
+| Inline suppression          | yes                             |
+| Blocks source preflight     | no                              |
+| Real-time editor diagnostic | yes                             |
+| Fix available               | no                              |

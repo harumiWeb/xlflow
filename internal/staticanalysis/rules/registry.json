@@ -1440,6 +1440,26 @@
       "configuration_key": "detect_range_value_array_shape",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA227",
+      "title": "Array lifecycle and dimension safety",
+      "description": "An array may be unallocated, accessed with an invalid dimension or bound, resized unsafely, or used without a provable array value.",
+      "family": "analyze",
+      "category": "runtime-safety",
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "interprocedural",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba227",
+      "configurable": true,
+      "configuration_key": "detect_array_lifecycle_safety",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

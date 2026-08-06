@@ -13,7 +13,7 @@ VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
-VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226`)
+VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -106,6 +106,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	valueShape, ok := Lookup("VBA226")
 	if !ok || valueShape.DefaultSeverity != SeverityWarning || !valueShape.DefaultEnabled || !valueShape.Configurable || valueShape.ConfigurationKey != "detect_range_value_array_shape" || valueShape.PreflightBlocking || !valueShape.InlineSuppressible || !valueShape.Realtime || valueShape.Scope != ScopeProcedureLocal || valueShape.Precision != PrecisionMedium || valueShape.Category != CategoryRuntimeSafety {
 		t.Fatalf("unexpected VBA226 metadata: %+v, %v", valueShape, ok)
+	}
+	arrayLifecycle, ok := Lookup("VBA227")
+	if !ok || arrayLifecycle.Family != FamilyAnalyze || arrayLifecycle.Category != CategoryRuntimeSafety || arrayLifecycle.DefaultSeverity != SeverityWarning || !reflect.DeepEqual(arrayLifecycle.SupportedSeverities, []RuleSeverity{SeverityWarning}) || !reflect.DeepEqual(arrayLifecycle.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) || !arrayLifecycle.DefaultEnabled || arrayLifecycle.Scope != ScopeInterprocedural || !arrayLifecycle.Realtime || arrayLifecycle.Precision != PrecisionMedium || !arrayLifecycle.Configurable || arrayLifecycle.ConfigurationKey != "detect_array_lifecycle_safety" || !arrayLifecycle.InlineSuppressible || arrayLifecycle.PreflightBlocking {
+		t.Fatalf("unexpected VBA227 metadata: %+v, %v", arrayLifecycle, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {
