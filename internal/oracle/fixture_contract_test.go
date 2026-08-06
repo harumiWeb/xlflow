@@ -126,7 +126,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 23 || report.UnboundFixtures != 21 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 23 || report.BoundFixtures != 3 || report.PartialFixtures != 2 || report.UnboundFixtures != 16 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 }

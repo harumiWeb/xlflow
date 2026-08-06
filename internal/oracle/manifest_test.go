@@ -135,6 +135,11 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.Analysis.BindingNote = analysisNote("positive contract is pending")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}},
+		{name: "partially-bound pending contract", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.BindingNote = analysisNote("contract cannot be expressed yet")
+		}},
 		{name: "bound rejected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.RuleCodes = []string{"VBA101"}
@@ -273,12 +278,12 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 		{name: "unsupported severity", prepare: func(c *Case) {
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "error"}}
 		}, wantErr: true, errSubstr: "unsupported severity"},
-		{name: "partially-bound rule code needs contract", prepare: func(c *Case) {
+		{name: "partially-bound contract needs declared rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.BindingNote = analysisNote("pending")
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
-		}, wantErr: true, errSubstr: "expected or forbidden diagnostic contract"},
+		}, wantErr: true, errSubstr: "partially-bound diagnostic code"},
 		{name: "bound contract needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.RuleCodes = []string{"VBA101"}
