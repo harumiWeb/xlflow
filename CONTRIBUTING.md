@@ -132,6 +132,32 @@ Include the executed oracle case IDs in the pull request, or state why an
 oracle run was not applicable. See [`docs/specs/vbe-oracle.md`](docs/specs/vbe-oracle.md)
 for fixture format, promotion, prerequisites, and the PR checklist.
 
+For a compile-error-equivalent diagnostic, use this binding workflow:
+
+1. Search the existing oracle corpus before creating a new fixture.
+2. Add or identify a minimal VBE-rejected fixture.
+3. Add or identify an adjacent VBE-accepted control.
+4. Run the known controls and the focused oracle cases sequentially.
+5. Promote only confirmed observations with verified cleanup.
+6. Implement the diagnostic from confirmed VBA behavior.
+7. Add the expected diagnostic contract to rejected fixtures.
+8. Add the forbidden contract to accepted controls and list those IDs in the
+   rejected fixture's `analysis.negative_controls`.
+9. Mark the relationship `bound` only when all declared analyzer surfaces are
+   protected; otherwise use `partially-bound` with a binding note.
+10. Run the Excel-free contracts and coverage report, then record rule codes,
+    rejected IDs, accepted control IDs, and executed oracle IDs in the PR.
+
+The coverage check is deterministic and does not open Excel:
+
+```powershell
+go test ./internal/oracle -run TestOracleBindingCoverage -v
+```
+
+Malformed pairings and incomplete `bound` rules fail normal tests. Historical
+`unbound` fixtures are reported but are not failures until their bindings are
+migrated.
+
 ## Release preflight
 
 Before a release that touches workbook automation, VBA import/export, run/test behavior, session handling, or other Excel COM paths, do not rely on CI alone.

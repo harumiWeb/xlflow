@@ -43,6 +43,15 @@ The oracle is never called by production xlflow commands, deterministic tests,
 or GitHub Actions. Contributors changing static-analysis semantics must run
 the relevant focused cases locally and record their IDs in the PR.
 
+Binding metadata remains fixture-local. A rejected fixture may list accepted
+`negative_controls`; Go validates the complete corpus and requires every bound
+rule to have rejected expected evidence plus accepted forbidden evidence. The
+referenced controls must cover all declared diagnostic surfaces, while
+historical unbound fixtures are reported without becoming an initial CI gate.
+This keeps the relationship reviewable beside the source that needs the
+false-positive protection and makes rule-to-control coverage queryable without
+launching Excel.
+
 ## Consequences
 
 - Analyzer changes can cite empirical VBE compile evidence while normal tests
@@ -55,6 +64,9 @@ the relevant focused cases locally and record their IDs in the PR.
   contamination at the cost of slower fixture runs.
 - VBE evidence must remain separate from policy and maintainability rule
   ownership; accepted VBA may still produce xlflow warnings.
+- Positive/negative coverage catches analyzer drift across future bindings while
+  preserving the Excel-free CI boundary; the trade-off is that a fixture must
+  remain `partially-bound` until every declared surface has an accepted control.
 
 ## Alternatives considered
 
@@ -85,6 +97,7 @@ the relevant focused cases locally and record their IDs in the PR.
 ## Related
 
 - Issue #502
+- Issue #514
 - `docs/adr/ADR-0008-dotnet-excel-bridge.md`
 - `docs/adr/ADR-0010-hybrid-excel-dialog-watcher.md`
 - `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`

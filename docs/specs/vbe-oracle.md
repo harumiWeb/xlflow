@@ -114,6 +114,50 @@ fixture is connected to an implemented rule, keep it `unbound` and do not alter
 the VBE expectation to satisfy an analyzer test. Binding notes must be omitted
 when unnecessary; an explicitly empty or whitespace-only note is invalid.
 
+## Positive/negative binding pairs
+
+Rejected fixtures may identify the accepted fixtures that protect their rules
+from false positives:
+
+```json
+{
+  "analysis": {
+    "binding_status": "bound",
+    "rule_codes": ["VBAxxx"],
+    "negative_controls": ["optional-argument-omitted", "known-named-argument"],
+    "expected_diagnostics": [{ "code": "VBAxxx", "surfaces": ["analyze", "lsp"] }]
+  }
+}
+```
+
+`negative_controls` is valid only on rejected `partially-bound` or `bound`
+fixtures. Each ID must name a distinct, existing, VBE-accepted, bound fixture;
+self-references, rejected controls, duplicate IDs, and cycles are invalid. The
+accepted fixture must forbid the same rule code. A bound rejected fixture is
+complete only when the union of its referenced controls' forbidden surfaces
+covers every surface in its positive contract. When a contract omits surfaces,
+the rule registry's supported surfaces are used for this comparison.
+
+The corpus validator also checks that every bound rule has rejected positive
+evidence and an accepted negative control. Existing historical `unbound` and
+`partially-bound` fixtures remain visible in the report and do not fail CI by
+themselves; malformed relationships and incomplete `bound` rules do fail.
+
+## Binding coverage report
+
+Run the Excel-free deterministic report with:
+
+```powershell
+go test ./internal/oracle -run TestOracleBindingCoverage -v
+```
+
+The test reports fixture state counts, complete and incomplete rule counts,
+sorted unbound/partially-bound fixture IDs, and sorted rule-to-case and
+surface coverage. The committed corpus currently reports 23 asserted fixtures,
+21 `unbound`, 2 `not-applicable`, and no bound rules. The report is emitted
+before a validation failure so missing positive/negative evidence remains
+visible in CI logs.
+
 ## Outcomes and strict mode
 
 Only `accepted` and `rejected` are VBA evidence. A compile dialog associated
@@ -170,13 +214,19 @@ When changing static-analysis semantics (including call/argument validation,
 type inference, object/`Set` diagnostics, parser interpretation, severity, or
 LSP projections):
 
-1. Decide whether the behavior depends on actual VBE semantics.
-2. Add or update an `observe` fixture if there is no existing evidence.
-3. Run both known controls and the focused oracle case IDs locally.
-4. Promote only accepted/rejected observations with confirmed cleanup.
-5. Run deterministic Go and .NET tests.
-6. Include the executed oracle case IDs, or a reason for non-applicability, in
-   the pull request description.
+1. Search existing oracle fixtures before creating new evidence.
+2. Add or update a minimal rejected `observe` fixture when needed.
+3. Add or identify one or more adjacent accepted controls.
+4. Run both known controls and the focused oracle case IDs locally.
+5. Promote only accepted/rejected observations with confirmed cleanup.
+6. Implement the diagnostic using confirmed VBA behavior.
+7. Add `expected_diagnostics` to rejected fixtures.
+8. Add `forbidden_diagnostics` and `negative_controls` to accepted/rejected
+   binding pairs, respectively.
+9. Mark fixtures `bound` only after all declared surfaces are covered; keep
+   incomplete work `partially-bound` with a note.
+10. Run Excel-free contracts and the coverage report, then record rule codes
+    and all executed case IDs in the pull request.
 
 Oracle infrastructure failures are stop-the-line failures for agents and
 contributors. Do not change analyzer behavior or promote fixtures based on a
@@ -191,6 +241,14 @@ cleanup.
       `<case-id-1>`, `<case-id-2>`
 - [ ] A VBE oracle run was not applicable because:
       `<reason>`
+- [ ] Rejected fixtures contain expected diagnostics and `negative_controls`.
+- [ ] Accepted controls forbid the bound rule codes on all declared surfaces.
+- [ ] Rule codes:
+      `<VBAxxx>`
+- [ ] Rejected cases:
+      `<case-id>`
+- [ ] Accepted controls:
+      `<control-id>`
 ```
 
 The oracle remains local-only until an appropriate Excel-installed self-hosted
