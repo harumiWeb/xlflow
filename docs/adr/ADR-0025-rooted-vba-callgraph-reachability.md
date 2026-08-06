@@ -20,10 +20,15 @@ uncertain or string-based dispatch into false confirmed dependencies.
 
 ## Decision
 
-Add a rooted reachability layer above the existing call graph. Build roots from
-the configured entry point, standard-module macros and tests, host events,
-UserForm/control metadata, and `WithEvents` callback handlers. Propagate only
-uniquely matched project-local calls as confirmed reachability to a fixed point.
+Add a rooted reachability layer above the existing call graph. Build confirmed
+roots from the configured entry point, argument-free standard-module macros
+and tests, host events, UserForm/control metadata, and `WithEvents` callback
+handlers. Treat other public or implicitly public standard-module procedures
+(`Sub`, `Function`, and `Property`) as possible API roots because Excel,
+worksheet formulas, and external VBA callers are outside the project graph.
+Propagate only uniquely matched project-local calls as confirmed reachability
+to a fixed point, and propagate the same edges from possible roots as possible
+reachability.
 
 Represent `Application.OnTime`, `Application.OnKey`, `Application.Run`, and
 `CallByName` callback names as `DynamicReference` values separate from normal
@@ -55,6 +60,9 @@ key, opt-in behavior, and JSON issue shape remain unchanged.
 
 - Host entry points and test procedures no longer depend on a textual caller
   being present in source.
+- Public helper libraries, including scaffolded `Xlflow` modules, no longer
+  produce false `VB021` findings for private helpers that are reachable from
+  externally callable APIs.
 - Dynamic callback targets avoid false positives without pretending to be
   confirmed graph edges.
 - Unresolved dynamic calls can reduce `VB021` precision substantially, but only
@@ -77,6 +85,10 @@ key, opt-in behavior, and JSON issue shape remain unchanged.
    unrelated findings; suppression is scoped to reachable callers.
 4. **Report only one issue for an entire cluster** - Rejected because it would
    break declaration-line inline suppression and make fixes less local.
+5. **Exclude bundled `Xlflow` modules by path or module name** - Rejected
+   because it would hide genuinely dead private code in helper modules and
+   would not generalize to user-authored public libraries. Public API roots
+   express the reachability reason without a framework-specific exemption.
 
 ## Evidence
 

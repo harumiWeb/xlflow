@@ -13,7 +13,11 @@ The root set is built before private procedures are classified. It includes:
 
 - the configured `[project].entry` when it resolves uniquely;
 - public or implicitly public, argument-free `Sub` procedures in standard
-  modules;
+  modules as confirmed macro roots;
+- other public or implicitly public `Sub`, `Function`, and `Property`
+  procedures in standard modules as possible API roots, because callers from
+  Excel, worksheet formulas, or external VBA are not present in the project
+  call graph;
 - test procedures in standard modules;
 - `Auto_Open` and `Auto_Close`;
 - recognized `Workbook_*` and `Worksheet_*` host-event procedures in document
@@ -24,7 +28,9 @@ The root set is built before private procedures are classified. It includes:
 
 An entry that cannot be resolved exactly is matched against procedure-name
 candidates as a possible root. Ambiguous roots are possible roots, never
-confirmed roots.
+confirmed roots. Possible roots propagate confirmed project call edges as
+possible reachability, so private helpers behind an externally callable API
+are not reported as definitely unreachable.
 
 ## Confirmed and possible reachability
 

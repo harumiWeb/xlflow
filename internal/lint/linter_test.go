@@ -2028,6 +2028,33 @@ End Sub
 	})
 }
 
+func TestLinterVB021TreatsPublicStandardModuleAPIsAsPossibleRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Api.bas", `Option Explicit
+Public Function PublicApi(ByVal value As String) As String
+  PublicApi = PrivateHelper(value)
+End Function
+
+Private Function PrivateHelper(ByVal value As String) As String
+  PrivateHelper = value
+End Function
+
+Private Sub Orphan()
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Entry = "Missing.Run"
+	cfg.Lint.DetectUnusedPrivateProcedures = true
+	issues, err := (Linter{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB021")
+	if len(got) != 1 || got[0].Symbol != "Orphan" {
+		t.Fatalf("public standard-module API reachability = %+v", got)
+	}
+}
+
 func TestLinterVB021RecognizesEventsAndWithEventsHandlers(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

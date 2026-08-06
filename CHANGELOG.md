@@ -17,6 +17,9 @@ All notable changes to xlflow will be documented in this file.
 - Improved opt-in `VB021` to analyze project call-graph roots, host events, tests,
   `WithEvents` handlers, UserForm metadata, and dynamic callbacks before
   reporting unreachable private procedures.
+- Improved opt-in `VB021` to treat externally callable public standard-module
+  APIs as possible roots, preventing false warnings for private helpers in
+  scaffolded and user-authored helper libraries.
 - Strengthened opt-in `VBA210` return-path analysis to cover `Function` and
   `Property Get` CFG exits, early exits, error-handler paths, shared cleanup,
   dominating assignments, object/value return assignment syntax, and

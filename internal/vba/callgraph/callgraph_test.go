@@ -234,6 +234,26 @@ func TestAnalyzeReachabilityHandlesRecursiveDiamondWithoutDuplicates(t *testing.
 	}
 }
 
+func TestAnalyzeReachabilityTerminatesWhenPossibleRootCallsConfirmedNode(t *testing.T) {
+	input := &calls.Result{
+		Symbols: []symbols.Symbol{
+			{Name: "Run", Kind: "sub", Visibility: "Public", Module: "Main", File: "Main.bas", StartLine: 1, StartColumn: 1},
+			{Name: "PublicApi", Kind: "function", Visibility: "Public", Module: "Api", File: "Api.bas", StartLine: 1, StartColumn: 1},
+		},
+		Calls: []calls.Call{
+			matchedKind("Api", "Api.bas", "PublicApi", "function", "Main", "Main.bas", "Run", "sub", 1, 2),
+		},
+	}
+
+	got := AnalyzeReachability(SnapshotFromResult(input), ReachabilityRequest{Roots: []Root{
+		{Target: "Main.Run", Confidence: RootConfirmed},
+		{Target: "Api.PublicApi", Confidence: RootPossible},
+	}})
+	if !hasReachabilityNode(got.Confirmed, "Main.Run") || len(got.Possible) != 1 || !hasReachabilityNode(got.Possible, "Api.PublicApi") {
+		t.Fatalf("possible root reachability = confirmed:%#v possible:%#v unreachable:%#v", got.Confirmed, got.Possible, got.Unreachable)
+	}
+}
+
 func privateSymbol(module, file, name string, line int) symbols.Symbol {
 	sym := symbol(module, file, name, line)
 	sym.Visibility = "Private"

@@ -70,12 +70,18 @@ func buildRoots(opts Options) ([]callgraph.Root, error) {
 			target := sym.Module + "." + sym.Name
 			lowerName := strings.ToLower(sym.Name)
 			public := !strings.EqualFold(sym.Visibility, "Private")
+			standard := strings.EqualFold(file.ModuleKind, "standard")
+			publicMacro := standard && public && sym.Kind == "sub" && len(sym.Parameters) == 0
+			testProcedure := standard && public && testdiscover.IsTestProcedure(sym)
 
-			if strings.EqualFold(file.ModuleKind, "standard") && public && sym.Kind == "sub" && len(sym.Parameters) == 0 {
+			if publicMacro {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: "public macro"})
 			}
-			if strings.EqualFold(file.ModuleKind, "standard") && public && testdiscover.IsTestProcedure(sym) {
+			if testProcedure {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: "test procedure"})
+			}
+			if standard && public && !publicMacro && !testProcedure {
+				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootPossible, Reason: "public standard-module API"})
 			}
 			if event, kind := procedureir.ClassifyEvent(file.ModuleKind, sym.Name); event {
 				roots = append(roots, callgraph.Root{Target: target, Confidence: callgraph.RootConfirmed, Reason: kind + " event"})

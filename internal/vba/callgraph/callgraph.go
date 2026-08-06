@@ -401,7 +401,7 @@ func AnalyzeReachability(input Snapshot, request ReachabilityRequest) Reachabili
 			}
 			for _, edge := range g.out[key] {
 				next := edge.Callee.String()
-				if !possible[next] {
+				if !confirmed[next] && !possible[next] {
 					possible[next] = true
 					changed = true
 				}
