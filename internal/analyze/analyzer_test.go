@@ -3512,10 +3512,32 @@ End Sub
 	if len(got) != 2 {
 		t.Fatalf("expected only the two accesses after Erase to report, got %+v", got)
 	}
+	expected := map[int]string{25: "leftValues", 26: "rightValues"}
 	for _, finding := range got {
-		if !strings.Contains(finding.Message, "leftValues") && !strings.Contains(finding.Message, "rightValues") {
+		name, ok := expected[finding.Line]
+		if !ok || !strings.Contains(finding.Message, name) {
 			t.Fatalf("unexpected VBA227 finding after multi-target Erase: %+v", finding)
 		}
+	}
+}
+
+func TestAnalyzerArrayLifecycleAcceptsReDimTypeSuffixAndUnknownDimension(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal dimension As Long)
+  Dim values() As Long
+  ReDim values(0 To 1) As Long
+  values(1) = 1
+  If UBound(values, dimension) > 0 Then Debug.Print "ok"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("typed ReDim and an unknown dimension expression should not produce VBA227: %+v", got)
 	}
 }
 

@@ -65,7 +65,7 @@ type arrayUse struct {
 
 var (
 	arrayRedimRe       = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
-	arrayRedimClauseRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*)\)\s*$`)
+	arrayRedimClauseRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_]\w*(?:\s*\(\s*\))?)?\s*$`)
 	arrayEraseRe       = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
 	arrayEraseNameRe   = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
 	arrayBoundCallRe   = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
@@ -92,7 +92,47 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		return a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial)
 	}
 
-	graph := proc.Graph
+	var findings []Finding
+	seen := map[string]bool{}
+	walkArrayCFG(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
+		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line)
+		for _, finding := range issues {
+			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
+			if !seen[key] {
+				seen[key] = true
+				findings = append(findings, finding)
+			}
+		}
+		return out
+	})
+	return findings
+}
+
+func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState) []Finding {
+	var findings []Finding
+	seen := map[string]bool{}
+	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		var issues []Finding
+		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line)
+		for _, finding := range issues {
+			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
+			if !seen[key] {
+				seen[key] = true
+				findings = append(findings, finding)
+			}
+		}
+	}
+	return findings
+}
+
+// walkArrayCFG owns the common allocation-state worklist used by both the
+// procedure findings pass and the array-return summary pass. Exceptional and
+// uncertain edges retain the predecessor's input state because the statement
+// may not have completed before control leaves the block.
+func walkArrayCFG(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState) {
+	if graph == nil {
+		return
+	}
 	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
 	outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
 	for _, block := range graph.Blocks {
@@ -103,8 +143,6 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	}
 	inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry: initial}
 	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
-	var findings []Finding
-	seen := map[string]bool{}
 	for len(queued) > 0 {
 		var id vbacfg.BlockID
 		for candidate := range queued {
@@ -124,18 +162,10 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 				line = block.Range.StartLine
 			}
 			text := block.Statement.Text
-			if strings.TrimSpace(text) == "" && line >= 1 && line <= len(file.Lines) {
-				text = file.Lines[line-1]
+			if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
+				text = lines[line-1]
 			}
-			var issues []Finding
-			out, issues = a.arrayTransfer(file, proc, ctx, variables, in, text, line)
-			for _, finding := range issues {
-				key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
-				if !seen[key] {
-					seen[key] = true
-					findings = append(findings, finding)
-				}
-			}
+			out = visit(text, line, in)
 		}
 		for _, edge := range outgoing[id] {
 			next := out
@@ -147,24 +177,6 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 			}
 		}
 	}
-	return findings
-}
-
-func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState) []Finding {
-	var findings []Finding
-	seen := map[string]bool{}
-	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-		var issues []Finding
-		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line)
-		for _, finding := range issues {
-			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
-			if !seen[key] {
-				seen[key] = true
-				findings = append(findings, finding)
-			}
-		}
-	}
-	return findings
 }
 
 func mergeArrayState(states map[vbacfg.BlockID]arrayFlowState, id vbacfg.BlockID, incoming arrayFlowState) bool {
@@ -351,8 +363,14 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		dimension := 1
-		if strings.TrimSpace(bound[3]) != "" {
-			dimension, _ = strconv.Atoi(strings.TrimSpace(bound[3]))
+		if argument := strings.TrimSpace(bound[3]); argument != "" {
+			parsed, err := strconv.Atoi(argument)
+			if err != nil {
+				// A variable or expression is an unknown dimension, not an
+				// invalid one. No contradiction can be proven statically.
+				continue
+			}
+			dimension = parsed
 		}
 		if dimension < 1 || len(value.dimensions) > 0 && dimension > len(value.dimensions) {
 			add("VBA227", bound[1]+" uses invalid dimension "+strconv.Itoa(dimension)+" for "+variable.name+".", "The requested dimension is outside the array dimensions known at this point.", "Use a valid dimension number for the array, or avoid assuming a shape that is not statically known.")
@@ -689,66 +707,18 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 			ctx := analysisContext{arrayReturns: map[string]arrayValue{}}
 			var returns []candidate
 			if proc.Graph == nil {
-				state := arrayInitialState(variables)
-				for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-					text := normalizedCodeLine(file.Lines[line-1])
-					if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
-						value, known := arrayExpressionState(rhs, state, ctx)
-						returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue})
-					}
-					state, _ = (Analyzer{}).arrayTransfer(file, proc, ctx, variables, state, text, line)
-				}
-			} else {
-				graph := proc.Graph
-				blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
-				outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
-				for _, block := range graph.Blocks {
-					blocks[block.ID] = block
-				}
-				for _, edge := range graph.Edges {
-					outgoing[edge.From] = append(outgoing[edge.From], edge)
-				}
-				inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry: arrayInitialState(variables)}
-				queued := map[vbacfg.BlockID]bool{graph.Entry: true}
-				for len(queued) > 0 {
-					var id vbacfg.BlockID
-					for candidateID := range queued {
-						id = candidateID
-						break
-					}
-					delete(queued, id)
-					in := cloneArrayState(inStates[id])
-					block, ok := blocks[id]
-					if !ok {
-						continue
-					}
-					out := in
-					if block.Statement != nil {
-						line := block.Statement.Range.StartLine
-						if line == 0 {
-							line = block.Range.StartLine
-						}
-						text := block.Statement.Text
-						if strings.TrimSpace(text) == "" && line >= 1 && line <= len(file.Lines) {
-							text = file.Lines[line-1]
-						}
-						if lhs, rhs, indexed, assignmentOK := arrayAssignment(text); assignmentOK && !indexed && strings.EqualFold(lhs, proc.Name) {
-							value, known := arrayExpressionState(rhs, in, ctx)
-							returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue})
-						}
-						out, _ = (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line)
-					}
-					for _, edge := range outgoing[id] {
-						next := out
-						if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
-							next = in
-						}
-						if mergeArrayState(inStates, edge.To, next) {
-							queued[edge.To] = true
-						}
-					}
-				}
+				// Without a CFG the scan cannot distinguish conditional from
+				// unconditional return assignments, so leave the summary unknown.
+				continue
 			}
+			walkArrayCFG(proc.Graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
+				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
+					value, known := arrayExpressionState(rhs, in, ctx)
+					returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue})
+				}
+				out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line)
+				return out
+			})
 			if len(returns) == 0 {
 				continue
 			}
