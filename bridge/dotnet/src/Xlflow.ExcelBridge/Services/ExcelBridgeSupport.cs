@@ -1620,7 +1620,7 @@ internal static class ExcelBridgeSupport
             {
                 attemptConfirmed &= EnsureOwnedExcelProcessExited(ownedProcess);
             }
-            confirmed = attemptConfirmed;
+            confirmed = confirmed && attemptConfirmed;
             if (confirmed && !discovered)
             {
                 break;

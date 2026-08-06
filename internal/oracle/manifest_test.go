@@ -39,6 +39,20 @@ func writeFixture(t *testing.T, expected string) (string, Manifest) {
 	if err := os.WriteFile(filepath.Join(rejectDir, "case.json"), rejectBody, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	strictDir := filepath.Join(root, "cases", "sample-strict")
+	if err := os.MkdirAll(strictDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(strictDir, "Main.bas"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	strict := caseJSON
+	strict.ID = "sample-strict"
+	strictBody, _ := json.Marshal(strict)
+	if err := os.WriteFile(filepath.Join(strictDir, "case.json"), strictBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Cases = append(manifest.Cases, ManifestEntry{ID: "sample-strict", Path: "cases/sample-strict/case.json"})
 	manifestBody, _ := json.Marshal(manifest)
 	manifestPath := filepath.Join(root, "manifest.json")
 	if err := os.WriteFile(manifestPath, manifestBody, 0o644); err != nil {

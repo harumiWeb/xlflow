@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"runtime"
 	"testing"
 	"time"
 
@@ -77,12 +76,9 @@ func (f *oracleFakeBridge) Execute(_ context.Context, req excelbridge.Request) (
 }
 
 func TestRunControlsStrictAndPromotion(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("oracle runner execution requires Windows with Excel")
-	}
 	manifestPath, _ := writeFixture(t, ExpectedObserve)
 	bridge := &oracleFakeBridge{}
-	report, err := Run(context.Background(), Options{ManifestPath: manifestPath, CaseIDs: []string{"sample"}, PromoteObserved: true, DiagnosticMeaning: map[string]string{"sample": MeaningSpecification}, Executor: bridge, Timeout: time.Second})
+	report, err := runValidated(context.Background(), Options{ManifestPath: manifestPath, CaseIDs: []string{"sample"}, PromoteObserved: true, DiagnosticMeaning: map[string]string{"sample": MeaningSpecification}, Executor: bridge, Timeout: time.Second})
 	if err != nil {
 		t.Fatalf("run promotion failed: %v report=%+v", err, report)
 	}
@@ -112,12 +108,9 @@ func TestPromoteObservedRequiresExcelMetadata(t *testing.T) {
 }
 
 func TestRunRejectsImplicitPromotionBeforeBridgeExecution(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("oracle runner execution requires Windows with Excel")
-	}
 	manifestPath, _ := writeFixture(t, ExpectedObserve)
 	bridge := &oracleFakeBridge{}
-	_, err := Run(context.Background(), Options{ManifestPath: manifestPath, PromoteObserved: true, Executor: bridge, Timeout: time.Second})
+	_, err := runValidated(context.Background(), Options{ManifestPath: manifestPath, PromoteObserved: true, Executor: bridge, Timeout: time.Second})
 	if err == nil {
 		t.Fatal("expected implicit promotion validation error")
 	}
@@ -127,5 +120,26 @@ func TestRunRejectsImplicitPromotionBeforeBridgeExecution(t *testing.T) {
 	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != 2 {
 		t.Fatalf("err=%v, want exit code 2", err)
+	}
+}
+
+func TestRunValidatedStrictMismatchReturnsExitCodeOne(t *testing.T) {
+	manifestPath, _ := writeFixture(t, ExpectedObserve)
+	report, err := runValidated(context.Background(), Options{
+		ManifestPath: manifestPath,
+		CaseIDs:      []string{"sample-strict"},
+		Strict:       true,
+		Executor:     &oracleFakeBridge{},
+		Timeout:      time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected strict expectation mismatch")
+	}
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.Code != 1 {
+		t.Fatalf("err=%v, want exit code 1", err)
+	}
+	if report.Error == nil || report.Error.Code != "expectation_mismatch" {
+		t.Fatalf("report=%+v, want expectation_mismatch", report)
 	}
 }

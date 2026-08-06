@@ -120,6 +120,13 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	if runtime.GOOS != "windows" {
 		return failReport(&report, 3, "oracle is available only on Windows with Excel installed", "unsupported_host")
 	}
+	return runValidated(ctx, opts)
+}
+
+// runValidated contains the deterministic orchestration after the Windows
+// host gate. Tests can inject a fake bridge here without requiring Excel.
+func runValidated(ctx context.Context, opts Options) (Report, error) {
+	report := Report{SchemaVersion: SchemaVersion, Status: "ok"}
 	if opts.ManifestPath == "" {
 		opts.ManifestPath = filepath.Join("testdata", "vbe-oracle", "manifest.json")
 	}
