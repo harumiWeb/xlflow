@@ -19,7 +19,8 @@
     "diagnostic_meaning": "compile-error"
   },
   "analysis": {
-    "binding_status": "unbound"
+    "binding_status": "unbound",
+    "binding_note": "No production diagnostic currently covers unresolved local As <Type> declarations; VBA222 is limited to public API signatures and is not applicable. See follow-up issue #519."
   },
   "provenance": {
     "status": "asserted",
