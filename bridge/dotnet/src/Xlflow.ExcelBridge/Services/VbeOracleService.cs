@@ -84,6 +84,8 @@ public sealed class VbeOracleService : IVbeOracleService
         var stage = "startup";
         var cleanupConfirmed = true;
         var tempCleanupConfirmed = true;
+        var remainingWindows = 0;
+        var cleanupDiagnostics = OracleCleanupDiagnostics.NotAttempted;
         IReadOnlyList<OwnedExcelProcess> baselineExcelProcesses = Array.Empty<OwnedExcelProcess>();
         var ownedExcelProcesses = new List<OwnedExcelProcess>();
         OracleObservation? observation = null;
@@ -167,6 +169,11 @@ public sealed class VbeOracleService : IVbeOracleService
                 cancellationToken,
                 selectionLocator);
             observation = ClassifyInvocation(invocation, stopwatch.Elapsed, excelMetadata);
+            if (invocation.Dialog is not null &&
+                !string.Equals(invocation.Dialog.Kind, "compile", StringComparison.OrdinalIgnoreCase))
+            {
+                remainingWindows = 1;
+            }
             if (observation.Outcome == "accepted")
             {
                 var lingeringDialogs = new DialogWatcher().CaptureOracleDialogs(
@@ -180,6 +187,7 @@ public sealed class VbeOracleService : IVbeOracleService
                 var lingeringDialog = lingeringDialogs.Count == 0 ? null : lingeringDialogs[0];
                 if (lingeringDialog is not null)
                 {
+                    remainingWindows = 1;
                     observation = InfrastructureObservation(
                         "oracle_unknown_modal",
                         "A modal dialog remained after VBE Compile completed.",
@@ -215,11 +223,12 @@ public sealed class VbeOracleService : IVbeOracleService
                         ownedExcelProcesses.Add(process);
                     }
                 }
-                cleanupConfirmed = ExcelBridgeSupport.ReleaseOracleExcelAndConfirmExit(
+                cleanupDiagnostics = ExcelBridgeSupport.ReleaseOracleExcelAndGetDiagnostics(
                     workbook,
                     excel,
                     ownedExcelProcesses,
                     baselineExcelProcesses);
+                cleanupConfirmed = cleanupDiagnostics.Confirmed;
                 workbook = null;
                 excel = null;
             }
@@ -237,6 +246,11 @@ public sealed class VbeOracleService : IVbeOracleService
             }
         }
 
+        if (remainingWindows > 0)
+        {
+            cleanupDiagnostics = cleanupDiagnostics with { RemainingWindows = remainingWindows };
+        }
+
         observation ??= InfrastructureObservation(
             "oracle_worker_output_invalid",
             "The VBE oracle did not produce an observation.",
@@ -248,6 +262,13 @@ public sealed class VbeOracleService : IVbeOracleService
         // deliberately overrides an otherwise accepted or rejected result.
         if (!cleanupConfirmed || !tempCleanupConfirmed)
         {
+            cleanupDiagnostics = cleanupDiagnostics with
+            {
+                Confirmed = false,
+                FailureStage = !cleanupConfirmed
+                    ? cleanupDiagnostics.FailureStage ?? "process-exit-confirmation"
+                    : "temporary-directory",
+            };
             observation = InfrastructureObservation(
                 "oracle_cleanup_unconfirmed",
                 !cleanupConfirmed
@@ -258,7 +279,7 @@ public sealed class VbeOracleService : IVbeOracleService
                 excelMetadata);
         }
 
-        return BuildResponse(request, plan, observation, excelProcessId, cleanupConfirmed && tempCleanupConfirmed);
+        return BuildResponse(request, plan, observation, excelProcessId, cleanupConfirmed && tempCleanupConfirmed, cleanupDiagnostics);
     }
 
     private static OraclePlan DecodePlan(string planJson64)
@@ -511,7 +532,13 @@ public sealed class VbeOracleService : IVbeOracleService
         };
     }
 
-    private static BridgeResponse BuildResponse(BridgeRequest request, OraclePlan plan, OracleObservation observation, int processId, bool cleanupConfirmed)
+    private static BridgeResponse BuildResponse(
+        BridgeRequest request,
+        OraclePlan plan,
+        OracleObservation observation,
+        int processId,
+        bool cleanupConfirmed,
+        OracleCleanupDiagnostics cleanupDiagnostics)
     {
         var oracle = new Dictionary<string, object?>
         {
@@ -523,6 +550,7 @@ public sealed class VbeOracleService : IVbeOracleService
             ["duration_ms"] = Math.Max(0L, (long)observation.Duration.TotalMilliseconds),
             ["compile_invoked"] = observation.CompileInvoked,
             ["cleanup_confirmed"] = cleanupConfirmed,
+            ["cleanup"] = CleanupPayload(cleanupDiagnostics),
             ["excel_process_id"] = processId > 0 ? processId : null,
             ["excel"] = observation.Excel,
             ["metadata"] = new Dictionary<string, object?>
@@ -570,7 +598,32 @@ public sealed class VbeOracleService : IVbeOracleService
     private static BridgeResponse InfrastructureResponse(BridgeRequest request, OraclePlan plan, string code, string message, string stage, int processId, TimeSpan elapsed, Dictionary<string, object?> excel)
     {
         var observation = InfrastructureObservation(code, message, stage, elapsed, excel);
-        return BuildResponse(request, plan, observation, processId, cleanupConfirmed: false);
+        return BuildResponse(
+            request,
+            plan,
+            observation,
+            processId,
+            cleanupConfirmed: false,
+            cleanupDiagnostics: OracleCleanupDiagnostics.NotAttempted with { Confirmed = false, FailureStage = "not-attempted" });
+    }
+
+    private static Dictionary<string, object?> CleanupPayload(OracleCleanupDiagnostics cleanup)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["confirmed"] = cleanup.Confirmed,
+            ["owned_processes"] = cleanup.OwnedProcesses.Select(process => new Dictionary<string, object?>
+            {
+                ["pid"] = process.ProcessId,
+                ["start_time"] = process.StartTime?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                ["exit_confirmed"] = process.ExitConfirmed,
+                ["ownership_basis"] = process.OwnershipBasis,
+            }).ToArray(),
+            ["drain_attempts"] = cleanup.DrainAttempts,
+            ["remaining_windows"] = cleanup.RemainingWindows,
+            ["remaining_processes"] = cleanup.RemainingProcesses,
+            ["failure_stage"] = cleanup.FailureStage,
+        };
     }
 
     private static OracleObservation InfrastructureObservation(string code, string message, string stage, TimeSpan elapsed, IReadOnlyDictionary<string, object?> excel, DialogSnapshot? dialog = null)

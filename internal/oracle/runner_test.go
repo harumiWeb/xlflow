@@ -75,12 +75,30 @@ func (f *oracleFakeBridge) Execute(_ context.Context, req excelbridge.Request) (
 	return excelbridge.Response{Stdout: body}, nil
 }
 
+type oracleFakeBatchLock struct {
+	acquireErr error
+	acquired   bool
+	released   bool
+}
+
+func (f *oracleFakeBatchLock) Acquire(context.Context) (func(), error) {
+	if f.acquireErr != nil {
+		return nil, f.acquireErr
+	}
+	f.acquired = true
+	return func() { f.released = true }, nil
+}
+
 func TestRunControlsStrictAndPromotion(t *testing.T) {
 	manifestPath, _ := writeFixture(t, ExpectedObserve)
 	bridge := &oracleFakeBridge{}
-	report, err := runValidated(context.Background(), Options{ManifestPath: manifestPath, CaseIDs: []string{"sample"}, PromoteObserved: true, DiagnosticMeaning: map[string]string{"sample": MeaningSpecification}, Executor: bridge, Timeout: time.Second})
+	lock := &oracleFakeBatchLock{}
+	report, err := runValidated(context.Background(), Options{ManifestPath: manifestPath, CaseIDs: []string{"sample"}, PromoteObserved: true, DiagnosticMeaning: map[string]string{"sample": MeaningSpecification}, Executor: bridge, Lock: lock, Timeout: time.Second})
 	if err != nil {
 		t.Fatalf("run promotion failed: %v report=%+v", err, report)
+	}
+	if !lock.acquired || !lock.released {
+		t.Fatalf("lock lifecycle acquired=%v released=%v", lock.acquired, lock.released)
 	}
 	if len(bridge.calls) != 2 || bridge.calls[0] != "sample" || bridge.calls[1] != "sample-reject" {
 		t.Fatalf("calls=%v", bridge.calls)
@@ -92,6 +110,30 @@ func TestRunControlsStrictAndPromotion(t *testing.T) {
 	}
 	if c.VBE.Expected != ExpectedAccepted || c.Provenance.Status != "asserted" || c.Analysis.BindingStatus != BindingNotApplicable {
 		t.Fatalf("promotion=%+v", c)
+	}
+}
+
+func TestRunValidatedRejectsConcurrentOracleBatch(t *testing.T) {
+	manifestPath, _ := writeFixture(t, ExpectedObserve)
+	lock := &oracleFakeBatchLock{acquireErr: errOracleAlreadyRunning}
+	report, err := runValidated(context.Background(), Options{
+		ManifestPath: manifestPath,
+		Executor:     &oracleFakeBridge{},
+		Lock:         lock,
+		Timeout:      time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected concurrent oracle failure")
+	}
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.Code != 3 {
+		t.Fatalf("err=%v, want infrastructure exit code", err)
+	}
+	if report.Error == nil || report.Error.Code != "oracle_already_running" || report.Error.Message != oracleAlreadyRunningMessage {
+		t.Fatalf("report=%+v", report)
+	}
+	if lock.acquired || lock.released {
+		t.Fatalf("busy lock lifecycle acquired=%v released=%v", lock.acquired, lock.released)
 	}
 }
 
