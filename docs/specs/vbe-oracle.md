@@ -80,6 +80,35 @@ contract uses `analysis.expected_diagnostics` and
 optional source range, and (when needed) `surfaces` from `lint`, `analyze`, and
 `lsp`.
 
+Every fixture must also declare its diagnostic binding state under `analysis`:
+
+```json
+{
+  "analysis": {
+    "binding_status": "unbound"
+  }
+}
+```
+
+The supported states are:
+
+- `unbound`: VBE evidence exists, but no analyzer rule has been connected yet.
+- `partially-bound`: at least one rule is connected, but coverage is incomplete;
+  `rule_codes` and a non-empty `binding_note` are required.
+- `bound`: the fixture is fully connected to declared rules. It requires at
+  least one rule code, each code must appear in an expected or forbidden
+  diagnostic contract, and the contract must match the VBE result (`expected`
+  for rejected cases, `forbidden` for accepted cases).
+- `not-applicable`: the fixture is intentionally a harness control or language
+  observation and cannot declare rule codes or diagnostic contracts.
+
+Binding status is structural metadata only. Diagnostic code existence,
+severity, and supported analyzer surfaces are validated by the rule-catalogue
+and binding work tracked separately from this fixture-schema change. Until a
+fixture is connected to an implemented rule, keep it `unbound` and do not alter
+the VBE expectation to satisfy an analyzer test. Binding notes must be omitted
+when unnecessary; an explicitly empty or whitespace-only note is invalid.
+
 ## Outcomes and strict mode
 
 Only `accepted` and `rejected` are VBA evidence. A compile dialog associated

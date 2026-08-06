@@ -34,6 +34,13 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if entry.ID == manifest.Controls.Accept || entry.ID == manifest.Controls.Reject {
+				if c.Analysis.BindingStatus != BindingNotApplicable {
+					t.Fatalf("control fixture binding_status = %q, want %q", c.Analysis.BindingStatus, BindingNotApplicable)
+				}
+			} else if c.Analysis.BindingStatus != BindingUnbound {
+				t.Fatalf("fixture binding_status = %q, want initial migration status %q", c.Analysis.BindingStatus, BindingUnbound)
+			}
 			projectRoot := t.TempDir()
 			modulesRoot := filepath.Join(projectRoot, "src", "modules")
 			if err := os.MkdirAll(modulesRoot, 0o755); err != nil {
