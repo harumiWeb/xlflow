@@ -1576,9 +1576,10 @@ internal static class ExcelBridgeSupport
 
     // The developer oracle owns a disposable, unsaved workbook. Releasing its
     // COM wrappers and terminating the captured process avoids allowing a
-    // modal VBE/Excel state to block app.Quit indefinitely. The PID and start
-    // time are captured before any worker is launched, so this cannot target
-    // an unrelated user's Excel instance.
+    // modal VBE/Excel state to block app.Quit indefinitely. Newly discovered
+    // Excel processes are adopted only when they are the captured instance or
+    // descendants of the bridge/oracle process tree; a baseline-only check is
+    // not sufficient because a user can start Excel while the oracle runs.
     public static bool ReleaseOracleExcelAndConfirmExit(
         object? workbook,
         object? excel,
@@ -1592,24 +1593,38 @@ internal static class ExcelBridgeSupport
         var confirmed = true;
         // Re-enumerate for a short bounded drain after releasing COM wrappers:
         // Excel may materialize a second /automation server while the VBE
-        // worker apartment drains. Only processes absent from the pre-run
-        // baseline are eligible for termination.
+        // worker apartment drains. Only processes proven to be part of the
+        // oracle process tree are eligible for termination.
         for (var attempt = 0; attempt < 3; attempt++)
         {
+            var discovered = false;
+            var unexpectedProcess = false;
             foreach (var process in CaptureOwnedExcelProcesses())
             {
-                if (!baselineProcesses.Any(existing => SameOwnedProcess(existing, process)) &&
+                if (IsOracleOwnedProcess(process, ownedProcesses) &&
                     !ownedProcesses.Any(existing => SameOwnedProcess(existing, process)))
                 {
                     ownedProcesses.Add(process);
+                    discovered = true;
+                }
+                else if (!baselineProcesses.Any(existing => SameOwnedProcess(existing, process)))
+                {
+                    // A new Excel process without a proven oracle relationship
+                    // is evidence that cleanup cannot be confirmed. Leave it
+                    // untouched rather than risking a user's unsaved work.
+                    unexpectedProcess = true;
                 }
             }
-            var attemptConfirmed = true;
+            var attemptConfirmed = !unexpectedProcess;
             foreach (var ownedProcess in ownedProcesses)
             {
                 attemptConfirmed &= EnsureOwnedExcelProcessExited(ownedProcess);
             }
             confirmed = attemptConfirmed;
+            if (confirmed && !discovered)
+            {
+                break;
+            }
             if (attempt < 2)
             {
                 Thread.Sleep(250);
@@ -1815,10 +1830,88 @@ internal static class ExcelBridgeSupport
         }
     }
 
-    private static bool SameOwnedProcess(OwnedExcelProcess left, OwnedExcelProcess right)
+    internal static bool SameOwnedProcess(OwnedExcelProcess left, OwnedExcelProcess right)
     {
         return left.ProcessId == right.ProcessId &&
                (left.StartTime is null || right.StartTime is null || left.StartTime.Value == right.StartTime.Value);
+    }
+
+    internal static bool IsOracleOwnedProcess(OwnedExcelProcess candidate, IEnumerable<OwnedExcelProcess> ownedProcesses)
+    {
+        if (candidate.ProcessId <= 0)
+        {
+            return false;
+        }
+        if (ownedProcesses.Any(existing => SameOwnedProcess(existing, candidate)))
+        {
+            return true;
+        }
+
+        var roots = ownedProcesses
+            .Where(process => process.ProcessId > 0)
+            .Select(process => process.ProcessId)
+            .ToHashSet();
+        roots.Add(Environment.ProcessId);
+        return HasProcessAncestor(candidate.ProcessId, roots);
+    }
+
+    private static bool HasProcessAncestor(int processId, IReadOnlySet<int> roots)
+    {
+        var visited = new HashSet<int> { processId };
+        var current = processId;
+        while (current > 0)
+        {
+            var parent = TryGetParentProcessId(current);
+            if (parent <= 0 || !visited.Add(parent))
+            {
+                return false;
+            }
+            if (roots.Contains(parent))
+            {
+                return true;
+            }
+            current = parent;
+        }
+        return false;
+    }
+
+    private static int TryGetParentProcessId(int processId)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return 0;
+        }
+
+        var snapshot = NativeMethods.CreateToolhelp32Snapshot(NativeMethods.Th32csSnapProcess, 0);
+        if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
+        {
+            return 0;
+        }
+
+        try
+        {
+            var entry = new NativeMethods.ProcessEntry32
+            {
+                Size = (uint)Marshal.SizeOf<NativeMethods.ProcessEntry32>(),
+            };
+            if (!NativeMethods.Process32First(snapshot, ref entry))
+            {
+                return 0;
+            }
+            do
+            {
+                if (entry.ProcessId == processId)
+                {
+                    return unchecked((int)entry.ParentProcessId);
+                }
+            }
+            while (NativeMethods.Process32Next(snapshot, ref entry));
+        }
+        finally
+        {
+            _ = NativeMethods.CloseHandle(snapshot);
+        }
+        return 0;
     }
 
     private static bool IsExcelProcess(Process process)
@@ -2016,6 +2109,7 @@ internal static class ExcelBridgeSupport
     private static class NativeMethods
     {
         public const uint PmRemove = 0x0001;
+        public const uint Th32csSnapProcess = 0x00000002;
 
         public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
@@ -2029,6 +2123,22 @@ internal static class ExcelBridgeSupport
             public uint Time;
             public int PtX;
             public int PtY;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct ProcessEntry32
+        {
+            public uint Size;
+            public uint Usage;
+            public uint ProcessId;
+            public IntPtr DefaultHeapId;
+            public uint ModuleId;
+            public uint Threads;
+            public uint ParentProcessId;
+            public int BasePriority;
+            public uint Flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string ExeFile;
         }
 
         [DllImport("user32.dll")]
@@ -2045,6 +2155,18 @@ internal static class ExcelBridgeSupport
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr handle);
 
         [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
         public static extern int CLSIDFromProgID(string lpszProgID, out Guid lpclsid);

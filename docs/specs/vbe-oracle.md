@@ -85,8 +85,8 @@ optional source range, and (when needed) `surfaces` from `lint`, `analyze`, and
 Only `accepted` and `rejected` are VBA evidence. A compile dialog associated
 with the target Excel/VBE process is `rejected`. A successful Compile command
 with no delayed compile dialog and confirmed cleanup is `accepted`. A disabled
-Compile command is recorded as accepted with `compile_invoked: false` because
-the project was already compiled.
+Compile command is `infrastructure_failure` with `compile_invoked: false`
+because no VBE Compile evidence was observed.
 
 Timeouts, Excel startup/VBOM/import/project activation failures, inability to
 find or invoke Compile, worker crashes or malformed output, unknown/unrelated

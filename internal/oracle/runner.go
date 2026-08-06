@@ -18,6 +18,7 @@ import (
 const (
 	CommandName                  = "vbe-oracle"
 	DefaultTimeout               = 5 * time.Minute
+	bridgeShutdownMargin         = 30 * time.Second
 	OutcomeAccepted              = "accepted"
 	OutcomeRejected              = "rejected"
 	OutcomeInfrastructureFailure = "infrastructure_failure"
@@ -80,8 +81,6 @@ func (e *ExitError) Error() string {
 	}
 	return e.Message
 }
-
-func (e *ExitError) IsInfrastructure() bool { return e != nil && e.Code == 3 }
 
 type fixtureRequest struct {
 	SchemaVersion int             `json:"schema_version"`
@@ -183,8 +182,8 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		if runErr != nil {
 			return failRun(&report, runErr)
 		}
-		if opts.Strict && result.Outcome != entryExpected(entry, root) {
-			return failReport(&report, 1, fmt.Sprintf("oracle case %q expected %s, observed %s", entry.ID, entryExpected(entry, root), result.Outcome), "expectation_mismatch")
+		if opts.Strict && result.Outcome != result.Expected {
+			return failReport(&report, 1, fmt.Sprintf("oracle case %q expected %s, observed %s", entry.ID, result.Expected, result.Outcome), "expectation_mismatch")
 		}
 	}
 	if opts.PromoteObserved {
@@ -230,14 +229,6 @@ func SelectCases(manifest Manifest, ids []string) ([]ManifestEntry, error) {
 	return selectEntries(manifest, ids)
 }
 
-func entryExpected(entry ManifestEntry, root string) string {
-	c, _, err := LoadCase(root, entry)
-	if err != nil {
-		return ""
-	}
-	return c.VBE.Expected
-}
-
 func runEntry(parent context.Context, root string, entry ManifestEntry, timeout time.Duration, executor BridgeExecutor) (CaseResult, error) {
 	started := time.Now()
 	c, _, err := LoadCase(root, entry)
@@ -264,7 +255,9 @@ func runEntry(parent context.Context, root string, entry ManifestEntry, timeout 
 	if err != nil {
 		return CaseResult{ID: c.ID, Outcome: OutcomeInfrastructureFailure, Error: err.Error()}, &ExitError{Code: 3, Message: err.Error()}
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	// Let the bridge timeout expire first so it can close Excel and report
+	// structured cleanup status before the Go process deadline fires.
+	ctx, cancel := context.WithTimeout(parent, timeout+bridgeShutdownMargin)
 	defer cancel()
 	response, execErr := executor.Execute(ctx, excelbridge.Request{Command: CommandName, Args: map[string]string{
 		"PlanJson64": base64.StdEncoding.EncodeToString(payload),
@@ -495,20 +488,10 @@ func promoteSelected(root string, selected []ManifestEntry, results []CaseResult
 	}
 	committed := 0
 	for i, item := range staged {
-		// Windows does not permit rename-overwrite. Remove only the validated
-		// fixture target, then rename the staged document into place.
-		if err := os.Remove(item.path); err != nil && !os.IsNotExist(err) {
-			for _, left := range staged[i:] {
-				_ = os.Remove(left.temp)
-			}
-			rollbackPromotion(staged[:committed])
-			return err
-		}
 		if err := os.Rename(item.temp, item.path); err != nil {
 			for _, left := range staged[i:] {
 				_ = os.Remove(left.temp)
 			}
-			_ = os.WriteFile(item.path, item.original, 0o644)
 			rollbackPromotion(staged[:committed])
 			return err
 		}

@@ -77,9 +77,10 @@ func CheckDiagnosticProjections(expect AnalysisExpectation, projections map[stri
 	all := make([]Diagnostic, 0)
 	for surface, diagnostics := range projections {
 		for _, diagnostic := range diagnostics {
-			if diagnostic.Surface == "" {
-				diagnostic.Surface = surface
+			if diagnostic.Surface != "" && diagnostic.Surface != surface {
+				return fmt.Errorf("diagnostic %s has surface %q in %q projection", diagnostic.Code, diagnostic.Surface, surface)
 			}
+			diagnostic.Surface = surface
 			all = append(all, diagnostic)
 		}
 	}

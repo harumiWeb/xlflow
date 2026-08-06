@@ -3,7 +3,7 @@ Option Explicit
 
 Public Sub ProbeUnknownNamedArgument()
     Dim result As Long
-    result = AddTwo(first:=1, third:=3)
+    result = AddTwo(first:=1, second:=2, third:=3)
 End Sub
 
 Private Function AddTwo(ByVal first As Long, ByVal second As Long) As Long

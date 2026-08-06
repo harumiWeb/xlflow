@@ -17,5 +17,7 @@ if (-not (Test-Path -LiteralPath $goScript)) {
 
 # Keep the oracle outside the public xlflow command tree. One invocation owns
 # one sequential Excel/VBE run; do not start this script concurrently.
+$global:LASTEXITCODE = 0
 & $goScript run ./cmd/xlflow-vbe-oracle @OracleArgs
-exit $LASTEXITCODE
+$oracleExitCode = if ($null -ne $global:LASTEXITCODE) { [int]$global:LASTEXITCODE } else { 0 }
+exit $oracleExitCode

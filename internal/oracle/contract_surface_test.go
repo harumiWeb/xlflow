@@ -23,3 +23,13 @@ func TestDiagnosticContractRejectsDuplicateNamedSurface(t *testing.T) {
 		t.Fatal("expected duplicate surface validation error")
 	}
 }
+
+func TestDiagnosticProjectionRejectsMismatchedSurface(t *testing.T) {
+	expect := AnalysisExpectation{ExpectedDiagnostics: []DiagnosticExpectation{{Code: "VBA001", Surfaces: []string{"analyze"}}}}
+	projections := map[string][]Diagnostic{
+		"lint": {{Code: "VBA001", Surface: "analyze"}},
+	}
+	if err := CheckDiagnosticProjections(expect, projections); err == nil {
+		t.Fatal("expected mismatched projection surface to fail")
+	}
+}

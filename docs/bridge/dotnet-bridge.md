@@ -63,7 +63,8 @@ with `name`, `kind`, and `source_path`.
 The bridge creates a disposable unsaved workbook, imports the verified sources,
 activates the target VBProject, and invokes the existing VBE Compile command.
 It reuses the worker timeout and Win32/UI Automation dialog watcher. A compile
-dialog is `rejected`; a completed worker with no compile dialog is `accepted`.
+dialog is `rejected`; a completed worker with no target-owned compile dialog is
+`accepted` only when `cleanup_confirmed` is true.
 Dialog identity is correlated with the target Excel/VBE owner chain; the
 oracle does not use `SendKeys` or keyboard-focus scripting.
 Timeouts, startup/VBIDE/import/COM failures, unknown modals, malformed worker

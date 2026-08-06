@@ -130,15 +130,15 @@ public sealed class VbeOracleService : IVbeOracleService
             {
                 throw new InvalidOperationException("Could not capture the dedicated Excel process identity");
             }
-            if (baselineExcelProcesses.Any(process => SameProcess(process, ownedExcelProcess)))
+            if (baselineExcelProcesses.Any(process => ExcelBridgeSupport.SameOwnedProcess(process, ownedExcelProcess)))
             {
                 throw new InvalidOperationException("Excel.Application did not create a dedicated process instance");
             }
             ownedExcelProcesses.Add(ownedExcelProcess);
             foreach (var process in ExcelBridgeSupport.CaptureOwnedExcelProcesses())
             {
-                if (!baselineExcelProcesses.Any(existing => SameProcess(existing, process)) &&
-                    !ownedExcelProcesses.Any(existing => SameProcess(existing, process)))
+                if (ExcelBridgeSupport.IsOracleOwnedProcess(process, ownedExcelProcesses) &&
+                    !ownedExcelProcesses.Any(existing => ExcelBridgeSupport.SameOwnedProcess(existing, process)))
                 {
                     ownedExcelProcesses.Add(process);
                 }
@@ -209,8 +209,8 @@ public sealed class VbeOracleService : IVbeOracleService
             {
                 foreach (var process in ExcelBridgeSupport.CaptureOwnedExcelProcesses())
                 {
-                    if (!baselineExcelProcesses.Any(existing => SameProcess(existing, process)) &&
-                        !ownedExcelProcesses.Any(existing => SameProcess(existing, process)))
+                    if (ExcelBridgeSupport.IsOracleOwnedProcess(process, ownedExcelProcesses) &&
+                        !ownedExcelProcesses.Any(existing => ExcelBridgeSupport.SameOwnedProcess(existing, process)))
                     {
                         ownedExcelProcesses.Add(process);
                     }
@@ -450,6 +450,15 @@ public sealed class VbeOracleService : IVbeOracleService
 
         var disabled = TryGetString(invocation.Result.Value, "reason");
         var compileInvoked = !string.Equals(disabled, "compile_command_disabled", StringComparison.OrdinalIgnoreCase);
+        if (!compileInvoked)
+        {
+            return InfrastructureObservation(
+                "oracle_compile_command_disabled",
+                "The VBE Compile command was disabled and no compile evidence was observed.",
+                "vbe_compile",
+                elapsed,
+                excel);
+        }
         var accepted = new OracleObservation(
             "accepted",
             "compile",
@@ -597,12 +606,6 @@ public sealed class VbeOracleService : IVbeOracleService
             return propertyValue.ValueKind == JsonValueKind.String ? propertyValue.GetString() : propertyValue.ToString();
         }
         return null;
-    }
-
-    private static bool SameProcess(OwnedExcelProcess left, OwnedExcelProcess right)
-    {
-        return left.ProcessId == right.ProcessId &&
-               (left.StartTime is null || right.StartTime is null || left.StartTime.Value == right.StartTime.Value);
     }
 
     private sealed class VbeOracleValidationException(string message, Exception? inner = null) : Exception(message, inner);

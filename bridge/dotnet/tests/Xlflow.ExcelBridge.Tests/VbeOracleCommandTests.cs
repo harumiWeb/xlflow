@@ -31,6 +31,29 @@ public sealed class VbeOracleCommandTests
     }
 
     [Fact]
+    public void HandleAcceptsRunnerPlanJson64AndTimeoutMs()
+    {
+        var planJson64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{}"));
+        var command = new VbeOracleCommand(new FakeOracleService((request, args) =>
+        {
+            Assert.Equal(planJson64, args.PlanJson64);
+            Assert.Equal(planJson64, args.FixtureJson64);
+            Assert.Equal(TimeSpan.FromSeconds(30), args.Timeout);
+            return BridgeResponse.Ok(request);
+        }));
+
+        var response = command.Handle(new BridgeRequest
+        {
+            ProtocolVersion = ProtocolVersion.Current,
+            RequestId = "req-oracle-runner-keys",
+            Command = "vbe-oracle",
+            Payload = JsonDocument.Parse($$"""{ "PlanJson64": "{{planJson64}}", "TimeoutMs": "30000" }""").RootElement.Clone(),
+        }, CancellationToken.None);
+
+        Assert.Equal(BridgeStatus.Ok, response.Status);
+    }
+
+    [Fact]
     public void HandleRejectsMissingFixture()
     {
         var response = new VbeOracleCommand(new FakeOracleService((request, _) => BridgeResponse.Ok(request)))

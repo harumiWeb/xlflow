@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
@@ -76,6 +77,9 @@ func (f *oracleFakeBridge) Execute(_ context.Context, req excelbridge.Request) (
 }
 
 func TestRunControlsStrictAndPromotion(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("oracle runner execution requires Windows with Excel")
+	}
 	manifestPath, _ := writeFixture(t, ExpectedObserve)
 	bridge := &oracleFakeBridge{}
 	report, err := Run(context.Background(), Options{ManifestPath: manifestPath, CaseIDs: []string{"sample"}, PromoteObserved: true, DiagnosticMeaning: map[string]string{"sample": MeaningSpecification}, Executor: bridge, Timeout: time.Second})
@@ -108,6 +112,9 @@ func TestPromoteObservedRequiresExcelMetadata(t *testing.T) {
 }
 
 func TestRunRejectsImplicitPromotionBeforeBridgeExecution(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("oracle runner execution requires Windows with Excel")
+	}
 	manifestPath, _ := writeFixture(t, ExpectedObserve)
 	bridge := &oracleFakeBridge{}
 	_, err := Run(context.Background(), Options{ManifestPath: manifestPath, PromoteObserved: true, Executor: bridge, Timeout: time.Second})

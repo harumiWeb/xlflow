@@ -2,8 +2,8 @@ namespace Xlflow.ExcelBridge.Services;
 
 public sealed record VbeOracleCommandArguments(string PlanJson64, TimeSpan Timeout)
 {
-    // FixtureJSON64 is the name used by the standalone Go oracle runner;
-    // PlanJson64 remains accepted for compatibility with early prototypes.
+    // FixtureJson64 remains exposed for compatibility with the bridge service;
+    // the standalone Go runner sends PlanJson64.
     public string FixtureJson64 => PlanJson64;
 }
 

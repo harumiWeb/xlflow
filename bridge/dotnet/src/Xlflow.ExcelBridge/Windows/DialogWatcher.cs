@@ -340,19 +340,22 @@ public sealed class DialogWatcher
 
 internal static class DialogFingerprint
 {
-    internal static bool IsDialogLike(WindowCandidate candidate, UiaDialogDescription? uia)
+    private static bool HasDialogClassName(WindowCandidate candidate)
     {
         return candidate.ClassName.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
                candidate.ClassName.StartsWith("bosa_sdm_", StringComparison.OrdinalIgnoreCase) ||
-               candidate.ClassName.Equals("NUIDialog", StringComparison.OrdinalIgnoreCase) ||
+               candidate.ClassName.Equals("NUIDialog", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsDialogLike(WindowCandidate candidate, UiaDialogDescription? uia)
+    {
+        return HasDialogClassName(candidate) ||
                string.Equals(uia?.ControlType, "Window", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static bool IsOracleDialogLike(WindowCandidate candidate, UiaDialogDescription? uia)
     {
-        if (candidate.ClassName.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
-            candidate.ClassName.StartsWith("bosa_sdm_", StringComparison.OrdinalIgnoreCase) ||
-            candidate.ClassName.Equals("NUIDialog", StringComparison.OrdinalIgnoreCase))
+        if (HasDialogClassName(candidate))
         {
             return true;
         }
