@@ -8,9 +8,11 @@ All notable changes to xlflow will be documented in this file.
   analysis compile evidence, with sequential disposable workbooks, known
   accept/reject controls, observational and strict JSON modes, explicit
   promotion, provenance metadata, and deterministic Excel-free fixture
-  contracts. The oracle is not invoked by production commands or GitHub
-  Actions; contributors should run relevant cases locally when changing VBA
-  semantics.
+  contracts. Fixtures now also carry explicit diagnostic binding metadata so
+  unbound, partially-bound, bound, and not-applicable evidence can be validated
+  independently of the later rule-catalogue and coverage work. The oracle is
+  not invoked by production commands or GitHub Actions; contributors should run
+  relevant cases locally when changing VBA semantics.
 - Added default-enabled `VBA223` security warnings for likely hardcoded VBA
   credentials, with structural matching, placeholder filtering, fixed
   `[REDACTED]` diagnostics, and independent configuration/inline suppression.

@@ -18,7 +18,9 @@
     "evidence_phase": "compile",
     "diagnostic_meaning": "compile-error"
   },
-  "analysis": {},
+  "analysis": {
+    "binding_status": "unbound"
+  },
   "provenance": {
     "status": "asserted",
     "verified_on": [

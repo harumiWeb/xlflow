@@ -90,7 +90,7 @@ func TestRunControlsStrictAndPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.VBE.Expected != ExpectedAccepted || c.Provenance.Status != "asserted" {
+	if c.VBE.Expected != ExpectedAccepted || c.Provenance.Status != "asserted" || c.Analysis.BindingStatus != BindingNotApplicable {
 		t.Fatalf("promotion=%+v", c)
 	}
 }

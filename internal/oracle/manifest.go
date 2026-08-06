@@ -31,6 +31,11 @@ const (
 	MeaningSpecification   = "specification"
 	MeaningPolicy          = "policy"
 	MeaningMaintainability = "maintainability"
+
+	BindingUnbound        = "unbound"
+	BindingPartiallyBound = "partially-bound"
+	BindingBound          = "bound"
+	BindingNotApplicable  = "not-applicable"
 )
 
 var caseIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -142,6 +147,9 @@ type VBEExpectation struct {
 }
 
 type AnalysisExpectation struct {
+	BindingStatus        string                  `json:"binding_status"`
+	RuleCodes            []string                `json:"rule_codes,omitempty"`
+	BindingNote          *string                 `json:"binding_note,omitempty"`
 	ExpectedDiagnostics  []DiagnosticExpectation `json:"expected_diagnostics,omitempty"`
 	ForbiddenDiagnostics []DiagnosticExpectation `json:"forbidden_diagnostics,omitempty"`
 }
@@ -339,6 +347,9 @@ func ValidateCase(c Case, manifestID, caseDir string) error {
 	if err := validateDiagnosticExpectations(c.Analysis.ForbiddenDiagnostics, "forbidden", c.ID); err != nil {
 		return err
 	}
+	if err := validateAnalysisBinding(c); err != nil {
+		return err
+	}
 	switch c.VBE.Expected {
 	case ExpectedObserve:
 		if strings.TrimSpace(c.Provenance.Status) != "pending" {
@@ -382,6 +393,83 @@ func ValidateCase(c Case, manifestID, caseDir string) error {
 		return fmt.Errorf("oracle case %q has invalid vbe.expected %q", c.ID, c.VBE.Expected)
 	}
 	return nil
+}
+
+func validateAnalysisBinding(c Case) error {
+	analysis := c.Analysis
+	switch analysis.BindingStatus {
+	case BindingUnbound, BindingPartiallyBound, BindingBound, BindingNotApplicable:
+	default:
+		return fmt.Errorf("oracle case %q has invalid analysis.binding_status %q", c.ID, analysis.BindingStatus)
+	}
+
+	seenCodes := make(map[string]struct{}, len(analysis.RuleCodes))
+	for _, code := range analysis.RuleCodes {
+		if strings.TrimSpace(code) == "" || code != strings.TrimSpace(code) {
+			return fmt.Errorf("oracle case %q has an empty or padded analysis rule code", c.ID)
+		}
+		if _, ok := seenCodes[code]; ok {
+			return fmt.Errorf("oracle case %q repeats analysis rule code %q", c.ID, code)
+		}
+		seenCodes[code] = struct{}{}
+	}
+	if analysis.BindingNote != nil && strings.TrimSpace(*analysis.BindingNote) == "" {
+		return fmt.Errorf("oracle case %q has an empty analysis.binding_note", c.ID)
+	}
+
+	hasExpected := len(analysis.ExpectedDiagnostics) > 0
+	hasForbidden := len(analysis.ForbiddenDiagnostics) > 0
+	switch analysis.BindingStatus {
+	case BindingUnbound:
+		if len(analysis.RuleCodes) > 0 && analysis.BindingNote == nil {
+			return fmt.Errorf("oracle case %q: unbound fixture with rule codes requires analysis.binding_note", c.ID)
+		}
+	case BindingPartiallyBound:
+		if len(analysis.RuleCodes) == 0 {
+			return fmt.Errorf("oracle case %q: partially-bound fixture requires analysis.rule_codes", c.ID)
+		}
+		if analysis.BindingNote == nil {
+			return fmt.Errorf("oracle case %q: partially-bound fixture requires analysis.binding_note", c.ID)
+		}
+	case BindingBound:
+		if len(analysis.RuleCodes) == 0 {
+			return fmt.Errorf("oracle case %q: bound fixture requires analysis.rule_codes", c.ID)
+		}
+		var boundExpectations []DiagnosticExpectation
+		switch c.VBE.Expected {
+		case ExpectedRejected:
+			if !hasExpected {
+				return fmt.Errorf("oracle case %q: bound rejected fixture requires expected diagnostics", c.ID)
+			}
+			boundExpectations = analysis.ExpectedDiagnostics
+		case ExpectedAccepted:
+			if !hasForbidden {
+				return fmt.Errorf("oracle case %q: bound accepted fixture requires forbidden diagnostics", c.ID)
+			}
+			boundExpectations = analysis.ForbiddenDiagnostics
+		default:
+			return fmt.Errorf("oracle case %q: bound fixture requires asserted VBE evidence", c.ID)
+		}
+		for _, code := range analysis.RuleCodes {
+			if !diagnosticCodeDeclared(code, boundExpectations) {
+				return fmt.Errorf("oracle case %q: bound rule code %q is not declared by an analysis contract", c.ID, code)
+			}
+		}
+	case BindingNotApplicable:
+		if len(analysis.RuleCodes) > 0 || hasExpected || hasForbidden {
+			return fmt.Errorf("oracle case %q: not-applicable fixture cannot declare analyzer bindings", c.ID)
+		}
+	}
+	return nil
+}
+
+func diagnosticCodeDeclared(code string, expectations []DiagnosticExpectation) bool {
+	for _, expectation := range expectations {
+		if expectation.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func validateDiagnosticExpectations(expectations []DiagnosticExpectation, kind, caseID string) error {

@@ -87,6 +87,13 @@ function walk(dir) {
 walk(path.join(repo, "internal"));
 
 const source = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+// Some structured metadata keys use the same snake_case shape as error-code
+// literals but are not user-facing errors and do not belong in this inventory.
+const excludedErrorInventoryLiterals = new Set([
+  "binding_status",
+  "rule_codes",
+  "binding_note",
+]);
 const errors = [
   ...new Set([...source.matchAll(/"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g)].map((m) => m[1])),
 ]
@@ -96,7 +103,8 @@ const errors = [
       !code.startsWith("go_") &&
       !code.startsWith("http_") &&
       code !== "default_enabled" &&
-      code !== "default_severity",
+      code !== "default_severity" &&
+      !excludedErrorInventoryLiterals.has(code),
   )
   .sort();
 

@@ -18,7 +18,7 @@ func writeFixture(t *testing.T, expected string) (string, Manifest) {
 	if err := os.WriteFile(filepath.Join(caseDir, "Main.bas"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	caseJSON := Case{SchemaVersion: SchemaVersion, ID: "sample", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas", Entry: true}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: expected, EvidencePhase: EvidenceUnknown, DiagnosticMeaning: MeaningObservation}, Provenance: Provenance{Status: "pending"}}
+	caseJSON := Case{SchemaVersion: SchemaVersion, ID: "sample", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas", Entry: true}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: expected, EvidencePhase: EvidenceUnknown, DiagnosticMeaning: MeaningObservation}, Analysis: AnalysisExpectation{BindingStatus: BindingNotApplicable}, Provenance: Provenance{Status: "pending"}}
 	body, _ := json.Marshal(caseJSON)
 	if err := os.WriteFile(filepath.Join(caseDir, "case.json"), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -90,9 +90,156 @@ func TestValidateManifestRequiresCaseDirectoryAndEntryAgreement(t *testing.T) {
 }
 
 func TestValidateCaseRequiresAssertedProvenance(t *testing.T) {
-	c := Case{SchemaVersion: SchemaVersion, ID: "x", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: ExpectedAccepted, EvidencePhase: EvidenceCompile}}
+	c := Case{SchemaVersion: SchemaVersion, ID: "x", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: ExpectedAccepted, EvidencePhase: EvidenceCompile}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}}
 	if err := ValidateCase(c, "x", t.TempDir()); err == nil {
 		t.Fatal("expected provenance validation error")
+	}
+}
+
+func analysisNote(value string) *string {
+	return &value
+}
+
+func validAssertedCase(expected string) Case {
+	meaning := MeaningSpecification
+	if expected == ExpectedRejected {
+		meaning = MeaningCompileError
+	}
+	return Case{
+		SchemaVersion: SchemaVersion,
+		ID:            "x",
+		Modules:       []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}},
+		Probe:         Probe{Mode: ProbeCompile},
+		VBE:           VBEExpectation{Expected: expected, EvidencePhase: EvidenceCompile, DiagnosticMeaning: meaning},
+		Analysis:      AnalysisExpectation{BindingStatus: BindingUnbound},
+		Provenance: Provenance{
+			Status: "asserted",
+			VerifiedOn: []VerificationMetadata{{
+				ExcelVersion: "16.0", ExcelBuild: "17932", Bitness: "x64", Locale: "ja-JP", VerifiedAt: "2026-08-06T00:00:00Z",
+			}},
+		},
+	}
+}
+
+func TestValidateCaseBindingMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*Case)
+		wantErr bool
+	}{
+		{name: "unbound", prepare: func(c *Case) {}},
+		{name: "partially-bound", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.BindingNote = analysisNote("positive contract is pending")
+		}},
+		{name: "bound rejected", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA001", Severity: "error"}}
+		}},
+		{name: "bound accepted", prepare: func(c *Case) {
+			c.VBE.Expected = ExpectedAccepted
+			c.VBE.DiagnosticMeaning = MeaningSpecification
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}},
+		{name: "not-applicable", prepare: func(c *Case) {
+			c.VBE.Expected = ExpectedAccepted
+			c.VBE.DiagnosticMeaning = MeaningSpecification
+			c.Analysis.BindingStatus = BindingNotApplicable
+		}},
+		{name: "missing status", prepare: func(c *Case) { c.Analysis.BindingStatus = "" }, wantErr: true},
+		{name: "invalid status", prepare: func(c *Case) { c.Analysis.BindingStatus = "future" }, wantErr: true},
+		{name: "unbound rule code needs note", prepare: func(c *Case) {
+			c.Analysis.RuleCodes = []string{"VBA001"}
+		}, wantErr: true},
+		{name: "partially-bound needs rule code", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.BindingNote = analysisNote("pending")
+		}, wantErr: true},
+		{name: "partially-bound needs note", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+		}, wantErr: true},
+		{name: "bound needs rule code", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}, wantErr: true},
+		{name: "bound code needs contract", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA002"}}
+		}, wantErr: true},
+		{name: "rejected bound code cannot be forbidden-only", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA002"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}, wantErr: true},
+		{name: "bound rejected needs expected", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+		}, wantErr: true},
+		{name: "bound accepted needs forbidden", prepare: func(c *Case) {
+			c.VBE.Expected = ExpectedAccepted
+			c.VBE.DiagnosticMeaning = MeaningSpecification
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+		}, wantErr: true},
+		{name: "accepted bound code cannot be expected-only", prepare: func(c *Case) {
+			c.VBE.Expected = ExpectedAccepted
+			c.VBE.DiagnosticMeaning = MeaningSpecification
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA002"}}
+		}, wantErr: true},
+		{name: "bound observe rejected", prepare: func(c *Case) {
+			c.VBE.Expected = ExpectedObserve
+			c.VBE.EvidencePhase = EvidenceUnknown
+			c.VBE.DiagnosticMeaning = MeaningObservation
+			c.Provenance = Provenance{Status: "pending"}
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.RuleCodes = []string{"VBA001"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}, wantErr: true},
+		{name: "not-applicable rule code", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.RuleCodes = []string{"VBA001"}
+		}, wantErr: true},
+		{name: "not-applicable expected", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}, wantErr: true},
+		{name: "not-applicable forbidden", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA001"}}
+		}, wantErr: true},
+		{name: "empty rule code", prepare: func(c *Case) {
+			c.Analysis.RuleCodes = []string{""}
+		}, wantErr: true},
+		{name: "padded rule code", prepare: func(c *Case) {
+			c.Analysis.RuleCodes = []string{" VBA001"}
+		}, wantErr: true},
+		{name: "duplicate rule code", prepare: func(c *Case) {
+			c.Analysis.RuleCodes = []string{"VBA001", "VBA001"}
+		}, wantErr: true},
+		{name: "empty binding note", prepare: func(c *Case) {
+			c.Analysis.BindingNote = analysisNote("  ")
+		}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validAssertedCase(ExpectedRejected)
+			tt.prepare(&c)
+			err := ValidateCase(c, c.ID, t.TempDir())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateCase() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
