@@ -30,13 +30,14 @@ type BindingCoverage struct {
 // BindingRuleCoverage describes positive and negative evidence for one
 // diagnostic rule. Missing fields explain why a bound rule is incomplete.
 type BindingRuleCoverage struct {
-	Code             string
-	RejectedCases    []string
-	AcceptedControls []string
-	CoveredSurfaces  []string
-	MissingSurfaces  []string
-	MissingPositive  bool
-	MissingNegative  bool
+	Code              string
+	RejectedCases     []string
+	AcceptedControls  []string
+	CoveredSurfaces   []string
+	MissingSurfaces   []string
+	MissingPositive   bool
+	MissingNegative   bool
+	InformationalOnly bool
 }
 
 // ValidateBindingCoverage validates relationships that require the complete
@@ -118,6 +119,16 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 			if control.Analysis.BindingStatus != BindingBound {
 				validationErrors = append(validationErrors, fmt.Sprintf("oracle case %q: negative control %q must be bound", c.ID, trimmed))
 			}
+			matchingRule := false
+			for _, forbidden := range control.Analysis.ForbiddenDiagnostics {
+				if containsString(c.Analysis.RuleCodes, forbidden.Code) {
+					matchingRule = true
+					break
+				}
+			}
+			if !matchingRule {
+				validationErrors = append(validationErrors, fmt.Sprintf("oracle case %q: negative control %q forbids none of the parent rule codes", c.ID, trimmed))
+			}
 		}
 	}
 
@@ -192,12 +203,18 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 		}
 		for _, code := range c.Analysis.RuleCodes {
 			coverage := ruleMap[code]
-			if coverage == nil || !acceptedReferencedByRejected(c.ID, code, cases) {
-				if coverage == nil {
-					coverage = &BindingRuleCoverage{Code: code}
-					ruleMap[code] = coverage
+			boundReference := acceptedReferencedByRejected(c.ID, code, cases, BindingBound)
+			partialReference := acceptedReferencedByRejected(c.ID, code, cases, BindingPartiallyBound)
+			if coverage == nil {
+				coverage = &BindingRuleCoverage{Code: code}
+				ruleMap[code] = coverage
+			}
+			if !boundReference {
+				if partialReference {
+					coverage.InformationalOnly = true
+				} else {
+					coverage.MissingPositive = true
 				}
-				coverage.MissingPositive = true
 			}
 		}
 	}
@@ -207,13 +224,13 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 		coverage.AcceptedControls = sortedUnique(coverage.AcceptedControls)
 		coverage.CoveredSurfaces = sortedUnique(coverage.CoveredSurfaces)
 		coverage.MissingSurfaces = sortedUnique(coverage.MissingSurfaces)
-		if coverage.MissingNegative || len(coverage.MissingSurfaces) > 0 || len(coverage.AcceptedControls) == 0 {
+		if !coverage.InformationalOnly && (coverage.MissingNegative || len(coverage.MissingSurfaces) > 0 || len(coverage.AcceptedControls) == 0) {
 			report.MissingNegativeRules++
 		}
-		if coverage.MissingPositive || len(coverage.RejectedCases) == 0 {
+		if !coverage.InformationalOnly && (coverage.MissingPositive || len(coverage.RejectedCases) == 0) {
 			report.MissingPositiveRules++
 		}
-		if !coverage.MissingPositive && !coverage.MissingNegative && len(coverage.RejectedCases) > 0 && len(coverage.AcceptedControls) > 0 && len(coverage.MissingSurfaces) == 0 {
+		if !coverage.InformationalOnly && !coverage.MissingPositive && !coverage.MissingNegative && len(coverage.RejectedCases) > 0 && len(coverage.AcceptedControls) > 0 && len(coverage.MissingSurfaces) == 0 {
 			report.CompleteRules++
 		}
 		report.Rules = append(report.Rules, *coverage)
@@ -233,10 +250,10 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 func coverageValidationErrors(rulesCoverage []BindingRuleCoverage) []string {
 	var result []string
 	for _, coverage := range rulesCoverage {
-		if coverage.MissingPositive || len(coverage.RejectedCases) == 0 {
+		if !coverage.InformationalOnly && (coverage.MissingPositive || len(coverage.RejectedCases) == 0) {
 			result = append(result, fmt.Sprintf("rule %s: missing rejected positive evidence", coverage.Code))
 		}
-		if coverage.MissingNegative || len(coverage.MissingSurfaces) > 0 || len(coverage.AcceptedControls) == 0 {
+		if !coverage.InformationalOnly && (coverage.MissingNegative || len(coverage.MissingSurfaces) > 0 || len(coverage.AcceptedControls) == 0) {
 			message := fmt.Sprintf("rule %s: missing accepted negative coverage", coverage.Code)
 			if len(coverage.MissingSurfaces) > 0 {
 				message += fmt.Sprintf(" on surfaces %s", strings.Join(coverage.MissingSurfaces, ", "))
@@ -288,9 +305,9 @@ func validateNegativeControlCycles(cases []Case, byID map[string]Case) []string 
 	return uniqueStrings(result)
 }
 
-func acceptedReferencedByRejected(controlID, code string, cases []Case) bool {
+func acceptedReferencedByRejected(controlID, code string, cases []Case, status string) bool {
 	for _, c := range cases {
-		if c.VBE.Expected != ExpectedRejected || c.Analysis.BindingStatus != BindingBound || !containsString(c.Analysis.RuleCodes, code) {
+		if c.VBE.Expected != ExpectedRejected || c.Analysis.BindingStatus != status || !containsString(c.Analysis.RuleCodes, code) {
 			continue
 		}
 		if containsString(c.Analysis.NegativeControls, controlID) {
@@ -383,7 +400,7 @@ func (r BindingCoverage) String() string {
 	if len(r.Rules) > 0 {
 		fmt.Fprintln(&b, "\nRules:")
 		for _, coverage := range r.Rules {
-			fmt.Fprintf(&b, "- %s: rejected=[%s] accepted=[%s] covered_surfaces=[%s] missing_surfaces=[%s]\n", coverage.Code, strings.Join(coverage.RejectedCases, ", "), strings.Join(coverage.AcceptedControls, ", "), strings.Join(coverage.CoveredSurfaces, ", "), strings.Join(coverage.MissingSurfaces, ", "))
+			fmt.Fprintf(&b, "- %s: rejected=[%s] accepted=[%s] covered_surfaces=[%s] missing_surfaces=[%s] informational_only=%t\n", coverage.Code, strings.Join(coverage.RejectedCases, ", "), strings.Join(coverage.AcceptedControls, ", "), strings.Join(coverage.CoveredSurfaces, ", "), strings.Join(coverage.MissingSurfaces, ", "), coverage.InformationalOnly)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

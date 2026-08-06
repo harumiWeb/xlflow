@@ -151,7 +151,7 @@ For a compile-error-equivalent diagnostic, use this binding workflow:
 The coverage check is deterministic and does not open Excel:
 
 ```powershell
-go test ./internal/oracle -run TestOracleBindingCoverage -v
+rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 ```
 
 Malformed pairings and incomplete `bound` rules fail normal tests. Historical

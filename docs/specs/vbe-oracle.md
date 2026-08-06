@@ -148,7 +148,7 @@ themselves; malformed relationships and incomplete `bound` rules do fail.
 Run the Excel-free deterministic report with:
 
 ```powershell
-go test ./internal/oracle -run TestOracleBindingCoverage -v
+rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 ```
 
 The test reports fixture state counts, complete and incomplete rule counts,

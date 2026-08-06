@@ -131,6 +131,35 @@ func TestValidateBindingCoverageRequiresCompletePositiveNegativeCoverage(t *test
 	}
 }
 
+func TestValidateBindingCoverageKeepsPartiallyBoundPairsInformational(t *testing.T) {
+	partial := coverageRejected("partial", "VBA101", []string{"accepted"}, nil)
+	partial.Analysis.BindingStatus = BindingPartiallyBound
+	report, err := ValidateBindingCoverage([]Case{
+		partial,
+		coverageAccepted("accepted", "VBA101", nil),
+	})
+	if err != nil {
+		t.Fatalf("ValidateBindingCoverage() error = %v", err)
+	}
+	if report.MissingPositiveRules != 0 || report.CompleteRules != 0 {
+		t.Fatalf("partial relationship should remain informational: %+v", report)
+	}
+	if len(report.Rules) != 1 || !report.Rules[0].InformationalOnly {
+		t.Fatalf("expected informational-only rule coverage: %+v", report.Rules)
+	}
+}
+
+func TestValidateBindingCoverageRequiresParentRuleMatchForControls(t *testing.T) {
+	partial := coverageRejected("partial", "VBA101", []string{"unrelated"}, nil)
+	partial.Analysis.BindingStatus = BindingPartiallyBound
+	if _, err := ValidateBindingCoverage([]Case{
+		partial,
+		coverageAccepted("unrelated", "VBA102", nil),
+	}); err == nil || !strings.Contains(err.Error(), "forbids none of the parent rule codes") {
+		t.Fatalf("ValidateBindingCoverage() error = %v, want parent-rule mismatch", err)
+	}
+}
+
 func TestValidateBindingCoverageRejectsNegativeControlCycle(t *testing.T) {
 	a := coverageRejected("a", "VBA101", []string{"b"}, nil)
 	b := coverageRejected("b", "VBA101", []string{"a"}, nil)
