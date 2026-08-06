@@ -33,6 +33,11 @@ func TestRulesCommandWritesV1JSONEnvelope(t *testing.T) {
 	if len(got.Rules.Items) == 0 || got.Rules.Items[0].ID == "" {
 		t.Fatalf("rules catalog is empty: %#v", got.Rules)
 	}
+	for _, item := range got.Rules.Items {
+		if len(item.Surfaces) == 0 || len(item.SupportedSeverities) == 0 {
+			t.Fatalf("rules metadata missing additive surface/severity fields for %s: %#v", item.ID, item)
+		}
+	}
 }
 
 func TestRulesCommandWritesDeterministicHumanInventory(t *testing.T) {

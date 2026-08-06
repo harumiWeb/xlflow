@@ -35,7 +35,7 @@ func TestRegistrySnapshotsAreSortedAndDefensive(t *testing.T) {
 	original := all[0]
 	all[0].ID = "VB999"
 	got, ok := Lookup(original.ID)
-	if !ok || got != original {
+	if !ok || !reflect.DeepEqual(got, original) {
 		t.Fatalf("caller mutated registry through All: %+v, %v", got, ok)
 	}
 
@@ -44,8 +44,13 @@ func TestRegistrySnapshotsAreSortedAndDefensive(t *testing.T) {
 		t.Fatalf("unexpected catalog snapshot: %+v", catalog)
 	}
 	catalog.Items[0].Title = "changed"
+	catalog.Items[0].Surfaces[0] = SurfaceLSP
+	catalog.Items[0].SupportedSeverities[0] = SeverityWarning
 	if got, _ := Lookup(original.ID); got.Title == "changed" {
 		t.Fatal("caller mutated registry through CatalogSnapshot")
+	}
+	if got, _ := Lookup(original.ID); got.Surfaces[0] == SurfaceLSP || got.SupportedSeverities[0] != SeverityError {
+		t.Fatal("caller mutated registry metadata slices through CatalogSnapshot")
 	}
 }
 
@@ -127,6 +132,13 @@ func TestValidateRejectsInvalidMetadata(t *testing.T) {
 		{"invalid severity", func(r *RuleMetadata) { r.DefaultSeverity = "info" }},
 		{"invalid scope", func(r *RuleMetadata) { r.Scope = "module" }},
 		{"invalid precision", func(r *RuleMetadata) { r.Precision = "certain" }},
+		{"invalid surface", func(r *RuleMetadata) { r.Surfaces = []RuleSurface{"editor"} }},
+		{"surface realtime mismatch", func(r *RuleMetadata) { r.Realtime = false }},
+		{"duplicate surface", func(r *RuleMetadata) { r.Surfaces = []RuleSurface{SurfaceLint, SurfaceLint, SurfaceLSP} }},
+		{"empty supported severities", func(r *RuleMetadata) { r.SupportedSeverities = nil }},
+		{"invalid supported severity", func(r *RuleMetadata) { r.SupportedSeverities = []RuleSeverity{"info"} }},
+		{"duplicate supported severity", func(r *RuleMetadata) { r.SupportedSeverities = []RuleSeverity{SeverityError, SeverityError} }},
+		{"default severity not first", func(r *RuleMetadata) { r.SupportedSeverities = []RuleSeverity{SeverityWarning, SeverityError} }},
 		{"config key mismatch", func(r *RuleMetadata) { r.ConfigurationKey = "" }},
 		{"invalid config key", func(r *RuleMetadata) { r.ConfigurationKey = "Option Explicit" }},
 		{"unconfigurable disabled default", func(r *RuleMetadata) { r.Configurable = false; r.ConfigurationKey = ""; r.DefaultEnabled = false }},
@@ -150,5 +162,43 @@ func TestValidateRejectsInvalidMetadata(t *testing.T) {
 
 	if err := Validate([]RuleMetadata{base, base}); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("Validate duplicate error = %v", err)
+	}
+}
+
+func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
+	for _, rule := range All() {
+		wantSurface := []RuleSurface{RuleSurface(rule.Family)}
+		if rule.Realtime {
+			wantSurface = append(wantSurface, SurfaceLSP)
+		}
+		if !reflect.DeepEqual(rule.Surfaces, wantSurface) {
+			t.Errorf("%s surfaces = %v, want %v", rule.ID, rule.Surfaces, wantSurface)
+		}
+		if len(rule.SupportedSeverities) == 0 || rule.SupportedSeverities[0] != rule.DefaultSeverity {
+			t.Errorf("%s supported severities = %v, want default %q first", rule.ID, rule.SupportedSeverities, rule.DefaultSeverity)
+		}
+	}
+	for _, id := range []string{"VBA214", "VBA225"} {
+		rule, ok := Lookup(id)
+		if !ok || !reflect.DeepEqual(rule.SupportedSeverities, []RuleSeverity{SeverityWarning, SeverityError}) {
+			t.Errorf("%s supported severities = %v, want warning,error", id, rule.SupportedSeverities)
+		}
+	}
+}
+
+func TestRegistryMetadataSlicesAreDeepCopied(t *testing.T) {
+	all := All()
+	all[0].Surfaces[0] = SurfaceLSP
+	all[0].SupportedSeverities[0] = SeverityWarning
+	lookup, ok := Lookup(all[0].ID)
+	if !ok || lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != SeverityError {
+		t.Fatalf("Lookup shared mutable metadata slices: %+v", lookup)
+	}
+	byFamily := ByFamily(lookup.Family)
+	byFamily[0].Surfaces[0] = SurfaceLSP
+	byFamily[0].SupportedSeverities[0] = SeverityWarning
+	lookup, _ = Lookup(byFamily[0].ID)
+	if lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != SeverityError {
+		t.Fatalf("ByFamily shared mutable metadata slices: %+v", lookup)
 	}
 }

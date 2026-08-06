@@ -57,23 +57,34 @@ const (
 	SeverityWarning RuleSeverity = "warning"
 )
 
+// RuleSurface identifies a public analysis surface that can emit a rule.
+type RuleSurface string
+
+const (
+	SurfaceLint    RuleSurface = "lint"
+	SurfaceAnalyze RuleSurface = "analyze"
+	SurfaceLSP     RuleSurface = "lsp"
+)
+
 type RuleMetadata struct {
-	ID                 string        `json:"id"`
-	Title              string        `json:"title"`
-	Description        string        `json:"description"`
-	Family             RuleFamily    `json:"family"`
-	Category           RuleCategory  `json:"category"`
-	DefaultSeverity    RuleSeverity  `json:"default_severity"`
-	DefaultEnabled     bool          `json:"default_enabled"`
-	Scope              RuleScope     `json:"scope"`
-	Realtime           bool          `json:"realtime"`
-	Precision          RulePrecision `json:"precision"`
-	FixAvailable       bool          `json:"fix_available"`
-	DocumentationURL   string        `json:"documentation_url"`
-	Configurable       bool          `json:"configurable"`
-	ConfigurationKey   string        `json:"configuration_key"`
-	InlineSuppressible bool          `json:"inline_suppressible"`
-	PreflightBlocking  bool          `json:"preflight_blocking"`
+	ID                  string         `json:"id"`
+	Title               string         `json:"title"`
+	Description         string         `json:"description"`
+	Family              RuleFamily     `json:"family"`
+	Category            RuleCategory   `json:"category"`
+	DefaultSeverity     RuleSeverity   `json:"default_severity"`
+	Surfaces            []RuleSurface  `json:"surfaces"`
+	SupportedSeverities []RuleSeverity `json:"supported_severities"`
+	DefaultEnabled      bool           `json:"default_enabled"`
+	Scope               RuleScope      `json:"scope"`
+	Realtime            bool           `json:"realtime"`
+	Precision           RulePrecision  `json:"precision"`
+	FixAvailable        bool           `json:"fix_available"`
+	DocumentationURL    string         `json:"documentation_url"`
+	Configurable        bool           `json:"configurable"`
+	ConfigurationKey    string         `json:"configuration_key"`
+	InlineSuppressible  bool           `json:"inline_suppressible"`
+	PreflightBlocking   bool           `json:"preflight_blocking"`
 }
 
 const SchemaVersion = 1
@@ -104,21 +115,21 @@ func init() {
 	if err := Validate(catalog.Items); err != nil {
 		panic(fmt.Sprintf("validate static-analysis rule registry: %v", err))
 	}
-	registry = append([]RuleMetadata(nil), catalog.Items...)
+	registry = cloneRules(catalog.Items)
 	sort.Slice(registry, func(i, j int) bool { return registry[i].ID < registry[j].ID })
 	byID = make(map[string]RuleMetadata, len(registry))
 	for _, rule := range registry {
-		byID[rule.ID] = rule
+		byID[rule.ID] = cloneRule(rule)
 	}
 }
 
 // All returns all rules in deterministic diagnostic-ID order.
-func All() []RuleMetadata { return append([]RuleMetadata(nil), registry...) }
+func All() []RuleMetadata { return cloneRules(registry) }
 
 // Lookup performs a case-insensitive lookup after trimming whitespace.
 func Lookup(id string) (RuleMetadata, bool) {
 	rule, ok := byID[strings.ToUpper(strings.TrimSpace(id))]
-	return rule, ok
+	return cloneRule(rule), ok
 }
 
 // ByFamily returns a defensive, ID-sorted snapshot for family.
@@ -126,7 +137,7 @@ func ByFamily(family RuleFamily) []RuleMetadata {
 	out := make([]RuleMetadata, 0)
 	for _, rule := range registry {
 		if rule.Family == family {
-			out = append(out, rule)
+			out = append(out, cloneRule(rule))
 		}
 	}
 	return out
@@ -161,6 +172,12 @@ func Validate(items []RuleMetadata) error {
 		}
 		if !validFamily(rule.Family) || !validCategory(rule.Category) || !validSeverity(rule.DefaultSeverity) || !validScope(rule.Scope) || !validPrecision(rule.Precision) {
 			return fmt.Errorf("%s has invalid enum metadata", rule.ID)
+		}
+		if err := validateSurfaces(rule); err != nil {
+			return err
+		}
+		if err := validateSupportedSeverities(rule); err != nil {
+			return err
 		}
 		if (rule.Family == FamilyLint && (!strings.HasPrefix(rule.ID, "VB") || strings.HasPrefix(rule.ID, "VBA"))) ||
 			(rule.Family == FamilyAnalyze && !strings.HasPrefix(rule.ID, "VBA")) {
@@ -204,9 +221,72 @@ func validCategory(v RuleCategory) bool {
 		v == CategoryArchitecture || v == CategorySecurity || v == CategoryTypeSafety
 }
 func validSeverity(v RuleSeverity) bool { return v == SeverityError || v == SeverityWarning }
+func validSurface(v RuleSurface) bool {
+	return v == SurfaceLint || v == SurfaceAnalyze || v == SurfaceLSP
+}
 func validScope(v RuleScope) bool {
 	return v == ScopeFileLocal || v == ScopeProcedureLocal || v == ScopeProjectWide || v == ScopeInterprocedural
 }
 func validPrecision(v RulePrecision) bool {
 	return v == PrecisionHigh || v == PrecisionMedium || v == PrecisionLow
+}
+
+func validateSurfaces(rule RuleMetadata) error {
+	wantBatch := RuleSurface(rule.Family)
+	if len(rule.Surfaces) == 0 || rule.Surfaces[0] != wantBatch {
+		return fmt.Errorf("%s must declare %q as its first surface", rule.ID, wantBatch)
+	}
+	wantLen := 1
+	if rule.Realtime {
+		wantLen = 2
+	}
+	if len(rule.Surfaces) != wantLen {
+		return fmt.Errorf("%s surfaces do not match realtime=%t", rule.ID, rule.Realtime)
+	}
+	for i, surface := range rule.Surfaces {
+		if !validSurface(surface) {
+			return fmt.Errorf("%s has invalid surface %q", rule.ID, surface)
+		}
+		if i > 0 && surface == rule.Surfaces[0] {
+			return fmt.Errorf("%s has duplicate surface %q", rule.ID, surface)
+		}
+	}
+	if rule.Realtime && rule.Surfaces[1] != SurfaceLSP {
+		return fmt.Errorf("%s must declare %q when realtime", rule.ID, SurfaceLSP)
+	}
+	return nil
+}
+
+func validateSupportedSeverities(rule RuleMetadata) error {
+	if len(rule.SupportedSeverities) == 0 {
+		return fmt.Errorf("%s has no supported severities", rule.ID)
+	}
+	if rule.SupportedSeverities[0] != rule.DefaultSeverity {
+		return fmt.Errorf("%s must declare default severity %q first", rule.ID, rule.DefaultSeverity)
+	}
+	seen := make(map[RuleSeverity]bool, len(rule.SupportedSeverities))
+	for _, severity := range rule.SupportedSeverities {
+		if !validSeverity(severity) {
+			return fmt.Errorf("%s has invalid supported severity %q", rule.ID, severity)
+		}
+		if seen[severity] {
+			return fmt.Errorf("%s has duplicate supported severity %q", rule.ID, severity)
+		}
+		seen[severity] = true
+	}
+	return nil
+}
+
+func cloneRule(rule RuleMetadata) RuleMetadata {
+	rule.Surfaces = append([]RuleSurface(nil), rule.Surfaces...)
+	rule.SupportedSeverities = append([]RuleSeverity(nil), rule.SupportedSeverities...)
+	return rule
+}
+
+func cloneRules(items []RuleMetadata) []RuleMetadata {
+	cloned := make([]RuleMetadata, len(items))
+	for i, rule := range items {
+		cloned[i] = cloneRule(rule)
+	}
+	return cloned
 }

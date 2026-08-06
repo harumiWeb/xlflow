@@ -31,6 +31,8 @@ const requiredRuleFields = [
   "family",
   "category",
   "default_severity",
+  "supported_severities",
+  "surfaces",
   "default_enabled",
   "scope",
   "realtime",
@@ -50,6 +52,7 @@ const booleanRuleFields = new Set([
   "inline_suppressible",
   "preflight_blocking",
 ]);
+const arrayRuleFields = new Set(["supported_severities", "surfaces"]);
 for (const [index, rule] of registryRules.entries()) {
   if (typeof rule !== "object" || rule === null || Array.isArray(rule)) {
     throw new Error(`diagnostic registry item ${index} must be an object`);
@@ -60,7 +63,10 @@ for (const [index, rule] of registryRules.entries()) {
   }
   for (const field of requiredRuleFields) {
     const expected = booleanRuleFields.has(field) ? "boolean" : "string";
-    if (typeof rule[field] !== expected) {
+    const validType = arrayRuleFields.has(field)
+      ? Array.isArray(rule[field]) && rule[field].every((value) => typeof value === "string")
+      : typeof rule[field] === expected;
+    if (!validType) {
       const diagnostic = typeof rule.id === "string" ? rule.id : `<item ${index}>`;
       throw new Error(`diagnostic ${diagnostic} has invalid ${field}: expected ${expected}`);
     }
@@ -89,11 +95,7 @@ walk(path.join(repo, "internal"));
 const source = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
 // Some structured metadata keys use the same snake_case shape as error-code
 // literals but are not user-facing errors and do not belong in this inventory.
-const excludedErrorInventoryLiterals = new Set([
-  "binding_status",
-  "rule_codes",
-  "binding_note",
-]);
+const excludedErrorInventoryLiterals = new Set(["binding_status", "rule_codes", "binding_note"]);
 const errors = [
   ...new Set([...source.matchAll(/"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g)].map((m) => m[1])),
 ]
@@ -144,6 +146,11 @@ const details = rules
       ["Family", `\`${markdown(rule.family)}\``],
       ["Category", `\`${markdown(rule.category)}\``],
       ["Default severity", `\`${markdown(rule.default_severity)}\``],
+      [
+        "Supported severities",
+        rule.supported_severities.map((value) => `\`${markdown(value)}\``).join(", "),
+      ],
+      ["Surfaces", rule.surfaces.map((value) => `\`${markdown(value)}\``).join(", ")],
       ["Scope", `\`${markdown(rule.scope)}\``],
       ["Precision", `\`${markdown(rule.precision)}\``],
       ["Enabled by default", yesNo(rule.default_enabled)],
