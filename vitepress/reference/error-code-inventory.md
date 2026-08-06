@@ -177,6 +177,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_error_handler_fallthrough`
 - `detect_event_handler_reentry`
 - `detect_excel_api_failure_contracts`
+- `detect_excel_cell_access_in_loops`
 - `detect_excel_object_member_mismatch`
 - `detect_for_each_control_type`
 - `detect_function_return_path`

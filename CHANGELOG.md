@@ -20,6 +20,10 @@ All notable changes to xlflow will be documented in this file.
 - Improved opt-in `VB021` to treat externally callable public standard-module
   APIs as possible roots, preventing false warnings for private helpers in
   scaffolded and user-authored helper libraries.
+- Documented the `VBA225` analyzer contract for issue #452: repeated
+  cell-by-cell Excel object-model work inside loops, nested-loop severity
+  escalation, helper-call coverage, small fixed-loop exemptions, and bulk
+  array/range remediation guidance.
 - Strengthened opt-in `VBA210` return-path analysis to cover `Function` and
   `Property Get` CFG exits, early exits, error-handler paths, shared cleanup,
   dominating assignments, object/value return assignment syntax, and

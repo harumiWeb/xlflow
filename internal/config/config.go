@@ -149,6 +149,7 @@ type AnalyzeConfig struct {
 	DetectHardcodedSecrets              bool     `toml:"detect_hardcoded_secrets"`
 	DetectPublicAPITypeSafety           bool     `toml:"detect_public_api_type_safety"`
 	DetectUntrustedDataFlow             bool     `toml:"detect_untrusted_data_flow"`
+	DetectExcelCellAccessInLoops        bool     `toml:"detect_excel_cell_access_in_loops"`
 }
 
 type lintRuleAdapter struct {
@@ -222,6 +223,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA222": {Get: func(c AnalyzeConfig) bool { return c.DetectPublicAPITypeSafety }, Set: func(c *AnalyzeConfig, v bool) { c.DetectPublicAPITypeSafety = v }},
 	"VBA223": {Get: func(c AnalyzeConfig) bool { return c.DetectHardcodedSecrets }, Set: func(c *AnalyzeConfig, v bool) { c.DetectHardcodedSecrets = v }},
 	"VBA224": {Get: func(c AnalyzeConfig) bool { return c.DetectUntrustedDataFlow }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUntrustedDataFlow = v }},
+	"VBA225": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelCellAccessInLoops }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelCellAccessInLoops = v }},
 }
 
 var (

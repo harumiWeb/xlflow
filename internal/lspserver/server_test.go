@@ -788,6 +788,28 @@ func TestProtocolDiagnosticUsesRegistryDocumentationURL(t *testing.T) {
 	}
 }
 
+func TestProtocolDiagnosticPreservesNestedVBA225SeverityAndRange(t *testing.T) {
+	diagnostic := toProtocolDiagnostic(intel.Diagnostic{
+		Code:     "VBA225",
+		Severity: "error",
+		Source:   "xlflow",
+		Range: intel.Range{
+			Start: intel.Position{Line: 4, Character: 0},
+			End:   intel.Position{Line: 6, Character: 0},
+		},
+		Message: "Nested loop depth: 2.",
+	})
+	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityError {
+		t.Fatalf("VBA225 severity = %#v, want error", diagnostic.Severity)
+	}
+	if diagnostic.Range.Start.Line != 4 || diagnostic.Range.End.Line != 6 {
+		t.Fatalf("VBA225 range = %#v, want loop range", diagnostic.Range)
+	}
+	if diagnostic.CodeDescription == nil || string(diagnostic.CodeDescription.HRef) != "https://harumiweb.github.io/xlflow/reference/diagnostics#vba225" {
+		t.Fatalf("VBA225 code description = %#v", diagnostic.CodeDescription)
+	}
+}
+
 func TestLSPDiagnosticsReportUnsafeProjectLocalByRefArgument(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

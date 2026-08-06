@@ -2327,6 +2327,22 @@ func TestWorkspaceSymbolsPreferOpenDocumentOverFilesystemContent(t *testing.T) {
 	}
 }
 
+func TestResolveDocumentExpressionTypeAtUsesLocalExcelDeclarations(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: "Main.bas",
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Excel.Range
+    Debug.Print rng.Cells(1, 1).Value2
+End Sub
+`,
+	}
+	if got, ok := analyzer.ResolveDocumentExpressionTypeAt(doc, "rng.Cells(1, 1)", 3); !ok || got != "Excel.Range" {
+		t.Fatalf("local Excel range type = %q, %v; want Excel.Range", got, ok)
+	}
+}
+
 func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 

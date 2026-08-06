@@ -3910,6 +3910,21 @@ func (a Analyzer) ResolveExpressionType(expr string) (string, bool) {
 	return a.resolveExpressionType(Document{}, expr, false)
 }
 
+// ResolveDocumentExpressionTypeAt resolves an expression using the local
+// declarations and module context available at a source position. It is a
+// protocol-neutral adapter for analyzers that need the same type-chain policy
+// as completion and typed diagnostics without duplicating member resolution.
+func (a Analyzer) ResolveDocumentExpressionTypeAt(doc Document, expr string, line int) (string, bool) {
+	if a.DB == nil {
+		return "", false
+	}
+	if line < 0 {
+		line = 0
+	}
+	offset := byteOffsetForDocumentPosition(doc, Position{Line: line, Character: 0})
+	return a.resolveDocumentExpressionTypeAt(doc, expr, offset)
+}
+
 func (a Analyzer) resolveDocumentExpressionTypeAt(doc Document, expr string, offset int) (string, bool) {
 	return a.resolveDocumentExpressionTypeAtContext(doc, expr, offset, nil)
 }
