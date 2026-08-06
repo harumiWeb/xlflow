@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA223` security warnings for likely hardcoded VBA
+  credentials, with structural matching, placeholder filtering, fixed
+  `[REDACTED]` diagnostics, and independent configuration/inline suppression.
 - Strengthened opt-in `VBA210` return-path analysis to cover `Function` and
   `Property Get` CFG exits, early exits, error-handler paths, shared cleanup,
   dominating assignments, object/value return assignment syntax, and

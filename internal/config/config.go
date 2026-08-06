@@ -146,6 +146,7 @@ type AnalyzeConfig struct {
 	DetectResourceLeaks                 bool     `toml:"detect_resource_leaks"`
 	DetectEventHandlerReentry           bool     `toml:"detect_event_handler_reentry"`
 	DetectApplicationStateCallEffects   bool     `toml:"detect_application_state_call_effects"`
+	DetectHardcodedSecrets              bool     `toml:"detect_hardcoded_secrets"`
 }
 
 type lintRuleAdapter struct {
@@ -216,6 +217,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA219": {Get: func(c AnalyzeConfig) bool { return c.DetectResourceLeaks }, Set: func(c *AnalyzeConfig, v bool) { c.DetectResourceLeaks = v }},
 	"VBA220": {Get: func(c AnalyzeConfig) bool { return c.DetectEventHandlerReentry }, Set: func(c *AnalyzeConfig, v bool) { c.DetectEventHandlerReentry = v }},
 	"VBA221": {Get: func(c AnalyzeConfig) bool { return c.DetectApplicationStateCallEffects }, Set: func(c *AnalyzeConfig, v bool) { c.DetectApplicationStateCallEffects = v }},
+	"VBA223": {Get: func(c AnalyzeConfig) bool { return c.DetectHardcodedSecrets }, Set: func(c *AnalyzeConfig, v bool) { c.DetectHardcodedSecrets = v }},
 }
 
 var (

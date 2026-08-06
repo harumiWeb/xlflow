@@ -1,0 +1,48 @@
+# Hardcoded Secret Diagnostics
+
+`VBA223` is a default-enabled, high-precision `analyze` warning for likely
+credentials embedded directly in VBA source. It runs in batch analysis and the
+shared real-time editor path, does not block source preflight, and supports
+normal inline suppression.
+
+## Detection policy
+
+The rule prefers structural evidence over entropy-only matching. It reports
+direct string literals used as or containing:
+
+- connection-string credentials such as `Password`, `Pwd`, `User ID`, `UID`,
+  `Username`, `Account Key`, `Client Secret`, or `Access Token`;
+- `Bearer` and `Basic` authorization values and URL credentials in the form
+  `user:password@host`;
+- PEM private-key markers;
+- curated provider-shaped access keys, API keys, and webhook URLs; and
+- values assigned directly to clearly credential-related names such as
+  `password`, `api_key`, `access_token`, `client_secret`, `private_key`,
+  `credential`, or `token`.
+
+The initial implementation does not perform arbitrary entropy matching,
+complex data-flow propagation, or infer a secret from a string concatenation
+without direct structural evidence.
+
+## Placeholders and suppression
+
+Empty values, environment-variable references, and obvious examples such as
+`your-password`, `changeme`, `example`, `dummy`, `placeholder`, `test`, and
+template markers are ignored where the value can be identified safely.
+Intentional fixtures that use a realistic value can suppress the finding with
+`xlflow:disable-line VBA223` or `xlflow:disable-next-line VBA223`.
+
+The project-wide setting is:
+
+```toml
+[analyze]
+disabled_rules = ["VBA223"]
+```
+
+## Redaction contract
+
+The detected value is never copied into `message`, `reason`, `suggestion`,
+LSP diagnostics, or JSON fields. `nearby_code` redacts string literals and
+comments in the surrounding source with the fixed marker `[REDACTED]`.
+The diagnostic does not expose a provider prefix, suffix, length, or partial
+value.

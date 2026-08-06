@@ -773,6 +773,51 @@ func TestAnalyzeCommandJSONIncludesConfigWarnings(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCommandJSONRedactsVBA223Secrets(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := "cli-hardcoded-secret-value"
+	body := "Option Explicit\nPublic Sub Run()\n  Dim password As String\n  password = \"" + secret + "\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	a := &app{
+		cwd:            dir,
+		stdout:         &stdout,
+		stderr:         &bytes.Buffer{},
+		stdoutTerminal: func() bool { return false },
+		stderrTerminal: func() bool { return false },
+	}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "analyze"})
+	if err := root.Execute(); err == nil || output.ExitCode(err) != output.ExitValidation {
+		t.Fatalf("analyze command error = %v, exit = %d; want validation failure", err, output.ExitCode(err))
+	}
+	if strings.Contains(stdout.String(), secret) {
+		t.Fatalf("analyze JSON contains the hardcoded secret: %s", stdout.String())
+	}
+	var got struct {
+		Analysis []analyze.Finding `json:"analysis"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode analyze JSON: %v\n%s", err, stdout.String())
+	}
+	if len(got.Analysis) != 1 || got.Analysis[0].Code != "VBA223" {
+		t.Fatalf("VBA223 JSON analysis = %+v", got.Analysis)
+	}
+	if !strings.Contains(stdout.String(), "[REDACTED]") {
+		t.Fatalf("analyze JSON does not contain fixed redaction: %s", stdout.String())
+	}
+}
+
 func TestAnalyzeCommandJSONIncludesVBA214ScopeEndLine(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

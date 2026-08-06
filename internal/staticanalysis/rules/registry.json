@@ -1206,6 +1206,24 @@
       "configuration_key": "detect_application_state_call_effects",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA223",
+      "title": "Likely hardcoded secret",
+      "description": "A credential-like value appears directly in VBA source.",
+      "family": "analyze",
+      "category": "security",
+      "default_severity": "warning",
+      "default_enabled": true,
+      "scope": "file-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba223",
+      "configurable": true,
+      "configuration_key": "detect_hardcoded_secrets",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

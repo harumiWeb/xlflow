@@ -176,6 +176,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_excel_object_member_mismatch`
 - `detect_for_each_control_type`
 - `detect_function_return_path`
+- `detect_hardcoded_secrets`
 - `detect_implicit_variant`
 - `detect_leaked_on_error_resume_next_scopes`
 - `detect_multiple_declarator_clarity`
