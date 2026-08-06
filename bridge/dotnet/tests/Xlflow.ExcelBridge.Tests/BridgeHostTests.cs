@@ -53,6 +53,7 @@ public sealed class BridgeHostTests
         Assert.Contains("test", commands);
         Assert.Contains("type-db-import", commands);
         Assert.Contains("ui", commands);
+        Assert.Contains("vbe-oracle", commands);
     }
 
     [Fact]

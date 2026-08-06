@@ -777,6 +777,34 @@ internal static class ExcelBridgeSupport
         return processId;
     }
 
+    public static string GetProcessBitness(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!NativeMethods.IsWow64Process2(process.Handle, out var processMachine, out var nativeMachine))
+            {
+                return "unknown";
+            }
+
+            const ushort imageFileMachineI386 = 0x014c;
+            const ushort imageFileMachineAmd64 = 0x8664;
+            const ushort imageFileMachineArm64 = 0xAA64;
+            var machine = processMachine != 0 ? processMachine : nativeMachine;
+            return machine switch
+            {
+                imageFileMachineI386 => "x86",
+                imageFileMachineAmd64 => "x64",
+                imageFileMachineArm64 => "arm64",
+                _ => "unknown",
+            };
+        }
+        catch
+        {
+            return "unknown";
+        }
+    }
+
     public static string GetRangeAddress(object range)
     {
         try
@@ -1546,6 +1574,50 @@ internal static class ExcelBridgeSupport
         return CloseWorkbookAndQuitApplicationCore(workbook, excel, CaptureOwnedExcelProcess(ownedProcessId));
     }
 
+    // The developer oracle owns a disposable, unsaved workbook. Releasing its
+    // COM wrappers and terminating the captured process avoids allowing a
+    // modal VBE/Excel state to block app.Quit indefinitely. The PID and start
+    // time are captured before any worker is launched, so this cannot target
+    // an unrelated user's Excel instance.
+    public static bool ReleaseOracleExcelAndConfirmExit(
+        object? workbook,
+        object? excel,
+        IList<OwnedExcelProcess> ownedProcesses,
+        IReadOnlyList<OwnedExcelProcess> baselineProcesses)
+    {
+        ReleaseComObject(workbook);
+        ReleaseComObject(excel);
+        CollectComGarbage();
+
+        var confirmed = true;
+        // Re-enumerate for a short bounded drain after releasing COM wrappers:
+        // Excel may materialize a second /automation server while the VBE
+        // worker apartment drains. Only processes absent from the pre-run
+        // baseline are eligible for termination.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            foreach (var process in CaptureOwnedExcelProcesses())
+            {
+                if (!baselineProcesses.Any(existing => SameOwnedProcess(existing, process)) &&
+                    !ownedProcesses.Any(existing => SameOwnedProcess(existing, process)))
+                {
+                    ownedProcesses.Add(process);
+                }
+            }
+            var attemptConfirmed = true;
+            foreach (var ownedProcess in ownedProcesses)
+            {
+                attemptConfirmed &= EnsureOwnedExcelProcessExited(ownedProcess);
+            }
+            confirmed = attemptConfirmed;
+            if (attempt < 2)
+            {
+                Thread.Sleep(250);
+            }
+        }
+        return confirmed;
+    }
+
     private static bool CloseWorkbookAndQuitApplicationCore(object? workbook, object? excel, OwnedExcelProcess ownedProcess)
     {
         if (workbook is not null)
@@ -1621,6 +1693,27 @@ internal static class ExcelBridgeSupport
         }
     }
 
+    public static IReadOnlyList<OwnedExcelProcess> CaptureOwnedExcelProcesses()
+    {
+        var result = new List<OwnedExcelProcess>();
+        foreach (var process in Process.GetProcessesByName("EXCEL"))
+        {
+            try
+            {
+                var owned = CaptureOwnedExcelProcess(process.Id);
+                if (owned.ProcessId > 0)
+                {
+                    result.Add(owned);
+                }
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+        return result;
+    }
+
     private static bool EnsureOwnedExcelProcessExited(OwnedExcelProcess ownedProcess)
     {
         if (ownedProcess.ProcessId <= 0)
@@ -1642,7 +1735,12 @@ internal static class ExcelBridgeSupport
             }
 
             process.Kill(entireProcessTree: true);
-            return process.WaitForExit(3000);
+            // Excel can take several seconds to tear down a VBE worker and
+            // release its COM apartment after a modal compile error. Keep the
+            // ownership check bounded, but allow the dedicated process time
+            // to acknowledge the termination before reporting infrastructure
+            // failure.
+            return process.WaitForExit(10000);
         }
         catch (ArgumentException)
         {
@@ -1715,6 +1813,12 @@ internal static class ExcelBridgeSupport
         {
             return false;
         }
+    }
+
+    private static bool SameOwnedProcess(OwnedExcelProcess left, OwnedExcelProcess right)
+    {
+        return left.ProcessId == right.ProcessId &&
+               (left.StartTime is null || right.StartTime is null || left.StartTime.Value == right.StartTime.Value);
     }
 
     private static bool IsExcelProcess(Process process)
@@ -1938,6 +2042,9 @@ internal static class ExcelBridgeSupport
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
 
         [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
         public static extern int CLSIDFromProgID(string lpszProgID, out Guid lpclsid);

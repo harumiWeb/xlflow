@@ -42,6 +42,7 @@ public sealed class CommandRegistry
             new TestCommand(),
             new TypeDbImportCommand(),
             new UICommand(),
+            new VbeOracleCommand(),
         });
     }
 
@@ -66,7 +67,8 @@ public sealed class CommandRegistry
         ISessionService? sessionService = null,
         ITestService? testService = null,
         TypeLibImporterService? typeLibImporterService = null,
-        IUIService? uiService = null)
+        IUIService? uiService = null,
+        IVbeOracleService? vbeOracleService = null)
     {
         return new CommandRegistry(new ICommandHandler[]
         {
@@ -91,6 +93,7 @@ public sealed class CommandRegistry
             new TestCommand(testService),
             new TypeDbImportCommand(typeLibImporterService),
             new UICommand(uiService),
+            new VbeOracleCommand(vbeOracleService),
         });
     }
 

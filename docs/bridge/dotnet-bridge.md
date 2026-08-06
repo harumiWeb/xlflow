@@ -51,6 +51,35 @@ recovery-required outcome even when no Excel PID was returned.
 
 ## Implemented Commands
 
+### Internal `vbe-oracle`
+
+The developer-only `vbe-oracle` bridge command is invoked by
+`cmd/xlflow-vbe-oracle`; it is not registered in the public xlflow command
+tree. Go sends one base64-encoded JSON plan per fixture through the normal
+bridge protocol. Schema v1 plans contain `schema_version`, `case_id`,
+`probe_mode: "compile"`, `timeout_ms`, and one or more standard `.bas` modules
+with `name`, `kind`, and `source_path`.
+
+The bridge creates a disposable unsaved workbook, imports the verified sources,
+activates the target VBProject, and invokes the existing VBE Compile command.
+It reuses the worker timeout and Win32/UI Automation dialog watcher. A compile
+dialog is `rejected`; a completed worker with no compile dialog is `accepted`.
+Dialog identity is correlated with the target Excel/VBE owner chain; the
+oracle does not use `SendKeys` or keyboard-focus scripting.
+Timeouts, startup/VBIDE/import/COM failures, unknown modals, malformed worker
+output, and unconfirmed cleanup are `infrastructure_failure` and are returned
+under the typed oracle response. The target Excel PID and cleanup status are
+always included when known, and cleanup failure overrides an earlier behavior
+observation.
+
+Successful responses expose the extension field `oracle` with `outcome`,
+`evidence_phase`, `last_stage`, `duration_ms`, `compile_invoked`,
+`cleanup_confirmed`, dialog/location metadata when present, and Excel
+version/build/bitness/locale metadata. Infrastructure responses preserve the
+same oracle payload in `error.details.oracle` so the Go runner can classify the
+failure without parsing localized messages. Only the bridge-created Excel
+process may be closed or terminated.
+
 ### `doctor`
 
 `xlflow doctor --bridge dotnet --json` runs environment diagnostics through the .NET bridge without launching PowerShell. The response includes a `diagnostics` object at the top level:

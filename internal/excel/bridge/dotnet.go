@@ -49,7 +49,8 @@ var dotNetSupportedCommands = map[string]struct{}{
 }
 
 type DotNetProvider struct {
-	RootDir string
+	RootDir         string
+	PreferRepoLocal bool
 }
 
 type dotNetBridgeInfo struct {
@@ -76,7 +77,7 @@ func (p DotNetProvider) Supports(command string) bool {
 }
 
 func (p DotNetProvider) Info(ctx context.Context) (Info, error) {
-	command, args, err := DotNetBridgeCommand()
+	command, args, err := p.bridgeCommand()
 	if err != nil {
 		return Info{}, err
 	}
@@ -101,7 +102,7 @@ func (p DotNetProvider) Info(ctx context.Context) (Info, error) {
 }
 
 func (p DotNetProvider) Execute(ctx context.Context, req Request) (Response, error) {
-	command, args, err := DotNetBridgeCommand()
+	command, args, err := p.bridgeCommand()
 	if err != nil {
 		return Response{}, err
 	}
@@ -148,6 +149,26 @@ func (p DotNetProvider) Execute(ctx context.Context, req Request) (Response, err
 		return response, err
 	}
 	return response, nil
+}
+
+// bridgeCommand lets developer-only callers force the repository bridge. This
+// avoids accidentally invoking a stale published bridge beside the binary
+// while leaving production provider resolution unchanged.
+func (p DotNetProvider) bridgeCommand() (string, []string, error) {
+	if p.PreferRepoLocal {
+		if projectPath, ok := repoLocalDotNetBridgeProjectPathFunc(); ok {
+			dotnetExe, err := dotNetLookPath("dotnet")
+			if err != nil {
+				return "", nil, &Error{Kind: ErrorDotNetRuntime, Message: "dotnet executable not found while resolving the repo-local Excel bridge project", Err: err}
+			}
+			return dotnetExe, []string{
+				"run", "--project", projectPath, "--configuration", "Release",
+				"--disable-build-servers", "-p:UseSharedCompilation=false",
+				"-p:BuildInParallel=false", "--",
+			}, nil
+		}
+	}
+	return DotNetBridgeCommand()
 }
 
 func dotNetBridgeRuntimeArgs(args []string) []string {

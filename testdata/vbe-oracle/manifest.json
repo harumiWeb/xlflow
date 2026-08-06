@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "description": "Focused Windows Excel/VBE compile probes for static-analysis evidence.",
+  "controls": {
+    "accept": "known-compile-accept",
+    "reject": "known-compile-reject"
+  },
+  "cases": [
+    {
+      "id": "known-compile-accept",
+      "path": "cases/known-compile-accept/case.json",
+      "control_role": "accept"
+    },
+    {
+      "id": "known-compile-reject",
+      "path": "cases/known-compile-reject/case.json",
+      "control_role": "reject"
+    },
+    { "id": "missing-required-argument", "path": "cases/missing-required-argument/case.json" },
+    { "id": "optional-argument-omitted", "path": "cases/optional-argument-omitted/case.json" },
+    { "id": "duplicate-named-argument", "path": "cases/duplicate-named-argument/case.json" },
+    { "id": "known-named-argument", "path": "cases/known-named-argument/case.json" },
+    { "id": "unknown-named-argument", "path": "cases/unknown-named-argument/case.json" },
+    { "id": "set-scalar-target", "path": "cases/set-scalar-target/case.json" },
+    { "id": "set-object-target", "path": "cases/set-object-target/case.json" },
+    {
+      "id": "missing-set-object-assignment",
+      "path": "cases/missing-set-object-assignment/case.json"
+    },
+    { "id": "scalar-assignment", "path": "cases/scalar-assignment/case.json" },
+    { "id": "scalar-to-object-parameter", "path": "cases/scalar-to-object-parameter/case.json" },
+    { "id": "object-to-object-parameter", "path": "cases/object-to-object-parameter/case.json" },
+    { "id": "byref-incompatible", "path": "cases/byref-incompatible/case.json" },
+    { "id": "byref-compatible", "path": "cases/byref-compatible/case.json" },
+    {
+      "id": "byref-parenthesized-variable",
+      "path": "cases/byref-parenthesized-variable/case.json"
+    },
+    { "id": "byref-bare-variable", "path": "cases/byref-bare-variable/case.json" },
+    { "id": "unknown-as-type", "path": "cases/unknown-as-type/case.json" },
+    { "id": "known-as-type", "path": "cases/known-as-type/case.json" },
+    { "id": "sub-parenthesized-call", "path": "cases/sub-parenthesized-call/case.json" },
+    { "id": "sub-bare-call", "path": "cases/sub-bare-call/case.json" },
+    { "id": "function-parenthesized-call", "path": "cases/function-parenthesized-call/case.json" },
+    { "id": "function-bare-call", "path": "cases/function-bare-call/case.json" }
+  ]
+}
