@@ -3371,6 +3371,29 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayComparisonFindingsHaveStableOrder(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim leftValues() As Variant
+  Dim rightValues() As Variant
+  If leftValues = rightValues Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 2 || got[0].Line != 5 || got[1].Line != 5 {
+		t.Fatalf("expected two stable same-line array comparison findings, got %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "leftValues") || !strings.Contains(got[1].Message, "rightValues") {
+		t.Fatalf("array comparison findings are not emitted in stable variable order: %+v", got)
+	}
+}
+
 func TestAnalyzerArrayLifecycleAndDimensionSafety(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -3525,10 +3548,10 @@ func TestAnalyzerArrayLifecycleAcceptsReDimTypeSuffixAndUnknownDimension(t *test
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal dimension As Long)
-  Dim values() As Long
-  ReDim values(0 To 1) As Long
-  values(1) = 1
-  If UBound(values, dimension) > 0 Then Debug.Print "ok"
+	Dim values() As Long
+	ReDim values(0 To 1) As Long
+	values(1) = 1
+	If UBound(values, dimension) > 0 Then Debug.Print "ok"
 End Sub
 `)
 
@@ -3538,6 +3561,30 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("typed ReDim and an unknown dimension expression should not produce VBA227: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayLifecycleQualifiedReDimAndUnknownArrayAssignment(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim qualified() As Variant
+  ReDim qualified(0 To 0) As Scripting.Dictionary
+  qualified(0) = Empty
+  Dim values() As Long
+  ReDim values(0 To 0)
+  values = ExternalValues()
+  values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("qualified ReDim should establish allocation while unknown array assignment should invalidate it: %+v", got)
 	}
 }
 
@@ -3602,6 +3649,35 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 1 || got[0].Line != 24 {
 		t.Fatalf("conditional allocation must remain unknown while matching branch allocations stay safe: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayReturnSummaryDeduplicatesLoopVisits(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function LoopValues() As Variant
+  Dim result() As Long
+  ReDim result(0 To 0)
+  Dim i As Long
+  For i = 1 To 2
+    Debug.Print i
+  Next i
+  LoopValues = result
+End Function
+
+Public Sub Run()
+  Dim values As Variant
+  values = LoopValues()
+  values(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a loop revisiting one allocated return assignment must not invalidate its summary: %+v", got)
 	}
 }
 

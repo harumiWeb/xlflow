@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -65,7 +66,7 @@ type arrayUse struct {
 
 var (
 	arrayRedimRe       = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
-	arrayRedimClauseRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_]\w*(?:\s*\(\s*\))?)?\s*$`)
+	arrayRedimClauseRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
 	arrayEraseRe       = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
 	arrayEraseNameRe   = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
 	arrayBoundCallRe   = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
@@ -105,6 +106,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		}
 		return out
 	})
+	sortFindings(findings)
 	return findings
 }
 
@@ -122,6 +124,7 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 			}
 		}
 	}
+	sortFindings(findings)
 	return findings
 }
 
@@ -163,7 +166,7 @@ func walkArrayCFG(graph *vbacfg.Graph, lines []string, initial arrayFlowState, v
 			}
 			text := block.Statement.Text
 			if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
-				text = lines[line-1]
+				text = normalizedCodeLine(lines[line-1])
 			}
 			out = visit(text, line, in)
 		}
@@ -416,7 +419,13 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	}
 
 	if a.Config.Analyze.DetectObjectArrayComparison {
-		for name, variable := range variables {
+		names := make([]string, 0, len(variables))
+		for name := range variables {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			variable := variables[name]
 			if variable.isArray && identifierComparedAsOperand(strings.ToLower(text), name, proc) {
 				add("VBA209", variable.name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself.")
 			}
@@ -444,7 +453,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}
-			} else if variable, exists := variables[name]; exists && variable.isVariant {
+			} else if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 				state[name] = arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginUnknown}
 			}
 		}
@@ -705,7 +714,7 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 			}
 			variables := arrayVariables(file, proc, moduleDecls)
 			ctx := analysisContext{arrayReturns: map[string]arrayValue{}}
-			var returns []candidate
+			returnCandidates := map[int]candidate{}
 			if proc.Graph == nil {
 				// Without a CFG the scan cannot distinguish conditional from
 				// unconditional return assignments, so leave the summary unknown.
@@ -714,11 +723,20 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 			walkArrayCFG(proc.Graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 					value, known := arrayExpressionState(rhs, in, ctx)
-					returns = append(returns, candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue})
+					returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 				}
 				out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line)
 				return out
 			})
+			returnLines := make([]int, 0, len(returnCandidates))
+			for line := range returnCandidates {
+				returnLines = append(returnLines, line)
+			}
+			sort.Ints(returnLines)
+			returns := make([]candidate, 0, len(returnLines))
+			for _, line := range returnLines {
+				returns = append(returns, returnCandidates[line])
+			}
 			if len(returns) == 0 {
 				continue
 			}
