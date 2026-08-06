@@ -9,6 +9,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ambiguous_test_name`
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
+- `args_invalid`
 - `argument_count`
 - `argument_diagnostics`
 - `argument_list`
@@ -81,6 +82,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `case_clause`
 - `case_else`
 - `case_expression`
+- `case_id`
+- `case_selection_invalid`
 - `cell_diffs`
 - `cells_updated`
 - `cfg_builds`
@@ -113,6 +116,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `command_line_argument`
 - `command_reads_saved_file`
 - `comparison_expression`
+- `compile_invoked`
 - `compile_vba`
 - `component_type`
 - `components_applied`
@@ -131,6 +135,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `constant_name`
 - `control_count`
 - `control_enumeration_failed`
+- `control_failed`
 - `coordinate_system`
 - `coordination_acquire_failed`
 - `coordination_identity_failed`
@@ -200,6 +205,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_unused_local_variables`
 - `detect_unused_private_procedures`
 - `detect_worksheet_root_mismatch`
+- `diagnostic_meaning`
 - `diagnostic_runs`
 - `dialog_id`
 - `diff_args_invalid`
@@ -251,6 +257,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `environment_variable`
 - `event_declaration`
 - `event_statement`
+- `evidence_phase`
 - `example_cell`
 - `example_formula`
 - `exceeds_keep_last`
@@ -277,6 +284,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exit_statement`
 - `exit_sub`
 - `expanded_formula`
+- `expectation_mismatch`
 - `expected_closer`
 - `expected_error`
 - `export_image_args_invalid`
@@ -291,6 +299,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `file_picker`
 - `files_changed`
 - `files_to_change`
+- `fixture_invalid`
 - `fmt_args_invalid`
 - `fmt_check_failed`
 - `fmt_failed`
@@ -379,6 +388,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `incompressible_short_over_limit_errors`
 - `incompressible_short_under_limit_roundtrips`
 - `incremental_parse_unavailable`
+- `infrastructure_failure`
 - `init_failed`
 - `inspect_args_invalid`
 - `inspect_failed`
@@ -407,7 +417,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invoke_macro`
 - `is_wsl`
 - `keyword_casing`
+- `known_accept`
+- `known_reject`
 - `label_statement`
+- `last_stage`
 - `latest_source_modified_at`
 - `launches_process`
 - `lbl_child`
@@ -523,6 +536,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `operator_spacing`
 - `option_statement`
 - `optional_modifier`
+- `oracle_failure`
 - `original_error`
 - `original_workbook_path`
 - `output_file_exists`
@@ -559,11 +573,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `parser_token`
 - `passing_mode`
 - `path_translation`
+- `plan_invalid`
 - `poison_reason`
 - `post_until`
 - `post_while`
 - `pre_until`
 - `pre_while`
+- `probe_mode`
 - `procedure_call`
 - `procedure_declaration`
 - `procedure_exit`
@@ -588,6 +604,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `project_create`
 - `project_init`
 - `project_name`
+- `promotion_invalid`
 - `property_declaration`
 - `property_diagnostics`
 - `property_get`
@@ -766,6 +783,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `test_not_found`
 - `test_run`
 - `timed_out`
+- `timeout_invalid`
+- `timeout_ms`
 - `too_long`
 - `total_diffs`
 - `tree_sitter_vba`

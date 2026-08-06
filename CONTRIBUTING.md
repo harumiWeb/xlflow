@@ -113,6 +113,25 @@ task verify:security
 
 Excel COM E2E verification should be done on Windows with Microsoft Excel installed and **Trust access to the VBA project object model** enabled.
 
+When a change modifies static-analysis behavior, use the local VBE oracle for
+the focused VBA semantics it relies on. The oracle is a developer-only,
+Windows/Excel check and is intentionally excluded from normal tests and CI.
+Start with an `observe` fixture when behavior is not already recorded, run the
+known accept/reject controls, run the selected cases sequentially, and promote
+only confirmed `accepted` or `rejected` observations. Treat timeouts, unknown
+modals, failed Compile invocation, COM/worker errors, and unconfirmed cleanup
+as infrastructure failures; do not promote or adjust analyzer behavior from
+such a run.
+
+```powershell
+./scripts/dev/test-vbe-oracle.ps1 --case <case-id>
+./scripts/dev/test-vbe-oracle.ps1 --case <case-id> --strict
+```
+
+Include the executed oracle case IDs in the pull request, or state why an
+oracle run was not applicable. See [`docs/specs/vbe-oracle.md`](docs/specs/vbe-oracle.md)
+for fixture format, promotion, prerequisites, and the PR checklist.
+
 ## Release preflight
 
 Before a release that touches workbook automation, VBA import/export, run/test behavior, session handling, or other Excel COM paths, do not rely on CI alone.

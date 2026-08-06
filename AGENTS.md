@@ -119,6 +119,24 @@ Before generating or modifying code, perform the following steps according to th
 - If modifying session-aware workflows, also include the sequence `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop` in the release gate checks.
 - When combining multiple workbook-backed commands during real device E2E testing for Windows + Excel, even if not altering the session-aware workflow, prioritize first performing `session start -> push --fast --session --no-save -> run/test --session -> save --session -> session stop`.
 
+### Local VBE oracle for static-analysis changes
+
+When changing static-analysis semantics, parser interpretation used by
+diagnostics, type/call/argument validation, object or `Set` diagnostics,
+diagnostic severity, or LSP projections, determine whether the behavior
+depends on actual VBE semantics. If it does, run the focused local VBE oracle
+cases on Windows with Excel and trusted VBIDE access enabled. Add an `observe`
+fixture when needed, run the known accept/reject controls first, and promote
+only confirmed outcomes through the explicit promotion command. Oracle cases
+must run sequentially. A timeout, unknown modal, failed Compile invocation,
+worker/COM failure, or unconfirmed Excel cleanup is an infrastructure failure
+and a stop-the-line condition: do not promote fixtures or change analyzer
+behavior based on that result. Record the executed case IDs in the PR.
+
+The oracle is developer-only and local. Never invoke it from production xlflow
+commands, ordinary tests, or GitHub Actions. See
+`docs/specs/vbe-oracle.md` for the complete workflow and contract.
+
 ## - In final reports, retain the absolute paths of used `tmp_workspaces`, the execution commands, test results, and any unverified items.
 
 ## 3. Documentation Retention Policy

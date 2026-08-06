@@ -9,6 +9,10 @@ namespace Xlflow.ExcelBridge.Windows;
 public enum DialogKind
 {
     Any,
+    // Used only by the developer VBE oracle's passive modal inspection. The
+    // normal run/push watcher never requests this kind and keeps its existing
+    // dialog classification behavior unchanged.
+    Unknown,
     MacroError,
     Runtime,
     Compile,
@@ -186,6 +190,38 @@ public sealed class DialogWatcher
         return null;
     }
 
+    /// <summary>
+    /// Captures every dialog-like window owned by the target Excel process,
+    /// including windows whose text does not match the known VBA dialog
+    /// fingerprints. This is intentionally a separate oracle-only API so the
+    /// production run/push suppression paths remain unchanged.
+    /// </summary>
+    internal IReadOnlyList<DialogSnapshot> CaptureOracleDialogs(DialogWatchRequest request, bool includeUia = true)
+    {
+        var result = new List<DialogSnapshot>();
+        foreach (var candidate in _windows.Enumerate(request.ExcelProcessId, request.VbeThreadId))
+        {
+            if (!BelongsToTarget(candidate, request))
+            {
+                continue;
+            }
+
+            var uia = includeUia ? _uia.Describe(candidate.Hwnd) : null;
+            var kind = DialogFingerprint.Classify(candidate, uia);
+            if (kind is null)
+            {
+                if (!DialogFingerprint.IsOracleDialogLike(candidate, uia))
+                {
+                    continue;
+                }
+                result.Add(BuildSnapshot(candidate, uia, DialogKind.Unknown, 0, DialogAction.None, DialogActionResult.None));
+                continue;
+            }
+            result.Add(BuildSnapshot(candidate, uia, kind.Value, 0, DialogAction.None, DialogActionResult.None));
+        }
+        return result;
+    }
+
     public IReadOnlyList<DialogSnapshot> CaptureCurrentDialogs(DialogWatchRequest request, bool includeUia)
     {
         var result = new List<DialogSnapshot>();
@@ -304,6 +340,32 @@ public sealed class DialogWatcher
 
 internal static class DialogFingerprint
 {
+    private static bool HasDialogClassName(WindowCandidate candidate)
+    {
+        return candidate.ClassName.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
+               candidate.ClassName.StartsWith("bosa_sdm_", StringComparison.OrdinalIgnoreCase) ||
+               candidate.ClassName.Equals("NUIDialog", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsDialogLike(WindowCandidate candidate, UiaDialogDescription? uia)
+    {
+        return HasDialogClassName(candidate) ||
+               string.Equals(uia?.ControlType, "Window", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsOracleDialogLike(WindowCandidate candidate, UiaDialogDescription? uia)
+    {
+        if (HasDialogClassName(candidate))
+        {
+            return true;
+        }
+
+        // UIA reports many normal Excel/VBE top-level windows as Window. Only
+        // treat those as oracle dialogs when they also expose dialog content.
+        return string.Equals(uia?.ControlType, "Window", StringComparison.OrdinalIgnoreCase) &&
+               (candidate.Buttons.Count > 0 || candidate.Text.Any(text => !string.IsNullOrWhiteSpace(text)));
+    }
+
     public static DialogKind? Classify(WindowCandidate candidate, UiaDialogDescription? uia)
     {
         var title = candidate.Title;
@@ -311,10 +373,7 @@ internal static class DialogFingerprint
         var text = string.Join("\n", candidate.Text);
         var buttons = string.Join("\n", candidate.Buttons.Select(button => button.Text));
         var combined = string.Join("\n", title, text, buttons, uia?.Name ?? "");
-        var dialogLike = className.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
-                         className.StartsWith("bosa_sdm_", StringComparison.OrdinalIgnoreCase) ||
-                         className.Equals("NUIDialog", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(uia?.ControlType, "Window", StringComparison.OrdinalIgnoreCase);
+        var dialogLike = IsDialogLike(candidate, uia);
         if (!dialogLike)
         {
             return null;

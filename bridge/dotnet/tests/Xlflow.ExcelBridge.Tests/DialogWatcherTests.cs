@@ -274,6 +274,53 @@ public sealed class DialogWatcherTests
         Assert.Equal("compile_close", dialog.Action);
     }
 
+    [Fact]
+    public void OracleCaptureReportsUnknownDialogLikeWindows()
+    {
+        var watcher = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Microsoft Visual Basic", text: ["Mystery prompt"], buttons: [])]),
+            new NullUiaDialogAdapter());
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 100,
+            ExcelMainHwnd: 2,
+            Kind: DialogKind.Any,
+            ActionPolicy: DialogActionPolicy.ObserveOnly,
+            Timeout: TimeSpan.Zero,
+            PollInterval: TimeSpan.Zero);
+
+        var dialogs = watcher.CaptureOracleDialogs(request, includeUia: false);
+
+        var dialog = Assert.Single(dialogs);
+        Assert.Equal("unknown", dialog.Kind);
+        Assert.Equal("Mystery prompt", dialog.Text.Single());
+    }
+
+    [Fact]
+    public void OracleCaptureUsesUiaWindowContentGate()
+    {
+        var request = new DialogWatchRequest(
+            ExcelProcessId: 100,
+            ExcelMainHwnd: 2,
+            Kind: DialogKind.Any,
+            ActionPolicy: DialogActionPolicy.ObserveOnly,
+            Timeout: TimeSpan.Zero,
+            PollInterval: TimeSpan.Zero);
+        var uia = new StaticUiaDialogAdapter(new UiaDialogDescription(null, null, "Window"));
+
+        var emptyWindow = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Excel", className: "XLMAIN")]),
+            uia);
+        Assert.Empty(emptyWindow.CaptureOracleDialogs(request, includeUia: true));
+
+        var textWindow = new DialogWatcher(
+            new StaticWindowEnumerator([Candidate(title: "Excel", className: "XLMAIN", text: ["Mystery prompt"])]),
+            uia);
+        var dialogs = textWindow.CaptureOracleDialogs(request, includeUia: true);
+        var dialog = Assert.Single(dialogs);
+        Assert.Equal("unknown", dialog.Kind);
+        Assert.Equal("Mystery prompt", dialog.Text.Single());
+    }
+
     private static WindowCandidate Candidate(
         string title,
         string className = "#32770",
@@ -312,6 +359,12 @@ public sealed class DialogWatcherTests
     private sealed class NullUiaDialogAdapter : IUiaDialogAdapter
     {
         public UiaDialogDescription? Describe(long hwnd) => null;
+        public bool TryInvoke(long hwnd) => false;
+    }
+
+    private sealed class StaticUiaDialogAdapter(UiaDialogDescription description) : IUiaDialogAdapter
+    {
+        public UiaDialogDescription? Describe(long hwnd) => description;
         public bool TryInvoke(long hwnd) => false;
     }
 }

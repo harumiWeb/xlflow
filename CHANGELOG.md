@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added the local-only Windows Excel/VBE oracle harness for focused static-
+  analysis compile evidence, with sequential disposable workbooks, known
+  accept/reject controls, observational and strict JSON modes, explicit
+  promotion, provenance metadata, and deterministic Excel-free fixture
+  contracts. The oracle is not invoked by production commands or GitHub
+  Actions; contributors should run relevant cases locally when changing VBA
+  semantics.
 - Added default-enabled `VBA223` security warnings for likely hardcoded VBA
   credentials, with structural matching, placeholder filtering, fixed
   `[REDACTED]` diagnostics, and independent configuration/inline suppression.
