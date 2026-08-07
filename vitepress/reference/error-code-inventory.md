@@ -116,6 +116,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `command_line_argument`
 - `command_reads_saved_file`
 - `comparison_expression`
+- `compile_equivalent`
 - `compile_invoked`
 - `compile_vba`
 - `component_type`
@@ -259,6 +260,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `environment_variable`
 - `event_declaration`
 - `event_statement`
+- `evidence_class`
 - `evidence_phase`
 - `evidence_role`
 - `example_cell`
@@ -765,6 +767,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `structured_reference`
 - `style_included`
 - `sub_declaration`
+- `supported_severities`
 - `suppresses_errors`
 - `symbols_singleflight`
 - `sync_source`

@@ -194,7 +194,9 @@ Every declared rule code is resolved against the authoritative static-analysis
 rule registry. The registry validates the canonical diagnostic ID, supported
 `lint`/`analyze`/`lsp` surfaces, and supported severities; fixture validation
 rejects unknown or non-canonical codes, unsupported surfaces, and unsupported
-severities. Bound and partially-bound fixtures require every contract code to
+severities. A `compile-equivalent` fixture binding must reference only registry
+rules with `compile_equivalent: true`; rejected bound expectations for those
+rules must use `severity: "error"`. Bound and partially-bound fixtures require every contract code to
 be listed in `rule_codes`; bound fixtures additionally require every declared
 rule code to appear in the contract that matches the VBE result (`expected`
 for rejected cases, `forbidden` for accepted cases). Until a fixture is
@@ -246,8 +248,8 @@ rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 The test reports fixture state counts, complete and incomplete rule counts,
 sorted fixture IDs for every state (`bound`, `partially-bound`, `unbound`, and
 `not-applicable`), and sorted rule-to-case and surface coverage. The committed
-corpus currently reports 23 asserted fixtures: 9 `bound`, 1
-`partially-bound`, 11 `unbound`, and 2 `not-applicable`; the three bound rules
+corpus currently reports 23 asserted fixtures: 11 `bound`, 0
+`partially-bound`, 10 `unbound`, and 2 `not-applicable`; the three bound rules
 have complete positive/negative coverage. The report is emitted before a
 validation failure so missing positive/negative evidence and state changes
 remain visible in CI logs.
@@ -314,12 +316,13 @@ LSP projections):
 4. Run both known controls and the focused oracle case IDs locally.
 5. Promote only accepted/rejected observations with confirmed cleanup.
 6. Implement the diagnostic using confirmed VBA behavior.
-7. Add `expected_diagnostics` to rejected fixtures.
+7. Add `expected_diagnostics` with registry `severity: "error"` to rejected
+   compile-equivalent fixtures.
 8. Add `forbidden_diagnostics` and `negative_controls` to accepted/rejected
    binding pairs, respectively.
-9. Assign `evidence_role`: use `compile-equivalent` only for compile-equivalent
-   bindings, and keep policy, maintainability, and language observations
-   unbound.
+9. Assign `evidence_role`: use `compile-equivalent` only for registry
+   `compile_equivalent` bindings, and keep policy, maintainability, and
+   language observations unbound.
 10. Mark fixtures `bound` only after all declared surfaces are covered; keep
     incomplete compile-equivalent work `partially-bound` with a note.
 11. Run Excel-free contracts and the coverage report, then record rule codes

@@ -38,9 +38,9 @@ only when its direct or propagated summary contains one of those classified
 accesses. Unresolved, ambiguous, external, and dynamic calls are uncertainty,
 not positive evidence.
 
-Emit one deterministic finding per loop at its loop header. Use `warning`
-severity at loop depth one and `error` severity at depth two or more;
-the escalation is advisory and never makes `VBA225` source-preflight-blocking.
+Emit one deterministic warning per loop at its loop header. Nested-loop depth
+remains in the message and reason as context, but does not escalate severity or
+make `VBA225` source-preflight-blocking.
 The message and reason name the access kind, identify nested depth when
 relevant, and explain the cost of a COM boundary per iteration. Suggestions
 prefer one-time range transfers into VBA arrays, one range assignment for
@@ -67,8 +67,8 @@ the generated catalog must be regenerated rather than edited manually.
   Excel execution, without requiring a workbook or runtime sampling.
 - Positive: CFG reachability, receiver resolution, and helper summaries reduce
   false positives from dead code, bulk range transfers, and unrelated VBA calls.
-- Positive: nested-loop escalation makes the most expensive shapes visible while
-  keeping the rule advisory.
+- Positive: nested-loop context makes the most expensive shapes visible while
+  keeping the rule advisory and warning-only.
 - Negative: dynamic dispatch, late binding, unresolved aliases, and helpers that
   cannot be uniquely resolved remain unreported even when they are slow.
 - Negative: interprocedural summaries add analysis work and must retain stable

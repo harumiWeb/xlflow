@@ -282,10 +282,6 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		}
 		categoryNames := sortedExcelCategories(categories)
 		helperNames := sortedStringSet(helpers)
-		severity := "warning"
-		if region.Depth >= 2 {
-			severity = "error"
-		}
 		message := "Loop performs repeated Excel object-model access"
 		if len(categoryNames) > 0 {
 			message += " (" + strings.Join(categoryNames, ", ") + ")"
@@ -318,7 +314,7 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		if categories[excelAccessWorksheetCall] {
 			suggestion = "Move the WorksheetFunction call out of the per-cell loop where possible, pass a range or array to one operation, and cache the resolved Worksheet/Range objects."
 		}
-		finding := a.simpleFinding(file, proc, region.Line, "VBA225", severity, message, reason, suggestion)
+		finding := a.simpleFinding(file, proc, region.Line, "VBA225", "warning", message, reason, suggestion)
 		finding.EndLine = region.EndLine
 		findings = append(findings, finding)
 	}

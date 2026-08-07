@@ -21,12 +21,12 @@
   "analysis": {
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
-    "rule_codes": ["VB030"],
+    "rule_codes": ["VB045"],
     "negative_controls": ["optional-argument-omitted", "known-named-argument"],
     "expected_diagnostics": [
       {
-        "code": "VB030",
-        "severity": "warning",
+        "code": "VB045",
+        "severity": "error",
         "surfaces": ["lsp"]
       }
     ]

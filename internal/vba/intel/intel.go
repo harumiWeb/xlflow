@@ -14,6 +14,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -216,6 +217,33 @@ func (a Analyzer) Diagnostics(doc Document) []Diagnostic {
 
 func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
 	return a.DiagnosticsRequestContext(ctx, DiagnosticRequest{Document: doc, Mode: DiagnosticModeFull}).Diagnostics
+}
+
+// CompileEquivalentDiagnosticsContext returns only diagnostics backed by a
+// deterministic VBE compile rejection. It is used by batch preflight to
+// project the same semantic findings that the LSP exposes, without importing
+// the full editor diagnostic pipeline a second time.
+func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	if ctx.Err() != nil {
+		return nil
+	}
+	var out []Diagnostic
+	for _, diagnostic := range a.argumentDiagnosticsContext(ctx, doc) {
+		if diagnostic.Code == "VB045" {
+			out = append(out, diagnostic)
+		}
+	}
+	for _, diagnostic := range a.ByRefArgumentDiagnosticsContext(ctx, doc) {
+		if diagnostic.Code == "VBA228" {
+			out = append(out, diagnostic)
+		}
+	}
+	for _, diagnostic := range a.assignmentDiagnosticsContext(ctx, doc) {
+		if diagnostic.Code == "VB037" {
+			out = append(out, diagnostic)
+		}
+	}
+	return out
 }
 
 func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Diagnostic {
@@ -2364,9 +2392,13 @@ func valueDiagnosticType(typ string) bool {
 }
 
 func assignmentDiagnostic(code, rule string, lineNo int, line string, exprStart int, expr, message string) Diagnostic {
+	severity := "warning"
+	if metadata, ok := staticrules.Lookup(code); ok {
+		severity = string(metadata.DefaultSeverity)
+	}
 	return Diagnostic{
 		Code:       code,
-		Severity:   "warning",
+		Severity:   severity,
 		Source:     "xlflow",
 		Rule:       rule,
 		Confidence: "high",
@@ -2590,28 +2622,43 @@ func matchingParen(line string, open int) int {
 }
 
 func diagnosticsForCallArguments(lineNo int, call parsedCall, sig Signature) []Diagnostic {
-	var out []Diagnostic
+	messages := make([]string, 0, 2)
 	minArgs, maxArgs := signatureArity(sig.Parameters)
 	got := len(call.Arguments)
 	if got < minArgs {
-		out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Argument count mismatch: %s expects at least %d argument(s), got %d.", sigLabelName(sig.Label), minArgs, got)))
+		messages = append(messages, fmt.Sprintf("Argument count mismatch: %s expects at least %d argument(s), got %d.", sigLabelName(sig.Label), minArgs, got))
 	}
 	if maxArgs >= 0 && got > maxArgs {
-		out = append(out, callDiagnostic(lineNo, call, fmt.Sprintf("Argument count mismatch: %s expects at most %d argument(s), got %d.", sigLabelName(sig.Label), maxArgs, got)))
+		messages = append(messages, fmt.Sprintf("Argument count mismatch: %s expects at most %d argument(s), got %d.", sigLabelName(sig.Label), maxArgs, got))
 	}
+	seenNamed := make(map[string]bool)
+	namedArgumentsStarted := false
 	for _, arg := range call.Arguments {
 		if arg.Name == "" {
+			if namedArgumentsStarted {
+				messages = append(messages, "Positional arguments cannot follow a named argument.")
+			}
 			continue
 		}
+		namedArgumentsStarted = true
+		key := strings.ToLower(strings.TrimSpace(arg.Name))
+		if seenNamed[key] {
+			messages = append(messages, fmt.Sprintf("Named argument %s is supplied more than once.", arg.Name))
+			continue
+		}
+		seenNamed[key] = true
 		if !signatureHasParameter(sig.Parameters, arg.Name) {
 			msg := fmt.Sprintf("Unknown named argument: %s.", arg.Name)
 			if suggestion, ok := closestParameterName(sig.Parameters, arg.Name); ok {
 				msg += fmt.Sprintf(" Did you mean %q?", suggestion)
 			}
-			out = append(out, callDiagnostic(lineNo, call, msg))
+			messages = append(messages, msg)
 		}
 	}
-	return out
+	if len(messages) == 0 {
+		return nil
+	}
+	return []Diagnostic{compileEquivalentCallDiagnostic(lineNo, call, strings.Join(messages, " "))}
 }
 
 func signatureArity(params []Parameter) (min int, max int) {
@@ -2698,6 +2745,18 @@ func editDistance(a, b string) int {
 }
 
 func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
+	return callDiagnosticWithRule(lineNo, call, "VB030", "warning", msg)
+}
+
+func compileEquivalentCallDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
+	severity := "error"
+	if metadata, ok := staticrules.Lookup("VB045"); ok {
+		severity = string(metadata.DefaultSeverity)
+	}
+	return callDiagnosticWithRule(lineNo, call, "VB045", severity, msg)
+}
+
+func callDiagnosticWithRule(lineNo int, call parsedCall, code, severity, msg string) Diagnostic {
 	r := Range{
 		Start: Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.Start, len(call.Line)))])},
 		End:   Position{Line: lineNo, Character: utf16Len(call.Line[:max(0, min(call.End, len(call.Line)))])},
@@ -2706,8 +2765,8 @@ func callDiagnostic(lineNo int, call parsedCall, msg string) Diagnostic {
 		r = *call.DiagnosticRange
 	}
 	return Diagnostic{
-		Code:     "VB030",
-		Severity: "warning",
+		Code:     code,
+		Severity: severity,
 		Source:   "xlflow",
 		Message:  msg,
 		Range:    r,

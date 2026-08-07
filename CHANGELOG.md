@@ -4,11 +4,17 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Defined VBE-verified compile-equivalent severity and preflight policy. Split
+  deterministic argument binding into `VB045`, scalar `Set` errors into `VB037`,
+  and definite ByRef type mismatches into `VBA228`; `VB030`, `VBA206`, `VB001`,
+  `VBA214`, and `VBA225` remain warning-level inference/runtime-safety/policy
+  diagnostics, and compile-equivalent findings cannot be hidden by inline
+  suppression.
 - Clarified VBE oracle fixture binding/evidence roles and coverage reporting.
   Compile-equivalent bindings now remain distinct from language, policy, and
   maintainability observations; `sub-parenthesized-call` is unbound with a
   maintainability role, `missing-set-object-assignment` records a policy role,
-  and `unknown-named-argument` remains partially bound and compile-equivalent.
+  and `unknown-named-argument` is now fully bound to `VB045`.
 - Stabilized the local VBE oracle cleanup path by closing the disposable
   workbook before quitting Excel, allowing delayed owned-process exit within a
   bounded drain, preserving fail-closed behavior for unexpected Excel
@@ -58,9 +64,9 @@ All notable changes to xlflow will be documented in this file.
   APIs as possible roots, preventing false warnings for private helpers in
   scaffolded and user-authored helper libraries.
 - Documented the `VBA225` analyzer contract for issue #452: repeated
-  cell-by-cell Excel object-model work inside loops, nested-loop severity
-  escalation, helper-call coverage, small fixed-loop exemptions, and bulk
-  array/range remediation guidance.
+  cell-by-cell Excel object-model work inside loops, nested-loop context,
+  helper-call coverage, small fixed-loop exemptions, and bulk array/range
+  remediation guidance.
 - Strengthened opt-in `VBA210` return-path analysis to cover `Function` and
   `Property Get` CFG exits, early exits, error-handler paths, shared cleanup,
   dominating assignments, object/value return assignment syntax, and
@@ -92,10 +98,11 @@ All notable changes to xlflow will be documented in this file.
   changes or reopen, and propagating cancellation through expensive analysis.
 - Updated `tree-sitter-vba` to v0.11.1 so VBE-exported procedure `Attribute`
   statements, including `Load` and `Name` targets, parse without recovery nodes.
-- Made `VBA206` a default-enabled, real-time non-blocking warning. It now
-  detects unsafe resolved project-local `ByRef` arguments, including explicit
-  type mismatches, temporary values, indirect member/array expressions, and
-  common `PtrSafe` pointer-width declaration mistakes.
+- Made `VBA206` a default-enabled, real-time non-blocking warning for runtime-
+  safety ByRef forms. Definite VBE-rejected type mismatches are reported by the
+  unsuppressible, preflight-blocking `VBA228` compile-equivalent diagnostic;
+  `VBA206` continues to cover temporary values, indirect member/array
+  expressions, and common `PtrSafe` pointer-width declaration mistakes.
 - Updated `golang.org/x/text` to v0.39.0 to include the latest invalid-input
   handling security fix.
 
@@ -119,7 +126,7 @@ All notable changes to xlflow will be documented in this file.
 - Added default-enabled real-time `VBA215` warnings for resolved `Range.Find` and `Range.Replace` calls that omit saved Excel search settings, including support for positional, named, mixed, and multiline calls plus normal rule-specific suppression.
 - Fixed scaffolded `XlflowAssert.bas` helpers to restore `On Error` handling immediately after each compatibility probe, so new projects pass the default-enabled `VBA214` analysis without warnings.
 - Fixed `VB030` false positives for valid VBA `Array` calls with zero or multiple arguments by modeling its optional argument list as a `ParamArray`.
-- Added default-enabled `VBA214` analysis for `On Error Resume Next` scopes that extend beyond one compatibility probe or can exit without restoration. Findings report the scope's start and effective end line; a confirmed project-local call inside the scope raises severity to `error` without blocking `push` or `run` preflight.
+- Added default-enabled `VBA214` analysis for `On Error Resume Next` scopes that extend beyond one compatibility probe or can exit without restoration. Findings report the scope's start and effective end line; project-local calls remain warning-level and do not block `push` or `run` preflight.
 - Strengthened `VBA203` so all paths after a tracked Excel `Application` state change, including early exits and error handlers, must restore the saved prior value. The diagnostic now covers `ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation`, `StatusBar`, `Cursor`, `Interactive`, `AskToUpdateLinks`, `AutomationSecurity`, and `CutCopyMode`.
 - Added a shared, protocol-neutral static-analysis rule registry for `VB...` and `VBA...` diagnostics, plus the source-only `xlflow rules` command, generated rule catalog, LSP documentation links, and registry-driven VS Code inline-suppression eligibility while preserving existing `disabled_rules`, legacy boolean, and inline suppression behavior.
 - Updated `tree-sitter-vba` to v0.11.0 and preserved lint and formatter behavior across its flat multiline-`If` CST: VB014 now runs structural block validation even when the parser accepts fragment nodes, and formatting pairs `if_statement`, `elseif_fragment`, `else_fragment`, and `end_if_fragment` ranges.

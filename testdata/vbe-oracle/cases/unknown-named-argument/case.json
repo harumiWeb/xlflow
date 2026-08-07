@@ -19,11 +19,17 @@
     "diagnostic_meaning": "compile-error"
   },
   "analysis": {
-    "binding_status": "partially-bound",
+    "binding_status": "bound",
     "evidence_role": "compile-equivalent",
-    "rule_codes": ["VB030"],
-    "binding_note": "The current LSP emits two VB030 diagnostics for this call (excess argument and unknown named argument), while the Excel-free contract intentionally rejects duplicate same-code diagnostics. The incomplete binding is tracked in follow-up issue #520.",
-    "negative_controls": ["known-named-argument"]
+    "rule_codes": ["VB045"],
+    "negative_controls": ["known-named-argument"],
+    "expected_diagnostics": [
+      {
+        "code": "VB045",
+        "severity": "error",
+        "surfaces": ["lsp"]
+      }
+    ]
   },
   "provenance": {
     "status": "asserted",

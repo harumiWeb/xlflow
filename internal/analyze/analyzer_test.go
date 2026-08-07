@@ -28,8 +28,11 @@ func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
 		t.Fatalf("source realtime implementations = %v, registry = %v", sourceRealtimeRuleIDs, registryIDs)
 	}
 	for _, id := range sourceRealtimeRuleIDs {
-		if _, ok := config.AnalyzeRuleEnabled(config.Default().Analyze, id); !ok {
-			t.Fatalf("source realtime rule %s has no config adapter", id)
+		metadata, _ := staticrules.Lookup(id)
+		if metadata.Configurable {
+			if _, ok := config.AnalyzeRuleEnabled(config.Default().Analyze, id); !ok {
+				t.Fatalf("source realtime rule %s has no config adapter", id)
+			}
 		}
 	}
 }
@@ -104,8 +107,8 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA225")
-	if len(got) != 1 || got[0].Severity != "error" || !strings.Contains(got[0].Message, "Nested loop depth: 2") {
-		t.Fatalf("nested VBA225 findings = %+v, want one depth-2 error", got)
+	if len(got) != 1 || got[0].Severity != "warning" || !strings.Contains(got[0].Message, "Nested loop depth: 2") {
+		t.Fatalf("nested VBA225 findings = %+v, want one depth-2 warning", got)
 	}
 }
 
@@ -2292,8 +2295,8 @@ End Sub
 	for _, finding := range got {
 		severityByProcedure[finding.Procedure] = finding.Severity
 	}
-	if severityByProcedure["LocalCall"] != "error" || severityByProcedure["LocalFunctionCall"] != "error" || severityByProcedure["UnknownCall"] != "warning" {
-		t.Fatalf("VBA214 call severities = %+v", severityByProcedure)
+	if severityByProcedure["LocalCall"] != "warning" || severityByProcedure["LocalFunctionCall"] != "warning" || severityByProcedure["UnknownCall"] != "warning" {
+		t.Fatalf("VBA214 call severities = %+v, want warning-only inference", severityByProcedure)
 	}
 	if blocking := findingsByCode(BlockingFindings(findings), "VBA214"); len(blocking) != 0 {
 		t.Fatalf("VBA214 must not block source preflight: %+v", blocking)
@@ -2447,8 +2450,8 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA214")
-	if len(got) != 1 || got[0].Severity != "error" || got[0].Procedure != "Run" {
-		t.Fatalf("project call in control condition should be VBA214 error: %+v", got)
+	if len(got) != 1 || got[0].Severity != "warning" || got[0].Procedure != "Run" {
+		t.Fatalf("project call in control condition should remain a VBA214 warning: %+v", got)
 	}
 }
 
@@ -3073,7 +3076,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertFinding(t, findings, "VBA206", 9)
+	assertFinding(t, findings, "VBA228", 9)
 	assertFinding(t, findings, "VBA207", 10)
 	assertFinding(t, findings, "VBA210", 4)
 }
@@ -3268,7 +3271,32 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertFinding(t, findings, "VBA206", 5)
+	assertFinding(t, findings, "VBA228", 5)
+}
+
+func TestAnalyzerCompileEquivalentByRefMismatchIgnoresVBA206Disable(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub NeedsLong(ByRef value As Long)
+End Sub
+Public Sub Run()
+  Dim text As String
+  NeedsLong text
+  NeedsLong (text)
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectByRefArgumentMismatch = false
+	findings, err := Analyzer{RootDir: dir, Config: cfg}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA228"); len(got) != 1 || got[0].Line != 6 || got[0].Severity != "error" {
+		t.Fatalf("compile-equivalent ByRef finding = %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA206"); len(got) != 0 {
+		t.Fatalf("VBA206 should remain disabled while VBA228 stays active: %+v", got)
+	}
 }
 
 func TestAnalyzerByRefUsesProjectLocalNamedSignatures(t *testing.T) {
@@ -3288,7 +3316,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := findingsByCode(findings, "VBA206")
+	got := findingsByCode(findings, "VBA228")
 	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
 		t.Fatalf("named project-local ByRef finding = %+v", got)
 	}
@@ -3310,7 +3338,7 @@ End Sub
 Public Sub Run()
   Dim value As Long
   TakeText value
-  TakeLong "temporary" ' xlflow:disable-line VBA206
+	  TakeLong "temporary" ' xlflow:disable-line VBA206
 End Sub
 `)
 
@@ -3318,8 +3346,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA206"); len(got) != 0 {
-		t.Fatalf("ambiguous and inline-suppressed ByRef calls must not report: %+v", got)
+	if got := findingsByCode(findings, "VBA228"); len(got) != 1 {
+		t.Fatalf("ambiguous ByRef calls should be skipped but compile-equivalent mismatches remain unsuppressible: %+v", got)
 	}
 }
 

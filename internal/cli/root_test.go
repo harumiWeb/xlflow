@@ -22,6 +22,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/excel"
 	"github.com/harumiWeb/xlflow/internal/excel/forms"
 	formulaspkg "github.com/harumiWeb/xlflow/internal/formulas"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
@@ -67,6 +68,22 @@ type runOptionsInput struct {
 	Timeout            time.Duration
 	CommandOptions     excel.CommandOptions
 	UIStream           bool
+}
+
+func TestProjectCompileEquivalentLintIssuesUsesRegistryBlockingPolicy(t *testing.T) {
+	findings := []analyze.Finding{
+		{Code: "VB037", Severity: "error", File: "Main.bas", Line: 4, Column: 3, Message: "Set cannot be used with a scalar."},
+		{Code: "VB045", Severity: "error", File: "Main.bas", Line: 5, Column: 3, Message: "Argument count mismatch."},
+		{Code: "VBA228", Severity: "error", File: "Main.bas", Line: 6, Column: 3, Message: "ByRef type mismatch."},
+	}
+	issues := projectCompileEquivalentLintIssues(findings)
+	if len(issues) != 2 || issues[0].Code != "VB037" || issues[1].Code != "VB045" {
+		t.Fatalf("projected lint issues = %+v", issues)
+	}
+	blocking := lint.PushBlockingIssues(issues)
+	if len(blocking) != 2 || blocking[0].Code != "VB037" || blocking[1].Code != "VB045" {
+		t.Fatalf("projected blocking issues = %+v", blocking)
+	}
 }
 
 func buildRunOptionsForTest(cfg config.Config, in runOptionsInput) (excel.RunOptions, error) {
@@ -7147,6 +7164,110 @@ func TestPushCommandReturnsValidationForBlockingAnalysisFindings(t *testing.T) {
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitValidation {
 		t.Fatalf("expected source validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestSourcePreflightBlocksCompileEquivalentSemanticFindings(t *testing.T) {
+	cases := []struct {
+		name          string
+		body          string
+		code          string
+		projectToLint bool
+	}{
+		{
+			name: "scalar-set",
+			body: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+  Dim value As Long
+  Set value = 1
+End Sub
+`,
+			code:          "VB037",
+			projectToLint: true,
+		},
+		{
+			name: "argument-binding",
+			body: `Attribute VB_Name = "Main"
+Option Explicit
+Public Function AddTwo(ByVal first As Long, ByVal second As Long) As Long
+  AddTwo = first + second
+End Function
+Public Sub Run()
+  Dim result As Long
+  result = AddTwo(1)
+End Sub
+`,
+			code:          "VB045",
+			projectToLint: true,
+		},
+		{
+			name: "byref-type-mismatch",
+			body: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub MutateLong(ByRef value As Long)
+End Sub
+Public Sub Run()
+  Dim value As String
+  MutateLong value
+End Sub
+`,
+			code: "VBA228",
+		},
+	}
+	for _, tc := range cases {
+		for _, command := range []string{"push", "run"} {
+			t.Run(tc.name+"/"+command, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
+					t.Fatal(err)
+				}
+				src := filepath.Join(dir, "src", "modules")
+				if err := os.MkdirAll(src, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(tc.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				var stdout bytes.Buffer
+				a := &app{cwd: dir, stdout: &stdout, stderr: &bytes.Buffer{}}
+				root := a.rootCommand()
+				args := []string{"--json", command}
+				if command == "run" {
+					args = append(args, "Main.Run", "--interactive")
+				}
+				root.SetArgs(args)
+				err := root.Execute()
+				if err == nil || output.ExitCode(err) != output.ExitValidation {
+					t.Fatalf("expected compile-equivalent preflight failure, got err=%v exit=%d output=%s", err, output.ExitCode(err), stdout.String())
+				}
+				var got struct {
+					Error struct {
+						Code  string `json:"code"`
+						Phase string `json:"phase"`
+					} `json:"error"`
+					Issues []struct {
+						Code string `json:"code"`
+					} `json:"issues"`
+					Analysis []struct {
+						Code string `json:"code"`
+					} `json:"analysis"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+					t.Fatal(err)
+				}
+				if tc.projectToLint {
+					if got.Error.Code != "lint_failed" || got.Error.Phase != "preflight" || len(got.Issues) != 1 || got.Issues[0].Code != tc.code {
+						t.Fatalf("expected projected %s lint blocker, got %+v output=%s", tc.code, got, stdout.String())
+					}
+					return
+				}
+				if got.Error.Code != "analyze_failed" || got.Error.Phase != "preflight" || len(got.Analysis) != 1 || got.Analysis[0].Code != tc.code {
+					t.Fatalf("expected %s analysis blocker, got %+v output=%s", tc.code, got, stdout.String())
+				}
+			})
+		}
 	}
 }
 

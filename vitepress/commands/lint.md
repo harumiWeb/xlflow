@@ -39,7 +39,7 @@ The summary below explains the lint findings in workflow terms.
 
 | Code    | Severity | Description                                                                                                                          |
 | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `VB001` | error    | Missing `Option Explicit`.                                                                                                           |
+| `VB001` | warning  | Missing `Option Explicit`.                                                                                                           |
 | `VB002` | warning  | `Select` member access such as `Range("A1").Select`.                                                                                 |
 | `VB003` | warning  | `Activate` member access such as `ActiveCell.Activate`.                                                                              |
 | `VB004` | warning  | Broad `On Error Resume Next`.                                                                                                        |
@@ -66,7 +66,9 @@ The summary below explains the lint findings in workflow terms.
 | `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                                      |
 | `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                               |
 | `VB032` | error    | Repeated `?` Debug.Print shorthand such as `?? "hoge"`.                                                                              |
+| `VB037` | error    | Definite scalar assignment incorrectly uses the `Set` keyword; blocks source preflight.                                              |
 | `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                                         |
+| `VB045` | error    | Deterministic argument-count or named-argument binding error; blocks source preflight.                                               |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
 
@@ -90,7 +92,9 @@ Range("A2").Select ' xlflow:disable-line VB002
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match a lint diagnostic are reported as warnings.
 
-Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, and `VB032` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+
+`VB030` remains a warning for inferred or otherwise uncertain argument compatibility. `VB045` is reserved for deterministic argument binding errors confirmed by the VBE contract.
 
 `VB014` is fail-closed for `push` and `run`, but parser recovery alone does not prove that Excel will reject the VBA. Its JSON issue may include `parser_node` (`ERROR` or `MISSING`), `parser_token`, and a short source-line `context`; when xlflow can confidently match an unclosed multiline block, it also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`. In that case the diagnostic location marks where the closer is expected and the message identifies the opener, for example `Possible missing 'End If' for multiline If block opened at line 8.` When a parent closer is aligned exactly with its outer opener and all skipped nested openers are indented further, that parent closer is highlighted for the inner missing terminator. Conditional compilation and other ambiguous structures keep the generic recovery diagnostic. Inspect that context and validate the source in the target host before changing otherwise-valid VBA merely to satisfy parser compatibility.
 

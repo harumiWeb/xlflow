@@ -158,8 +158,6 @@ note and create a follow-up issue rather than silently leaving the gap.
 
 ### Role Separation Guidelines
 
-- The `tasks/todo.md` file may temporarily contain not only session-level progress tracking but also temporary records of verification outcomes, unresolved issues, and summary explanations of decision rationales.
-- The `tasks/feature_spec.md` may be used as a working specification document prior to implementation, but should not be discarded if it contains future reference specifications, constraints, or test conditions.
 - The `tasks/lessons.md` should exclusively serve as a repository for recording recurrence prevention rules - it must not be used for storing design decisions or actual specifications themselves.
 - Design judgments and trade-offs should be recorded in the `docs/adr/` directory, while current internal specifications and constraints should be moved to the `docs/specs/` directory.
 

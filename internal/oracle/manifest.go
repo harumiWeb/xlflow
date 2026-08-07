@@ -424,6 +424,10 @@ func validateAnalysisBinding(c Case) error {
 		if _, err := canonicalRuleMetadata(code); err != nil {
 			return fmt.Errorf("oracle case %q has invalid analysis rule code %q: %w", c.ID, code, err)
 		}
+		rule, _ := canonicalRuleMetadata(code)
+		if analysis.EvidenceRole == EvidenceRoleCompileEquivalent && !rule.CompileEquivalent {
+			return fmt.Errorf("oracle case %q binds non-compile-equivalent rule %q as compile-equivalent", c.ID, code)
+		}
 		if _, ok := seenCodes[code]; ok {
 			return fmt.Errorf("oracle case %q repeats analysis rule code %q", c.ID, code)
 		}
@@ -472,6 +476,13 @@ func validateAnalysisBinding(c Case) error {
 		for _, code := range analysis.RuleCodes {
 			if !diagnosticCodeDeclared(code, boundExpectations) {
 				return fmt.Errorf("oracle case %q: bound rule code %q is not declared by an analysis contract", c.ID, code)
+			}
+			if c.VBE.Expected == ExpectedRejected {
+				for _, expectation := range analysis.ExpectedDiagnostics {
+					if expectation.Code == code && expectation.Severity != string(rules.SeverityError) {
+						return fmt.Errorf("oracle case %q: rejected compile-equivalent rule %q must expect severity %q", c.ID, code, rules.SeverityError)
+					}
+				}
 			}
 		}
 	case BindingNotApplicable:

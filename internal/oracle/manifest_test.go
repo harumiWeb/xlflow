@@ -132,29 +132,29 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 		{name: "partially-bound", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.BindingNote = analysisNote("positive contract is pending")
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}},
 		{name: "partially-bound pending contract", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.BindingNote = analysisNote("contract cannot be expressed yet")
 		}},
 		{name: "bound rejected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "warning"}}
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104", Severity: "error"}}
 		}},
 		{name: "bound accepted", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
-			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}},
 		{name: "not-applicable", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedAccepted
@@ -165,13 +165,13 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 		{name: "missing status", prepare: func(c *Case) { c.Analysis.BindingStatus = "" }, wantErr: true},
 		{name: "invalid status", prepare: func(c *Case) { c.Analysis.BindingStatus = "future" }, wantErr: true},
 		{name: "unbound rule code needs note", prepare: func(c *Case) {
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 		}, wantErr: true},
 		{name: "unbound expected contract", prepare: func(c *Case) {
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "unbound forbidden contract", prepare: func(c *Case) {
-			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "partially-bound needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
@@ -181,45 +181,45 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 		{name: "partially-bound needs note", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 		}, wantErr: true},
 		{name: "bound needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "bound code needs contract", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 		}, wantErr: true},
 		{name: "rejected bound code cannot be forbidden-only", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
-			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "bound rejected needs expected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 		}, wantErr: true},
 		{name: "bound accepted needs forbidden", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 		}, wantErr: true},
 		{name: "accepted bound code cannot be expected-only", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 		}, wantErr: true},
 		{name: "bound observe rejected", prepare: func(c *Case) {
@@ -229,32 +229,32 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.Provenance = Provenance{Status: "pending"}
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "not-applicable rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable
 			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 		}, wantErr: true},
 		{name: "not-applicable expected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable
 			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "not-applicable forbidden", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable
 			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
-			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true},
 		{name: "empty rule code", prepare: func(c *Case) {
 			c.Analysis.RuleCodes = []string{""}
 		}, wantErr: true},
 		{name: "padded rule code", prepare: func(c *Case) {
-			c.Analysis.RuleCodes = []string{" VBA101"}
+			c.Analysis.RuleCodes = []string{" VBA104"}
 		}, wantErr: true},
 		{name: "duplicate rule code", prepare: func(c *Case) {
-			c.Analysis.RuleCodes = []string{"VBA101", "VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104", "VBA104"}
 		}, wantErr: true},
 		{name: "empty binding note", prepare: func(c *Case) {
 			c.Analysis.BindingNote = analysisNote("  ")
@@ -283,17 +283,17 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 		{name: "canonical registry diagnostic", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.BindingNote = analysisNote("registry validation test")
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "warning", Surfaces: []string{"analyze"}}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104", Severity: "error", Surfaces: []string{"analyze"}}}
 		}},
-		{name: "dynamic severity", prepare: func(c *Case) {
+		{name: "dynamic severity is rejected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA214"}
 			c.Analysis.BindingNote = analysisNote("registry validation test")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA214", Severity: "error"}}
-		}},
+		}, wantErr: true, errSubstr: "unsupported severity"},
 		{name: "unknown diagnostic code", prepare: func(c *Case) {
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA999"}}
 		}, wantErr: true, errSubstr: "not in the static-analysis rule registry"},
@@ -301,26 +301,30 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "vba101"}}
 		}, wantErr: true, errSubstr: "canonical registry ID"},
 		{name: "family-incompatible surface", prepare: func(c *Case) {
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Surfaces: []string{"lint"}}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104", Surfaces: []string{"lint"}}}
 		}, wantErr: true, errSubstr: "unsupported surface"},
 		{name: "non-realtime lsp surface", prepare: func(c *Case) {
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Surfaces: []string{"lsp"}}}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104", Surfaces: []string{"lsp"}}}
 		}, wantErr: true, errSubstr: "unsupported surface"},
 		{name: "unsupported severity", prepare: func(c *Case) {
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "error"}}
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.BindingNote = analysisNote("registry validation test")
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104", Severity: "warning"}}
 		}, wantErr: true, errSubstr: "unsupported severity"},
 		{name: "partially-bound contract needs declared rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.BindingNote = analysisNote("pending")
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 		}, wantErr: true, errSubstr: "partially-bound diagnostic code"},
 		{name: "bound contract needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104", Severity: "error"}}
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 		}, wantErr: true, errSubstr: "not declared by analysis.rule_codes"},
 	}
@@ -350,7 +354,7 @@ func TestValidateCaseEvidenceRoleSemantics(t *testing.T) {
 		{name: "valid compile-equivalent partial", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
 			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
-			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.RuleCodes = []string{"VBA104"}
 			c.Analysis.BindingNote = analysisNote("diagnostic identity is incomplete")
 			c.Analysis.NegativeControls = []string{"accepted"}
 		}},
@@ -363,8 +367,8 @@ func TestValidateCaseEvidenceRoleSemantics(t *testing.T) {
 		{name: "policy observation cannot be bound", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
 			c.Analysis.EvidenceRole = EvidenceRolePolicyObservation
-			c.Analysis.RuleCodes = []string{"VBA101"}
-			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+			c.Analysis.RuleCodes = []string{"VBA104"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA104"}}
 		}, wantErr: true, errSubstr: "bound fixture requires evidence_role"},
 		{name: "harness control is explicit", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable

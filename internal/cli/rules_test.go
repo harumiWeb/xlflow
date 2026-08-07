@@ -34,8 +34,22 @@ func TestRulesCommandWritesV1JSONEnvelope(t *testing.T) {
 		t.Fatalf("rules catalog is empty: %#v", got.Rules)
 	}
 	for _, item := range got.Rules.Items {
-		if len(item.Surfaces) == 0 || len(item.SupportedSeverities) == 0 {
+		if item.EvidenceClass == "" || len(item.Surfaces) == 0 || len(item.SupportedSeverities) == 0 {
 			t.Fatalf("rules metadata missing additive surface/severity fields for %s: %#v", item.ID, item)
+		}
+	}
+	for _, id := range []string{"VB037", "VB045", "VBA228"} {
+		found := false
+		for _, item := range got.Rules.Items {
+			if item.ID == id {
+				found = true
+				if !item.CompileEquivalent || item.DefaultSeverity != staticrules.SeverityError || !item.PreflightBlocking || item.InlineSuppressible {
+					t.Fatalf("compile-equivalent metadata for %s = %#v", id, item)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("rules metadata missing %s", id)
 		}
 	}
 }

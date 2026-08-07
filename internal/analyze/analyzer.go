@@ -236,7 +236,11 @@ func (a Analyzer) RunResult() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || a.Config.Analyze.DetectByRefArgumentMismatch || a.Config.Analyze.DetectExcelCellAccessInLoops
+	// Compile-equivalent argument, Set, and ByRef findings are always enabled
+	// because they represent VBE compile rejections and cannot be disabled by
+	// the legacy VBA206 runtime-safety setting.
+	needsByRefAnalysis := true
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
@@ -326,7 +330,7 @@ func (a Analyzer) RunResult() (Result, error) {
 	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
 		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
 	}
-	if analysis.Config.Analyze.DetectByRefArgumentMismatch {
+	if needsByRefAnalysis {
 		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
 		if err != nil {
 			return Result{}, err
@@ -360,6 +364,7 @@ func (a Analyzer) RunResult() (Result, error) {
 		findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
 		findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
 		findings = append(findings, analysis.byRefArgumentFindings(file)...)
+		findings = append(findings, analysis.compileEquivalentFindings(file)...)
 	}
 	sortFindings(findings)
 	directives, directiveWarnings, err := suppression.DirectivesForFiles(a.RootDir, files)
@@ -373,7 +378,7 @@ func (a Analyzer) RunResult() (Result, error) {
 }
 
 func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
-	if !a.Config.Analyze.DetectByRefArgumentMismatch || a.typeDB == nil {
+	if a.typeDB == nil {
 		return nil
 	}
 	diagnostics := (intel.Analyzer{
@@ -388,6 +393,9 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	out := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "VBA206" {
+			continue
+		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		for _, candidate := range procedures {
@@ -414,9 +422,61 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 	return out
 }
 
-// projectByRefSymbols builds the batch project's procedure index once. VBA206
-// resolves every call through this immutable slice instead of rediscovering the
-// entire source tree through symbols.Inspect for each call site.
+func (a Analyzer) compileEquivalentFindings(file parsedFile) []Finding {
+	if a.typeDB == nil {
+		return nil
+	}
+	diagnostics := (intel.Analyzer{
+		RootDir:                  a.RootDir,
+		Config:                   a.Config,
+		DB:                       a.typeDB,
+		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	out := make([]Finding, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		line := diagnostic.Range.Start.Line + 1
+		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
+		for _, candidate := range procedures {
+			if line >= candidate.StartLine && line <= candidate.EndLine {
+				proc = candidate
+				break
+			}
+		}
+		reason, suggestion := compileEquivalentFindingGuidance(diagnostic.Code)
+		severity := diagnostic.Severity
+		if metadata, ok := staticrules.Lookup(diagnostic.Code); ok {
+			severity = string(metadata.DefaultSeverity)
+		}
+		finding := a.simpleFinding(file, proc, line, diagnostic.Code, severity, diagnostic.Message, reason, suggestion)
+		finding.Column = diagnostic.Range.Start.Character + 1
+		finding.EndLine = diagnostic.Range.End.Line + 1
+		finding.EndColumn = diagnostic.Range.End.Character + 1
+		out = append(out, finding)
+	}
+	return out
+}
+
+func compileEquivalentFindingGuidance(code string) (string, string) {
+	switch code {
+	case "VB037":
+		return "VBE rejects Set when the assignment target has a scalar value type.", "Remove Set from the scalar assignment."
+	case "VB045":
+		return "VBE rejects deterministic argument-count and named-argument binding errors at compile time.", "Pass the required arguments with valid names and do not repeat or reorder named arguments."
+	case "VBA228":
+		return "VBE rejects a statically incompatible argument passed to a ByRef parameter.", "Pass a variable with the declared parameter type or change the parameter passing contract."
+	default:
+		return "The VBE rejects this deterministic compile-time contract.", "Correct the source so the call or assignment satisfies the VBA compile-time contract."
+	}
+}
+
+// projectByRefSymbols builds the batch project's procedure index once. ByRef
+// diagnostics resolve every call through this immutable slice instead of
+// rediscovering the entire source tree through symbols.Inspect for each call
+// site.
 func projectByRefSymbols(rootDir string, cfg config.Config) ([]intel.Symbol, error) {
 	return (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
 }
@@ -746,7 +806,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -2316,12 +2376,8 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 	findings := make([]Finding, 0, len(keys))
 	for _, key := range keys {
 		outcome := outcomes[key]
-		severity := "warning"
-		if outcome.flags&resumeNextScopeProjectCall != 0 {
-			severity = "error"
-		}
 		finding := a.simpleFinding(
-			file, proc, outcome.startLine, "VBA214", severity,
+			file, proc, outcome.startLine, "VBA214", "warning",
 			"On Error Resume Next starting at line "+strconvItoa(outcome.startLine)+" remains active through line "+strconvItoa(outcome.endLine)+".",
 			resumeNextScopeReason(outcome.flags),
 			"Limit `On Error Resume Next` to one compatibility probe, inspect and clear `Err` when needed, then restore error handling with `On Error GoTo 0` before calls, branches, or exits.",

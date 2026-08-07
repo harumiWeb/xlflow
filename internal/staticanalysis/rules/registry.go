@@ -33,6 +33,19 @@ const (
 	CategoryTypeSafety      RuleCategory = "type-safety"
 )
 
+// RuleEvidenceClass describes the strongest evidence behind a diagnostic.
+// Only compile-equivalent evidence is strong enough to make a source
+// preflight blocking claim.
+type RuleEvidenceClass string
+
+const (
+	EvidenceCompileEquivalent RuleEvidenceClass = "compile-equivalent"
+	EvidenceInference         RuleEvidenceClass = "inference"
+	EvidenceRuntimeSafety     RuleEvidenceClass = "runtime-safety"
+	EvidencePolicy            RuleEvidenceClass = "policy"
+	EvidenceMaintainability   RuleEvidenceClass = "maintainability"
+)
+
 type RuleScope string
 
 const (
@@ -67,24 +80,26 @@ const (
 )
 
 type RuleMetadata struct {
-	ID                  string         `json:"id"`
-	Title               string         `json:"title"`
-	Description         string         `json:"description"`
-	Family              RuleFamily     `json:"family"`
-	Category            RuleCategory   `json:"category"`
-	DefaultSeverity     RuleSeverity   `json:"default_severity"`
-	Surfaces            []RuleSurface  `json:"surfaces"`
-	SupportedSeverities []RuleSeverity `json:"supported_severities"`
-	DefaultEnabled      bool           `json:"default_enabled"`
-	Scope               RuleScope      `json:"scope"`
-	Realtime            bool           `json:"realtime"`
-	Precision           RulePrecision  `json:"precision"`
-	FixAvailable        bool           `json:"fix_available"`
-	DocumentationURL    string         `json:"documentation_url"`
-	Configurable        bool           `json:"configurable"`
-	ConfigurationKey    string         `json:"configuration_key"`
-	InlineSuppressible  bool           `json:"inline_suppressible"`
-	PreflightBlocking   bool           `json:"preflight_blocking"`
+	ID                  string            `json:"id"`
+	Title               string            `json:"title"`
+	Description         string            `json:"description"`
+	Family              RuleFamily        `json:"family"`
+	Category            RuleCategory      `json:"category"`
+	EvidenceClass       RuleEvidenceClass `json:"evidence_class"`
+	CompileEquivalent   bool              `json:"compile_equivalent"`
+	DefaultSeverity     RuleSeverity      `json:"default_severity"`
+	Surfaces            []RuleSurface     `json:"surfaces"`
+	SupportedSeverities []RuleSeverity    `json:"supported_severities"`
+	DefaultEnabled      bool              `json:"default_enabled"`
+	Scope               RuleScope         `json:"scope"`
+	Realtime            bool              `json:"realtime"`
+	Precision           RulePrecision     `json:"precision"`
+	FixAvailable        bool              `json:"fix_available"`
+	DocumentationURL    string            `json:"documentation_url"`
+	Configurable        bool              `json:"configurable"`
+	ConfigurationKey    string            `json:"configuration_key"`
+	InlineSuppressible  bool              `json:"inline_suppressible"`
+	PreflightBlocking   bool              `json:"preflight_blocking"`
 }
 
 const SchemaVersion = 1
@@ -170,8 +185,11 @@ func Validate(items []RuleMetadata) error {
 		if strings.TrimSpace(rule.Title) == "" || strings.TrimSpace(rule.Description) == "" {
 			return fmt.Errorf("%s is missing title or description", rule.ID)
 		}
-		if !validFamily(rule.Family) || !validCategory(rule.Category) || !validSeverity(rule.DefaultSeverity) || !validScope(rule.Scope) || !validPrecision(rule.Precision) {
+		if !validFamily(rule.Family) || !validCategory(rule.Category) || !validEvidenceClass(rule.EvidenceClass) || !validSeverity(rule.DefaultSeverity) || !validScope(rule.Scope) || !validPrecision(rule.Precision) {
 			return fmt.Errorf("%s has invalid enum metadata", rule.ID)
+		}
+		if rule.CompileEquivalent != (rule.EvidenceClass == EvidenceCompileEquivalent) {
+			return fmt.Errorf("%s compile_equivalent and evidence_class are inconsistent", rule.ID)
 		}
 		if err := validateSurfaces(rule); err != nil {
 			return err
@@ -205,6 +223,23 @@ func Validate(items []RuleMetadata) error {
 		if rule.PreflightBlocking && rule.DefaultSeverity != SeverityError {
 			return fmt.Errorf("%s is preflight-blocking but does not have error severity", rule.ID)
 		}
+		if rule.CompileEquivalent {
+			if rule.DefaultSeverity != SeverityError || len(rule.SupportedSeverities) != 1 || rule.SupportedSeverities[0] != SeverityError {
+				return fmt.Errorf("%s compile-equivalent rules must support error severity only", rule.ID)
+			}
+			if rule.InlineSuppressible || !rule.PreflightBlocking {
+				return fmt.Errorf("%s compile-equivalent rules must be unsuppressible and preflight-blocking", rule.ID)
+			}
+		} else {
+			if rule.DefaultSeverity == SeverityError || rule.PreflightBlocking {
+				return fmt.Errorf("%s non-compile-equivalent rules cannot be error or preflight-blocking", rule.ID)
+			}
+			for _, severity := range rule.SupportedSeverities {
+				if severity == SeverityError {
+					return fmt.Errorf("%s non-compile-equivalent rules cannot support error severity", rule.ID)
+				}
+			}
+		}
 		wantURL := "https://harumiweb.github.io/xlflow/reference/diagnostics#" + strings.ToLower(rule.ID)
 		parsed, err := url.ParseRequestURI(rule.DocumentationURL)
 		if err != nil || parsed.Scheme != "https" || rule.DocumentationURL != wantURL {
@@ -219,6 +254,9 @@ func validCategory(v RuleCategory) bool {
 	return v == CategoryCorrectness || v == CategoryDocumentation || v == CategoryMaintainability ||
 		v == CategoryReliability || v == CategoryRuntimeSafety || v == CategoryPerformance ||
 		v == CategoryArchitecture || v == CategorySecurity || v == CategoryTypeSafety
+}
+func validEvidenceClass(v RuleEvidenceClass) bool {
+	return v == EvidenceCompileEquivalent || v == EvidenceInference || v == EvidenceRuntimeSafety || v == EvidencePolicy || v == EvidenceMaintainability
 }
 func validSeverity(v RuleSeverity) bool { return v == SeverityError || v == SeverityWarning }
 func validSurface(v RuleSurface) bool {

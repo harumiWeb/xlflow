@@ -30,6 +30,8 @@ const requiredRuleFields = [
   "description",
   "family",
   "category",
+  "evidence_class",
+  "compile_equivalent",
   "default_severity",
   "supported_severities",
   "surfaces",
@@ -46,6 +48,7 @@ const requiredRuleFields = [
 ];
 const booleanRuleFields = new Set([
   "default_enabled",
+  "compile_equivalent",
   "realtime",
   "fix_available",
   "configurable",
@@ -145,6 +148,8 @@ const details = rules
       ["Property", "Value"],
       ["Family", `\`${markdown(rule.family)}\``],
       ["Category", `\`${markdown(rule.category)}\``],
+      ["Evidence class", `\`${markdown(rule.evidence_class)}\``],
+      ["Compile-equivalent", yesNo(rule.compile_equivalent)],
       ["Default severity", `\`${markdown(rule.default_severity)}\``],
       [
         "Supported severities",

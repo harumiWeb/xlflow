@@ -11,9 +11,9 @@ func TestRegistryContainsEveryProductionDiagnostic(t *testing.T) {
 	want := strings.Fields(`
 VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB014 VB015
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
-VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044
+VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
-VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227`)
+VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -49,7 +49,7 @@ func TestRegistrySnapshotsAreSortedAndDefensive(t *testing.T) {
 	if got, _ := Lookup(original.ID); got.Title == "changed" {
 		t.Fatal("caller mutated registry through CatalogSnapshot")
 	}
-	if got, _ := Lookup(original.ID); got.Surfaces[0] == SurfaceLSP || got.SupportedSeverities[0] != SeverityError {
+	if got, _ := Lookup(original.ID); got.Surfaces[0] == SurfaceLSP || got.SupportedSeverities[0] != original.SupportedSeverities[0] {
 		t.Fatal("caller mutated registry metadata slices through CatalogSnapshot")
 	}
 }
@@ -64,8 +64,20 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		t.Fatalf("unexpected VBA216 metadata: %+v, %v", mismatch, ok)
 	}
 	byRef, ok := Lookup("VBA206")
-	if !ok || byRef.DefaultSeverity != SeverityWarning || byRef.PreflightBlocking || !byRef.InlineSuppressible || !byRef.Realtime || byRef.Scope != ScopeInterprocedural || byRef.Precision != PrecisionHigh || !byRef.DefaultEnabled || byRef.Category != "runtime-safety" {
+	if !ok || byRef.EvidenceClass != EvidenceRuntimeSafety || byRef.CompileEquivalent || byRef.DefaultSeverity != SeverityWarning || byRef.PreflightBlocking || !byRef.InlineSuppressible || !byRef.Realtime || byRef.Scope != ScopeInterprocedural || byRef.Precision != PrecisionHigh || !byRef.DefaultEnabled || byRef.Category != "runtime-safety" {
 		t.Fatalf("unexpected VBA206 metadata: %+v, %v", byRef, ok)
+	}
+	setScalar, ok := Lookup("VB037")
+	if !ok || setScalar.EvidenceClass != EvidenceCompileEquivalent || !setScalar.CompileEquivalent || setScalar.DefaultSeverity != SeverityError || !setScalar.PreflightBlocking || setScalar.InlineSuppressible || !reflect.DeepEqual(setScalar.SupportedSeverities, []RuleSeverity{SeverityError}) {
+		t.Fatalf("unexpected VB037 metadata: %+v, %v", setScalar, ok)
+	}
+	argumentBinding, ok := Lookup("VB045")
+	if !ok || argumentBinding.EvidenceClass != EvidenceCompileEquivalent || !argumentBinding.CompileEquivalent || argumentBinding.DefaultSeverity != SeverityError || !argumentBinding.PreflightBlocking || argumentBinding.InlineSuppressible {
+		t.Fatalf("unexpected VB045 metadata: %+v, %v", argumentBinding, ok)
+	}
+	byRefMismatch, ok := Lookup("VBA228")
+	if !ok || byRefMismatch.EvidenceClass != EvidenceCompileEquivalent || !byRefMismatch.CompileEquivalent || byRefMismatch.DefaultSeverity != SeverityError || !byRefMismatch.PreflightBlocking || byRefMismatch.InlineSuppressible || byRefMismatch.Configurable {
+		t.Fatalf("unexpected VBA228 metadata: %+v, %v", byRefMismatch, ok)
 	}
 	unstable, ok := Lookup("VBA217")
 	if !ok || unstable.DefaultSeverity != SeverityWarning || unstable.PreflightBlocking || !unstable.InlineSuppressible || !unstable.Realtime || unstable.Precision != PrecisionMedium {
@@ -133,6 +145,8 @@ func TestValidateRejectsInvalidMetadata(t *testing.T) {
 		{"invalid family", func(r *RuleMetadata) { r.Family = "editor" }},
 		{"family mismatch", func(r *RuleMetadata) { r.Family = FamilyAnalyze }},
 		{"invalid category", func(r *RuleMetadata) { r.Category = "style" }},
+		{"invalid evidence class", func(r *RuleMetadata) { r.EvidenceClass = "vbe" }},
+		{"inconsistent compile equivalent flag", func(r *RuleMetadata) { r.CompileEquivalent = true }},
 		{"invalid severity", func(r *RuleMetadata) { r.DefaultSeverity = "info" }},
 		{"invalid scope", func(r *RuleMetadata) { r.Scope = "module" }},
 		{"invalid precision", func(r *RuleMetadata) { r.Precision = "certain" }},
@@ -167,6 +181,49 @@ func TestValidateRejectsInvalidMetadata(t *testing.T) {
 	if err := Validate([]RuleMetadata{base, base}); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("Validate duplicate error = %v", err)
 	}
+
+	compileEquivalent, ok := Lookup("VB008")
+	if !ok {
+		t.Fatal("VB008 missing")
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*RuleMetadata)
+	}{
+		{"compile-equivalent warning", func(r *RuleMetadata) {
+			r.DefaultSeverity = SeverityWarning
+			r.SupportedSeverities = []RuleSeverity{SeverityWarning}
+		}},
+		{"compile-equivalent suppressible", func(r *RuleMetadata) { r.InlineSuppressible = true }},
+		{"compile-equivalent nonblocking", func(r *RuleMetadata) { r.PreflightBlocking = false }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := compileEquivalent
+			tc.edit(&rule)
+			if err := Validate([]RuleMetadata{rule}); err == nil {
+				t.Fatalf("Validate accepted %+v", rule)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*RuleMetadata)
+	}{
+		{"inference error", func(r *RuleMetadata) {
+			r.DefaultSeverity = SeverityError
+			r.SupportedSeverities = []RuleSeverity{SeverityError}
+		}},
+		{"inference blocking", func(r *RuleMetadata) { r.PreflightBlocking = true }},
+		{"inference supports error", func(r *RuleMetadata) { r.SupportedSeverities = []RuleSeverity{SeverityWarning, SeverityError} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := base
+			tc.edit(&rule)
+			if err := Validate([]RuleMetadata{rule}); err == nil {
+				t.Fatalf("Validate accepted %+v", rule)
+			}
+		})
+	}
 }
 
 func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
@@ -184,25 +241,26 @@ func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
 	}
 	for _, id := range []string{"VBA214", "VBA225"} {
 		rule, ok := Lookup(id)
-		if !ok || !reflect.DeepEqual(rule.SupportedSeverities, []RuleSeverity{SeverityWarning, SeverityError}) {
-			t.Errorf("%s supported severities = %v, want warning,error", id, rule.SupportedSeverities)
+		if !ok || !reflect.DeepEqual(rule.SupportedSeverities, []RuleSeverity{SeverityWarning}) {
+			t.Errorf("%s supported severities = %v, want warning", id, rule.SupportedSeverities)
 		}
 	}
 }
 
 func TestRegistryMetadataSlicesAreDeepCopied(t *testing.T) {
 	all := All()
+	originalSeverity := all[0].SupportedSeverities[0]
 	all[0].Surfaces[0] = SurfaceLSP
 	all[0].SupportedSeverities[0] = SeverityWarning
 	lookup, ok := Lookup(all[0].ID)
-	if !ok || lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != SeverityError {
+	if !ok || lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != originalSeverity {
 		t.Fatalf("Lookup shared mutable metadata slices: %+v", lookup)
 	}
 	byFamily := ByFamily(lookup.Family)
 	byFamily[0].Surfaces[0] = SurfaceLSP
 	byFamily[0].SupportedSeverities[0] = SeverityWarning
 	lookup, _ = Lookup(byFamily[0].ID)
-	if lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != SeverityError {
+	if lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != all[0].SupportedSeverities[0] {
 		t.Fatalf("ByFamily shared mutable metadata slices: %+v", lookup)
 	}
 }
