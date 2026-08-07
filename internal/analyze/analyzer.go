@@ -42,6 +42,22 @@ type Finding struct {
 	DataFlow     *DataFlowContext `json:"data_flow,omitempty"`
 }
 
+// ParseError reports that tree-sitter could not produce a complete VBA
+// syntax tree for a source file. Callers that need to distinguish parser
+// failures from other analysis failures can use errors.As with this type.
+type ParseError struct {
+	Path       string
+	HasError   bool
+	HasMissing bool
+}
+
+func (e *ParseError) Error() string {
+	if e == nil {
+		return "VBA parser reported errors or missing nodes"
+	}
+	return fmt.Sprintf("parse %s: VBA parser reported errors or missing nodes", e.Path)
+}
+
 type Result struct {
 	Findings []Finding
 	Warnings []map[string]any
@@ -276,7 +292,7 @@ func (a Analyzer) RunResult() (Result, error) {
 		if ir.Parse.HasError || ir.Parse.HasMissing {
 			parsed.Close()
 			closeParsedFiles(parsedFiles)
-			return Result{}, fmt.Errorf("parse %s: VBA parser reported errors or missing nodes", file)
+			return Result{}, &ParseError{Path: file, HasError: ir.Parse.HasError, HasMissing: ir.Parse.HasMissing}
 		}
 		controlFlow := vbacfg.BuildDocument(ir)
 		var intelDocument intel.Document
