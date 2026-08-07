@@ -158,6 +158,17 @@ publish failure rollback. The synchronizer additionally rejects missing
 projects, symlink/reparse entries, and irregular files during staging. A
 second run from the real upstream pin must produce no corpus diff.
 
+Native runner regression tests cover discovery and stable project-ID selection,
+independent execution of each project root with its own configuration,
+separation of invalid-configuration, parser, and execution failures from
+ordinary diagnostics, deterministic diagnostic ordering across repeated runs,
+and preservation of partial results when another project fails. The real-world
+`self/gen-qrcode` test executes both lint and analyze through the production
+implementations, verifies repeatable diagnostics, and compares the project
+tree before and after execution to prove that corpus analysis is read-only.
+These tests protect the project-isolation and failure-boundary contracts that
+unit fixtures alone cannot establish.
+
 The corpus does not change static-analysis semantics, public CLI/API output,
 Excel/VBE oracle behavior, or Go dependency-inventory checks. Those suites
 remain separate from synchronization and may run fully offline.
