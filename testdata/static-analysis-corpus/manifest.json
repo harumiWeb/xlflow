@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "harumiWeb/tree-sitter-vba",
+    "commit": "c867f27ea3dedc2ccece1eeb0273cdb242899182"
+  },
+  "projects": [
+    {
+      "id": "access-examples",
+      "path": "projects/third_party/access-examples",
+      "profile": "access",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/Access-examples-master"
+      },
+      "provenance": {
+        "repository": "https://github.com/Access-projects/Access-examples",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-json",
+      "path": "projects/third_party/vba-json",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA-JSON-master"
+      },
+      "provenance": {
+        "repository": "https://github.com/VBA-tools/VBA-JSON",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-web",
+      "path": "projects/third_party/vba-web",
+      "profile": "excel",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA-Web-master"
+      },
+      "provenance": {
+        "repository": "https://github.com/VBA-tools/VBA-Web",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    }
+  ]
+}
