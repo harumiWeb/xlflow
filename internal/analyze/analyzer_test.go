@@ -4628,3 +4628,45 @@ func containsAll(text string, parts ...string) bool {
 	}
 	return true
 }
+
+func TestAnalyzerVBA229IsBlockingAndUnsuppressible(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe()
+    ' xlflow:disable-next-line VBA229
+    Dim value As DefinitelyNotARealType
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := findingsByCode(result.Findings, "VBA229")
+	if len(findings) != 1 || findings[0].Severity != "error" || findings[0].Line != 4 {
+		t.Fatalf("VBA229 findings = %+v, want one blocking error on line 4", findings)
+	}
+	if blocking := findingsByCode(BlockingFindings(result.Findings), "VBA229"); len(blocking) != 1 {
+		t.Fatalf("VBA229 blocking findings = %+v, want one", blocking)
+	}
+}
+
+func TestAnalyzerVBA229AcceptsQualifiedProjectType(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Types.bas", `Option Explicit
+Public Type Payload
+    Value As Long
+End Type
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe()
+    Dim value As Types.Payload
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
+		t.Fatalf("qualified project type should resolve: %+v", findings)
+	}
+}

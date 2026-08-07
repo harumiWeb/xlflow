@@ -268,6 +268,8 @@ or another explicit recovery path rather than saving the uncertain workbook.
 
 `check` runs `lint`, `analyze`, then `doctor`. It continues after lint/analyze findings so source issues and environment status are returned together. JSON output includes top-level `check`, `issues`, `analysis`, and doctor diagnostics. Lint/analyze findings return exit code `1`; doctor/environment failure returns exit code `3`.
 
+`VBA229` is a default-enabled, realtime and batch compile-equivalent error for an unresolved type identifier in a procedure-local `Dim` or `Static ... As <Type>` declaration. It uses the production built-in/host/TypeLib and project symbol resolver, points at the type identifier, cannot be suppressed, and blocks source preflight. Parameters, return types, and module-level declarations remain outside this rule's v1 scope.
+
 `macros` opens the configured workbook and discovers VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. `macros --session` reads from the workbook opened by `session start`. Agents should use this command before guessing a `run` target.
 
 `macros` supports the `.NET` bridge in both explicit `--bridge dotnet` mode and Windows `auto` mode. In `auto`, xlflow uses the `.NET` bridge and does not fall back to PowerShell. The command routes through the `.NET` Excel bridge executable (`xlflow-excel-bridge.exe`) and produces the same envelope fields (`target`, `session`, `workbook`, `macros`, `logs`). The `.NET` bridge implementation discovers public, private, friend, and implicit VBA entrypoints, and reports the runner's ability to invoke each one. When `--session` is used, the `.NET` bridge reports session-attached workbook dirty state; if the dirty state cannot be determined, `dirty` and `save_required` default to `true` and `source_of_truth` defaults to `live_workbook`.
@@ -885,7 +887,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, and `VBA228` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 
@@ -929,6 +931,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA225`: repeated cell-by-cell Excel object-model work occurs inside a non-trivial loop; nested loops increase the warning's context but do not escalate it to error
 - `VBA226`: a `Range.Value` / `Value2` result is consumed with an unsafe scalar, one-dimensional, dimension/order, bounds, or destination-shape assumption
 - `VBA227`: an array lifecycle, allocation, dimension, bound, or object-array assignment assumption is not proven safe
+- `VBA229`: a procedure-local `Dim` or `Static ... As <Type>` declaration uses a type name that cannot be resolved
 
 Projects should disable configurable analyzer rules with `[analyze].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VBA205", "VBA211"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
 

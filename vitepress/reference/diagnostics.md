@@ -81,6 +81,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA226`](#vba226) | analyze | warning  | procedure-local | yes     | Unsafe Range.Value array shape assumption          |
 | [`VBA227`](#vba227) | analyze | warning  | interprocedural | yes     | Array lifecycle and dimension safety               |
 | [`VBA228`](#vba228) | analyze | error    | interprocedural | yes     | ByRef type mismatch                                |
+| [`VBA229`](#vba229) | analyze | error    | procedure-local | yes     | Unresolved local As type name                      |
 
 ## VB001
 
@@ -1724,6 +1725,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Supported severities        | `error`              |
 | Surfaces                    | `analyze`, `lsp`     |
 | Scope                       | `interprocedural`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VBA229
+
+**Unresolved local As type name.** A procedure-local declaration uses a VBA type name that cannot be resolved from the project or production type database.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `analyze`            |
+| Category                    | `type-safety`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `analyze`, `lsp`     |
+| Scope                       | `procedure-local`    |
 | Precision                   | `high`               |
 | Enabled by default          | yes                  |
 | Configuration               | not configurable     |

@@ -84,6 +84,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA226` | warning  | A `Range.Value` result is used with an unsafe scalar or array shape assumption.                |
 | `VBA227` | warning  | Array allocation, lifecycle, dimension, bound, or object-element safety is not proven.         |
 | `VBA228` | error    | Definite ByRef type or array-shape mismatch rejected by the VBE; blocks source preflight.      |
+| `VBA229` | error    | Unresolved procedure-local `As <Type>` identifier; blocks source preflight.                    |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -118,6 +119,8 @@ Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, and `VB
 `VBA226` is enabled in batch and real-time analysis and tracks procedure-local `Range.Value` / `Value2` shapes. It reports one-dimensional or scalar assumptions for definite multi-cell ranges, dimensionless bounds, statically provable dimension/order/bounds mistakes, and incompatible known destination ranges. Multi-cell values are modeled as two-dimensional arrays; single-cell values are modeled as scalars. Dynamic, reassigned, and branch-merged shapes remain uncertain, so only unsafe consumption or a statically proven shape mismatch is reported. Use `values(row, column)`, dimension-specific bounds, and a dominating `IsArray` guard for dynamic values when appropriate.
 
 `VBA227` is enabled in batch and real-time analysis and tracks array allocation through the CFG. Fixed arrays start allocated; dynamic arrays start unallocated; `ReDim`, `Erase`, array assignments, and proven project-local array returns update the state, while unknown `Variant` and external values remain conservative. In real-time analysis, array-return summaries are limited to the active document. It reports unsafe `LBound` / `UBound` and indexed access, invalid dimensions or known bounds, fixed-array `ReDim`, and unknown Variant array operations. `VBA208` remains the owner of `ReDim Preserve` findings, while object-array missing-`Set` findings remain owned by `VBA101` / `VBA102`. `Range.Value` / `Value2` shape cases remain owned by `VBA226`; use `xlflow:disable-line VBA227`, `xlflow:disable-next-line VBA227`, or `[analyze].disabled_rules = ["VBA227"]` for intentional exceptions.
+
+`VBA229` is a realtime and batch compile-equivalent error for unresolved type identifiers in procedure-local `Dim` and `Static ... As <Type>` declarations. It uses the production built-in/host/TypeLib and project-symbol resolver, points at the type identifier, cannot be suppressed, and blocks source preflight. Parameters, return types, and module-level declarations are outside the v1 rule scope.
 
 ## JSON Output Example
 

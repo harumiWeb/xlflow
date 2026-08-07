@@ -4605,3 +4605,64 @@ func lineIndex(source, contains string) int {
 	}
 	return -1
 }
+
+func TestLocalTypeNameDiagnosticsResolveBuiltinsAndReportOnlyLocalUnknowns(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Function Probe(ByVal input As Long) As Long
+    Dim known As Long
+    Dim value As DefinitelyNotARealType
+    Dim first, second As AnotherMissingType
+    Probe = input
+End Function
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), ModuleKind: "standard", Source: source}
+	diagnostics := analyzer.LocalTypeNameDiagnosticsContext(context.Background(), doc)
+	if len(diagnostics) != 2 {
+		t.Fatalf("local type diagnostics = %+v, want two unresolved names", diagnostics)
+	}
+	wantNames := []string{"DefinitelyNotARealType", "AnotherMissingType"}
+	for i, diagnostic := range diagnostics {
+		if diagnostic.Code != "VBA229" || diagnostic.Severity != "error" {
+			t.Fatalf("diagnostic %d = %+v, want VBA229 error", i, diagnostic)
+		}
+		if got := rangeText(source, diagnostic.Range); got != wantNames[i] {
+			t.Fatalf("diagnostic %d range text = %q, want %q", i, got, wantNames[i])
+		}
+	}
+	full := diagnosticsByCode(analyzer.Diagnostics(doc), "VBA229")
+	if len(full) != 2 {
+		t.Fatalf("full diagnostics = %+v, want two VBA229 findings", full)
+	}
+	compileEquivalent := diagnosticsByCode(analyzer.CompileEquivalentDiagnosticsContext(context.Background(), doc), "VBA229")
+	if len(compileEquivalent) != 2 {
+		t.Fatalf("compile-equivalent diagnostics = %+v, want two VBA229 findings", compileEquivalent)
+	}
+}
+
+func TestLocalTypeNameDiagnosticsAcceptProjectClassSymbols(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode == WorkspaceSymbolQueryExact {
+			switch strings.ToLower(query.Text) {
+			case "worker":
+				return []Symbol{{Name: "Worker", Kind: "module", Module: "Worker", ModuleKind: "class"}}, nil
+			case "payload":
+				return []Symbol{{Name: "Payload", Kind: "type", Module: "Types"}}, nil
+			case "status":
+				return []Symbol{{Name: "Status", Kind: "enum", Module: "Types"}}, nil
+			}
+		}
+		if query.Mode == WorkspaceSymbolQueryQualified && strings.EqualFold(query.Text, "Types.Payload") {
+			return []Symbol{{Name: "Payload", Kind: "type", Module: "Types"}}, nil
+		}
+		return nil, nil
+	}
+	if err := analyzer.DB.MergeJSON([]byte(`{"types":[{"name":"Vendor.Widget","library":"Vendor","kind":"class","source":"typelib","confidence":"generated"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), ModuleKind: "standard", Source: "Option Explicit\nPublic Sub Probe()\n    Dim worker As Worker\n    Dim payload As Payload\n    Dim state As Status\n    Dim qualified As Types.Payload\n    Dim widget As Vendor.Widget\nEnd Sub\n"}
+	if diagnostics := analyzer.LocalTypeNameDiagnosticsContext(context.Background(), doc); len(diagnostics) != 0 {
+		t.Fatalf("project/TypeLib types should resolve: %+v", diagnostics)
+	}
+}
