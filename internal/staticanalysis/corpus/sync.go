@@ -44,7 +44,7 @@ func Sync(ctx context.Context, opts SyncOptions) error {
 	if err := ensureDirectory(corpusRoot); err != nil {
 		return fmt.Errorf("corpus root: %w", err)
 	}
-	if err := ensureManagedTreeClean(corpusRoot); err != nil {
+	if err := ensureManagedTreeClean(ctx, corpusRoot); err != nil {
 		return err
 	}
 
@@ -171,7 +171,7 @@ func ensureDirectory(path string) error {
 	return nil
 }
 
-func ensureManagedTreeClean(corpusRoot string) error {
+func ensureManagedTreeClean(ctx context.Context, corpusRoot string) error {
 	repoRoot, err := findGitRoot(corpusRoot)
 	if err != nil {
 		return nil
@@ -181,7 +181,7 @@ func ensureManagedTreeClean(corpusRoot string) error {
 	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil
 	}
-	out, err := runGitOutput(context.Background(), repoRoot, "status", "--porcelain", "--", filepath.ToSlash(rel))
+	out, err := runGitOutput(ctx, repoRoot, "status", "--porcelain", "--", filepath.ToSlash(rel))
 	if err != nil {
 		return fmt.Errorf("check managed corpus tree: %w", err)
 	}
@@ -280,7 +280,11 @@ func ensureResolvedWithin(candidate, root string) error {
 	if err != nil {
 		return err
 	}
-	return ensurePathWithin(resolved, root)
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	return ensurePathWithin(resolved, resolvedRoot)
 }
 
 func ensurePathWithin(candidate, root string) error {

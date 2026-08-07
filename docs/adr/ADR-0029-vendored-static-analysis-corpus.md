@@ -20,8 +20,9 @@ while contributors need a safe, reviewable way to refresh the pinned sources.
 
 ## Decision
 
-Vendor the selected projects below `testdata/static-analysis-corpus/projects/
-third_party/` and describe them with the schema-versioned
+Vendor the selected projects below the managed
+`testdata/static-analysis-corpus/projects/third_party/` tree and describe them
+with the schema-versioned
 `testdata/static-analysis-corpus/manifest.json`:
 
 - upstream repository `harumiWeb/tree-sitter-vba` at commit

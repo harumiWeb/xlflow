@@ -159,17 +159,17 @@ func ValidateManifest(manifest Manifest) error {
 		if !identifierPattern.MatchString(p.ID) || p.ID != strings.TrimSpace(p.ID) {
 			return fmt.Errorf("project %d has invalid id %q", i, p.ID)
 		}
-		if i > 0 && manifest.Projects[i-1].ID >= p.ID {
-			return fmt.Errorf("projects must be sorted by id: %q follows %q", p.ID, manifest.Projects[i-1].ID)
-		}
 		if _, ok := seenIDs[p.ID]; ok {
 			return fmt.Errorf("duplicate project id %q", p.ID)
 		}
 		seenIDs[p.ID] = struct{}{}
+		if i > 0 && manifest.Projects[i-1].ID >= p.ID {
+			return fmt.Errorf("projects must be sorted by id: %q follows %q", p.ID, manifest.Projects[i-1].ID)
+		}
 		if manifest.jsonLoaded && !p.enabledPresent {
 			return fmt.Errorf("project %q must explicitly declare enabled", p.ID)
 		}
-		if err := validateRelativePath(p.Path, true); err != nil {
+		if err := validateRelativePath(p.Path); err != nil {
 			return fmt.Errorf("project %q destination path: %w", p.ID, err)
 		}
 		if !strings.HasPrefix(p.Path, "projects/third_party/") || p.Path == "projects/third_party/" {
@@ -227,10 +227,10 @@ func validateProvenance(p Provenance) error {
 	if strings.TrimSpace(p.License) == "" || strings.ContainsAny(p.License, " \t\r\n") {
 		return fmt.Errorf("license must be a non-empty SPDX identifier, got %q", p.License)
 	}
-	if err := validateRelativePath(p.LicenseFile, false); err != nil {
+	if err := validateRelativePath(p.LicenseFile); err != nil {
 		return fmt.Errorf("license_file: %w", err)
 	}
-	if err := validateRelativePath(p.SourceFile, false); err != nil {
+	if err := validateRelativePath(p.SourceFile); err != nil {
 		return fmt.Errorf("source_file: %w", err)
 	}
 	if strings.EqualFold(p.LicenseFile, p.SourceFile) {
@@ -240,7 +240,7 @@ func validateProvenance(p Provenance) error {
 }
 
 func validateSourcePath(value string) error {
-	if err := validateRelativePath(value, false); err != nil {
+	if err := validateRelativePath(value); err != nil {
 		return err
 	}
 	if value == "examples/third_party" || !strings.HasPrefix(value, "examples/third_party/") {
@@ -249,7 +249,7 @@ func validateSourcePath(value string) error {
 	return nil
 }
 
-func validateRelativePath(value string, allowDir bool) error {
+func validateRelativePath(value string) error {
 	if value == "" || strings.TrimSpace(value) != value || strings.Contains(value, "\\") || strings.Contains(value, ":") {
 		return fmt.Errorf("must be a canonical slash-separated relative path, got %q", value)
 	}
@@ -259,9 +259,6 @@ func validateRelativePath(value string, allowDir bool) error {
 	clean := path.Clean(value)
 	if clean != value || clean == "." || strings.HasPrefix(clean, "../") || clean == ".." {
 		return fmt.Errorf("must not contain traversal or non-canonical segments")
-	}
-	if !allowDir && strings.HasSuffix(value, "/") {
-		return fmt.Errorf("must name a file")
 	}
 	for _, segment := range strings.Split(value, "/") {
 		if segment == "" || segment == "." || segment == ".." {

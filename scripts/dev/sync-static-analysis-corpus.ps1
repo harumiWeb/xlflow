@@ -10,9 +10,9 @@ $ErrorActionPreference = "Stop"
 # Resolve defaults from the repository root so this script is safe to invoke
 # from any working directory. The manifest remains the only source of the
 # upstream repository and pinned commit; this wrapper only forwards paths.
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$repoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot "..") "..")).Path
 if ([string]::IsNullOrWhiteSpace($Manifest)) {
-    $Manifest = Join-Path $repoRoot "testdata\static-analysis-corpus\manifest.json"
+    $Manifest = Join-Path (Join-Path (Join-Path $repoRoot "testdata") "static-analysis-corpus") "manifest.json"
 }
 if ([string]::IsNullOrWhiteSpace($CorpusRoot)) {
     $CorpusRoot = Split-Path -Parent $Manifest
@@ -20,7 +20,7 @@ if ([string]::IsNullOrWhiteSpace($CorpusRoot)) {
 
 $manifestPath = (Resolve-Path -LiteralPath $Manifest).Path
 $corpusPath = (Resolve-Path -LiteralPath $CorpusRoot).Path
-$goScript = Join-Path $repoRoot "scripts\dev\go.ps1"
+$goScript = Join-Path (Join-Path (Join-Path $repoRoot "scripts") "dev") "go.ps1"
 if (-not (Test-Path -LiteralPath $goScript)) {
     throw "Cannot find the repository Go wrapper: $goScript"
 }

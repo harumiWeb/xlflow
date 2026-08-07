@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/harumiWeb/xlflow/internal/staticanalysis/corpus"
 )
@@ -26,7 +27,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "sync does not accept positional arguments")
 		os.Exit(2)
 	}
-	if err := corpus.Sync(context.Background(), corpus.SyncOptions{ManifestPath: *manifest, CorpusRoot: *corpusRoot, UpstreamCheckout: *checkout}); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := corpus.Sync(ctx, corpus.SyncOptions{ManifestPath: *manifest, CorpusRoot: *corpusRoot, UpstreamCheckout: *checkout}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

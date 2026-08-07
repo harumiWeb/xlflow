@@ -144,10 +144,11 @@ attribution metadata. Repository checks verify each listed project, license,
 and `SOURCE.md` against the manifest.
 
 Synchronization tests use temporary local Git repositories and cover the
-correct pinned commit, project boundaries, byte preservation, metadata,
-idempotent tree digests, stale-file removal, commit mismatch, missing project,
-symlink/irregular-file rejection, dirty-tree protection, and publish failure
-rollback. A second run from the real upstream pin must produce no corpus diff.
+correct pinned commit, project boundaries, metadata presence, idempotent tree
+digests, stale-file removal, commit mismatch, dirty-tree protection, and
+publish failure rollback. The synchronizer additionally rejects missing
+projects, symlink/reparse entries, and irregular files during staging. A
+second run from the real upstream pin must produce no corpus diff.
 
 The corpus does not change static-analysis semantics, public CLI/API output,
 Excel/VBE oracle behavior, or Go dependency-inventory checks. Those suites

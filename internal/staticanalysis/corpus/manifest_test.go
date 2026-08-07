@@ -86,12 +86,26 @@ func TestSyncLocalCheckoutIsDeterministicAndRemovesStaleFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "one", "LICENSE")); err != nil {
 		t.Fatal(err)
 	}
+	mainContents, err := os.ReadFile(filepath.Join(target, "one", "Main.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(mainContents) != "Attribute VB_Name = \"Main\"\r\n" {
+		t.Fatalf("copied project content changed: %q", mainContents)
+	}
+	afterFirstSync, err := TreeDigest(target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(target, "stale.bas"), []byte("stale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	first, err := TreeDigest(target)
+	withStale, err := TreeDigest(target)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if withStale == afterFirstSync {
+		t.Fatal("digest unexpectedly ignored stale file")
 	}
 	if err := Sync(context.Background(), SyncOptions{ManifestPath: manifestPath, CorpusRoot: corpusRoot, UpstreamCheckout: upstream}); err != nil {
 		t.Fatal(err)
@@ -99,19 +113,19 @@ func TestSyncLocalCheckoutIsDeterministicAndRemovesStaleFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "stale.bas")); !os.IsNotExist(err) {
 		t.Fatalf("stale file still exists, stat error = %v", err)
 	}
-	second, err := TreeDigest(target)
+	afterSecondSync, err := TreeDigest(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first == second {
-		t.Fatal("digest unexpectedly included stale file")
+	if afterFirstSync != afterSecondSync {
+		t.Fatalf("resync changed the managed tree: %s != %s", afterFirstSync, afterSecondSync)
 	}
 	third, err := TreeDigest(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second != third {
-		t.Fatalf("second sync was not stable: %s != %s", second, third)
+	if afterSecondSync != third {
+		t.Fatalf("second sync was not stable: %s != %s", afterSecondSync, third)
 	}
 }
 
