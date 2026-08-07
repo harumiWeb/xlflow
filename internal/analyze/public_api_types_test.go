@@ -204,6 +204,42 @@ End Sub
 	}
 }
 
+func TestVBA229FailsClosedWhenManifestOutputIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := filepath.Join(dir, "typelib")
+	if err := os.MkdirAll(typeDBDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+		GeneratorVersion: "1.2.3",
+		Libraries: []typedb.ManifestLibrary{{
+			Name:   "Vendor",
+			Output: "vendor.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim value As MissingGeneratedType
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA229"); len(got) != 0 {
+		t.Fatalf("incomplete TypeDB must not produce VBA229 false positives: %+v", got)
+	}
+	for _, warning := range result.Warnings {
+		if warning["code"] == "type_db_load_warning" && strings.Contains(warning["message"].(string), "vendor.generated.json") {
+			return
+		}
+	}
+	t.Fatalf("missing manifest output warning was not reported: %+v", result.Warnings)
+}
+
 func TestVBA222ExcludesHostRequiredEventHandlers(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "Sheet1.bas")

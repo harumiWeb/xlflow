@@ -3,6 +3,7 @@ package typedb
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -190,5 +191,32 @@ func TestLoadForRuntimeUsesManifestOutputsWhenPresent(t *testing.T) {
 	}
 	if _, ok := result.DB.ResolveType("Vendor.Stale"); ok {
 		t.Fatal("stale output outside manifest should not be loaded")
+	}
+}
+
+func TestLoadForRuntimeMarksMissingManifestOutputsIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteManifest(dir, Manifest{
+		GeneratorVersion: "1.2.3",
+		Libraries: []ManifestLibrary{{
+			Name:   "Vendor",
+			Output: "vendor.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Complete {
+		t.Fatal("missing manifest output should make the TypeDB incomplete")
+	}
+	if len(result.GeneratedFiles) != 0 {
+		t.Fatalf("generated files = %+v, want none", result.GeneratedFiles)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "vendor.generated.json") {
+		t.Fatalf("warnings = %+v, want missing output warning", result.Warnings)
 	}
 }
