@@ -280,6 +280,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exceptional_exit`
 - `excluded_components`
 - `executable_path`
+- `execution_failure`
 - `existing_warning`
 - `exit_code`
 - `exit_do`
@@ -411,6 +412,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_entry`
 - `invalid_formula`
 - `invalid_metadata_json`
+- `invalid_project_config`
 - `invalid_range`
 - `invalid_reference`
 - `invalid_row_selector`
@@ -576,6 +578,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `parenthesized_expression`
 - `parse_status`
 - `parse_status_summary`
+- `parser_failure`
 - `parser_node`
 - `parser_recovery`
 - `parser_token`

@@ -125,15 +125,23 @@ removes stale files from a prior managed tree. Pin updates are explicit review
 changes to the manifest followed by a synchronization run; branch names and
 implicit "latest" updates are not accepted.
 
-## Future runner boundary
+## Runner boundary
 
-A future static-analysis runner may load this manifest, resolve each profile,
-and scan one project at a time. It must retain the project ID and profile in
-its test context and must not merge project roots unless a separate reviewed
-fixture explicitly requires that behavior. The runner consumes only the
-vendored tree and manifest; it does not invoke the synchronizer, fetch
-upstream, open Excel, or require COM/VBE. Runner-specific expectations belong
-in tests or a follow-up specification and must not change this sync contract.
+The native self-corpus runner discovers `example/*` directories that contain
+`xlflow.toml` and identifies them as `self/<directory>`. Callers may select a
+stable subset by project ID; the default is every discovered project in
+lexicographic order. Each project is loaded and analyzed from its own root
+through the production `config.Load`, lint, and analyze implementations. The
+runner never merges source trees, treats ordinary diagnostics as successful
+results, and reports invalid configuration, parser failures, and execution
+failures separately from normalized diagnostic records.
+
+The runner is test/developer infrastructure. It reads source files only and
+does not modify examples, invoke the corpus synchronizer, fetch upstream
+content, open Excel, or require COM/VBE. Third-party manifest profiles and
+vendored projects remain governed by the synchronization contract above; a
+third-party adapter, golden snapshots, and snapshot-delta reporting are
+follow-up work and must not change this sync contract.
 
 ## Verification requirements
 

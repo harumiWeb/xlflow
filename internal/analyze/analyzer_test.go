@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -698,6 +699,13 @@ End Function
 	}
 	if !strings.Contains(err.Error(), "VBA parser reported errors or missing nodes") {
 		t.Fatalf("unexpected parse error: %v", err)
+	}
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("expected ParseError, got %T: %v", err, err)
+	}
+	if parseErr.Path != filepath.Join(dir, "src", "modules", "Main.bas") || !parseErr.HasError && !parseErr.HasMissing {
+		t.Fatalf("unexpected ParseError: %+v", parseErr)
 	}
 }
 
