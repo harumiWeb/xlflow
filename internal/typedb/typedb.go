@@ -250,8 +250,12 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	result := LoadResult{GeneratedDir: resolved, Complete: true}
-	files, missing := runtimeGeneratedFiles(resolved)
+	files, missing, manifestErr := runtimeGeneratedFiles(resolved)
 	result.GeneratedFiles = files
+	if manifestErr != nil {
+		result.Complete = false
+		result.Warnings = append(result.Warnings, "generated TypeLib manifest could not be loaded: "+manifestErr.Error())
+	}
 	for _, path := range missing {
 		result.Complete = false
 		result.Warnings = append(result.Warnings, "generated TypeLib output is missing: "+path)
@@ -294,10 +298,13 @@ func generatedFiles(dir string) []string {
 	return files
 }
 
-func runtimeGeneratedFiles(dir string) ([]string, []string) {
+func runtimeGeneratedFiles(dir string) ([]string, []string, error) {
 	manifest, err := ReadManifest(dir)
 	if err != nil {
-		return generatedFiles(dir), nil
+		if errors.Is(err, os.ErrNotExist) {
+			return generatedFiles(dir), nil, nil
+		}
+		return nil, nil, err
 	}
 	var files []string
 	var missing []string
@@ -316,7 +323,7 @@ func runtimeGeneratedFiles(dir string) ([]string, []string) {
 	}
 	sort.Strings(files)
 	sort.Strings(missing)
-	return files, missing
+	return files, missing, nil
 }
 
 func unsafeCleanTarget(path string) bool {

@@ -220,3 +220,32 @@ func TestLoadForRuntimeMarksMissingManifestOutputsIncomplete(t *testing.T) {
 		t.Fatalf("warnings = %+v, want missing output warning", result.Warnings)
 	}
 }
+
+func TestLoadForRuntimeMarksMalformedManifestIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vendor.generated.json"), []byte(`{
+  "types": [{ "name": "Vendor.Widget", "library": "Vendor", "kind": "class" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ManifestPath(dir), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Complete {
+		t.Fatal("malformed manifest should make the TypeDB incomplete")
+	}
+	if len(result.GeneratedFiles) != 0 {
+		t.Fatalf("generated files = %+v, want none", result.GeneratedFiles)
+	}
+	if _, ok := result.DB.ResolveType("Vendor.Widget"); ok {
+		t.Fatal("generated files must not be loaded when the manifest is malformed")
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "generated TypeLib manifest could not be loaded") {
+		t.Fatalf("warnings = %+v, want manifest load warning", result.Warnings)
+	}
+}
