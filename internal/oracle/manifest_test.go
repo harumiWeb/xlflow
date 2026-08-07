@@ -91,7 +91,7 @@ func TestValidateManifestRequiresCaseDirectoryAndEntryAgreement(t *testing.T) {
 }
 
 func TestValidateCaseRequiresAssertedProvenance(t *testing.T) {
-	c := Case{SchemaVersion: SchemaVersion, ID: "x", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: ExpectedAccepted, EvidencePhase: EvidenceCompile}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}}
+	c := Case{SchemaVersion: SchemaVersion, ID: "x", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: ExpectedAccepted, EvidencePhase: EvidenceCompile}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound, EvidenceRole: EvidenceRoleCompileEquivalent}}
 	if err := ValidateCase(c, "x", t.TempDir()); err == nil {
 		t.Fatal("expected provenance validation error")
 	}
@@ -112,7 +112,7 @@ func validAssertedCase(expected string) Case {
 		Modules:       []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}},
 		Probe:         Probe{Mode: ProbeCompile},
 		VBE:           VBEExpectation{Expected: expected, EvidencePhase: EvidenceCompile, DiagnosticMeaning: meaning},
-		Analysis:      AnalysisExpectation{BindingStatus: BindingUnbound},
+		Analysis:      AnalysisExpectation{BindingStatus: BindingUnbound, EvidenceRole: EvidenceRoleCompileEquivalent},
 		Provenance: Provenance{
 			Status: "asserted",
 			VerifiedOn: []VerificationMetadata{{
@@ -373,6 +373,9 @@ func TestValidateCaseEvidenceRoleSemantics(t *testing.T) {
 		{name: "invalid role", prepare: func(c *Case) {
 			c.Analysis.EvidenceRole = "compile-ish"
 		}, wantErr: true, errSubstr: "invalid analysis.evidence_role"},
+		{name: "missing role", prepare: func(c *Case) {
+			c.Analysis.EvidenceRole = ""
+		}, wantErr: true, errSubstr: "analysis.evidence_role is required"},
 		{name: "padded role", prepare: func(c *Case) {
 			c.Analysis.EvidenceRole = " compile-equivalent"
 		}, wantErr: true, errSubstr: "padded analysis.evidence_role"},

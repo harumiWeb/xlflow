@@ -156,7 +156,7 @@ type VBEExpectation struct {
 
 type AnalysisExpectation struct {
 	BindingStatus        string                  `json:"binding_status"`
-	EvidenceRole         string                  `json:"evidence_role,omitempty"`
+	EvidenceRole         string                  `json:"evidence_role"`
 	RuleCodes            []string                `json:"rule_codes,omitempty"`
 	BindingNote          *string                 `json:"binding_note,omitempty"`
 	NegativeControls     []string                `json:"negative_controls,omitempty"`
@@ -506,8 +506,10 @@ func validateEvidenceRole(c Case) error {
 		return fmt.Errorf("oracle case %q has padded analysis.evidence_role %q", c.ID, c.Analysis.EvidenceRole)
 	}
 	switch role {
-	case "", EvidenceRoleCompileEquivalent, EvidenceRolePolicyObservation,
+	case EvidenceRoleCompileEquivalent, EvidenceRolePolicyObservation,
 		EvidenceRoleMaintainabilityObservation, EvidenceRoleLanguageObservation, EvidenceRoleHarnessControl:
+	case "":
+		return fmt.Errorf("oracle case %q: analysis.evidence_role is required", c.ID)
 	default:
 		return fmt.Errorf("oracle case %q has invalid analysis.evidence_role %q", c.ID, c.Analysis.EvidenceRole)
 	}

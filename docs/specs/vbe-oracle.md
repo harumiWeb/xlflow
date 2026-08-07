@@ -137,7 +137,8 @@ contract uses `analysis.expected_diagnostics` and
 optional source range, and (when needed) `surfaces` from `lint`, `analyze`, and
 `lsp`.
 
-Every fixture must also declare its diagnostic binding state under `analysis`:
+Every fixture must also declare its diagnostic binding state and a non-empty
+`evidence_role` under `analysis`:
 
 ```json
 {
