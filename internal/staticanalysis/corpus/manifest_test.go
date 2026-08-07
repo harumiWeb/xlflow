@@ -45,6 +45,9 @@ func TestLoadManifestRejectsMalformedDocuments(t *testing.T) {
 		{"path traversal", strings.Replace(valid, "projects/third_party/one", "projects/third_party/../one", 1), "non-canonical"},
 		{"unsupported profile", strings.Replace(valid, `"generic-vba"`, `"other"`, 1), "unsupported profile"},
 		{"empty notes", strings.Replace(valid, `"enabled":true`, `"enabled":true,"notes":"  "`, 1), "notes"},
+		{"disabled without reason", strings.Replace(valid, `"enabled":true`, `"enabled":false`, 1), "requires a non-empty notes reason"},
+		{"unsupported classification kind", strings.Replace(valid, `"source":{"origin"`, `"classifications":[{"path":"Main.bas","kind":"other"}],"source":{"origin"`, 1), "unsupported kind"},
+		{"classification traversal", strings.Replace(valid, `"source":{"origin"`, `"classifications":[{"path":"../Main.bas","kind":"standard"}],"source":{"origin"`, 1), "classification"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -57,6 +60,24 @@ func TestLoadManifestRejectsMalformedDocuments(t *testing.T) {
 				t.Fatalf("LoadManifest() error = %v, want substring %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateManifestRejectsInvalidClassificationOrderingAndDuplicates(t *testing.T) {
+	manifest := fixtureManifest("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	manifest.Projects[0].Classifications = []Classification{
+		{Path: "z.cls", Kind: ModuleKindClass},
+		{Path: "a.cls", Kind: ModuleKindClass},
+	}
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "sorted by path") {
+		t.Fatalf("unsorted classifications accepted: %v", err)
+	}
+	manifest.Projects[0].Classifications = []Classification{
+		{Path: "Main.cls", Kind: ModuleKindClass},
+		{Path: "main.cls", Kind: ModuleKindClass},
+	}
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "duplicate classification") {
+		t.Fatalf("case-insensitive duplicate classifications accepted: %v", err)
 	}
 }
 
@@ -226,7 +247,7 @@ func fixtureManifest(commit string) Manifest {
 		Upstream:      Upstream{Repository: "harumiWeb/tree-sitter-vba", Commit: commit},
 		Projects: []Project{
 			{ID: "one", Path: "projects/third_party/one", Profile: ProfileGenericVBA, Enabled: true, Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/one"}, Provenance: Provenance{Repository: "https://example.test/one", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
-			{ID: "two", Path: "projects/third_party/two", Profile: ProfileExcel, Enabled: false, Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/two"}, Provenance: Provenance{Repository: "https://example.test/two", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
+			{ID: "two", Path: "projects/third_party/two", Profile: ProfileExcel, Enabled: false, Notes: "fixture disabled in this test", Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/two"}, Provenance: Provenance{Repository: "https://example.test/two", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
 		},
 	}
 }

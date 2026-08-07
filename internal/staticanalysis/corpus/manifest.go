@@ -44,13 +44,14 @@ type Upstream struct {
 }
 
 type Project struct {
-	ID         string     `json:"id"`
-	Path       string     `json:"path"`
-	Profile    string     `json:"profile"`
-	Enabled    bool       `json:"enabled"`
-	Notes      string     `json:"notes,omitempty"`
-	Source     Source     `json:"source"`
-	Provenance Provenance `json:"provenance"`
+	ID              string           `json:"id"`
+	Path            string           `json:"path"`
+	Profile         string           `json:"profile"`
+	Enabled         bool             `json:"enabled"`
+	Notes           string           `json:"notes,omitempty"`
+	Source          Source           `json:"source"`
+	Provenance      Provenance       `json:"provenance"`
+	Classifications []Classification `json:"classifications,omitempty"`
 
 	// Presence flags are populated while decoding JSON.  They make it possible
 	// to distinguish a deliberately disabled project from a missing `enabled`
@@ -58,6 +59,22 @@ type Project struct {
 	enabledPresent bool
 	notesPresent   bool
 }
+
+// Classification overrides the default extension-to-module-kind mapping for
+// one source file. Paths are project-relative and deliberately exact; the
+// adapter never guesses document-module semantics from file names or VBA
+// attributes.
+type Classification struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
+const (
+	ModuleKindStandard = "standard"
+	ModuleKindClass    = "class"
+	ModuleKindForm     = "form"
+	ModuleKindDocument = "document"
+)
 
 type Source struct {
 	Origin string `json:"origin"`
@@ -186,6 +203,9 @@ func ValidateManifest(manifest Manifest) error {
 		if p.notesPresent && (p.Notes == "" || p.Notes != strings.TrimSpace(p.Notes)) {
 			return fmt.Errorf("project %q notes must be non-empty and unpadded", p.ID)
 		}
+		if !p.Enabled && strings.TrimSpace(p.Notes) == "" {
+			return fmt.Errorf("disabled project %q requires a non-empty notes reason", p.ID)
+		}
 		if err := validateSourcePath(p.Source.Path); err != nil {
 			return fmt.Errorf("project %q source.path: %w", p.ID, err)
 		}
@@ -200,6 +220,9 @@ func ValidateManifest(manifest Manifest) error {
 		if err := validateProvenance(p.Provenance); err != nil {
 			return fmt.Errorf("project %q provenance: %w", p.ID, err)
 		}
+		if err := validateClassifications(p.ID, p.Classifications); err != nil {
+			return err
+		}
 	}
 	// Source and destination paths may not overlap; otherwise one copy could
 	// consume or overwrite another project and boundaries would be ambiguous.
@@ -211,6 +234,35 @@ func ValidateManifest(manifest Manifest) error {
 			if pathOverlap(manifest.Projects[i].Path, manifest.Projects[j].Path) {
 				return fmt.Errorf("projects %q and %q have overlapping destination paths", manifest.Projects[i].ID, manifest.Projects[j].ID)
 			}
+		}
+	}
+	return nil
+}
+
+func validateClassifications(projectID string, classifications []Classification) error {
+	seen := make(map[string]struct{}, len(classifications))
+	for i, classification := range classifications {
+		if err := validateRelativePath(classification.Path); err != nil {
+			return fmt.Errorf("project %q classification %d path: %w", projectID, i, err)
+		}
+		ext := strings.ToLower(path.Ext(classification.Path))
+		switch ext {
+		case ".bas", ".cls", ".frm":
+		default:
+			return fmt.Errorf("project %q classification %q targets unsupported extension %q", projectID, classification.Path, ext)
+		}
+		switch classification.Kind {
+		case ModuleKindStandard, ModuleKindClass, ModuleKindForm, ModuleKindDocument:
+		default:
+			return fmt.Errorf("project %q classification %q has unsupported kind %q", projectID, classification.Path, classification.Kind)
+		}
+		key := strings.ToLower(classification.Path)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("project %q has duplicate classification path %q", projectID, classification.Path)
+		}
+		seen[key] = struct{}{}
+		if i > 0 && classifications[i-1].Path >= classification.Path {
+			return fmt.Errorf("project %q classifications must be sorted by path: %q follows %q", projectID, classification.Path, classifications[i-1].Path)
 		}
 	}
 	return nil

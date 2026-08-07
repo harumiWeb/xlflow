@@ -838,6 +838,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unsupported_inline_suppression_rule`
 - `unsupported_literal`
 - `unsupported_parameter_type`
+- `unsupported_project_layout`
 - `unsupported_property`
 - `unsupported_test_isolation`
 - `unsupported_test_rerun`
@@ -924,6 +925,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `worksheet_cell`
 - `worksheet_change`
 - `worksheet_selectionchange`
+- `workspace_failure`
 - `workspace_resolution_views`
 - `write_only`
 - `writes_cells`
