@@ -40,7 +40,13 @@ if (files.length === 0) {
   process.exit(0);
 }
 
-let ok = run("git diff --cached --check", "git", ["diff", "--cached", "--check"]);
+// Vendored static-analysis corpus files are byte-for-byte upstream fixtures.
+// Do not normalize their intentional whitespace or line endings in hooks.
+const vendoredCorpusPrefix = "testdata/static-analysis-corpus/";
+const sourceFiles = files.filter((file) => !file.startsWith(vendoredCorpusPrefix));
+let ok =
+  sourceFiles.length === 0 ||
+  run("git diff --cached --check", "git", ["diff", "--cached", "--check", "--", ...sourceFiles]);
 
 const goFiles = files.filter((file) => file.toLowerCase().endsWith(".go"));
 if (goFiles.length > 0) {
@@ -49,27 +55,29 @@ if (goFiles.length > 0) {
 }
 
 const oxfmtExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".json", ".jsonc", ".md", ".mdx"]);
-const oxfmtFiles = files.filter((file) => oxfmtExtensions.has(path.extname(file).toLowerCase()));
+const oxfmtFiles = sourceFiles.filter((file) =>
+  oxfmtExtensions.has(path.extname(file).toLowerCase()),
+);
 if (oxfmtFiles.length > 0) {
-  ok = run(
-    "oxfmt",
-    windows ? "pnpm.cmd" : "pnpm",
-    ["exec", "oxfmt", "--check", ...oxfmtFiles],
-  ) && ok;
+  ok =
+    run("oxfmt", windows ? "pnpm.cmd" : "pnpm", ["exec", "oxfmt", "--check", ...oxfmtFiles]) && ok;
 }
 
 const csharpFiles = files.filter((file) => file.toLowerCase().endsWith(".cs"));
 if (csharpFiles.length > 0) {
-  ok = run("dotnet format", "dotnet", [
-    "format",
-    "bridge/dotnet/Xlflow.ExcelBridge.sln",
-    "--verify-no-changes",
-    "--include",
-    ...csharpFiles,
-  ]) && ok;
+  ok =
+    run("dotnet format", "dotnet", [
+      "format",
+      "bridge/dotnet/Xlflow.ExcelBridge.sln",
+      "--verify-no-changes",
+      "--include",
+      ...csharpFiles,
+    ]) && ok;
 }
 
 if (!ok) {
-  console.error("Run `task fmt` explicitly to apply repository-wide formatting, then review the diff.");
+  console.error(
+    "Run `task fmt` explicitly to apply repository-wide formatting, then review the diff.",
+  );
   process.exit(1);
 }

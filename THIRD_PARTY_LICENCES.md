@@ -61,6 +61,26 @@ This file is provided for attribution and licence review. It is not a substitute
 
 `github.com/mattn/go-localereader` was reported as `Unknown` by `go-licenses` because the scanner could not find a recognized licence file in the module cache. Review this module manually before the first public release. If necessary, keep this dependency notice as `Unknown` or replace/remove the dependency path by upgrading transitive dependencies.
 
+## Static-analysis test corpus
+
+The following projects are vendored under `testdata/static-analysis-corpus` as
+parser and static-analysis fixtures. They are independent test data, not Go
+runtime dependencies, and are therefore listed separately from the module
+inventory above. The corpus is pinned through
+`harumiWeb/tree-sitter-vba@c867f27ea3dedc2ccece1eeb0273cdb242899182`; each
+project retains the referenced `LICENSE` and repository-local `SOURCE.md`.
+
+| Project           | Licence | Original repository                                                   | Saved metadata                                                                                                                                                   |
+| ----------------- | ------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vba-web`         | MIT     | [VBA-Web](https://github.com/VBA-tools/VBA-Web)                       | `testdata/static-analysis-corpus/projects/third_party/vba-web/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-web/SOURCE.md`                 |
+| `vba-json`        | MIT     | [VBA-JSON](https://github.com/VBA-tools/VBA-JSON)                     | `testdata/static-analysis-corpus/projects/third_party/vba-json/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-json/SOURCE.md`               |
+| `access-examples` | MIT     | [Access-examples](https://github.com/Access-projects/Access-examples) | `testdata/static-analysis-corpus/projects/third_party/access-examples/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/access-examples/SOURCE.md` |
+
+The manifest and provenance files document the source paths, fixture profiles,
+and any normalization or file removal performed during import. Refreshes must
+preserve these attribution files and are governed by
+`docs/specs/static-analysis-corpus.md`.
+
 ## Licence notes
 
 ### MIT
