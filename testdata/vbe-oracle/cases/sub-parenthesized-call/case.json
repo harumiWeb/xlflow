@@ -19,8 +19,8 @@
     "diagnostic_meaning": "specification"
   },
   "analysis": {
-    "binding_status": "partially-bound",
-    "rule_codes": ["VB022"],
+    "binding_status": "unbound",
+    "evidence_role": "maintainability-observation",
     "binding_note": "VBE accepts this syntax. Current VB022 is an intentional maintainability warning on lint and LSP, not a compile-error-equivalent diagnostic, so this fixture has no expected or forbidden diagnostic contract in issue #511."
   },
   "provenance": {

@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "language-observation",
     "binding_note": "VBE accepts the bare Sub call and the current analyzer emits no compile-error-equivalent diagnostic for this accepted form. No binding contract is applicable in issue #511."
   },
   "provenance": {

@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "language-observation",
     "binding_note": "No production diagnostic currently covers unresolved local As <Type> declarations; VBA222 is limited to public API signatures and is not applicable. See follow-up issue #519."
   },
   "provenance": {

@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "language-observation",
     "binding_note": "VBE rejects duplicate named-argument assignment, but the current analyzer has no corresponding compile-error-equivalent diagnostic. The rejected fixture and its known-named-argument control are tracked in follow-up issue #520."
   },
   "provenance": {

@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
     "rule_codes": ["VBA206"],
     "forbidden_diagnostics": [
       {

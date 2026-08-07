@@ -19,7 +19,8 @@
     "diagnostic_meaning": "compile-error"
   },
   "analysis": {
-    "binding_status": "not-applicable"
+    "binding_status": "not-applicable",
+    "evidence_role": "harness-control"
   },
   "provenance": {
     "status": "asserted",

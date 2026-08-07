@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "language-observation",
     "binding_note": "VBE rejects scalar-to-Object parameter compatibility, but no existing xlflow diagnostic covers this rule; track a focused follow-up."
   },
   "provenance": {

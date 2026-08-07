@@ -142,34 +142,64 @@ Every fixture must also declare its diagnostic binding state under `analysis`:
 ```json
 {
   "analysis": {
-    "binding_status": "unbound"
+    "binding_status": "unbound",
+    "evidence_role": "language-observation"
   }
 }
 ```
 
 The supported states are:
 
-- `unbound`: VBE evidence exists, but no analyzer rule has been connected yet.
+- `unbound`: VBE evidence exists, but no analyzer rule contract is connected.
+  It cannot declare expected or forbidden diagnostics. Use an evidence role to
+  distinguish a pending compile-equivalent result from a language, policy, or
+  maintainability observation; a non-empty `binding_note` may explain the
+  missing contract.
 - `partially-bound`: at least one rule is connected, but coverage is incomplete;
-  `rule_codes` and a non-empty `binding_note` are required.
+  `evidence_role` must be `compile-equivalent`, and `rule_codes` plus a
+  non-empty `binding_note` are required.
 - `bound`: the fixture is fully connected to declared rules. It requires at
-  least one rule code, and every declared code must appear in the contract that
-  matches the VBE result (`expected` for rejected cases, `forbidden` for
-  accepted cases).
-- `not-applicable`: the fixture is intentionally a harness control or language
-  observation and cannot declare rule codes or diagnostic contracts.
+  least one rule code, `evidence_role` must be `compile-equivalent`, and every
+  declared code must appear in the contract that matches the VBE result
+  (`expected` for rejected cases, `forbidden` for accepted cases).
+- `not-applicable`: the fixture is a harness control. It must use the
+  `harness-control` evidence role and cannot declare rule codes or diagnostic
+  contracts. A language observation is `unbound`, not `not-applicable`.
+
+`analysis.evidence_role` records what the fixture can support independently of
+the VBE outcome and must not be used to rewrite `vbe.expected`,
+`vbe.evidence_phase`, `vbe.diagnostic_meaning`, or `provenance`:
+
+- `compile-equivalent`: the VBE result is relevant to a compile-equivalent
+  diagnostic. A bound or partially-bound fixture has a connected contract;
+  an unbound fixture records a pending compile-equivalent rule with no current
+  analyzer contract.
+- `language-observation`: an unbound fixture retaining VBE language behavior
+  for a rule that has no connected analyzer contract yet.
+- `policy-observation`: an unbound fixture where accepted VBA may still
+  receive a safety or policy warning, such as a missing-`Set` assignment.
+- `maintainability-observation`: an unbound fixture where accepted VBA may
+  still receive a maintainability warning, such as a parenthesized `Sub` call.
+- `harness-control`: a `not-applicable` known accept/reject control used to
+  verify the oracle itself.
+
+The validator requires `compile-equivalent` for `bound` and
+`partially-bound`, `harness-control` for `not-applicable`, and rejects
+`harness-control` on `unbound` fixtures. This keeps compile-equivalent binding
+coverage separate from accepted-language, policy, and maintainability
+observations.
 
 Every declared rule code is resolved against the authoritative static-analysis
 rule registry. The registry validates the canonical diagnostic ID, supported
 `lint`/`analyze`/`lsp` surfaces, and supported severities; fixture validation
 rejects unknown or non-canonical codes, unsupported surfaces, and unsupported
-severities. When a fixture declares rule codes, each code must be used by an
-expected or forbidden diagnostic contract. Bound fixtures also require every
-contract code to be listed in `rule_codes`, with rejected cases using the
-expected contract and accepted cases using the forbidden contract. Until a
-fixture is connected to an implemented rule, keep it `unbound` and do not alter
-the VBE expectation to satisfy an analyzer test. Binding notes must be omitted
-when unnecessary; an explicitly empty or whitespace-only note is invalid.
+severities. Bound and partially-bound fixtures require every contract code to
+be listed in `rule_codes`; bound fixtures additionally require every declared
+rule code to appear in the contract that matches the VBE result (`expected`
+for rejected cases, `forbidden` for accepted cases). Until a fixture is
+connected to an implemented rule, keep it `unbound` and do not alter the VBE
+expectation to satisfy an analyzer test. Binding notes must be omitted when
+unnecessary; an explicitly empty or whitespace-only note is invalid.
 
 ## Positive/negative binding pairs
 
@@ -180,6 +210,7 @@ from false positives:
 {
   "analysis": {
     "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
     "rule_codes": ["VBAxxx"],
     "negative_controls": ["optional-argument-omitted", "known-named-argument"],
     "expected_diagnostics": [{ "code": "VBAxxx", "surfaces": ["analyze", "lsp"] }]
@@ -196,7 +227,7 @@ covers every surface in its positive contract. When a contract omits surfaces,
 the rule registry's supported surfaces are used for this comparison.
 
 The corpus validator also checks that every bound rule has rejected positive
-evidence and an accepted negative control. Existing historical `unbound` and
+evidence and an accepted negative control. Existing `unbound` and
 `partially-bound` fixtures remain visible in the report and do not fail CI by
 themselves; malformed relationships and incomplete `bound` rules do fail. A
 valid pair attached to a `partially-bound` rejected fixture is informational
@@ -212,11 +243,13 @@ rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 ```
 
 The test reports fixture state counts, complete and incomplete rule counts,
-sorted unbound/partially-bound fixture IDs, and sorted rule-to-case and
-surface coverage. The committed corpus currently reports 23 asserted fixtures,
-21 `unbound`, 2 `not-applicable`, and no bound rules. The report is emitted
-before a validation failure so missing positive/negative evidence remains
-visible in CI logs.
+sorted fixture IDs for every state (`bound`, `partially-bound`, `unbound`, and
+`not-applicable`), and sorted rule-to-case and surface coverage. The committed
+corpus currently reports 23 asserted fixtures: 9 `bound`, 1
+`partially-bound`, 11 `unbound`, and 2 `not-applicable`; the three bound rules
+have complete positive/negative coverage. The report is emitted before a
+validation failure so missing positive/negative evidence and state changes
+remain visible in CI logs.
 
 ## Outcomes and strict mode
 
@@ -283,9 +316,12 @@ LSP projections):
 7. Add `expected_diagnostics` to rejected fixtures.
 8. Add `forbidden_diagnostics` and `negative_controls` to accepted/rejected
    binding pairs, respectively.
-9. Mark fixtures `bound` only after all declared surfaces are covered; keep
-   incomplete work `partially-bound` with a note.
-10. Run Excel-free contracts and the coverage report, then record rule codes
+9. Assign `evidence_role`: use `compile-equivalent` only for compile-equivalent
+   bindings, and keep policy, maintainability, and language observations
+   unbound.
+10. Mark fixtures `bound` only after all declared surfaces are covered; keep
+    incomplete compile-equivalent work `partially-bound` with a note.
+11. Run Excel-free contracts and the coverage report, then record rule codes
     and all executed case IDs in the pull request.
 
 Oracle infrastructure failures are stop-the-line failures for agents and
