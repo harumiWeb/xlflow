@@ -52,6 +52,18 @@ This keeps the relationship reviewable beside the source that needs the
 false-positive protection and makes rule-to-control coverage queryable without
 launching Excel.
 
+Binding completeness and evidence meaning are separate dimensions. `bound`
+means a compile-equivalent diagnostic contract is complete; `partially-bound`
+means that contract is intended but has a concrete incomplete piece; `unbound`
+means no compile-equivalent analyzer contract exists yet; and
+`not-applicable` is reserved for oracle harness controls. The orthogonal
+`evidence_role` classifies pending compile-equivalent evidence separately from
+language, policy, and maintainability observations. Policy or maintainability
+warnings therefore remain visible without being counted as incomplete compiler
+coverage, and an accepted VBE result cannot be used to erase those warnings.
+The Excel-free coverage test asserts the exact fixture IDs in every state so a
+state swap cannot hide behind unchanged aggregate counts.
+
 ## Consequences
 
 - Analyzer changes can cite empirical VBE compile evidence while normal tests
@@ -65,8 +77,8 @@ launching Excel.
 - VBE evidence must remain separate from policy and maintainability rule
   ownership; accepted VBA may still produce xlflow warnings.
 - Positive/negative coverage catches analyzer drift across future bindings while
-  preserving the Excel-free CI boundary; the trade-off is that a fixture must
-  remain `partially-bound` until every declared surface has an accepted control.
+  preserving the Excel-free CI boundary; exact fixture-state assertions add a
+  small reviewed migration cost when a binding is intentionally reclassified.
 
 ## Alternatives considered
 

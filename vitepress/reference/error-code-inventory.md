@@ -260,6 +260,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `event_declaration`
 - `event_statement`
 - `evidence_phase`
+- `evidence_role`
 - `example_cell`
 - `example_formula`
 - `exceeds_keep_last`

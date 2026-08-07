@@ -22,9 +22,11 @@ type BindingCoverage struct {
 	MissingNegativeRules int
 	MissingPositiveRules int
 
-	UnboundIDs []string
-	PartialIDs []string
-	Rules      []BindingRuleCoverage
+	BoundIDs         []string
+	PartialIDs       []string
+	UnboundIDs       []string
+	NotApplicableIDs []string
+	Rules            []BindingRuleCoverage
 }
 
 // BindingRuleCoverage describes positive and negative evidence for one
@@ -60,6 +62,7 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 		switch c.Analysis.BindingStatus {
 		case BindingBound:
 			report.BoundFixtures++
+			report.BoundIDs = append(report.BoundIDs, c.ID)
 		case BindingPartiallyBound:
 			report.PartialFixtures++
 			report.PartialIDs = append(report.PartialIDs, c.ID)
@@ -68,6 +71,7 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 			report.UnboundIDs = append(report.UnboundIDs, c.ID)
 		case BindingNotApplicable:
 			report.NotApplicable++
+			report.NotApplicableIDs = append(report.NotApplicableIDs, c.ID)
 		}
 		for _, code := range c.Analysis.RuleCodes {
 			if _, err := canonicalRuleMetadata(code); err != nil {
@@ -236,8 +240,10 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 		report.Rules = append(report.Rules, *coverage)
 	}
 	sort.Slice(report.Rules, func(i, j int) bool { return report.Rules[i].Code < report.Rules[j].Code })
-	sort.Strings(report.UnboundIDs)
+	sort.Strings(report.BoundIDs)
 	sort.Strings(report.PartialIDs)
+	sort.Strings(report.UnboundIDs)
+	sort.Strings(report.NotApplicableIDs)
 
 	validationErrors = append(validationErrors, coverageValidationErrors(report.Rules)...)
 	if len(validationErrors) > 0 {
@@ -385,18 +391,16 @@ func (r BindingCoverage) String() string {
 	fmt.Fprintf(&b, "Rules with complete positive/negative coverage: %d\n", r.CompleteRules)
 	fmt.Fprintf(&b, "Rules missing accepted controls: %d\n", r.MissingNegativeRules)
 	fmt.Fprintf(&b, "Rules missing rejected evidence: %d\n", r.MissingPositiveRules)
-	if len(r.UnboundIDs) > 0 {
-		fmt.Fprintln(&b, "\nUnbound fixtures:")
-		for _, id := range r.UnboundIDs {
+	writeFixtureIDs := func(label string, ids []string) {
+		fmt.Fprintf(&b, "\n%s\n", label)
+		for _, id := range ids {
 			fmt.Fprintf(&b, "- %s\n", id)
 		}
 	}
-	if len(r.PartialIDs) > 0 {
-		fmt.Fprintln(&b, "\nPartially-bound fixtures:")
-		for _, id := range r.PartialIDs {
-			fmt.Fprintf(&b, "- %s\n", id)
-		}
-	}
+	writeFixtureIDs("Bound fixtures:", r.BoundIDs)
+	writeFixtureIDs("Partially-bound fixtures:", r.PartialIDs)
+	writeFixtureIDs("Unbound fixtures:", r.UnboundIDs)
+	writeFixtureIDs("Not-applicable fixtures:", r.NotApplicableIDs)
 	if len(r.Rules) > 0 {
 		fmt.Fprintln(&b, "\nRules:")
 		for _, coverage := range r.Rules {

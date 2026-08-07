@@ -38,6 +38,12 @@ const (
 	BindingPartiallyBound = "partially-bound"
 	BindingBound          = "bound"
 	BindingNotApplicable  = "not-applicable"
+
+	EvidenceRoleCompileEquivalent          = "compile-equivalent"
+	EvidenceRolePolicyObservation          = "policy-observation"
+	EvidenceRoleMaintainabilityObservation = "maintainability-observation"
+	EvidenceRoleLanguageObservation        = "language-observation"
+	EvidenceRoleHarnessControl             = "harness-control"
 )
 
 var caseIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -150,6 +156,7 @@ type VBEExpectation struct {
 
 type AnalysisExpectation struct {
 	BindingStatus        string                  `json:"binding_status"`
+	EvidenceRole         string                  `json:"evidence_role"`
 	RuleCodes            []string                `json:"rule_codes,omitempty"`
 	BindingNote          *string                 `json:"binding_note,omitempty"`
 	NegativeControls     []string                `json:"negative_controls,omitempty"`
@@ -405,6 +412,9 @@ func validateAnalysisBinding(c Case) error {
 	default:
 		return fmt.Errorf("oracle case %q has invalid analysis.binding_status %q", c.ID, analysis.BindingStatus)
 	}
+	if err := validateEvidenceRole(c); err != nil {
+		return err
+	}
 
 	seenCodes := make(map[string]struct{}, len(analysis.RuleCodes))
 	for _, code := range analysis.RuleCodes {
@@ -485,6 +495,41 @@ func validateAnalysisBinding(c Case) error {
 				}
 				return fmt.Errorf("oracle case %q: partially-bound diagnostic code %q is not declared by analysis.rule_codes", c.ID, expectation.Code)
 			}
+		}
+	}
+	return nil
+}
+
+func validateEvidenceRole(c Case) error {
+	role := strings.TrimSpace(c.Analysis.EvidenceRole)
+	if role != c.Analysis.EvidenceRole {
+		return fmt.Errorf("oracle case %q has padded analysis.evidence_role %q", c.ID, c.Analysis.EvidenceRole)
+	}
+	switch role {
+	case EvidenceRoleCompileEquivalent, EvidenceRolePolicyObservation,
+		EvidenceRoleMaintainabilityObservation, EvidenceRoleLanguageObservation, EvidenceRoleHarnessControl:
+	case "":
+		return fmt.Errorf("oracle case %q: analysis.evidence_role is required", c.ID)
+	default:
+		return fmt.Errorf("oracle case %q has invalid analysis.evidence_role %q", c.ID, c.Analysis.EvidenceRole)
+	}
+
+	switch c.Analysis.BindingStatus {
+	case BindingPartiallyBound:
+		if role != EvidenceRoleCompileEquivalent {
+			return fmt.Errorf("oracle case %q: partially-bound fixture requires evidence_role %q", c.ID, EvidenceRoleCompileEquivalent)
+		}
+	case BindingBound:
+		if role != EvidenceRoleCompileEquivalent {
+			return fmt.Errorf("oracle case %q: bound fixture requires evidence_role %q", c.ID, EvidenceRoleCompileEquivalent)
+		}
+	case BindingNotApplicable:
+		if role != EvidenceRoleHarnessControl {
+			return fmt.Errorf("oracle case %q: not-applicable fixture requires evidence_role %q", c.ID, EvidenceRoleHarnessControl)
+		}
+	case BindingUnbound:
+		if role == EvidenceRoleHarnessControl {
+			return fmt.Errorf("oracle case %q: unbound fixture cannot use evidence_role %q", c.ID, EvidenceRoleHarnessControl)
 		}
 	}
 	return nil

@@ -19,7 +19,7 @@ func writeFixture(t *testing.T, expected string) (string, Manifest) {
 	if err := os.WriteFile(filepath.Join(caseDir, "Main.bas"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	caseJSON := Case{SchemaVersion: SchemaVersion, ID: "sample", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas", Entry: true}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: expected, EvidencePhase: EvidenceUnknown, DiagnosticMeaning: MeaningObservation}, Analysis: AnalysisExpectation{BindingStatus: BindingNotApplicable}, Provenance: Provenance{Status: "pending"}}
+	caseJSON := Case{SchemaVersion: SchemaVersion, ID: "sample", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas", Entry: true}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: expected, EvidencePhase: EvidenceUnknown, DiagnosticMeaning: MeaningObservation}, Analysis: AnalysisExpectation{BindingStatus: BindingNotApplicable, EvidenceRole: EvidenceRoleHarnessControl}, Provenance: Provenance{Status: "pending"}}
 	body, _ := json.Marshal(caseJSON)
 	if err := os.WriteFile(filepath.Join(caseDir, "case.json"), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestValidateManifestRequiresCaseDirectoryAndEntryAgreement(t *testing.T) {
 }
 
 func TestValidateCaseRequiresAssertedProvenance(t *testing.T) {
-	c := Case{SchemaVersion: SchemaVersion, ID: "x", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: ExpectedAccepted, EvidencePhase: EvidenceCompile}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}}
+	c := Case{SchemaVersion: SchemaVersion, ID: "x", Modules: []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}}, Probe: Probe{Mode: ProbeCompile}, VBE: VBEExpectation{Expected: ExpectedAccepted, EvidencePhase: EvidenceCompile}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound, EvidenceRole: EvidenceRoleCompileEquivalent}}
 	if err := ValidateCase(c, "x", t.TempDir()); err == nil {
 		t.Fatal("expected provenance validation error")
 	}
@@ -112,7 +112,7 @@ func validAssertedCase(expected string) Case {
 		Modules:       []Module{{Name: "Main", Kind: "standard", Path: "Main.bas"}},
 		Probe:         Probe{Mode: ProbeCompile},
 		VBE:           VBEExpectation{Expected: expected, EvidencePhase: EvidenceCompile, DiagnosticMeaning: meaning},
-		Analysis:      AnalysisExpectation{BindingStatus: BindingUnbound},
+		Analysis:      AnalysisExpectation{BindingStatus: BindingUnbound, EvidenceRole: EvidenceRoleCompileEquivalent},
 		Provenance: Provenance{
 			Status: "asserted",
 			VerifiedOn: []VerificationMetadata{{
@@ -131,17 +131,20 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 		{name: "unbound", prepare: func(c *Case) {}},
 		{name: "partially-bound", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.BindingNote = analysisNote("positive contract is pending")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}},
 		{name: "partially-bound pending contract", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.BindingNote = analysisNote("contract cannot be expressed yet")
 		}},
 		{name: "bound rejected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "warning"}}
 		}},
@@ -149,6 +152,7 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}},
@@ -156,6 +160,7 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
 		}},
 		{name: "missing status", prepare: func(c *Case) { c.Analysis.BindingStatus = "" }, wantErr: true},
 		{name: "invalid status", prepare: func(c *Case) { c.Analysis.BindingStatus = "future" }, wantErr: true},
@@ -170,41 +175,49 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 		}, wantErr: true},
 		{name: "partially-bound needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.BindingNote = analysisNote("pending")
 		}, wantErr: true},
 		{name: "partially-bound needs note", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 		}, wantErr: true},
 		{name: "bound needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}, wantErr: true},
 		{name: "bound code needs contract", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 		}, wantErr: true},
 		{name: "rejected bound code cannot be forbidden-only", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}, wantErr: true},
 		{name: "bound rejected needs expected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 		}, wantErr: true},
 		{name: "bound accepted needs forbidden", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 		}, wantErr: true},
 		{name: "accepted bound code cannot be expected-only", prepare: func(c *Case) {
 			c.VBE.Expected = ExpectedAccepted
 			c.VBE.DiagnosticMeaning = MeaningSpecification
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
@@ -215,19 +228,23 @@ func TestValidateCaseBindingMetadata(t *testing.T) {
 			c.VBE.DiagnosticMeaning = MeaningObservation
 			c.Provenance = Provenance{Status: "pending"}
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}, wantErr: true},
 		{name: "not-applicable rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
 			c.Analysis.RuleCodes = []string{"VBA101"}
 		}, wantErr: true},
 		{name: "not-applicable expected", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}, wantErr: true},
 		{name: "not-applicable forbidden", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 		}, wantErr: true},
 		{name: "empty rule code", prepare: func(c *Case) {
@@ -265,12 +282,14 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 	}{
 		{name: "canonical registry diagnostic", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.BindingNote = analysisNote("registry validation test")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101", Severity: "warning", Surfaces: []string{"analyze"}}}
 		}},
 		{name: "dynamic severity", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA214"}
 			c.Analysis.BindingNote = analysisNote("registry validation test")
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA214", Severity: "error"}}
@@ -292,12 +311,14 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 		}, wantErr: true, errSubstr: "unsupported severity"},
 		{name: "partially-bound contract needs declared rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.BindingNote = analysisNote("pending")
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
 		}, wantErr: true, errSubstr: "partially-bound diagnostic code"},
 		{name: "bound contract needs rule code", prepare: func(c *Case) {
 			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
 			c.Analysis.RuleCodes = []string{"VBA101"}
 			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
 			c.Analysis.ForbiddenDiagnostics = []DiagnosticExpectation{{Code: "VB002"}}
@@ -307,6 +328,66 @@ func TestValidateCaseRuleRegistryBindings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := validAssertedCase(ExpectedRejected)
+			tt.prepare(&c)
+			err := ValidateCase(c, c.ID, t.TempDir())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateCase() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("ValidateCase() error = %q, want substring %q", err, tt.errSubstr)
+			}
+		})
+	}
+}
+
+func TestValidateCaseEvidenceRoleSemantics(t *testing.T) {
+	tests := []struct {
+		name      string
+		prepare   func(*Case)
+		wantErr   bool
+		errSubstr string
+	}{
+		{name: "valid compile-equivalent partial", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleCompileEquivalent
+			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.BindingNote = analysisNote("diagnostic identity is incomplete")
+			c.Analysis.NegativeControls = []string{"accepted"}
+		}},
+		{name: "policy observation cannot be partial", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingPartiallyBound
+			c.Analysis.EvidenceRole = EvidenceRoleMaintainabilityObservation
+			c.Analysis.RuleCodes = []string{"VB022"}
+			c.Analysis.BindingNote = analysisNote("VBE accepts the syntax")
+		}, wantErr: true, errSubstr: "partially-bound fixture requires evidence_role"},
+		{name: "policy observation cannot be bound", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingBound
+			c.Analysis.EvidenceRole = EvidenceRolePolicyObservation
+			c.Analysis.RuleCodes = []string{"VBA101"}
+			c.Analysis.ExpectedDiagnostics = []DiagnosticExpectation{{Code: "VBA101"}}
+		}, wantErr: true, errSubstr: "bound fixture requires evidence_role"},
+		{name: "harness control is explicit", prepare: func(c *Case) {
+			c.Analysis.BindingStatus = BindingNotApplicable
+			c.Analysis.EvidenceRole = EvidenceRoleHarnessControl
+		}},
+		{name: "invalid role", prepare: func(c *Case) {
+			c.Analysis.EvidenceRole = "compile-ish"
+		}, wantErr: true, errSubstr: "invalid analysis.evidence_role"},
+		{name: "missing role", prepare: func(c *Case) {
+			c.Analysis.EvidenceRole = ""
+		}, wantErr: true, errSubstr: "analysis.evidence_role is required"},
+		{name: "padded role", prepare: func(c *Case) {
+			c.Analysis.EvidenceRole = " compile-equivalent"
+		}, wantErr: true, errSubstr: "padded analysis.evidence_role"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validAssertedCase(ExpectedRejected)
+			if tt.name == "harness control is explicit" {
+				c.VBE.Expected = ExpectedAccepted
+				c.VBE.DiagnosticMeaning = MeaningSpecification
+			}
 			tt.prepare(&c)
 			err := ValidateCase(c, c.ID, t.TempDir())
 			if (err != nil) != tt.wantErr {

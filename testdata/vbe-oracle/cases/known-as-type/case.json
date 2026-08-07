@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "language-observation",
     "binding_note": "No production diagnostic currently covers local As <Type> declarations, so this accepted built-in-type control cannot yet forbid a corresponding rule. See follow-up issue #519."
   },
   "provenance": {

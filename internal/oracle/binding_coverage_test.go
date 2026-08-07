@@ -1,6 +1,7 @@
 package oracle
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -210,5 +211,80 @@ func TestBindingCoverageStringIsDeterministic(t *testing.T) {
 	}
 	if !strings.Contains(output, "Rules with complete positive/negative coverage: 1") {
 		t.Fatalf("report missing complete rule count:\n%s", output)
+	}
+}
+
+func TestBindingCoverageReportsEveryFixtureState(t *testing.T) {
+	partial := coverageRejected("partial", "VBA101", []string{"accepted"}, nil)
+	partial.Analysis.BindingStatus = BindingPartiallyBound
+	cases := []Case{
+		coverageRejected("bound", "VBA101", []string{"accepted"}, nil),
+		partial,
+		{ID: "partial-z", VBE: VBEExpectation{Expected: ExpectedRejected}, Analysis: AnalysisExpectation{BindingStatus: BindingPartiallyBound}},
+		{ID: "partial-a", VBE: VBEExpectation{Expected: ExpectedRejected}, Analysis: AnalysisExpectation{BindingStatus: BindingPartiallyBound}},
+		coverageAccepted("accepted", "VBA101", nil),
+		{ID: "unbound-z", VBE: VBEExpectation{Expected: ExpectedAccepted}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}},
+		{ID: "unbound-a", VBE: VBEExpectation{Expected: ExpectedAccepted}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}},
+		{ID: "not-applicable-z", VBE: VBEExpectation{Expected: ExpectedAccepted}, Analysis: AnalysisExpectation{BindingStatus: BindingNotApplicable}},
+		{ID: "not-applicable-a", VBE: VBEExpectation{Expected: ExpectedAccepted}, Analysis: AnalysisExpectation{BindingStatus: BindingNotApplicable}},
+	}
+	report, err := ValidateBindingCoverage(cases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := report.BoundIDs, []string{"accepted", "bound"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("bound IDs = %v, want %v", got, want)
+	}
+	if got, want := report.PartialIDs, []string{"partial", "partial-a", "partial-z"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("partial IDs = %v, want %v", got, want)
+	}
+	if got, want := report.UnboundIDs, []string{"unbound-a", "unbound-z"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unbound IDs = %v, want %v", got, want)
+	}
+	if got, want := report.NotApplicableIDs, []string{"not-applicable-a", "not-applicable-z"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("not-applicable IDs = %v, want %v", got, want)
+	}
+	output := report.String()
+	for _, label := range []string{
+		"Bound fixtures:",
+		"Partially-bound fixtures:",
+		"Unbound fixtures:",
+		"Not-applicable fixtures:",
+	} {
+		if !strings.Contains(output, label) {
+			t.Fatalf("report missing %q:\n%s", label, output)
+		}
+	}
+	assertBefore := func(first, second string) {
+		t.Helper()
+		if strings.Index(output, first) >= strings.Index(output, second) {
+			t.Fatalf("report order is not deterministic for %q before %q:\n%s", first, second, output)
+		}
+	}
+	assertBefore("- accepted\n", "- bound\n")
+	assertBefore("- partial-a\n", "- partial-z\n")
+	assertBefore("- unbound-a\n", "- unbound-z\n")
+	assertBefore("- not-applicable-a\n", "- not-applicable-z\n")
+}
+
+func TestBindingCoverageDetectsFixtureStateSwapWithEqualCounts(t *testing.T) {
+	makeReport := func(boundID, unboundID string) BindingCoverage {
+		report, err := ValidateBindingCoverage([]Case{
+			coverageRejected(boundID, "VBA101", []string{"accepted"}, nil),
+			coverageAccepted("accepted", "VBA101", nil),
+			{ID: unboundID, VBE: VBEExpectation{Expected: ExpectedAccepted}, Analysis: AnalysisExpectation{BindingStatus: BindingUnbound}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	first := makeReport("fixture-a", "fixture-b")
+	swapped := makeReport("fixture-b", "fixture-a")
+	if first.BoundFixtures != swapped.BoundFixtures || first.UnboundFixtures != swapped.UnboundFixtures {
+		t.Fatalf("state swap changed aggregate counts: first=%+v swapped=%+v", first, swapped)
+	}
+	if reflect.DeepEqual(first.BoundIDs, swapped.BoundIDs) || reflect.DeepEqual(first.UnboundIDs, swapped.UnboundIDs) {
+		t.Fatalf("state swap was not visible in fixture IDs: first=%+v swapped=%+v", first, swapped)
 	}
 }

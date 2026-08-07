@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/analyze"
@@ -126,7 +127,39 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 23 || report.BoundFixtures != 9 || report.PartialFixtures != 2 || report.UnboundFixtures != 10 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 23 || report.BoundFixtures != 9 || report.PartialFixtures != 1 || report.UnboundFixtures != 11 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
+	assertIDs := func(name string, got, want []string) {
+		t.Helper()
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s fixture IDs = %v, want %v", name, got, want)
+		}
+	}
+	assertIDs("bound", report.BoundIDs, []string{
+		"byref-bare-variable",
+		"byref-compatible",
+		"byref-incompatible",
+		"known-named-argument",
+		"missing-required-argument",
+		"optional-argument-omitted",
+		"scalar-assignment",
+		"set-object-target",
+		"set-scalar-target",
+	})
+	assertIDs("partially-bound", report.PartialIDs, []string{"unknown-named-argument"})
+	assertIDs("unbound", report.UnboundIDs, []string{
+		"byref-parenthesized-variable",
+		"duplicate-named-argument",
+		"function-bare-call",
+		"function-parenthesized-call",
+		"known-as-type",
+		"missing-set-object-assignment",
+		"object-to-object-parameter",
+		"scalar-to-object-parameter",
+		"sub-bare-call",
+		"sub-parenthesized-call",
+		"unknown-as-type",
+	})
+	assertIDs("not-applicable", report.NotApplicableIDs, []string{"known-compile-accept", "known-compile-reject"})
 }

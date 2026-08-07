@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "policy-observation",
     "binding_note": "VBE accepts this policy-level missing-Set case; the existing VBA101 analyze warning is intentionally preserved and is not a compile-equivalent forbidden diagnostic."
   },
   "provenance": {

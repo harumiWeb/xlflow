@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "policy-observation",
     "binding_note": "VBE accepts the parenthesized ByRef argument, while the existing VBA206 runtime-safety warning intentionally reports possible mutation loss; it cannot forbid VBA206."
   },
   "provenance": {

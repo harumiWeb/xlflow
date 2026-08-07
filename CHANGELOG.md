@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Clarified VBE oracle fixture binding/evidence roles and coverage reporting.
+  Compile-equivalent bindings now remain distinct from language, policy, and
+  maintainability observations; `sub-parenthesized-call` is unbound with a
+  maintainability role, `missing-set-object-assignment` records a policy role,
+  and `unknown-named-argument` remains partially bound and compile-equivalent.
 - Stabilized the local VBE oracle cleanup path by closing the disposable
   workbook before quitting Excel, allowing delayed owned-process exit within a
   bounded drain, preserving fail-closed behavior for unexpected Excel

@@ -20,6 +20,7 @@
   },
   "analysis": {
     "binding_status": "unbound",
+    "evidence_role": "language-observation",
     "binding_note": "Accepted Object-to-Object parameter control retained for the missing scalar/Object compatibility rule; no existing diagnostic is bound yet."
   },
   "provenance": {
