@@ -33,6 +33,7 @@ func TestRegistrySnapshotsAreSortedAndDefensive(t *testing.T) {
 		t.Fatal("All is not sorted by ID")
 	}
 	original := all[0]
+	originalSeverity := original.SupportedSeverities[0]
 	all[0].ID = "VB999"
 	got, ok := Lookup(original.ID)
 	if !ok || !reflect.DeepEqual(got, original) {
@@ -45,11 +46,11 @@ func TestRegistrySnapshotsAreSortedAndDefensive(t *testing.T) {
 	}
 	catalog.Items[0].Title = "changed"
 	catalog.Items[0].Surfaces[0] = SurfaceLSP
-	catalog.Items[0].SupportedSeverities[0] = SeverityWarning
+	catalog.Items[0].SupportedSeverities[0] = SeverityError
 	if got, _ := Lookup(original.ID); got.Title == "changed" {
 		t.Fatal("caller mutated registry through CatalogSnapshot")
 	}
-	if got, _ := Lookup(original.ID); got.Surfaces[0] == SurfaceLSP || got.SupportedSeverities[0] != original.SupportedSeverities[0] {
+	if got, _ := Lookup(original.ID); got.Surfaces[0] == SurfaceLSP || got.SupportedSeverities[0] != originalSeverity {
 		t.Fatal("caller mutated registry metadata slices through CatalogSnapshot")
 	}
 }
@@ -250,17 +251,18 @@ func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
 func TestRegistryMetadataSlicesAreDeepCopied(t *testing.T) {
 	all := All()
 	originalSeverity := all[0].SupportedSeverities[0]
+	originalID := all[0].ID
 	all[0].Surfaces[0] = SurfaceLSP
-	all[0].SupportedSeverities[0] = SeverityWarning
-	lookup, ok := Lookup(all[0].ID)
+	all[0].SupportedSeverities[0] = SeverityError
+	lookup, ok := Lookup(originalID)
 	if !ok || lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != originalSeverity {
 		t.Fatalf("Lookup shared mutable metadata slices: %+v", lookup)
 	}
 	byFamily := ByFamily(lookup.Family)
 	byFamily[0].Surfaces[0] = SurfaceLSP
-	byFamily[0].SupportedSeverities[0] = SeverityWarning
+	byFamily[0].SupportedSeverities[0] = SeverityError
 	lookup, _ = Lookup(byFamily[0].ID)
-	if lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != all[0].SupportedSeverities[0] {
+	if lookup.Surfaces[0] == SurfaceLSP || lookup.SupportedSeverities[0] != originalSeverity {
 		t.Fatalf("ByFamily shared mutable metadata slices: %+v", lookup)
 	}
 }

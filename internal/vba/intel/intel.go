@@ -229,21 +229,26 @@ func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc D
 	}
 	var out []Diagnostic
 	for _, diagnostic := range a.argumentDiagnosticsContext(ctx, doc) {
-		if diagnostic.Code == "VB045" {
+		if isCompileEquivalentDiagnostic(diagnostic.Code) {
 			out = append(out, diagnostic)
 		}
 	}
 	for _, diagnostic := range a.ByRefArgumentDiagnosticsContext(ctx, doc) {
-		if diagnostic.Code == "VBA228" {
+		if isCompileEquivalentDiagnostic(diagnostic.Code) {
 			out = append(out, diagnostic)
 		}
 	}
 	for _, diagnostic := range a.assignmentDiagnosticsContext(ctx, doc) {
-		if diagnostic.Code == "VB037" {
+		if isCompileEquivalentDiagnostic(diagnostic.Code) {
 			out = append(out, diagnostic)
 		}
 	}
 	return out
+}
+
+func isCompileEquivalentDiagnostic(code string) bool {
+	rule, ok := staticrules.Lookup(code)
+	return ok && rule.CompileEquivalent
 }
 
 func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Diagnostic {
