@@ -74,6 +74,7 @@ type LoadResult struct {
 	GeneratedDir   string
 	GeneratedFiles []string
 	Generated      bool
+	Complete       bool
 	Warnings       []string
 }
 
@@ -248,13 +249,14 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 	if err != nil {
 		return LoadResult{}, err
 	}
-	result := LoadResult{GeneratedDir: resolved}
+	result := LoadResult{GeneratedDir: resolved, Complete: true}
 	files := runtimeGeneratedFiles(resolved)
 	result.GeneratedFiles = files
 	db := vbadb.New()
 	if len(files) > 0 {
 		generated, err := vbadb.LoadFiles(files...)
 		if err != nil {
+			result.Complete = false
 			result.Warnings = append(result.Warnings, "generated type database could not be loaded: "+err.Error())
 		} else {
 			db = generated

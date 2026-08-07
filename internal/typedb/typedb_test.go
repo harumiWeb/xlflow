@@ -138,6 +138,9 @@ func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
 	if !result.Generated {
 		t.Fatal("generated DB should be loaded")
 	}
+	if !result.Complete {
+		t.Fatal("successfully loaded generated DB should be complete")
+	}
 	if typ, ok := result.DB.ResolveType("Vendor.Widget"); !ok || typ.Name != "Vendor.Widget" {
 		t.Fatalf("generated type missing: %+v, %v", typ, ok)
 	}

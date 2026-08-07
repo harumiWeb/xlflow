@@ -48,16 +48,17 @@ type Result struct {
 }
 
 type Analyzer struct {
-	RootDir               string
-	Config                config.Config
-	PathFilter            func(string) bool
-	typeDB                *vbadb.DB
-	byRefSymbols          []intel.Symbol
-	errorGuardAliases     map[string]bool
-	errorValueWrappers    map[string]bool
-	eventSafeProcedures   map[string]bool
-	applicationStateLeaks *applicationStateLeakIndex
-	excelLoopAccess       *excelLoopAccessIndex
+	RootDir                    string
+	Config                     config.Config
+	PathFilter                 func(string) bool
+	typeDB                     *vbadb.DB
+	typeDBResolutionIncomplete bool
+	byRefSymbols               []intel.Symbol
+	errorGuardAliases          map[string]bool
+	errorValueWrappers         map[string]bool
+	eventSafeProcedures        map[string]bool
+	applicationStateLeaks      *applicationStateLeakIndex
+	excelLoopAccess            *excelLoopAccessIndex
 }
 
 var (
@@ -313,6 +314,7 @@ func (a Analyzer) RunResult() (Result, error) {
 			return Result{}, err
 		}
 		analysis.typeDB = loaded.DB
+		analysis.typeDBResolutionIncomplete = !loaded.Complete
 		for _, warning := range loaded.Warnings {
 			warnings = append(warnings, map[string]any{
 				"code": "type_db_load_warning", "message": warning,
@@ -374,10 +376,11 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 		return nil
 	}
 	diagnostics := (intel.Analyzer{
-		RootDir:                  a.RootDir,
-		Config:                   a.Config,
-		DB:                       a.typeDB,
-		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+		RootDir:                    a.RootDir,
+		Config:                     a.Config,
+		DB:                         a.typeDB,
+		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
+		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 	}).ByRefArgumentDiagnostics(file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil
@@ -419,10 +422,11 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) []Finding {
 		return nil
 	}
 	diagnostics := (intel.Analyzer{
-		RootDir:                  a.RootDir,
-		Config:                   a.Config,
-		DB:                       a.typeDB,
-		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+		RootDir:                    a.RootDir,
+		Config:                     a.Config,
+		DB:                         a.typeDB,
+		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
+		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil

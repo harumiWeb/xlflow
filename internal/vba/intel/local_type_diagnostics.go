@@ -15,7 +15,7 @@ import (
 // deliberately fail-closed: an incomplete workspace lookup is not treated as
 // proof that a name is missing.
 func (a Analyzer) LocalTypeNameDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
-	if ctx.Err() != nil || a.DB == nil {
+	if ctx.Err() != nil || a.DB == nil || a.TypeDBResolutionIncomplete {
 		return nil
 	}
 	parsed, closeParsed, err := parsedDocumentForDocument(doc)
@@ -31,7 +31,7 @@ func (a Analyzer) LocalTypeNameDiagnosticsContext(ctx context.Context, doc Docum
 }
 
 func (a Analyzer) localTypeNameDiagnostics(ctx context.Context, doc Document, ir procedureir.DocumentIR) []Diagnostic {
-	if a.DB == nil || ctx.Err() != nil {
+	if a.DB == nil || a.TypeDBResolutionIncomplete || ctx.Err() != nil {
 		return nil
 	}
 	var out []Diagnostic
@@ -98,11 +98,6 @@ func (a Analyzer) resolveLocalTypeName(doc Document, target string) (resolved, c
 	}
 	if _, ok := a.DB.ResolveType(target); ok {
 		return true, true
-	}
-	if short := shortTypeName(target); !strings.EqualFold(short, target) {
-		if _, ok := a.DB.ResolveType(short); ok {
-			return true, true
-		}
 	}
 	mode := WorkspaceSymbolQueryExact
 	if strings.Contains(target, ".") {
