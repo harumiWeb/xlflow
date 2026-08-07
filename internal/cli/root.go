@@ -7569,8 +7569,7 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
 	issues := lintResult.Issues
-	blockingIssues := lint.PushBlockingIssues(issues)
-	if len(blockingIssues) > 0 {
+	if blockingIssues := lint.PushBlockingIssues(issues); len(blockingIssues) > 0 {
 		env := output.Failure(command, output.Error{
 			Code:    "lint_failed",
 			Message: fmt.Sprintf("%d source issue(s) must be fixed before %s to avoid a VBA editor dialog", len(blockingIssues), action),
@@ -7584,10 +7583,17 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	}
 	analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
 	if err != nil {
-		return a.writeFailure(command, output.ExitEnvironment, "analyze_failed", err)
+		exitCode := output.ExitEnvironment
+		if strings.HasPrefix(err.Error(), "parse ") {
+			exitCode = output.ExitValidation
+		}
+		return a.writeFailure(command, exitCode, "analyze_failed", err)
 	}
 	findings := analyzeResult.Findings
+	issues = append(issues, projectCompileEquivalentLintIssues(findings)...)
+	blockingIssues := lint.PushBlockingIssues(issues)
 	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
+	blockingFindings = filterProjectedLintFindings(blockingFindings)
 	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
 		return nil
 	}
@@ -7613,6 +7619,37 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 	env.Warnings = mergeWarningsUnique(lintResult.Warnings, analyzeResult.Warnings)
 	env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 	return a.write(env, output.ExitValidation)
+}
+
+func projectCompileEquivalentLintIssues(findings []analyze.Finding) []lint.Issue {
+	issues := make([]lint.Issue, 0)
+	for _, finding := range findings {
+		metadata, ok := staticrules.Lookup(finding.Code)
+		if !ok || metadata.Family != staticrules.FamilyLint || !metadata.CompileEquivalent || !metadata.PreflightBlocking {
+			continue
+		}
+		issues = append(issues, lint.Issue{
+			Code:     finding.Code,
+			Severity: finding.Severity,
+			File:     finding.File,
+			Line:     finding.Line,
+			Column:   finding.Column,
+			Message:  finding.Message,
+		})
+	}
+	return issues
+}
+
+func filterProjectedLintFindings(findings []analyze.Finding) []analyze.Finding {
+	out := findings[:0]
+	for _, finding := range findings {
+		metadata, ok := staticrules.Lookup(finding.Code)
+		if ok && metadata.Family == staticrules.FamilyLint && metadata.CompileEquivalent && metadata.PreflightBlocking {
+			continue
+		}
+		out = append(out, finding)
+	}
+	return out
 }
 
 func buildUserFormSourcePathFilter(root string, cfg config.Config, targetForms map[string]bool) func(string) bool {

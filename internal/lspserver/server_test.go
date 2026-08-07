@@ -778,7 +778,7 @@ func TestProtocolDiagnosticUsesRegistryDocumentationURL(t *testing.T) {
 	if diagnostic.CodeDescription == nil || string(diagnostic.CodeDescription.HRef) != "https://harumiweb.github.io/xlflow/reference/diagnostics#vb001" {
 		t.Fatalf("code description = %#v", diagnostic.CodeDescription)
 	}
-	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityError {
+	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityWarning {
 		t.Fatalf("registry severity was not applied: %#v", diagnostic.Severity)
 	}
 
@@ -788,7 +788,7 @@ func TestProtocolDiagnosticUsesRegistryDocumentationURL(t *testing.T) {
 	}
 }
 
-func TestProtocolDiagnosticPreservesNestedVBA225SeverityAndRange(t *testing.T) {
+func TestProtocolDiagnosticUsesRegistrySeverityAndPreservesNestedVBA225Range(t *testing.T) {
 	diagnostic := toProtocolDiagnostic(intel.Diagnostic{
 		Code:     "VBA225",
 		Severity: "error",
@@ -799,8 +799,8 @@ func TestProtocolDiagnosticPreservesNestedVBA225SeverityAndRange(t *testing.T) {
 		},
 		Message: "Nested loop depth: 2.",
 	})
-	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityError {
-		t.Fatalf("VBA225 severity = %#v, want error", diagnostic.Severity)
+	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityWarning {
+		t.Fatalf("VBA225 severity = %#v, want warning", diagnostic.Severity)
 	}
 	if diagnostic.Range.Start.Line != 4 || diagnostic.Range.End.Line != 6 {
 		t.Fatalf("VBA225 range = %#v, want loop range", diagnostic.Range)

@@ -880,22 +880,22 @@ End Sub
 	}
 
 	diagnostics := analyzer.Diagnostics(doc)
-	vb030 := diagnosticsByCode(diagnostics, "VB030")
-	if len(vb030) < 3 {
+	vb045 := diagnosticsByCode(diagnostics, "VB045")
+	if len(vb045) < 3 {
 		t.Fatalf("expected argument diagnostics, got %+v", diagnostics)
 	}
-	if !hasDiagnosticMessage(vb030, "expects at least 2 argument") {
-		t.Fatalf("missing Dictionary.Add argument count diagnostic: %+v", vb030)
+	if !hasDiagnosticMessage(vb045, "expects at least 2 argument") {
+		t.Fatalf("missing Dictionary.Add argument count diagnostic: %+v", vb045)
 	}
-	if !hasDiagnosticMessage(vb030, "Range expects at least 1 argument") {
-		t.Fatalf("missing Range argument count diagnostic: %+v", vb030)
+	if !hasDiagnosticMessage(vb045, "Range expects at least 1 argument") {
+		t.Fatalf("missing Range argument count diagnostic: %+v", vb045)
 	}
-	if !hasDiagnosticMessage(vb030, `Unknown named argument: Iteem. Did you mean "Item"?`) {
-		t.Fatalf("missing unknown named argument diagnostic: %+v", vb030)
+	if !hasDiagnosticMessage(vb045, `Unknown named argument: Iteem. Did you mean "Item"?`) {
+		t.Fatalf("missing unknown named argument diagnostic: %+v", vb045)
 	}
 }
 
-func TestDiagnosticsApplyInlineSuppressionToIntelligenceRules(t *testing.T) {
+func TestDiagnosticsDoNotApplyInlineSuppressionToCompileEquivalentRules(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	dir := t.TempDir()
 	doc := Document{
@@ -903,14 +903,14 @@ func TestDiagnosticsApplyInlineSuppressionToIntelligenceRules(t *testing.T) {
 		Source: `Option Explicit
 Sub Test()
     Dim dict As Scripting.Dictionary
-    ' xlflow:disable-next-line VB030
-    dict.Add "A"
+	    ' xlflow:disable-next-line VB045
+	    dict.Add "A"
 End Sub
 `,
 	}
 	analyzer.RootDir = dir
-	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
-		t.Fatalf("VB030 should be suppressed by registry-backed directive: %+v", diagnostics)
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 1 {
+		t.Fatalf("VB045 must not be suppressed by an inline directive: %+v", diagnostics)
 	}
 }
 
@@ -1088,7 +1088,11 @@ End Sub
 		t.Fatalf("VBA206 diagnostics = %+v, want eleven", diagnostics)
 	}
 	for _, diagnostic := range diagnostics {
-		if diagnostic.Code != "VBA206" || diagnostic.Severity != "warning" || diagnostic.Confidence != "high" {
+		wantCode, wantSeverity := "VBA206", "warning"
+		if strings.Contains(diagnostic.Message, "has type") {
+			wantCode, wantSeverity = "VBA228", "error"
+		}
+		if diagnostic.Code != wantCode || diagnostic.Severity != wantSeverity || diagnostic.Confidence != "high" {
 			t.Fatalf("unexpected ByRef diagnostic: %+v", diagnostic)
 		}
 	}
@@ -1283,7 +1287,7 @@ End Sub
 `,
 	}
 
-	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
 	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "NeedsTwo expects at least 2 argument(s), got 1") {
 		t.Fatalf("nested continued call should report its argument mismatch: %+v", diagnostics)
 	}
@@ -1580,8 +1584,8 @@ func TestDiagnosticsIncludeParenlessCallAfterSpace(t *testing.T) {
 	}
 
 	diagnostics := analyzer.Diagnostics(doc)
-	vb030 := diagnosticsByCode(diagnostics, "VB030")
-	if !hasDiagnosticMessage(vb030, "expects at least 2 argument") {
+	vb045 := diagnosticsByCode(diagnostics, "VB045")
+	if !hasDiagnosticMessage(vb045, "expects at least 2 argument") {
 		t.Fatalf("missing parenless empty argument diagnostic: %+v", diagnostics)
 	}
 }
@@ -1606,12 +1610,12 @@ End Sub
 `,
 	}
 
-	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
 	if len(diagnostics) != 1 {
-		t.Fatalf("VB030 diagnostics = %+v, want only Range.Find argument warning", diagnostics)
+		t.Fatalf("VB045 diagnostics = %+v, want only Range.Find argument error", diagnostics)
 	}
 	if !strings.Contains(diagnostics[0].Message, "Find expects at least 1 argument") {
-		t.Fatalf("VB030 diagnostic = %+v, want Range.Find argument warning", diagnostics[0])
+		t.Fatalf("VB045 diagnostic = %+v, want Range.Find argument error", diagnostics[0])
 	}
 	if diagnostics[0].Range.Start.Line != 10 {
 		t.Fatalf("VB030 range = %+v, want Range.Find line", diagnostics[0].Range)
@@ -1660,7 +1664,7 @@ End Sub
 		t.Fatalf("Font.Color completion missing: %+v", items)
 	}
 
-	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030")
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
 	if !hasDiagnosticMessage(diagnostics, "Add expects at least 2 argument") || !hasDiagnosticMessage(diagnostics, "Find expects at least 1 argument") {
 		t.Fatalf("expected Dictionary.Add and Range.Find argument diagnostics, got %+v", diagnostics)
 	}

@@ -21,11 +21,11 @@
   "analysis": {
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
-    "rule_codes": ["VBA206"],
+    "rule_codes": ["VBA228"],
     "forbidden_diagnostics": [
       {
-        "code": "VBA206",
-        "severity": "warning",
+        "code": "VBA228",
+        "severity": "error",
         "surfaces": ["analyze", "lsp"]
       }
     ]

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
 var (
@@ -23,9 +25,6 @@ func (a Analyzer) ByRefArgumentDiagnostics(doc Document) []Diagnostic {
 
 // ByRefArgumentDiagnosticsContext is the cancellable form used by realtime LSP analysis.
 func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
-	if !a.Config.Analyze.DetectByRefArgumentMismatch {
-		return nil
-	}
 	// Resolve calls in the current module directly from its immutable snapshot.
 	// A newly opened document's workspace overlay is intentionally absent while
 	// background analysis is pending, but file-local diagnostics must still be
@@ -64,7 +63,7 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 				if !ok || param.ParamArray || !isByRefParameter(param) {
 					continue
 				}
-				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param); found {
+				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param); found && (diagnostic.Code != "VBA206" || a.Config.Analyze.DetectByRefArgumentMismatch) {
 					out = append(out, diagnostic)
 				}
 			}
@@ -73,7 +72,10 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 	if ctx.Err() != nil {
 		return nil
 	}
-	return append(out, a.ptrSafeDeclareDiagnostics(doc)...)
+	if a.Config.Analyze.DetectByRefArgumentMismatch {
+		out = append(out, a.ptrSafeDeclareDiagnostics(doc)...)
+	}
+	return out
 }
 
 // callsOnLine retains both parenthesized and parenthesis-free VBA call forms
@@ -185,7 +187,7 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 	}
 	if literalType, literal := byRefLiteralType(expr); literal {
 		if byRefTypesMismatch(literalType, false, param.Type, param.IsArray) {
-			return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, literalType, param.Name, displayParameterType(param))), true
+			return byRefTypeMismatchDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, literalType, param.Name, displayParameterType(param))), true
 		}
 		return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is a literal. Pass a writable variable because procedure changes cannot update a literal.", expr, param.Name)), true
 	}
@@ -198,7 +200,7 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 			return Diagnostic{}, false
 		}
 		if byRefTypesMismatch(inferred.Type, inferred.IsArray, param.Type, param.IsArray) {
-			return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, displayInferredType(inferred), param.Name, displayParameterType(param))), true
+			return byRefTypeMismatchDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, displayInferredType(inferred), param.Name, displayParameterType(param))), true
 		}
 		return Diagnostic{}, false
 	}
@@ -216,6 +218,16 @@ func byRefDiagnostic(lineNo int, call parsedCall, message string) Diagnostic {
 	diagnostic.Code = "VBA206"
 	diagnostic.Rule = "VBA206"
 	diagnostic.Confidence = "high"
+	return diagnostic
+}
+
+func byRefTypeMismatchDiagnostic(lineNo int, call parsedCall, message string) Diagnostic {
+	diagnostic := byRefDiagnostic(lineNo, call, message)
+	diagnostic.Code = "VBA228"
+	diagnostic.Rule = "VBA228"
+	if metadata, ok := staticrules.Lookup(diagnostic.Code); ok {
+		diagnostic.Severity = string(metadata.DefaultSeverity)
+	}
 	return diagnostic
 }
 

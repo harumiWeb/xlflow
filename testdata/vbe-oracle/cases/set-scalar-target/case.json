@@ -26,7 +26,7 @@
     "expected_diagnostics": [
       {
         "code": "VB037",
-        "severity": "warning",
+        "severity": "error",
         "surfaces": ["lsp"]
       }
     ]

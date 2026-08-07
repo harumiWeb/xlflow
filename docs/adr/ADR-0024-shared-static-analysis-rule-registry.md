@@ -29,9 +29,12 @@ canonical data is an embedded JSON file owned by that package. Each normal
 description, family, category, default and supported severities, supported
 `lint`/`analyze`/`lsp` surfaces, scope, precision, default-enabled state,
 configuration binding, inline-suppression policy, preflight policy, real-time
-eligibility, fix availability, and documentation URL. Surface metadata remains
-consistent with family and real-time eligibility, while supported severities
-also describe conditional escalation such as nested-loop analysis findings.
+eligibility, fix availability, documentation URL, evidence class, and whether
+the rule is compile-equivalent. Evidence metadata is normative: a
+compile-equivalent rule supports only `error`, is not inline-suppressible, and
+blocks source preflight; inference, runtime-safety, policy, and maintainability
+rules remain warning-only and non-blocking. Surface metadata remains consistent
+with family and real-time eligibility.
 
 The Go package validates the complete registry at load time and exposes sorted,
 defensive projections through lookup, enumeration, and family filtering. It
@@ -43,6 +46,7 @@ registry entries to match exactly.
 The registry is authoritative for these projections:
 
 - `lint`, `analyze`, and source preflight rule identity and policy;
+- evidence classification, severity, suppression, and preflight blocking;
 - inline suppression eligibility and preflight-blocking behavior;
 - LSP diagnostic severity and `codeDescription.href` documentation links;
 - the source-only, parallel-safe `xlflow rules` command;
@@ -88,6 +92,13 @@ Negative consequences:
   not depend on concrete config structures.
 - Older xlflow binaries may not provide `rules`; editor consumers must preserve
   fail-closed fallback behavior rather than guessing.
+
+The initial evidence migration separates deterministic VBE compile rejections
+from advisory findings: `VB037` covers scalar `Set`, `VB045` covers
+deterministic argument binding, and `VBA228` covers proven ByRef type
+mismatches. `VB030` and `VBA206` retain their warning contracts for inference
+and runtime-safety cases; a legacy `VBA206` disable setting cannot disable
+`VBA228`.
 
 ## Alternatives Considered
 

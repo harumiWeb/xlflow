@@ -509,7 +509,7 @@ type astLintContext struct {
 func (c *astLintContext) lint(root *tree_sitter.Node) {
 	c.visit(root, false, false)
 	if c.linter.Config.Lint.RequireOptionExplicit && !c.hasOptionExplicit {
-		c.issues = append([]Issue{c.linter.issue(c.path, 1, "VB001", "error", "Missing Option Explicit.")}, c.issues...)
+		c.issues = append([]Issue{c.linter.issue(c.path, 1, "VB001", "warning", "Missing Option Explicit.")}, c.issues...)
 	}
 }
 

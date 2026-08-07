@@ -6,7 +6,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 | ID                  | Family  | Severity | Scope           | Default | Title                                              |
 | ------------------- | ------- | -------- | --------------- | ------- | -------------------------------------------------- |
-| [`VB001`](#vb001)   | lint    | error    | file-local      | yes     | Missing Option Explicit                            |
+| [`VB001`](#vb001)   | lint    | warning  | file-local      | yes     | Missing Option Explicit                            |
 | [`VB002`](#vb002)   | lint    | warning  | procedure-local | yes     | Select usage                                       |
 | [`VB003`](#vb003)   | lint    | warning  | procedure-local | yes     | Activate usage                                     |
 | [`VB004`](#vb004)   | lint    | warning  | procedure-local | yes     | Broad On Error Resume Next                         |
@@ -38,7 +38,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB034`](#vb034)   | lint    | warning  | procedure-local | yes     | Read-only property assignment                      |
 | [`VB035`](#vb035)   | lint    | warning  | procedure-local | yes     | Write-only property read                           |
 | [`VB036`](#vb036)   | lint    | warning  | procedure-local | yes     | Set required                                       |
-| [`VB037`](#vb037)   | lint    | warning  | procedure-local | yes     | Set not allowed                                    |
+| [`VB037`](#vb037)   | lint    | error    | procedure-local | yes     | Set not allowed                                    |
 | [`VB038`](#vb038)   | lint    | warning  | procedure-local | yes     | Incompatible assignment                            |
 | [`VB039`](#vb039)   | lint    | warning  | procedure-local | yes     | Method has no return value                         |
 | [`VB040`](#vb040)   | lint    | warning  | file-local      | yes     | Unknown documented parameter                       |
@@ -46,6 +46,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB042`](#vb042)   | lint    | warning  | file-local      | yes     | Returns documentation on Sub                       |
 | [`VB043`](#vb043)   | lint    | warning  | file-local      | yes     | Orphan documentation comment                       |
 | [`VB044`](#vb044)   | lint    | warning  | procedure-local | no      | Procedure-name constant mismatch                   |
+| [`VB045`](#vb045)   | lint    | error    | procedure-local | yes     | Deterministic argument binding error               |
 | [`VBA101`](#vba101) | analyze | warning  | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning  | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning  | procedure-local | yes     | Object function return missing Set                 |
@@ -79,6 +80,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA225`](#vba225) | analyze | warning  | interprocedural | yes     | Excel cell access inside loop                      |
 | [`VBA226`](#vba226) | analyze | warning  | procedure-local | yes     | Unsafe Range.Value array shape assumption          |
 | [`VBA227`](#vba227) | analyze | warning  | interprocedural | yes     | Array lifecycle and dimension safety               |
+| [`VBA228`](#vba228) | analyze | error    | interprocedural | yes     | ByRef type mismatch                                |
 
 ## VB001
 
@@ -88,8 +90,10 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------- |
 | Family                      | `lint`                    |
 | Category                    | `correctness`             |
-| Default severity            | `error`                   |
-| Supported severities        | `error`                   |
+| Evidence class              | `policy`                  |
+| Compile-equivalent          | no                        |
+| Default severity            | `warning`                 |
+| Supported severities        | `warning`                 |
 | Surfaces                    | `lint`, `lsp`             |
 | Scope                       | `file-local`              |
 | Precision                   | `high`                    |
@@ -108,6 +112,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `reliability`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -128,6 +134,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `reliability`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -148,6 +156,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------------- |
 | Family                      | `lint`                        |
 | Category                    | `reliability`                 |
+| Evidence class              | `inference`                   |
+| Compile-equivalent          | no                            |
 | Default severity            | `warning`                     |
 | Supported severities        | `warning`                     |
 | Surfaces                    | `lint`, `lsp`                 |
@@ -168,6 +178,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------- |
 | Family                      | `lint`                    |
 | Category                    | `maintainability`         |
+| Evidence class              | `maintainability`         |
+| Compile-equivalent          | no                        |
 | Default severity            | `warning`                 |
 | Supported severities        | `warning`                 |
 | Surfaces                    | `lint`, `lsp`             |
@@ -188,6 +200,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------------- |
 | Family                      | `lint`                        |
 | Category                    | `maintainability`             |
+| Evidence class              | `maintainability`             |
+| Compile-equivalent          | no                            |
 | Default severity            | `warning`                     |
 | Supported severities        | `warning`                     |
 | Surfaces                    | `lint`, `lsp`                 |
@@ -208,6 +222,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------- |
 | Family                      | `lint`                     |
 | Category                    | `reliability`              |
+| Evidence class              | `inference`                |
+| Compile-equivalent          | no                         |
 | Default severity            | `warning`                  |
 | Supported severities        | `warning`                  |
 | Surfaces                    | `lint`                     |
@@ -224,161 +240,177 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Typographic quote.** A typographic quote can trigger an Excel VBE compile dialog.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB009
 
 **C-style quote escape.** A C-style escaped quote is invalid VBA string syntax.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB010
 
 **Unterminated procedure.** A Sub, Function, or Property procedure has no matching terminator.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB011
 
 **Unexpected procedure terminator.** An End procedure statement has no matching opener.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB012
 
 **Mismatched procedure terminator.** A procedure is closed with the wrong End statement kind.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB013
 
 **Invalid line continuation.** A line-continuation underscore is not preceded by whitespace.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB014
 
 **Parser recovery.** The parser recovered from an error, missing node, or unmatched source structure.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `medium`         |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `medium`             |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB015
 
 **Continuation limit exceeded.** A VBA logical line exceeds the supported continuation-line limit.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB018
 
@@ -388,6 +420,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------ |
 | Family                      | `lint`                   |
 | Category                    | `maintainability`        |
+| Evidence class              | `maintainability`        |
+| Compile-equivalent          | no                       |
 | Default severity            | `warning`                |
 | Supported severities        | `warning`                |
 | Surfaces                    | `lint`                   |
@@ -408,6 +442,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------------ |
 | Family                      | `lint`                               |
 | Category                    | `correctness`                        |
+| Evidence class              | `inference`                          |
+| Compile-equivalent          | no                                   |
 | Default severity            | `warning`                            |
 | Supported severities        | `warning`                            |
 | Surfaces                    | `lint`, `lsp`                        |
@@ -428,6 +464,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------- |
 | Family                      | `lint`                          |
 | Category                    | `maintainability`               |
+| Evidence class              | `maintainability`               |
+| Compile-equivalent          | no                              |
 | Default severity            | `warning`                       |
 | Supported severities        | `warning`                       |
 | Surfaces                    | `lint`, `lsp`                   |
@@ -448,6 +486,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ---------------------------------- |
 | Family                      | `lint`                             |
 | Category                    | `maintainability`                  |
+| Evidence class              | `maintainability`                  |
+| Compile-equivalent          | no                                 |
 | Default severity            | `warning`                          |
 | Supported severities        | `warning`                          |
 | Surfaces                    | `lint`                             |
@@ -468,6 +508,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------ |
 | Family                      | `lint`                         |
 | Category                    | `maintainability`              |
+| Evidence class              | `maintainability`              |
+| Compile-equivalent          | no                             |
 | Default severity            | `warning`                      |
 | Supported severities        | `warning`                      |
 | Surfaces                    | `lint`, `lsp`                  |
@@ -488,6 +530,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------ |
 | Family                      | `lint`                         |
 | Category                    | `correctness`                  |
+| Evidence class              | `inference`                    |
+| Compile-equivalent          | no                             |
 | Default severity            | `warning`                      |
 | Supported severities        | `warning`                      |
 | Surfaces                    | `lint`, `lsp`                  |
@@ -508,6 +552,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------- |
 | Family                      | `lint`                    |
 | Category                    | `reliability`             |
+| Evidence class              | `inference`               |
+| Compile-equivalent          | no                        |
 | Default severity            | `warning`                 |
 | Supported severities        | `warning`                 |
 | Surfaces                    | `lint`, `lsp`             |
@@ -528,6 +574,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------ |
 | Family                      | `lint`                         |
 | Category                    | `reliability`                  |
+| Evidence class              | `inference`                    |
+| Compile-equivalent          | no                             |
 | Default severity            | `warning`                      |
 | Supported severities        | `warning`                      |
 | Surfaces                    | `lint`, `lsp`                  |
@@ -544,41 +592,45 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Bare dialog call with XlflowUI.** A bare dialog call can bind to an incompatible XlflowUI member.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`           |
-| Scope                       | `project-wide`   |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | no               |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`               |
+| Scope                       | `project-wide`       |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | no                   |
+| Fix available               | no                   |
 
 ## VB029
 
 **Undeclared variable.** Option Explicit is present but a referenced assignment or loop variable is undeclared.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB030
 
@@ -588,6 +640,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -604,41 +658,45 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Missing module name attribute.** A standard module lacks its exported Attribute VB_Name declaration.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB032
 
 **Repeated Debug.Print shorthand.** Repeated question-mark shorthand is invalid VBA syntax.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB033
 
@@ -648,6 +706,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -668,6 +728,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -688,6 +750,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -708,6 +772,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -724,21 +790,23 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Set not allowed.** A value assignment incorrectly uses the Set keyword.
 
-| Property                    | Value             |
-| --------------------------- | ----------------- |
-| Family                      | `lint`            |
-| Category                    | `type-safety`     |
-| Default severity            | `warning`         |
-| Supported severities        | `warning`         |
-| Surfaces                    | `lint`, `lsp`     |
-| Scope                       | `procedure-local` |
-| Precision                   | `high`            |
-| Enabled by default          | yes               |
-| Configuration               | not configurable  |
-| Inline suppression          | yes               |
-| Blocks source preflight     | no                |
-| Real-time editor diagnostic | yes               |
-| Fix available               | no                |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `type-safety`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VB038
 
@@ -748,6 +816,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -768,6 +838,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `lint`            |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `lint`, `lsp`     |
@@ -784,81 +856,89 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Unknown documented parameter.** A documentation comment names a parameter that the procedure does not declare.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `documentation`  |
-| Default severity            | `warning`        |
-| Supported severities        | `warning`        |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | yes              |
-| Blocks source preflight     | no               |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `documentation`   |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `file-local`      |
+| Precision                   | `high`            |
+| Enabled by default          | yes               |
+| Configuration               | not configurable  |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
 
 ## VB041
 
 **Duplicate documented parameter.** A documentation comment lists the same parameter more than once.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `documentation`  |
-| Default severity            | `warning`        |
-| Supported severities        | `warning`        |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | yes              |
-| Blocks source preflight     | no               |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `documentation`   |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `file-local`      |
+| Precision                   | `high`            |
+| Enabled by default          | yes               |
+| Configuration               | not configurable  |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
 
 ## VB042
 
 **Returns documentation on Sub.** A Sub procedure documentation comment contains a Returns section.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `documentation`  |
-| Default severity            | `warning`        |
-| Supported severities        | `warning`        |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | yes              |
-| Blocks source preflight     | no               |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `documentation`   |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `file-local`      |
+| Precision                   | `high`            |
+| Enabled by default          | yes               |
+| Configuration               | not configurable  |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
 
 ## VB043
 
 **Orphan documentation comment.** A documentation comment is not associated with a declaration.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `lint`           |
-| Category                    | `documentation`  |
-| Default severity            | `warning`        |
-| Supported severities        | `warning`        |
-| Surfaces                    | `lint`, `lsp`    |
-| Scope                       | `file-local`     |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | yes              |
-| Blocks source preflight     | no               |
-| Real-time editor diagnostic | yes              |
-| Fix available               | no               |
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `documentation`   |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `file-local`      |
+| Precision                   | `high`            |
+| Enabled by default          | yes               |
+| Configuration               | not configurable  |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
 
 ## VB044
 
@@ -868,6 +948,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------- |
 | Family                      | `lint`                    |
 | Category                    | `maintainability`         |
+| Evidence class              | `maintainability`         |
+| Compile-equivalent          | no                        |
 | Default severity            | `warning`                 |
 | Supported severities        | `warning`                 |
 | Surfaces                    | `lint`, `lsp`             |
@@ -880,6 +962,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                       |
 | Fix available               | yes                       |
 
+## VB045
+
+**Deterministic argument binding error.** A resolved procedure call has a deterministic argument-count or named-argument compile error.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
 ## VBA101
 
 **Object assignment missing Set.** An object variable assignment likely omits Set.
@@ -888,6 +992,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `analyze`         |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `analyze`         |
@@ -908,6 +1014,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `analyze`         |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `analyze`         |
@@ -928,6 +1036,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------- |
 | Family                      | `analyze`         |
 | Category                    | `type-safety`     |
+| Evidence class              | `inference`       |
+| Compile-equivalent          | no                |
 | Default severity            | `warning`         |
 | Supported severities        | `warning`         |
 | Surfaces                    | `analyze`         |
@@ -944,61 +1054,67 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Excel object member mismatch.** A known Excel object does not provide the referenced member.
 
-| Property                    | Value             |
-| --------------------------- | ----------------- |
-| Family                      | `analyze`         |
-| Category                    | `correctness`     |
-| Default severity            | `error`           |
-| Supported severities        | `error`           |
-| Surfaces                    | `analyze`         |
-| Scope                       | `procedure-local` |
-| Precision                   | `high`            |
-| Enabled by default          | yes               |
-| Configuration               | not configurable  |
-| Inline suppression          | no                |
-| Blocks source preflight     | yes               |
-| Real-time editor diagnostic | no                |
-| Fix available               | no                |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `analyze`            |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `analyze`            |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | no                   |
+| Fix available               | no                   |
 
 ## VBA105
 
 **Removed XlflowLog helper.** The source calls the removed XlflowLog trace helper.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `analyze`        |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `analyze`        |
-| Scope                       | `project-wide`   |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | no               |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `analyze`            |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `analyze`            |
+| Scope                       | `project-wide`       |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | no                   |
+| Fix available               | no                   |
 
 ## VBA106
 
 **Removed XlflowSetTraceFile helper.** The source calls the removed XlflowSetTraceFile trace helper.
 
-| Property                    | Value            |
-| --------------------------- | ---------------- |
-| Family                      | `analyze`        |
-| Category                    | `correctness`    |
-| Default severity            | `error`          |
-| Supported severities        | `error`          |
-| Surfaces                    | `analyze`        |
-| Scope                       | `project-wide`   |
-| Precision                   | `high`           |
-| Enabled by default          | yes              |
-| Configuration               | not configurable |
-| Inline suppression          | no               |
-| Blocks source preflight     | yes              |
-| Real-time editor diagnostic | no               |
-| Fix available               | no               |
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `analyze`            |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `analyze`            |
+| Scope                       | `project-wide`       |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | no                   |
+| Fix available               | no                   |
 
 ## VBA201
 
@@ -1008,6 +1124,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | --------------------------------- |
 | Family                      | `analyze`                         |
 | Category                    | `reliability`                     |
+| Evidence class              | `inference`                       |
+| Compile-equivalent          | no                                |
 | Default severity            | `warning`                         |
 | Supported severities        | `warning`                         |
 | Surfaces                    | `analyze`, `lsp`                  |
@@ -1028,6 +1146,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------ |
 | Family                      | `analyze`                      |
 | Category                    | `reliability`                  |
+| Evidence class              | `inference`                    |
+| Compile-equivalent          | no                             |
 | Default severity            | `warning`                      |
 | Supported severities        | `warning`                      |
 | Surfaces                    | `analyze`                      |
@@ -1048,6 +1168,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ---------------------------------- |
 | Family                      | `analyze`                          |
 | Category                    | `reliability`                      |
+| Evidence class              | `inference`                        |
+| Compile-equivalent          | no                                 |
 | Default severity            | `warning`                          |
 | Supported severities        | `warning`                          |
 | Surfaces                    | `analyze`                          |
@@ -1068,6 +1190,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ---------------------------------- |
 | Family                      | `analyze`                          |
 | Category                    | `reliability`                      |
+| Evidence class              | `inference`                        |
+| Compile-equivalent          | no                                 |
 | Default severity            | `warning`                          |
 | Supported severities        | `warning`                          |
 | Surfaces                    | `analyze`, `lsp`                   |
@@ -1088,6 +1212,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ---------------------------------- |
 | Family                      | `analyze`                          |
 | Category                    | `reliability`                      |
+| Evidence class              | `inference`                        |
+| Compile-equivalent          | no                                 |
 | Default severity            | `warning`                          |
 | Supported severities        | `warning`                          |
 | Surfaces                    | `analyze`                          |
@@ -1108,6 +1234,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------------- |
 | Family                      | `analyze`                        |
 | Category                    | `runtime-safety`                 |
+| Evidence class              | `runtime-safety`                 |
+| Compile-equivalent          | no                               |
 | Default severity            | `warning`                        |
 | Supported severities        | `warning`                        |
 | Surfaces                    | `analyze`, `lsp`                 |
@@ -1128,6 +1256,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------------ |
 | Family                      | `analyze`                            |
 | Category                    | `reliability`                        |
+| Evidence class              | `inference`                          |
+| Compile-equivalent          | no                                   |
 | Default severity            | `warning`                            |
 | Supported severities        | `warning`                            |
 | Surfaces                    | `analyze`                            |
@@ -1148,6 +1278,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | --------------------------------- |
 | Family                      | `analyze`                         |
 | Category                    | `correctness`                     |
+| Evidence class              | `inference`                       |
+| Compile-equivalent          | no                                |
 | Default severity            | `warning`                         |
 | Supported severities        | `warning`                         |
 | Surfaces                    | `analyze`, `lsp`                  |
@@ -1168,6 +1300,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------------- |
 | Family                      | `analyze`                        |
 | Category                    | `type-safety`                    |
+| Evidence class              | `inference`                      |
+| Compile-equivalent          | no                               |
 | Default severity            | `warning`                        |
 | Supported severities        | `warning`                        |
 | Surfaces                    | `analyze`, `lsp`                 |
@@ -1188,6 +1322,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------------- |
 | Family                      | `analyze`                     |
 | Category                    | `correctness`                 |
+| Evidence class              | `inference`                   |
+| Compile-equivalent          | no                            |
 | Default severity            | `warning`                     |
 | Supported severities        | `warning`                     |
 | Surfaces                    | `analyze`                     |
@@ -1208,6 +1344,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------------- |
 | Family                      | `analyze`                             |
 | Category                    | `correctness`                         |
+| Evidence class              | `compile-equivalent`                  |
+| Compile-equivalent          | yes                                   |
 | Default severity            | `error`                               |
 | Supported severities        | `error`                               |
 | Surfaces                    | `analyze`                             |
@@ -1228,6 +1366,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | --------------------------------------- |
 | Family                      | `analyze`                               |
 | Category                    | `reliability`                           |
+| Evidence class              | `inference`                             |
+| Compile-equivalent          | no                                      |
 | Default severity            | `warning`                               |
 | Supported severities        | `warning`                               |
 | Surfaces                    | `analyze`, `lsp`                        |
@@ -1248,6 +1388,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------------------------- |
 | Family                      | `analyze`                                 |
 | Category                    | `type-safety`                             |
+| Evidence class              | `inference`                               |
+| Compile-equivalent          | no                                        |
 | Default severity            | `warning`                                 |
 | Supported severities        | `warning`                                 |
 | Surfaces                    | `analyze`, `lsp`                          |
@@ -1268,8 +1410,10 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------------------- |
 | Family                      | `analyze`                                   |
 | Category                    | `reliability`                               |
+| Evidence class              | `inference`                                 |
+| Compile-equivalent          | no                                          |
 | Default severity            | `warning`                                   |
-| Supported severities        | `warning`, `error`                          |
+| Supported severities        | `warning`                                   |
 | Surfaces                    | `analyze`                                   |
 | Scope                       | `procedure-local`                           |
 | Precision                   | `medium`                                    |
@@ -1288,6 +1432,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------------------- |
 | Family                      | `analyze`                              |
 | Category                    | `reliability`                          |
+| Evidence class              | `inference`                            |
+| Compile-equivalent          | no                                     |
 | Default severity            | `warning`                              |
 | Supported severities        | `warning`                              |
 | Surfaces                    | `analyze`, `lsp`                       |
@@ -1308,6 +1454,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------------- |
 | Family                      | `analyze`                        |
 | Category                    | `reliability`                    |
+| Evidence class              | `compile-equivalent`             |
+| Compile-equivalent          | yes                              |
 | Default severity            | `error`                          |
 | Supported severities        | `error`                          |
 | Surfaces                    | `analyze`, `lsp`                 |
@@ -1328,6 +1476,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------------------- |
 | Family                      | `analyze`                           |
 | Category                    | `reliability`                       |
+| Evidence class              | `inference`                         |
+| Compile-equivalent          | no                                  |
 | Default severity            | `warning`                           |
 | Supported severities        | `warning`                           |
 | Surfaces                    | `analyze`, `lsp`                    |
@@ -1348,6 +1498,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------------ |
 | Family                      | `analyze`                            |
 | Category                    | `reliability`                        |
+| Evidence class              | `inference`                          |
+| Compile-equivalent          | no                                   |
 | Default severity            | `warning`                            |
 | Supported severities        | `warning`                            |
 | Surfaces                    | `analyze`, `lsp`                     |
@@ -1368,6 +1520,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------- |
 | Family                      | `analyze`               |
 | Category                    | `reliability`           |
+| Evidence class              | `inference`             |
+| Compile-equivalent          | no                      |
 | Default severity            | `warning`               |
 | Supported severities        | `warning`               |
 | Surfaces                    | `analyze`, `lsp`        |
@@ -1388,6 +1542,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------ |
 | Family                      | `analyze`                      |
 | Category                    | `reliability`                  |
+| Evidence class              | `inference`                    |
+| Compile-equivalent          | no                             |
 | Default severity            | `warning`                      |
 | Supported severities        | `warning`                      |
 | Surfaces                    | `analyze`                      |
@@ -1408,6 +1564,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | --------------------------------------- |
 | Family                      | `analyze`                               |
 | Category                    | `reliability`                           |
+| Evidence class              | `inference`                             |
+| Compile-equivalent          | no                                      |
 | Default severity            | `warning`                               |
 | Supported severities        | `warning`                               |
 | Surfaces                    | `analyze`                               |
@@ -1428,6 +1586,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------- |
 | Family                      | `analyze`                       |
 | Category                    | `type-safety`                   |
+| Evidence class              | `inference`                     |
+| Compile-equivalent          | no                              |
 | Default severity            | `warning`                       |
 | Supported severities        | `warning`                       |
 | Surfaces                    | `analyze`                       |
@@ -1448,6 +1608,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------- |
 | Family                      | `analyze`                  |
 | Category                    | `security`                 |
+| Evidence class              | `policy`                   |
+| Compile-equivalent          | no                         |
 | Default severity            | `warning`                  |
 | Supported severities        | `warning`                  |
 | Surfaces                    | `analyze`, `lsp`           |
@@ -1468,6 +1630,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ---------------------------- |
 | Family                      | `analyze`                    |
 | Category                    | `security`                   |
+| Evidence class              | `policy`                     |
+| Compile-equivalent          | no                           |
 | Default severity            | `warning`                    |
 | Supported severities        | `warning`                    |
 | Surfaces                    | `analyze`, `lsp`             |
@@ -1488,8 +1652,10 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ----------------------------------- |
 | Family                      | `analyze`                           |
 | Category                    | `performance`                       |
+| Evidence class              | `maintainability`                   |
+| Compile-equivalent          | no                                  |
 | Default severity            | `warning`                           |
-| Supported severities        | `warning`, `error`                  |
+| Supported severities        | `warning`                           |
 | Surfaces                    | `analyze`, `lsp`                    |
 | Scope                       | `interprocedural`                   |
 | Precision                   | `medium`                            |
@@ -1508,6 +1674,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | -------------------------------- |
 | Family                      | `analyze`                        |
 | Category                    | `runtime-safety`                 |
+| Evidence class              | `runtime-safety`                 |
+| Compile-equivalent          | no                               |
 | Default severity            | `warning`                        |
 | Supported severities        | `warning`                        |
 | Surfaces                    | `analyze`, `lsp`                 |
@@ -1528,6 +1696,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | --------------------------- | ------------------------------- |
 | Family                      | `analyze`                       |
 | Category                    | `runtime-safety`                |
+| Evidence class              | `runtime-safety`                |
+| Compile-equivalent          | no                              |
 | Default severity            | `warning`                       |
 | Supported severities        | `warning`                       |
 | Surfaces                    | `analyze`, `lsp`                |
@@ -1539,3 +1709,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                              |
 | Real-time editor diagnostic | yes                             |
 | Fix available               | no                              |
+
+## VBA228
+
+**ByRef type mismatch.** A resolved project-local ByRef call passes a statically incompatible argument type that the VBE rejects at compile time.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `analyze`            |
+| Category                    | `type-safety`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `analyze`, `lsp`     |
+| Scope                       | `interprocedural`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |

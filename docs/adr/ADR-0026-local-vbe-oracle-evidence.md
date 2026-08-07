@@ -64,6 +64,16 @@ coverage, and an accepted VBE result cannot be used to erase those warnings.
 The Excel-free coverage test asserts the exact fixture IDs in every state so a
 state swap cannot hide behind unchanged aggregate counts.
 
+Rule binding is also checked against the shared registry evidence class. A
+`compile-equivalent` fixture may bind only a compile-equivalent rule, and a
+rejected bound fixture must expect registry `error` severity. This makes VBE
+rejection evidence a blocking claim only for deterministic compiler contracts;
+accepted controls forbid the same split diagnostic code. The first migration
+uses `VB037` for scalar `Set`, `VB045` for deterministic argument binding, and
+`VBA228` for definite ByRef type mismatch. `VB030` remains inference warning
+coverage, `VBA206` remains runtime-safety warning coverage, and the accepted
+parenthesized-ByRef observation deliberately remains a policy observation.
+
 ## Consequences
 
 - Analyzer changes can cite empirical VBE compile evidence while normal tests

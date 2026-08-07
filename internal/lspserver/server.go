@@ -1555,9 +1555,7 @@ func (s *Server) runDiagnosticsBody(
 func toProtocolDiagnostic(diag intel.Diagnostic) protocol.Diagnostic {
 	severityName := diag.Severity
 	metadata, hasMetadata := staticrules.Lookup(diag.Code)
-	// VBA225 escalates nested-loop findings dynamically; preserve that
-	// diagnostic severity while retaining registry defaults for all other rules.
-	if !hasMetadata || diag.Code != "VBA225" || diag.Severity != "error" {
+	if hasMetadata {
 		severityName = string(metadata.DefaultSeverity)
 	}
 	severity := diagnosticSeverity(severityName)

@@ -21,10 +21,10 @@
   "analysis": {
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
-    "rule_codes": ["VB030"],
+    "rule_codes": ["VB045"],
     "forbidden_diagnostics": [
       {
-        "code": "VB030",
+        "code": "VB045",
         "surfaces": ["lsp"]
       }
     ]

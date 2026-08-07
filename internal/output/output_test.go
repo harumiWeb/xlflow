@@ -42,12 +42,15 @@ func TestWriteRulesJSONAndHumanOutput(t *testing.T) {
 		"schema_version": 1,
 		"items": []map[string]any{
 			{
-				"id":               "VB001",
-				"family":           "lint",
-				"default_severity": "error",
-				"scope":            "file-local",
-				"default_enabled":  true,
-				"title":            "Require Option Explicit",
+				"id":                   "VB001",
+				"family":               "lint",
+				"evidence_class":       "policy",
+				"compile_equivalent":   false,
+				"default_severity":     "warning",
+				"supported_severities": []string{"warning"},
+				"scope":                "file-local",
+				"default_enabled":      true,
+				"title":                "Require Option Explicit",
 			},
 		},
 	}
@@ -68,7 +71,7 @@ func TestWriteRulesJSONAndHumanOutput(t *testing.T) {
 	if err := WriteWithOptions(&human, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"VB001", "lint", "error", "file-local", "enabled", "Require Option Explicit"} {
+	for _, want := range []string{"VB001", "lint", "warning", "file-local", "enabled", "Require Option Explicit"} {
 		if !strings.Contains(human.String(), want) {
 			t.Fatalf("rules human output missing %q:\n%s", want, human.String())
 		}
