@@ -1650,6 +1650,28 @@
       "configuration_key": "",
       "inline_suppressible": false,
       "preflight_blocking": true
+    },
+    {
+      "id": "VBA229",
+      "title": "Unresolved local As type name",
+      "description": "A procedure-local declaration uses a VBA type name that cannot be resolved from the project or production type database.",
+      "family": "analyze",
+      "category": "type-safety",
+      "evidence_class": "compile-equivalent",
+      "compile_equivalent": true,
+      "default_severity": "error",
+      "supported_severities": ["error"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba229",
+      "configurable": false,
+      "configuration_key": "",
+      "inline_suppressible": false,
+      "preflight_blocking": true
     }
   ]
 }

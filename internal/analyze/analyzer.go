@@ -48,16 +48,17 @@ type Result struct {
 }
 
 type Analyzer struct {
-	RootDir               string
-	Config                config.Config
-	PathFilter            func(string) bool
-	typeDB                *vbadb.DB
-	byRefSymbols          []intel.Symbol
-	errorGuardAliases     map[string]bool
-	errorValueWrappers    map[string]bool
-	eventSafeProcedures   map[string]bool
-	applicationStateLeaks *applicationStateLeakIndex
-	excelLoopAccess       *excelLoopAccessIndex
+	RootDir                    string
+	Config                     config.Config
+	PathFilter                 func(string) bool
+	typeDB                     *vbadb.DB
+	typeDBResolutionIncomplete bool
+	byRefSymbols               []intel.Symbol
+	errorGuardAliases          map[string]bool
+	errorValueWrappers         map[string]bool
+	eventSafeProcedures        map[string]bool
+	applicationStateLeaks      *applicationStateLeakIndex
+	excelLoopAccess            *excelLoopAccessIndex
 }
 
 var (
@@ -236,9 +237,9 @@ func (a Analyzer) RunResult() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	// Compile-equivalent argument, Set, and ByRef findings are always enabled
-	// because they represent VBE compile rejections and cannot be disabled by
-	// the legacy VBA206 runtime-safety setting.
+	// Compile-equivalent argument, Set, ByRef, and local-type findings are
+	// always enabled because they represent VBE compile rejections and cannot
+	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
 	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety
@@ -308,23 +309,16 @@ func (a Analyzer) RunResult() (Result, error) {
 	}
 	var warnings []map[string]any
 	if needsTypeDB {
-		if analysis.Config.Analyze.DetectPublicAPITypeSafety {
-			loaded, err := typedb.LoadForRuntime("")
-			if err != nil {
-				return Result{}, err
-			}
-			analysis.typeDB = loaded.DB
-			for _, warning := range loaded.Warnings {
-				warnings = append(warnings, map[string]any{
-					"code": "type_db_load_warning", "message": warning,
-				})
-			}
-		} else {
-			typeDB, err := vbadb.LoadBuiltin()
-			if err != nil {
-				return Result{}, err
-			}
-			analysis.typeDB = typeDB
+		loaded, err := typedb.LoadForRuntime("")
+		if err != nil {
+			return Result{}, err
+		}
+		analysis.typeDB = loaded.DB
+		analysis.typeDBResolutionIncomplete = !loaded.Complete
+		for _, warning := range loaded.Warnings {
+			warnings = append(warnings, map[string]any{
+				"code": "type_db_load_warning", "message": warning,
+			})
 		}
 	}
 	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
@@ -382,10 +376,11 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 		return nil
 	}
 	diagnostics := (intel.Analyzer{
-		RootDir:                  a.RootDir,
-		Config:                   a.Config,
-		DB:                       a.typeDB,
-		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+		RootDir:                    a.RootDir,
+		Config:                     a.Config,
+		DB:                         a.typeDB,
+		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
+		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 	}).ByRefArgumentDiagnostics(file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil
@@ -427,10 +422,11 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) []Finding {
 		return nil
 	}
 	diagnostics := (intel.Analyzer{
-		RootDir:                  a.RootDir,
-		Config:                   a.Config,
-		DB:                       a.typeDB,
-		WorkspaceSymbolQueryFunc: a.byRefWorkspaceSymbolQuery,
+		RootDir:                    a.RootDir,
+		Config:                     a.Config,
+		DB:                         a.typeDB,
+		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
+		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil
@@ -468,6 +464,8 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 		return "VBE rejects deterministic argument-count and named-argument binding errors at compile time.", "Pass the required arguments with valid names and do not repeat or reorder named arguments."
 	case "VBA228":
 		return "VBE rejects a statically incompatible argument passed to a ByRef parameter.", "Pass a variable with the declared parameter type or change the parameter passing contract."
+	case "VBA229":
+		return "VBE rejects a procedure-local declaration when its As type name cannot be resolved.", "Use a built-in, project-defined, host-library, or referenced TypeLib type name that is available to the project."
 	default:
 		return "The VBE rejects this deterministic compile-time contract.", "Correct the source so the call or assignment satisfies the VBA compile-time contract."
 	}
@@ -483,12 +481,21 @@ func projectByRefSymbols(rootDir string, cfg config.Config) ([]intel.Symbol, err
 
 func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
 	needle := strings.ToLower(strings.TrimSpace(query.Text))
-	if query.Mode != intel.WorkspaceSymbolQueryExact || needle == "" {
+	if needle == "" || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
 		return nil, nil
 	}
 	out := make([]intel.Symbol, 0)
 	for _, sym := range a.byRefSymbols {
-		if strings.EqualFold(sym.Name, needle) {
+		match := strings.EqualFold(sym.Name, needle)
+		if query.Mode == intel.WorkspaceSymbolQueryQualified {
+			qualified := strings.TrimSpace(sym.Module)
+			if qualified != "" {
+				qualified += "."
+			}
+			qualified += sym.Name
+			match = strings.EqualFold(qualified, needle)
+		}
+		if match {
 			out = append(out, sym)
 		}
 	}
@@ -806,7 +813,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {

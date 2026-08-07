@@ -74,6 +74,7 @@ type LoadResult struct {
 	GeneratedDir   string
 	GeneratedFiles []string
 	Generated      bool
+	Complete       bool
 	Warnings       []string
 }
 
@@ -248,13 +249,22 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 	if err != nil {
 		return LoadResult{}, err
 	}
-	result := LoadResult{GeneratedDir: resolved}
-	files := runtimeGeneratedFiles(resolved)
+	result := LoadResult{GeneratedDir: resolved, Complete: true}
+	files, missing, manifestErr := runtimeGeneratedFiles(resolved)
 	result.GeneratedFiles = files
+	if manifestErr != nil {
+		result.Complete = false
+		result.Warnings = append(result.Warnings, "generated TypeLib manifest could not be loaded: "+manifestErr.Error())
+	}
+	for _, path := range missing {
+		result.Complete = false
+		result.Warnings = append(result.Warnings, "generated TypeLib output is missing: "+path)
+	}
 	db := vbadb.New()
 	if len(files) > 0 {
 		generated, err := vbadb.LoadFiles(files...)
 		if err != nil {
+			result.Complete = false
 			result.Warnings = append(result.Warnings, "generated type database could not be loaded: "+err.Error())
 		} else {
 			db = generated
@@ -288,23 +298,32 @@ func generatedFiles(dir string) []string {
 	return files
 }
 
-func runtimeGeneratedFiles(dir string) []string {
+func runtimeGeneratedFiles(dir string) ([]string, []string, error) {
 	manifest, err := ReadManifest(dir)
 	if err != nil {
-		return generatedFiles(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			return generatedFiles(dir), nil, nil
+		}
+		return nil, nil, err
 	}
 	var files []string
+	var missing []string
 	for _, library := range manifest.Libraries {
-		if strings.TrimSpace(library.Output) == "" {
+		output := strings.TrimSpace(library.Output)
+		if output == "" {
+			missing = append(missing, library.Name)
 			continue
 		}
-		path := filepath.Join(dir, library.Output)
+		path := filepath.Join(dir, output)
 		if _, err := os.Stat(path); err == nil {
 			files = append(files, path)
+		} else {
+			missing = append(missing, path)
 		}
 	}
 	sort.Strings(files)
-	return files
+	sort.Strings(missing)
+	return files, missing, nil
 }
 
 func unsafeCleanTarget(path string) bool {

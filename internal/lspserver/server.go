@@ -167,9 +167,10 @@ func New(opts Options) (*Server, func(), error) {
 		opts: opts,
 		db:   typeDB.DB,
 		analyzer: intel.Analyzer{
-			RootDir: opts.RootDir,
-			Config:  opts.Config,
-			DB:      typeDB.DB,
+			RootDir:                    opts.RootDir,
+			Config:                     opts.Config,
+			DB:                         typeDB.DB,
+			TypeDBResolutionIncomplete: !typeDB.Complete,
 			RealtimeFindingsFunc: func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
 				findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB)
 				if err != nil {

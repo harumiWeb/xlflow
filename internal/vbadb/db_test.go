@@ -39,6 +39,12 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if typ, ok := db.ResolveType("Collection"); !ok || typ.Name != "VBA.Collection" {
 		t.Fatalf("ResolveType(Collection) = %+v, %v", typ, ok)
 	}
+	if typ, ok := db.ResolveType("FileDialog"); !ok || typ.Name != "Office.FileDialog" {
+		t.Fatalf("ResolveType(FileDialog) = %+v, %v", typ, ok)
+	}
+	if typ, ok := db.ResolveType("Office.FileDialogSelectedItems"); !ok || typ.Name != "Office.FileDialogSelectedItems" {
+		t.Fatalf("ResolveType(Office.FileDialogSelectedItems) = %+v, %v", typ, ok)
+	}
 	if typ, ok := db.ResolveGlobal("Worksheets"); !ok || typ.Name != "Excel.Worksheets" {
 		t.Fatalf("ResolveGlobal(Worksheets) = %+v, %v", typ, ok)
 	}

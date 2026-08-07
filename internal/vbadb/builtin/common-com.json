@@ -308,6 +308,44 @@
       ],
       "confidence": "curated",
       "source": "xlflow"
+    },
+    {
+      "name": "Office.FileDialog",
+      "library": "Office",
+      "kind": "class",
+      "aliases": ["FileDialog"],
+      "properties": [
+        { "name": "AllowMultiSelect", "return_type": "Boolean" },
+        { "name": "ButtonName", "return_type": "String" },
+        { "name": "InitialFileName", "return_type": "String" },
+        {
+          "name": "SelectedItems",
+          "return_type": "Office.FileDialogSelectedItems",
+          "read_only": true
+        },
+        { "name": "Title", "return_type": "String" }
+      ],
+      "methods": [{ "name": "Show", "return_type": "Long" }],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "Office.FileDialogSelectedItems",
+      "library": "Office",
+      "kind": "collection",
+      "aliases": ["FileDialogSelectedItems"],
+      "default_member": "Item",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        {
+          "name": "Item",
+          "return_type": "String",
+          "parameters": [{ "name": "Index", "type": "Long" }],
+          "default": true
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
     }
   ],
   "progids": {

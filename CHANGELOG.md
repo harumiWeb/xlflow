@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added `VBA229`, an unsuppressible compile-equivalent diagnostic for
+  unresolved procedure-local `As <Type>` names. It shares production
+  built-in, host/TypeLib, and project-symbol resolution across analyze and LSP.
 - Defined VBE-verified compile-equivalent severity and preflight policy. Split
   deterministic argument binding into `VB045`, scalar `Set` errors into `VB037`,
   and definite ByRef type mismatches into `VBA228`; `VB030`, `VBA206`, `VB001`,

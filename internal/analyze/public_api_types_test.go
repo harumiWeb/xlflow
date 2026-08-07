@@ -170,6 +170,111 @@ End Sub
 	}
 }
 
+func TestVBA229FailsClosedWhenTypeDBLoadIsIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := filepath.Join(dir, "typelib")
+	if err := os.MkdirAll(typeDBDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(typeDBDir, "broken.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim value As MissingGeneratedType
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA229"); len(got) != 0 {
+		t.Fatalf("incomplete TypeDB must not produce VBA229 false positives: %+v", got)
+	}
+	foundWarning := false
+	for _, warning := range result.Warnings {
+		if warning["code"] == "type_db_load_warning" {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("incomplete TypeDB warning was not reported: %+v", result.Warnings)
+	}
+}
+
+func TestVBA229FailsClosedWhenManifestOutputIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := filepath.Join(dir, "typelib")
+	if err := os.MkdirAll(typeDBDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+		GeneratorVersion: "1.2.3",
+		Libraries: []typedb.ManifestLibrary{{
+			Name:   "Vendor",
+			Output: "vendor.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim value As MissingGeneratedType
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA229"); len(got) != 0 {
+		t.Fatalf("incomplete TypeDB must not produce VBA229 false positives: %+v", got)
+	}
+	for _, warning := range result.Warnings {
+		if warning["code"] == "type_db_load_warning" && strings.Contains(warning["message"].(string), "vendor.generated.json") {
+			return
+		}
+	}
+	t.Fatalf("missing manifest output warning was not reported: %+v", result.Warnings)
+}
+
+func TestVBA229FailsClosedWhenManifestIsMalformed(t *testing.T) {
+	dir := t.TempDir()
+	typeDBDir := filepath.Join(dir, "typelib")
+	if err := os.MkdirAll(typeDBDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(typeDBDir, "vendor.generated.json"), []byte(`{
+  "types": [{ "name": "Vendor.Widget", "library": "Vendor", "kind": "class" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(typedb.ManifestPath(typeDBDir), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim value As MissingGeneratedType
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VBA229"); len(got) != 0 {
+		t.Fatalf("malformed TypeDB manifest must not produce VBA229 false positives: %+v", got)
+	}
+	for _, warning := range result.Warnings {
+		if warning["code"] == "type_db_load_warning" && strings.Contains(warning["message"].(string), "generated TypeLib manifest could not be loaded") {
+			return
+		}
+	}
+	t.Fatalf("malformed manifest warning was not reported: %+v", result.Warnings)
+}
+
 func TestVBA222ExcludesHostRequiredEventHandlers(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "Sheet1.bas")

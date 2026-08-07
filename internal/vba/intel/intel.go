@@ -56,9 +56,13 @@ type WorkspaceSymbolQueryFunc func(open []Document, query WorkspaceSymbolQuery) 
 type WorkspaceSymbolsSnapshotFunc func(open []Document) ([]Symbol, error)
 
 type Analyzer struct {
-	RootDir                      string
-	Config                       config.Config
-	DB                           *vbadb.DB
+	RootDir string
+	Config  config.Config
+	DB      *vbadb.DB
+	// TypeDBResolutionIncomplete is true when the production type database
+	// loaded with warnings. Type-dependent unresolved-name diagnostics must
+	// fail closed until the generated TypeLib view is complete.
+	TypeDBResolutionIncomplete   bool
 	DocumentSymbolsFunc          DocumentSymbolsFunc
 	WorkspaceSymbolsFunc         func(open []Document, query string) ([]Symbol, error)
 	WorkspaceSymbolQueryFunc     WorkspaceSymbolQueryFunc
@@ -243,6 +247,11 @@ func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc D
 			out = append(out, diagnostic)
 		}
 	}
+	for _, diagnostic := range a.LocalTypeNameDiagnosticsContext(ctx, doc) {
+		if isCompileEquivalentDiagnostic(diagnostic.Code) {
+			out = append(out, diagnostic)
+		}
+	}
 	return out
 }
 
@@ -290,6 +299,13 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 	}
 	if err != nil {
 		return append(out, lineDiagnostic("VBA000", "error", 0, err.Error()))
+	}
+	finishStage = analysisstats.Measure(ctx, "local_type_diagnostics")
+	localTypeDiagnostics := a.localTypeNameDiagnostics(ctx, doc, procedureIR)
+	finishStage(len(localTypeDiagnostics), nil)
+	out = append(out, localTypeDiagnostics...)
+	if ctx.Err() != nil {
+		return nil
 	}
 	finishStage = analysisstats.Measure(ctx, "cfg")
 	controlFlow, err := controlFlowForDocumentContext(ctx, doc, procedureIR)

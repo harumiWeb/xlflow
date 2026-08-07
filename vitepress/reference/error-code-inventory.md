@@ -451,6 +451,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `live_session_dirty`
 - `live_session_newer_than_disk`
 - `live_workbook`
+- `local_type_diagnostics`
 - `local_variable`
 - `location_capture`
 - `logical_line`

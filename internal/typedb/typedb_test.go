@@ -3,6 +3,7 @@ package typedb
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -138,6 +139,9 @@ func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
 	if !result.Generated {
 		t.Fatal("generated DB should be loaded")
 	}
+	if !result.Complete {
+		t.Fatal("successfully loaded generated DB should be complete")
+	}
 	if typ, ok := result.DB.ResolveType("Vendor.Widget"); !ok || typ.Name != "Vendor.Widget" {
 		t.Fatalf("generated type missing: %+v, %v", typ, ok)
 	}
@@ -187,5 +191,61 @@ func TestLoadForRuntimeUsesManifestOutputsWhenPresent(t *testing.T) {
 	}
 	if _, ok := result.DB.ResolveType("Vendor.Stale"); ok {
 		t.Fatal("stale output outside manifest should not be loaded")
+	}
+}
+
+func TestLoadForRuntimeMarksMissingManifestOutputsIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteManifest(dir, Manifest{
+		GeneratorVersion: "1.2.3",
+		Libraries: []ManifestLibrary{{
+			Name:   "Vendor",
+			Output: "vendor.generated.json",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Complete {
+		t.Fatal("missing manifest output should make the TypeDB incomplete")
+	}
+	if len(result.GeneratedFiles) != 0 {
+		t.Fatalf("generated files = %+v, want none", result.GeneratedFiles)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "vendor.generated.json") {
+		t.Fatalf("warnings = %+v, want missing output warning", result.Warnings)
+	}
+}
+
+func TestLoadForRuntimeMarksMalformedManifestIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vendor.generated.json"), []byte(`{
+  "types": [{ "name": "Vendor.Widget", "library": "Vendor", "kind": "class" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ManifestPath(dir), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Complete {
+		t.Fatal("malformed manifest should make the TypeDB incomplete")
+	}
+	if len(result.GeneratedFiles) != 0 {
+		t.Fatalf("generated files = %+v, want none", result.GeneratedFiles)
+	}
+	if _, ok := result.DB.ResolveType("Vendor.Widget"); ok {
+		t.Fatal("generated files must not be loaded when the manifest is malformed")
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "generated TypeLib manifest could not be loaded") {
+		t.Fatalf("warnings = %+v, want manifest load warning", result.Warnings)
 	}
 }

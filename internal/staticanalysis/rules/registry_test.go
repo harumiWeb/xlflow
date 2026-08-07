@@ -13,7 +13,7 @@ VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
-VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228`)
+VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -79,6 +79,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	byRefMismatch, ok := Lookup("VBA228")
 	if !ok || byRefMismatch.EvidenceClass != EvidenceCompileEquivalent || !byRefMismatch.CompileEquivalent || byRefMismatch.DefaultSeverity != SeverityError || !byRefMismatch.PreflightBlocking || byRefMismatch.InlineSuppressible || byRefMismatch.Configurable {
 		t.Fatalf("unexpected VBA228 metadata: %+v, %v", byRefMismatch, ok)
+	}
+	localType, ok := Lookup("VBA229")
+	if !ok || localType.Family != FamilyAnalyze || localType.EvidenceClass != EvidenceCompileEquivalent || !localType.CompileEquivalent || localType.DefaultSeverity != SeverityError || !reflect.DeepEqual(localType.SupportedSeverities, []RuleSeverity{SeverityError}) || !reflect.DeepEqual(localType.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) || !localType.DefaultEnabled || !localType.PreflightBlocking || localType.InlineSuppressible || localType.Configurable || !localType.Realtime || localType.Scope != ScopeProcedureLocal || localType.Precision != PrecisionHigh || localType.Category != CategoryTypeSafety {
+		t.Fatalf("unexpected VBA229 metadata: %+v, %v", localType, ok)
 	}
 	unstable, ok := Lookup("VBA217")
 	if !ok || unstable.DefaultSeverity != SeverityWarning || unstable.PreflightBlocking || !unstable.InlineSuppressible || !unstable.Realtime || unstable.Precision != PrecisionMedium {
