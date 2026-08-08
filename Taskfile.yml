@@ -113,6 +113,16 @@ tasks:
       - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
         platforms: [linux, darwin]
 
+  corpus:test:
+    desc: Run real-world corpus snapshot tests without updating snapshots
+    env:
+      XLFLOW_UPDATE_CORPUS_SNAPSHOTS: "0"
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1 --test.v
+        platforms: [windows]
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1 -v
+        platforms: [linux, darwin]
+
   bench:lsp:
     desc: Run deterministic LSP performance benchmarks
     cmds:

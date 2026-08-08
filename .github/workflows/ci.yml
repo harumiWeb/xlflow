@@ -113,6 +113,19 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Run deterministic static-analysis corpus
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          XLFLOW_UPDATE_CORPUS_SNAPSHOTS=0 \
+            /usr/bin/time -f 'corpus_elapsed_seconds=%e' \
+            go test ./internal/staticanalysis/corpus \
+              -run '^TestRealWorldCorpusSnapshots$' -count=1 -v
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Corpus verification modified the worktree"
+            git status --short
+            exit 1
+          fi
       - run: go build ./...
       - run: go test ./...
       - run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj

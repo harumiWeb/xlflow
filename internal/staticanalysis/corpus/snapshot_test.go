@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/typedb"
@@ -243,12 +244,41 @@ func TestWriteSnapshotSetDoesNotPublishInvalidUpdate(t *testing.T) {
 	}
 }
 
-func runRealWorldCorpus(repoRoot string) (Report, error) {
+func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, error) {
+	var timingLogf func(string, ...any)
+	if len(logf) > 0 {
+		timingLogf = logf[0]
+	}
+	started := time.Now()
+	defer func() {
+		if timingLogf != nil {
+			timingLogf("corpus timing: total=%s", time.Since(started))
+		}
+	}()
+
 	nativeProjects, err := DiscoverExampleProjects(repoRoot)
 	if err != nil {
 		return Report{}, err
 	}
-	nativeReport, nativeErr := RunProjects(nativeProjects)
+	var nativeReport Report
+	nativeFailed := false
+	for _, project := range nativeProjects {
+		projectStarted := time.Now()
+		report, err := RunProjects([]NativeProject{project})
+		nativeReport.Surfaces = append(nativeReport.Surfaces, report.Surfaces...)
+		nativeReport.Diagnostics = append(nativeReport.Diagnostics, report.Diagnostics...)
+		nativeReport.Failures = append(nativeReport.Failures, report.Failures...)
+		if err != nil {
+			nativeFailed = true
+		}
+		if timingLogf != nil {
+			timingLogf("corpus timing: project=%s elapsed=%s", project.ID, time.Since(projectStarted))
+		}
+	}
+	var nativeErr error
+	if nativeFailed {
+		nativeErr = &RunError{Failures: append([]Failure(nil), nativeReport.Failures...)}
+	}
 	manifestPath := filepath.Join(repoRoot, "testdata", "static-analysis-corpus", "manifest.json")
 	manifest, corpusRoot, manifestErr := LoadManifest(manifestPath)
 	if manifestErr != nil {
@@ -258,13 +288,35 @@ func runRealWorldCorpus(repoRoot string) (Report, error) {
 	if selectErr != nil {
 		return nativeReport, errors.Join(nativeErr, selectErr)
 	}
-	thirdReport, thirdErr := RunThirdPartyProjects(corpusRoot, thirdProjects, MaterializeOptions{})
+	var thirdReport Report
+	thirdFailed := false
+	for _, project := range thirdProjects {
+		projectStarted := time.Now()
+		report, err := RunThirdPartyProjects(corpusRoot, []Project{project}, MaterializeOptions{})
+		thirdReport.Surfaces = append(thirdReport.Surfaces, report.Surfaces...)
+		thirdReport.Diagnostics = append(thirdReport.Diagnostics, report.Diagnostics...)
+		thirdReport.Failures = append(thirdReport.Failures, report.Failures...)
+		thirdReport.Skipped = append(thirdReport.Skipped, report.Skipped...)
+		if err != nil {
+			thirdFailed = true
+		}
+		if timingLogf != nil {
+			timingLogf("corpus timing: project=third_party/%s elapsed=%s", project.ID, time.Since(projectStarted))
+		}
+	}
+	var thirdErr error
+	if thirdFailed {
+		sortThirdPartyFailuresAndSkips(&thirdReport)
+		thirdErr = &RunError{Failures: append([]Failure(nil), thirdReport.Failures...)}
+	}
 	combined := Report{
 		Surfaces:    append(append([]SurfaceResult(nil), nativeReport.Surfaces...), thirdReport.Surfaces...),
 		Diagnostics: append(append([]Diagnostic(nil), nativeReport.Diagnostics...), thirdReport.Diagnostics...),
 		Failures:    append(append([]Failure(nil), nativeReport.Failures...), thirdReport.Failures...),
 		Skipped:     append(append([]Skip(nil), nativeReport.Skipped...), thirdReport.Skipped...),
 	}
+	sortDiagnostics(combined.Diagnostics)
+	sortThirdPartyFailuresAndSkips(&combined)
 	return combined, errors.Join(nativeErr, thirdErr)
 }
 
@@ -276,7 +328,7 @@ func TestRealWorldCorpusSnapshots(t *testing.T) {
 	// Snapshot identities must not depend on a developer's generated TypeLib
 	// database. Use only the embedded built-in database for every platform.
 	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
-	report, runErr := runRealWorldCorpus(repoRoot)
+	report, runErr := runRealWorldCorpus(repoRoot, t.Logf)
 	if runErr != nil {
 		t.Fatalf("real-world corpus execution failed: %v", runErr)
 	}
