@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced conservative data-flow analysis allocation pressure by comparing
+  deterministic propagation paths without repeatedly serializing them, and
+  indexed effect-summary candidate lookup so matching one call no longer
+  clones the complete project summary. Added developer-only real-world corpus
+  benchmarks and profiling commands for the `std-vba` and `ronecone` analyzer
+  hotspots.
 - Added context-aware cancellation to procedure-level `VBA224` dataflow
   analysis and propagated explicit cancellation errors through batch and
   real-time analyzer paths.

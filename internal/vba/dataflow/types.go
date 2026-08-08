@@ -4,6 +4,7 @@ package dataflow
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -161,10 +162,131 @@ func sourceKey(source Source) string {
 	return fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%d\x00%d", source.Kind, strings.ToLower(source.Label), source.Range.StartByte, source.Range.EndByte, source.Range.StartLine, source.StatementID)
 }
 
-func pathKey(path []PathStep) string {
-	var b strings.Builder
-	for _, step := range path {
-		fmt.Fprintf(&b, "%s\x00%s\x00%d\x00%d\x00%d\x00%d\x01", step.Kind, strings.ToLower(step.Label), step.Range.StartByte, step.Range.EndByte, step.Range.StartLine, step.StatementID)
+// comparePathKeys compares the byte sequences formerly produced by pathKey
+// without materializing those sequences. Labels use the allocation-free ASCII
+// case fold on the common path and fall back to strings.ToLower for Unicode.
+func comparePathKeys(left, right []PathStep) int {
+	leftKey := pathKeyIterator{path: left}
+	rightKey := pathKeyIterator{path: right}
+	for {
+		leftByte, leftOK := leftKey.next()
+		rightByte, rightOK := rightKey.next()
+		switch {
+		case !leftOK && !rightOK:
+			return 0
+		case !leftOK:
+			return -1
+		case !rightOK:
+			return 1
+		case leftByte < rightByte:
+			return -1
+		case leftByte > rightByte:
+			return 1
+		}
 	}
-	return b.String()
+}
+
+type pathKeyIterator struct {
+	path []PathStep
+
+	step  int
+	field int
+	index int
+
+	labelReady  bool
+	labelASCII  bool
+	foldedLabel string
+
+	decimalReady  bool
+	decimalLength int
+	decimal       [32]byte
+}
+
+func (it *pathKeyIterator) next() (byte, bool) {
+	for it.step < len(it.path) {
+		step := &it.path[it.step]
+		switch it.field {
+		case 0:
+			if it.index < len(step.Kind) {
+				value := step.Kind[it.index]
+				it.index++
+				return value, true
+			}
+			it.advanceField()
+		case 1, 3, 5, 7, 9:
+			it.advanceField()
+			return 0, true
+		case 2:
+			if !it.labelReady {
+				it.prepareLabel(step.Label)
+			}
+			label := step.Label
+			if !it.labelASCII {
+				label = it.foldedLabel
+			}
+			if it.index < len(label) {
+				value := label[it.index]
+				if it.labelASCII && value >= 'A' && value <= 'Z' {
+					value += 'a' - 'A'
+				}
+				it.index++
+				return value, true
+			}
+			it.advanceField()
+		case 4, 6, 8, 10:
+			if !it.decimalReady {
+				it.prepareDecimal(step)
+			}
+			if it.index < it.decimalLength {
+				value := it.decimal[it.index]
+				it.index++
+				return value, true
+			}
+			it.advanceField()
+		case 11:
+			it.step++
+			it.field = 0
+			it.index = 0
+			return 1, true
+		}
+	}
+	return 0, false
+}
+
+func (it *pathKeyIterator) advanceField() {
+	it.field++
+	it.index = 0
+	it.labelReady = false
+	it.foldedLabel = ""
+	it.decimalReady = false
+	it.decimalLength = 0
+}
+
+func (it *pathKeyIterator) prepareLabel(label string) {
+	it.labelReady = true
+	it.labelASCII = true
+	for index := 0; index < len(label); index++ {
+		if label[index] >= 0x80 {
+			it.labelASCII = false
+			it.foldedLabel = strings.ToLower(label)
+			return
+		}
+	}
+}
+
+func (it *pathKeyIterator) prepareDecimal(step *PathStep) {
+	value := 0
+	switch it.field {
+	case 4:
+		value = step.Range.StartByte
+	case 6:
+		value = step.Range.EndByte
+	case 8:
+		value = step.Range.StartLine
+	case 10:
+		value = step.StatementID
+	}
+	formatted := strconv.AppendInt(it.decimal[:0], int64(value), 10)
+	it.decimalLength = len(formatted)
+	it.decimalReady = true
 }

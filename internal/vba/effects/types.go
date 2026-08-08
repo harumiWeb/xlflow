@@ -108,8 +108,9 @@ func (s ProcedureSummary) Has(kind EffectKind) bool {
 }
 
 type ProjectSummary struct {
-	procedures []ProcedureSummary
-	byKey      map[string]int
+	procedures      []ProcedureSummary
+	byKey           map[string]int
+	byCandidateLine map[int][]int
 }
 
 func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
@@ -118,6 +119,24 @@ func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
 		return ProcedureSummary{}, false
 	}
 	return cloneProcedureSummary(p.procedures[i]), true
+}
+
+// LookupCandidate returns the first summary in deterministic procedure order
+// that matches the resolver candidate. The line index narrows the search while
+// the final comparisons preserve the resolver's case-insensitive matching
+// contract, including Unicode case folding.
+func (p ProjectSummary) LookupCandidate(candidate procedureir.Candidate) (ProcedureSummary, bool) {
+	candidateFile := filepath.ToSlash(candidate.File)
+	for _, i := range p.byCandidateLine[candidate.Line] {
+		id := p.procedures[i].Identity
+		if strings.EqualFold(filepath.ToSlash(id.File), candidateFile) &&
+			strings.EqualFold(id.QualifiedName, candidate.QualifiedName) &&
+			strings.EqualFold(string(id.Kind), candidate.Kind) &&
+			id.DeclarationLine == candidate.Line {
+			return cloneProcedureSummary(p.procedures[i]), true
+		}
+	}
+	return ProcedureSummary{}, false
 }
 
 // All returns a defensive copy in deterministic procedure order.

@@ -1198,7 +1198,7 @@ func joinStateValue(a, b State) State {
 func isEmptyValue(input value) bool { return len(input.origins) == 0 }
 
 func sameProvenance(a, b provenance) bool {
-	return a.state == b.state && sourceKey(a.source) == sourceKey(b.source) && pathKey(a.path) == pathKey(b.path) && sameSafe(a.safe, b.safe)
+	return a.state == b.state && sourceKey(a.source) == sourceKey(b.source) && comparePathKeys(a.path, b.path) == 0 && sameSafe(a.safe, b.safe)
 }
 
 func sameSafe(a, b map[SinkKind]bool) bool {
@@ -1230,7 +1230,7 @@ func betterPath(a, b []PathStep) bool {
 	if len(a) != len(b) {
 		return len(a) < len(b)
 	}
-	return pathKey(a) < pathKey(b)
+	return comparePathKeys(a, b) < 0
 }
 
 func betterPathValue(a, b []PathStep) []PathStep {
