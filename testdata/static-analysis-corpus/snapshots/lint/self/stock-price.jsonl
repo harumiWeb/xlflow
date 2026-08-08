@@ -1,0 +1,2 @@
+{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"lint","code":"VB020","severity":"warning","line":7,"column":7}
+{"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"lint","code":"VB020","severity":"warning","line":357,"column":7}

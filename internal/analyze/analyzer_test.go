@@ -3490,6 +3490,39 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayLifecycleIsDeterministicAcrossRuns(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal chooseFirst As Boolean)
+  Dim values() As Long
+  If chooseFirst Then
+    ReDim values(0 To 1)
+  Else
+    Erase values
+  End If
+  If chooseFirst Then
+    values(0) = 1
+  Else
+    values(1) = 2
+  End If
+End Sub
+`)
+	var want []Finding
+	for i := 0; i < 10; i++ {
+		findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			want = findings
+			continue
+		}
+		if !reflect.DeepEqual(findings, want) {
+			t.Fatalf("array lifecycle findings changed on run %d:\n got=%+v\nwant=%+v", i, findings, want)
+		}
+	}
+}
+
 func TestAnalyzerArrayLifecycleSuppressesRangeValueDuplicates(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit

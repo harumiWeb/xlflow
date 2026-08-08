@@ -147,10 +147,15 @@ func walkArrayCFG(graph *vbacfg.Graph, lines []string, initial arrayFlowState, v
 	inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry: initial}
 	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
 	for len(queued) > 0 {
+		// Block IDs are ordered so the worklist cannot inherit Go map iteration
+		// order and change the fixed-point path through the array state lattice.
 		var id vbacfg.BlockID
+		first := true
 		for candidate := range queued {
-			id = candidate
-			break
+			if first || candidate < id {
+				id = candidate
+				first = false
+			}
 		}
 		delete(queued, id)
 		in := cloneArrayState(inStates[id])
