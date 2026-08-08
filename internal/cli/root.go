@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
@@ -303,7 +304,9 @@ func isGeneratedCobraCommand(cmd *cobra.Command) bool {
 }
 
 func (a *app) executeRoot(root *cobra.Command) error {
-	err := root.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return nil
 	}
@@ -1183,7 +1186,7 @@ func (a *app) formBuildCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.runFormWritePreflight("form build", cfg, opts); err != nil {
+			if err := a.runFormWritePreflight(cmd.Context(), "form build", cfg, opts); err != nil {
 				return err
 			}
 			var env output.Envelope
@@ -1235,7 +1238,7 @@ func (a *app) formApplyCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.runFormWritePreflight("form apply", cfg, opts); err != nil {
+			if err := a.runFormWritePreflight(cmd.Context(), "form apply", cfg, opts); err != nil {
 				return err
 			}
 			var env output.Envelope
@@ -1672,7 +1675,7 @@ func (a *app) initCommand() *cobra.Command {
 					if err != nil {
 						return a.writeFailure("init", output.ExitConfig, "module_install_failed", err)
 					}
-					pushEnv, pushCode, pushErr := a.pushSource("init", cfg, excel.PushOptions{
+					pushEnv, pushCode, pushErr := a.pushSource(cmd.Context(), "init", cfg, excel.PushOptions{
 						BackupMode: "always",
 						Keepalive:  runOpts,
 						SourceRoot: project.ResolveModuleRoot(a.cwd, cfg.Src),
@@ -2383,7 +2386,7 @@ func (a *app) pushCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("push", output.ExitConfig, "push_args_invalid", err)
 			}
-			env, code, err := a.pushSource("push", cfg, pushOpts, "Importing VBA source")
+			env, code, err := a.pushSource(cmd.Context(), "push", cfg, pushOpts, "Importing VBA source")
 			if err != nil {
 				return err
 			}
@@ -2584,7 +2587,7 @@ func (a *app) moduleInstallCommand() *cobra.Command {
 				return a.write(env, output.ExitSuccess)
 			}
 			commandOpts := buildCommandOptions(a.stderrWriter())
-			pushEnv, pushCode, pushErr := a.pushSource("module install", cfg, excel.PushOptions{
+			pushEnv, pushCode, pushErr := a.pushSource(cmd.Context(), "module install", cfg, excel.PushOptions{
 				BackupMode: "always",
 				Keepalive:  commandOpts,
 				SourceRoot: project.ResolveModuleRoot(a.cwd, cfg.Src),
@@ -2628,14 +2631,14 @@ func buildPushOptions(backupMode string, fast bool, changedOnly bool, session bo
 	}, nil
 }
 
-func (a *app) pushSource(command string, cfg config.Config, pushOpts excel.PushOptions, progressLabel string) (output.Envelope, int, error) {
+func (a *app) pushSource(ctx context.Context, command string, cfg config.Config, pushOpts excel.PushOptions, progressLabel string) (output.Envelope, int, error) {
 	if err := a.runUserFormCodeSourcePreflight(command, cfg, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
 	if err := a.runUserFormArtifactPreflight(command, cfg, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
-	if err := a.runSourcePreflight(command, cfg, "pushing to Excel", nil, nil); err != nil {
+	if err := a.runSourcePreflight(ctx, command, cfg, "pushing to Excel", nil, nil); err != nil {
 		return output.Envelope{}, 0, err
 	}
 	var env output.Envelope
@@ -4128,7 +4131,7 @@ func (a *app) runCommand() *cobra.Command {
 				if err != nil {
 					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 				}
-				pushEnv, pushCode, pushErr := a.pushSource("run", cfg, pushOpts, "Importing VBA source")
+				pushEnv, pushCode, pushErr := a.pushSource(cmd.Context(), "run", cfg, pushOpts, "Importing VBA source")
 				if pushErr != nil {
 					return pushErr
 				}
@@ -4137,7 +4140,7 @@ func (a *app) runCommand() *cobra.Command {
 				}
 			}
 			if a.shouldRunSourcePreflight(cfg, opts) {
-				if err := a.runSourcePreflight("run", cfg, "running macros", nil, nil); err != nil {
+				if err := a.runSourcePreflight(cmd.Context(), "run", cfg, "running macros", nil, nil); err != nil {
 					return err
 				}
 			}
@@ -4170,7 +4173,7 @@ func (a *app) runCommand() *cobra.Command {
 				return err
 			}
 			if shouldAttachRunDiagnostic(env) {
-				env.RunDiagnostic = a.buildRunDiagnostic(cfg, env)
+				env.RunDiagnostic = a.buildRunDiagnostic(cmd.Context(), cfg, env)
 			}
 			return a.writeWithOutputOptions(env, code, a.outputOptionsWithVerbose(verbose))
 		},
@@ -7188,7 +7191,7 @@ func (a *app) lintCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResult()
+			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("lint", output.ExitEnvironment, "lint_failed", err)
 			}
@@ -7343,7 +7346,7 @@ func (a *app) analyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResult()
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("analyze", output.ExitEnvironment, "analyze_failed", err)
 			}
@@ -7375,13 +7378,13 @@ func (a *app) checkCommand() *cobra.Command {
 			}
 			env := output.New("check")
 			check := map[string]any{}
-			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResult()
+			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "lint_failed", err)
 			}
 			issues := lintResult.Issues
 			check["lint"] = map[string]any{"status": statusForCount(len(issues)), "count": len(issues)}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResult()
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "analyze_failed", err)
 			}
@@ -7498,7 +7501,7 @@ func withGUIBoundarySummary(value any, boundaries []gui.Boundary) any {
 	return diag
 }
 
-func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[string]any {
+func (a *app) buildRunDiagnostic(ctx context.Context, cfg config.Config, env output.Envelope) map[string]any {
 	diag := map[string]any{}
 	for key, item := range cliObjectMap(env.RunDiagnostic) {
 		diag[key] = item
@@ -7539,7 +7542,8 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 			diag["suggestion"] = "Check object assignments near the reported line; use Set when assigning Workbook, Worksheet, Range, or other object references."
 		}
 	}
-	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+	result, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(ctx)
+	findings := result.Findings
 	if err == nil && env.Error != nil && !sourceNewer {
 		for _, finding := range findings {
 			if finding.Module != "" && env.Error.Source != "" && !strings.EqualFold(finding.Module, env.Error.Source) {
@@ -7563,8 +7567,14 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 	return diag
 }
 
-func (a *app) runSourcePreflight(command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
-	lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
+func (a *app) runSourcePreflight(ctx context.Context, command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResultContext(ctx)
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
@@ -7581,7 +7591,7 @@ func (a *app) runSourcePreflight(command string, cfg config.Config, action strin
 		env.Logs = []string{"blocked before Excel automation to avoid a VBA editor dialog"}
 		return a.write(env, output.ExitValidation)
 	}
-	analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
+	analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResultContext(ctx)
 	if err != nil {
 		exitCode := output.ExitEnvironment
 		if strings.HasPrefix(err.Error(), "parse ") {
@@ -7740,13 +7750,19 @@ func (a *app) runUserFormArtifactPreflight(command string, cfg config.Config, ta
 	return a.write(env, output.ExitValidation)
 }
 
-func (a *app) runFormWritePreflight(command string, cfg config.Config, opts formWriteCommandOptions) error {
+func (a *app) runFormWritePreflight(ctx context.Context, command string, cfg config.Config, opts formWriteCommandOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	targetForms := map[string]bool{opts.Spec.Form.Name: true}
 	if err := a.runUserFormCodeSourcePreflight(command, cfg, targetForms); err != nil {
 		return err
 	}
 	if cfg.UserForm.CodeSource == "sidecar" {
-		if err := a.runSourcePreflight(command, cfg, "writing workbook forms", nil, buildUserFormSourcePathFilter(a.cwd, cfg, targetForms)); err != nil {
+		if err := a.runSourcePreflight(ctx, command, cfg, "writing workbook forms", nil, buildUserFormSourcePathFilter(a.cwd, cfg, targetForms)); err != nil {
 			return err
 		}
 	}

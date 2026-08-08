@@ -17,6 +17,33 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
 
+func TestLinterRunResultContextReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := (Linter{RootDir: t.TempDir(), Config: config.Default()}).RunResultContext(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+	}
+	if !reflect.DeepEqual(result, Result{}) {
+		t.Fatalf("canceled result = %#v, want zero result", result)
+	}
+}
+
+func TestLinterRunResultContextReturnsZeroResultWhenCanceledDuringFinalization(t *testing.T) {
+	ctx := &lintCheckpointContext{cancelAt: 13}
+	result, err := (Linter{RootDir: t.TempDir(), Config: config.Default()}).RunResultContext(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+	}
+	if !reflect.DeepEqual(result, Result{}) {
+		t.Fatalf("canceled result = %#v, want zero result", result)
+	}
+	if ctx.checks != ctx.cancelAt {
+		t.Fatalf("cancellation checks = %d, want finalization check %d", ctx.checks, ctx.cancelAt)
+	}
+}
+
 func TestLintParsedContextReturnsCancellationWithoutPartialIssues(t *testing.T) {
 	doc, err := vbaast.ParseDocument("Main.bas", []byte("Sub Main()\nEnd Sub\n"))
 	if err != nil {

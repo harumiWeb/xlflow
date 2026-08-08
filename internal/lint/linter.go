@@ -88,7 +88,12 @@ const (
 )
 
 func (l Linter) Run() ([]Issue, error) {
-	result, err := l.RunResult()
+	return l.RunContext(context.Background())
+}
+
+// RunContext runs all project lint rules with cooperative cancellation.
+func (l Linter) RunContext(ctx context.Context) ([]Issue, error) {
+	result, err := l.RunResultContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -96,35 +101,68 @@ func (l Linter) Run() ([]Issue, error) {
 }
 
 func (l Linter) RunResult() (Result, error) {
-	files, err := l.files()
+	return l.RunResultContext(context.Background())
+}
+
+// RunResultContext runs all project lint rules with cooperative cancellation.
+func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	files, err := l.filesContext(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
-		fileIssues, err := l.lintFile(file)
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		fileIssues, err := l.lintFileContext(ctx, file)
 		if err != nil {
 			return Result{}, err
 		}
 		issues = append(issues, fileIssues...)
 	}
-	issues = append(issues, l.xlflowUIBareDialogIssues(files)...)
-	projectIssues, err := l.projectIssues()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	uiIssues, err := l.xlflowUIBareDialogIssuesContext(ctx, files)
+	if err != nil {
+		return Result{}, err
+	}
+	issues = append(issues, uiIssues...)
+	projectIssues, err := l.projectIssuesContext(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	issues = append(issues, projectIssues...)
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	sortIssues(issues)
-	directives, warnings, err := suppression.DirectivesForFiles(l.RootDir, files)
+	directives, warnings, err := suppression.DirectivesForFilesContext(ctx, l.RootDir, files)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	issues, suppressionWarnings := applyInlineSuppressions(issues, directives)
 	warnings = append(warnings, suppressionWarnings...)
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	return Result{Issues: issues, Warnings: warnings}, nil
 }
 
-func (l Linter) files() ([]string, error) {
+func (l Linter) filesContext(ctx context.Context) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	dirs := []string{
 		l.Config.Src.Modules,
 		l.Config.Src.Classes,
@@ -134,6 +172,9 @@ func (l Linter) files() ([]string, error) {
 	}
 	var files []string
 	for _, dir := range dirs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		root := filepath.Join(l.RootDir, dir)
 		if _, err := os.Stat(root); err != nil {
 			if os.IsNotExist(err) {
@@ -142,6 +183,9 @@ func (l Linter) files() ([]string, error) {
 			return nil, err
 		}
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return contextErr
+			}
 			if err != nil {
 				return err
 			}
@@ -187,12 +231,15 @@ func (l Linter) shouldIncludeFile(path string) bool {
 	return true
 }
 
-func (l Linter) lintFile(path string) ([]Issue, error) {
+func (l Linter) lintFileContext(ctx context.Context, path string) ([]Issue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	source, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return l.lintSource(path, source, true)
+	return l.lintSourceContext(ctx, path, source, true)
 }
 
 // LintSource runs file-local lint rules against source content supplied by a
@@ -215,10 +262,6 @@ func (l Linter) LintParsed(doc *vbaast.ParsedDocument) ([]Issue, error) {
 // LintParsedContext runs file-local rules against a caller-owned parse tree.
 func (l Linter) LintParsedContext(ctx context.Context, doc *vbaast.ParsedDocument) ([]Issue, error) {
 	return l.lintParsedContext(ctx, doc, false)
-}
-
-func (l Linter) lintSource(path string, source []byte, includeFilesystemRules bool) ([]Issue, error) {
-	return l.lintSourceContext(context.Background(), path, source, includeFilesystemRules)
 }
 
 func (l Linter) lintSourceContext(ctx context.Context, path string, source []byte, includeFilesystemRules bool) ([]Issue, error) {
@@ -1332,12 +1375,20 @@ func PushBlockingIssues(issues []Issue) []Issue {
 	return blocking
 }
 
-func (l Linter) xlflowUIBareDialogIssues(files []string) []Issue {
+func (l Linter) xlflowUIBareDialogIssuesContext(ctx context.Context, files []string) ([]Issue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !hasXlflowUIModule(files) {
-		return nil
+		return nil, nil
 	}
 	var issues []Issue
-	for _, path := range files {
+	for fileIndex, path := range files {
+		if fileIndex&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if strings.EqualFold(filepath.Base(path), "XlflowUI.bas") {
 			continue
 		}
@@ -1347,6 +1398,11 @@ func (l Linter) xlflowUIBareDialogIssues(files []string) []Issue {
 		}
 		lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
 		for i, line := range lines {
+			if i&0xff == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			code := maskStringLiterals(gui.StripComment(line))
 			for _, statement := range splitStatements(code) {
 				for _, symbol := range bareDialogCalls(statement) {
@@ -1359,7 +1415,7 @@ func (l Linter) xlflowUIBareDialogIssues(files []string) []Issue {
 			}
 		}
 	}
-	return issues
+	return issues, ctx.Err()
 }
 
 func hasXlflowUIModule(files []string) bool {
@@ -1479,7 +1535,10 @@ afterVisibility:
 	}
 }
 
-func (l Linter) projectIssues() ([]Issue, error) {
+func (l Linter) projectIssuesContext(ctx context.Context) ([]Issue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cfg := l.Config.Lint
 	if !cfg.DetectScopeShadowing && !cfg.DetectUnusedPrivateProcedures {
 		return nil, nil
@@ -1493,6 +1552,9 @@ func (l Linter) projectIssues() ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var issues []Issue
 	if cfg.DetectScopeShadowing {
 		issues = append(issues, l.symbolScopeIssues(result)...)
@@ -1502,13 +1564,16 @@ func (l Linter) projectIssues() ([]Issue, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		unusedIssues, err := l.unusedPrivateProcedureIssues(result, callResult)
 		if err != nil {
 			return nil, err
 		}
 		issues = append(issues, unusedIssues...)
 	}
-	return issues, nil
+	return issues, ctx.Err()
 }
 
 func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {

@@ -4880,10 +4880,27 @@ code_source = "sidecar"
 			Form: forms.FormSpecForm{Name: "UserForm1"},
 		},
 	}
-	if err := a.runFormWritePreflight("form apply", cfg, opts); err != nil {
+	frmPath := filepath.Join(dir, "src", "forms", "UserForm1.frm")
+	beforeCanceled, err := os.ReadFile(frmPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := a.runFormWritePreflight(canceled, "form apply", cfg, opts); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled runFormWritePreflight() error = %v, want context.Canceled", err)
+	}
+	afterCanceled, err := os.ReadFile(frmPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(afterCanceled, beforeCanceled) {
+		t.Fatalf("canceled runFormWritePreflight() modified %s", frmPath)
+	}
+	if err := a.runFormWritePreflight(context.Background(), "form apply", cfg, opts); err != nil {
 		t.Fatalf("runFormWritePreflight() error = %v, exit = %d", err, output.ExitCode(err))
 	}
-	rewritten, err := os.ReadFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"))
+	rewritten, err := os.ReadFile(frmPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7326,7 +7343,7 @@ func TestBuildRunDiagnosticPreservesExistingScriptDiagnostic(t *testing.T) {
 		"location": map[string]any{"module": "Main", "line": 12},
 	}
 
-	diag := a.buildRunDiagnostic(cfg, env)
+	diag := a.buildRunDiagnostic(context.Background(), cfg, env)
 	if got := cliObjectMap(diag["dialog"]); got["title"] != "Microsoft Visual Basic" {
 		t.Fatalf("dialog metadata was not preserved: %#v", diag)
 	}
@@ -7353,7 +7370,7 @@ func TestBuildRunDiagnosticBackfillsBlankScriptLocation(t *testing.T) {
 		"location": map[string]any{"module": "", "line": 0},
 	}
 
-	diag := a.buildRunDiagnostic(cfg, env)
+	diag := a.buildRunDiagnostic(context.Background(), cfg, env)
 	location := cliObjectMap(diag["location"])
 	if got := location["module"]; got != "Main" {
 		t.Fatalf("module = %#v, want Main: %#v", got, diag)
@@ -7386,7 +7403,7 @@ func TestBuildRunDiagnosticSuggestsPushWhenSourceIsNewer(t *testing.T) {
 
 	a := &app{cwd: dir}
 	env := output.Failure("run", output.Error{Code: "macro_failed", Message: "macro not available", Source: "Sheet1", Number: 1004, Phase: "invoke_macro"})
-	diag := a.buildRunDiagnostic(cfg, env)
+	diag := a.buildRunDiagnostic(context.Background(), cfg, env)
 
 	if got := fmt.Sprint(diag["likely_cause"]); !strings.Contains(got, "not have been pushed") {
 		t.Fatalf("likely_cause = %q, want unpushed source guidance: %#v", got, diag)

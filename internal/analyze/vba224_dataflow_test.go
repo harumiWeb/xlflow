@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"sort"
@@ -9,6 +10,47 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 )
+
+func TestAnalyzerRunResultContextReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := (Analyzer{RootDir: t.TempDir(), Config: config.Default()}).RunResultContext(ctx)
+	if err != context.Canceled {
+		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+	}
+}
+
+func TestAnalyzerRunResultContextReturnsCancellationDuringFileLoop(t *testing.T) {
+	dir := t.TempDir()
+	for _, module := range []string{"First", "Second", "Third"} {
+		writeModule(t, dir, module+".bas", `Attribute VB_Name = "`+module+`"
+Option Explicit
+
+Public Sub Run()
+End Sub
+`)
+	}
+
+	ctx := &cancelAfterChecksContext{Context: context.Background(), remaining: 2}
+	_, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResultContext(ctx)
+	if err != context.Canceled {
+		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+	}
+}
+
+type cancelAfterChecksContext struct {
+	context.Context
+	remaining int
+}
+
+func (c *cancelAfterChecksContext) Err() error {
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
 
 func TestVBA224DetectsDirectAliasAndConcatenation(t *testing.T) {
 	dir := t.TempDir()

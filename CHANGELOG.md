@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added context-aware cancellation to procedure-level `VBA224` dataflow
+  analysis and propagated explicit cancellation errors through batch and
+  real-time analyzer paths.
 - Fixed VBA LSP hover for procedures in open documents so `'''` and Rubberduck
   documentation comments are displayed through the lightweight symbol path.
 - Defined reviewed static-analysis corpus evidence with exact expected and
