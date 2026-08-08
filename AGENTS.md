@@ -252,6 +252,9 @@ Do not rely on grepai trace alone for complete impact analysis.
 - Use `pnpm format:check` for the staged-file format check. Use `task fmt`
   explicitly when repository-wide formatting is intentional, then review the
   complete diff before committing.
+- Formatter-produced diffs may be included in the PR when they are reviewable
+  and within the requested change scope; review the complete diff before
+  staging them.
 - Keep Go formatting and import checks read-only in hooks. Do not run overlapping
   formatters in parallel because `gofmt` and `goimports` can both rewrite Go
   files.
