@@ -267,6 +267,178 @@ empty files during an explicit update so that a reviewed no-diagnostic result
 remains a committed baseline. Updating a baseline is a reviewable change to
 test data, not an automatic acceptance of newly observed analyzer behavior.
 
+## Operational workflow
+
+The corpus has three deliberately separate evidence layers. Focused unit
+fixtures are small, deterministic source snippets owned by the rule tests. They
+prove one parser, diagnostic, severity, or LSP contract at a time and should
+remain the first place to reproduce a suspected regression. The real-world
+corpus runs the production runner against the pinned native and vendored
+projects; it exercises project isolation, source mapping, and interactions
+between rules that a focused fixture cannot model. The VBE oracle is a local,
+developer-only authority for whether a focused VBA case compiles in the real
+Excel/VBE environment. It is not a policy or maintainability oracle, and it is
+never a replacement for either unit fixtures or the real-world run.
+
+Run the Excel-free contracts before investigating a corpus change. On Windows
+use the repository Go wrapper (which selects the supported CGO toolchain); on
+other platforms the direct Go command is equivalent:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/... -count=1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/oracle -run '^TestCommittedFixtureContractsWithoutExcel$' -count=1
+```
+
+For a rule-level change, narrow the focused fixture run to the owning
+diagnostic packages before running the corpus-wide checks:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lint ./internal/analyze -run 'TestLinter|Test.*Analyze' -count=1
+```
+
+```bash
+rtk go test ./internal/staticanalysis/... -count=1
+rtk go test ./internal/oracle -run '^TestCommittedFixtureContractsWithoutExcel$' -count=1
+```
+
+```bash
+rtk go test ./internal/lint ./internal/analyze -run 'TestLinter|Test.*Analyze' -count=1
+```
+
+Then verify the checked-in observed behavior without writing files:
+
+```powershell
+rtk task corpus:test
+```
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+```
+
+```bash
+rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+```
+
+Every snapshot row is an observation of the analyzer version and pinned source
+tree at the time it was reviewed. A row is not a claim that the diagnostic is
+a true positive, that the source is approved, or that the rule is correct. A
+new row therefore requires diagnosis; simply regenerating the file is not a
+false-positive fix.
+
+### Pin and vendor changes
+
+Upstream refreshes are explicit data changes. Review the complete manifest
+change (including the full 40-character commit, source path, profile,
+provenance, and `SOURCE.md`) before running the synchronizer. From the
+repository root, use the supported entry point:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\sync-static-analysis-corpus.ps1
+```
+
+When the exact pinned commit is already available locally, the same operation
+can avoid a network fetch:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\sync-static-analysis-corpus.ps1 -UpstreamCheckout C:\src\tree-sitter-vba
+```
+
+The checkout `HEAD` must equal the manifest pin. The synchronizer's clean-tree
+check, staging, byte-preserving copy, metadata validation, and atomic publish
+are the only supported vendor update path; do not copy files by hand or edit a
+snapshot to hide a vendor diff. Inspect the resulting tree and `SOURCE.md`,
+run the Excel-free contracts, and run the real-world snapshot verification
+before proposing any snapshot update. A pin change and its resulting snapshot
+change are separate review concerns and must be explained separately.
+
+### Reading a snapshot delta
+
+The delta report is grouped by diagnostic code and retains every `+` and `-`
+row, including duplicate identities. Read it in this order:
+
+1. Confirm that the project/file path and line mapping are stable. A path or
+   line movement caused by a vendor refresh is source churn, not automatically
+   an analyzer regression.
+2. Check the manifest pin and vendored tree digest. If the source did not
+   change, reproduce the delta with the focused unit fixture and inspect the
+   rule implementation or registry severity.
+3. Run the same verification twice. A changing result indicates an ordering,
+   parser recovery, temporary-workspace, or other determinism failure; do not
+   update the snapshot until it is fixed.
+4. For a deliberate analyzer change, land the focused fixture and its review
+   first, then perform one explicit snapshot update and include the delta in
+   the change description.
+
+An added diagnostic in a real-world project is not evidence that the project is
+wrong, and a removed diagnostic is not evidence that the rule is now correct.
+Message-only changes are intentionally absent from identity; if message prose
+is a contract, test it in the owning focused fixture instead of broadening the
+snapshot schema.
+
+### False-positive handling and VBE escalation
+
+When a delta looks like a false positive, first reduce it to a focused fixture
+and add an adjacent accepted control. For a compile-equivalent rule, run the
+known controls and the focused VBE case sequentially:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\test-vbe-oracle.ps1 --case known-compile-accept --case known-compile-reject --strict
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\test-vbe-oracle.ps1 --case <focused-case-id> --strict
+```
+
+Only a confirmed `accepted` or `rejected` result with confirmed Excel cleanup
+may be used to bind analyzer behavior. A timeout, unknown modal, failed
+Compile invocation, worker/COM failure, or unconfirmed cleanup is an
+infrastructure failure: stop, inspect the owned Excel process, and do not
+change the analyzer or promote a fixture. Accepted negative controls must
+forbid the bound rule on every declared surface; rejected fixtures should list
+those controls in `negative_controls` as described by the VBE oracle contract.
+Policy and maintainability observations remain unbound when VBE compilation
+cannot establish their meaning. Do not silence a suspected false positive by
+deleting a row or weakening the real-world snapshot comparison.
+
+### Explicit snapshot updates
+
+After the source, fixture, and (when applicable) VBE evidence are reviewed,
+generate snapshots explicitly:
+
+```powershell
+rtk task corpus:update-snapshots
+```
+
+```bash
+rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+```
+
+The update command sets `XLFLOW_UPDATE_CORPUS_SNAPSHOTS=1`; it must complete
+every selected project and both surfaces before the atomic snapshot tree is
+published. Re-run the verify-only command afterwards. A failed update must
+leave the previous tree byte-for-byte unchanged, and a zero-byte successful
+surface remains a required reviewed artifact.
+
+### Execution-time reference
+
+The following are review observations, not CI thresholds; record actual elapsed
+times in a pull request when a run is unusually slow. A Windows run of the
+focused corpus test on 2026-08-08 completed in 41.168 s according to Go's
+package timer and 43.959 s wall-clock time. The Linux CI step emits the same
+project-ordered timing logs plus `corpus_elapsed_seconds` so future regressions
+remain visible. Do not treat this single workstation measurement as a fixed
+upper bound; record a new observation when analyzer or corpus changes make the
+run unusually slow. The VBE oracle is intentionally slower: its default
+per-case timeout is 5 min and a multi-case run can take several minutes because
+Excel startup and cleanup are serialized.
+
+Measure a local run when timing matters:
+
+```powershell
+rtk powershell -NoProfile -Command "Measure-Command { rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1 } | Select-Object TotalSeconds"
+```
+
+Do not parallelize VBE cases or infer a hang from the broad `go test ./...`
+duration; Excel/COM tests have a materially different runtime profile from
+the Excel-free corpus checks.
+
 ## Verification requirements
 
 Manifest tests cover valid v1 data and rejection of unknown fields, unsupported
