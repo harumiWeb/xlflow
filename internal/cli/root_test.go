@@ -4880,7 +4880,7 @@ code_source = "sidecar"
 			Form: forms.FormSpecForm{Name: "UserForm1"},
 		},
 	}
-	if err := a.runFormWritePreflight("form apply", cfg, opts); err != nil {
+	if err := a.runFormWritePreflight(context.Background(), "form apply", cfg, opts); err != nil {
 		t.Fatalf("runFormWritePreflight() error = %v, exit = %d", err, output.ExitCode(err))
 	}
 	rewritten, err := os.ReadFile(filepath.Join(dir, "src", "forms", "UserForm1.frm"))

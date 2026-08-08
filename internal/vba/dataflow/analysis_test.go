@@ -34,7 +34,7 @@ func TestAnalyzeProcedureContextCancelsDuringLargeCFGTraversal(t *testing.T) {
 		}
 	}
 
-	ctx := &cancelAfterChecksContext{remaining: 1000}
+	ctx := &cancelAfterChecksContext{Context: context.Background(), remaining: 1000}
 	result, err := AnalyzeProcedureContext(ctx, procedureir.ProcedureIR{}, cfg.Graph{Blocks: blocks, Edges: edges, Entry: 1}, Options{})
 	if err != context.Canceled {
 		t.Fatalf("large CFG error = %v, want context.Canceled", err)

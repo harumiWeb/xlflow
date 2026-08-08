@@ -267,8 +267,8 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 		if !ok {
 			continue
 		}
-		out := a.transfer(id, state, false)
-		if err := a.contextErr(); err != nil {
+		out, err := a.transfer(id, state, false)
+		if err != nil {
 			return Result{}, stats, err
 		}
 		stats.transfers++
@@ -313,8 +313,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 		if !ok {
 			continue
 		}
-		a.transfer(id, state, true)
-		if err := a.contextErr(); err != nil {
+		if _, err := a.transfer(id, state, true); err != nil {
 			return Result{}, stats, err
 		}
 	}
@@ -345,14 +344,14 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 	return Result{Findings: findings, States: states}, stats, nil
 }
 
-func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) abstractState {
-	if a.contextErr() != nil {
-		return abstractState{}
+func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) (abstractState, error) {
+	if err := a.contextErr(); err != nil {
+		return abstractState{}, err
 	}
 	state := cloneState(input)
 	block, ok := a.blocksByID[id]
 	if !ok || block.Statement == nil {
-		return state
+		return state, nil
 	}
 	statement := *block.Statement
 	recovered := statement.Recovered || statement.Kind == procedureir.StatementRecovered
@@ -363,19 +362,25 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 	}
 	if target := assignmentTarget(statement); !recovered && target != "" && statement.Value != nil {
 		assigned := a.evalExpression(*statement.Value, state)
+		if err := a.contextErr(); err != nil {
+			return abstractState{}, err
+		}
 		assigned = appendPath(assigned, PathStep{Kind: "assignment", Label: statement.Text, Range: statement.Range, StatementID: statement.ID})
 		state.vars[target] = assigned
 	}
 	for _, call := range a.callsByStatement[statement.ID] {
-		if a.contextErr() != nil {
-			return abstractState{}
+		if err := a.contextErr(); err != nil {
+			return abstractState{}, err
 		}
 		a.applySourceWrite(call, state)
 		if collectFindings {
 			a.inspectSink(call, state)
 		}
 	}
-	return state
+	if err := a.contextErr(); err != nil {
+		return abstractState{}, err
+	}
+	return state, nil
 }
 
 func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state abstractState) {
@@ -910,9 +915,6 @@ func (a *procedureAnalyzer) reversePostOrderRankContext(reachable map[cfg.BlockI
 			target := edges[current.next].To
 			current.next++
 			if reachable[target] && !visited[target] {
-				if err := a.contextErr(); err != nil {
-					return nil, err
-				}
 				visited[target] = true
 				stack = append(stack, frame{id: target})
 			}
@@ -988,8 +990,8 @@ func (a *procedureAnalyzer) reachableContext() (map[cfg.BlockID]bool, error) {
 			current := queue[0]
 			queue = queue[1:]
 			for _, edge := range a.outgoing(current) {
-				if a.contextErr() != nil {
-					return nil, a.contextErr()
+				if err := a.contextErr(); err != nil {
+					return nil, err
 				}
 				if seen[edge.To] {
 					continue

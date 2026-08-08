@@ -284,6 +284,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
+			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
 		source, err := os.ReadFile(file)
