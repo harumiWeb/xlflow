@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -34,6 +36,8 @@ const (
 	FailureInvalidProjectConfig FailureKind = "invalid_project_config"
 	FailureParser               FailureKind = "parser_failure"
 	FailureExecution            FailureKind = "execution_failure"
+	FailureWorkspace            FailureKind = "workspace_failure"
+	FailureUnsupportedLayout    FailureKind = "unsupported_project_layout"
 )
 
 type Diagnostic struct {
@@ -53,6 +57,11 @@ type Failure struct {
 	Err     error       `json:"-"`
 }
 
+type Skip struct {
+	Project string `json:"project"`
+	Reason  string `json:"reason"`
+}
+
 type SurfaceResult struct {
 	Project     string       `json:"project"`
 	Surface     Surface      `json:"surface"`
@@ -64,6 +73,7 @@ type Report struct {
 	Surfaces    []SurfaceResult `json:"surfaces"`
 	Diagnostics []Diagnostic    `json:"diagnostics"`
 	Failures    []Failure       `json:"failures"`
+	Skipped     []Skip          `json:"skipped,omitempty"`
 }
 
 // RunError reports project-level failures while preserving all successful and
@@ -170,6 +180,120 @@ func RunProjects(projects []NativeProject) (Report, error) {
 	return runProjects(projects, productionExecutor())
 }
 
+// SelectThirdPartyProjects filters manifest projects by their stable manifest
+// IDs. Empty ids selects every project in manifest order, including disabled
+// entries so callers can report their documented skip reasons.
+func SelectThirdPartyProjects(projects []Project, ids []string) ([]Project, error) {
+	if len(ids) == 0 {
+		return append([]Project(nil), projects...), nil
+	}
+	known := make(map[string]Project, len(projects))
+	for _, project := range projects {
+		if _, exists := known[project.ID]; exists {
+			return nil, fmt.Errorf("duplicate project ID %q", project.ID)
+		}
+		known[project.ID] = project
+	}
+	wanted := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, exists := wanted[id]; exists {
+			return nil, fmt.Errorf("duplicate selected project ID %q", id)
+		}
+		if _, exists := known[id]; !exists {
+			return nil, fmt.Errorf("unknown project ID %q", id)
+		}
+		wanted[id] = struct{}{}
+	}
+	selected := make([]Project, 0, len(ids))
+	for _, project := range projects {
+		if _, ok := wanted[project.ID]; ok {
+			selected = append(selected, project)
+		}
+	}
+	return selected, nil
+}
+
+// RunThirdPartyProjects materializes and analyzes each vendored project in an
+// isolated workspace. The caller supplies the manifest directory as
+// corpusRoot, not the project destination itself.
+func RunThirdPartyProjects(corpusRoot string, projects []Project, opts MaterializeOptions) (Report, error) {
+	return runThirdPartyProjects(corpusRoot, projects, opts, productionExecutor())
+}
+
+func runThirdPartyProjects(corpusRoot string, projects []Project, opts MaterializeOptions, exec executor) (Report, error) {
+	report := Report{
+		Surfaces:    make([]SurfaceResult, 0, len(projects)*2),
+		Diagnostics: make([]Diagnostic, 0),
+		Failures:    make([]Failure, 0),
+		Skipped:     make([]Skip, 0),
+	}
+	for _, project := range projects {
+		projectID := "third_party/" + project.ID
+		if !project.Enabled {
+			report.Skipped = append(report.Skipped, Skip{Project: projectID, Reason: project.Notes})
+			continue
+		}
+		workspace, err := MaterializeThirdPartyProject(corpusRoot, project, opts)
+		if err != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceConfig, Kind: classifyThirdPartyFailure(err), Err: err}
+			report.Failures = append(report.Failures, failure)
+			continue
+		}
+		cfg, err := exec.loadConfig(workspace.Root)
+		if err != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceConfig, Kind: FailureInvalidProjectConfig, Err: err}
+			report.Failures = append(report.Failures, failure)
+			if closeErr := workspace.Close(); closeErr != nil {
+				closeFailure := Failure{Project: projectID, Surface: SurfaceConfig, Kind: FailureWorkspace, Err: closeErr}
+				report.Failures = append(report.Failures, closeFailure)
+			}
+			continue
+		}
+
+		lintSurface := SurfaceResult{Project: projectID, Surface: SurfaceLint, Diagnostics: make([]Diagnostic, 0)}
+		lintResult, lintErr := exec.runLint(workspace.Root, cfg)
+		if lintErr != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceLint, Kind: classifyFailure(lintErr), Err: lintErr}
+			lintSurface.Failure = &failure
+			report.Failures = append(report.Failures, failure)
+		} else if diagnostics, normalizeErr := normalizeThirdPartyLintDiagnostics(projectID, project.Profile, workspace.Mappings, lintResult.Issues); normalizeErr != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceLint, Kind: FailureWorkspace, Err: normalizeErr}
+			lintSurface.Failure = &failure
+			report.Failures = append(report.Failures, failure)
+		} else {
+			lintSurface.Diagnostics = diagnostics
+			report.Diagnostics = append(report.Diagnostics, diagnostics...)
+		}
+		report.Surfaces = append(report.Surfaces, lintSurface)
+
+		analyzeSurface := SurfaceResult{Project: projectID, Surface: SurfaceAnalyze, Diagnostics: make([]Diagnostic, 0)}
+		analyzeResult, analyzeErr := exec.runAnalyze(workspace.Root, cfg)
+		if analyzeErr != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceAnalyze, Kind: classifyFailure(analyzeErr), Err: analyzeErr}
+			analyzeSurface.Failure = &failure
+			report.Failures = append(report.Failures, failure)
+		} else if diagnostics, normalizeErr := normalizeThirdPartyAnalyzeDiagnostics(projectID, project.Profile, workspace.Mappings, analyzeResult.Findings); normalizeErr != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceAnalyze, Kind: FailureWorkspace, Err: normalizeErr}
+			analyzeSurface.Failure = &failure
+			report.Failures = append(report.Failures, failure)
+		} else {
+			analyzeSurface.Diagnostics = diagnostics
+			report.Diagnostics = append(report.Diagnostics, diagnostics...)
+		}
+		report.Surfaces = append(report.Surfaces, analyzeSurface)
+		if closeErr := workspace.Close(); closeErr != nil {
+			failure := Failure{Project: projectID, Surface: SurfaceConfig, Kind: FailureWorkspace, Err: closeErr}
+			report.Failures = append(report.Failures, failure)
+		}
+	}
+	sortDiagnostics(report.Diagnostics)
+	sortThirdPartyFailuresAndSkips(&report)
+	if len(report.Failures) > 0 {
+		return report, &RunError{Failures: append([]Failure(nil), report.Failures...)}
+	}
+	return report, nil
+}
+
 func runProjects(projects []NativeProject, exec executor) (Report, error) {
 	report := Report{
 		Surfaces:    make([]SurfaceResult, 0, len(projects)*2),
@@ -234,6 +358,13 @@ func classifyFailure(err error) FailureKind {
 	return FailureExecution
 }
 
+func classifyThirdPartyFailure(err error) FailureKind {
+	if errors.Is(err, ErrUnsupportedProjectLayout) {
+		return FailureUnsupportedLayout
+	}
+	return FailureWorkspace
+}
+
 func normalizeLintDiagnostics(project string, issues []lint.Issue) []Diagnostic {
 	result := make([]Diagnostic, 0, len(issues))
 	for _, issue := range issues {
@@ -248,6 +379,63 @@ func normalizeAnalyzeDiagnostics(project string, findings []analyze.Finding) []D
 		result = append(result, Diagnostic{Project: project, Surface: SurfaceAnalyze, Code: finding.Code, Severity: finding.Severity, File: filepath.ToSlash(filepath.Clean(finding.File)), Line: finding.Line, Column: finding.Column})
 	}
 	return result
+}
+
+func normalizeThirdPartyLintDiagnostics(project, profile string, mappings map[string]string, issues []lint.Issue) ([]Diagnostic, error) {
+	result := make([]Diagnostic, 0, len(issues))
+	for _, issue := range issues {
+		if profileExcludes(profile, issue.Code) {
+			continue
+		}
+		file, err := remapThirdPartyPath(mappings, issue.File)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, Diagnostic{Project: project, Surface: SurfaceLint, Code: issue.Code, Severity: issue.Severity, File: file, Line: issue.Line, Column: issue.Column})
+	}
+	return result, nil
+}
+
+func normalizeThirdPartyAnalyzeDiagnostics(project, profile string, mappings map[string]string, findings []analyze.Finding) ([]Diagnostic, error) {
+	result := make([]Diagnostic, 0, len(findings))
+	for _, finding := range findings {
+		if profileExcludes(profile, finding.Code) {
+			continue
+		}
+		file, err := remapThirdPartyPath(mappings, finding.File)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, Diagnostic{Project: project, Surface: SurfaceAnalyze, Code: finding.Code, Severity: finding.Severity, File: file, Line: finding.Line, Column: finding.Column})
+	}
+	return result, nil
+}
+
+func remapThirdPartyPath(mappings map[string]string, file string) (string, error) {
+	key := path.Clean(filepath.ToSlash(strings.TrimSpace(file)))
+	if key == "." || key == "" {
+		return "", fmt.Errorf("third-party diagnostic has empty source path")
+	}
+	if source, ok := mappings[key]; ok {
+		return source, nil
+	}
+	return "", fmt.Errorf("third-party diagnostic path %q is not in the materialized source map", file)
+}
+
+func sortThirdPartyFailuresAndSkips(report *Report) {
+	sort.SliceStable(report.Failures, func(i, j int) bool {
+		a, b := report.Failures[i], report.Failures[j]
+		if a.Project != b.Project {
+			return a.Project < b.Project
+		}
+		if a.Surface != b.Surface {
+			return surfaceRank(a.Surface) < surfaceRank(b.Surface)
+		}
+		return a.Kind < b.Kind
+	})
+	sort.SliceStable(report.Skipped, func(i, j int) bool {
+		return report.Skipped[i].Project < report.Skipped[j].Project
+	})
 }
 
 func sortDiagnostics(diagnostics []Diagnostic) {

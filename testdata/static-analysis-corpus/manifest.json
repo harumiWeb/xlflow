@@ -19,7 +19,30 @@
         "license": "MIT",
         "license_file": "LICENSE",
         "source_file": "SOURCE.md"
-      }
+      },
+      "classifications": [
+        { "path": "Form_001_About_frm.cls", "kind": "document" },
+        { "path": "Form_002_Splash_Screen_frm.cls", "kind": "document" },
+        { "path": "Form_003_Buttons_frm.cls", "kind": "document" },
+        { "path": "Form_004_DSN_Password_frm.cls", "kind": "document" },
+        { "path": "Form_005_Access_Security_frm.cls", "kind": "document" },
+        { "path": "Form_006_Dialogbox_Examples_frm.cls", "kind": "document" },
+        { "path": "Form_010_Date_Calendar_frm.cls", "kind": "document" },
+        { "path": "Form_301_Roulette_frm.cls", "kind": "document" },
+        { "path": "Form_700_Create_Filelist_frm.cls", "kind": "document" },
+        { "path": "Form_800_Link_Manager_frm.cls", "kind": "document" },
+        { "path": "Form_900_Check_Runtime_frm.cls", "kind": "document" },
+        { "path": "Form_950_Leszynski_Conventions_frm.cls", "kind": "document" },
+        { "path": "Form_980_Data_Dictionary_frm.cls", "kind": "document" },
+        { "path": "Report_001_Organization_Logo_srp.cls", "kind": "document" },
+        { "path": "Report_099_Object_Listing_Report_rpt.cls", "kind": "document" },
+        { "path": "Report_803_Object_Calendar_List_rpt.cls", "kind": "document" },
+        { "path": "Report_803a_Calendar_List_srp.cls", "kind": "document" },
+        { "path": "Report_804_Weekly_Report_rpt.cls", "kind": "document" },
+        { "path": "Report_805_Timeline_Report_rpt.cls", "kind": "document" },
+        { "path": "Report_950_Leszynski_Conventions_rpt.cls", "kind": "document" },
+        { "path": "Report_980_Data_Dictionary_rpt.cls", "kind": "document" }
+      ]
     },
     {
       "id": "vba-json",
@@ -51,7 +74,15 @@
         "license": "MIT",
         "license_file": "LICENSE",
         "source_file": "SOURCE.md"
-      }
+      },
+      "classifications": [
+        { "path": "examples/analytics/AnalyticsSheet.cls", "kind": "document" },
+        { "path": "examples/linkedin/LinkedInSheet.cls", "kind": "document" },
+        { "path": "examples/maps/MapsSheet.cls", "kind": "document" },
+        { "path": "examples/ops/OPSSheet.cls", "kind": "document" },
+        { "path": "examples/salesforce/SalesforceSheet.cls", "kind": "document" },
+        { "path": "examples/twitter/TwitterSheet.cls", "kind": "document" }
+      ]
     }
   ]
 }

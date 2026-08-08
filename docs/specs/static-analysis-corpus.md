@@ -52,15 +52,21 @@ The JSON document has exactly these top-level fields:
         "license": "MIT",
         "license_file": "LICENSE",
         "source_file": "SOURCE.md"
-      }
+      },
+      "classifications": [{ "path": "examples/analytics/AnalyticsSheet.cls", "kind": "document" }]
     }
   ]
 }
 ```
 
 `notes` is optional; when present it must contain non-whitespace text without
-leading or trailing padding. The allowed profiles are `excel`, `generic-vba`,
-and `access`. `source.origin` is
+leading or trailing padding. A disabled project must provide `notes` as its
+documented skip reason. `classifications` is an optional path-sorted list of
+exact project-relative source paths and module kinds (`standard`, `class`,
+`form`, or `document`). The default mapping is `.bas` to `standard`, `.cls` to
+`class`, and `.frm` to `form`; the adapter never infers document-module
+semantics from names or `Attribute VB_*` values. The allowed profiles are
+`excel`, `generic-vba`, and `access`. `source.origin` is
 currently only `tree-sitter-vba`. `provenance.license` is an SPDX identifier.
 The `license_file` and `source_file` values are required relative paths inside
 the destination project and must be present in the checked-in tree. `SOURCE.md`
@@ -70,9 +76,11 @@ normalization or file-removal performed during import.
 The loader uses strict JSON decoding. It rejects unknown fields, unsupported
 schema/profile/origin values, missing required values, duplicate IDs or
 destination/source paths, duplicate provenance paths, malformed repository
-names or commit hashes, overlapping project paths, and unsorted project
-entries. IDs are stable and lowercase; projects are ordered lexicographically by
-ID. All paths use `/`,
+names or commit hashes, overlapping project paths, and unsorted project or
+classification entries. It also rejects classification traversal, duplicate
+paths, unsupported extensions/kinds, and disabled projects without a reason.
+IDs are stable and lowercase; projects are ordered lexicographically by ID.
+All paths use `/`,
 are relative, contain no empty, `.` or `..` segment, do not name a drive/UNC
 root, and remain within the corpus or upstream checkout boundary. A project
 destination must remain under `projects/third_party`.
@@ -138,10 +146,35 @@ failures separately from normalized diagnostic records.
 
 The runner is test/developer infrastructure. It reads source files only and
 does not modify examples, invoke the corpus synchronizer, fetch upstream
-content, open Excel, or require COM/VBE. Third-party manifest profiles and
-vendored projects remain governed by the synchronization contract above; a
-third-party adapter, golden snapshots, and snapshot-delta reporting are
-follow-up work and must not change this sync contract.
+content, open Excel, or require COM/VBE.
+
+### Third-party workspace adapter
+
+Enabled manifest projects are analyzed independently. For each project the
+adapter creates an invocation-owned temporary child containing
+`src/modules`, `src/classes`, `src/forms`, `src/workbook`, and a generated
+`xlflow.toml`. Source files retain their project-relative subdirectories and
+bytes. The generated config applies the profile policy and uses `frm` as the
+UserForm code source. `.cls` document modules are placed under `src/workbook`
+only when an exact manifest classification says `document`.
+
+The result project ID is `third_party/<manifest-id>` and the diagnostic file is
+the stable project-relative source path. Temporary paths are never emitted in
+normalized diagnostics. Missing source-map entries, unsupported layouts,
+copy collisions, irregular files, and cleanup failures are reported as
+workspace failures; they do not silently fall back to temporary paths.
+Disabled projects are skipped with their manifest `notes` reason. Cleanup is
+performed after both analysis surfaces, including failure paths, and removes
+only the workspace child owned by that invocation.
+
+Profiles are selected in the corpus adapter, not in the shared static-analysis
+registry. `excel` keeps the normal rule set. `generic-vba` and `access` omit
+the Excel object-model rules `VB002`, `VB003`, `VB027`, `VBA104`, `VBA201`,
+`VBA203`, `VBA205`, `VBA211`, `VBA215`, `VBA216`, `VBA217`, `VBA218`, `VBA221`,
+`VBA225`, and `VBA226` from corpus evidence. Configurable rules are disabled
+in the generated project config; always-on `VBA104` and `VBA211` are filtered
+at normalization. This policy affects corpus evidence only and does not alter
+production analyzer semantics.
 
 ## Verification requirements
 
@@ -169,6 +202,14 @@ tree before and after execution to prove that corpus analysis is read-only.
 These tests protect the project-isolation and failure-boundary contracts that
 unit fixtures alone cannot establish.
 
+Third-party adapter tests cover manifest classifications, byte-preserving
+materialization of all three vendored projects, generated profile configs,
+document-module placement, source-map remapping, temporary-path exclusion,
+disabled-project skips, partial-result preservation, and cleanup after both
+success and failure. A representative third-party project is analyzed through
+the production lint/analyze implementations; the full golden snapshot and CI
+integration remain follow-up work.
+
 The corpus does not change static-analysis semantics, public CLI/API output,
 Excel/VBE oracle behavior, or Go dependency-inventory checks. Those suites
 remain separate from synchronization and may run fully offline.
@@ -176,6 +217,7 @@ remain separate from synchronization and may run fully offline.
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`
+- `docs/adr/ADR-0030-third-party-corpus-workspaces.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - `docs/adr/ADR-0026-local-vbe-oracle-evidence.md`
 - Issue #530
