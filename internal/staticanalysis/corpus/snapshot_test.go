@@ -391,6 +391,19 @@ func TestRealWorldCorpusSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reviewPath := filepath.Join(repoRoot, "testdata", "static-analysis-corpus", "reviews", "diagnostics.jsonl")
+	reviews, err := LoadDiagnosticReviews(reviewPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReviewSources(repoRoot, filepath.Join(repoRoot, "testdata", "static-analysis-corpus"), reviews); err != nil {
+		t.Fatal(err)
+	}
+	metrics, err := EvaluateDiagnosticReviews(reviews, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(FormatReviewMetrics(metrics))
 	snapshotRoot := filepath.Join(repoRoot, "testdata", "static-analysis-corpus", "snapshots")
 	if update {
 		if err := WriteSnapshotSet(snapshotRoot, actual); err != nil {

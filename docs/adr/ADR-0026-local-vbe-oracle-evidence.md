@@ -124,3 +124,4 @@ parenthesized-ByRef observation deliberately remains a policy observation.
 - `docs/adr/ADR-0010-hybrid-excel-dialog-watcher.md`
 - `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
+- `docs/adr/ADR-0032-reviewed-static-analysis-corpus-evidence.md`

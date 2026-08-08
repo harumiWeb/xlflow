@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Static-Analysis Corpus"
+  short_description: "Review corpus diagnostics and remediate false positives"
+  default_prompt: "Use $review-static-analysis-corpus to classify corpus diagnostics and safely remediate false positives with committed evidence."

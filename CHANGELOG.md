@@ -6,6 +6,11 @@ All notable changes to xlflow will be documented in this file.
 
 - Fixed VBA LSP hover for procedures in open documents so `'''` and Rubberduck
   documentation comments are displayed through the lightweight symbol path.
+- Defined reviewed static-analysis corpus evidence with exact expected and
+  forbidden diagnostic contracts, durable false-positive records, and
+  reviewed-only per-rule precision metrics. Added developer tasks for printing
+  the metrics and selecting bounded, deterministic unreviewed candidates by
+  rule from committed evidence.
 - Made `VBA224` finding emission independent of dataflow worklist scheduling by
   projecting diagnostics only after block-entry states reach a fixed point.
 - Re-enabled all 16 pinned static-analysis corpus projects. Analyzer type

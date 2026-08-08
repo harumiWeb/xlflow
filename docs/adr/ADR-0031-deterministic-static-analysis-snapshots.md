@@ -146,3 +146,4 @@ None.
 - `docs/specs/static-analysis-corpus.md`
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`
 - `docs/adr/ADR-0030-third-party-corpus-workspaces.md`
+- `docs/adr/ADR-0032-reviewed-static-analysis-corpus-evidence.md`
