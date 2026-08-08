@@ -6,8 +6,8 @@ Accepted
 
 ## Context
 
-Issues #530, #531, and #547 add representative VBA projects to the
-static-analysis test corpus. The projects are useful parser and analyzer
+Issues #530, #531, #547, and #548 add and qualify representative VBA projects
+in the static-analysis test corpus. The projects are useful parser and analyzer
 fixtures, but an unbounded checkout of an upstream branch would make tests
 non-reproducible,
 would allow source changes to enter the repository without review, and would
@@ -32,9 +32,11 @@ projects: `access-examples`, `better-access-charts`, `iguana-tex`, `json`,
 `vba-fast-dictionary`, `vba-fast-json`, `vba-json`, `vba-memory-tools`,
 `vba-web`, `wasabi`, and `webxcel`. Every entry has an explicit host profile,
 source-count contract, enabled state, source path, and provenance metadata.
-Thirteen entries are enabled. `std-vba`, `vba-fast-dictionary`, and
-`vba-fast-json` remain vendored but are disabled with notes documenting
-production parser/analyzer limitations observed during onboarding.
+All 16 entries are enabled. `std-vba`, `vba-fast-dictionary`, and
+`vba-fast-json` were initially kept vendored but disabled while their production
+parser/analyzer completion failures were isolated. Issue #548 enabled them only
+after source-independent analyzer fixes, focused regression coverage, isolated
+lint/analyze runs, and deterministic snapshot verification.
 
 Each manifest entry records an independent destination path, an explicit
 `enabled` value, source origin/path, expected `.bas`/`.cls`/`.frm` source
@@ -106,6 +108,7 @@ requirements to production commands.
 
 - Issue #530 (parent) and issue #531 acceptance requirements.
 - Issue #547 corpus-breadth and duplicate-CI-execution requirements.
+- Issue #548 analyzer-completion and full-corpus enablement requirements.
 - Corpus contract: `docs/specs/static-analysis-corpus.md`.
 - Existing static-analysis ownership and registry boundary:
   `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md` and
@@ -115,6 +118,12 @@ requirements to production commands.
 - Pinned manifest and attribution files:
   `testdata/static-analysis-corpus/manifest.json`, each project's `LICENSE` or
   `LICENSE.txt`, and each project's `SOURCE.md`.
+- Focused completion regressions:
+  `internal/vba/intel/intel_test.go`, `internal/vba/effects/effects_test.go`,
+  and `internal/vba/dataflow/parsechars_regression_test.go`.
+- Full-corpus inventory and snapshot gates:
+  `internal/staticanalysis/corpus/manifest_test.go` and
+  `internal/staticanalysis/corpus/snapshot_test.go`.
 
 ## Supersedes
 
@@ -129,6 +138,7 @@ None.
 - Issue #530
 - Issue #531
 - Issue #547
+- Issue #548
 - `docs/specs/static-analysis-corpus.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - `docs/adr/ADR-0026-local-vbe-oracle-evidence.md`

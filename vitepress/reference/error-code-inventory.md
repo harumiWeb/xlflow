@@ -215,6 +215,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `diff_failed`
 - `direct_callees`
 - `direct_callers`
+- `disabled_count`
 - `disabled_rules`
 - `disabled_rules_precedence`
 - `disables_events`
@@ -251,6 +252,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enable_events_after`
 - `enable_events_before`
 - `enable_vba_object_model_access`
+- `enabled_count`
 - `end_column`
 - `end_if_fragment`
 - `end_line`
@@ -612,6 +614,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `prog_id`
 - `project_config`
 - `project_config_missing`
+- `project_count`
 - `project_create`
 - `project_init`
 - `project_name`
@@ -740,6 +743,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_applied`
 - `source_artifacts`
 - `source_bytes`
+- `source_counts`
 - `source_file`
 - `source_files`
 - `source_lines`

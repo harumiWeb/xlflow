@@ -3770,6 +3770,19 @@ type inferredType struct {
 	Source  string
 }
 
+type assignmentInferenceKey struct {
+	name      string
+	procedure string
+	offset    int
+}
+
+// typeInferenceState is request-local. It prevents an assignment RHS from
+// recursively selecting the same assignment while leaving sibling requests
+// and earlier-assignment propagation independent.
+type typeInferenceState struct {
+	activeAssignments map[assignmentInferenceKey]struct{}
+}
+
 func (a Analyzer) inferWordTypeAt(doc Document, word string, offset int) (string, bool) {
 	inferred, ok := a.inferWordTypeInfoAtContext(doc, word, offset, nil)
 	return inferred.Type, ok
@@ -3780,6 +3793,12 @@ func (a Analyzer) inferWordTypeInfoAt(doc Document, word string, offset int) (in
 }
 
 func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset int, ctx *documentTypeContext) (inferredType, bool) {
+	return a.inferWordTypeInfoAtContextWithState(doc, word, offset, ctx, &typeInferenceState{
+		activeAssignments: make(map[assignmentInferenceKey]struct{}),
+	})
+}
+
+func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string, offset int, ctx *documentTypeContext, state *typeInferenceState) (inferredType, bool) {
 	if strings.EqualFold(word, "Me") {
 		if instance, ok := a.currentInstanceType(doc); ok {
 			return inferredType{Type: instance.Type, Source: instance.Source}, true
@@ -3824,7 +3843,18 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 		lookupOffset = len(doc.Source)
 	}
 	lookupPosition := positionForDocumentByteOffset(doc, lookupOffset)
-	if assignment, ok := index.nearestAssignment(word, currentProcedureNameAt(doc, lookupPosition, ctx), lookupPosition); ok {
+	procedure := currentProcedureNameAt(doc, lookupPosition, ctx)
+	assignment, ok := index.nearestAssignment(word, procedure, lookupPosition)
+	for ok {
+		key := assignmentInferenceKey{
+			name:      indexName(assignment.name),
+			procedure: indexName(assignment.procedure),
+			offset:    assignment.offset,
+		}
+		if _, active := state.activeAssignments[key]; active {
+			assignment, ok = index.nearestAssignmentBefore(word, procedure, lookupPosition, assignment.offset)
+			continue
+		}
 		if match := newAssignmentExprRe.FindStringSubmatch(assignment.expression); len(match) == 2 {
 			return inferredType{Type: match[1], Source: "inferred from Set New"}, true
 		}
@@ -3833,9 +3863,12 @@ func (a Analyzer) inferWordTypeInfoAtContext(doc Document, word string, offset i
 				return inferredType{Type: typ.Name, Source: "inferred from CreateObject"}, true
 			}
 		}
-		if typ, ok := a.resolveDocumentExpressionTypeAtContext(doc, assignment.expression, assignment.offset, ctx); ok {
+		state.activeAssignments[key] = struct{}{}
+		defer delete(state.activeAssignments, key)
+		if typ, ok := a.resolveDocumentExpressionTypeAtContextWithState(doc, assignment.expression, assignment.offset, ctx, state); ok {
 			return inferredType{Type: typ, Source: "inferred from Set assignment"}, true
 		}
+		break
 	}
 	if declared.Type != "" {
 		return declared, true
@@ -4010,7 +4043,13 @@ func (a Analyzer) resolveDocumentExpressionTypeAt(doc Document, expr string, off
 }
 
 func (a Analyzer) resolveDocumentExpressionTypeAtContext(doc Document, expr string, offset int, ctx *documentTypeContext) (string, bool) {
-	return a.resolveExpressionTypeAtContext(doc, expr, true, offset, ctx)
+	return a.resolveDocumentExpressionTypeAtContextWithState(doc, expr, offset, ctx, &typeInferenceState{
+		activeAssignments: make(map[assignmentInferenceKey]struct{}),
+	})
+}
+
+func (a Analyzer) resolveDocumentExpressionTypeAtContextWithState(doc Document, expr string, offset int, ctx *documentTypeContext, state *typeInferenceState) (string, bool) {
+	return a.resolveExpressionTypeAtContextWithState(doc, expr, true, offset, ctx, state)
 }
 
 func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument bool) (string, bool) {
@@ -4018,6 +4057,12 @@ func (a Analyzer) resolveExpressionType(doc Document, expr string, useDocument b
 }
 
 func (a Analyzer) resolveExpressionTypeAtContext(doc Document, expr string, useDocument bool, offset int, ctx *documentTypeContext) (string, bool) {
+	return a.resolveExpressionTypeAtContextWithState(doc, expr, useDocument, offset, ctx, &typeInferenceState{
+		activeAssignments: make(map[assignmentInferenceKey]struct{}),
+	})
+}
+
+func (a Analyzer) resolveExpressionTypeAtContextWithState(doc Document, expr string, useDocument bool, offset int, ctx *documentTypeContext, state *typeInferenceState) (string, bool) {
 	parts := splitMemberExpression(expr)
 	if len(parts) == 0 {
 		return "", false
@@ -4040,7 +4085,7 @@ func (a Analyzer) resolveExpressionTypeAtContext(doc Document, expr string, useD
 	} else if typ, ok := a.DB.ResolveType(base); ok {
 		current = typ.Name
 	} else if useDocument {
-		if inferred, ok := a.inferWordTypeInfoAtContext(doc, base, offset, ctx); ok {
+		if inferred, ok := a.inferWordTypeInfoAtContextWithState(doc, base, offset, ctx, state); ok {
 			current = inferred.Type
 		} else {
 			return "", false

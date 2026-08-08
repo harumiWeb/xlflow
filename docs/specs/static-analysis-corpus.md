@@ -31,11 +31,9 @@ following 16 independent projects and records expected `.bas`, `.cls`, and
 | `wasabi`               | `generic-vba` | `examples/third_party/wasabi-main`               | `projects/third_party/wasabi`               |     22 |      1 |      0 |
 | `webxcel`              | `excel`       | `examples/third_party/webxcel-master`            | `projects/third_party/webxcel`              |     11 |     32 |      0 |
 
-Thirteen entries are enabled. `std-vba`, `vba-fast-dictionary`, and
-`vba-fast-json` are explicitly disabled with manifest notes documenting
-production analyzer/parser limitations; the runner skips them without
-changing the vendored tree. Synchronization reproduces every manifest entry,
-including disabled entries. The upstream is `harumiWeb/tree-sitter-vba` at the full
+All 16 entries are enabled. Synchronization reproduces every manifest entry,
+including an entry that is temporarily disabled with a documented reason. The
+upstream is `harumiWeb/tree-sitter-vba` at the full
 40-character commit `2b944e30c7f76dd3e771d02584b80dd6a4733e4d`. A branch, tag,
 abbreviated hash, or floating dependency is not a valid pin.
 
@@ -475,10 +473,14 @@ surface remains a required reviewed artifact.
 ### Execution-time reference
 
 The following are review observations, not CI thresholds; record actual elapsed
-times in a pull request when a run is unusually slow. A Windows run of the
-focused corpus test on 2026-08-08 completed in 170.79 s wall-clock time
-(package timer 163.097 s) with 13 enabled projects; the verify-only rerun
-completed in the same range. The Linux CI step emits the same project-ordered
+times in a pull request when a run is unusually slow. After all 16 projects
+were enabled on 2026-08-08, the snapshot update completed in 202.028 s by the
+package timer. Three verify-only Windows runs completed in 201.156 s, 196.764 s,
+and 200.100 s wall-clock time; the latter reported a 197.263 s package timer.
+Its newly enabled project timings were 1m22.250s for `std-vba`, 8.209s for
+`vba-fast-dictionary`, and 11.002s for `vba-fast-json`. These results include
+both lint and analyze for each isolated project and remain below the 10-minute
+CI budget. The Linux CI step emits the same project-ordered
 timing logs plus `corpus_elapsed_seconds` so future regressions remain visible.
 Do not treat this single workstation measurement as a fixed upper bound; record
 a new observation when analyzer or corpus changes make the run unusually slow.
@@ -534,9 +536,27 @@ prose exclusion, empty snapshots, added/removed diagnostic failures, missing
 snapshot failures, verify-only behavior, explicit update generation, and the
 no-partial-update guarantee when any project or surface fails.
 
-The corpus does not change static-analysis semantics, public CLI/API output,
-Excel/VBE oracle behavior, or Go dependency-inventory checks. Those suites
-remain separate from synchronization and may run fully offline.
+Corpus synchronization and execution do not change static-analysis semantics,
+public CLI/API output, Excel/VBE oracle behavior, or Go dependency-inventory
+checks. Those suites remain separate from synchronization and may run fully
+offline.
+
+Issue #548 added focused completion regressions at the analyzer boundary. Type
+inference tracks active `Set` assignments so a self-referential RHS terminates
+while still consulting an earlier same-scope assignment. Project effect
+propagation uses indexed evidence and uncertainty membership while preserving
+first-seen ordering. Procedure dataflow uses a deterministic reverse-postorder
+priority worklist built from pre-indexed CFG adjacency, with iterative traversal
+to avoid analyzer-stack growth. The dataflow regression analyzes the vendored
+`LibJSON.ParseChars` procedure and also covers a synthetic 8,000-block-deep,
+4,000-block-wide CFG. These are source-independent analyzer rules; no corpus
+project name, file omission, diagnostic suppression, or relaxed timeout is
+used to make a project complete.
+
+The reverse-postorder change preserves the source, sink, sanitizer, join, and
+path-witness contracts. Snapshot review removed three pre-existing `VBA224`
+rows that arose only from transient, partially propagated FIFO states; all
+remaining diagnostics are stable across repeated verify-only runs.
 
 ## Related
 
@@ -547,3 +567,4 @@ remain separate from synchronization and may run fully offline.
 - `docs/adr/ADR-0026-local-vbe-oracle-evidence.md`
 - Issue #530
 - Issue #531
+- Issue #548
