@@ -116,9 +116,14 @@ jobs:
       - name: Run deterministic static-analysis corpus
         timeout-minutes: 10
         shell: bash
+        env:
+          # The real-world snapshot suite is intentionally opt-in so the
+          # package-wide `go test ./...` below does not execute it a second
+          # time. Keep the dedicated CI gate explicit and reviewable.
+          XLFLOW_RUN_REALWORLD_CORPUS: "1"
+          XLFLOW_UPDATE_CORPUS_SNAPSHOTS: "0"
         run: |
-          XLFLOW_UPDATE_CORPUS_SNAPSHOTS=0 \
-            /usr/bin/time -f 'corpus_elapsed_seconds=%e' \
+          /usr/bin/time -f 'corpus_elapsed_seconds=%e' \
             go test ./internal/staticanalysis/corpus \
               -run '^TestRealWorldCorpusSnapshots$' -count=1 -v
           if [[ -n "$(git status --porcelain)" ]]; then

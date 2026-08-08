@@ -1,0 +1,742 @@
+Attribute VB_Name = "WebShared"
+'@folder("SeleniumVBA.Source")
+' ==========================================================================
+' SeleniumVBA v7.3
+'
+' A Selenium wrapper for browser automation developed for MS Office VBA
+'
+' https://github.com/GCuser99/SeleniumVBA/tree/main
+'
+' Contact Info:
+'
+' https://github.com/6DiegoDiego9
+' https://github.com/GCUser99
+' ==========================================================================
+' MIT License
+'
+' Copyright (c) 2023-2026, GCUser99 and 6DiegoDiego9 (https://github.com/GCuser99/SeleniumVBA)
+'
+' Permission is hereby granted, free of charge, to any person obtaining a copy
+' of this software and associated documentation files (the "Software"), to deal
+' in the Software without restriction, including without limitation the rights
+' to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+' copies of the Software, and to permit persons to whom the Software is
+' furnished to do so, subject to the following conditions:
+'
+' The above copyright notice and this permission notice shall be included in all
+' copies or substantial portions of the Software.
+'
+' THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+' IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+' FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+' AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+' LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+' OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+' SOFTWARE.
+' ==========================================================================
+' For more info:
+' https://docs.microsoft.com/en-us/dotnet/standard/io/file-path-formats
+' http://vbnet.mvps.org/index.html?code/fileapi/pathisrelative.htm
+' https://stackoverflow.com/questions/57475738/ (for use of SetCurrentDirectory)
+' https://stackoverflow.com/a/72736800/11738627 (handling of OneDrive/SharePoint cloud urls)
+
+Option Explicit
+Option Private Module
+
+'for the Sleep procedure
+Public Declare PtrSafe Sub SleepWinAPI Lib "kernel32" Alias "Sleep" (ByVal milliseconds As Long)
+Public Declare PtrSafe Function GetFrequency Lib "kernel32" Alias "QueryPerformanceFrequency" (ByRef Frequency As Currency) As Long
+Public Declare PtrSafe Function GetTime Lib "kernel32" Alias "QueryPerformanceCounter" (ByRef counter As Currency) As Long
+
+Private Declare PtrSafe Function SetCurrentDirectory Lib "kernel32" Alias "SetCurrentDirectoryW" (ByVal lpPathName As LongPtr) As Long
+Private Declare PtrSafe Function PathIsRelative Lib "shlwapi" Alias "PathIsRelativeW" (ByVal pszPath As LongPtr) As Long
+Private Declare PtrSafe Function PathIsURL Lib "shlwapi" Alias "PathIsURLW" (ByVal pszPath As LongPtr) As Long
+
+Private Declare PtrSafe Function FindWindowEx Lib "user32" Alias "FindWindowExW" (ByVal hWndParent As LongPtr, ByVal hWndChildAfter As LongPtr, ByVal lpszClass As LongPtr, ByVal lpszWindow As LongPtr) As LongPtr
+Private Declare PtrSafe Function GetWindowText Lib "user32" Alias "GetWindowTextW" (ByVal hWnd As LongPtr, ByVal lpString As LongPtr, ByVal cch As Long) As Long
+Private Declare PtrSafe Function GetWindowTextLength Lib "user32" Alias "GetWindowTextLengthW" (ByVal hWnd As LongPtr) As Long
+Private Declare PtrSafe Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As LongPtr, lpdwProcessId As Long) As Long
+
+Private Declare PtrSafe Function GetForegroundWindow Lib "user32" () As LongPtr
+
+Private Declare PtrSafe Function GetPrivateProfileString Lib "kernel32" Alias "GetPrivateProfileStringW" (ByVal lpApplicationName As LongPtr, ByVal lpKeyName As LongPtr, ByVal lpDefault As LongPtr, lpReturnedString As Any, ByVal nSize As Long, ByVal lpFileName As LongPtr) As Long
+
+'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptbinarytostringw
+Private Declare PtrSafe Function CryptBinaryToStringW Lib "crypt32" (pbBinary As Any, ByVal cbBinary As Long, ByVal dwFlags As CRYPT_STRING_OPTIONS, ByVal pszString As LongPtr, pcchString As Long) As Long
+'https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptstringtobinaryw
+Private Declare PtrSafe Function CryptStringToBinaryW Lib "crypt32" (ByVal pszString As LongPtr, ByVal cchString As Long, ByVal dwFlags As CRYPT_STRING_OPTIONS, pbBinary As Any, pcbBinary As Long, Optional pdwSkip As Long, Optional pdwFlags As CRYPT_STRING_OPTIONS) As Long
+
+Private Enum CRYPT_STRING_OPTIONS
+    CRYPT_STRING_BASE64 = &H1           'Base64, without headers.
+    CRYPT_STRING_NOCRLF = &H40000000    'Do not append any new line characters to the encoded string.
+    CRYPT_STRING_NOCR = &H80000000      'this will use vbLF for new line character (as opposed to default vbCrLf), compatible with MSXML2
+End Enum
+
+'file download-related stuff
+Private Declare PtrSafe Function WinHttpGetProxyForUrl Lib "WinHttp" (ByVal hSession As LongPtr, ByVal lpcwszUrl As LongPtr, pAutoProxyOptions As WINHTTP_AUTOPROXY_OPTIONS, pProxyInfo As WINHTTP_PROXY_INFO) As Long
+Private Declare PtrSafe Function WinHttpOpen Lib "WinHttp" (ByVal pszAgentW As LongPtr, ByVal dwAccessType As Long, ByVal pszProxyW As LongPtr, ByVal pszProxyBypassW As LongPtr, ByVal dwFlags As Long) As LongPtr
+Private Declare PtrSafe Function WinHttpCloseHandle Lib "WinHttp" (ByVal hInternet As LongPtr) As Long
+Private Declare PtrSafe Function WinHttpGetIEProxyConfigForCurrentUser Lib "winhttp.dll" (ByRef pProxyConfig As WINHTTP_CURRENT_USER_IE_PROXY_CONFIG) As Long
+Private Declare PtrSafe Function GlobalFree Lib "kernel32" (ByVal hMem As LongPtr) As LongPtr
+Private Declare PtrSafe Function lstrlenW Lib "kernel32" (lpString As Any) As Long
+Private Declare PtrSafe Function lstrcpyW Lib "kernel32" (ByVal lpString1 As LongPtr, ByVal lpString2 As LongPtr) As LongPtr
+
+Private Type WINHTTP_AUTOPROXY_OPTIONS
+    dwFlags As Long
+    dwAutoDetectFlags As Long
+    lpszAutoConfigUrl As LongPtr
+    lpvReserved As LongPtr
+    dwReserved As Long
+    fAutoLogonIfChallenged As Long
+End Type
+
+Private Type WINHTTP_PROXY_INFO
+    dwAccessType As Long
+    lpszProxy As LongPtr
+    lpszProxyBypass As LongPtr
+End Type
+
+Private Type WINHTTP_CURRENT_USER_IE_PROXY_CONFIG
+    fAutoDetect As Long
+    lpszAutoConfigUrl As LongPtr
+    lpszProxy As LongPtr
+    lpszProxyBypass As LongPtr
+End Type
+
+Private Const WINHTTP_AUTOPROXY_AUTO_DETECT As Long = &H1
+Private Const WINHTTP_AUTOPROXY_CONFIG_URL As Long = &H2
+Private Const WINHTTP_AUTO_DETECT_TYPE_DHCP As Long = &H1
+Private Const WINHTTP_AUTO_DETECT_TYPE_DNS_A As Long = &H2
+Private Const WINHTTP_ACCESS_TYPE_NO_PROXY As Long = 1
+Private Const HTTPREQUEST_PROXYSETTING_PROXY As Long = 2
+
+' Converts a pointer to a Unicode string using lstrcpyW
+Private Function ptrToStr(ByVal lpsz As LongPtr) As String
+    Dim length As Long
+    If lpsz = 0 Then Exit Function
+    ' Get the length of the Unicode string (in characters)
+    length = lstrlenW(ByVal lpsz)
+    If length > 0 Then
+        ' Allocate a string buffer
+        ptrToStr = String$(length, vbNullChar)
+        ' Copy the Unicode string from unmanaged memory to the VBA string buffer
+        lstrcpyW StrPtr(ptrToStr), lpsz
+    End If
+End Function
+
+Public Function downloadToFile(ByVal Url As String, ByVal filePath As String, Optional ByVal timeout As Long = 30000) As Boolean
+    Dim http As Object
+    Dim bytes() As Byte
+    Dim ieProxy As WINHTTP_CURRENT_USER_IE_PROXY_CONFIG
+    Dim autoProxyOptions As WINHTTP_AUTOPROXY_OPTIONS
+    Dim proxyInfo As WINHTTP_PROXY_INFO
+    Dim hSession As LongPtr
+    Dim proxyStr As String
+    Dim bypassStr As String
+    
+    On Error GoTo ErrHandler
+    
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    http.setTimeouts 0, 60000, 30000, timeout
+    
+    ' Try IE proxy settings first
+    If WinHttpGetIEProxyConfigForCurrentUser(ieProxy) <> 0 Then
+        
+        ' Handle static proxy
+        If ieProxy.lpszProxy <> 0 Then
+            proxyStr = ptrToStr(ieProxy.lpszProxy)
+            If ieProxy.lpszProxyBypass <> 0 Then bypassStr = ptrToStr(ieProxy.lpszProxyBypass)
+            http.setProxy HTTPREQUEST_PROXYSETTING_PROXY, proxyStr, bypassStr
+            GoTo ProxyConfigured
+        End If
+        
+        ' Handle PAC file or auto-detect
+        If ieProxy.lpszAutoConfigUrl <> 0 Or ieProxy.fAutoDetect <> 0 Then
+            hSession = WinHttpOpen(0, WINHTTP_ACCESS_TYPE_NO_PROXY, 0, 0, 0)
+            
+            If hSession <> 0 Then
+                ' Configure auto-proxy options
+                If ieProxy.fAutoDetect <> 0 Then
+                    autoProxyOptions.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT
+                    autoProxyOptions.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP Or WINHTTP_AUTO_DETECT_TYPE_DNS_A
+                End If
+                
+                If ieProxy.lpszAutoConfigUrl <> 0 Then
+                    autoProxyOptions.dwFlags = autoProxyOptions.dwFlags Or WINHTTP_AUTOPROXY_CONFIG_URL
+                    autoProxyOptions.lpszAutoConfigUrl = ieProxy.lpszAutoConfigUrl
+                End If
+                
+                autoProxyOptions.fAutoLogonIfChallenged = 1
+                
+                ' Get proxy for this specific URL
+                If WinHttpGetProxyForUrl(hSession, StrPtr(Url), autoProxyOptions, proxyInfo) <> 0 Then
+                    If proxyInfo.lpszProxy <> 0 Then
+                        proxyStr = ptrToStr(proxyInfo.lpszProxy)
+                        If proxyInfo.lpszProxyBypass <> 0 Then bypassStr = ptrToStr(proxyInfo.lpszProxyBypass)
+                        http.setProxy HTTPREQUEST_PROXYSETTING_PROXY, proxyStr, bypassStr
+                    End If
+                End If
+                
+                ' Free proxy info strings
+                If proxyInfo.lpszProxy <> 0 Then GlobalFree proxyInfo.lpszProxy
+                If proxyInfo.lpszProxyBypass <> 0 Then GlobalFree proxyInfo.lpszProxyBypass
+                
+                WinHttpCloseHandle hSession
+            End If
+        End If
+        
+ProxyConfigured:
+        ' Free IE proxy config strings
+        If ieProxy.lpszProxy <> 0 Then GlobalFree ieProxy.lpszProxy
+        If ieProxy.lpszProxyBypass <> 0 Then GlobalFree ieProxy.lpszProxyBypass
+        If ieProxy.lpszAutoConfigUrl <> 0 Then GlobalFree ieProxy.lpszAutoConfigUrl
+    End If
+    
+    ' Send request
+    http.Open "GET", Url, False
+    http.setRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    http.Send
+    
+    ' Check status and save response to file
+    If http.Status >= 200 And http.Status < 300 Then
+        bytes = http.ResponseBody
+        saveByteArrayToFile bytes, filePath
+        downloadToFile = True
+    Else
+        Debug.Print "HTTP error: " & http.Status
+    End If
+    
+    Exit Function
+    
+ErrHandler:
+    Debug.Print "Error: " & Err.Description
+End Function
+
+Public Function getFullLocalPath(ByVal inputPath As String, Optional ByVal basePath As String = vbNullString, Optional ByVal targetExists As Boolean = True) As String
+    'Returns an absolute path from a relative path and a fully qualified base path.
+    'basePath defaults to the folder path of the document that holds the Active VBA Project
+    'fso.GetAbsolutePathName interprets a url as a relative path, so must avoid for url's
+
+    Dim fso As New FileSystemObject
+    Dim savePath As String
+    Dim parentFolder As String
+    Dim pathSep As String
+
+    'make sure no rogue beginning or ending spaces and expand "%[Environ Variable]%" if in the path
+    inputPath = expandEnvironVariable(VBA.Trim$(inputPath))
+
+    If isPathRelative(inputPath) Then
+        'convert relative path to absolute
+        If basePath = vbNullString Then
+            basePath = activeVBAProjectFolderPath
+        Else
+            'make sure no rogue beginning or ending spaces and expand "%[Environ Variable]%" if in the basePath
+            basePath = expandEnvironVariable(VBA.Trim$(basePath))
+            'it's possible that user specified a relative reference folder path - convert it to absolute relative to
+            'the folder path of the document that holds the Active VBA Project
+            If isPathRelative(basePath) Then basePath = getFullLocalPath(basePath, activeVBAProjectFolderPath, True)
+        End If
+
+        'convert OneDrive path if needed
+        If isPathHTTPS(basePath) Then
+            basePath = getLocalOneDrivePath(basePath) 'assumes basePath exists
+        End If
+        
+        'check that reference path exists and notify user if not
+        If Not fso.FolderExists(basePath) Then
+            If Not isPathHTTPS(basePath) Then 'its a url which fso doesn't support - must trust that it exists (@6DiegoDiego9)
+                Err.Raise 1, "WebShared", "Reference folder basePath does not exist." & vbNewLine & vbNewLine & basePath & vbNewLine & vbNewLine & "Please specify a valid folder path."
+            End If
+        End If
+        
+        'employ fso to make the conversion of relative path to absolute
+        savePath = CurDir$()
+        SetCurrentDirectory StrPtr(basePath)
+        getFullLocalPath = fso.GetAbsolutePathName(inputPath)
+        SetCurrentDirectory StrPtr(savePath)
+    Else
+        'its an absolute path
+        'just in case OneDrive/SharePoint user has specified a path built with ThisWorkbook.Path...
+        If isPathHTTPS(inputPath) Then
+            If targetExists Then
+                inputPath = getLocalOneDrivePath(inputPath) 'assumes target exists
+            Else
+                'target does not exist, so resolve the parent folder instead, and then rebuild path
+                parentFolder = getLocalOneDrivePath(fso.GetParentFolderName(inputPath))
+                If InStr(parentFolder, "\") Then pathSep = "\" Else pathSep = "/"
+                inputPath = parentFolder & pathSep & fso.GetFileName(inputPath)
+            End If
+        End If
+        
+        'normalize the path if its not a url - this insures that path separators are correct, and
+        'if a folder, has no ending separator
+        If Not isPathUrl(inputPath) Then inputPath = fso.GetAbsolutePathName(inputPath)
+        
+        getFullLocalPath = inputPath
+    End If
+End Function
+
+Private Function getLocalOneDrivePath(ByVal targetPath As String) As String
+    'for more info, see https://stackoverflow.com/a/72736800/11738627 post by Guido Witt-Dorring
+    'this function returns the original/local disk path associated with a synched OneDrive or SharePoint cloud url
+    'this function assumes that the specified path exists
+    Dim origPath As String: origPath = targetPath '(@6DiegoDiego9)
+
+    Const HKCU = &H80000001
+    Dim objReg As Object, rPath As String, subKeys() As Variant, subKey As Variant
+    Dim urlNamespace As String, mountPoint As String, secPart As String
+    Set objReg = GetObject("winmgmts:{impersonationLevel=impersonate}!\\." & "\root\default:StdRegProv")
+    rPath = "Software\SyncEngines\Providers\OneDrive\"
+    objReg.EnumKey HKCU, rPath, subKeys
+    For Each subKey In subKeys
+        objReg.GetStringValue HKCU, rPath & subKey, "UrlNamespace", urlNamespace
+        If urlNamespace <> "" And InStr(targetPath & "/", urlNamespace) > 0 Then
+            objReg.GetStringValue HKCU, rPath & subKey, "MountPoint", mountPoint
+            secPart = Replace$(Mid$(targetPath, Len(urlNamespace) + 1), "/", "\") '+1
+            Dim firstSecPart As String: firstSecPart = secPart
+            targetPath = mountPoint & secPart
+            Do Until Dir(targetPath, vbDirectory) <> "" Or InStr(2, secPart, "\") = 0
+                secPart = Mid$(secPart, InStr(2, secPart, "\"))
+                targetPath = mountPoint & secPart
+            Loop
+            Exit For
+        End If
+    Next subKey
+    If firstSecPart = secPart Then targetPath = mountPoint 'OneDrivePersonal root folder
+    
+    Dim fso As New FileSystemObject
+    If Not (fso.FileExists(targetPath) Or fso.FolderExists(targetPath)) Then
+        targetPath = origPath 'fallback to original path if it's online-only (excluded from sync) (@6DiegoDiego9)
+    End If
+    getLocalOneDrivePath = targetPath
+End Function
+
+Private Function isPathRelative(ByVal sPath As String) As Boolean
+    'PathIsRelative interprets a properly formed url as relative, so add a check for url too
+    isPathRelative = (PathIsRelative(StrPtr(sPath)) = 1 And PathIsURL(StrPtr(sPath)) = 0)
+End Function
+
+Private Function isPathHTTPS(ByVal sPath As String) As Boolean
+    isPathHTTPS = (VBA.Left$(sPath, 8) = "https://")
+End Function
+
+Private Function isPathUrl(ByVal sPath As String) As Boolean
+    isPathUrl = (PathIsURL(StrPtr(sPath)) = 1)
+End Function
+
+Private Function isArrayInitialized(ByRef arry() As Variant) As Boolean
+    If (Not arry) = -1 Then isArrayInitialized = False Else isArrayInitialized = True
+End Function
+
+Private Function activeVBAProjectFolderPath() As String
+    'This returns the calling code project's parent document path. If caller is from a project that references the SeleniumVBA Add-in
+    'then this returns the path to the caller, not the Add-in (unless they are the same).
+    'But be aware that if qc'ing this routine in Debug mode, the path to this SeleniumVBA project will be returned, which
+    'may not be the caller's intended target if it resides in a different project.
+    Dim fso As FileSystemObject
+    Dim oApp As Object
+    
+    Set oApp = Application 'late bound needed for cross-app compatibility
+    Select Case oApp.Name
+    Case "Microsoft Excel"
+        'first check if programatic access to vba is trusted - if so, then this works for all tested cases - then we are done
+        If vbaIsTrusted Then
+            Set fso = New FileSystemObject
+            'below will return an error if active project's host doc has not yet been saved (has no valid path yet)
+            On Error Resume Next
+            activeVBAProjectFolderPath = fso.GetParentFolderName(oApp.VBE.ActiveVBProject.fileName)
+            If Err.Number > 0 Then Err.Raise 1, , "Error: unable to get the active Caller path - make sure the parent document has been saved."
+            On Error GoTo 0
+            Exit Function
+        End If
+        
+        'handle vba-is-not-trusted cases
+        
+        'test if procedure was launched by a formula, shape button, or form control (not ActiveX) embedded in a worksheet
+        If TypeName(oApp.Caller) <> "Error" Then
+            'found embedded forumla, shape, or form control
+            activeVBAProjectFolderPath = oApp.ActiveWorkbook.Path
+            If activeVBAProjectFolderPath = vbNullString Then Err.Raise 1, , "Error: unable to get the active Caller path - make sure the parent document has been saved."
+            Exit Function
+        End If
+        
+        'handle cases where:
+        '1) procedure launched in the VBE (Run)
+        '2) procedure launched by clicking a worksheet-embedded ActiveX control with VBE window having been opened previously
+        Dim ThisAppProcessID As Long
+        GetWindowThreadProcessId oApp.hWnd, ThisAppProcessID
+        
+        Do 'search for an open VBE window
+            Dim hWnd As LongPtr
+            Dim lpszClass As String
+            lpszClass = "wndclass_desked_gsk"
+            hWnd = FindWindowEx(0, hWnd, StrPtr(lpszClass), 0&)
+            If hWnd > 0 Then
+                Dim WndProcessID As Long
+                GetWindowThreadProcessId hWnd, WndProcessID
+                
+                If ThisAppProcessID = WndProcessID Then
+                    'get window caption
+                    Dim bufferLen As Long, caption As String, result As Long
+                    bufferLen = GetWindowTextLength(hWnd)
+                    caption = String$(bufferLen + 1, vbNullChar)
+                    result = GetWindowText(hWnd, StrPtr(caption), bufferLen + 1)
+                    caption = Left$(caption, InStr(caption, vbNullChar) - 1)
+                    'extract filename from the caption
+                    Dim oRegExp As New RegExp
+                    
+                    oRegExp.Pattern = "^Microsoft Visual Basic[^-]*- (.*\.xl\w{1,2})(?:|(?:| -) \[.*\])$"
+                    Dim oMatches As MatchCollection
+                    Set oMatches = oRegExp.execute(caption)
+                    If oMatches.Count = 1 Then
+                        'found vbe window and succesfully parsed caption
+                        Dim sFilename As String
+                        sFilename = oMatches.Item(0).SubMatches(0)
+                        'the following returns vbNullString if workbook has not been saved (has no valid path yet)
+                        activeVBAProjectFolderPath = oApp.Workbooks(sFilename).Path
+                        If activeVBAProjectFolderPath = vbNullString Then Err.Raise 1, , "Error: unable to get the active VBProject path - make sure the parent document has been saved."
+                        Exit Function
+                    Else
+                        'handle edge case where embedded ActiveX control is caller and VBE window open but "uninitialized"
+                        'this edge case happens under the following conditions:
+
+                        '1) caller is a worksheet-embedded ActiveX button (not a form control)
+                        '2) caller workbook is opened, user opens VBE, but then closes without running or editing
+                        '3) user clicks on button causing a control event to initiate SeleniumVBA procedure
+
+                        'detect open but "uninitialized" VBE window looking for a pattern like this:
+                        'Microsoft Visual Basic for Applications - [Module1 (Code)]
+                        oRegExp.Pattern = "^Microsoft Visual Basic[^-]*- \[.*\]$"
+                        If oRegExp.test(caption) Then
+                            'found embedded ActiveX control with open but uninitialized VBE window
+                            'the uninitialized VBE window was found so done with loop - finish processing this case after exiting loop
+                            Exit Do
+                        Else
+                            Err.Raise 1, , "Error: unable to extract filename from VBE window caption. Please report caption to developers." & vbCrLf & vbCrLf & "Caption:" & vbCrLf & vbCrLf & caption
+                        End If
+                    End If
+                End If
+            End If
+        Loop Until hWnd = 0
+
+        If oApp.ActiveWorkbook.Path <> vbNullString Then
+            'by elimination, user clicked embedded ActiveX control with either not opened or an opened but uninitialized VBE window
+            activeVBAProjectFolderPath = oApp.ActiveWorkbook.Path
+        Else
+            Err.Raise 1, , "Error: unable to get the active Caller path - make sure the parent document has been saved."
+        End If
+        
+    Case "Microsoft Access"
+        Dim strPath As String
+    
+        strPath = vbNullString
+        
+        'if the parent document holding the active vba project has not yet been saved, then Application.VBE.ActiveVBProject.Filename
+        'will throw an error so trap and report below...
+        
+        On Error Resume Next
+        strPath = oApp.VBE.ActiveVBProject.fileName
+        On Error GoTo 0
+        
+        If strPath <> vbNullString Then
+            Set fso = New FileSystemObject
+            strPath = fso.GetParentFolderName(strPath)
+            activeVBAProjectFolderPath = strPath
+        Else
+            Err.Raise 1, "WebShared", "Error: Attempting to reference a folder/file path relative to the parent document location of this active code project - save the parent document first."
+        End If
+    Case Else
+        Err.Raise 1, "WebShared", "Error: Only MS Access and MS Excel supported."
+    End Select
+End Function
+
+Private Function vbaIsTrusted() As Boolean
+    vbaIsTrusted = False
+    'Note: this may cause "Run-time Error 1004" if Tools->Options->Error Trapping is set to "Break on All Errors"
+    On Error Resume Next
+    vbaIsTrusted = (Application.VBE.VBProjects.Count > 0)
+    On Error GoTo 0
+End Function
+
+Public Function thisLibFolderPath() As String
+    'returns the path of this library - not the path of the active vba project, which may be referencing this library"
+    Dim oApp As Object
+    Set oApp = Application
+    Select Case oApp.Name
+    Case "Microsoft Excel"
+        thisLibFolderPath = oApp.ThisWorkbook.Path
+    Case "Microsoft Access"
+        thisLibFolderPath = oApp.CodeProject.Path
+    Case Else
+        Err.Raise 1, "WebShared", "Error: Only MS Access and MS Excel supported."
+    End Select
+End Function
+
+Public Function getBrowserNameString(ByVal browser As svbaBrowser) As String
+    Select Case browser
+    Case svbaBrowser.Chrome
+        getBrowserNameString = "chrome"
+    Case svbaBrowser.Edge
+        getBrowserNameString = "msedge"
+    Case svbaBrowser.Firefox
+        getBrowserNameString = "firefox"
+    End Select
+End Function
+
+Private Function expandEnvironVariable(ByVal inputPath As String) As String
+    'this searches input path for %[Environ Variable]% pattern and if found, then replaces with the path equivalent
+    Dim wsh As New IWshRuntimeLibrary.WshShell
+    expandEnvironVariable = wsh.ExpandEnvironmentStrings(inputPath)
+End Function
+
+Public Function readIniFileEntry(ByVal filePath As String, ByVal section As String, ByVal keyName As String, Optional ByVal defaultValue As Variant = vbNullString, Optional ByVal useDefaultValue As Boolean = False) As String
+    'reads a single settings file entry
+    Const lenBuffer = 512
+    Dim outputLen As Long
+    Dim fso As FileSystemObject
+    Dim buffer() As Byte
+    
+    If useDefaultValue Then 'quick escape!
+        readIniFileEntry = defaultValue
+        Exit Function
+    End If
+    
+    'check if optional settings file exists - if not then use default and exit
+    Set fso = New FileSystemObject
+    If Not fso.FileExists(filePath) Then
+        readIniFileEntry = defaultValue
+        Exit Function
+    End If
+    
+    'try to read and return the section/keyName value - if not then use default and exit
+
+    ReDim buffer(0 To lenBuffer - 1)
+
+    outputLen = GetPrivateProfileString( _
+                    StrPtr(section), _
+                    StrPtr(keyName), _
+                    0&, _
+                    buffer(0), _
+                    lenBuffer, _
+                    StrPtr(filePath))
+                    
+    If outputLen Then
+        readIniFileEntry = Left$(buffer, outputLen)
+    Else
+        readIniFileEntry = defaultValue
+    End If
+End Function
+
+Public Function enumTextToValue(ByVal enumText As String) As Long
+    'this function converts an enum string read from the settings file to it's corresponding enum value
+    enumText = Trim$(enumText)
+    If IsNumeric(enumText) Then
+        enumTextToValue = VBA.val(enumText)
+        Exit Function
+    End If
+    Select Case LCase$(enumText)
+    Case "svbanotcompatible": enumTextToValue = svbaCompatibility.svbaNotCompatible
+    Case "svbamajor": enumTextToValue = svbaCompatibility.svbaMajor
+    Case "svbaminor": enumTextToValue = svbaCompatibility.svbaMinor
+    Case "svbabuildmajor": enumTextToValue = svbaCompatibility.svbaBuildMajor
+    Case "svbaexactmatch": enumTextToValue = svbaCompatibility.svbaExactMatch
+    Case "vbhide": enumTextToValue = VbAppWinStyle.vbHide
+    Case "vbmaximizedfocus": enumTextToValue = VbAppWinStyle.vbMaximizedFocus
+    Case "vbminimizedfocus": enumTextToValue = VbAppWinStyle.vbMinimizedFocus
+    Case "vbminimizednofocus": enumTextToValue = VbAppWinStyle.vbMinimizedNoFocus
+    Case "vbnormalfocus": enumTextToValue = VbAppWinStyle.vbNormalFocus
+    Case "vbnormalnofocus": enumTextToValue = VbAppWinStyle.vbNormalNoFocus
+    Case "svbalandscape": enumTextToValue = svbaOrientation.svbaLandscape
+    Case "svbaportrait": enumTextToValue = svbaOrientation.svbaPortrait
+    Case "svbacentimeters": enumTextToValue = svbaUnits.svbaCentimeters
+    Case "svbainches": enumTextToValue = svbaUnits.svbaInches
+    Case Else: Err.Raise 1, "WebShared", "Settings file enum value " & enumText & " not recognized"
+    End Select
+End Function
+
+Public Sub sleep(ByVal ms As Currency)
+    'Enhanced sleep proc. featuring <0.0% CPU usage, DoEvents, precision +-<10ms
+    'Better Sleep proc. featuring <0.0% CPU usage, DoEvents, precision +-<10ms
+    'Uses "Currency" as a good-enough workaround to avoid the complexity of a LARGE_INTEGER (see https://stackoverflow.com/a/31387007)
+    'Note: VBA.Timer ( + VBA.Date for midnight adjustment) and VBA.Now avoided for accuracy issues (10-15ms and occasionally even worse? see https://stackoverflow.com/questions/68767198/is-this-unstable-vba-timer-behavior-real-or-am-i-doing-something-wrong)
+    Dim cTimeStart As Currency, cTimeEnd As Currency
+    Dim dTimeElapsed As Currency, cTimeTarget As Currency
+    Dim cApproxDelay As Currency
+    
+    GetTime cTimeStart
+    
+    Static cPerSecond As Currency
+    If cPerSecond = 0 Then GetFrequency cPerSecond
+    cTimeTarget = ms * (cPerSecond / 1000)
+    
+    If ms <= 25 Then
+        'empty loop for improved accuracy (SleepWinAPI alone costs 2-15ms and DoEvents 2-8ms)
+        Do
+            GetTime cTimeEnd
+        Loop Until cTimeEnd - cTimeStart >= cTimeTarget
+        Exit Sub
+    Else 'fully featured loop
+        SleepWinAPI 5 '"WaitMessage" avoided because it costs 0.0* to 2**(!) ms
+        DoEvents
+        GetTime cTimeEnd
+        cApproxDelay = (cTimeEnd - cTimeStart) / 2
+        
+        cTimeTarget = cTimeTarget - cApproxDelay
+        Do While (cTimeEnd - cTimeStart) < cTimeTarget
+            SleepWinAPI 1
+            DoEvents
+            GetTime cTimeEnd
+        Loop
+    End If
+End Sub
+
+Public Function Max(ParamArray numberList() As Variant) As Variant
+    Dim i As Long
+    Max = numberList(LBound(numberList))
+    For i = LBound(numberList) + 1 To UBound(numberList)
+        If numberList(i) > Max Then Max = numberList(i)
+    Next i
+End Function
+
+Public Function AppActivate(ByVal partialWindowText As String, Optional ByVal Wait As Boolean = False) As Boolean
+    'The VBA.AppActivate throws an error if a match is not found
+    'This function wraps VBA's AppActivate but returns a boolean signifying whether the match was found
+    'which allows for looping until found
+    On Error GoTo winNotFound
+    VBA.AppActivate partialWindowText, Wait
+    AppActivate = True
+    Exit Function
+winNotFound:
+    AppActivate = False
+End Function
+
+Public Function IsActiveWindowVBIDE() As Boolean
+    'determines whether the VBDIDE is the active window or not
+    Dim winTitle As String
+    winTitle = String$(200, vbNullChar)
+    GetWindowText GetForegroundWindow(), StrPtr(winTitle), 200
+    IsActiveWindowVBIDE = Left$(winTitle, InStr(winTitle, vbNullChar) - 1) Like "Microsoft Visual Basic for Applications -*"
+End Function
+
+Public Function splitKeyString(ByVal keys As String) As Collection
+    'splits the input string into a collection of individual characters
+    Dim i As Long
+    Dim chars As New Collection
+    For i = 1 To Len(keys)
+        chars.Add Mid$(keys, i, 1)
+    Next i
+    Set splitKeyString = chars
+End Function
+
+Public Function getResponseErrorMessage(resp As Dictionary) As String
+    If TypeName(resp("value")) = "Dictionary" Then
+        If resp("value").Exists("error") Then getResponseErrorMessage = resp("value")("message")
+    End If
+End Function
+
+Public Function isResponseError(resp As Dictionary) As Boolean
+    isResponseError = False
+    If TypeName(resp("value")) = "Dictionary" Then isResponseError = resp("value").Exists("error")
+End Function
+
+'this is used to convert an escaped unicode string (e.g. "\u00A9") into the
+'single (wide) character equiv. This conversion is required by WebJsonConverter.
+Public Function unEscapeUnicode(ByRef keyString As Variant) As String
+    Dim oRegExp As New RegExp
+    Dim oMatches As MatchCollection
+    Dim oMatch As match
+    Dim unEscapedValue As String
+    
+    oRegExp.Global = True
+
+    'process escaped unicode
+    oRegExp.Pattern = "\\u([0-9a-fA-F]{4})"
+    Set oMatches = oRegExp.execute(keyString)
+    If oMatches.Count > 0 Then
+        For Each oMatch In oMatches
+            unEscapedValue = ChrW$(val("&H" & oMatch.SubMatches(0)))
+            'replace match with unescaped value
+            keyString = Replace$(keyString, oMatch.Value, unEscapedValue, Count:=1)
+        Next oMatch
+    End If
+    unEscapeUnicode = keyString
+End Function
+
+'this is to replace AscW which outputs negative ascii code for unicode due to its integer return value
+Public Function AscWL(ByVal s As String) As Long
+    AscWL = CLng(AscW(s)) And &HFFFF&
+End Function
+
+Public Function encodeBase64(bytes() As Byte, Optional ByVal useNewLines As Boolean = True, Optional ByVal useCrLfForNewLine As Boolean = True) As String
+    'https://gist.github.com/wqweto/0002b7e6c4f92e69c8e8339ed2235b4c
+    Dim lSize As Long
+    Dim flags As Long
+    Dim baseIndex As Long
+    Dim numBytes As Long
+    
+    flags = CRYPT_STRING_BASE64
+    If Not useNewLines Then
+        flags = flags Or CRYPT_STRING_NOCRLF
+    ElseIf Not useCrLfForNewLine Then
+        flags = flags Or CRYPT_STRING_NOCR 'compatibility with MSXML2 which uses vbLf
+    End If
+    
+    baseIndex = LBound(bytes)
+    numBytes = UBound(bytes) - baseIndex + 1
+    
+    encodeBase64 = String$(2 * numBytes + 4, 0)
+    lSize = Len(encodeBase64) + 1
+    Call CryptBinaryToStringW(bytes(baseIndex), numBytes, flags, StrPtr(encodeBase64), lSize)
+    encodeBase64 = Left$(encodeBase64, lSize)
+End Function
+
+Public Function decodeBase64(sText As String, Optional ByVal baseIndex As Long = 1) As Byte()
+    'https://gist.github.com/wqweto/0002b7e6c4f92e69c8e8339ed2235b4c
+    Dim lSize As Long
+    Dim baOutput() As Byte
+    lSize = Len(sText) + 1
+    ReDim baOutput(baseIndex To lSize - 1 + baseIndex) As Byte
+    If CryptStringToBinaryW(StrPtr(sText), Len(sText), CRYPT_STRING_BASE64, baOutput(baseIndex), lSize) <> 0 Then
+        ReDim Preserve baOutput(baseIndex To lSize - 1 + baseIndex) As Byte
+        decodeBase64 = baOutput
+    End If
+End Function
+
+Public Sub saveByteArrayToFile(bytearray() As Byte, ByVal filePath As String)
+    'we are using ADODB.Stream instead of native Open because later does not support unicode filePaths
+    Dim binaryStream As New ADODB.Stream
+    'specify stream type - we want to save binary data.
+    binaryStream.Type = adTypeBinary
+  
+    'open the stream And write binary data
+    binaryStream.Open
+    binaryStream.Write bytearray
+  
+    'save binary data To disk
+    binaryStream.SaveToFile filePath, adSaveCreateOverWrite
+    binaryStream.Close
+End Sub
+
+Public Function readByteArrayFromFile(ByVal filePath As String) As Byte()
+    'we are using ADODB.Stream instead of native Open because later does not support unicode filePaths
+    Dim binaryStream As New ADODB.Stream
+    Dim bytearray() As Byte
+
+    'specify stream type - we want to read binary data.
+    binaryStream.Type = adTypeBinary
+  
+    'open the stream
+    binaryStream.Open
+    
+    'load and read binary data from disk
+    binaryStream.LoadFromFile filePath
+    bytearray = binaryStream.Read 'returns 0-based byte array
+  
+    binaryStream.Close
+    readByteArrayFromFile = bytearray
+End Function
+
+Public Function taskTerminate(ByVal method As String, ByVal pidOrImageName As String) As Boolean
+    Dim wsh As New IWshRuntimeLibrary.WshShell
+    taskTerminate = wsh.Run("taskkill /f /t /" & method & " " & pidOrImageName, 0, True)
+End Function

@@ -14,32 +14,53 @@ func TestRepositoryManifestAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Upstream.Commit != "c867f27ea3dedc2ccece1eeb0273cdb242899182" {
+	if manifest.Upstream.Commit != "2b944e30c7f76dd3e771d02584b80dd6a4733e4d" {
 		t.Fatalf("unexpected pinned commit %q", manifest.Upstream.Commit)
 	}
-	if got := CanonicalProjectIDs(manifest); strings.Join(got, ",") != "access-examples,vba-json,vba-web" {
+	if got := CanonicalProjectIDs(manifest); strings.Join(got, ",") != "access-examples,better-access-charts,iguana-tex,json,ronecone,selenium-vba,std-vba,vba-cryptography,vba-dictionary,vba-fast-dictionary,vba-fast-json,vba-json,vba-memory-tools,vba-web,wasabi,webxcel" {
 		t.Fatalf("unexpected project order %v", got)
 	}
 	for _, project := range manifest.Projects {
 		destination := filepath.Join(root, filepath.FromSlash(project.Path))
+		if project.SourceCounts.Total() == 0 {
+			t.Fatalf("project %s has no declared source files", project.ID)
+		}
 		for _, relative := range []string{project.Provenance.LicenseFile, project.Provenance.SourceFile} {
 			if _, err := os.Stat(filepath.Join(destination, filepath.FromSlash(relative))); err != nil {
 				t.Fatalf("project %s metadata %s: %v", project.ID, relative, err)
 			}
 		}
 	}
+	var enabled, disabled int
+	var total SourceCounts
+	for _, project := range manifest.Projects {
+		total.Bas += project.SourceCounts.Bas
+		total.Cls += project.SourceCounts.Cls
+		total.Frm += project.SourceCounts.Frm
+		if project.Enabled {
+			enabled++
+		} else {
+			disabled++
+			if strings.TrimSpace(project.Notes) == "" {
+				t.Fatalf("disabled project %s has no reason", project.ID)
+			}
+		}
+	}
+	if enabled != 13 || disabled != 3 || total != (SourceCounts{Bas: 151, Cls: 218, Frm: 9}) {
+		t.Fatalf("manifest inventory = enabled:%d disabled:%d counts:%+v", enabled, disabled, total)
+	}
 }
 
 func TestLoadManifestRejectsMalformedDocuments(t *testing.T) {
-	valid := `{"schema_version":1,"upstream":{"repository":"harumiWeb/tree-sitter-vba","commit":"c867f27ea3dedc2ccece1eeb0273cdb242899182"},"projects":[{"id":"one","path":"projects/third_party/one","profile":"generic-vba","enabled":true,"source":{"origin":"tree-sitter-vba","path":"examples/third_party/one"},"provenance":{"repository":"https://example.test/one","license":"MIT","license_file":"LICENSE","source_file":"SOURCE.md"}}]}`
+	valid := `{"schema_version":2,"upstream":{"repository":"harumiWeb/tree-sitter-vba","commit":"2b944e30c7f76dd3e771d02584b80dd6a4733e4d"},"projects":[{"id":"one","path":"projects/third_party/one","profile":"generic-vba","enabled":true,"source":{"origin":"tree-sitter-vba","path":"examples/third_party/one"},"source_counts":{"bas":1,"cls":0,"frm":0},"provenance":{"repository":"https://example.test/one","license":"MIT","license_file":"LICENSE","source_file":"SOURCE.md"}}]}`
 	tests := []struct {
 		name string
 		body string
 		want string
 	}{
 		{"unknown field", strings.Replace(valid, `"enabled":true`, `"enabled":true,"unexpected":true`, 1), "unknown field"},
-		{"unsupported schema", strings.Replace(valid, `"schema_version":1`, `"schema_version":2`, 1), "unsupported corpus manifest"},
-		{"short commit", strings.Replace(valid, "c867f27ea3dedc2ccece1eeb0273cdb242899182", "c867f27", 1), "40-character SHA"},
+		{"unsupported schema", strings.Replace(valid, `"schema_version":2`, `"schema_version":1`, 1), "unsupported corpus manifest"},
+		{"short commit", strings.Replace(valid, "2b944e30c7f76dd3e771d02584b80dd6a4733e4d", "2b944e3", 1), "40-character SHA"},
 		{"missing enabled", strings.Replace(valid, `,"enabled":true`, "", 1), "explicitly declare enabled"},
 		{"null enabled", strings.Replace(valid, `"enabled":true`, `"enabled":null`, 1), "enabled must be a boolean"},
 		{"path traversal", strings.Replace(valid, "projects/third_party/one", "projects/third_party/../one", 1), "non-canonical"},
@@ -78,6 +99,53 @@ func TestValidateManifestRejectsInvalidClassificationOrderingAndDuplicates(t *te
 	}
 	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "duplicate classification") {
 		t.Fatalf("case-insensitive duplicate classifications accepted: %v", err)
+	}
+}
+
+func TestValidateManifestSourceCounts(t *testing.T) {
+	manifest := fixtureManifest("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	manifest.Projects[0].SourceCounts = SourceCounts{Bas: -1}
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "source_counts must be non-negative") {
+		t.Fatalf("negative source count accepted: %v", err)
+	}
+
+	valid := `{"schema_version":2,"upstream":{"repository":"harumiWeb/tree-sitter-vba","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"projects":[{"id":"one","path":"projects/third_party/one","profile":"generic-vba","enabled":true,"source":{"origin":"tree-sitter-vba","path":"examples/third_party/one"},"provenance":{"repository":"https://example.test/one","license":"MIT","license_file":"LICENSE","source_file":"SOURCE.md"}}]}`
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(path, []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadManifest(path); err == nil || !strings.Contains(err.Error(), "source_counts") {
+		t.Fatalf("missing source_counts accepted: %v", err)
+	}
+	validWithCounts := strings.Replace(valid, `"source":{"origin"`, `"source_counts":{"bas":1,"cls":0,"frm":0},"source":{"origin"`, 1)
+	unknownField := strings.Replace(validWithCounts, `"source_counts":{"bas":1,"cls":0,"frm":0}`, `"source_counts":{"bas":1,"cls":0,"frm":0,"wat":1}`, 1)
+	if err := os.WriteFile(path, []byte(unknownField), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadManifest(path); err == nil || !strings.Contains(strings.ToLower(err.Error()), "unknown field") {
+		t.Fatalf("unknown source_counts field accepted: %v", err)
+	}
+	missingField := strings.Replace(valid, `"source":{"origin"`, `"source_counts":{"bas":1,"cls":0},"source":{"origin"`, 1)
+	if err := os.WriteFile(path, []byte(missingField), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadManifest(path); err == nil || !strings.Contains(err.Error(), "must declare frm") {
+		t.Fatalf("incomplete source_counts accepted: %v", err)
+	}
+}
+
+func TestSyncRejectsSourceCountMismatch(t *testing.T) {
+	upstream, commit := createGitFixture(t)
+	corpusRoot := t.TempDir()
+	manifest := fixtureManifest(commit)
+	manifest.Projects[0].SourceCounts = SourceCounts{Bas: 2}
+	manifestPath := filepath.Join(corpusRoot, "manifest.json")
+	writeManifest(t, manifestPath, manifest)
+	if err := Sync(context.Background(), SyncOptions{ManifestPath: manifestPath, CorpusRoot: corpusRoot, UpstreamCheckout: upstream}); err == nil || !strings.Contains(err.Error(), "source_counts mismatch") {
+		t.Fatalf("Sync accepted source-count mismatch: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(corpusRoot, "projects", "third_party", "one")); !os.IsNotExist(err) {
+		t.Fatalf("source-count mismatch published a project tree, stat error = %v", err)
 	}
 }
 
@@ -264,8 +332,8 @@ func fixtureManifest(commit string) Manifest {
 		SchemaVersion: SchemaVersion,
 		Upstream:      Upstream{Repository: "harumiWeb/tree-sitter-vba", Commit: commit},
 		Projects: []Project{
-			{ID: "one", Path: "projects/third_party/one", Profile: ProfileGenericVBA, Enabled: true, Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/one"}, Provenance: Provenance{Repository: "https://example.test/one", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
-			{ID: "two", Path: "projects/third_party/two", Profile: ProfileExcel, Enabled: false, Notes: "fixture disabled in this test", Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/two"}, Provenance: Provenance{Repository: "https://example.test/two", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
+			{ID: "one", Path: "projects/third_party/one", Profile: ProfileGenericVBA, Enabled: true, Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/one"}, SourceCounts: SourceCounts{Bas: 1}, Provenance: Provenance{Repository: "https://example.test/one", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
+			{ID: "two", Path: "projects/third_party/two", Profile: ProfileExcel, Enabled: false, Notes: "fixture disabled in this test", Source: Source{Origin: OriginTreeSitterVBA, Path: "examples/third_party/two"}, SourceCounts: SourceCounts{Bas: 1}, Provenance: Provenance{Repository: "https://example.test/two", License: "MIT", LicenseFile: "LICENSE", SourceFile: "SOURCE.md"}},
 		},
 	}
 }

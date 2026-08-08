@@ -8,33 +8,47 @@ test data, not a runtime dependency of `xlflow`.
 
 The corpus root is `testdata/static-analysis-corpus`. Its manifest is
 `manifest.json`; vendored projects live below
-`projects/third_party/<project-id>`. The initial manifest is schema version 1
-and pins:
+`projects/third_party/<project-id>`. Manifest schema version 2 pins the
+following 16 independent projects and records expected `.bas`, `.cls`, and
+`.frm` source counts for each one:
 
-| ID                | Profile       | Upstream project path                         | Destination                            |
-| ----------------- | ------------- | --------------------------------------------- | -------------------------------------- |
-| `access-examples` | `access`      | `examples/third_party/Access-examples-master` | `projects/third_party/access-examples` |
-| `vba-json`        | `generic-vba` | `examples/third_party/VBA-JSON-master`        | `projects/third_party/vba-json`        |
-| `vba-web`         | `excel`       | `examples/third_party/VBA-Web-master`         | `projects/third_party/vba-web`         |
+| ID                     | Profile       | Upstream project path                            | Destination                                 | `.bas` | `.cls` | `.frm` |
+| ---------------------- | ------------- | ------------------------------------------------ | ------------------------------------------- | -----: | -----: | -----: |
+| `access-examples`      | `access`      | `examples/third_party/Access-examples-master`    | `projects/third_party/access-examples`      |     11 |     22 |      0 |
+| `better-access-charts` | `access`      | `examples/third_party/better-access-charts-main` | `projects/third_party/better-access-charts` |      2 |     22 |      0 |
+| `iguana-tex`           | `generic-vba` | `examples/third_party/IguanaTex-master`          | `projects/third_party/iguana-tex`           |     10 |      5 |      9 |
+| `json`                 | `generic-vba` | `examples/third_party/json-main`                 | `projects/third_party/json`                 |      3 |      1 |      0 |
+| `ronecone`             | `excel`       | `examples/third_party/ROneCOne`                  | `projects/third_party/ronecone`             |      0 |      1 |      0 |
+| `selenium-vba`         | `generic-vba` | `examples/third_party/SeleniumVBA-main`          | `projects/third_party/selenium-vba`         |     34 |     15 |      0 |
+| `std-vba`              | `generic-vba` | `examples/third_party/stdVBA-master`             | `projects/third_party/std-vba`              |     21 |     93 |      0 |
+| `vba-cryptography`     | `generic-vba` | `examples/third_party/VBA.Cryptography-main`     | `projects/third_party/vba-cryptography`     |      5 |      0 |      0 |
+| `vba-dictionary`       | `generic-vba` | `examples/third_party/VBA-Dictionary-master`     | `projects/third_party/vba-dictionary`       |      1 |      1 |      0 |
+| `vba-fast-dictionary`  | `generic-vba` | `examples/third_party/VBA-FastDictionary-master` | `projects/third_party/vba-fast-dictionary`  |      3 |      1 |      0 |
+| `vba-fast-json`        | `generic-vba` | `examples/third_party/VBA-FastJSON-master`       | `projects/third_party/vba-fast-json`        |      2 |      0 |      0 |
+| `vba-json`             | `generic-vba` | `examples/third_party/VBA-JSON-master`           | `projects/third_party/vba-json`             |      2 |      0 |      0 |
+| `vba-memory-tools`     | `generic-vba` | `examples/third_party/VBA-MemoryTools-master`    | `projects/third_party/vba-memory-tools`     |      3 |      1 |      0 |
+| `vba-web`              | `excel`       | `examples/third_party/VBA-Web-master`            | `projects/third_party/vba-web`              |     21 |     23 |      0 |
+| `wasabi`               | `generic-vba` | `examples/third_party/wasabi-main`               | `projects/third_party/wasabi`               |     22 |      1 |      0 |
+| `webxcel`              | `excel`       | `examples/third_party/webxcel-master`            | `projects/third_party/webxcel`              |     11 |     32 |      0 |
 
-All three entries currently have `enabled: true`. Synchronization reproduces
-every manifest entry, including an explicitly disabled entry; a future test
-runner may use `enabled` to select cases without changing the vendored tree.
+Thirteen entries are enabled. `std-vba`, `vba-fast-dictionary`, and
+`vba-fast-json` are explicitly disabled with manifest notes documenting
+production analyzer/parser limitations; the runner skips them without
+changing the vendored tree. Synchronization reproduces every manifest entry,
+including disabled entries. The upstream is `harumiWeb/tree-sitter-vba` at the full
+40-character commit `2b944e30c7f76dd3e771d02584b80dd6a4733e4d`. A branch, tag,
+abbreviated hash, or floating dependency is not a valid pin.
 
-The upstream is `harumiWeb/tree-sitter-vba` at the full 40-character commit
-`c867f27ea3dedc2ccece1eeb0273cdb242899182`. A branch, tag, abbreviated hash,
-or floating dependency is not a valid pin.
-
-## Manifest schema v1
+## Manifest schema v2
 
 The JSON document has exactly these top-level fields:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "upstream": {
     "repository": "harumiWeb/tree-sitter-vba",
-    "commit": "c867f27ea3dedc2ccece1eeb0273cdb242899182"
+    "commit": "2b944e30c7f76dd3e771d02584b80dd6a4733e4d"
   },
   "projects": [
     {
@@ -42,6 +56,7 @@ The JSON document has exactly these top-level fields:
       "path": "projects/third_party/vba-web",
       "profile": "excel",
       "enabled": true,
+      "source_counts": { "bas": 21, "cls": 23, "frm": 0 },
       "notes": "optional non-empty reviewer note",
       "source": {
         "origin": "tree-sitter-vba",
@@ -61,7 +76,10 @@ The JSON document has exactly these top-level fields:
 
 `notes` is optional; when present it must contain non-whitespace text without
 leading or trailing padding. A disabled project must provide `notes` as its
-documented skip reason. `classifications` is an optional path-sorted list of
+documented skip reason. `source_counts` is required and records non-negative
+`.bas`, `.cls`, and `.frm` counts for the project. Synchronization and
+inventory validation compare these counts against the materialized tree.
+`classifications` is an optional path-sorted list of
 exact project-relative source paths and module kinds (`standard`, `class`,
 `form`, or `document`). The default mapping is `.bas` to `standard`, `.cls` to
 `class`, and `.frm` to `form`; the adapter never infers document-module
@@ -87,13 +105,15 @@ destination must remain under `projects/third_party`.
 
 ## Provenance and attribution
 
-Every project keeps its upstream `LICENSE` and a repository-local `SOURCE.md`.
+Every project keeps its upstream `LICENSE` (or `LICENSE.txt`) and a
+repository-local `SOURCE.md`.
 The source file is metadata, not an analyzer fixture, and must not be omitted
 when the project is refreshed. The imported Access examples intentionally keep
 only exported VBA source files and document removed binaries; VBA-Web and
 VBA-JSON document that no source modifications were made apart from permitted
-line-ending normalization. `THIRD_PARTY_LICENCES.md` lists these three MIT
-projects separately from the Go module dependency inventory.
+line-ending normalization. `THIRD_PARTY_LICENCES.md` lists all 16 projects
+separately from the Go module dependency inventory, including the IguanaTex
+CC-BY-3.0 attribution.
 
 Changing a pin or adding a project requires reviewing the upstream repository,
 license, source metadata, source path, profile, and resulting tree together.
@@ -147,6 +167,15 @@ failures separately from normalized diagnostic records.
 The runner is test/developer infrastructure. It reads source files only and
 does not modify examples, invoke the corpus synchronizer, fetch upstream
 content, open Excel, or require COM/VBE.
+
+The full real-world snapshot suite is explicitly opt-in. The
+`TestRealWorldCorpusSnapshots` test returns without running the corpus unless
+`XLFLOW_RUN_REALWORLD_CORPUS=1` is set. This keeps the focused corpus package
+tests part of ordinary `go test ./...` runs without repeating the expensive
+project-wide lint/analyze pass. The dedicated CI corpus step and the explicit
+`task corpus:test` / `task corpus:update-snapshots` entry points set this guard
+for their invocation; callers that run the test directly must set the
+variable themselves.
 
 ### Third-party workspace adapter
 
@@ -215,6 +244,26 @@ configuration paths are never emitted. Multiple diagnostics with the same
 identity are retained as repeated rows; comparison therefore preserves their
 multiplicity rather than deduplicating them.
 
+### Coverage inventory and diagnostic summaries
+
+Manifest `source_counts` provide a deterministic coverage contract independent
+of snapshot contents. The inventory helpers scan the materialized
+`projects/third_party` tree, compare each project's observed extension counts
+with the manifest, and report missing or unexpected project directories. A
+clean inventory for the current pin contains 16 projects and 378 VBA source
+files: 151 `.bas`, 218 `.cls`, and 9 `.frm`. Profile distribution is 2
+`access`, 11 `generic-vba`, and 3 `excel` projects; 13 are enabled and 3 are
+disabled for documented analyzer limitations. Disabled entries remain in the
+inventory so an explicit disable cannot hide a coverage change.
+
+`BuildInventory`/`ValidateInventory` are read-only and deterministic; a source
+file count mismatch, missing project, stale project directory, symlink, or
+irregular file is an error. `SummarizeDiagnostics` groups a runner report by
+diagnostic code, surface, and project without deduplicating findings, while
+`FormatInventorySummary` and `FormatDiagnosticSummary` provide stable review
+logs. These summaries are discovery evidence, not true-positive or precision
+claims.
+
 Rows are sorted deterministically by `project`, `surface`, `file`, `line`,
 `column` (missing columns sort before present columns), `code`, and
 `severity`. JSON serialization uses the same field order shown above. Message
@@ -257,6 +306,7 @@ VBA209 +1 -0
 
 Snapshot generation is an explicit developer action, for example
 `task corpus:update-snapshots` (which sets
+`XLFLOW_RUN_REALWORLD_CORPUS=1` and
 `XLFLOW_UPDATE_CORPUS_SNAPSHOTS=1` for the focused snapshot test). Ordinary
 tests never rewrite committed files and do not infer update mode from a diff.
 An update must complete every analyzed project and each applicable surface
@@ -312,12 +362,17 @@ rtk task corpus:test
 ```
 
 ```powershell
-rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -Command '$env:XLFLOW_RUN_REALWORLD_CORPUS="1"; & ".\scripts\dev\go.ps1" test ./internal/staticanalysis/corpus -run "^TestRealWorldCorpusSnapshots$" -count=1'
 ```
 
 ```bash
-rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+XLFLOW_RUN_REALWORLD_CORPUS=1 rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
 ```
+
+The direct commands above are opt-in and must include
+`XLFLOW_RUN_REALWORLD_CORPUS=1`. Prefer `rtk task corpus:test`, which sets the
+guard and the verify-only snapshot mode together. The ordinary package test
+command intentionally skips the full suite when the guard is absent.
 
 Every snapshot row is an observation of the analyzer version and pinned source
 tree at the time it was reviewed. A row is not a claim that the diagnostic is
@@ -407,10 +462,11 @@ rtk task corpus:update-snapshots
 ```
 
 ```bash
-rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+XLFLOW_RUN_REALWORLD_CORPUS=1 rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
 ```
 
-The update command sets `XLFLOW_UPDATE_CORPUS_SNAPSHOTS=1`; it must complete
+The update command sets `XLFLOW_RUN_REALWORLD_CORPUS=1` and
+`XLFLOW_UPDATE_CORPUS_SNAPSHOTS=1`; it must complete
 every selected project and both surfaces before the atomic snapshot tree is
 published. Re-run the verify-only command afterwards. A failed update must
 leave the previous tree byte-for-byte unchanged, and a zero-byte successful
@@ -420,19 +476,20 @@ surface remains a required reviewed artifact.
 
 The following are review observations, not CI thresholds; record actual elapsed
 times in a pull request when a run is unusually slow. A Windows run of the
-focused corpus test on 2026-08-08 completed in 41.168 s according to Go's
-package timer and 43.959 s wall-clock time. The Linux CI step emits the same
-project-ordered timing logs plus `corpus_elapsed_seconds` so future regressions
-remain visible. Do not treat this single workstation measurement as a fixed
-upper bound; record a new observation when analyzer or corpus changes make the
-run unusually slow. The VBE oracle is intentionally slower: its default
+focused corpus test on 2026-08-08 completed in 170.79 s wall-clock time
+(package timer 163.097 s) with 13 enabled projects; the verify-only rerun
+completed in the same range. The Linux CI step emits the same project-ordered
+timing logs plus `corpus_elapsed_seconds` so future regressions remain visible.
+Do not treat this single workstation measurement as a fixed upper bound; record
+a new observation when analyzer or corpus changes make the run unusually slow.
+The VBE oracle is intentionally slower: its default
 per-case timeout is 5 min and a multi-case run can take several minutes because
 Excel startup and cleanup are serialized.
 
 Measure a local run when timing matters:
 
 ```powershell
-rtk powershell -NoProfile -Command "Measure-Command { rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1 } | Select-Object TotalSeconds"
+rtk powershell -NoProfile -Command '$env:XLFLOW_RUN_REALWORLD_CORPUS="1"; Measure-Command { & ".\scripts\dev\go.ps1" test ./internal/staticanalysis/corpus -run "^TestRealWorldCorpusSnapshots$" -count=1 } | Select-Object TotalSeconds'
 ```
 
 Do not parallelize VBE cases or infer a hang from the broad `go test ./...`
@@ -441,7 +498,7 @@ the Excel-free corpus checks.
 
 ## Verification requirements
 
-Manifest tests cover valid v1 data and rejection of unknown fields, unsupported
+Manifest tests cover valid v2 data and rejection of unknown fields, unsupported
 schema/profile/origin, malformed or abbreviated SHAs, missing values, duplicate
 IDs/paths, unsorted projects, path traversal, empty notes, and missing
 attribution metadata. Repository checks verify each listed project, license,
@@ -466,7 +523,7 @@ These tests protect the project-isolation and failure-boundary contracts that
 unit fixtures alone cannot establish.
 
 Third-party adapter tests cover manifest classifications, byte-preserving
-materialization of all three vendored projects, generated profile configs,
+materialization of all 16 vendored projects, generated profile configs,
 document-module placement, source-map remapping, temporary-path exclusion,
 disabled-project skips, partial-result preservation, and cleanup after both
 success and failure. A representative third-party project is analyzed through

@@ -14,6 +14,42 @@ import (
 	"github.com/harumiWeb/xlflow/internal/typedb"
 )
 
+const (
+	runRealWorldCorpusEnv    = "XLFLOW_RUN_REALWORLD_CORPUS"
+	updateCorpusSnapshotsEnv = "XLFLOW_UPDATE_CORPUS_SNAPSHOTS"
+)
+
+func realWorldCorpusMode() (run, update bool) {
+	run = os.Getenv(runRealWorldCorpusEnv) == "1"
+	update = run && os.Getenv(updateCorpusSnapshotsEnv) == "1"
+	return run, update
+}
+
+func TestRealWorldCorpusSnapshotMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		runEnv     string
+		updateEnv  string
+		wantRun    bool
+		wantUpdate bool
+	}{
+		{name: "disabled", wantRun: false, wantUpdate: false},
+		{name: "update requires explicit run", updateEnv: "1", wantRun: false, wantUpdate: false},
+		{name: "run only", runEnv: "1", wantRun: true, wantUpdate: false},
+		{name: "run and update", runEnv: "1", updateEnv: "1", wantRun: true, wantUpdate: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(runRealWorldCorpusEnv, tt.runEnv)
+			t.Setenv(updateCorpusSnapshotsEnv, tt.updateEnv)
+			gotRun, gotUpdate := realWorldCorpusMode()
+			if gotRun != tt.wantRun || gotUpdate != tt.wantUpdate {
+				t.Fatalf("real-world corpus mode = run:%t update:%t, want run:%t update:%t", gotRun, gotUpdate, tt.wantRun, tt.wantUpdate)
+			}
+		})
+	}
+}
+
 func snapshotTestRow(project string, surface Surface, file string, line, column int, code string) SnapshotDiagnostic {
 	return SnapshotDiagnostic{
 		Project: project, Surface: surface, File: file, Line: line, Column: column,
@@ -284,6 +320,17 @@ func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, 
 	if manifestErr != nil {
 		return nativeReport, errors.Join(nativeErr, manifestErr)
 	}
+	inventory, inventoryErr := ValidateInventory(corpusRoot, manifest)
+	if timingLogf != nil {
+		if inventoryErr == nil {
+			timingLogf("%s", FormatInventorySummary(inventory))
+		} else {
+			timingLogf("corpus inventory validation failed: %v", inventoryErr)
+		}
+	}
+	if inventoryErr != nil {
+		return nativeReport, errors.Join(nativeErr, inventoryErr)
+	}
 	thirdProjects, selectErr := SelectThirdPartyProjects(manifest.Projects, nil)
 	if selectErr != nil {
 		return nativeReport, errors.Join(nativeErr, selectErr)
@@ -317,10 +364,18 @@ func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, 
 	}
 	sortDiagnostics(combined.Diagnostics)
 	sortThirdPartyFailuresAndSkips(&combined)
+	if timingLogf != nil {
+		timingLogf("corpus inventory: skipped=%d", len(combined.Skipped))
+		timingLogf("%s", FormatDiagnosticSummary(SummarizeDiagnostics(combined)))
+	}
 	return combined, errors.Join(nativeErr, thirdErr)
 }
 
 func TestRealWorldCorpusSnapshots(t *testing.T) {
+	shouldRun, update := realWorldCorpusMode()
+	if !shouldRun {
+		t.Skipf("set %s=1 to run the real-world corpus snapshot test", runRealWorldCorpusEnv)
+	}
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +392,7 @@ func TestRealWorldCorpusSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshotRoot := filepath.Join(repoRoot, "testdata", "static-analysis-corpus", "snapshots")
-	if os.Getenv("XLFLOW_UPDATE_CORPUS_SNAPSHOTS") == "1" {
+	if update {
 		if err := WriteSnapshotSet(snapshotRoot, actual); err != nil {
 			t.Fatal(err)
 		}

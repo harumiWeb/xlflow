@@ -23,7 +23,8 @@ type SyncOptions struct {
 }
 
 // Sync validates the manifest, materialises every listed project in a private
-// staging tree, and atomically replaces projects/third_party. It never edits
+// staging tree, and atomically replaces projects/third_party. It verifies each
+// staged project's source_counts contract before publication. It never edits
 // the manifest and does not perform network access when UpstreamCheckout is
 // supplied.
 func Sync(ctx context.Context, opts SyncOptions) error {
@@ -82,6 +83,9 @@ func Sync(ctx context.Context, opts SyncOptions) error {
 		}
 		if err := verifyProjectMetadata(destination, project); err != nil {
 			return fmt.Errorf("project %q metadata: %w", project.ID, err)
+		}
+		if err := verifyProjectSourceCounts(destination, project.SourceCounts); err != nil {
+			return fmt.Errorf("project %q source counts: %w", project.ID, err)
 		}
 	}
 	if err := publishManagedTree(stageTarget, filepath.Join(corpusRoot, "projects", "third_party"), corpusRoot); err != nil {
@@ -335,6 +339,55 @@ func verifyProjectMetadata(destination string, project Project) error {
 		}
 	}
 	return nil
+}
+
+func verifyProjectSourceCounts(destination string, expected SourceCounts) error {
+	actual, err := CountSourceFiles(destination)
+	if err != nil {
+		return err
+	}
+	if actual != expected {
+		return fmt.Errorf("source_counts mismatch: expected bas=%d cls=%d frm=%d, got bas=%d cls=%d frm=%d", expected.Bas, expected.Cls, expected.Frm, actual.Bas, actual.Cls, actual.Frm)
+	}
+	return nil
+}
+
+// CountSourceFiles scans a project tree and counts regular VBA source files
+// by extension. It rejects symlinks and other irregular entries so callers can
+// use the result as a safe coverage check for a managed corpus tree.
+func CountSourceFiles(root string) (SourceCounts, error) {
+	var counts SourceCounts
+	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink/reparse content is not allowed: %s", filepath.ToSlash(current))
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("irregular file is not allowed: %s", filepath.ToSlash(current))
+		}
+		switch strings.ToLower(filepath.Ext(entry.Name())) {
+		case ".bas":
+			counts.Bas++
+		case ".cls":
+			counts.Cls++
+		case ".frm":
+			counts.Frm++
+		}
+		return nil
+	})
+	if err != nil {
+		return SourceCounts{}, fmt.Errorf("scan source files: %w", err)
+	}
+	return counts, nil
 }
 
 func publishManagedTree(staged, target, corpusRoot string) error {

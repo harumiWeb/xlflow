@@ -1,0 +1,6 @@
+{"project":"third_party/vba-dictionary","file":"Dictionary.cls","surface":"lint","code":"VB004","severity":"warning","line":253,"column":5}
+{"project":"third_party/vba-dictionary","file":"Dictionary.cls","surface":"lint","code":"VB020","severity":"warning","line":311,"column":9}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"lint","code":"VB004","severity":"warning","line":431,"column":5}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"lint","code":"VB020","severity":"warning","line":568,"column":9}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"lint","code":"VB004","severity":"warning","line":626,"column":5}

@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "upstream": {
     "repository": "harumiWeb/tree-sitter-vba",
-    "commit": "c867f27ea3dedc2ccece1eeb0273cdb242899182"
+    "commit": "2b944e30c7f76dd3e771d02584b80dd6a4733e4d"
   },
   "projects": [
     {
@@ -14,6 +14,7 @@
         "origin": "tree-sitter-vba",
         "path": "examples/third_party/Access-examples-master"
       },
+      "source_counts": { "bas": 11, "cls": 22, "frm": 0 },
       "provenance": {
         "repository": "https://github.com/Access-projects/Access-examples",
         "license": "MIT",
@@ -45,6 +46,179 @@
       ]
     },
     {
+      "id": "better-access-charts",
+      "path": "projects/third_party/better-access-charts",
+      "profile": "access",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/better-access-charts-main"
+      },
+      "source_counts": { "bas": 2, "cls": 22, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/team-moeller/better-access-charts",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "iguana-tex",
+      "path": "projects/third_party/iguana-tex",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/IguanaTex-master"
+      },
+      "source_counts": { "bas": 10, "cls": 5, "frm": 9 },
+      "provenance": {
+        "repository": "https://github.com/Jonathan-LeRoux/IguanaTex",
+        "license": "CC-BY-3.0",
+        "license_file": "LICENSE.txt",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "json",
+      "path": "projects/third_party/json",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/json-main"
+      },
+      "source_counts": { "bas": 3, "cls": 1, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/vbacollective/json",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "ronecone",
+      "path": "projects/third_party/ronecone",
+      "profile": "excel",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/ROneCOne"
+      },
+      "source_counts": { "bas": 0, "cls": 1, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/WilliamSmithEdward/ROneCOne",
+        "license": "MIT",
+        "license_file": "LICENSE.txt",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "selenium-vba",
+      "path": "projects/third_party/selenium-vba",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/SeleniumVBA-main"
+      },
+      "source_counts": { "bas": 34, "cls": 15, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/GCUser99/SeleniumVBA",
+        "license": "MIT",
+        "license_file": "LICENSE.txt",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "std-vba",
+      "path": "projects/third_party/std-vba",
+      "profile": "generic-vba",
+      "enabled": false,
+      "notes": "Disabled: production analysis stalls while parsing stdHTTP.cls during workspace analysis; limitation belongs to the xlflow parser/analyzer and requires a follow-up before enabling.",
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/stdVBA-master"
+      },
+      "source_counts": { "bas": 21, "cls": 93, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/sancarn/stdVBA",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-cryptography",
+      "path": "projects/third_party/vba-cryptography",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA.Cryptography-main"
+      },
+      "source_counts": { "bas": 5, "cls": 0, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/GustavBrock/VBA.Cryptography",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-dictionary",
+      "path": "projects/third_party/vba-dictionary",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA-Dictionary-master"
+      },
+      "source_counts": { "bas": 1, "cls": 1, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/VBA-tools/VBA-Dictionary",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-fast-dictionary",
+      "path": "projects/third_party/vba-fast-dictionary",
+      "profile": "generic-vba",
+      "enabled": false,
+      "notes": "Disabled: production analysis overflows the resolver stack on this project; limitation belongs to the xlflow analyzer and requires a follow-up before enabling.",
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA-FastDictionary-master"
+      },
+      "source_counts": { "bas": 3, "cls": 1, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/cristianbuse/VBA-FastDictionary",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-fast-json",
+      "path": "projects/third_party/vba-fast-json",
+      "profile": "generic-vba",
+      "enabled": false,
+      "notes": "Disabled: production dataflow analysis exceeds the corpus project timeout; limitation belongs to the xlflow analyzer and requires a follow-up before enabling.",
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA-FastJSON-master"
+      },
+      "source_counts": { "bas": 2, "cls": 0, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/cristianbuse/VBA-FastJSON",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
       "id": "vba-json",
       "path": "projects/third_party/vba-json",
       "profile": "generic-vba",
@@ -53,8 +227,26 @@
         "origin": "tree-sitter-vba",
         "path": "examples/third_party/VBA-JSON-master"
       },
+      "source_counts": { "bas": 2, "cls": 0, "frm": 0 },
       "provenance": {
         "repository": "https://github.com/VBA-tools/VBA-JSON",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "vba-memory-tools",
+      "path": "projects/third_party/vba-memory-tools",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/VBA-MemoryTools-master"
+      },
+      "source_counts": { "bas": 3, "cls": 1, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/cristianbuse/VBA-MemoryTools",
         "license": "MIT",
         "license_file": "LICENSE",
         "source_file": "SOURCE.md"
@@ -69,6 +261,7 @@
         "origin": "tree-sitter-vba",
         "path": "examples/third_party/VBA-Web-master"
       },
+      "source_counts": { "bas": 21, "cls": 23, "frm": 0 },
       "provenance": {
         "repository": "https://github.com/VBA-tools/VBA-Web",
         "license": "MIT",
@@ -83,6 +276,40 @@
         { "path": "examples/salesforce/SalesforceSheet.cls", "kind": "document" },
         { "path": "examples/twitter/TwitterSheet.cls", "kind": "document" }
       ]
+    },
+    {
+      "id": "wasabi",
+      "path": "projects/third_party/wasabi",
+      "profile": "generic-vba",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/wasabi-main"
+      },
+      "source_counts": { "bas": 22, "cls": 1, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/vbacollective/wasabi",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
+    },
+    {
+      "id": "webxcel",
+      "path": "projects/third_party/webxcel",
+      "profile": "excel",
+      "enabled": true,
+      "source": {
+        "origin": "tree-sitter-vba",
+        "path": "examples/third_party/webxcel-master"
+      },
+      "source_counts": { "bas": 11, "cls": 32, "frm": 0 },
+      "provenance": {
+        "repository": "https://github.com/michaelneu/webxcel",
+        "license": "MIT",
+        "license_file": "LICENSE",
+        "source_file": "SOURCE.md"
+      }
     }
   ]
 }
