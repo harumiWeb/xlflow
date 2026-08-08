@@ -153,7 +153,10 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 	}
 	issues, suppressionWarnings := applyInlineSuppressions(issues, directives)
 	warnings = append(warnings, suppressionWarnings...)
-	return Result{Issues: issues, Warnings: warnings}, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	return Result{Issues: issues, Warnings: warnings}, nil
 }
 
 func (l Linter) filesContext(ctx context.Context) ([]string, error) {

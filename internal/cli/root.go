@@ -7751,6 +7751,12 @@ func (a *app) runUserFormArtifactPreflight(command string, cfg config.Config, ta
 }
 
 func (a *app) runFormWritePreflight(ctx context.Context, command string, cfg config.Config, opts formWriteCommandOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	targetForms := map[string]bool{opts.Spec.Form.Name: true}
 	if err := a.runUserFormCodeSourcePreflight(command, cfg, targetForms); err != nil {
 		return err
