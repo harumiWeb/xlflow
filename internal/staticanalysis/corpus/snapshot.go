@@ -88,7 +88,10 @@ func validateSnapshotID(id SnapshotID) error {
 	if id.Surface != SurfaceLint && id.Surface != SurfaceAnalyze {
 		return fmt.Errorf("unsupported snapshot surface %q", id.Surface)
 	}
-	project := id.Project
+	return validateSnapshotProject(id.Project)
+}
+
+func validateSnapshotProject(project string) error {
 	if project == "" || strings.TrimSpace(project) != project || strings.Contains(project, "\\") || strings.Contains(project, ":") {
 		return fmt.Errorf("invalid snapshot project %q", project)
 	}
@@ -104,24 +107,37 @@ func validateSnapshotID(id SnapshotID) error {
 	return nil
 }
 
+func validateSnapshotDiagnosticIdentity(project, file, code string) error {
+	if err := validateSnapshotProject(project); err != nil {
+		return err
+	}
+	if file == "" || strings.TrimSpace(file) != file || strings.Contains(file, "\\") || strings.Contains(file, ":") {
+		return fmt.Errorf("invalid snapshot file %q", file)
+	}
+	clean := pathpkg.Clean(file)
+	if clean != file || pathpkg.IsAbs(file) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("invalid snapshot file path %q", file)
+	}
+	for _, segment := range strings.Split(file, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("invalid snapshot file path %q", file)
+		}
+	}
+	if code == "" {
+		return errors.New("snapshot diagnostic code is required")
+	}
+	return nil
+}
+
 func validateSnapshotDiagnostic(d SnapshotDiagnostic) error {
 	if err := validateSnapshotID(SnapshotID{Project: d.Project, Surface: d.Surface}); err != nil {
 		return err
 	}
-	if d.File == "" || strings.TrimSpace(d.File) != d.File || strings.Contains(d.File, "\\") || strings.Contains(d.File, ":") {
-		return fmt.Errorf("invalid snapshot file %q", d.File)
+	if err := validateSnapshotDiagnosticIdentity(d.Project, d.File, d.Code); err != nil {
+		return err
 	}
-	file := pathpkg.Clean(d.File)
-	if file != d.File || pathpkg.IsAbs(d.File) || file == "." || file == ".." || strings.HasPrefix(file, "../") {
-		return fmt.Errorf("invalid snapshot file path %q", d.File)
-	}
-	for _, segment := range strings.Split(d.File, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return fmt.Errorf("invalid snapshot file path %q", d.File)
-		}
-	}
-	if d.Code == "" || d.Severity == "" {
-		return errors.New("snapshot diagnostic code and severity are required")
+	if d.Severity == "" {
+		return errors.New("snapshot diagnostic severity is required")
 	}
 	if d.Line < 1 {
 		return fmt.Errorf("snapshot diagnostic line must be positive, got %d", d.Line)

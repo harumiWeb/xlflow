@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	staticcontract "github.com/harumiWeb/xlflow/internal/staticanalysis/contract"
 	"github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
@@ -74,12 +75,12 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 			report.NotApplicableIDs = append(report.NotApplicableIDs, c.ID)
 		}
 		for _, code := range c.Analysis.RuleCodes {
-			if _, err := canonicalRuleMetadata(code); err != nil {
+			if _, err := staticcontract.CanonicalRuleMetadata(code); err != nil {
 				validationErrors = append(validationErrors, fmt.Sprintf("oracle case %q: %v", c.ID, err))
 			}
 		}
 		for _, expectation := range append(append([]DiagnosticExpectation(nil), c.Analysis.ExpectedDiagnostics...), c.Analysis.ForbiddenDiagnostics...) {
-			if _, err := canonicalRuleMetadata(expectation.Code); err != nil {
+			if _, err := staticcontract.CanonicalRuleMetadata(expectation.Code); err != nil {
 				validationErrors = append(validationErrors, fmt.Sprintf("oracle case %q: %v", c.ID, err))
 			}
 		}

@@ -41,13 +41,15 @@ const (
 )
 
 type Diagnostic struct {
-	Project  string  `json:"project"`
-	Surface  Surface `json:"surface"`
-	Code     string  `json:"code"`
-	Severity string  `json:"severity"`
-	File     string  `json:"file"`
-	Line     int     `json:"line"`
-	Column   int     `json:"column,omitempty"`
+	Project   string  `json:"project"`
+	Surface   Surface `json:"surface"`
+	Code      string  `json:"code"`
+	Severity  string  `json:"severity"`
+	File      string  `json:"file"`
+	Line      int     `json:"line"`
+	Column    int     `json:"column,omitempty"`
+	EndLine   int     `json:"-"`
+	EndColumn int     `json:"-"`
 }
 
 type Failure struct {
@@ -368,7 +370,7 @@ func classifyThirdPartyFailure(err error) FailureKind {
 func normalizeLintDiagnostics(project string, issues []lint.Issue) []Diagnostic {
 	result := make([]Diagnostic, 0, len(issues))
 	for _, issue := range issues {
-		result = append(result, Diagnostic{Project: project, Surface: SurfaceLint, Code: issue.Code, Severity: issue.Severity, File: filepath.ToSlash(filepath.Clean(issue.File)), Line: issue.Line, Column: issue.Column})
+		result = append(result, Diagnostic{Project: project, Surface: SurfaceLint, Code: issue.Code, Severity: issue.Severity, File: filepath.ToSlash(filepath.Clean(issue.File)), Line: issue.Line, Column: issue.Column, EndLine: issue.Line, EndColumn: issue.Column})
 	}
 	return result
 }
@@ -376,7 +378,8 @@ func normalizeLintDiagnostics(project string, issues []lint.Issue) []Diagnostic 
 func normalizeAnalyzeDiagnostics(project string, findings []analyze.Finding) []Diagnostic {
 	result := make([]Diagnostic, 0, len(findings))
 	for _, finding := range findings {
-		result = append(result, Diagnostic{Project: project, Surface: SurfaceAnalyze, Code: finding.Code, Severity: finding.Severity, File: filepath.ToSlash(filepath.Clean(finding.File)), Line: finding.Line, Column: finding.Column})
+		endLine, endColumn := normalizeDiagnosticEnd(finding.Line, finding.Column, finding.EndLine, finding.EndColumn)
+		result = append(result, Diagnostic{Project: project, Surface: SurfaceAnalyze, Code: finding.Code, Severity: finding.Severity, File: filepath.ToSlash(filepath.Clean(finding.File)), Line: finding.Line, Column: finding.Column, EndLine: endLine, EndColumn: endColumn})
 	}
 	return result
 }
@@ -391,7 +394,7 @@ func normalizeThirdPartyLintDiagnostics(project, profile string, mappings map[st
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, Diagnostic{Project: project, Surface: SurfaceLint, Code: issue.Code, Severity: issue.Severity, File: file, Line: issue.Line, Column: issue.Column})
+		result = append(result, Diagnostic{Project: project, Surface: SurfaceLint, Code: issue.Code, Severity: issue.Severity, File: file, Line: issue.Line, Column: issue.Column, EndLine: issue.Line, EndColumn: issue.Column})
 	}
 	return result, nil
 }
@@ -406,9 +409,20 @@ func normalizeThirdPartyAnalyzeDiagnostics(project, profile string, mappings map
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, Diagnostic{Project: project, Surface: SurfaceAnalyze, Code: finding.Code, Severity: finding.Severity, File: file, Line: finding.Line, Column: finding.Column})
+		endLine, endColumn := normalizeDiagnosticEnd(finding.Line, finding.Column, finding.EndLine, finding.EndColumn)
+		result = append(result, Diagnostic{Project: project, Surface: SurfaceAnalyze, Code: finding.Code, Severity: finding.Severity, File: file, Line: finding.Line, Column: finding.Column, EndLine: endLine, EndColumn: endColumn})
 	}
 	return result, nil
+}
+
+func normalizeDiagnosticEnd(line, column, endLine, endColumn int) (int, int) {
+	if endLine == 0 {
+		endLine = line
+	}
+	if endColumn == 0 && endLine == line {
+		endColumn = column
+	}
+	return endLine, endColumn
 }
 
 func remapThirdPartyPath(mappings map[string]string, file string) (string, error) {
