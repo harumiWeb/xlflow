@@ -251,10 +251,19 @@ func validateClassifications(projectID string, classifications []Classification)
 		default:
 			return fmt.Errorf("project %q classification %q targets unsupported extension %q", projectID, classification.Path, ext)
 		}
-		switch classification.Kind {
-		case ModuleKindStandard, ModuleKindClass, ModuleKindForm, ModuleKindDocument:
-		default:
-			return fmt.Errorf("project %q classification %q has unsupported kind %q", projectID, classification.Path, classification.Kind)
+		switch ext {
+		case ".bas":
+			if classification.Kind != ModuleKindStandard {
+				return fmt.Errorf("project %q classification %q must use kind %q", projectID, classification.Path, ModuleKindStandard)
+			}
+		case ".frm":
+			if classification.Kind != ModuleKindForm {
+				return fmt.Errorf("project %q classification %q must use kind %q", projectID, classification.Path, ModuleKindForm)
+			}
+		case ".cls":
+			if classification.Kind != ModuleKindClass && classification.Kind != ModuleKindDocument {
+				return fmt.Errorf("project %q classification %q has unsupported kind %q", projectID, classification.Path, classification.Kind)
+			}
 		}
 		key := strings.ToLower(classification.Path)
 		if _, exists := seen[key]; exists {

@@ -46,7 +46,7 @@ func TestLoadManifestRejectsMalformedDocuments(t *testing.T) {
 		{"unsupported profile", strings.Replace(valid, `"generic-vba"`, `"other"`, 1), "unsupported profile"},
 		{"empty notes", strings.Replace(valid, `"enabled":true`, `"enabled":true,"notes":"  "`, 1), "notes"},
 		{"disabled without reason", strings.Replace(valid, `"enabled":true`, `"enabled":false`, 1), "requires a non-empty notes reason"},
-		{"unsupported classification kind", strings.Replace(valid, `"source":{"origin"`, `"classifications":[{"path":"Main.bas","kind":"other"}],"source":{"origin"`, 1), "unsupported kind"},
+		{"unsupported classification kind", strings.Replace(valid, `"source":{"origin"`, `"classifications":[{"path":"Main.cls","kind":"other"}],"source":{"origin"`, 1), "unsupported kind"},
 		{"classification traversal", strings.Replace(valid, `"source":{"origin"`, `"classifications":[{"path":"../Main.bas","kind":"standard"}],"source":{"origin"`, 1), "classification"},
 	}
 	for _, test := range tests {
@@ -78,6 +78,24 @@ func TestValidateManifestRejectsInvalidClassificationOrderingAndDuplicates(t *te
 	}
 	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "duplicate classification") {
 		t.Fatalf("case-insensitive duplicate classifications accepted: %v", err)
+	}
+}
+
+func TestValidateManifestRejectsInvalidClassificationKindPairs(t *testing.T) {
+	for _, test := range []struct {
+		name, path, kind, want string
+	}{
+		{"standard source as document", "Main.bas", ModuleKindDocument, "must use kind \"standard\""},
+		{"form source as class", "Dialog.frm", ModuleKindClass, "must use kind \"form\""},
+		{"class source as form", "Sheet.cls", ModuleKindForm, "unsupported kind"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manifest := fixtureManifest("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+			manifest.Projects[0].Classifications = []Classification{{Path: test.path, Kind: test.kind}}
+			if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("invalid classification pair error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
