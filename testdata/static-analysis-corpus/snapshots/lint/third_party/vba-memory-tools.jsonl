@@ -1,0 +1,9 @@
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":114,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":154,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":194,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":239,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":262,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":333,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/Demo/DemoLibMemory.bas","surface":"lint","code":"VB007","severity":"warning","line":406,"column":0}
+{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"lint","code":"VB020","severity":"warning","line":1017,"column":9}
+{"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"lint","code":"VB020","severity":"warning","line":958,"column":9}

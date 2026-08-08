@@ -1,0 +1,3 @@
+{"project":"third_party/vba-cryptography","file":"BPassword.bas","surface":"lint","code":"VB020","severity":"warning","line":81,"column":11}
+{"project":"third_party/vba-cryptography","file":"BPassword.bas","surface":"lint","code":"VB020","severity":"warning","line":82,"column":11}
+{"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"lint","code":"VB022","severity":"warning","line":500,"column":0}

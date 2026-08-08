@@ -21,7 +21,7 @@ import (
 	"strings"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 const (
 	ProfileExcel        = "excel"
@@ -50,15 +50,29 @@ type Project struct {
 	Enabled         bool             `json:"enabled"`
 	Notes           string           `json:"notes,omitempty"`
 	Source          Source           `json:"source"`
+	SourceCounts    SourceCounts     `json:"source_counts"`
 	Provenance      Provenance       `json:"provenance"`
 	Classifications []Classification `json:"classifications,omitempty"`
 
-	// Presence flags are populated while decoding JSON.  They make it possible
-	// to distinguish a deliberately disabled project from a missing `enabled`
-	// field, while retaining a convenient bool for callers constructing values.
-	enabledPresent bool
-	notesPresent   bool
+	// Presence flags are populated while decoding JSON. They make it possible to
+	// distinguish deliberately supplied zero/false values from missing fields,
+	// while retaining convenient value fields for callers constructing values.
+	enabledPresent      bool
+	notesPresent        bool
+	sourceCountsPresent bool
 }
+
+// SourceCounts records the expected number of exported VBA source files in a
+// project. Counts are part of the manifest contract so a refresh cannot
+// silently drop or add source files while preserving the same project ID.
+type SourceCounts struct {
+	Bas int `json:"bas"`
+	Cls int `json:"cls"`
+	Frm int `json:"frm"`
+}
+
+// Total returns the number of VBA source files represented by the counts.
+func (c SourceCounts) Total() int { return c.Bas + c.Cls + c.Frm }
 
 // Classification overrides the default extension-to-module-kind mapping for
 // one source file. Paths are project-relative and deliberately exact; the
@@ -120,6 +134,34 @@ func (p *Project) UnmarshalJSON(data []byte) error {
 		}
 	}
 	_, value.notesPresent = fields["notes"]
+	counts, ok := fields["source_counts"]
+	value.sourceCountsPresent = ok
+	if ok {
+		if string(counts) == "null" {
+			return errors.New("project source_counts must be an object")
+		}
+		var countFields map[string]json.RawMessage
+		if err := json.Unmarshal(counts, &countFields); err != nil || countFields == nil {
+			if err != nil {
+				return fmt.Errorf("project source_counts must be an object: %w", err)
+			}
+			return errors.New("project source_counts must be an object")
+		}
+		for _, name := range []string{"bas", "cls", "frm"} {
+			raw, present := countFields[name]
+			if !present {
+				return fmt.Errorf("project source_counts must declare %s", name)
+			}
+			if string(raw) == "null" {
+				return fmt.Errorf("project source_counts.%s must be an integer", name)
+			}
+		}
+		var parsed SourceCounts
+		if err := decodeStrict(counts, &parsed); err != nil {
+			return fmt.Errorf("project source_counts must contain integer bas/cls/frm counts: %w", err)
+		}
+		value.SourceCounts = parsed
+	}
 	*p = Project(value)
 	return nil
 }
@@ -185,6 +227,12 @@ func ValidateManifest(manifest Manifest) error {
 		}
 		if manifest.jsonLoaded && !p.enabledPresent {
 			return fmt.Errorf("project %q must explicitly declare enabled", p.ID)
+		}
+		if manifest.jsonLoaded && !p.sourceCountsPresent {
+			return fmt.Errorf("project %q must explicitly declare source_counts", p.ID)
+		}
+		if p.SourceCounts.Bas < 0 || p.SourceCounts.Cls < 0 || p.SourceCounts.Frm < 0 {
+			return fmt.Errorf("project %q source_counts must be non-negative", p.ID)
 		}
 		if err := validateRelativePath(p.Path); err != nil {
 			return fmt.Errorf("project %q destination path: %w", p.ID, err)

@@ -67,14 +67,28 @@ The following projects are vendored under `testdata/static-analysis-corpus` as
 parser and static-analysis fixtures. They are independent test data, not Go
 runtime dependencies, and are therefore listed separately from the module
 inventory above. The corpus is pinned through
-`harumiWeb/tree-sitter-vba@c867f27ea3dedc2ccece1eeb0273cdb242899182`; each
-project retains the referenced `LICENSE` and repository-local `SOURCE.md`.
+`harumiWeb/tree-sitter-vba@2b944e30c7f76dd3e771d02584b80dd6a4733e4d`, as
+recorded in `testdata/static-analysis-corpus/manifest.json`; each project retains its
+repository-local `SOURCE.md` and any upstream licence file that was available.
 
-| Project           | Licence | Original repository                                                   | Saved metadata                                                                                                                                                   |
-| ----------------- | ------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vba-web`         | MIT     | [VBA-Web](https://github.com/VBA-tools/VBA-Web)                       | `testdata/static-analysis-corpus/projects/third_party/vba-web/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-web/SOURCE.md`                 |
-| `vba-json`        | MIT     | [VBA-JSON](https://github.com/VBA-tools/VBA-JSON)                     | `testdata/static-analysis-corpus/projects/third_party/vba-json/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-json/SOURCE.md`               |
-| `access-examples` | MIT     | [Access-examples](https://github.com/Access-projects/Access-examples) | `testdata/static-analysis-corpus/projects/third_party/access-examples/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/access-examples/SOURCE.md` |
+| Project                | Licence   | Original repository                                                          | Saved metadata                                                                                                                                                             |
+| ---------------------- | --------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `access-examples`      | MIT       | [Access-examples](https://github.com/Access-projects/Access-examples)        | `testdata/static-analysis-corpus/projects/third_party/access-examples/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/access-examples/SOURCE.md`           |
+| `better-access-charts` | MIT       | [better-access-charts](https://github.com/team-moeller/better-access-charts) | `testdata/static-analysis-corpus/projects/third_party/better-access-charts/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/better-access-charts/SOURCE.md` |
+| `iguana-tex`           | CC-BY-3.0 | [IguanaTex](https://github.com/Jonathan-LeRoux/IguanaTex)                    | `testdata/static-analysis-corpus/projects/third_party/iguana-tex/LICENSE.txt`; `testdata/static-analysis-corpus/projects/third_party/iguana-tex/SOURCE.md`                 |
+| `json`                 | MIT       | [JSON](https://github.com/vbacollective/json)                                | `testdata/static-analysis-corpus/projects/third_party/json/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/json/SOURCE.md`                                 |
+| `ronecone`             | MIT       | [ROneCOne](https://github.com/WilliamSmithEdward/ROneCOne)                   | `testdata/static-analysis-corpus/projects/third_party/ronecone/LICENSE.txt`; `testdata/static-analysis-corpus/projects/third_party/ronecone/SOURCE.md`                     |
+| `selenium-vba`         | MIT       | [SeleniumVBA](https://github.com/GCUser99/SeleniumVBA)                       | `testdata/static-analysis-corpus/projects/third_party/selenium-vba/LICENSE.txt`; `testdata/static-analysis-corpus/projects/third_party/selenium-vba/SOURCE.md`             |
+| `std-vba`              | MIT       | [stdVBA](https://github.com/sancarn/stdVBA)                                  | `testdata/static-analysis-corpus/projects/third_party/std-vba/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/std-vba/SOURCE.md`                           |
+| `vba-cryptography`     | MIT       | [VBA.Cryptography](https://github.com/GustavBrock/VBA.Cryptography)          | `testdata/static-analysis-corpus/projects/third_party/vba-cryptography/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-cryptography/SOURCE.md`         |
+| `vba-dictionary`       | MIT       | [VBA-Dictionary](https://github.com/VBA-tools/VBA-Dictionary)                | `testdata/static-analysis-corpus/projects/third_party/vba-dictionary/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-dictionary/SOURCE.md`             |
+| `vba-fast-dictionary`  | MIT       | [VBA-FastDictionary](https://github.com/cristianbuse/VBA-FastDictionary)     | `testdata/static-analysis-corpus/projects/third_party/vba-fast-dictionary/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-fast-dictionary/SOURCE.md`   |
+| `vba-fast-json`        | MIT       | [VBA-FastJSON](https://github.com/cristianbuse/VBA-FastJSON)                 | `testdata/static-analysis-corpus/projects/third_party/vba-fast-json/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-fast-json/SOURCE.md`               |
+| `vba-json`             | MIT       | [VBA-JSON](https://github.com/VBA-tools/VBA-JSON)                            | `testdata/static-analysis-corpus/projects/third_party/vba-json/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-json/SOURCE.md`                         |
+| `vba-memory-tools`     | MIT       | [VBA-MemoryTools](https://github.com/cristianbuse/VBA-MemoryTools)           | `testdata/static-analysis-corpus/projects/third_party/vba-memory-tools/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-memory-tools/SOURCE.md`         |
+| `vba-web`              | MIT       | [VBA-Web](https://github.com/VBA-tools/VBA-Web)                              | `testdata/static-analysis-corpus/projects/third_party/vba-web/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/vba-web/SOURCE.md`                           |
+| `wasabi`               | MIT       | [Wasabi](https://github.com/vbacollective/wasabi)                            | `testdata/static-analysis-corpus/projects/third_party/wasabi/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/wasabi/SOURCE.md`                             |
+| `webxcel`              | MIT       | [webxcel](https://github.com/michaelneu/webxcel)                             | `testdata/static-analysis-corpus/projects/third_party/webxcel/LICENSE`; `testdata/static-analysis-corpus/projects/third_party/webxcel/SOURCE.md`                           |
 
 The manifest and provenance files document the source paths, fixture profiles,
 and any normalization or file removal performed during import. Refreshes must
@@ -94,6 +108,12 @@ The BSD 3-Clause Licence is a permissive licence. It generally allows redistribu
 ### Apache-2.0
 
 The Apache License 2.0 is a permissive licence. It generally allows use, reproduction, modification, distribution, and sublicensing, subject to its conditions. It also includes an express patent licence and NOTICE-related requirements when applicable.
+
+### CC-BY-3.0
+
+The Creative Commons Attribution 3.0 Unported licence permits sharing and
+adaptation with attribution. The IguanaTex source metadata records this
+licence; preserve that attribution when redistributing the fixture.
 
 ## Review checklist before release
 
