@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	staticcontract "github.com/harumiWeb/xlflow/internal/staticanalysis/contract"
 	"github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
 
@@ -164,19 +165,9 @@ type AnalysisExpectation struct {
 	ForbiddenDiagnostics []DiagnosticExpectation `json:"forbidden_diagnostics,omitempty"`
 }
 
-type DiagnosticExpectation struct {
-	Code     string   `json:"code"`
-	Severity string   `json:"severity,omitempty"`
-	Range    *Range   `json:"range,omitempty"`
-	Surfaces []string `json:"surfaces,omitempty"`
-}
+type DiagnosticExpectation = staticcontract.DiagnosticExpectation
 
-type Range struct {
-	StartLine   int `json:"start_line,omitempty"`
-	StartColumn int `json:"start_column,omitempty"`
-	EndLine     int `json:"end_line,omitempty"`
-	EndColumn   int `json:"end_column,omitempty"`
-}
+type Range = staticcontract.Range
 
 type Provenance struct {
 	Status     string                 `json:"status"`
@@ -556,29 +547,8 @@ func diagnosticCodeDeclared(code string, expectations []DiagnosticExpectation) b
 }
 
 func validateDiagnosticExpectations(expectations []DiagnosticExpectation, kind, caseID string) error {
-	for _, expectation := range expectations {
-		rule, err := canonicalRuleMetadata(expectation.Code)
-		if err != nil {
-			return fmt.Errorf("oracle case %q has invalid %s diagnostic code %q: %w", caseID, kind, expectation.Code, err)
-		}
-		if severity := expectation.Severity; severity != "" && !ruleSupportsSeverity(rule, severity) {
-			return fmt.Errorf("oracle case %q diagnostic %q has unsupported severity %q", caseID, expectation.Code, severity)
-		}
-		seenSurfaces := map[string]struct{}{}
-		for _, surface := range expectation.Surfaces {
-			if !ruleSupportsSurface(rule, surface) {
-				return fmt.Errorf("oracle case %q diagnostic %q has unsupported surface %q", caseID, expectation.Code, surface)
-			}
-			if _, duplicate := seenSurfaces[surface]; duplicate {
-				return fmt.Errorf("oracle case %q diagnostic %q repeats surface %q", caseID, expectation.Code, surface)
-			}
-			seenSurfaces[surface] = struct{}{}
-		}
-		if expectation.Range != nil {
-			if expectation.Range.StartLine < 0 || expectation.Range.StartColumn < 0 || expectation.Range.EndLine < 0 || expectation.Range.EndColumn < 0 {
-				return fmt.Errorf("oracle case %q diagnostic %q has a negative source range", caseID, expectation.Code)
-			}
-		}
+	if err := staticcontract.ValidateExpectations(expectations); err != nil {
+		return fmt.Errorf("oracle case %q has invalid %s diagnostic contract: %w", caseID, kind, err)
 	}
 	return nil
 }
@@ -595,24 +565,6 @@ func canonicalRuleMetadata(code string) (rules.RuleMetadata, error) {
 		return rules.RuleMetadata{}, fmt.Errorf("code must use canonical registry ID %q", rule.ID)
 	}
 	return rule, nil
-}
-
-func ruleSupportsSurface(rule rules.RuleMetadata, surface string) bool {
-	for _, supported := range rule.Surfaces {
-		if surface == string(supported) {
-			return true
-		}
-	}
-	return false
-}
-
-func ruleSupportsSeverity(rule rules.RuleMetadata, severity string) bool {
-	for _, supported := range rule.SupportedSeverities {
-		if severity == string(supported) {
-			return true
-		}
-	}
-	return false
 }
 
 func confinedPath(root, relative string) (string, error) {

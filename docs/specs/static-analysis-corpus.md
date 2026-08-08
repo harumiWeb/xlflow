@@ -315,6 +315,143 @@ empty files during an explicit update so that a reviewed no-diagnostic result
 remains a committed baseline. Updating a baseline is a reviewable change to
 test data, not an automatic acceptance of newly observed analyzer behavior.
 
+### Reviewed diagnostic evidence
+
+Deterministic snapshots record observed analyzer output. Reviewed semantic
+evidence is a separate UTF-8 JSONL ledger at
+`testdata/static-analysis-corpus/reviews/diagnostics.jsonl`. The ledger has no
+header or blank lines and uses one object per reviewed diagnostic identity. Its
+schema is:
+
+```json
+{
+  "schema_version": 1,
+  "project": "self/gen-qrcode",
+  "file": "src/modules/QrCode.bas",
+  "classification": "false-positive",
+  "diagnostic": {
+    "code": "VBA209",
+    "severity": "warning",
+    "surface": "analyze",
+    "range": {
+      "start_line": 21,
+      "start_column": 5,
+      "end_line": 24,
+      "end_column": 18
+    },
+    "count": 1,
+    "allowed_occurrences": 2
+  },
+  "rationale": "The guarded value is initialized on every reachable path.",
+  "regression_test": "internal/analyze/qrcode_test.go::TestAnalyzeGuardedQrCodeValue"
+}
+```
+
+The fields have the following contract:
+
+- `schema_version` is `1`. Unknown versions and unknown fields are rejected.
+- `project` is the stable corpus runner ID, and `file` is the slash-separated
+  project-relative path after source-map remapping. Absolute and temporary
+  workspace paths are invalid.
+- `classification` is exactly `true-positive` or `false-positive`. Unreviewed
+  is the absence of a matching ledger row, not an assertion serialized into
+  the ledger.
+- `diagnostic.code` is the canonical registry ID, `severity` is a supported
+  registry severity, and `surface` is the exact `lint` or `analyze` surface.
+- `diagnostic.range` is required and contains all four normalized coordinates.
+  Lines are 1-based. Columns use the corpus diagnostic convention, including
+  `0` when no column is available. When the production finding has no end
+  position, normalization copies its start line and, for a single-line range,
+  its start column before ledger matching. All four coordinates are compared
+  exactly; a line-only overlap is not a match.
+- `count` is a positive diagnostic multiplicity for the exact identity. It
+  makes duplicate findings explicit instead of deduplicating them.
+- `allowed_occurrences` is optional and valid only for a false-positive row.
+  It records how many separately reviewed diagnostics may continue to share
+  the same normalized identity when source/sink detail is not part of the
+  corpus contract. Verification fails when the actual count exceeds this
+  ceiling. It does not change the false-positive evidence `count` used by
+  metrics.
+
+Because the snapshot and shared contract intentionally exclude rule-specific
+prose and path witnesses, `allowed_occurrences` cannot distinguish an allowed
+occurrence disappearing at the same time that the reviewed false positive
+reappears under the identical normalized identity. It deterministically guards
+the observable multiplicity boundary; a future context-rich identity would be
+required to distinguish that swap.
+
+- `rationale` is a non-empty human review explanation.
+- A `false-positive` row contains exactly one of `regression_test` or
+  `regression_exception`. `regression_test` names the focused regression that
+  protects the root-cause fix. `regression_exception` explains why such a
+  fixture is impractical. Neither field is valid for a `true-positive` row.
+
+Ledger rows are sorted deterministically by `project`, `file`, diagnostic
+`surface`, `code`, `severity`, range coordinates, and `classification`.
+Duplicate or conflicting rows for the same exact diagnostic identity are
+invalid. The complete identity consists of project, file, surface, code,
+severity, and all four range coordinates.
+
+A `true-positive` ledger row is an expected diagnostic contract. Corpus
+verification requires the current normalized output to contain that identity
+with at least the declared `count`; an unexpected disappearance or reduced
+multiplicity fails verification, while additional occurrences remain
+unreviewed and visible. A `false-positive` row is a forbidden diagnostic
+contract. It remains in the ledger after the analyzer is fixed, and verification
+fails if any matching diagnostic reappears. When reviewed diagnostics that are
+not false positives share the same exact normalized identity,
+`allowed_occurrences` preserves that baseline and verification fails only when
+the count grows beyond it.
+
+Every current snapshot diagnostic not consumed by a matching true-positive
+row is unreviewed unless it violates a false-positive contract. Unreviewed
+diagnostics remain permitted and visible in reports; they are never silently
+classified as correct. Snapshot verification still compares all observations,
+including unreviewed rows, so this review layer does not weaken the broad
+regression baseline.
+
+The committed ledger also supplies deterministic quality metrics. The summary
+reports reviewed count, unreviewed count, true-positive count, false-positive
+count, and per-rule precision; project/profile coverage may also be reported.
+`count` contributes multiplicity to all ledger totals. For a rule with reviewed
+evidence, precision is `TP / (TP + FP)`. Unreviewed diagnostics are excluded
+from both numerator and denominator. False-positive ledger rows continue to
+contribute after remediation, so fixing a diagnostic does not erase reviewed
+evidence or inflate precision. Metrics are claims about the committed reviewed
+ledger, not estimates for all VBA code.
+
+When the real-world corpus exposes a suspected false positive, use this
+workflow:
+
+```text
+real-world corpus finds suspicious diagnostic
+        ↓
+review the exact diagnostic and confirm the false positive
+        ↓
+reduce the cause to a minimal focused fixture where practical
+        ↓
+fix the root cause
+        ↓
+add the focused regression test
+        ↓
+add or retain the real-world forbidden ledger contract
+```
+
+The focused fixture proves the analyzer behavior directly and keeps failures
+small and actionable; the real-world forbidden contract proves the original
+integration boundary. A `regression_exception` is acceptable only when a
+focused fixture is impractical and must record that reason. The broad corpus
+case complements, rather than replaces, the focused regression.
+
+The expected/forbidden matcher and diagnostic contract representation are
+static-analysis-owned infrastructure that can also be consumed by the local
+VBE oracle. This reuse does not make the corpus depend on Excel, and it does not
+give VBE compilation universal authority over xlflow diagnostics. VBE
+acceptance or rejection is relevant to compile-equivalent rules only.
+Maintainability, policy, runtime-risk, portability, and Excel-specific
+diagnostics may intentionally report code that compiles successfully; compile
+success alone is not evidence that such a warning is a false positive.
+
 ## Operational workflow
 
 The corpus has three deliberately separate evidence layers. Focused unit
@@ -352,6 +489,27 @@ rtk go test ./internal/oracle -run '^TestCommittedFixtureContractsWithoutExcel$'
 ```bash
 rtk go test ./internal/lint ./internal/analyze -run 'TestLinter|Test.*Analyze' -count=1
 ```
+
+To select a small review-only batch without running the analyzer, query the
+committed snapshots and review ledger by canonical rule ID:
+
+```powershell
+rtk task corpus:review-candidates -- VBA225
+rtk task corpus:review-candidates -- VBA225 10
+```
+
+The optional second argument is a positive display limit and defaults to 20.
+The task validates the ledger schema and sources, checks committed
+true-positive start-position/multiplicity evidence, consumes the multiplicity
+already claimed by matching true-positive rows, and lists the remaining
+snapshot rows in deterministic project/file/surface/location order.
+False-positive evidence does not consume current rows: any allowed colliding
+occurrence remains a candidate for independent review. The reported total
+retains duplicate occurrences even when the display is limited. Candidate
+locations are start-only snapshot coordinates, so this command is a selection
+aid, not a ledger-row generator or an exact forbidden-contract check; obtain
+the full normalized range from the analyzer before committing semantic
+evidence, and use `task corpus:test` for exact TP/FP verification.
 
 Then verify the checked-in observed behavior without writing files:
 
@@ -563,8 +721,10 @@ remaining diagnostics are stable across repeated verify-only runs.
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`
 - `docs/adr/ADR-0030-third-party-corpus-workspaces.md`
 - `docs/adr/ADR-0031-deterministic-static-analysis-snapshots.md`
+- `docs/adr/ADR-0032-reviewed-static-analysis-corpus-evidence.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - `docs/adr/ADR-0026-local-vbe-oracle-evidence.md`
 - Issue #530
 - Issue #531
+- Issue #537
 - Issue #548

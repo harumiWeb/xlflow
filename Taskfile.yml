@@ -125,6 +125,25 @@ tasks:
       - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1 -v
         platforms: [linux, darwin]
 
+  corpus:metrics:
+    desc: Verify committed real-world corpus reviews and print reviewed-only precision metrics
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^TestCommittedCorpusReviewMetrics$' -count=1 --test.v
+        platforms: [windows]
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestCommittedCorpusReviewMetrics$' -count=1 -v
+        platforms: [linux, darwin]
+
+  corpus:review-candidates:
+    desc: "List unreviewed committed snapshot diagnostics for one rule (usage: task corpus:review-candidates -- VBA225 [20])"
+    env:
+      XLFLOW_PRINT_CORPUS_REVIEW_CANDIDATES: "1"
+      XLFLOW_CORPUS_REVIEW_CANDIDATES_ARGS: "{{.CLI_ARGS}}"
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^TestCommittedCorpusReviewCandidates$' -count=1 --test.v
+        platforms: [windows]
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestCommittedCorpusReviewCandidates$' -count=1 -v
+        platforms: [linux, darwin]
+
   bench:lsp:
     desc: Run deterministic LSP performance benchmarks
     cmds:

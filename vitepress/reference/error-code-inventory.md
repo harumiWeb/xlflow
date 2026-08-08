@@ -657,6 +657,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `redim_declarator`
 - `redim_statement`
 - `refers_to`
+- `regression_exception`
 - `replaced_existing`
 - `request_id`
 - `requested_bridge`
