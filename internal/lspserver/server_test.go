@@ -54,6 +54,45 @@ func TestNewLoadsGeneratedTypeDatabaseWhenPresent(t *testing.T) {
 	}
 }
 
+func TestHoverIncludesDocumentationForOpenDocumentProcedure(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "Main.bas")
+	source := `Option Explicit
+''' Target documentation.
+Public Sub Target()
+End Sub
+
+Public Sub Caller()
+    Call Target
+End Sub
+`
+	server, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	uri := pathToFileURI(path)
+	if _, err := server.docs.open(uri, source, 1); err != nil {
+		t.Fatal(err)
+	}
+	line := "    Call Target"
+	hover, err := server.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+		Position:     protocol.Position{Line: 6, Character: protocol.UInteger(strings.Index(line, "Target") + 2)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil {
+		t.Fatal("hover = nil")
+	}
+	contents, ok := hover.Contents.(protocol.MarkupContent)
+	if !ok || !strings.Contains(contents.Value, "Target documentation.") {
+		t.Fatalf("hover contents = %#v, want target documentation", hover.Contents)
+	}
+}
+
 func TestFileURIPathRoundTripWithEscapedJapanesePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "日本 語#%dir", "Main.bas")
 	uri := pathToFileURI(path)
