@@ -42,10 +42,11 @@ severity, and range recorded in the ledger; it cannot accidentally approve or
 forbid a different occurrence of the same rule elsewhere.
 
 A true-positive row is an expected diagnostic contract: the current corpus
-must contain the exact diagnostic with the declared multiplicity. A
-false-positive row is a forbidden diagnostic contract: after remediation the
-current corpus must not add an occurrence of that identity. The ordinary case
-has a zero ceiling; `allowed_occurrences` handles the narrower case where
+must contain the exact diagnostic at least the declared number of times.
+Additional occurrences remain unreviewed. A false-positive row is a forbidden
+diagnostic contract: after remediation the current corpus must not add an
+occurrence of that identity. The ordinary case has a zero ceiling;
+`allowed_occurrences` handles the narrower case where
 multiple source flows collapse to the same normalized identity and fails on
 any increase above the reviewed baseline. The false-positive row remains
 committed after remediation, preserving both the regression boundary and the

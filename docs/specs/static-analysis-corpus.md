@@ -373,18 +373,18 @@ The fields have the following contract:
   ceiling. It does not change the false-positive evidence `count` used by
   metrics.
 
-Because the snapshot and shared contract intentionally exclude rule-specific
-prose and path witnesses, `allowed_occurrences` cannot distinguish an allowed
-occurrence disappearing at the same time that the reviewed false positive
-reappears under the identical normalized identity. It deterministically guards
-the observable multiplicity boundary; a future context-rich identity would be
-required to distinguish that swap.
-
 - `rationale` is a non-empty human review explanation.
 - A `false-positive` row contains exactly one of `regression_test` or
   `regression_exception`. `regression_test` names the focused regression that
   protects the root-cause fix. `regression_exception` explains why such a
   fixture is impractical. Neither field is valid for a `true-positive` row.
+
+Because the snapshot and shared contract intentionally exclude rule-specific
+prose and path witnesses, `allowed_occurrences` cannot distinguish an allowed
+occurrence disappearing while the reviewed false positive reappears under the
+identical normalized identity. It deterministically guards the observable
+multiplicity boundary; a future context-rich identity would be required to
+distinguish that swap.
 
 Ledger rows are sorted deterministically by `project`, `file`, diagnostic
 `surface`, `code`, `severity`, range coordinates, and `classification`.

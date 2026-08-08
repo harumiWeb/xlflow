@@ -213,10 +213,7 @@ func validateDiagnosticReview(review DiagnosticReview) error {
 	if review.SchemaVersion != ReviewSchemaVersion {
 		return fmt.Errorf("unsupported schema_version %d (want %d)", review.SchemaVersion, ReviewSchemaVersion)
 	}
-	if err := validateSnapshotDiagnostic(SnapshotDiagnostic{
-		Project: review.Project, File: review.File, Surface: SurfaceAnalyze,
-		Code: review.Diagnostic.Code, Severity: "review", Line: 1,
-	}); err != nil {
+	if err := validateSnapshotDiagnosticIdentity(review.Project, review.File, review.Diagnostic.Code); err != nil {
 		return err
 	}
 	if review.Classification != ReviewTruePositive && review.Classification != ReviewFalsePositive {
@@ -226,8 +223,7 @@ func validateDiagnosticReview(review DiagnosticReview) error {
 		return err
 	}
 	rng := review.Diagnostic.Range
-	if rng == nil || rng.StartLine < 1 || rng.EndLine < rng.StartLine || rng.StartColumn < 0 || rng.EndColumn < 0 ||
-		(rng.EndLine == rng.StartLine && rng.EndColumn < rng.StartColumn) {
+	if rng == nil || rng.StartLine < 1 {
 		return errors.New("diagnostic review requires a valid exact range")
 	}
 	if review.Diagnostic.Count < 1 {
@@ -315,7 +311,7 @@ func EvaluateDiagnosticReviews(reviews []DiagnosticReview, report Report) (Revie
 		location := reviewLocation{project: review.Project, file: review.File}
 		count := 0
 		for _, diagnostic := range actualByLocation[location] {
-			if reviewMatches(review.expectation(), diagnostic) {
+			if contract.Matches(review.expectation(), diagnostic) {
 				count++
 			}
 		}
@@ -349,7 +345,7 @@ func buildReviewMetrics(reviews []DiagnosticReview, diagnostics []Diagnostic) Re
 		}
 		for range review.Diagnostic.Count {
 			for index, diagnostic := range diagnostics {
-				if used[index] || review.Project != diagnostic.Project || review.File != diagnostic.File || !reviewMatches(review.expectation(), contractDiagnostic(diagnostic)) {
+				if used[index] || review.Project != diagnostic.Project || review.File != diagnostic.File || !contract.Matches(review.expectation(), contractDiagnostic(diagnostic)) {
 					continue
 				}
 				used[index] = true
@@ -387,21 +383,25 @@ func EvaluateSnapshotReviews(reviews []DiagnosticReview, snapshots SnapshotSet) 
 func consumeSnapshotTruePositiveReviews(reviews []DiagnosticReview, rows []SnapshotDiagnostic) ([]bool, error) {
 	used := make([]bool, len(rows))
 	violations := make([]string, 0)
-	for _, review := range reviews {
+	for reviewIndex, review := range reviews {
+		if err := validateDiagnosticReview(review); err != nil {
+			return nil, fmt.Errorf("review %d: %w", reviewIndex+1, err)
+		}
 		if review.Classification == ReviewFalsePositive {
 			continue
 		}
-		matched := 0
+		available := make([]int, 0)
 		for index, row := range rows {
-			if snapshotReviewMatches(review, row) {
-				if !used[index] && matched < review.Diagnostic.Count {
-					used[index] = true
-					matched++
-				}
+			if !used[index] && snapshotReviewMatches(review, row) {
+				available = append(available, index)
 			}
 		}
-		if matched != review.Diagnostic.Count {
-			violations = append(violations, fmt.Sprintf("%s/%s: expected %d %s diagnostic(s), found %d", review.Project, review.File, review.Diagnostic.Count, review.Diagnostic.Code, matched))
+		if len(available) < review.Diagnostic.Count {
+			violations = append(violations, fmt.Sprintf("%s/%s: expected %d %s diagnostic(s), found %d", review.Project, review.File, review.Diagnostic.Count, review.Diagnostic.Code, len(available)))
+			continue
+		}
+		for _, index := range available[:review.Diagnostic.Count] {
+			used[index] = true
 		}
 	}
 	if len(violations) > 0 {
@@ -459,16 +459,6 @@ func buildReviewMetricsFromMatches(reviews []DiagnosticReview, codes []string, u
 		metrics.Rules = append(metrics.Rules, RuleReviewMetrics{Rule: code, Reviewed: reviewed, Unreviewed: unreviewedByRule[code], TP: count.tp, FP: count.fp, Precision: precision, HasPrecision: reviewed > 0})
 	}
 	return metrics
-}
-
-func reviewMatches(expect contract.DiagnosticExpectation, diagnostic contract.Diagnostic) bool {
-	if expect.Code != diagnostic.Code || expect.Severity != "" && expect.Severity != diagnostic.Severity {
-		return false
-	}
-	if len(expect.Surfaces) == 1 && expect.Surfaces[0] != diagnostic.Surface {
-		return false
-	}
-	return expect.Range == nil || diagnostic.Range != nil && *expect.Range == *diagnostic.Range
 }
 
 func FormatReviewMetrics(metrics ReviewMetrics) string {

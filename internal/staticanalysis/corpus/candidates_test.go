@@ -42,6 +42,7 @@ func TestFindSnapshotReviewCandidatesPreservesFalsePositiveCollisionsAndLimit(t 
 	second := snapshotAt("self/sample", "src/Main.bas", SurfaceAnalyze, "VBA224", 7)
 	fp := reviewAt(ReviewFalsePositive, "VBA224", 3)
 	fp.Diagnostic.AllowedOccurrences = 1
+	fp.RegressionException = "Synthetic candidate test has no analyzer regression fixture."
 	snapshots := SnapshotSet{
 		{Project: "self/sample", Surface: SurfaceAnalyze}: {second, first},
 	}

@@ -34,6 +34,21 @@ func TestCheckRequiresDistinctDiagnosticsForDuplicateExpectations(t *testing.T) 
 	}
 }
 
+func TestCheckReassignsBroadMatchToSatisfySpecificExpectation(t *testing.T) {
+	exactRange := &Range{StartLine: 4, StartColumn: 1, EndLine: 4, EndColumn: 8}
+	expect := ExpectationSet{ExpectedDiagnostics: []DiagnosticExpectation{
+		{Code: "VBA101"},
+		{Code: "VBA101", Severity: "warning", Range: exactRange, Surfaces: []string{"analyze"}},
+	}}
+	actual := []Diagnostic{
+		{Code: "VBA101", Severity: "warning", Range: exactRange, Surface: "analyze"},
+		{Code: "VBA101", Severity: "warning", Range: &Range{StartLine: 9}, Surface: "analyze"},
+	}
+	if err := Check(expect, actual); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckProjections(t *testing.T) {
 	expect := ExpectationSet{ExpectedDiagnostics: []DiagnosticExpectation{{Code: "VBA001", Severity: "warning", Surfaces: []string{"analyze", "lsp"}}}}
 	projections := map[string][]Diagnostic{
@@ -50,6 +65,22 @@ func TestCheckProjections(t *testing.T) {
 	projections["lsp"] = []Diagnostic{{Code: "VBA001", Severity: "warning"}, {Code: "VBA001", Severity: "warning"}}
 	if err := CheckProjections(expect, projections); err == nil {
 		t.Fatal("expected duplicate projection diagnostic")
+	}
+
+	surfaceMismatch := map[string][]Diagnostic{
+		"lsp":     {{Code: "VBA101", Severity: "warning", Surface: "analyze"}},
+		"analyze": {{Code: "VBA101", Severity: "warning", Surface: "lsp"}},
+	}
+	if err := CheckProjections(expect, surfaceMismatch); err == nil || !strings.Contains(err.Error(), `in "analyze" projection`) {
+		t.Fatalf("surface mismatch error = %v", err)
+	}
+
+	projections = map[string][]Diagnostic{
+		"analyze": {{Code: "VBA001", Severity: "warning", Range: &Range{StartLine: 1, EndLine: 1}}},
+		"lsp":     {{Code: "VBA001", Severity: "warning", Range: &Range{StartLine: 2, EndLine: 2}}},
+	}
+	if err := CheckProjections(expect, projections); err == nil || !strings.Contains(err.Error(), "differs across projections") {
+		t.Fatalf("range mismatch error = %v", err)
 	}
 }
 
@@ -82,6 +113,8 @@ func TestValidateUsesRuleRegistry(t *testing.T) {
 		{name: "surface", item: DiagnosticExpectation{Code: "VBA101", Surfaces: []string{"lint"}}, want: "unsupported surface"},
 		{name: "duplicate surface", item: DiagnosticExpectation{Code: "VBA101", Surfaces: []string{"analyze", "analyze"}}, want: "repeats surface"},
 		{name: "negative range", item: DiagnosticExpectation{Code: "VBA101", Range: &Range{StartLine: -1}}, want: "negative source range"},
+		{name: "reversed lines", item: DiagnosticExpectation{Code: "VBA101", Range: &Range{StartLine: 4, EndLine: 3}}, want: "incoherent source range"},
+		{name: "reversed columns", item: DiagnosticExpectation{Code: "VBA101", Range: &Range{StartLine: 4, StartColumn: 8, EndLine: 4, EndColumn: 2}}, want: "incoherent source range"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,5 +126,22 @@ func TestValidateUsesRuleRegistry(t *testing.T) {
 				t.Fatalf("err=%v, want substring %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateChecksBothExpectationSets(t *testing.T) {
+	expect := ExpectationSet{ForbiddenDiagnostics: []DiagnosticExpectation{{Code: "vba101"}}}
+	if err := Validate(expect); err == nil || !strings.Contains(err.Error(), "forbidden diagnostics") {
+		t.Fatalf("Validate error = %v", err)
+	}
+}
+
+func TestMatchesUsesSurfaceSetMembership(t *testing.T) {
+	expect := DiagnosticExpectation{Code: "VBA101", Surfaces: []string{"analyze", "lsp"}}
+	if !Matches(expect, Diagnostic{Code: "VBA101", Surface: "lsp"}) {
+		t.Fatal("expected lsp diagnostic to match surface set")
+	}
+	if Matches(expect, Diagnostic{Code: "VBA101", Surface: "lint"}) {
+		t.Fatal("unexpected lint diagnostic match")
 	}
 }

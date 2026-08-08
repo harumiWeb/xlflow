@@ -19,7 +19,7 @@ Before classifying or changing evidence:
 
 If the rule specification, registry metadata, implementation, and focused tests disagree about severity, surface, or semantics, stop classification and report the contract drift first. Do not choose whichever source makes the proposed classification convenient.
 
-Treat the specification as the schema authority. If this Skill and the specification disagree, follow the specification and update this Skill in the same change when appropriate.
+Treat the specification as the schema authority. If this Skill and the specification disagree, follow the specification and report the drift. Modify this Skill only when the user explicitly asks to maintain it.
 
 ## Choose One Workflow
 
@@ -38,7 +38,7 @@ Keep one pull request centered on one rule or one analyzer root cause. A small b
 2. Locate every candidate in the snapshot and source. Preserve duplicate occurrences; do not deduplicate by eye.
 3. Read the rule contract and focused tests before deciding. Evaluate the source facts required by that rule, not whether the VBA merely compiles.
 4. Record a true positive only when the diagnostic matches the intended rule semantics at that exact source location.
-5. Use the full normalized identity: project, project-relative file, surface, code, severity, all four range coordinates, and multiplicity.
+5. Use the full normalized identity: project, project-relative file, surface, code, severity, and all four range coordinates. Record multiplicity separately in `count`; it is not part of the identity.
 6. Do not infer an end position from the start-only snapshot format. Obtain the normalized full range from the actual analyzer/corpus diagnostic or a focused diagnostic probe. Prefer an existing owning-package test helper that exposes normalized diagnostics. If no targeted probe exists, add a small probe only when repository edits are in scope and either retain it as a useful focused test or remove that probe-only change before handoff. Otherwise report range collection as a blocker and leave the ledger unchanged.
 7. Add canonical, sorted `true-positive` rows to `testdata/static-analysis-corpus/reviews/diagnostics.jsonl`, with a concise rationale explaining the source fact that makes the finding valid.
 8. Leave every undecided or unexamined occurrence absent from the ledger. Absence means `unreviewed`; never serialize an unreviewed classification.

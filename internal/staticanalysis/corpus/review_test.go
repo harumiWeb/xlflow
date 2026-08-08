@@ -53,6 +53,26 @@ func TestLoadDiagnosticReviewsStrictJSONLines(t *testing.T) {
 	if _, err := LoadDiagnosticReviews(path); err == nil || !strings.Contains(err.Error(), "canonical JSON") {
 		t.Fatalf("leading whitespace error = %v", err)
 	}
+	if err := os.WriteFile(path, []byte(data+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDiagnosticReviews(path); err == nil || !strings.Contains(err.Error(), "is blank") {
+		t.Fatalf("blank line error = %v", err)
+	}
+	trailing := strings.TrimSuffix(data, "\n") + `{}` + "\n"
+	if err := os.WriteFile(path, []byte(trailing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDiagnosticReviews(path); err == nil || !strings.Contains(err.Error(), "trailing JSON") {
+		t.Fatalf("trailing JSON error = %v", err)
+	}
+	unsupported := strings.Replace(data, `"schema_version":1`, `"schema_version":2`, 1)
+	if err := os.WriteFile(path, []byte(unsupported), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDiagnosticReviews(path); err == nil || !strings.Contains(err.Error(), "unsupported schema_version") {
+		t.Fatalf("schema version error = %v", err)
+	}
 }
 
 func TestLoadDiagnosticReviewsRejectsConflictingIdentityAndOrder(t *testing.T) {
@@ -92,7 +112,17 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalid := append([]DiagnosticReview(nil), reviews...)
-	invalid[2].RegressionTest = "internal/vba/dataflow/analysis_test.go::TestDoesNotExist"
+	target := -1
+	for index := range invalid {
+		if invalid[index].RegressionTest != "" {
+			target = index
+			break
+		}
+	}
+	if target < 0 {
+		t.Fatal("committed reviews contain no regression_test")
+	}
+	invalid[target].RegressionTest = "internal/vba/dataflow/analysis_test.go::TestDoesNotExist"
 	if err := ValidateReviewSources(repoRoot, corpusRoot, invalid); err == nil || !strings.Contains(err.Error(), "does not name a function") {
 		t.Fatalf("missing regression function error = %v", err)
 	}
@@ -215,6 +245,17 @@ func TestEvaluateSnapshotReviewsUsesCommittedStartIdentity(t *testing.T) {
 	if err != nil || metrics.Unreviewed != 2 {
 		t.Fatalf("start-only forbidden snapshot must remain unreviewed: metrics=%#v err=%v", metrics, err)
 	}
+	set[id] = append(set[id], SnapshotDiagnostic{Project: "self/sample", File: "src/Main.bas", Surface: SurfaceAnalyze, Code: "VBA225", Severity: "warning", Line: 3})
+	metrics, err = EvaluateSnapshotReviews([]DiagnosticReview{tp, fp}, set)
+	if err != nil || metrics.TP != 1 || metrics.Unreviewed != 3 {
+		t.Fatalf("extra TP occurrence must remain unreviewed: metrics=%#v err=%v", metrics, err)
+	}
+
+	invalid := tp
+	invalid.Diagnostic.Count = 0
+	if _, err := EvaluateSnapshotReviews([]DiagnosticReview{invalid}, set); err == nil || !strings.Contains(err.Error(), "review 1") {
+		t.Fatalf("invalid direct review error = %v", err)
+	}
 }
 
 func TestFormatReviewMetricsIsDeterministicAndReviewedOnly(t *testing.T) {
@@ -251,7 +292,7 @@ func TestDiagnosticReviewRejectsReversedSingleLineRange(t *testing.T) {
 	review := reviewAt(ReviewTruePositive, "VBA225", 3)
 	review.Diagnostic.Range.StartColumn = 8
 	review.Diagnostic.Range.EndColumn = 2
-	if err := validateDiagnosticReview(review); err == nil || !strings.Contains(err.Error(), "valid exact range") {
+	if err := validateDiagnosticReview(review); err == nil || !strings.Contains(err.Error(), "incoherent source range") {
 		t.Fatalf("reversed range error = %v", err)
 	}
 }

@@ -43,59 +43,71 @@ type ExpectationSet struct {
 }
 
 // Check verifies required and forbidden diagnostics. Each actual diagnostic
-// can satisfy at most one required expectation.
+// can satisfy at most one required expectation. Matching may reassign a broad
+// expectation so a more constrained expectation can consume its only match.
 func Check(expect ExpectationSet, actual []Diagnostic) error {
 	for _, forbidden := range expect.ForbiddenDiagnostics {
 		if countDiagnostics(forbidden, actual) > 0 {
 			return fmt.Errorf("forbidden diagnostic %s was emitted", forbidden.Code)
 		}
 	}
-	used := make([]bool, len(actual))
+	type requiredSlot struct {
+		expectation DiagnosticExpectation
+		surface     string
+	}
+	slots := make([]requiredSlot, 0, len(expect.ExpectedDiagnostics))
 	for _, required := range expect.ExpectedDiagnostics {
 		if len(required.Surfaces) > 0 {
 			for _, surface := range required.Surfaces {
-				matched := false
-				for i, diagnostic := range actual {
-					if used[i] || diagnostic.Surface != surface || !diagnosticMatches(required, diagnostic) {
-						continue
-					}
-					used[i] = true
-					matched = true
-					break
-				}
-				if !matched {
-					return fmt.Errorf("expected diagnostic %s was not emitted on %s", required.Code, surface)
-				}
+				slots = append(slots, requiredSlot{expectation: required, surface: surface})
 			}
 			continue
 		}
-		matched := false
-		for i, diagnostic := range actual {
-			if used[i] || !diagnosticMatches(required, diagnostic) {
+		slots = append(slots, requiredSlot{expectation: required})
+	}
+	actualToSlot := make([]int, len(actual))
+	for index := range actualToSlot {
+		actualToSlot[index] = -1
+	}
+	var assign func(int, []bool) bool
+	assign = func(slotIndex int, seen []bool) bool {
+		slot := slots[slotIndex]
+		for actualIndex, diagnostic := range actual {
+			if seen[actualIndex] || slot.surface != "" && diagnostic.Surface != slot.surface || !Matches(slot.expectation, diagnostic) {
 				continue
 			}
-			used[i] = true
-			matched = true
-			break
+			seen[actualIndex] = true
+			previous := actualToSlot[actualIndex]
+			if previous < 0 || assign(previous, seen) {
+				actualToSlot[actualIndex] = slotIndex
+				return true
+			}
 		}
-		if !matched {
-			return fmt.Errorf("expected diagnostic %s was not emitted", required.Code)
+		return false
+	}
+	for slotIndex, slot := range slots {
+		if assign(slotIndex, make([]bool, len(actual))) {
+			continue
 		}
+		if slot.surface != "" {
+			return fmt.Errorf("expected diagnostic %s was not emitted on %s", slot.expectation.Code, slot.surface)
+		}
+		return fmt.Errorf("expected diagnostic %s was not emitted", slot.expectation.Code)
 	}
 	return nil
-}
-
-// CheckDiagnosticContract is the descriptive form of Check retained for
-// callers that prefer the full operation name.
-func CheckDiagnosticContract(expect ExpectationSet, actual []Diagnostic) error {
-	return Check(expect, actual)
 }
 
 // CheckProjections verifies diagnostics grouped by public analysis surface and
 // rejects projection-specific duplicates or changes in severity/range.
 func CheckProjections(expect ExpectationSet, projections map[string][]Diagnostic) error {
 	all := make([]Diagnostic, 0)
-	for surface, diagnostics := range projections {
+	surfaces := make([]string, 0, len(projections))
+	for surface := range projections {
+		surfaces = append(surfaces, surface)
+	}
+	sort.Strings(surfaces)
+	for _, surface := range surfaces {
+		diagnostics := projections[surface]
 		for _, diagnostic := range diagnostics {
 			if diagnostic.Surface != "" && diagnostic.Surface != surface {
 				return fmt.Errorf("diagnostic %s has surface %q in %q projection", diagnostic.Code, diagnostic.Surface, surface)
@@ -108,7 +120,8 @@ func CheckProjections(expect ExpectationSet, projections map[string][]Diagnostic
 		return err
 	}
 	for _, required := range expect.ExpectedDiagnostics {
-		for surface, diagnostics := range projections {
+		for _, surface := range surfaces {
+			diagnostics := projections[surface]
 			if len(required.Surfaces) > 0 && !containsString(required.Surfaces, surface) {
 				continue
 			}
@@ -155,16 +168,11 @@ func CheckProjections(expect ExpectationSet, projections map[string][]Diagnostic
 	return nil
 }
 
-// CheckDiagnosticProjections is the descriptive form of CheckProjections.
-func CheckDiagnosticProjections(expect ExpectationSet, projections map[string][]Diagnostic) error {
-	return CheckProjections(expect, projections)
-}
-
 // ValidateExpectations checks expectations against the static-analysis rule
 // registry, including canonical IDs and supported severities/surfaces.
 func ValidateExpectations(expectations []DiagnosticExpectation) error {
 	for _, expectation := range expectations {
-		rule, err := canonicalRuleMetadata(expectation.Code)
+		rule, err := CanonicalRuleMetadata(expectation.Code)
 		if err != nil {
 			return fmt.Errorf("invalid diagnostic code %q: %w", expectation.Code, err)
 		}
@@ -181,17 +189,16 @@ func ValidateExpectations(expectations []DiagnosticExpectation) error {
 			}
 			seenSurfaces[surface] = struct{}{}
 		}
-		if expectation.Range != nil && (expectation.Range.StartLine < 0 || expectation.Range.StartColumn < 0 || expectation.Range.EndLine < 0 || expectation.Range.EndColumn < 0) {
-			return fmt.Errorf("diagnostic %q has a negative source range", expectation.Code)
+		if value := expectation.Range; value != nil {
+			if value.StartLine < 0 || value.StartColumn < 0 || value.EndLine < 0 || value.EndColumn < 0 {
+				return fmt.Errorf("diagnostic %q has a negative source range", expectation.Code)
+			}
+			if value.EndLine < value.StartLine || value.EndLine == value.StartLine && value.EndColumn < value.StartColumn {
+				return fmt.Errorf("diagnostic %q has an incoherent source range", expectation.Code)
+			}
 		}
 	}
 	return nil
-}
-
-// ValidateDiagnosticExpectations is the descriptive form of
-// ValidateExpectations.
-func ValidateDiagnosticExpectations(expectations []DiagnosticExpectation) error {
-	return ValidateExpectations(expectations)
 }
 
 // Validate checks both halves of an expectation set against the registry.
@@ -223,11 +230,6 @@ func Normalize(diagnostics []Diagnostic) []Diagnostic {
 	return result
 }
 
-// NormalizeDiagnostics is the descriptive form of Normalize.
-func NormalizeDiagnostics(diagnostics []Diagnostic) []Diagnostic {
-	return Normalize(diagnostics)
-}
-
 func expectedForCode(expectations []DiagnosticExpectation, code string) (DiagnosticExpectation, bool) {
 	for _, expectation := range expectations {
 		if expectation.Code == code {
@@ -240,14 +242,16 @@ func expectedForCode(expectations []DiagnosticExpectation, code string) (Diagnos
 func countDiagnostics(expect DiagnosticExpectation, actual []Diagnostic) int {
 	count := 0
 	for _, diagnostic := range actual {
-		if diagnosticMatches(expect, diagnostic) {
+		if Matches(expect, diagnostic) {
 			count++
 		}
 	}
 	return count
 }
 
-func diagnosticMatches(expect DiagnosticExpectation, diagnostic Diagnostic) bool {
+// Matches reports whether a diagnostic satisfies an expectation's optional
+// severity, exact range, and surface-set constraints.
+func Matches(expect DiagnosticExpectation, diagnostic Diagnostic) bool {
 	return diagnostic.Code == expect.Code &&
 		(expect.Severity == "" || diagnostic.Severity == expect.Severity) &&
 		(expect.Range == nil || rangesEqual(expect.Range, diagnostic.Range)) &&
@@ -270,7 +274,9 @@ func containsString(values []string, value string) bool {
 	return false
 }
 
-func canonicalRuleMetadata(code string) (rules.RuleMetadata, error) {
+// CanonicalRuleMetadata resolves a canonical diagnostic ID through the shared
+// static-analysis rule registry.
+func CanonicalRuleMetadata(code string) (rules.RuleMetadata, error) {
 	if strings.TrimSpace(code) == "" {
 		return rules.RuleMetadata{}, errors.New("code is empty")
 	}

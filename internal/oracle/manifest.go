@@ -412,10 +412,10 @@ func validateAnalysisBinding(c Case) error {
 		if strings.TrimSpace(code) == "" || code != strings.TrimSpace(code) {
 			return fmt.Errorf("oracle case %q has an empty or padded analysis rule code", c.ID)
 		}
-		if _, err := canonicalRuleMetadata(code); err != nil {
+		rule, err := staticcontract.CanonicalRuleMetadata(code)
+		if err != nil {
 			return fmt.Errorf("oracle case %q has invalid analysis rule code %q: %w", c.ID, code, err)
 		}
-		rule, _ := canonicalRuleMetadata(code)
 		if analysis.EvidenceRole == EvidenceRoleCompileEquivalent && !rule.CompileEquivalent {
 			return fmt.Errorf("oracle case %q binds non-compile-equivalent rule %q as compile-equivalent", c.ID, code)
 		}
@@ -551,20 +551,6 @@ func validateDiagnosticExpectations(expectations []DiagnosticExpectation, kind, 
 		return fmt.Errorf("oracle case %q has invalid %s diagnostic contract: %w", caseID, kind, err)
 	}
 	return nil
-}
-
-func canonicalRuleMetadata(code string) (rules.RuleMetadata, error) {
-	if strings.TrimSpace(code) == "" {
-		return rules.RuleMetadata{}, errors.New("code is empty")
-	}
-	rule, ok := rules.Lookup(code)
-	if !ok {
-		return rules.RuleMetadata{}, errors.New("code is not in the static-analysis rule registry")
-	}
-	if code != rule.ID {
-		return rules.RuleMetadata{}, fmt.Errorf("code must use canonical registry ID %q", rule.ID)
-	}
-	return rule, nil
 }
 
 func confinedPath(root, relative string) (string, error) {
