@@ -46,6 +46,15 @@ type SnapshotDiff struct {
 
 func (d SnapshotDiff) Empty() bool { return len(d.Added) == 0 && len(d.Removed) == 0 }
 
+// SnapshotRuleDelta groups one snapshot difference by diagnostic code. The
+// rows retain their multiplicity so a repeated diagnostic remains visible in
+// both machine-readable and human-readable projections.
+type SnapshotRuleDelta struct {
+	Code    string               `json:"code"`
+	Added   []SnapshotDiagnostic `json:"added"`
+	Removed []SnapshotDiagnostic `json:"removed"`
+}
+
 func snapshotIDLess(a, b SnapshotID) bool {
 	if a.Project != b.Project {
 		return a.Project < b.Project
@@ -462,4 +471,111 @@ func countSnapshotRows(rows []SnapshotDiagnostic) map[SnapshotDiagnostic]int {
 		counts[row]++
 	}
 	return counts
+}
+
+// ByRule returns a deterministic, structured projection of the raw multiset
+// difference. The raw SnapshotDiff remains the source of truth; this view is
+// intended for reporting and future machine-readable consumers.
+func (d SnapshotDiff) ByRule() []SnapshotRuleDelta {
+	groups := make(map[string]*SnapshotRuleDelta)
+	for _, row := range d.Added {
+		group := groups[row.Code]
+		if group == nil {
+			group = newSnapshotRuleDelta(row.Code)
+			groups[row.Code] = group
+		}
+		group.Added = append(group.Added, row)
+	}
+	for _, row := range d.Removed {
+		group := groups[row.Code]
+		if group == nil {
+			group = newSnapshotRuleDelta(row.Code)
+			groups[row.Code] = group
+		}
+		group.Removed = append(group.Removed, row)
+	}
+
+	codes := make([]string, 0, len(groups))
+	for code := range groups {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	result := make([]SnapshotRuleDelta, 0, len(codes))
+	for _, code := range codes {
+		group := groups[code]
+		sort.SliceStable(group.Added, func(i, j int) bool {
+			return snapshotReportDiagnosticLess(group.Added[i], group.Added[j])
+		})
+		sort.SliceStable(group.Removed, func(i, j int) bool {
+			return snapshotReportDiagnosticLess(group.Removed[i], group.Removed[j])
+		})
+		result = append(result, *group)
+	}
+	return result
+}
+
+func newSnapshotRuleDelta(code string) *SnapshotRuleDelta {
+	return &SnapshotRuleDelta{
+		Code:    code,
+		Added:   make([]SnapshotDiagnostic, 0),
+		Removed: make([]SnapshotDiagnostic, 0),
+	}
+}
+
+func snapshotReportDiagnosticLess(a, b SnapshotDiagnostic) bool {
+	if a.Project != b.Project {
+		return a.Project < b.Project
+	}
+	if a.File != b.File {
+		return a.File < b.File
+	}
+	if a.Line != b.Line {
+		return a.Line < b.Line
+	}
+	if a.Column != b.Column {
+		return a.Column < b.Column
+	}
+	if surfaceRank(a.Surface) != surfaceRank(b.Surface) {
+		return surfaceRank(a.Surface) < surfaceRank(b.Surface)
+	}
+	if a.Severity != b.Severity {
+		return a.Severity < b.Severity
+	}
+	return a.Code < b.Code
+}
+
+// FormatSnapshotDiff renders a deterministic, actionable failure report for
+// a non-empty corpus snapshot difference. Every changed row is retained; the
+// per-rule count header makes large rule-wide regressions scannable first.
+func FormatSnapshotDiff(diff SnapshotDiff) string {
+	groups := diff.ByRule()
+	if len(groups) == 0 {
+		return ""
+	}
+
+	var report strings.Builder
+	report.WriteString("Real-world static-analysis corpus changed\n\n")
+	for i, group := range groups {
+		fmt.Fprintf(&report, "%s +%d -%d\n", group.Code, len(group.Added), len(group.Removed))
+		for _, row := range group.Added {
+			writeSnapshotReportRow(&report, '+', row)
+		}
+		for _, row := range group.Removed {
+			writeSnapshotReportRow(&report, '-', row)
+		}
+		if i+1 < len(groups) {
+			report.WriteByte('\n')
+		}
+	}
+	return report.String()
+}
+
+func writeSnapshotReportRow(report *strings.Builder, sign byte, row SnapshotDiagnostic) {
+	file := strings.ReplaceAll(row.File, "\\", "/")
+	project := strings.ReplaceAll(row.Project, "\\", "/")
+	fmt.Fprintf(report, "  %c %s/%s:%d", sign, project, file, row.Line)
+	if row.Column > 0 {
+		fmt.Fprintf(report, ":%d", row.Column)
+	}
+	fmt.Fprintf(report, " [%s %s]\n", row.Surface, row.Severity)
 }
