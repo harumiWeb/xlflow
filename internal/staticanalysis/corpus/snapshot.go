@@ -523,11 +523,15 @@ func newSnapshotRuleDelta(code string) *SnapshotRuleDelta {
 }
 
 func snapshotReportDiagnosticLess(a, b SnapshotDiagnostic) bool {
-	if a.Project != b.Project {
-		return a.Project < b.Project
+	aProject := snapshotReportPath(a.Project)
+	bProject := snapshotReportPath(b.Project)
+	if aProject != bProject {
+		return aProject < bProject
 	}
-	if a.File != b.File {
-		return a.File < b.File
+	aFile := snapshotReportPath(a.File)
+	bFile := snapshotReportPath(b.File)
+	if aFile != bFile {
+		return aFile < bFile
 	}
 	if a.Line != b.Line {
 		return a.Line < b.Line
@@ -542,6 +546,10 @@ func snapshotReportDiagnosticLess(a, b SnapshotDiagnostic) bool {
 		return a.Severity < b.Severity
 	}
 	return a.Code < b.Code
+}
+
+func snapshotReportPath(value string) string {
+	return strings.ReplaceAll(value, "\\", "/")
 }
 
 // FormatSnapshotDiff renders a deterministic, actionable failure report for

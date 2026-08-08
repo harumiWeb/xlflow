@@ -141,6 +141,23 @@ func TestSnapshotDiffByRuleAndFormatIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestFormatSnapshotDiffNormalizesPathsBeforeSorting(t *testing.T) {
+	diff := SnapshotDiff{
+		Added: []SnapshotDiagnostic{
+			{Project: `self\z`, File: `src\Z.bas`, Surface: SurfaceAnalyze, Code: "VBA209", Severity: "warning", Line: 2},
+			{Project: "self/a", File: "src/A.bas", Surface: SurfaceAnalyze, Code: "VBA209", Severity: "warning", Line: 1},
+		},
+	}
+
+	want := "Real-world static-analysis corpus changed\n\n" +
+		"VBA209 +2 -0\n" +
+		"  + self/a/src/A.bas:1 [analyze warning]\n" +
+		"  + self/z/src/Z.bas:2 [analyze warning]\n"
+	if got := FormatSnapshotDiff(diff); got != want {
+		t.Fatalf("formatted diff = %q, want %q", got, want)
+	}
+}
+
 func TestFormatSnapshotDiffEmpty(t *testing.T) {
 	if got := FormatSnapshotDiff(SnapshotDiff{}); got != "" {
 		t.Fatalf("empty formatted diff = %q, want empty", got)

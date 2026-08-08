@@ -113,3 +113,5 @@
 - For CFG-based resource ownership, start only from entry-reachable acquisitions, preserve pre-acquisition scalar-handle equivalences, apply assignments only on normal edges, and treat Function-return ownership transfer as complete only at a successful normal exit.
 - In Go tests, add an explicit `return` after `t.Fatal`/`t.Fatalf` nil guards before dereferencing the guarded pointer; newer staticcheck versions may report SA5011 otherwise.
 - Do not classify host callbacks from an event-like prefix alone. Use a centralized known-event allowlist or verified metadata, and add negative tests for underscore-named helpers in host modules.
+- Corpus snapshot discovery depends on the committed project configuration. When an example's `xlflow.toml` is ignored by the root rules, force-track it together with every lint/analyze baseline, including zero-byte files for empty surfaces.
+- Normalize project and file separators before sorting diagnostic delta rows, not only while rendering them, so deterministic output does not depend on the runner OS.
