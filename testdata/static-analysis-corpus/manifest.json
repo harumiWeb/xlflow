@@ -134,8 +134,7 @@
       "id": "std-vba",
       "path": "projects/third_party/std-vba",
       "profile": "generic-vba",
-      "enabled": false,
-      "notes": "Disabled: production analysis stalls while parsing stdHTTP.cls during workspace analysis; limitation belongs to the xlflow parser/analyzer and requires a follow-up before enabling.",
+      "enabled": true,
       "source": {
         "origin": "tree-sitter-vba",
         "path": "examples/third_party/stdVBA-master"
@@ -186,8 +185,7 @@
       "id": "vba-fast-dictionary",
       "path": "projects/third_party/vba-fast-dictionary",
       "profile": "generic-vba",
-      "enabled": false,
-      "notes": "Disabled: production analysis overflows the resolver stack on this project; limitation belongs to the xlflow analyzer and requires a follow-up before enabling.",
+      "enabled": true,
       "source": {
         "origin": "tree-sitter-vba",
         "path": "examples/third_party/VBA-FastDictionary-master"
@@ -204,8 +202,7 @@
       "id": "vba-fast-json",
       "path": "projects/third_party/vba-fast-json",
       "profile": "generic-vba",
-      "enabled": false,
-      "notes": "Disabled: production dataflow analysis exceeds the corpus project timeout; limitation belongs to the xlflow analyzer and requires a follow-up before enabling.",
+      "enabled": true,
       "source": {
         "origin": "tree-sitter-vba",
         "path": "examples/third_party/VBA-FastJSON-master"

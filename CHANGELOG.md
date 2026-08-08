@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Made `VBA224` finding emission independent of dataflow worklist scheduling by
+  projecting diagnostics only after block-entry states reach a fixed point.
+- Re-enabled all 16 pinned static-analysis corpus projects. Analyzer type
+  inference now terminates on self-referential `Set` assignments without losing
+  earlier assignment context, project-effect propagation uses indexed
+  membership, and procedure dataflow converges through a deterministic
+  reverse-postorder worklist on large nested control-flow graphs.
 - Added `VBA229`, an unsuppressible compile-equivalent diagnostic for
   unresolved procedure-local `As <Type>` names. It shares production
   built-in, host/TypeLib, and project-symbol resolution across analyze and LSP.

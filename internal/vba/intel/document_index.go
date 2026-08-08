@@ -170,10 +170,17 @@ func (idx *documentIndex) nearestAssignment(name, procedure string, pos Position
 	if idx == nil {
 		return typedAssignment{}, false
 	}
+	return idx.nearestAssignmentBefore(name, procedure, pos, len(idx.source)+1)
+}
+
+func (idx *documentIndex) nearestAssignmentBefore(name, procedure string, pos Position, exclusiveOffset int) (typedAssignment, bool) {
+	if idx == nil {
+		return typedAssignment{}, false
+	}
 	idx.initAssignments()
 	assignments := idx.assignmentsByName[indexName(name)]
 	for i := len(assignments) - 1; i >= 0; i-- {
-		if comparePosition(assignments[i].position, pos) <= 0 && (procedure == "" || assignments[i].procedure == "" || strings.EqualFold(assignments[i].procedure, procedure)) {
+		if assignments[i].offset < exclusiveOffset && comparePosition(assignments[i].position, pos) <= 0 && (procedure == "" || assignments[i].procedure == "" || strings.EqualFold(assignments[i].procedure, procedure)) {
 			return assignments[i], true
 		}
 	}

@@ -3,6 +3,7 @@ package intel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2542,6 +2543,46 @@ End Sub
 	}
 	if !hasCompletion(items, "ReadLine") {
 		t.Fatalf("ts should complete TextStream.ReadLine after method-return inference: %+v", items)
+	}
+}
+
+func TestSetAssignmentInferenceTerminatesOnSelfReference(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	for _, declaredType := range []string{"Object", "Variant"} {
+		t.Run(declaredType, func(t *testing.T) {
+			source := fmt.Sprintf(`Option Explicit
+Sub Test()
+    Dim t As %s
+    Set t = t.Item(1)
+    t.Item 2
+End Sub
+`, declaredType)
+			doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+			offset := byteOffsetForPosition(source, Position{Line: 4, Character: utf16Len("    t")})
+
+			if got, ok := analyzer.inferWordTypeAt(doc, "t", offset); !ok || got != declaredType {
+				t.Fatalf("self-referential t type = %q, %v, want declared %s fallback", got, ok, declaredType)
+			}
+			_ = analyzer.CompileEquivalentDiagnosticsContext(context.Background(), doc)
+		})
+	}
+}
+
+func TestSetAssignmentSelfReferenceUsesPreviousAssignment(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Sub Test()
+    Dim t As Object
+    Set t = New Collection
+    Set t = t.Item(1)
+    t.Item 2
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source}
+	offset := byteOffsetForPosition(source, Position{Line: 5, Character: utf16Len("    t")})
+
+	if got, ok := analyzer.inferWordTypeAt(doc, "t", offset); !ok || got != "Variant" {
+		t.Fatalf("self-referential t type = %q, %v, want Variant via previous Collection assignment", got, ok)
 	}
 }
 

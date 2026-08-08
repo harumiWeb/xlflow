@@ -218,6 +218,54 @@ func TestPropagationConvergesAndDeduplicatesDiamondAndCycles(t *testing.T) {
 	}
 }
 
+func TestMembershipIndexComputesOneKeyPerAdd(t *testing.T) {
+	const size = 4096
+	keyCalls := 0
+	index := newMembershipIndex(size, func(value int) string {
+		keyCalls++
+		return decimal(value)
+	})
+	for value := 0; value < size; value++ {
+		if !index.add(value) {
+			t.Fatalf("first add of %d was rejected", value)
+		}
+	}
+	for value := 0; value < size; value++ {
+		if index.add(value) {
+			t.Fatalf("duplicate add of %d was accepted", value)
+		}
+	}
+	if want := 2 * size; keyCalls != want {
+		t.Fatalf("key calls = %d, want %d", keyCalls, want)
+	}
+}
+
+func TestPropagationMembershipPreservesFirstSeenOrderAndExactSlices(t *testing.T) {
+	callerID := ProcedureIdentity{File: "Caller.bas", Module: "Caller", QualifiedName: "Caller.Run", Kind: procedureir.ProcedureSub, DeclarationLine: 1}
+	calleeID := ProcedureIdentity{File: "Callee.bas", Module: "Callee", QualifiedName: "Callee.Run", Kind: procedureir.ProcedureSub, DeclarationLine: 1}
+	uncertainties := []CallUncertainty{
+		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 3, Callee: "Third"},
+		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 2, Callee: "Second"},
+		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 1, Callee: "First"},
+	}
+	summaries := map[string]*ProcedureSummary{
+		callerID.Key(): {Identity: callerID},
+		calleeID.Key(): {Identity: calleeID, DirectUncertainty: uncertainties},
+	}
+	propagate(summaries, []edge{
+		{from: callerID.Key(), to: calleeID.Key()},
+		{from: callerID.Key(), to: calleeID.Key()},
+	})
+
+	caller := summaries[callerID.Key()]
+	if !reflect.DeepEqual(caller.PropagatedUncertainty, uncertainties) {
+		t.Fatalf("propagated uncertainty changed order or contents:\ngot  %#v\nwant %#v", caller.PropagatedUncertainty, uncertainties)
+	}
+	if caller.DirectUncertainty != nil {
+		t.Fatalf("direct uncertainty was mutated: %#v", caller.DirectUncertainty)
+	}
+}
+
 func TestCallUncertaintyClassificationAndPropagation(t *testing.T) {
 	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
 		manualProcedure("Calls.Root", 1, []procedureir.CallSite{{ID: 1, StatementID: 1, Callee: procedureir.Callee{Text: "Child", BaseName: "Child"}, Resolution: procedureir.CallResolution{Status: procedureir.ResolutionMatched, Candidates: []procedureir.Candidate{{QualifiedName: "Calls.Child", Kind: "sub", File: "Calls.bas", Line: 10}}}}}),

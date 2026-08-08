@@ -16,6 +16,54 @@ type procedureInput struct {
 
 type edge struct{ from, to string }
 
+type membershipIndex[T any] struct {
+	keys map[string]struct{}
+	key  func(T) string
+}
+
+func newMembershipIndex[T any](capacity int, key func(T) string) membershipIndex[T] {
+	return membershipIndex[T]{keys: make(map[string]struct{}, capacity), key: key}
+}
+
+// add reports whether value was absent. The key is computed exactly once so
+// fixed-point propagation does not repeatedly rebuild keys for an expanding
+// summary.
+func (i *membershipIndex[T]) add(value T) bool {
+	key := i.key(value)
+	if _, exists := i.keys[key]; exists {
+		return false
+	}
+	i.keys[key] = struct{}{}
+	return true
+}
+
+type summaryMembership struct {
+	identityKey string
+	evidence    membershipIndex[Evidence]
+	uncertainty membershipIndex[CallUncertainty]
+}
+
+func newSummaryMembership(summary *ProcedureSummary) *summaryMembership {
+	index := &summaryMembership{
+		identityKey: summary.Identity.Key(),
+		evidence:    newMembershipIndex(len(summary.Direct)+len(summary.Propagated), evidenceKey),
+		uncertainty: newMembershipIndex(len(summary.DirectUncertainty)+len(summary.PropagatedUncertainty), uncertaintyKey),
+	}
+	for _, fact := range summary.Direct {
+		index.evidence.add(fact)
+	}
+	for _, fact := range summary.Propagated {
+		index.evidence.add(fact)
+	}
+	for _, fact := range summary.DirectUncertainty {
+		index.uncertainty.add(fact)
+	}
+	for _, fact := range summary.PropagatedUncertainty {
+		index.uncertainty.add(fact)
+	}
+	return index
+}
+
 // Build computes direct facts and then propagates finite provenance sets over
 // uniquely resolved, reachable project-local calls until a fixed point.
 func Build(documents []Document) ProjectSummary {
@@ -150,9 +198,13 @@ func propagate(summaries map[string]*ProcedureSummary, edges []edge) {
 	}
 	queue := make([]string, 0, len(summaries))
 	queued := map[string]bool{}
+	membership := make(map[string]*summaryMembership, len(summaries))
 	for key := range summaries {
 		queue = append(queue, key)
 		queued[key] = true
+		if summaries[key] != nil {
+			membership[key] = newSummaryMembership(summaries[key])
+		}
 	}
 	sort.Strings(queue)
 	for len(queue) > 0 {
@@ -161,26 +213,34 @@ func propagate(summaries map[string]*ProcedureSummary, edges []edge) {
 		queued[calleeKey] = false
 		for _, callerKey := range callers[calleeKey] {
 			caller, callee := summaries[callerKey], summaries[calleeKey]
-			if caller == nil || callee == nil {
+			callerMembership := membership[callerKey]
+			if caller == nil || callee == nil || callerMembership == nil {
 				continue
 			}
 			changed := false
-			facts := append(append([]Evidence{}, callee.Direct...), callee.Propagated...)
-			for _, fact := range facts {
-				if fact.Origin.Key() == caller.Identity.Key() || containsEvidence(caller.Direct, fact) || containsEvidence(caller.Propagated, fact) {
-					continue
+			propagateEvidence := func(facts []Evidence) {
+				for _, fact := range facts {
+					if fact.Origin.Key() == callerMembership.identityKey || !callerMembership.evidence.add(fact) {
+						continue
+					}
+					caller.Propagated = append(caller.Propagated, fact)
+					changed = true
 				}
-				caller.Propagated = append(caller.Propagated, fact)
-				changed = true
 			}
-			unknown := append(append([]CallUncertainty{}, callee.DirectUncertainty...), callee.PropagatedUncertainty...)
-			for _, fact := range unknown {
-				if fact.Origin.Key() == caller.Identity.Key() || containsUncertainty(caller.DirectUncertainty, fact) || containsUncertainty(caller.PropagatedUncertainty, fact) {
-					continue
+			propagateEvidence(callee.Direct)
+			propagateEvidence(callee.Propagated)
+
+			propagateUncertainty := func(facts []CallUncertainty) {
+				for _, fact := range facts {
+					if fact.Origin.Key() == callerMembership.identityKey || !callerMembership.uncertainty.add(fact) {
+						continue
+					}
+					caller.PropagatedUncertainty = append(caller.PropagatedUncertainty, fact)
+					changed = true
 				}
-				caller.PropagatedUncertainty = append(caller.PropagatedUncertainty, fact)
-				changed = true
 			}
+			propagateUncertainty(callee.DirectUncertainty)
+			propagateUncertainty(callee.PropagatedUncertainty)
 			if changed && !queued[callerKey] {
 				queue = append(queue, callerKey)
 				queued[callerKey] = true
@@ -190,38 +250,22 @@ func propagate(summaries map[string]*ProcedureSummary, edges []edge) {
 }
 
 func uniqueEvidence(in []Evidence) []Evidence {
-	out := []Evidence{}
+	index := newMembershipIndex(len(in), evidenceKey)
+	out := make([]Evidence, 0, len(in))
 	for _, v := range in {
-		if !containsEvidence(out, v) {
+		if index.add(v) {
 			out = append(out, v)
 		}
 	}
 	return out
 }
 func uniqueUncertainty(in []CallUncertainty) []CallUncertainty {
-	out := []CallUncertainty{}
+	index := newMembershipIndex(len(in), uncertaintyKey)
+	out := make([]CallUncertainty, 0, len(in))
 	for _, v := range in {
-		if !containsUncertainty(out, v) {
+		if index.add(v) {
 			out = append(out, v)
 		}
 	}
 	return out
-}
-func containsEvidence(in []Evidence, target Evidence) bool {
-	key := evidenceKey(target)
-	for _, v := range in {
-		if evidenceKey(v) == key {
-			return true
-		}
-	}
-	return false
-}
-func containsUncertainty(in []CallUncertainty, target CallUncertainty) bool {
-	key := uncertaintyKey(target)
-	for _, v := range in {
-		if uncertaintyKey(v) == key {
-			return true
-		}
-	}
-	return false
 }

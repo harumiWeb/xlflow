@@ -46,7 +46,7 @@ func TestRepositoryManifestAndMetadata(t *testing.T) {
 			}
 		}
 	}
-	if enabled != 13 || disabled != 3 || total != (SourceCounts{Bas: 151, Cls: 218, Frm: 9}) {
+	if enabled != 16 || disabled != 0 || total != (SourceCounts{Bas: 151, Cls: 218, Frm: 9}) {
 		t.Fatalf("manifest inventory = enabled:%d disabled:%d counts:%+v", enabled, disabled, total)
 	}
 }

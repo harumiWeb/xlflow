@@ -1,6 +1,7 @@
 package dataflow
 
 import (
+	"container/heap"
 	"fmt"
 	"regexp"
 	"sort"
@@ -49,6 +50,12 @@ type procedureAnalyzer struct {
 	knownShellObjects map[string]bool
 	selectVariables   map[int]string
 	findings          map[string]Finding
+	blocksByID        map[cfg.BlockID]cfg.Block
+	outgoingEdges     map[cfg.BlockID][]cfg.Edge
+}
+
+type analysisStats struct {
+	transfers int
 }
 
 func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, options Options) *procedureAnalyzer {
@@ -64,6 +71,23 @@ func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, op
 		knownShellObjects: map[string]bool{},
 		selectVariables:   map[int]string{},
 		findings:          map[string]Finding{},
+		blocksByID:        map[cfg.BlockID]cfg.Block{},
+		outgoingEdges:     map[cfg.BlockID][]cfg.Edge{},
+	}
+	for _, block := range graph.Blocks {
+		a.blocksByID[block.ID] = block
+	}
+	for _, edge := range graph.Edges {
+		a.outgoingEdges[edge.From] = append(a.outgoingEdges[edge.From], edge)
+	}
+	for from := range a.outgoingEdges {
+		sort.SliceStable(a.outgoingEdges[from], func(i, j int) bool {
+			left, right := a.outgoingEdges[from][i], a.outgoingEdges[from][j]
+			if left.To != right.To {
+				return left.To < right.To
+			}
+			return left.ID < right.ID
+		})
 	}
 	for _, statement := range procedure.Statements {
 		a.statements[statement.ID] = statement
@@ -96,6 +120,16 @@ func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, op
 }
 
 func (a *procedureAnalyzer) run() Result {
+	result, _ := a.runWithStats()
+	return result
+}
+
+func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
+	return a.runWithStatsAndRank(nil)
+}
+
+func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int) (Result, analysisStats) {
+	stats := analysisStats{}
 	entry := abstractState{vars: map[string]value{}}
 	for _, parameter := range a.procedure.Symbol.Parameters {
 		entry.vars[canonicalName(parameter.Name)] = valueFromSource(Source{
@@ -111,20 +145,24 @@ func (a *procedureAnalyzer) run() Result {
 		reachable[id] = true
 	}
 	if len(reachable) == 0 {
-		return Result{Findings: nil, States: nil}
+		return Result{Findings: nil, States: nil}, stats
 	}
 	inStates := map[cfg.BlockID]abstractState{a.graph.Entry: entry}
-	queue := []cfg.BlockID{a.graph.Entry}
+	if worklistRank == nil {
+		worklistRank = a.reversePostOrderRank(reachable)
+	}
+	queue := rankedWorklist{{id: a.graph.Entry, rank: worklistRank[a.graph.Entry]}}
+	heap.Init(&queue)
 	inQueue := map[cfg.BlockID]bool{a.graph.Entry: true}
 	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
+		id := heap.Pop(&queue).(rankedBlock).id
 		inQueue[id] = false
 		state, ok := inStates[id]
 		if !ok {
 			continue
 		}
-		out := a.transfer(id, state)
+		out := a.transfer(id, state, false)
+		stats.transfers++
 		for _, edge := range a.outgoing(id) {
 			if !reachable[edge.To] {
 				continue
@@ -137,10 +175,27 @@ func (a *procedureAnalyzer) run() Result {
 			}
 			inStates[edge.To] = merged
 			if !inQueue[edge.To] {
-				queue = append(queue, edge.To)
+				heap.Push(&queue, rankedBlock{id: edge.To, rank: worklistRank[edge.To]})
 				inQueue[edge.To] = true
 			}
 		}
+	}
+
+	// Finding emission is a projection of the converged block-entry states, not
+	// a side effect of the worklist schedule. This keeps diagnostics and their
+	// representative paths stable when the fixed-point traversal order changes.
+	a.findings = map[string]Finding{}
+	blockIDs := make([]cfg.BlockID, 0, len(reachable))
+	for id := range reachable {
+		blockIDs = append(blockIDs, id)
+	}
+	sort.Slice(blockIDs, func(i, j int) bool { return blockIDs[i] < blockIDs[j] })
+	for _, id := range blockIDs {
+		state, ok := inStates[id]
+		if !ok {
+			continue
+		}
+		a.transfer(id, state, true)
 	}
 
 	findings := make([]Finding, 0, len(a.findings))
@@ -163,12 +218,12 @@ func (a *procedureAnalyzer) run() Result {
 			states[id][name] = variableState(variable)
 		}
 	}
-	return Result{Findings: findings, States: states}
+	return Result{Findings: findings, States: states}, stats
 }
 
-func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState) abstractState {
+func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) abstractState {
 	state := cloneState(input)
-	block, ok := blockByID(a.graph, id)
+	block, ok := a.blocksByID[id]
 	if !ok || block.Statement == nil {
 		return state
 	}
@@ -186,7 +241,9 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState) abstra
 	}
 	for _, call := range a.callsByStatement[statement.ID] {
 		a.applySourceWrite(call, state)
-		a.inspectSink(call, state)
+		if collectFindings {
+			a.inspectSink(call, state)
+		}
 	}
 	return state
 }
@@ -574,7 +631,7 @@ func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state ab
 	if edge.Kind != cfg.EdgeBranchTrue && edge.Kind != cfg.EdgeCase {
 		return
 	}
-	block, ok := blockByID(a.graph, from)
+	block, ok := a.blocksByID[from]
 	if !ok || block.Statement == nil {
 		return
 	}
@@ -587,7 +644,7 @@ func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state ab
 		}
 	}
 	if edge.Kind == cfg.EdgeCase {
-		caseBlock, ok := blockByID(a.graph, edge.To)
+		caseBlock, ok := a.blocksByID[edge.To]
 		if !ok || caseBlock.Statement == nil {
 			return
 		}
@@ -671,29 +728,65 @@ func assignmentTarget(statement procedureir.Statement) string {
 	return ""
 }
 
-func blockByID(graph cfg.Graph, id cfg.BlockID) (cfg.Block, bool) {
-	for _, block := range graph.Blocks {
-		if block.ID == id {
-			return block, true
-		}
-	}
-	return cfg.Block{}, false
+func (a *procedureAnalyzer) outgoing(from cfg.BlockID) []cfg.Edge {
+	return a.outgoingEdges[from]
 }
 
-func (a *procedureAnalyzer) outgoing(from cfg.BlockID) []cfg.Edge {
-	var edges []cfg.Edge
-	for _, edge := range a.graph.Edges {
-		if edge.From == from {
-			edges = append(edges, edge)
-		}
+func (a *procedureAnalyzer) reversePostOrderRank(reachable map[cfg.BlockID]bool) map[cfg.BlockID]int {
+	visited := map[cfg.BlockID]bool{}
+	postorder := make([]cfg.BlockID, 0, len(reachable))
+	type frame struct {
+		id   cfg.BlockID
+		next int
 	}
-	sort.SliceStable(edges, func(i, j int) bool {
-		if edges[i].To != edges[j].To {
-			return edges[i].To < edges[j].To
+	visited[a.graph.Entry] = true
+	stack := []frame{{id: a.graph.Entry}}
+	for len(stack) > 0 {
+		current := &stack[len(stack)-1]
+		edges := a.outgoing(current.id)
+		if current.next < len(edges) {
+			target := edges[current.next].To
+			current.next++
+			if reachable[target] && !visited[target] {
+				visited[target] = true
+				stack = append(stack, frame{id: target})
+			}
+			continue
 		}
-		return edges[i].ID < edges[j].ID
-	})
-	return edges
+		postorder = append(postorder, current.id)
+		stack = stack[:len(stack)-1]
+	}
+	rank := make(map[cfg.BlockID]int, len(postorder))
+	for index := len(postorder) - 1; index >= 0; index-- {
+		rank[postorder[index]] = len(postorder) - 1 - index
+	}
+	return rank
+}
+
+type rankedBlock struct {
+	id   cfg.BlockID
+	rank int
+}
+
+type rankedWorklist []rankedBlock
+
+func (w rankedWorklist) Len() int { return len(w) }
+func (w rankedWorklist) Less(i, j int) bool {
+	if w[i].rank != w[j].rank {
+		return w[i].rank < w[j].rank
+	}
+	return w[i].id < w[j].id
+}
+func (w rankedWorklist) Swap(i, j int) { w[i], w[j] = w[j], w[i] }
+func (w *rankedWorklist) Push(value any) {
+	*w = append(*w, value.(rankedBlock))
+}
+func (w *rankedWorklist) Pop() any {
+	old := *w
+	last := len(old) - 1
+	value := old[last]
+	*w = old[:last]
+	return value
 }
 
 func canonicalName(name string) string {

@@ -86,7 +86,12 @@ deterministic representative path:
 
 The message and reason identify the source, sink, path, and that the result is
 conservative. Findings are deduplicated per source/sink pair and sorted by the
-existing analyzer ordering contract.
+existing analyzer ordering contract. Fixed-point propagation completes before
+finding emission. Each reachable statement block is then evaluated once from
+its converged block-entry state, so transient states and worklist priority
+cannot add or remove diagnostics. Changing the fixed-point traversal order
+must preserve the finding set, state, source/sink identity, and representative
+path.
 
 ## Non-goals
 

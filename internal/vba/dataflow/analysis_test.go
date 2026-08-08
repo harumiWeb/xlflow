@@ -1,12 +1,59 @@
 package dataflow
 
 import (
+	"reflect"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestAnalyzeProcedureFindingsDoNotDependOnWorklistRank(t *testing.T) {
+	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit
+Sub Run(ByVal raw As String)
+    Dim command As String
+    Dim index As Long
+    command = raw
+    For index = 1 To 3
+        If index = 2 Then command = command & " suffix"
+    Next index
+    Shell command
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Procedures) != 1 {
+		t.Fatalf("procedures = %d, want 1", len(document.Procedures))
+	}
+	procedure := document.Procedures[0]
+	graph := cfg.Build(procedure)
+	reachable := make(map[cfg.BlockID]bool)
+	for _, id := range graph.Reachable(cfg.EdgeFilter{}) {
+		reachable[id] = true
+	}
+
+	normalAnalyzer := newProcedureAnalyzer(procedure, graph, Options{})
+	normal, _ := normalAnalyzer.runWithStats()
+	if len(normal.Findings) != 1 || normal.Findings[0].Source.Kind != SourceParameter || normal.Findings[0].Sink.Kind != SinkShell {
+		t.Fatalf("normal findings = %+v, want one parameter-to-Shell flow", normal.Findings)
+	}
+
+	normalRank := normalAnalyzer.reversePostOrderRank(reachable)
+	reversedRank := make(map[cfg.BlockID]int, len(normalRank))
+	for id, rank := range normalRank {
+		reversedRank[id] = len(normalRank) - 1 - rank
+	}
+	reversedAnalyzer := newProcedureAnalyzer(procedure, graph, Options{})
+	// A finding observed from an intermediate state must not leak into the final
+	// projection after the fixed point has converged.
+	reversedAnalyzer.findings["transient"] = Finding{Source: Source{Kind: SourceUnknown}, Sink: Sink{Kind: SinkShell}}
+	reversed, _ := reversedAnalyzer.runWithStatsAndRank(reversedRank)
+	if !reflect.DeepEqual(reversed, normal) {
+		t.Fatalf("analysis depends on worklist rank:\nnormal   = %#v\nreversed = %#v", normal, reversed)
+	}
+}
 
 func TestAnalyzeProcedureTracksParameterAliasAndConcatenation(t *testing.T) {
 	procedure := procedureir.ProcedureIR{
