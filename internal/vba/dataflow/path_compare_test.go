@@ -9,6 +9,7 @@ import (
 )
 
 func TestComparePathKeysMatchesSerializedKeyOrdering(t *testing.T) {
+	t.Parallel()
 	paths := [][]PathStep{
 		nil,
 		{},

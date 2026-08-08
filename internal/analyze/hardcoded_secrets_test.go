@@ -11,6 +11,7 @@ import (
 )
 
 func TestVBA223DetectsStructuredCredentialsAndRedactsOutput(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	apiKey := "g" + "h" + "p_" + strings.Repeat("a", 24)
 	awsAccessKey := "A" + "KIA" + strings.Repeat("A", 16)
@@ -94,6 +95,7 @@ End Sub
 }
 
 func TestVBA223IgnoresPlaceholdersCommentsAndEnvironmentReferences(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 ' password = "comment-secret"
@@ -118,6 +120,7 @@ End Sub
 }
 
 func TestVBA223DetectsModuleOnlyDeclarationsInBatchAndRealtime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := "module-only-secret"
 	source := `Option Explicit
@@ -147,6 +150,7 @@ Private Const ApiKey As String = "__SECRET__"
 }
 
 func TestVBA223DetectsCredentialContainingPercent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := "pa%ssword-value"
 	source := `Option Explicit
@@ -168,6 +172,7 @@ End Sub
 }
 
 func TestVBA223RedactsRemCommentsInNearbyCode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	commentSecret := "adjacent-comment-secret"
 	source := `Option Explicit
@@ -198,6 +203,7 @@ End Sub
 }
 
 func TestVBA223HonorsDisabledRulesAndInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Option Explicit
 Public Sub Run()

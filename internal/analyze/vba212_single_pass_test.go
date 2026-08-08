@@ -12,6 +12,7 @@ import (
 )
 
 func TestVBA212ScannerTraversesRootOnceAndPreservesProcedureOwnership(t *testing.T) {
+	t.Parallel()
 	source := []byte(`Option Explicit
 Public Sub First()
   Dim one As Collection
@@ -65,6 +66,7 @@ End Property
 }
 
 func TestVBA212ScannerCancellationStopsAtCheckpoint(t *testing.T) {
+	t.Parallel()
 	var source strings.Builder
 	source.WriteString("Option Explicit\nPublic Sub Run()\n  Dim item As Collection\n")
 	for i := 0; i < 600; i++ {

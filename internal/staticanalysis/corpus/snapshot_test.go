@@ -2,11 +2,14 @@ package corpus
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,8 +18,9 @@ import (
 )
 
 const (
-	runRealWorldCorpusEnv    = "XLFLOW_RUN_REALWORLD_CORPUS"
-	updateCorpusSnapshotsEnv = "XLFLOW_UPDATE_CORPUS_SNAPSHOTS"
+	runRealWorldCorpusEnv     = "XLFLOW_RUN_REALWORLD_CORPUS"
+	updateCorpusSnapshotsEnv  = "XLFLOW_UPDATE_CORPUS_SNAPSHOTS"
+	maxParallelCorpusProjects = 2
 )
 
 func realWorldCorpusMode() (run, update bool) {
@@ -280,7 +284,44 @@ func TestWriteSnapshotSetDoesNotPublishInvalidUpdate(t *testing.T) {
 	}
 }
 
-func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, error) {
+type corpusProjectResult struct {
+	report  Report
+	err     error
+	elapsed time.Duration
+}
+
+func runParallelCorpusProjects(t *testing.T, group string, names []string, run func(int) (Report, error)) []corpusProjectResult {
+	t.Helper()
+	results := make([]corpusProjectResult, len(names))
+	limiter := make(chan struct{}, maxParallelCorpusProjects)
+	t.Run(group, func(t *testing.T) {
+		for i, name := range names {
+			i, name := i, name
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				limiter <- struct{}{}
+				defer func() { <-limiter }()
+				started := time.Now()
+				report, err := run(i)
+				results[i] = corpusProjectResult{
+					report:  report,
+					err:     err,
+					elapsed: time.Since(started),
+				}
+			})
+		}
+	})
+	return results
+}
+
+func appendCorpusReport(dst *Report, src Report) {
+	dst.Surfaces = append(dst.Surfaces, src.Surfaces...)
+	dst.Diagnostics = append(dst.Diagnostics, src.Diagnostics...)
+	dst.Failures = append(dst.Failures, src.Failures...)
+	dst.Skipped = append(dst.Skipped, src.Skipped...)
+}
+
+func runRealWorldCorpus(t *testing.T, repoRoot string, logf ...func(string, ...any)) (Report, error) {
 	var timingLogf func(string, ...any)
 	if len(logf) > 0 {
 		timingLogf = logf[0]
@@ -298,17 +339,20 @@ func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, 
 	}
 	var nativeReport Report
 	nativeFailed := false
-	for _, project := range nativeProjects {
-		projectStarted := time.Now()
-		report, err := RunProjects([]NativeProject{project})
-		nativeReport.Surfaces = append(nativeReport.Surfaces, report.Surfaces...)
-		nativeReport.Diagnostics = append(nativeReport.Diagnostics, report.Diagnostics...)
-		nativeReport.Failures = append(nativeReport.Failures, report.Failures...)
-		if err != nil {
+	nativeNames := make([]string, len(nativeProjects))
+	for i, project := range nativeProjects {
+		nativeNames[i] = project.ID
+	}
+	nativeResults := runParallelCorpusProjects(t, "native", nativeNames, func(i int) (Report, error) {
+		return RunProjects([]NativeProject{nativeProjects[i]})
+	})
+	for i, result := range nativeResults {
+		appendCorpusReport(&nativeReport, result.report)
+		if result.err != nil {
 			nativeFailed = true
 		}
 		if timingLogf != nil {
-			timingLogf("corpus timing: project=%s elapsed=%s", project.ID, time.Since(projectStarted))
+			timingLogf("corpus timing: project=%s elapsed=%s", nativeProjects[i].ID, result.elapsed)
 		}
 	}
 	var nativeErr error
@@ -337,18 +381,20 @@ func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, 
 	}
 	var thirdReport Report
 	thirdFailed := false
-	for _, project := range thirdProjects {
-		projectStarted := time.Now()
-		report, err := RunThirdPartyProjects(corpusRoot, []Project{project}, MaterializeOptions{})
-		thirdReport.Surfaces = append(thirdReport.Surfaces, report.Surfaces...)
-		thirdReport.Diagnostics = append(thirdReport.Diagnostics, report.Diagnostics...)
-		thirdReport.Failures = append(thirdReport.Failures, report.Failures...)
-		thirdReport.Skipped = append(thirdReport.Skipped, report.Skipped...)
-		if err != nil {
+	thirdNames := make([]string, len(thirdProjects))
+	for i, project := range thirdProjects {
+		thirdNames[i] = project.ID
+	}
+	thirdResults := runParallelCorpusProjects(t, "third_party", thirdNames, func(i int) (Report, error) {
+		return RunThirdPartyProjects(corpusRoot, []Project{thirdProjects[i]}, MaterializeOptions{})
+	})
+	for i, result := range thirdResults {
+		appendCorpusReport(&thirdReport, result.report)
+		if result.err != nil {
 			thirdFailed = true
 		}
 		if timingLogf != nil {
-			timingLogf("corpus timing: project=third_party/%s elapsed=%s", project.ID, time.Since(projectStarted))
+			timingLogf("corpus timing: project=third_party/%s elapsed=%s", thirdProjects[i].ID, result.elapsed)
 		}
 	}
 	var thirdErr error
@@ -371,6 +417,87 @@ func runRealWorldCorpus(repoRoot string, logf ...func(string, ...any)) (Report, 
 	return combined, errors.Join(nativeErr, thirdErr)
 }
 
+func TestParallelCorpusProjectsPreserveOrderAndFailures(t *testing.T) {
+	names := []string{"first", "second", "third"}
+	wantPeak := maxParallelCorpusProjects
+	if parallelFlag := flag.Lookup("test.parallel"); parallelFlag != nil {
+		if parallel, err := strconv.Atoi(parallelFlag.Value.String()); err == nil && parallel < wantPeak {
+			wantPeak = parallel
+		}
+	}
+	admitted := make(chan struct{}, len(names))
+	completed := make(chan int, len(names))
+	release := make(chan struct{})
+	var active atomic.Int32
+	var peak atomic.Int32
+	go func() {
+		for i := 0; i < wantPeak; i++ {
+			<-admitted
+		}
+		close(release)
+	}()
+	results := runParallelCorpusProjects(t, "synthetic", names, func(i int) (Report, error) {
+		current := active.Add(1)
+		for {
+			previous := peak.Load()
+			if current <= previous || peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		admitted <- struct{}{}
+		<-release
+		active.Add(-1)
+		completed <- i
+		report := Report{
+			Diagnostics: []Diagnostic{{
+				Project: names[i], Surface: SurfaceAnalyze, Code: fmt.Sprintf("VBA%d", i),
+			}},
+		}
+		if i != 1 {
+			return report, nil
+		}
+		failure := Failure{Project: names[i], Surface: SurfaceAnalyze, Kind: FailureExecution, Err: errors.New("synthetic worker failure")}
+		report.Failures = []Failure{failure}
+		return report, &RunError{Failures: []Failure{failure}}
+	})
+
+	if len(results) != len(names) {
+		t.Fatalf("result count = %d, want %d", len(results), len(names))
+	}
+	if got := peak.Load(); got != int32(wantPeak) {
+		t.Fatalf("peak corpus project concurrency = %d, want %d", got, wantPeak)
+	}
+	seen := make(map[int]bool, len(names))
+	var combined Report
+	var failures []Failure
+	for i, result := range results {
+		if len(result.report.Diagnostics) != 1 || result.report.Diagnostics[0].Project != names[i] {
+			t.Fatalf("result[%d] project = %#v, want %q", i, result.report.Diagnostics, names[i])
+		}
+		appendCorpusReport(&combined, result.report)
+		if result.err == nil {
+			continue
+		}
+		var runErr *RunError
+		if !errors.As(result.err, &runErr) {
+			t.Fatalf("result[%d] error = %T, want *RunError", i, result.err)
+		}
+		failures = append(failures, runErr.Failures...)
+	}
+	for len(seen) < len(names) {
+		seen[<-completed] = true
+	}
+	if len(combined.Diagnostics) != len(names) {
+		t.Fatalf("combined diagnostics = %d, want %d", len(combined.Diagnostics), len(names))
+	}
+	if len(combined.Failures) != 1 || len(failures) != 1 || failures[0].Project != names[1] {
+		t.Fatalf("combined failures = %#v, worker failures = %#v", combined.Failures, failures)
+	}
+	if got := (&RunError{Failures: failures}).Error(); got != "static-analysis corpus execution failed for 1 project surface(s)" {
+		t.Fatalf("RunError summary = %q", got)
+	}
+}
+
 func TestRealWorldCorpusSnapshots(t *testing.T) {
 	shouldRun, update := realWorldCorpusMode()
 	if !shouldRun {
@@ -383,7 +510,7 @@ func TestRealWorldCorpusSnapshots(t *testing.T) {
 	// Snapshot identities must not depend on a developer's generated TypeLib
 	// database. Use only the embedded built-in database for every platform.
 	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
-	report, runErr := runRealWorldCorpus(repoRoot, t.Logf)
+	report, runErr := runRealWorldCorpus(t, repoRoot, t.Logf)
 	if runErr != nil {
 		t.Fatalf("real-world corpus execution failed: %v", runErr)
 	}

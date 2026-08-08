@@ -19,6 +19,7 @@ import (
 )
 
 func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
+	t.Parallel()
 	var registryIDs []string
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
 		if rule.Realtime {
@@ -39,6 +40,7 @@ func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
 }
 
 func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
+	t.Parallel()
 	document := procedureir.DocumentIR{
 		Path:       filepath.Join("modules", "..", "modules", "Main.bas"),
 		ModuleName: "Main",
@@ -60,6 +62,7 @@ func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 }
 
 func TestVBA225DetectsIndexedCellReadsWritesAndFormatting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -88,6 +91,7 @@ End Sub
 }
 
 func TestVBA225NestedSeverityAndSmallLoopExemption(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -114,6 +118,7 @@ End Sub
 }
 
 func TestVBA225UsesNearestNonSmallLoop(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -137,6 +142,7 @@ End Sub
 }
 
 func TestVBA225IgnoresStringAndCommentText(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -157,6 +163,7 @@ End Sub
 }
 
 func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -186,6 +193,7 @@ End Sub
 }
 
 func TestVBA225SupportsDoAndWhileLoops(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -211,6 +219,7 @@ End Sub
 }
 
 func TestVBA225BulkOperationsAndSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")
 	writeModule(t, dir, "Main.bas", `Option Explicit
@@ -259,6 +268,7 @@ End Sub
 }
 
 func TestVBA225TracksUniqueAndTransitiveHelpers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Helpers.bas", `Option Explicit
 Public Sub ReadCell(ByVal rng As Range, ByVal i As Long)
@@ -316,6 +326,7 @@ End Sub
 }
 
 func TestVBA225SkipsAmbiguousHelpers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "First.bas", `Option Explicit
 Public Sub ReadCell(ByVal rng As Range, ByVal i As Long)
@@ -347,6 +358,7 @@ End Sub
 }
 
 func TestAnalyzerDetectsProcedureLocalResourceLeaks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Resources.bas", `Option Explicit
 
@@ -525,6 +537,7 @@ End Sub
 }
 
 func TestResourceLeakDoesNotTrustRecoveredRelease(t *testing.T) {
+	t.Parallel()
 	acquisition := procedureir.Statement{ID: 1, Kind: procedureir.StatementSet, Text: `Set wb = Workbooks.Open(path)`}
 	recoveredClose := procedureir.Statement{ID: 2, Kind: procedureir.StatementCall, Text: `wb.Close`, Recovered: true}
 	graph := vbacfg.Graph{
@@ -548,6 +561,7 @@ func TestResourceLeakDoesNotTrustRecoveredRelease(t *testing.T) {
 }
 
 func TestSourceRealtimeFindingsParsedMatchesSource(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
 	source := []byte("Option Explicit\nPublic Sub Run()\n  Dim found As Range\n  Set found = Range(\"A1\").Find(What:=\"x\")\n  Debug.Print found.Value\nEnd Sub\n")
@@ -571,6 +585,7 @@ func TestSourceRealtimeFindingsParsedMatchesSource(t *testing.T) {
 }
 
 func TestAnalyzerFindsMissingSetForObjectVariable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -587,6 +602,7 @@ End Sub
 }
 
 func TestAnalyzerFindsMissingSetForModuleLevelObjectVariable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private ws As Worksheet
@@ -603,6 +619,7 @@ End Sub
 }
 
 func TestAnalyzerFindsMissingSetForObjectReturningFunction(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function FindRange() As Range
@@ -622,6 +639,7 @@ End Sub
 }
 
 func TestAnalyzerFindsMissingSetInObjectReturningFunction(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function GetSheet() As Worksheet
@@ -641,6 +659,7 @@ End Function
 }
 
 func TestAnalyzerIgnoresScalarAndSetAssignments(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function FindRange() As Range
@@ -664,6 +683,7 @@ End Sub
 }
 
 func TestAnalyzerDoesNotReportObjectFunctionAssignmentToScalar(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function FindRange() As Range
@@ -687,6 +707,7 @@ End Sub
 }
 
 func TestAnalyzerFailsOnParserRecovery(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function Broken(ByVal value As String
@@ -710,6 +731,7 @@ End Function
 }
 
 func TestAnalyzerFindsWorksheetMemberAssignedOnVariable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -727,6 +749,7 @@ End Sub
 }
 
 func TestAnalyzerFindsWorksheetMemberOnModuleLevelVariable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private ws As Worksheet
@@ -744,6 +767,7 @@ End Sub
 }
 
 func TestAnalyzerFindsWorksheetMemberAssignedInsideWithBlock(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -763,6 +787,7 @@ End Sub
 }
 
 func TestAnalyzerFindsMissingXlflowLogHelperSource(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -782,6 +807,7 @@ End Sub
 }
 
 func TestAnalyzerFindsMissingXlflowSetTraceFileHelperSource(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -801,6 +827,7 @@ End Sub
 }
 
 func TestAnalyzerStillFlagsLegacyTraceHelpersWhenHelperSourceExists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -824,6 +851,7 @@ End Sub
 }
 
 func TestAnalyzerSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	formsDir := filepath.Join(dir, "src", "forms")
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
@@ -858,6 +886,7 @@ func TestAnalyzerSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 }
 
 func TestAnalyzerFindsDefaultRuntimeRiskRules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -895,6 +924,7 @@ End Sub
 }
 
 func TestAnalyzerDetectsAmbiguousExcelScopeRoots(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub InteractiveEntry()
@@ -957,6 +987,7 @@ End Sub
 }
 
 func TestAnalyzerAcceptsExplicitExcelScopeReferences(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal wb As Workbook, ByVal ws As Worksheet)
@@ -982,6 +1013,7 @@ End Sub
 }
 
 func TestAnalyzerDetectsAmbiguousExcelScopeRootsInWithHeaders(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1017,6 +1049,7 @@ End Sub
 }
 
 func TestAnalyzerDetectsApplicationScopedAmbiguousRoots(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1053,6 +1086,7 @@ End Sub
 }
 
 func TestAnalyzerDetectsAllNumericPositionalWorkbookAndWindowIndices(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1081,6 +1115,7 @@ End Sub
 }
 
 func TestAnalyzerClassifiesEachWorkbooksOpenCaptureIndependently(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal useA As Boolean)
@@ -1103,6 +1138,7 @@ End Sub
 }
 
 func TestAnalyzerAddInSheetCollectionSuggestsCallerWorkbook(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "AddInEntry.bas", `Option Explicit
 Public Sub Run()
@@ -1128,6 +1164,7 @@ End Sub
 }
 
 func TestAnalyzerReportsThisWorkbookOnlyForAddInStandardModules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "AddInEntry.bas", `Option Explicit
 Public Sub Run()
@@ -1159,6 +1196,7 @@ End Sub
 }
 
 func TestAnalyzerReportsActiveSheetDependenciesInPrivateHelpers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1184,6 +1222,7 @@ End Sub
 }
 
 func TestAnalyzerVBA205IgnoresCommentsAndStringLiterals(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1202,6 +1241,7 @@ End Sub
 }
 
 func TestAnalyzerHonorsDisabledRuleIDs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1239,6 +1279,7 @@ disabled_rules = ["VBA205"]
 }
 
 func TestAnalyzerSupportsInlineSuppressions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1258,6 +1299,7 @@ End Sub
 }
 
 func TestAnalyzerReportsUnknownAndUnusedInlineSuppressionsAsWarnings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1284,6 +1326,7 @@ End Sub
 }
 
 func TestAnalyzerDoesNotSuppressPreflightBlockingDiagnostics(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1307,6 +1350,7 @@ End Sub
 }
 
 func TestAnalyzerDoesNotSuppressVBA216(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "Sheet1.bas")
 	writeWorkbookModule(t, dir, "Sheet2.bas")
@@ -1331,6 +1375,7 @@ End Sub
 }
 
 func TestAnalyzerRuntimeRiskRulesAllowGuardedPatterns(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function Build() As Range
@@ -1363,6 +1408,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateAllowsPushPopRestorePattern(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private fastModeDepth As Long
@@ -1414,6 +1460,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateAllowsEitherSameModuleRestoreAlias(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1439,6 +1486,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateRejectsPopThatDisablesEvents(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1458,6 +1506,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateStillFlagsUnpairedPushPattern(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1473,6 +1522,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateAllowsPropagatedRestoreEffect(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1504,6 +1554,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateAllowsUniqueProjectVisibleRestorePair(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1530,6 +1581,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateRejectsAmbiguousProjectRestorePair(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1552,6 +1604,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateRejectsCrossModuleClassMethodPair(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1572,6 +1625,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateRejectsRestorePropagatedFromBareClassMethod(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1597,6 +1651,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateRejectsRestorePropagatedFromBareUserFormMethod(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1622,6 +1677,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStatePreservesInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub PushFastMode()
@@ -1640,6 +1696,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateChecksEveryConfiguredProperty(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub UnsafeAllProperties()
@@ -1679,6 +1736,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateRecognizesWithApplicationSharedCleanupAndCopies(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub SafeCleanup(ByVal invalidInput As Boolean)
@@ -1713,6 +1771,7 @@ End Sub
 }
 
 func TestAnalyzerApplicationStateReportsEarlyExitAndErrorHandlerPaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub UnsafeExitSub(ByVal invalidInput As Boolean)
@@ -1796,6 +1855,7 @@ End Property
 }
 
 func TestAnalyzerApplicationStateRejectsInvalidOrConditionalSavedValue(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub ReassignedSavedValue()
@@ -1837,6 +1897,7 @@ End Sub
 }
 
 func TestVBA221ReportsImmediateCallerAndUncertainCalleeOncePerProperty(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Main()
@@ -1875,6 +1936,7 @@ End Sub
 }
 
 func TestVBA221DoesNotRepeatTransitiveLeakAtAncestorOrRealtime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Option Explicit
 Public Sub Main()
@@ -1908,6 +1970,7 @@ End Sub
 }
 
 func TestVBA221IgnoresUnreachableCallerPaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Main()
@@ -1931,6 +1994,7 @@ End Sub
 }
 
 func TestVBA221HonorsConfigAndInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Main()
@@ -1978,6 +2042,7 @@ End Sub
 }
 
 func TestAnalyzerErrorHandlerFallthroughSuggestsConcreteExitStatement(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1998,6 +2063,7 @@ End Sub
 }
 
 func TestAnalyzerIRVBA204PreservesPropertyExitAndCleanupSemantics(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Property Get SafeValue() As Long
@@ -2036,6 +2102,7 @@ End Sub
 }
 
 func TestAnalyzerIRVBA204PreservesInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2055,6 +2122,7 @@ End Sub
 }
 
 func TestAnalyzerIRVBA204DoesNotTreatNestedExitAsUnconditional(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal stopEarly As Boolean)
@@ -2076,6 +2144,7 @@ End Sub
 }
 
 func TestAnalyzerIRVBA204DoesNotNestHandlerAfterSingleLineIf(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal stopEarly As Boolean)
@@ -2095,6 +2164,7 @@ End Sub
 }
 
 func TestAnalyzerCFGVBA204DoesNotReportHandlerSkippedByGoto(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2117,6 +2187,7 @@ End Sub
 }
 
 func TestAnalyzerCFGVBA204DoesNotTreatGotoHandlerAsFallthrough(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2138,6 +2209,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214AllowsNarrowCompatibilityProbes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub DirectProbe()
@@ -2178,6 +2250,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214ReportsScopeBoundsAndEarlyExits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub BroadScope()
@@ -2219,6 +2292,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214ReportsContinuationAfterObjectProbeBeforeRestore(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub UsesFailedProbe()
@@ -2241,6 +2315,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214DoesNotTreatStringLiteralsAsErrProbes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2262,6 +2337,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214ElevatesResolvedProjectCallsAndWarnsUnresolvedCalls(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Helper()
@@ -2312,6 +2388,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214TracksNestedBranchAndHandlerScopes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub BranchLeak(ByVal stopEarly As Boolean)
@@ -2354,6 +2431,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214DoesNotFollowMergedDisabledErrorMode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2376,6 +2454,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214ReportsAllProcedureExitKindsAndHandlerReplacement(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function FunctionExit() As Long
@@ -2419,6 +2498,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214ReportsUnknownGotoExit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2438,6 +2518,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214ElevatesProjectCallsInControlConditions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function ProjectPredicate() As Boolean
@@ -2464,6 +2545,7 @@ End Sub
 }
 
 func TestAnalyzerVBA214HonorsInlineAndConfigSuppressionIndependentlyOfVB004(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub InlineSuppressed()
@@ -2510,6 +2592,7 @@ End Sub
 }
 
 func TestSourceRealtimeAnalysisExcludesBatchOnlyVBA214(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
 	source := []byte(`Option Explicit
@@ -2530,6 +2613,7 @@ End Sub
 }
 
 func TestVBA215MatchesBatchAndRealtimeAnalysisAndHonorsSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2575,6 +2659,7 @@ End Sub
 }
 
 func TestBatchTypedExcelRulesReusePreparedParsedDocument(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
 	source := []byte(`Option Explicit
@@ -2617,6 +2702,7 @@ End Sub
 }
 
 func TestVBA218MatchesBatchAndRealtimeAnalysisAndHonorsFailureContracts(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
 	source := `Option Explicit
@@ -2669,6 +2755,7 @@ End Sub
 }
 
 func TestVBA218RecognizesLocalIsErrorGuardAndCVErrWrapper(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function IsLookupError(ByVal value As Variant) As Boolean
@@ -2704,6 +2791,7 @@ End Sub
 }
 
 func TestVBA218UsesUniqueCrossModuleIsErrorGuardOnlyInBatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Guards.bas", `Option Explicit
 Public Function IsLookupFailure(ByVal value As Variant) As Boolean
@@ -2737,6 +2825,7 @@ End Sub
 }
 
 func TestVBA218RejectsNonDominatingAndUninspectedGuards(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function IsLookupError(ByVal value As Variant) As Boolean
@@ -2769,6 +2858,7 @@ End Sub
 }
 
 func TestVBA218TracksCVErrWrapperResultAtCaller(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function TryVisible(ByVal rng As Range) As Variant
@@ -2796,6 +2886,7 @@ End Sub
 }
 
 func TestVBA218SuppressesDisabledCVErrWrapperFindingsInBatchAndRealtime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
 	source := `Option Explicit
@@ -2829,6 +2920,7 @@ End Sub
 }
 
 func TestVBA218RecognizesLocalGuardAliasInRealtimeWrapperChecks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
 	source := `Option Explicit
@@ -2859,6 +2951,7 @@ End Sub
 }
 
 func TestVBA218StopsVariantTrackingAfterImmediateReassignment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal values As Range)
@@ -2878,6 +2971,7 @@ End Sub
 }
 
 func TestVBA218RecognizesMultilineIsErrorExitGuard(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal values As Range)
@@ -2899,6 +2993,7 @@ End Sub
 }
 
 func TestVBA218TracksUniqueCrossModuleCVErrWrapperOnlyInBatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Guards.bas", `Option Explicit
 Public Function TryVisible(ByVal rng As Range) As Variant
@@ -2933,6 +3028,7 @@ End Sub
 }
 
 func TestWorksheetRootFindingsAppearInRealtimeAnalysis(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")
 	source := []byte(`Option Explicit
@@ -2960,6 +3056,7 @@ End Sub
 }
 
 func TestWorksheetRootRealtimeAnalysisUsesWorkbookCodenames(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "InputSheet.bas")
 	writeWorkbookModule(t, dir, "OutputSheet.bas")
@@ -2981,6 +3078,7 @@ End Sub
 }
 
 func TestWorksheetRootRealtimeAnalysisHandlesContinuationsAndWithHeaders(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "InputSheet.bas")
 	writeWorkbookModule(t, dir, "OutputSheet.bas")
@@ -3007,6 +3105,7 @@ End Sub
 }
 
 func TestAnalyzerChecksObjectUseOnSetAssignmentRHS(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3024,6 +3123,7 @@ End Sub
 }
 
 func TestAnalyzerDoesNotTreatAnyObjectMentionAsInitialization(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3041,6 +3141,7 @@ End Sub
 }
 
 func TestAnalyzerAllowsKnownByRefObjectInitializer(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub InitSheet(ByRef target As Worksheet)
@@ -3063,6 +3164,7 @@ End Sub
 }
 
 func TestAnalyzerRuntimeRiskRules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub NeedsLong(ByRef value As Long)
@@ -3090,6 +3192,7 @@ End Sub
 }
 
 func TestAnalyzerVBA210UsesCFGReturnPaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function MissingReturn() As Long
@@ -3267,6 +3370,7 @@ End Sub
 }
 
 func TestAnalyzerByRefMismatchHandlesLowercaseCallKeyword(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub NeedsLong(ByRef value As Long)
@@ -3283,6 +3387,7 @@ End Sub
 }
 
 func TestAnalyzerCompileEquivalentByRefMismatchIgnoresVBA206Disable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub NeedsLong(ByRef value As Long)
@@ -3308,6 +3413,7 @@ End Sub
 }
 
 func TestAnalyzerByRefUsesProjectLocalNamedSignatures(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Receiver.bas", `Option Explicit
 Public Sub ReplaceText(ByRef target As String, Optional ByVal suffix As String = "")
@@ -3331,6 +3437,7 @@ End Sub
 }
 
 func TestAnalyzerByRefSkipsAmbiguousCallsAndHonorsSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "First.bas", `Option Explicit
 Public Sub TakeText(ByRef target As String)
@@ -3360,6 +3467,7 @@ End Sub
 }
 
 func TestAnalyzerArrayComparisonUsesIdentifierBoundaries(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3382,6 +3490,7 @@ End Sub
 }
 
 func TestAnalyzerArrayComparisonIgnoresFunctionReturnAssignment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function CopyValues() As Variant
@@ -3408,6 +3517,7 @@ End Sub
 }
 
 func TestAnalyzerArrayComparisonFindingsHaveStableOrder(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3431,6 +3541,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleAndDimensionSafety(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function BuildValues() As Variant
@@ -3491,6 +3602,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleIsDeterministicAcrossRuns(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal chooseFirst As Boolean)
@@ -3527,6 +3639,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleSuppressesRangeValueDuplicates(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3545,6 +3658,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleUsesConservativeBranchAndVariantStates(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal shouldAllocate As Boolean)
@@ -3569,6 +3683,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecyclePreservesMatchingShapesAndMultiTargetTransitions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal shouldAllocate As Boolean)
@@ -3617,6 +3732,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleAcceptsReDimTypeSuffixAndUnknownDimension(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal dimension As Long)
@@ -3637,6 +3753,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleQualifiedReDimAndUnknownArrayAssignment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3661,6 +3778,7 @@ End Sub
 }
 
 func TestAnalyzerArrayLifecycleKeepsAlwaysEnabledObjectArrayFindings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3684,6 +3802,7 @@ End Sub
 }
 
 func TestAnalyzerArrayReturnSummariesRequireDefiniteAllocation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function MaybeValues(ByVal shouldAllocate As Boolean) As Variant
@@ -3725,6 +3844,7 @@ End Sub
 }
 
 func TestAnalyzerArrayReturnSummaryDeduplicatesLoopVisits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function LoopValues() As Variant
@@ -3754,6 +3874,7 @@ End Sub
 }
 
 func TestAnalyzerArrayReturnSummaryExcludesScalarRangeValue(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Function ReadScalar() As Variant
@@ -3778,6 +3899,7 @@ End Sub
 }
 
 func TestVBA227RealtimeArrayReturnSummariesAreDocumentLocal(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Helper.bas", `Option Explicit
 Public Function BuildValues() As Variant
@@ -3805,6 +3927,7 @@ End Sub
 }
 
 func TestVBA227BatchAndRealtimeResultsMatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Option Explicit
 Public Sub Run()
@@ -3834,6 +3957,7 @@ End Sub
 }
 
 func TestAnalyzerArrayComparisonIgnoresElementsAndProcedureHeaders(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private fastModeDepth As Long
@@ -3873,6 +3997,7 @@ End Sub
 }
 
 func TestAnalyzerExpandedExcelMemberMismatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3890,6 +4015,7 @@ End Sub
 }
 
 func TestAnalyzerDetectsNonShortCircuitObjectGuards(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3920,6 +4046,7 @@ End Sub
 }
 
 func TestAnalyzerNonShortCircuitObjectGuardAllowsSeparateAndDifferentObjects(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3943,6 +4070,7 @@ End Sub
 }
 
 func TestAnalyzerNonShortCircuitObjectGuardCanBeDisabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -3976,6 +4104,7 @@ disabled_rules = ["VBA212"]
 }
 
 func TestAnalyzerNonShortCircuitObjectGuardDedupesMultilineExpression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4006,6 +4135,7 @@ End Sub
 }
 
 func TestAnalyzerNonShortCircuitObjectGuardSupportsInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4025,6 +4155,7 @@ End Sub
 }
 
 func TestAnalyzerDictionaryIterationValueUsageFindsKnownAndInferredDictionaries(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4064,6 +4195,7 @@ End Sub
 }
 
 func TestAnalyzerDictionaryIterationValueUsageFindsObjectAssignmentAndIgnoresKeyUsage(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4100,6 +4232,7 @@ End Sub
 }
 
 func TestAnalyzerDictionaryIterationValueUsageIsOptInAndInvalidatesInference(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4122,6 +4255,7 @@ End Sub
 }
 
 func TestAnalyzerDictionaryIterationValueUsageRecognizesWithAndAllowsReboundValues(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4151,6 +4285,7 @@ End Sub
 }
 
 func TestAnalyzerRuntimeRiskRulesIgnoreCommentsAndStrings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4173,6 +4308,7 @@ End Sub
 }
 
 func TestAnalyzerVBA216DetectsDistinctWorksheetRoots(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tracker := newWorksheetRootTracker(nil)
 	tracker.observeSetAssignment(`Set inputSheet = ThisWorkbook.Worksheets("Input")`)
@@ -4235,6 +4371,7 @@ End Sub
 }
 
 func TestAnalyzerVBA216OnlyComparesProvableRootIdentities(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "InputSheet.bas")
 	writeWorkbookModule(t, dir, "OutputSheet.bas")
@@ -4264,6 +4401,7 @@ End Sub
 }
 
 func TestAnalyzerVBA216AnalyzesContinuationsAndWithHeaders(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeWorkbookModule(t, dir, "InputSheet.bas")
 	writeWorkbookModule(t, dir, "OutputSheet.bas")
@@ -4289,6 +4427,7 @@ End Sub
 }
 
 func TestAnalyzerVBA217AnalyzesContinuationStatements(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4309,6 +4448,7 @@ End Sub
 }
 
 func TestWorksheetRootMemberOffsetsPreserveUTF8(t *testing.T) {
+	t.Parallel()
 	tracker := newWorksheetRootTracker(map[string]string{"inputsheet": "InputSheet", "outputsheet": "OutputSheet"})
 	accesses := worksheetMemberAccesses(`lastRow = Len("İ") + InputSheet.Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row`, tracker)
 	if len(accesses) != 2 || accesses[0].root.identity != "codename:inputsheet" || accesses[1].root.identity != "codename:outputsheet" {
@@ -4317,6 +4457,7 @@ func TestWorksheetRootMemberOffsetsPreserveUTF8(t *testing.T) {
 }
 
 func TestAnalyzerVBA216AcceptsSameWorksheetRootsAndUnknowns(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub SameRoot()
@@ -4342,6 +4483,7 @@ End Sub
 }
 
 func TestAnalyzerVBA217ReportsOnlyUnstableLastRowPatterns(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4376,6 +4518,7 @@ End Sub
 }
 
 func TestAnalyzerVBA217HonorsDisableAndInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub InlineSuppressed()
@@ -4405,6 +4548,7 @@ End Sub
 }
 
 func TestAnalyzerWorksheetRootRulesIgnoreStringLiterals(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -4436,6 +4580,7 @@ func writeModule(t *testing.T, dir, name, body string) {
 }
 
 func TestVBA220DetectsEventReentryAndHonorsSafeEventCleanup(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "src", "workbook")
 	if err := os.MkdirAll(workbook, 0o755); err != nil {
@@ -4504,6 +4649,7 @@ End Sub
 }
 
 func TestVBA220ReportsUserFormControlReentryWithoutEnableEventsExemption(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
 Private Sub TextBox1_Change()
@@ -4523,6 +4669,7 @@ End Sub
 }
 
 func TestVBA220AcceptsDelegatedWorkCoveredBySafeEventCleanup(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "src", "workbook")
 	if err := os.MkdirAll(workbook, 0o755); err != nil {
@@ -4561,6 +4708,7 @@ End Sub
 }
 
 func TestVBA220ReportsAmbiguousCallsAsUncertainty(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	workbook := filepath.Join(dir, "src", "workbook")
 	if err := os.MkdirAll(workbook, 0o755); err != nil {
@@ -4674,6 +4822,7 @@ func containsAll(text string, parts ...string) bool {
 }
 
 func TestAnalyzerVBA229IsBlockingAndUnsuppressible(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Probe()
@@ -4695,6 +4844,7 @@ End Sub
 }
 
 func TestAnalyzerVBA229AcceptsQualifiedProjectType(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Types.bas", `Option Explicit
 Public Type Payload

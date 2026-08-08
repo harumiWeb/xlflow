@@ -18,6 +18,7 @@ import (
 )
 
 func TestLinterRunResultContextReturnsCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -31,6 +32,7 @@ func TestLinterRunResultContextReturnsCancellation(t *testing.T) {
 }
 
 func TestLinterRunResultContextReturnsZeroResultWhenCanceledDuringFinalization(t *testing.T) {
+	t.Parallel()
 	ctx := &lintCheckpointContext{cancelAt: 13}
 	result, err := (Linter{RootDir: t.TempDir(), Config: config.Default()}).RunResultContext(ctx)
 	if !errors.Is(err, context.Canceled) {
@@ -45,6 +47,7 @@ func TestLinterRunResultContextReturnsZeroResultWhenCanceledDuringFinalization(t
 }
 
 func TestLintParsedContextReturnsCancellationWithoutPartialIssues(t *testing.T) {
+	t.Parallel()
 	doc, err := vbaast.ParseDocument("Main.bas", []byte("Sub Main()\nEnd Sub\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +113,7 @@ func (c *lintCheckpointContext) Err() error {
 }
 
 func TestLinterFindsMVPRules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -206,6 +210,7 @@ End Sub
 }
 
 func TestLinterAllowsSelectCase(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -233,6 +238,7 @@ End Sub
 }
 
 func TestLinterHonorsDisabledRuleIDs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -269,6 +275,7 @@ disabled_rules = ["VB002"]
 }
 
 func TestLinterSupportsInlineSuppressions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -288,6 +295,7 @@ End Sub
 }
 
 func TestLinterSupportsMultipleInlineSuppressionIDs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -309,6 +317,7 @@ End Sub
 }
 
 func TestLinterInlineSuppressionKeepsUnrelatedSameLineDiagnostic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -330,6 +339,7 @@ End Sub
 }
 
 func TestLinterReportsUnknownAndUnusedInlineSuppressionsAsWarnings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -357,6 +367,7 @@ End Sub
 }
 
 func TestLinterDoesNotSuppressPreflightBlockingDiagnostics(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  ' xlflow:disable-next-line VB008\n  Debug.Print “bad quote”\nEnd Sub\n")
 
@@ -373,6 +384,7 @@ func TestLinterDoesNotSuppressPreflightBlockingDiagnostics(t *testing.T) {
 }
 
 func TestLinterConfigDisabledRulesComposeWithInlineSuppressions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -401,6 +413,7 @@ End Sub
 }
 
 func TestLinterUsesASTForDeclaratorsAndColumns(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -445,6 +458,7 @@ End Sub
 }
 
 func TestLinterASTIgnoresCommentsAndStringsForKeywordRules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -473,6 +487,7 @@ End Sub
 }
 
 func TestLinterASTDetectsMemberAccessAndOnError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -514,6 +529,7 @@ End Sub
 }
 
 func TestLinterAcceptsBoundedErrNumberProbes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -545,6 +561,7 @@ End Sub
 }
 
 func TestLinterReportsUnobservedOnErrorCleanupScopes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -576,6 +593,7 @@ End Sub
 }
 
 func TestConfusingParenthesizedCallIgnoresFunctionArguments(t *testing.T) {
+	t.Parallel()
 	if name, ok := confusingParenthesizedCall("Mid$(alphabet, (block \\ 64) + 1, 1)"); ok || name != "" {
 		t.Fatalf("Mid$ argument expression = (%q, %t), want no VB022", name, ok)
 	}
@@ -585,6 +603,7 @@ func TestConfusingParenthesizedCallIgnoresFunctionArguments(t *testing.T) {
 }
 
 func TestLinterReportsParserRecovery(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -637,6 +656,7 @@ End Sub
 }
 
 func TestLinterReportsMissingParserRecoveryContext(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")
 	source := []byte(`Option Explicit
@@ -664,6 +684,7 @@ End Sub
 }
 
 func TestLinterReportsLikelyUnclosedBlocks(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	tests := []struct {
 		name         string
@@ -727,6 +748,7 @@ func TestLinterReportsLikelyUnclosedBlocks(t *testing.T) {
 }
 
 func TestLinterLocatesNestedUnclosedBlockAtParentCloser(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	source := []byte("Option Explicit\nSub Main()\n  If outerReady Then\n    If innerReady Then\n      Debug.Print \"x\"\n  End If\nEnd Sub\n")
 	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
@@ -747,6 +769,7 @@ func TestLinterLocatesNestedUnclosedBlockAtParentCloser(t *testing.T) {
 }
 
 func TestLinterPreservesContinuationTailLocationForUnclosedBlock(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	source := []byte("Sub Main()\n  result = _\n    1: If ready Then\n      Debug.Print \"x\"\nEnd Sub\n")
 	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
@@ -764,6 +787,7 @@ func TestLinterPreservesContinuationTailLocationForUnclosedBlock(t *testing.T) {
 }
 
 func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
+	t.Parallel()
 	valid := "Sub Main()\n  If ready Then\n    For Each item In items\n      Debug.Print item\n    Next item\n  End If\nEnd Sub\n"
 	if candidates, reliable := unmatchedBlockCandidates(valid); !reliable || len(candidates) != 0 {
 		t.Fatalf("valid source candidates = %+v, reliable=%t", candidates, reliable)
@@ -834,6 +858,7 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 }
 
 func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "classes", "Example.cls")
 	source := []byte("Option Explicit\nPrivate Sub ReadNext()\n  Dim nextChar As String\n  Dim nextSlot As Long\n  nextChar = Mid$(text, position, 1)\n  nextSlot = (slot + 1) And mask\nEnd Sub\nPrivate Function NextHashCapacity() As Long\n  NextHashCapacity = 1\nEnd Function\n")
 	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
@@ -846,6 +871,7 @@ func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T)
 }
 
 func TestLinterFallsBackToGenericRecoveryForConditionalCompilation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	source := []byte("Option Explicit\nSub Main()\n#If VBA7 Then\n  If ready Then\n    Debug.Print \"x\"\n#End If\nEnd Sub\n")
 	issues, err := (Linter{RootDir: filepath.Dir(filepath.Dir(filepath.Dir(path))), Config: config.Default()}).LintSource(path, source)
@@ -863,6 +889,7 @@ func TestLinterFallsBackToGenericRecoveryForConditionalCompilation(t *testing.T)
 }
 
 func TestConditionalIfBalanceAcrossCompilationBranches(t *testing.T) {
+	t.Parallel()
 	balanced := "Sub Main()\n#If Win64 Then\n  If a Then\n#Else\n  If b Then\n#End If\n    Debug.Print \"x\"\n  Else\n    Debug.Print \"y\"\n  End If\nEnd Sub\n"
 	if conditionalIfBalanceInvalid(balanced) {
 		t.Fatal("equivalent conditional If headers should merge into one balanced shared block")
@@ -875,6 +902,7 @@ func TestConditionalIfBalanceAcrossCompilationBranches(t *testing.T) {
 }
 
 func TestLinterAcceptsConditionalCompilationSplitIfWithFlatCST(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	source := []byte("Option Explicit\nSub Main()\n#If Win64 Then\n  If a Then\n#Else\n  If b Then\n#End If\n    Debug.Print \"x\"\n  Else\n    Debug.Print \"y\"\n  End If\nEnd Sub\n")
 
@@ -888,6 +916,7 @@ func TestLinterAcceptsConditionalCompilationSplitIfWithFlatCST(t *testing.T) {
 }
 
 func TestLinterFlagsUnbalancedConditionalCompilationSplitIfWithFlatCST(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	source := []byte("Option Explicit\nSub Main()\n#If Win64 Then\n  If a Then\n#End If\n    Debug.Print \"x\"\nEnd Sub\n")
 
@@ -901,6 +930,7 @@ func TestLinterFlagsUnbalancedConditionalCompilationSplitIfWithFlatCST(t *testin
 }
 
 func TestLinterAcceptsContinuedIfWithConditionalCompilation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	source := []byte("Option Explicit\nSub Main()\n#If Win64 Then\n  Debug.Print \"64\"\n#Else\n  Debug.Print \"32\"\n#End If\n  If ready _\n    And enabled Then\n    Debug.Print \"x\"\n  End If\nEnd Sub\n")
 
@@ -914,6 +944,7 @@ func TestLinterAcceptsContinuedIfWithConditionalCompilation(t *testing.T) {
 }
 
 func TestLinterRejectsInvalidFlatIfBranchOwnership(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	tests := map[string]string{
 		"orphan Else":   "Option Explicit\nSub Main()\n  Else\n    Debug.Print \"x\"\nEnd Sub\n",
@@ -937,6 +968,7 @@ func TestLinterRejectsInvalidFlatIfBranchOwnership(t *testing.T) {
 }
 
 func TestLinterFallsBackToGenericRecoveryForAmbiguousBlocks(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
 	tests := []struct {
 		name   string
@@ -974,6 +1006,7 @@ func TestLinterFallsBackToGenericRecoveryForAmbiguousBlocks(t *testing.T) {
 }
 
 func TestParserRecoveryDetailsForBlocksAssociateOnlyMatchingRecovery(t *testing.T) {
+	t.Parallel()
 	blocks := []unclosedBlockCandidate{
 		{openingLine: 2, expectedLine: 9},
 		{openingLine: 4, expectedLine: 6},
@@ -993,6 +1026,7 @@ func TestParserRecoveryDetailsForBlocksAssociateOnlyMatchingRecovery(t *testing.
 }
 
 func TestParserRecoveryDetailBoundsUnicodeText(t *testing.T) {
+	t.Parallel()
 	text := strings.Repeat("あ", maxParserRecoveryContextRunes+1)
 	got := truncateParserRecoveryText(text, maxParserRecoveryContextRunes)
 	if utf8.RuneCountInString(got) != maxParserRecoveryContextRunes || !strings.HasSuffix(got, "…") {
@@ -1001,6 +1035,7 @@ func TestParserRecoveryDetailBoundsUnicodeText(t *testing.T) {
 }
 
 func TestLinterHandlesImplicitVariantsInsideUDTs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1054,6 +1089,7 @@ End Sub
 }
 
 func TestLinterIgnoresConditionalCompilationDirectivesInsideUDTs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1097,6 +1133,7 @@ End Type
 }
 
 func TestLinterAllowsInteractiveInputWhenDisabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1125,6 +1162,7 @@ End Sub
 }
 
 func TestLinterIgnoresXlflowUIWrappers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1160,6 +1198,7 @@ End Sub
 }
 
 func TestLinterBlocksBareDialogsWhenXlflowUIIsPresent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1220,6 +1259,7 @@ End Sub
 }
 
 func TestLinterVB028UsesStatementCallContext(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1265,6 +1305,7 @@ End Function
 }
 
 func TestLinterAllowsBareDialogsWithoutXlflowUI(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1284,6 +1325,7 @@ End Sub
 }
 
 func TestLinterFindsTypographicQuotesThatTriggerVBECompileDialogs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1307,6 +1349,7 @@ func TestLinterFindsTypographicQuotesThatTriggerVBECompileDialogs(t *testing.T) 
 }
 
 func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1330,6 +1373,7 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 }
 
 func TestLinterKeepsEarlierCStyleQuoteEscapeWhenLaterQuoteExists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  s = \"\\\"\": Debug.Print \"x\"\nEnd Sub\n")
 	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
@@ -1346,6 +1390,7 @@ func TestLinterKeepsEarlierCStyleQuoteEscapeWhenLaterQuoteExists(t *testing.T) {
 }
 
 func TestLinterAllowsVBAJSONEscapedQuoteStrings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "JsonConverter.bas", `Attribute VB_Name = "JsonConverter"
 Option Explicit
@@ -1371,6 +1416,7 @@ End Function
 }
 
 func TestLinterAllowsValidProcedureBoundaries(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1409,6 +1455,7 @@ Public Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long
 }
 
 func TestLinterFindsProcedureBoundarySyntaxErrors(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1437,6 +1484,7 @@ End Property
 }
 
 func TestLinterFindsUnterminatedProcedureAtStartLine(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1461,6 +1509,7 @@ Public Function MissingClose() As String
 }
 
 func TestLinterProcedureScannerIgnoresCommentsStringsAndDesignerEnd(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	formsDir := filepath.Join(dir, "src", "forms")
 	if err := os.MkdirAll(formsDir, 0o755); err != nil {
@@ -1493,6 +1542,7 @@ End Sub
 }
 
 func TestLinterHandlesContinuedProcedureDeclaration(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1518,6 +1568,7 @@ End Sub
 }
 
 func TestLinterFindsMissingWhitespaceBeforeLineContinuation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1551,6 +1602,7 @@ End Sub
 }
 
 func TestLinterFindsVBAContinuationLineOverflow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		body          string
@@ -1621,6 +1673,7 @@ func TestLinterFindsVBAContinuationLineOverflow(t *testing.T) {
 }
 
 func TestLinterAllowsVBAContinuationLineLimitAndIgnoresStringsAndComments(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Run()\n" +
 		continuedLogicalLine("    result = a0 +", "        arg +", "        finalArg\n", 24) +
@@ -1639,6 +1692,7 @@ func TestLinterAllowsVBAContinuationLineLimitAndIgnoresStringsAndComments(t *tes
 }
 
 func TestLinterFindsRepeatedQuestionShorthand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1687,6 +1741,7 @@ End Sub
 }
 
 func TestLinterAllowsIdentifiersEndingWithUnderscore(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1714,6 +1769,7 @@ End Sub
 }
 
 func TestLinterHandlesOneLineProcedureStatements(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -1739,6 +1795,7 @@ Property Get Name() As String: Name = "x": End Property
 }
 
 func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	formsDir := filepath.Join(dir, "src", "forms")
 	if err := os.MkdirAll(filepath.Join(formsDir, "code"), 0o755); err != nil {
@@ -1773,6 +1830,7 @@ func TestLinterSidecarModeSkipsGeneratedFRMCodeDiagnostics(t *testing.T) {
 }
 
 func TestLinterFindsDefaultASTBackedRules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1788,6 +1846,7 @@ End Sub
 }
 
 func TestLinterAllowsQualifiedExcelAccessAndNarrowResumeNext(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -1815,6 +1874,7 @@ End Sub
 }
 
 func TestLinterOptInProcedureLocalRules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Private moduleValue As Long
@@ -1862,6 +1922,7 @@ End Sub
 }
 
 func TestLinterVB021UsesRootedReachabilityAndClusters(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Private Sub Used()
@@ -1938,6 +1999,7 @@ End Sub
 }
 
 func TestLinterVB021KeepsInlineSuppressionLineBased(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 ' xlflow:disable-next-line VB021
@@ -1967,6 +2029,7 @@ End Sub
 }
 
 func TestLinterVB021RecognizesTestProceduresAsRoots(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Tests.bas", `Option Explicit
 Public Sub TestWorkflow(ByVal input As Long)
@@ -1994,6 +2057,7 @@ End Sub
 }
 
 func TestLinterVB021HandlesDynamicReachabilityConservatively(t *testing.T) {
+	t.Parallel()
 	t.Run("known target from reachable caller", func(t *testing.T) {
 		dir := t.TempDir()
 		writeLintModule(t, dir, "Main.bas", `Option Explicit
@@ -2056,6 +2120,7 @@ End Sub
 }
 
 func TestLinterVB021TreatsPublicStandardModuleAPIsAsPossibleRoots(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Api.bas", `Option Explicit
 Public Function PublicApi(ByVal value As String) As String
@@ -2083,6 +2148,7 @@ End Sub
 }
 
 func TestLinterVB021RecognizesEventsAndWithEventsHandlers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.Project.Entry = "Missing.Run"
@@ -2193,6 +2259,7 @@ End Sub
 }
 
 func TestLinterUnusedLocalVariableUsesProcedureBounds(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2214,6 +2281,7 @@ End Sub
 }
 
 func TestLinterUnusedLocalVariableCountsEarlierConstOnSameLine(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2234,6 +2302,7 @@ End Sub
 }
 
 func TestLinterUnusedLocalVariableIgnoresWriteOnlyAssignments(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2259,6 +2328,7 @@ End Sub
 }
 
 func TestLinterUnusedLocalVariableTreatsOneLineConditionalAssignmentsAsWrites(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2282,6 +2352,7 @@ End Sub
 }
 
 func TestLinterDetectsNestedWithAmbiguityWhenEnabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2302,6 +2373,7 @@ End Sub
 }
 
 func TestLinterNewASTRulesIgnoreCommentsAndStrings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -2321,6 +2393,7 @@ End Sub
 }
 
 func TestLinterSortsIssuesStably(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "B.bas", "Sub B()\nRange(\"A1\").Value = 1\nEnd Sub\n")
 	writeLintModule(t, dir, "A.bas", "Sub A()\nRange(\"A1\").Value = 1\nEnd Sub\n")
@@ -2344,6 +2417,7 @@ func TestLinterSortsIssuesStably(t *testing.T) {
 }
 
 func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")
 	source := []byte("Sub Run()\n    Range(\"A1\").Select\n    Dim value\nEnd Sub\n")
@@ -2359,6 +2433,7 @@ func TestLinterLintSourceUsesUnsavedContent(t *testing.T) {
 }
 
 func TestLinterLintParsedMatchesLintSource(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")
 	source := []byte("Option Explicit\nPublic Sub Run()\n    Dim value\n    Range(\"A1\").Select\nEnd Sub\n")
@@ -2382,6 +2457,7 @@ func TestLinterLintParsedMatchesLintSource(t *testing.T) {
 }
 
 func TestLinterLintSourceAppliesInlineSuppressions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Main.bas")
 	source := []byte(`Option Explicit
@@ -2401,6 +2477,7 @@ End Sub
 }
 
 func TestLinterReportsUndeclaredAssignmentsWithOptionExplicit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Private moduleValue As Long
@@ -2437,6 +2514,7 @@ End Function
 }
 
 func TestLinterDoesNotTreatMultilineComparisonArgumentsAsAssignments(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -2458,6 +2536,7 @@ End Function
 }
 
 func TestLinterAllowsModuleVariablesDeclaredInsideConditionalCompilationBlocks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -2511,6 +2590,7 @@ End Sub
 }
 
 func TestLinterUndeclaredAssignmentsRequireOptionExplicit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Public Sub Run()
   missingValue = 1
@@ -2527,6 +2607,7 @@ End Sub
 }
 
 func TestLinterRequiresVBNameAttributeForStandardModules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -2549,6 +2630,7 @@ End Sub
 }
 
 func TestLinterAcceptsVBNameAttributeForStandardModules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -2566,6 +2648,7 @@ End Sub
 }
 
 func TestLinterRejectsEmptyVBNameAttributeForStandardModules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = ""
 Option Explicit
@@ -2583,6 +2666,7 @@ End Sub
 }
 
 func TestLinterVBNameAttributeOnlyAppliesToStandardModules(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := config.Default()
 	classes := filepath.Join(dir, "src", "classes")
@@ -2655,6 +2739,7 @@ func hasWarning(warnings []map[string]any, code string, rule string) bool {
 }
 
 func TestLinterProcedureNameConstantRule(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{Enabled: true, ConstantName: "procedure_name"}
@@ -2719,6 +2804,7 @@ End Property
 }
 
 func TestLinterProcedureNameConstantRuleScansModuleKinds(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.UserForm.CodeSource = "frm"
