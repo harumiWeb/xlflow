@@ -108,9 +108,9 @@ tasks:
     env:
       XLFLOW_UPDATE_CORPUS_SNAPSHOTS: "1"
     cmds:
-      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
         platforms: [windows]
-      - cmd: go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
         platforms: [linux, darwin]
 
   bench:lsp:

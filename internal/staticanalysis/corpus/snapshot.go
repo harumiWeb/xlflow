@@ -226,7 +226,7 @@ func decodeSnapshotRow(line []byte) (SnapshotDiagnostic, error) {
 	if err != nil {
 		return SnapshotDiagnostic{}, err
 	}
-	if !bytes.Equal(append([]byte(nil), line...), bytes.TrimSuffix(canonical, []byte{'\n'})) {
+	if !bytes.Equal(line, bytes.TrimSuffix(canonical, []byte{'\n'})) {
 		return SnapshotDiagnostic{}, errors.New("snapshot row is not in canonical JSON form")
 	}
 	return row, nil
@@ -365,25 +365,46 @@ func WriteSnapshotSet(root string, set SnapshotSet) error {
 	if err := writeSnapshotTree(stage, set); err != nil {
 		return err
 	}
-	backup := rootAbs + ".backup"
-	_ = os.RemoveAll(backup)
+	backup, err := os.MkdirTemp(parent, ".static-analysis-snapshots-backup-")
+	if err != nil {
+		return fmt.Errorf("create snapshot backup path: %w", err)
+	}
+	if err := os.Remove(backup); err != nil {
+		_ = os.RemoveAll(backup)
+		return fmt.Errorf("prepare snapshot backup path: %w", err)
+	}
+	backupExists := false
+	preserveBackup := false
+	defer func() {
+		if backupExists && !preserveBackup {
+			_ = os.RemoveAll(backup)
+		}
+	}()
 	hadRoot := false
 	if _, statErr := os.Stat(rootAbs); statErr == nil {
 		if err := os.Rename(rootAbs, backup); err != nil {
 			return fmt.Errorf("stage existing snapshot root: %w", err)
 		}
 		hadRoot = true
+		backupExists = true
 	} else if !os.IsNotExist(statErr) {
 		return fmt.Errorf("inspect existing snapshot root: %w", statErr)
 	}
 	if err := os.Rename(stage, rootAbs); err != nil {
 		if hadRoot {
-			_ = os.Rename(backup, rootAbs)
+			if restoreErr := os.Rename(backup, rootAbs); restoreErr == nil {
+				backupExists = false
+			} else {
+				preserveBackup = true
+				return fmt.Errorf("publish snapshot root: %w (restore existing root: %v)", err, restoreErr)
+			}
 		}
 		return fmt.Errorf("publish snapshot root: %w", err)
 	}
 	if hadRoot {
-		_ = os.RemoveAll(backup)
+		if err := os.RemoveAll(backup); err == nil {
+			backupExists = false
+		}
 	}
 	return nil
 }
@@ -406,14 +427,8 @@ func CompareSnapshotSets(want, got SnapshotSet) SnapshotDiff {
 	}
 	sort.Slice(ordered, func(i, j int) bool { return snapshotIDLess(ordered[i], ordered[j]) })
 	for _, id := range ordered {
-		wantRows := append([]SnapshotDiagnostic(nil), want[id]...)
-		gotRows := append([]SnapshotDiagnostic(nil), got[id]...)
-		sort.SliceStable(wantRows, func(i, j int) bool { return snapshotDiagnosticLess(wantRows[i], wantRows[j]) })
-		sort.SliceStable(gotRows, func(i, j int) bool { return snapshotDiagnosticLess(gotRows[i], gotRows[j]) })
-		// Rows are sorted, so compare by identity counts rather than relying on
-		// equal rows being adjacent to a differing row in both slices.
-		wantCounts := countSnapshotRows(wantRows)
-		gotCounts := countSnapshotRows(gotRows)
+		wantCounts := countSnapshotRows(want[id])
+		gotCounts := countSnapshotRows(got[id])
 		rowKeys := make([]SnapshotDiagnostic, 0, len(wantCounts)+len(gotCounts))
 		seen := make(map[SnapshotDiagnostic]struct{}, len(wantCounts)+len(gotCounts))
 		for row := range wantCounts {

@@ -3515,6 +3515,9 @@ End Sub
 		}
 		if i == 0 {
 			want = findings
+			if len(want) == 0 {
+				t.Fatal("expected array lifecycle findings, got none")
+			}
 			continue
 		}
 		if !reflect.DeepEqual(findings, want) {
