@@ -1,6 +1,7 @@
 package suppression
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,9 +32,20 @@ type Diagnostic struct {
 }
 
 func DirectivesForFiles(root string, paths []string) ([]Directive, []map[string]any, error) {
+	return DirectivesForFilesContext(context.Background(), root, paths)
+}
+
+// DirectivesForFilesContext reads inline suppressions with cooperative cancellation.
+func DirectivesForFilesContext(ctx context.Context, root string, paths []string) ([]Directive, []map[string]any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var directives []Directive
 	var warnings []map[string]any
 	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		fileDirectives, fileWarnings, err := directivesForFile(root, path)
 		if err != nil {
 			return nil, nil, err
@@ -41,7 +53,7 @@ func DirectivesForFiles(root string, paths []string) ([]Directive, []map[string]
 		directives = append(directives, fileDirectives...)
 		warnings = append(warnings, fileWarnings...)
 	}
-	return directives, warnings, nil
+	return directives, warnings, ctx.Err()
 }
 
 func DirectivesForSource(root, path, source string) ([]Directive, []map[string]any) {

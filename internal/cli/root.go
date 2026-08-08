@@ -4173,7 +4173,7 @@ func (a *app) runCommand() *cobra.Command {
 				return err
 			}
 			if shouldAttachRunDiagnostic(env) {
-				env.RunDiagnostic = a.buildRunDiagnostic(cfg, env)
+				env.RunDiagnostic = a.buildRunDiagnostic(cmd.Context(), cfg, env)
 			}
 			return a.writeWithOutputOptions(env, code, a.outputOptionsWithVerbose(verbose))
 		},
@@ -7191,7 +7191,7 @@ func (a *app) lintCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResult()
+			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("lint", output.ExitEnvironment, "lint_failed", err)
 			}
@@ -7378,7 +7378,7 @@ func (a *app) checkCommand() *cobra.Command {
 			}
 			env := output.New("check")
 			check := map[string]any{}
-			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResult()
+			lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "lint_failed", err)
 			}
@@ -7501,7 +7501,7 @@ func withGUIBoundarySummary(value any, boundaries []gui.Boundary) any {
 	return diag
 }
 
-func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[string]any {
+func (a *app) buildRunDiagnostic(ctx context.Context, cfg config.Config, env output.Envelope) map[string]any {
 	diag := map[string]any{}
 	for key, item := range cliObjectMap(env.RunDiagnostic) {
 		diag[key] = item
@@ -7542,7 +7542,8 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 			diag["suggestion"] = "Check object assignments near the reported line; use Set when assigning Workbook, Worksheet, Range, or other object references."
 		}
 	}
-	findings, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
+	result, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(ctx)
+	findings := result.Findings
 	if err == nil && env.Error != nil && !sourceNewer {
 		for _, finding := range findings {
 			if finding.Module != "" && env.Error.Source != "" && !strings.EqualFold(finding.Module, env.Error.Source) {
@@ -7567,7 +7568,13 @@ func (a *app) buildRunDiagnostic(cfg config.Config, env output.Envelope) map[str
 }
 
 func (a *app) runSourcePreflight(ctx context.Context, command string, cfg config.Config, action string, ignoredAnalysisCodes map[string]bool, pathFilter func(string) bool) error {
-	lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResult()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	lintResult, err := lint.Linter{RootDir: a.cwd, Config: cfg, PathFilter: pathFilter}.RunResultContext(ctx)
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
