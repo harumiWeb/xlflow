@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed VBA LSP hover for procedures in open documents so `'''` and Rubberduck
+  documentation comments are displayed through the lightweight symbol path.
 - Defined reviewed static-analysis corpus evidence with exact expected and
   forbidden diagnostic contracts, durable false-positive records, and
   reviewed-only per-rule precision metrics. Added developer tasks for printing

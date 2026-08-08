@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed VBA hover documentation for procedures in currently open modules.
+
 ## v0.9.0
 
 - Load static-analysis rule metadata from `xlflow rules --json` and offer inline-suppression Quick Fixes only for rules declared suppressible by the active CLI. Metadata discovery is cached per resolved CLI executable and fails closed when unavailable or incompatible.

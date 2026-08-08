@@ -1,6 +1,10 @@
 package intel
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
+)
 
 // LightweightDocumentSymbols resolves exact procedure queries without forcing
 // full-document symbol extraction. The boolean reports whether the query shape
@@ -27,6 +31,7 @@ func (a Analyzer) LightweightDocumentSymbols(doc Document, query WorkspaceSymbol
 		return nil, false
 	}
 	module := moduleNameForDocument(doc)
+	lines := documentLines(doc)
 	var out []Symbol
 	for _, entry := range catalog.Entries {
 		if !strings.EqualFold(entry.Identity.CanonicalName, needle) {
@@ -45,6 +50,14 @@ func (a Analyzer) LightweightDocumentSymbols(doc Document, query WorkspaceSymbol
 			symbol.File = doc.Path
 			symbol.Module = module
 			if strings.EqualFold(symbol.Name, needle) {
+				if documentation, startLine, ok := doccomments.DocumentationForTargetLines(
+					lines,
+					entry.Range.Start.Line+1,
+					"symbol",
+				); ok {
+					symbol.Documentation = documentation
+					symbol.DocStartLine = startLine
+				}
 				out = append(out, symbol)
 			}
 		}
