@@ -176,6 +176,74 @@ in the generated project config; always-on `VBA104` and `VBA211` are filtered
 at normalization. This policy affects corpus evidence only and does not alter
 production analyzer semantics.
 
+### Deterministic diagnostic snapshots
+
+The corpus records reviewed analyzer behavior as deterministic JSONL snapshots;
+it does not require a real-world project to produce zero diagnostics. Snapshot
+files live below `testdata/static-analysis-corpus/snapshots/<surface>/`, with
+one file per analyzed project (`<project-id>.jsonl`) for each `lint` and
+`analyze` surface. Disabled manifest projects remain documented skips and do
+not require snapshot files. Project ID path segments are retained, so a
+vendored project such as
+`third_party/vba-json` is stored at
+`snapshots/analyze/third_party/vba-json.jsonl`. Native projects use their
+stable `self/<directory>` IDs. A snapshot is UTF-8 JSONL with one normalized
+diagnostic object per line, no header or blank lines, and a trailing newline
+for every row. A successful surface with no diagnostics still has a present,
+zero-byte JSONL file; a missing file is not equivalent to an empty baseline.
+
+The normalized object is the exact snapshot identity:
+
+```json
+{
+  "project": "third_party/vba-json",
+  "file": "JsonConverter.bas",
+  "surface": "analyze",
+  "code": "VBA209",
+  "severity": "warning",
+  "line": 123,
+  "column": 5
+}
+```
+
+`project` is the stable runner ID, `file` is the slash-separated
+project-relative source path after the third-party source-map remap, and
+`surface` is `lint` or `analyze`. `line` and `column` are the diagnostic's
+1-based start position; `column` is `0` when the normalized diagnostic has no
+column. Temporary workspace paths, absolute paths, and generated
+configuration paths are never emitted. Multiple diagnostics with the same
+identity are retained as repeated rows; comparison therefore preserves their
+multiplicity rather than deduplicating them.
+
+Rows are sorted deterministically by `project`, `surface`, `file`, `line`,
+`column` (missing columns sort before present columns), `code`, and
+`severity`. JSON serialization uses the same field order shown above. Message
+prose (`message`, `reason`, `suggestion`, nearby source/code, and other
+explanatory fields) is deliberately excluded from identity and JSONL. Wording
+changes therefore do not rewrite an otherwise equivalent baseline; prose
+contracts, if needed, must be tested separately.
+
+Normal corpus regression is verify-only. It runs every selected project through
+both production surfaces, normalizes diagnostics, loads the committed file for
+each project/surface, and compares the ordered rows exactly (including duplicate
+counts). Added, removed, or moved diagnostics and any identity-field change
+fail the test. A diagnostic is observed analyzer output, not an assertion that
+the finding is a true positive or semantic approval. Configuration, parser,
+workspace, cleanup, or execution failures are separate corpus failures and
+also fail verification; they must never be represented as diagnostic rows.
+
+Snapshot generation is an explicit developer action, for example
+`task corpus:update-snapshots` (which sets
+`XLFLOW_UPDATE_CORPUS_SNAPSHOTS=1` for the focused snapshot test). Ordinary
+tests never rewrite committed files and do not infer update mode from a diff.
+An update must complete every analyzed project and each applicable surface
+without any failure before replacing snapshots. The writer stages all output
+and publishes it atomically, so a failure leaves every existing snapshot
+unchanged; there is no partial update. Empty successful surfaces are written as
+empty files during an explicit update so that a reviewed no-diagnostic result
+remains a committed baseline. Updating a baseline is a reviewable change to
+test data, not an automatic acceptance of newly observed analyzer behavior.
+
 ## Verification requirements
 
 Manifest tests cover valid v1 data and rejection of unknown fields, unsupported
@@ -207,8 +275,12 @@ materialization of all three vendored projects, generated profile configs,
 document-module placement, source-map remapping, temporary-path exclusion,
 disabled-project skips, partial-result preservation, and cleanup after both
 success and failure. A representative third-party project is analyzed through
-the production lint/analyze implementations; the full golden snapshot and CI
-integration remain follow-up work.
+the production lint/analyze implementations. Snapshot tests additionally cover
+the exact JSONL identity and field order, project-relative path remapping,
+deterministic ordering across repeated runs, duplicate-row multiplicity,
+prose exclusion, empty snapshots, added/removed diagnostic failures, missing
+snapshot failures, verify-only behavior, explicit update generation, and the
+no-partial-update guarantee when any project or surface fails.
 
 The corpus does not change static-analysis semantics, public CLI/API output,
 Excel/VBE oracle behavior, or Go dependency-inventory checks. Those suites
@@ -218,6 +290,7 @@ remain separate from synchronization and may run fully offline.
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`
 - `docs/adr/ADR-0030-third-party-corpus-workspaces.md`
+- `docs/adr/ADR-0031-deterministic-static-analysis-snapshots.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - `docs/adr/ADR-0026-local-vbe-oracle-evidence.md`
 - Issue #530

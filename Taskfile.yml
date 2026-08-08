@@ -103,6 +103,16 @@ tasks:
       - cmd: go test ./...
         platforms: [linux, darwin]
 
+  corpus:update-snapshots:
+    desc: Update real-world corpus snapshots
+    env:
+      XLFLOW_UPDATE_CORPUS_SNAPSHOTS: "1"
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+        platforms: [windows]
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestRealWorldCorpusSnapshots$' -count=1
+        platforms: [linux, darwin]
+
   bench:lsp:
     desc: Run deterministic LSP performance benchmarks
     cmds:
