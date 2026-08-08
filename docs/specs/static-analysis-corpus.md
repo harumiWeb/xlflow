@@ -31,9 +31,9 @@ following 16 independent projects and records expected `.bas`, `.cls`, and
 | `wasabi`               | `generic-vba` | `examples/third_party/wasabi-main`               | `projects/third_party/wasabi`               |     22 |      1 |      0 |
 | `webxcel`              | `excel`       | `examples/third_party/webxcel-master`            | `projects/third_party/webxcel`              |     11 |     32 |      0 |
 
-All 16 entries are enabled. Synchronization reproduces every manifest entry,
-including an entry that is temporarily disabled with a documented reason. The
-upstream is `harumiWeb/tree-sitter-vba` at the full
+All 16 entries are enabled. Synchronization reproduces every manifest entry.
+If a future entry is disabled, it remains in the inventory with a documented
+reason. The upstream is `harumiWeb/tree-sitter-vba` at the full
 40-character commit `2b944e30c7f76dd3e771d02584b80dd6a4733e4d`. A branch, tag,
 abbreviated hash, or floating dependency is not a valid pin.
 
@@ -250,9 +250,9 @@ of snapshot contents. The inventory helpers scan the materialized
 with the manifest, and report missing or unexpected project directories. A
 clean inventory for the current pin contains 16 projects and 378 VBA source
 files: 151 `.bas`, 218 `.cls`, and 9 `.frm`. Profile distribution is 2
-`access`, 11 `generic-vba`, and 3 `excel` projects; 13 are enabled and 3 are
-disabled for documented analyzer limitations. Disabled entries remain in the
-inventory so an explicit disable cannot hide a coverage change.
+`access`, 11 `generic-vba`, and 3 `excel` projects; 16 are enabled and 0 are
+disabled. If a future entry is disabled, it remains in the inventory so an
+explicit disable cannot hide a coverage change.
 
 `BuildInventory`/`ValidateInventory` are read-only and deterministic; a source
 file count mismatch, missing project, stale project directory, symlink, or
