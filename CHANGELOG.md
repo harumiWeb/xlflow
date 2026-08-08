@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Made `VBA224` finding emission independent of dataflow worklist scheduling by
+  projecting diagnostics only after block-entry states reach a fixed point.
 - Re-enabled all 16 pinned static-analysis corpus projects. Analyzer type
   inference now terminates on self-referential `Set` assignments without losing
   earlier assignment context, project-effect propagation uses indexed

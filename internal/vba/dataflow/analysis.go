@@ -125,6 +125,10 @@ func (a *procedureAnalyzer) run() Result {
 }
 
 func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
+	return a.runWithStatsAndRank(nil)
+}
+
+func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int) (Result, analysisStats) {
 	stats := analysisStats{}
 	entry := abstractState{vars: map[string]value{}}
 	for _, parameter := range a.procedure.Symbol.Parameters {
@@ -144,7 +148,9 @@ func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
 		return Result{Findings: nil, States: nil}, stats
 	}
 	inStates := map[cfg.BlockID]abstractState{a.graph.Entry: entry}
-	worklistRank := a.reversePostOrderRank(reachable)
+	if worklistRank == nil {
+		worklistRank = a.reversePostOrderRank(reachable)
+	}
 	queue := rankedWorklist{{id: a.graph.Entry, rank: worklistRank[a.graph.Entry]}}
 	heap.Init(&queue)
 	inQueue := map[cfg.BlockID]bool{a.graph.Entry: true}
@@ -155,7 +161,7 @@ func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
 		if !ok {
 			continue
 		}
-		out := a.transfer(id, state)
+		out := a.transfer(id, state, false)
 		stats.transfers++
 		for _, edge := range a.outgoing(id) {
 			if !reachable[edge.To] {
@@ -173,6 +179,23 @@ func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
 				inQueue[edge.To] = true
 			}
 		}
+	}
+
+	// Finding emission is a projection of the converged block-entry states, not
+	// a side effect of the worklist schedule. This keeps diagnostics and their
+	// representative paths stable when the fixed-point traversal order changes.
+	a.findings = map[string]Finding{}
+	blockIDs := make([]cfg.BlockID, 0, len(reachable))
+	for id := range reachable {
+		blockIDs = append(blockIDs, id)
+	}
+	sort.Slice(blockIDs, func(i, j int) bool { return blockIDs[i] < blockIDs[j] })
+	for _, id := range blockIDs {
+		state, ok := inStates[id]
+		if !ok {
+			continue
+		}
+		a.transfer(id, state, true)
 	}
 
 	findings := make([]Finding, 0, len(a.findings))
@@ -198,7 +221,7 @@ func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
 	return Result{Findings: findings, States: states}, stats
 }
 
-func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState) abstractState {
+func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) abstractState {
 	state := cloneState(input)
 	block, ok := a.blocksByID[id]
 	if !ok || block.Statement == nil {
@@ -218,7 +241,9 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState) abstra
 	}
 	for _, call := range a.callsByStatement[statement.ID] {
 		a.applySourceWrite(call, state)
-		a.inspectSink(call, state)
+		if collectFindings {
+			a.inspectSink(call, state)
+		}
 	}
 	return state
 }
