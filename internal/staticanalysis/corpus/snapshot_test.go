@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -95,6 +96,98 @@ func TestCompareSnapshotSetsPreservesMultiplicity(t *testing.T) {
 	diff := CompareSnapshotSets(want, got)
 	if !reflect.DeepEqual(diff.Added, []SnapshotDiagnostic{b}) || !reflect.DeepEqual(diff.Removed, []SnapshotDiagnostic{a}) {
 		t.Fatalf("diff = %#v, want added [%#v], removed [%#v]", diff, b, a)
+	}
+}
+
+func TestSnapshotDiffByRuleAndFormatIsDeterministic(t *testing.T) {
+	diff := SnapshotDiff{
+		Added: []SnapshotDiagnostic{
+			{Project: "self/z", File: "src/Z.bas", Surface: SurfaceAnalyze, Code: "VBA209", Severity: "warning", Line: 3},
+			{Project: "self/a", File: `src\A.bas`, Surface: SurfaceLint, Code: "VBA209", Severity: "error", Line: 2, Column: 4},
+			{Project: "self/a", File: `src\A.bas`, Surface: SurfaceLint, Code: "VBA209", Severity: "error", Line: 2, Column: 4},
+		},
+		Removed: []SnapshotDiagnostic{
+			{Project: "third_party/vba", File: "WebClient.cls", Surface: SurfaceAnalyze, Code: "VBA209", Severity: "warning", Line: 1},
+			{Project: "self/x", File: "src/X.bas", Surface: SurfaceLint, Code: "VBA206", Severity: "warning", Line: 5, Column: 1},
+		},
+	}
+
+	groups := diff.ByRule()
+	if len(groups) != 2 || groups[0].Code != "VBA206" || groups[1].Code != "VBA209" {
+		t.Fatalf("rule groups = %#v, want VBA206 then VBA209", groups)
+	}
+	if len(groups[1].Added) != 3 || len(groups[1].Removed) != 1 {
+		t.Fatalf("VBA209 group = %#v, want three additions and one removal", groups[1])
+	}
+
+	want := "Real-world static-analysis corpus changed\n\n" +
+		"VBA206 +0 -1\n" +
+		"  - self/x/src/X.bas:5:1 [lint warning]\n\n" +
+		"VBA209 +3 -1\n" +
+		"  + self/a/src/A.bas:2:4 [lint error]\n" +
+		"  + self/a/src/A.bas:2:4 [lint error]\n" +
+		"  + self/z/src/Z.bas:3 [analyze warning]\n" +
+		"  - third_party/vba/WebClient.cls:1 [analyze warning]\n"
+	if got := FormatSnapshotDiff(diff); got != want {
+		t.Fatalf("formatted diff = %q, want %q", got, want)
+	}
+
+	shuffled := SnapshotDiff{
+		Added:   []SnapshotDiagnostic{diff.Added[2], diff.Added[0], diff.Added[1]},
+		Removed: []SnapshotDiagnostic{diff.Removed[0], diff.Removed[1]},
+	}
+	if got := FormatSnapshotDiff(shuffled); got != want {
+		t.Fatalf("shuffled formatted diff = %q, want %q", got, want)
+	}
+}
+
+func TestFormatSnapshotDiffNormalizesPathsBeforeSorting(t *testing.T) {
+	diff := SnapshotDiff{
+		Added: []SnapshotDiagnostic{
+			{Project: `self\z`, File: `src\Z.bas`, Surface: SurfaceAnalyze, Code: "VBA209", Severity: "warning", Line: 2},
+			{Project: "self/a", File: "src/A.bas", Surface: SurfaceAnalyze, Code: "VBA209", Severity: "warning", Line: 1},
+		},
+	}
+
+	want := "Real-world static-analysis corpus changed\n\n" +
+		"VBA209 +2 -0\n" +
+		"  + self/a/src/A.bas:1 [analyze warning]\n" +
+		"  + self/z/src/Z.bas:2 [analyze warning]\n"
+	if got := FormatSnapshotDiff(diff); got != want {
+		t.Fatalf("formatted diff = %q, want %q", got, want)
+	}
+}
+
+func TestFormatSnapshotDiffEmpty(t *testing.T) {
+	if got := FormatSnapshotDiff(SnapshotDiff{}); got != "" {
+		t.Fatalf("empty formatted diff = %q, want empty", got)
+	}
+}
+
+func TestFormatSnapshotDiffRetainsLargeRuleDelta(t *testing.T) {
+	const count = 73
+	added := make([]SnapshotDiagnostic, count)
+	for i := range added {
+		added[i] = SnapshotDiagnostic{
+			Project:  fmt.Sprintf("self/project-%02d", i),
+			File:     "src/Main.bas",
+			Surface:  SurfaceAnalyze,
+			Code:     "VBA209",
+			Severity: "warning",
+			Line:     i + 1,
+		}
+	}
+
+	report := FormatSnapshotDiff(SnapshotDiff{Added: added})
+	if !strings.Contains(report, "VBA209 +73 -0\n") {
+		excerpt := report
+		if len(excerpt) > 100 {
+			excerpt = excerpt[:100]
+		}
+		t.Fatalf("large report missing aggregate header: %q", excerpt)
+	}
+	if got := strings.Count(report, "\n  + "); got != count {
+		t.Fatalf("large report detail count = %d, want %d", got, count)
 	}
 }
 
@@ -203,6 +296,6 @@ func TestRealWorldCorpusSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	if diff := CompareSnapshotSets(expected, actual); !diff.Empty() {
-		t.Fatalf("real-world static-analysis corpus changed: added=%v removed=%v", diff.Added, diff.Removed)
+		t.Fatal(FormatSnapshotDiff(diff))
 	}
 }

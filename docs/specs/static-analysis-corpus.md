@@ -232,6 +232,29 @@ the finding is a true positive or semantic approval. Configuration, parser,
 workspace, cleanup, or execution failures are separate corpus failures and
 also fail verification; they must never be represented as diagnostic rows.
 
+When a snapshot comparison fails, the test renders the structured delta as a
+human-readable report. The report starts with `Real-world static-analysis
+corpus changed`, then groups rows by diagnostic `code` in lexical order. Each
+group header shows `+<added> -<removed>`, followed by every changed row with a
+`+` or `-` marker, the stable `project/file` path, the 1-based start position,
+and `[surface severity]`. A zero column is rendered as `:line`; a present
+column is rendered as `:line:column`. Rows within each direction are ordered
+by project, file, line, column, surface, and severity. All rows are retained,
+including duplicate identities, so large rule-wide changes remain actionable
+after the aggregate count is read.
+
+For example:
+
+```text
+Real-world static-analysis corpus changed
+
+VBA206 +0 -1
+  - self/example/src/Main.bas:10:2 [analyze warning]
+
+VBA209 +1 -0
+  + third_party/vba-web/WebClient.cls:123 [lint warning]
+```
+
 Snapshot generation is an explicit developer action, for example
 `task corpus:update-snapshots` (which sets
 `XLFLOW_UPDATE_CORPUS_SNAPSHOTS=1` for the focused snapshot test). Ordinary
