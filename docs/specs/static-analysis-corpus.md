@@ -652,6 +652,80 @@ Measure a local run when timing matters:
 rtk powershell -NoProfile -Command '$env:XLFLOW_RUN_REALWORLD_CORPUS="1"; Measure-Command { & ".\scripts\dev\go.ps1" test ./internal/staticanalysis/corpus -run "^TestRealWorldCorpusSnapshots$" -count=1 } | Select-Object TotalSeconds'
 ```
 
+### Developer-only corpus profiling
+
+The slowest projects have a focused benchmark that is separate from snapshot
+and review evaluation. It materializes each selected project in its own
+temporary workspace and offers two stages: `full-pipeline` runs materialization,
+configuration, lint, analyze, normalization, and cleanup; `analyze-only`
+materializes and loads configuration outside the timer, then measures the
+production analyzer. Benchmarks are opt-in Go test binaries: ordinary tests,
+the production CLI/API, corpus CI, and the Excel/VBE oracle never invoke them.
+
+Run the analyzer-only measurement twice for both hotspot projects:
+
+```powershell
+rtk task bench:corpus
+```
+
+Use a leaf benchmark name to isolate one project and stage. `-count=2` is the
+minimum timing run for variability; profiles use `-count=1` so output files are
+not overwritten by repeated test processes:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -Command '$cpu = Join-Path $env:TEMP "xlflow-std-vba.cpu.pprof"; $mem = Join-Path $env:TEMP "xlflow-std-vba.mem.pprof"; $bin = Join-Path $env:TEMP "xlflow-std-vba-corpus.test.exe"; $args = @("test", "./internal/staticanalysis/corpus", "-run", "^$", "-bench", "^BenchmarkRealWorldCorpus/std-vba/analyze-only$", "-benchtime=1x", "-count=1", "-cpuprofile=$cpu", "-memprofile=$mem", "-o=$bin"); & ".\scripts\dev\go.ps1" @args'
+rtk powershell -NoProfile -ExecutionPolicy Bypass -Command '$cpu = Join-Path $env:TEMP "xlflow-ronecone.cpu.pprof"; $mem = Join-Path $env:TEMP "xlflow-ronecone.mem.pprof"; $bin = Join-Path $env:TEMP "xlflow-ronecone-corpus.test.exe"; $args = @("test", "./internal/staticanalysis/corpus", "-run", "^$", "-bench", "^BenchmarkRealWorldCorpus/ronecone/analyze-only$", "-benchtime=1x", "-count=1", "-cpuprofile=$cpu", "-memprofile=$mem", "-o=$bin"); & ".\scripts\dev\go.ps1" @args'
+```
+
+The 2026-08-08 Windows CPU profile attributed 112.24 s cumulative CPU to
+procedure data-flow analysis, including 102.96 s in state joins. Repeated
+serialization of propagation paths accounted for 82.45 s in `pathKey`, with
+41.42 s below `fmt.Fprintf` and 23.77 s below `strings.ToLower`; GC draining
+accounted for 133.68 s across the full profiled corpus. The optimized comparator
+streams the exact former canonical byte sequence, retains lowercase label and
+decimal lexical ordering, and allocates nothing for ASCII path comparisons.
+This preserves representative paths and diagnostic behavior while removing the
+dominant temporary strings.
+
+The project-specific heap profiles also separated the two slow projects. After
+the path comparison change, `ronecone` still allocated 20.89 GB through
+`ProjectSummary.All` while resolving call candidates: every lookup defensively
+cloned every procedure and evidence slice before selecting one summary. The
+replacement maintains a declaration-line index, rechecks the original
+slash-normalized `EqualFold` file/name/kind and exact-line contract, preserves
+the first deterministic match, and defensively clones only that match.
+
+The focused `LibJSON.ParseChars` benchmark set a target of at least 20% lower
+median runtime and 50% lower allocated bytes per operation. On the same
+Windows machine, the pre-change five-run baseline was 1.190-1.266 s,
+1,003.4-1,003.8 MB, and 20.681-20.682 million allocations per operation. Three
+post-change runs were 0.919-0.934 s, 447.6-448.1 MB, and 5.576 million
+allocations per operation. Median runtime fell from 1.197 s to 0.924 s (22.8%),
+allocated bytes fell by approximately 55.3%, and allocation count fell by
+approximately 73.0%, meeting the recorded target.
+
+The final project-isolated `analyze-only` benchmark produced two post-change
+samples of 62.869 s and 62.980 s for `std-vba` (0.2% spread), 19.741 GB
+allocated per operation, and 2,792 stable findings. For `ronecone`, the
+candidate-lookup baseline was 46.014 s and
+47.769 s with 43.214 GB allocated per operation; post-index samples were
+36.156 s and 36.664 s (1.4% spread), 20.617 GB per operation, and the same 808
+findings. Its two-sample midpoint runtime fell by 22.4% and allocated bytes by
+52.3%. These numbers are developer observations rather than fixed thresholds;
+compare future changes using the same command, machine, power state, and Go
+toolchain.
+
+After rebasing onto the context-cancellation analyzer change, two consecutive
+final verify-only corpus runs completed in 171.5 s and 170.2 s wall-clock time
+with no snapshot, diagnostic, severity, range, multiplicity, or ordering delta.
+Compared with the earlier same-machine 196.764-201.156 s reference, the
+midpoint fell by approximately 14.1%. `std-vba` completed in 68.276 s and
+68.474 s, down 16.9% from the earlier 82.250 s observation; `ronecone`
+completed in 38.558 s and 38.635 s, down approximately 16.1% from the roughly
+46 s issue baseline. The focused benchmark target remains the hardware-local
+optimization guard because it isolates this change from independent analyzer
+instrumentation overhead.
+
 Do not parallelize VBE cases or infer a hang from the broad `go test ./...`
 duration; Excel/COM tests have a materially different runtime profile from
 the Excel-free corpus checks.

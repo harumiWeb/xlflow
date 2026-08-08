@@ -1,7 +1,6 @@
 package analyze
 
 import (
-	"path/filepath"
 	"strings"
 
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -200,14 +199,7 @@ func eventSafeProcedures(files []parsedFile, project effects.ProjectSummary) map
 }
 
 func summaryForCandidate(project effects.ProjectSummary, candidate procedureir.Candidate) (effects.ProcedureSummary, bool) {
-	for _, summary := range project.All() {
-		id := summary.Identity
-		if strings.EqualFold(filepath.ToSlash(id.File), filepath.ToSlash(candidate.File)) && strings.EqualFold(id.QualifiedName, candidate.QualifiedName) &&
-			strings.EqualFold(string(id.Kind), candidate.Kind) && id.DeclarationLine == candidate.Line {
-			return summary, true
-		}
-	}
-	return effects.ProcedureSummary{}, false
+	return project.LookupCandidate(candidate)
 }
 
 // eventGuardedAt accepts a guard only when its False assignment dominates the

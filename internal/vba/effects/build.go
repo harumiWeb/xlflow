@@ -104,13 +104,18 @@ func Build(documents []Document) ProjectSummary {
 		return edges[i].to < edges[j].to
 	})
 	propagate(summaries, edges)
-	out := ProjectSummary{byKey: map[string]int{}}
+	out := ProjectSummary{
+		byKey:           map[string]int{},
+		byCandidateLine: map[int][]int{},
+	}
 	for _, summary := range summaries {
 		out.procedures = append(out.procedures, *summary)
 	}
 	sortSummaries(out.procedures)
 	for i := range out.procedures {
 		out.byKey[out.procedures[i].Identity.Key()] = i
+		line := out.procedures[i].Identity.DeclarationLine
+		out.byCandidateLine[line] = append(out.byCandidateLine[line], i)
 	}
 	return out
 }

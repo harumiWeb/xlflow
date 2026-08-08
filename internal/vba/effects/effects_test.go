@@ -1,7 +1,9 @@
 package effects
 
 import (
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -311,6 +313,83 @@ func TestProjectSummaryReturnsDefensiveCopies(t *testing.T) {
 	second, ok := project.Lookup(id)
 	if !ok || second.Identity.Name != "Run" || second.Direct[0].Target == "mutated" || second.Direct[0].Target == "mutated again" {
 		t.Fatalf("project summary was mutated through a returned value: %#v", second)
+	}
+}
+
+func TestProjectSummaryLookupCandidateMatchesResolverIdentity(t *testing.T) {
+	path := filepath.Join("Dir", "State.bas")
+	project := buildSources(t, sourceFile{path, "State", "Public Sub Run()\n Application.EnableEvents = False\nEnd Sub\n"})
+	candidate := procedureir.Candidate{
+		File:          filepath.FromSlash("DIR/STATE.BAS"),
+		QualifiedName: "state.run",
+		Kind:          "SUB",
+		Line:          1,
+	}
+
+	first, ok := project.LookupCandidate(candidate)
+	if !ok {
+		t.Fatal("case-insensitive, slash-normalized candidate did not match")
+	}
+	first.Direct[0].Target = "mutated"
+	second, ok := project.LookupCandidate(candidate)
+	if !ok || second.Direct[0].Target == "mutated" {
+		t.Fatalf("candidate lookup did not return a defensive copy: %#v", second)
+	}
+}
+
+func TestProjectSummaryLookupCandidateRequiresCompleteIdentity(t *testing.T) {
+	project := buildSources(t, sourceFile{"State.bas", "State", "Public Sub Run()\nEnd Sub\n"})
+	matching := procedureir.Candidate{File: "State.bas", QualifiedName: "State.Run", Kind: "sub", Line: 1}
+	tests := map[string]procedureir.Candidate{
+		"file":           {File: "Other.bas", QualifiedName: matching.QualifiedName, Kind: matching.Kind, Line: matching.Line},
+		"qualified name": {File: matching.File, QualifiedName: "State.Other", Kind: matching.Kind, Line: matching.Line},
+		"kind":           {File: matching.File, QualifiedName: matching.QualifiedName, Kind: "function", Line: matching.Line},
+		"line":           {File: matching.File, QualifiedName: matching.QualifiedName, Kind: matching.Kind, Line: 2},
+	}
+	for name, candidate := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, ok := project.LookupCandidate(candidate); ok {
+				t.Fatalf("mismatched candidate unexpectedly resolved: %#v", candidate)
+			}
+		})
+	}
+}
+
+func TestProjectSummaryLookupCandidatePreservesUnicodeCaseFolding(t *testing.T) {
+	doc := procedureir.DocumentIR{
+		Path:       "Σ.bas",
+		ModuleName: "Σ",
+		Procedures: []procedureir.ProcedureIR{{Symbol: procedureir.ProcedureSymbol{
+			Name: "Run", QualifiedName: "Σ.Run", Kind: procedureir.ProcedureSub,
+			DeclarationRange: rangeAt(1),
+		}}},
+	}
+	project := Build([]Document{{IR: doc}})
+	candidate := procedureir.Candidate{File: "ς.BAS", QualifiedName: "ς.run", Kind: "SUB", Line: 1}
+	if _, ok := project.LookupCandidate(candidate); !ok {
+		t.Fatal("candidate lookup lost strings.EqualFold Unicode semantics")
+	}
+}
+
+func TestProjectSummaryLookupCandidateUsesFirstDeterministicDuplicate(t *testing.T) {
+	procedure := func(module string) procedureir.ProcedureIR {
+		return procedureir.ProcedureIR{Symbol: procedureir.ProcedureSymbol{
+			Name: "Run", QualifiedName: "Shared.Run", Kind: procedureir.ProcedureSub,
+			DeclarationRange: rangeAt(1),
+		}}
+	}
+	documents := func(first, second string) []Document {
+		return []Document{
+			{IR: procedureir.DocumentIR{Path: "Shared.bas", ModuleName: first, Procedures: []procedureir.ProcedureIR{procedure(first)}}},
+			{IR: procedureir.DocumentIR{Path: "Shared.bas", ModuleName: second, Procedures: []procedureir.ProcedureIR{procedure(second)}}},
+		}
+	}
+	candidate := procedureir.Candidate{File: "Shared.bas", QualifiedName: "Shared.Run", Kind: "sub", Line: 1}
+	for _, project := range []ProjectSummary{Build(documents("Z", "A")), Build(documents("A", "Z"))} {
+		got, ok := project.LookupCandidate(candidate)
+		if !ok || !strings.EqualFold(got.Identity.Module, "A") {
+			t.Fatalf("duplicate candidate selected %q, want deterministic first module A", got.Identity.Module)
+		}
 	}
 }
 
