@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 )
 
 func snapshotTestRow(project string, surface Surface, file string, line, column int, code string) SnapshotDiagnostic {
@@ -179,6 +180,9 @@ func TestRealWorldCorpusSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Snapshot identities must not depend on a developer's generated TypeLib
+	// database. Use only the embedded built-in database for every platform.
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
 	report, runErr := runRealWorldCorpus(repoRoot)
 	if runErr != nil {
 		t.Fatalf("real-world corpus execution failed: %v", runErr)
