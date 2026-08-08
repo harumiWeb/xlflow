@@ -249,6 +249,28 @@ func (a Analyzer) Run() ([]Finding, error) {
 }
 
 func (a Analyzer) RunResult() (Result, error) {
+	return a.RunResultContext(context.Background())
+}
+
+// RunContext is the cancellable variant of Run.
+func (a Analyzer) RunContext(ctx context.Context) ([]Finding, error) {
+	result, err := a.RunResultContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return result.Findings, nil
+}
+
+// RunResultContext is the cancellable variant of RunResult. Cancellation is
+// returned explicitly so callers can distinguish it from analysis findings or
+// a project-specific timeout policy.
+func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	files, err := a.files()
 	if err != nil {
 		return Result{}, err
@@ -261,6 +283,9 @@ func (a Analyzer) RunResult() (Result, error) {
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
 		source, err := os.ReadFile(file)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
@@ -315,7 +340,10 @@ func (a Analyzer) RunResult() (Result, error) {
 	defer closeParsedFiles(parsedFiles)
 
 	projectEffects := buildProjectEffects(parsedFiles)
-	ctx := a.buildContext(parsedFiles)
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	analysisCtx := a.buildContext(parsedFiles)
 	analysis := a
 	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
 		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
@@ -357,15 +385,28 @@ func (a Analyzer) RunResult() (Result, error) {
 		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB)
 	}
 	for _, file := range parsedFiles {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
 		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			file.Root = view.Root
-			findings = append(findings, analysis.analyzeParsedFile(file, ctx, projectEffects)...)
+			fileFindings, analyzeErr := analysis.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
+			if analyzeErr != nil {
+				return analyzeErr
+			}
+			findings = append(findings, fileFindings...)
 			if publicAPITypeIndex != nil {
 				findings = append(findings, analysis.publicAPITypeFindings(file, publicAPITypeIndex)...)
 			}
 			findings = append(findings, analysis.errorValueWrapperFindings(file)...)
 			return nil
 		}); err != nil {
+			return Result{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
 		// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
@@ -930,7 +971,11 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
-	findings = append(findings, a.dataFlowFindings(file, proc)...)
+	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, dataFlowFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -1025,27 +1070,47 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	return ctx
 }
 
-func (a Analyzer) analyzeParsedFile(file parsedFile, ctx analysisContext, projectEffects effects.ProjectSummary) []Finding {
+func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analysisContext, file parsedFile, projectEffects effects.ProjectSummary) ([]Finding, error) {
+	if err := cancelCtx.Err(); err != nil {
+		return nil, err
+	}
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
 	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := moduleDeclarations(file.Lines, procedures)
 	findings = append(findings, a.hardcodedSecretFindings(file, procedures)...)
 	for _, proc := range procedures {
-		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
+		if err := cancelCtx.Err(); err != nil {
+			return nil, err
+		}
+		procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, procedureFindings...)
 	}
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		findings = append(findings, a.analyzeProcedure(file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)...)
+		procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, procedureFindings...)
 	}
 	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
-		guardFindings, _ := a.nonShortCircuitObjectGuardDocumentFindings(context.Background(), file, procedures, nil)
+		guardFindings, err := a.nonShortCircuitObjectGuardDocumentFindings(cancelCtx, file, procedures, nil)
+		if err != nil {
+			return nil, err
+		}
 		findings = append(findings, guardFindings...)
 	}
-	return findings
+	return findings, cancelCtx.Err()
 }
 
-func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool) []Finding {
+func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool) ([]Finding, error) {
+	if err := cancelCtx.Err(); err != nil {
+		return nil, err
+	}
 	decls := cloneDeclarations(moduleDecls)
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
@@ -1065,6 +1130,11 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	}
 
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
+		if i&0xff == 0 {
+			if err := cancelCtx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		lineNo := i + 1
 		stmt := normalizedCodeLine(file.Lines[i])
 		worksheetStmt, worksheetStatementStart := worksheetLogicalStatement(file.Lines, i, proc.EndLine-1)
@@ -1172,7 +1242,11 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 	if a.Config.Analyze.DetectEventHandlerReentry {
 		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
 	}
-	findings = append(findings, a.dataFlowFindings(file, proc)...)
+	dataFlowFindings, err := a.dataFlowFindingsContext(cancelCtx, file, proc)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, dataFlowFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -1189,7 +1263,7 @@ func (a Analyzer) analyzeProcedure(file parsedFile, proc sourceProcedure, module
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
 	findings = append(findings, a.functionReturnPathFindings(file, proc)...)
-	return findings
+	return findings, cancelCtx.Err()
 }
 
 func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {

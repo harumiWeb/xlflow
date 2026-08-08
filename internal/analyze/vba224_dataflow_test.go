@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"sort"
@@ -9,6 +10,16 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 )
+
+func TestAnalyzerRunResultContextReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := (Analyzer{RootDir: t.TempDir(), Config: config.Default()}).RunResultContext(ctx)
+	if err != context.Canceled {
+		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+	}
+}
 
 func TestVBA224DetectsDirectAliasAndConcatenation(t *testing.T) {
 	dir := t.TempDir()

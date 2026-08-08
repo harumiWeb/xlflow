@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,17 +9,18 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-// dataFlowFindings is the single adapter used by batch and realtime analysis.
-// The dataflow package remains independent from analyzer and LSP protocols.
-func (a Analyzer) dataFlowFindings(file parsedFile, proc sourceProcedure) []Finding {
+func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure) ([]Finding, error) {
 	if !a.Config.Analyze.DetectUntrustedDataFlow || proc.Graph == nil {
-		return nil
+		return nil, nil
 	}
 	ir, ok := procedureIRForSource(file.IR, proc)
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	result := vbadf.AnalyzeProcedure(ir, *proc.Graph, vbadf.Options{Conservative: true})
+	result, err := vbadf.AnalyzeProcedureContext(ctx, ir, *proc.Graph, vbadf.Options{Conservative: true})
+	if err != nil {
+		return nil, err
+	}
 	findings := make([]Finding, 0, len(result.Findings))
 	for _, flow := range result.Findings {
 		line := flow.Sink.Range.StartLine
@@ -48,7 +50,7 @@ func (a Analyzer) dataFlowFindings(file parsedFile, proc sourceProcedure) []Find
 		}
 		findings = append(findings, finding)
 	}
-	return findings
+	return findings, nil
 }
 
 func procedureIRForSource(document procedureir.DocumentIR, proc sourceProcedure) (procedureir.ProcedureIR, bool) {

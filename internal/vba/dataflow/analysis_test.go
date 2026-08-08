@@ -1,6 +1,7 @@
 package dataflow
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -8,6 +9,53 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestAnalyzeProcedureContextReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := AnalyzeProcedureContext(ctx, procedureir.ProcedureIR{}, cfg.Graph{}, Options{})
+	if err != context.Canceled {
+		t.Fatalf("AnalyzeProcedureContext error = %v, want context.Canceled", err)
+	}
+	if !reflect.DeepEqual(result, Result{}) {
+		t.Fatalf("canceled result = %#v, want zero result", result)
+	}
+}
+
+func TestAnalyzeProcedureContextCancelsDuringLargeCFGTraversal(t *testing.T) {
+	const blockCount = 20000
+	blocks := make([]cfg.Block, 0, blockCount)
+	edges := make([]cfg.Edge, 0, blockCount-1)
+	for id := 1; id <= blockCount; id++ {
+		blocks = append(blocks, cfg.Block{ID: cfg.BlockID(id)})
+		if id > 1 {
+			edges = append(edges, cfg.Edge{ID: cfg.EdgeID(id - 1), From: cfg.BlockID(id - 1), To: cfg.BlockID(id)})
+		}
+	}
+
+	ctx := &cancelAfterChecksContext{remaining: 1000}
+	result, err := AnalyzeProcedureContext(ctx, procedureir.ProcedureIR{}, cfg.Graph{Blocks: blocks, Edges: edges, Entry: 1}, Options{})
+	if err != context.Canceled {
+		t.Fatalf("large CFG error = %v, want context.Canceled", err)
+	}
+	if !reflect.DeepEqual(result, Result{}) {
+		t.Fatalf("large CFG canceled result = %#v, want zero result", result)
+	}
+}
+
+type cancelAfterChecksContext struct {
+	context.Context
+	remaining int
+}
+
+func (c *cancelAfterChecksContext) Err() error {
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
 
 func TestAnalyzeProcedureFindingsDoNotDependOnWorklistRank(t *testing.T) {
 	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit

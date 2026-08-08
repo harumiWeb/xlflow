@@ -2,6 +2,7 @@ package dataflow
 
 import (
 	"container/heap"
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -16,11 +17,33 @@ import (
 // may-analysis. A supplied graph is used as-is; when it is empty a graph is
 // built from the procedure so small protocol adapters can use the API safely.
 func AnalyzeProcedure(procedure procedureir.ProcedureIR, graph cfg.Graph, options Options) Result {
-	if len(graph.Blocks) == 0 {
-		graph = cfg.Build(procedure)
+	result, _ := AnalyzeProcedureContext(context.Background(), procedure, graph, options)
+	return result
+}
+
+// AnalyzeProcedureContext performs the same analysis as AnalyzeProcedure but
+// observes ctx and returns its cancellation or deadline error explicitly.
+// Cancellation never produces a partial Result: callers must handle the
+// returned error before using any findings.
+func AnalyzeProcedureContext(ctx context.Context, procedure procedureir.ProcedureIR, graph cfg.Graph, options Options) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	a := newProcedureAnalyzer(procedure, graph, options)
-	return a.run()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	if len(graph.Blocks) == 0 {
+		var err error
+		graph, err = cfg.BuildContext(ctx, procedure)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	a, err := newProcedureAnalyzerContext(ctx, procedure, graph, options)
+	if err != nil {
+		return Result{}, err
+	}
+	return a.runContext()
 }
 
 type provenance struct {
@@ -52,6 +75,7 @@ type procedureAnalyzer struct {
 	findings          map[string]Finding
 	blocksByID        map[cfg.BlockID]cfg.Block
 	outgoingEdges     map[cfg.BlockID][]cfg.Edge
+	ctx               context.Context
 }
 
 type analysisStats struct {
@@ -59,6 +83,17 @@ type analysisStats struct {
 }
 
 func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, options Options) *procedureAnalyzer {
+	a, _ := newProcedureAnalyzerContext(context.Background(), procedure, graph, options)
+	return a
+}
+
+func newProcedureAnalyzerContext(ctx context.Context, procedure procedureir.ProcedureIR, graph cfg.Graph, options Options) (*procedureAnalyzer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	a := &procedureAnalyzer{
 		procedure:         procedure,
 		graph:             graph,
@@ -73,14 +108,28 @@ func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, op
 		findings:          map[string]Finding{},
 		blocksByID:        map[cfg.BlockID]cfg.Block{},
 		outgoingEdges:     map[cfg.BlockID][]cfg.Edge{},
+		ctx:               ctx,
 	}
-	for _, block := range graph.Blocks {
+	for i, block := range graph.Blocks {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		a.blocksByID[block.ID] = block
 	}
-	for _, edge := range graph.Edges {
+	for i, edge := range graph.Edges {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		a.outgoingEdges[edge.From] = append(a.outgoingEdges[edge.From], edge)
 	}
 	for from := range a.outgoingEdges {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		sort.SliceStable(a.outgoingEdges[from], func(i, j int) bool {
 			left, right := a.outgoingEdges[from][i], a.outgoingEdges[from][j]
 			if left.To != right.To {
@@ -89,25 +138,55 @@ func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, op
 			return left.ID < right.ID
 		})
 	}
-	for _, statement := range procedure.Statements {
+	for i, statement := range procedure.Statements {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		a.statements[statement.ID] = statement
 	}
-	for _, declaration := range procedure.Declarations {
+	for i, declaration := range procedure.Declarations {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		a.declaredNames[canonicalName(declaration.Name)] = true
 	}
-	for _, parameter := range procedure.Symbol.Parameters {
+	for i, parameter := range procedure.Symbol.Parameters {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		a.declaredNames[canonicalName(parameter.Name)] = true
 	}
-	for _, expression := range procedure.Expressions {
+	for i, expression := range procedure.Expressions {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		a.expressions[expression.ID] = expression
 	}
-	for _, call := range procedure.Calls {
+	for i, call := range procedure.Calls {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if call.ExpressionID != 0 {
 			a.callsByExpression[call.ExpressionID] = call
 		}
 		a.callsByStatement[call.StatementID] = append(a.callsByStatement[call.StatementID], call)
 	}
-	for _, statement := range procedure.Statements {
+	for i, statement := range procedure.Statements {
+		if i&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if statement.Kind != procedureir.StatementSelect {
 			continue
 		}
@@ -116,22 +195,43 @@ func newProcedureAnalyzer(procedure procedureir.ProcedureIR, graph cfg.Graph, op
 		}
 	}
 	a.scanKnownShellObjects()
-	return a
-}
-
-func (a *procedureAnalyzer) run() Result {
-	result, _ := a.runWithStats()
-	return result
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func (a *procedureAnalyzer) runWithStats() (Result, analysisStats) {
-	return a.runWithStatsAndRank(nil)
+	result, stats, _ := a.runWithStatsContext()
+	return result, stats
 }
 
 func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int) (Result, analysisStats) {
+	result, stats, _ := a.runWithStatsAndRankContext(worklistRank)
+	return result, stats
+}
+
+func (a *procedureAnalyzer) runContext() (Result, error) {
+	result, _, err := a.runWithStatsContext()
+	return result, err
+}
+
+func (a *procedureAnalyzer) runWithStatsContext() (Result, analysisStats, error) {
+	return a.runWithStatsAndRankContext(nil)
+}
+
+func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.BlockID]int) (Result, analysisStats, error) {
 	stats := analysisStats{}
+	if err := a.contextErr(); err != nil {
+		return Result{}, stats, err
+	}
 	entry := abstractState{vars: map[string]value{}}
-	for _, parameter := range a.procedure.Symbol.Parameters {
+	for i, parameter := range a.procedure.Symbol.Parameters {
+		if i&0xff == 0 {
+			if err := a.contextErr(); err != nil {
+				return Result{}, stats, err
+			}
+		}
 		entry.vars[canonicalName(parameter.Name)] = valueFromSource(Source{
 			Kind:        SourceParameter,
 			Label:       parameter.Name,
@@ -140,21 +240,27 @@ func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int
 		}, PathStep{Kind: "source", Label: parameter.Name, Range: parameter.Range})
 	}
 
-	reachable := map[cfg.BlockID]bool{}
-	for _, id := range a.graph.Reachable(cfg.EdgeFilter{}) {
-		reachable[id] = true
+	reachable, err := a.reachableContext()
+	if err != nil {
+		return Result{}, stats, err
 	}
 	if len(reachable) == 0 {
-		return Result{Findings: nil, States: nil}, stats
+		return Result{Findings: nil, States: nil}, stats, nil
 	}
 	inStates := map[cfg.BlockID]abstractState{a.graph.Entry: entry}
 	if worklistRank == nil {
-		worklistRank = a.reversePostOrderRank(reachable)
+		worklistRank, err = a.reversePostOrderRankContext(reachable)
+		if err != nil {
+			return Result{}, stats, err
+		}
 	}
 	queue := rankedWorklist{{id: a.graph.Entry, rank: worklistRank[a.graph.Entry]}}
 	heap.Init(&queue)
 	inQueue := map[cfg.BlockID]bool{a.graph.Entry: true}
 	for len(queue) > 0 {
+		if err := a.contextErr(); err != nil {
+			return Result{}, stats, err
+		}
 		id := heap.Pop(&queue).(rankedBlock).id
 		inQueue[id] = false
 		state, ok := inStates[id]
@@ -162,8 +268,14 @@ func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int
 			continue
 		}
 		out := a.transfer(id, state, false)
+		if err := a.contextErr(); err != nil {
+			return Result{}, stats, err
+		}
 		stats.transfers++
 		for _, edge := range a.outgoing(id) {
+			if err := a.contextErr(); err != nil {
+				return Result{}, stats, err
+			}
 			if !reachable[edge.To] {
 				continue
 			}
@@ -187,15 +299,24 @@ func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int
 	a.findings = map[string]Finding{}
 	blockIDs := make([]cfg.BlockID, 0, len(reachable))
 	for id := range reachable {
+		if err := a.contextErr(); err != nil {
+			return Result{}, stats, err
+		}
 		blockIDs = append(blockIDs, id)
 	}
 	sort.Slice(blockIDs, func(i, j int) bool { return blockIDs[i] < blockIDs[j] })
 	for _, id := range blockIDs {
+		if err := a.contextErr(); err != nil {
+			return Result{}, stats, err
+		}
 		state, ok := inStates[id]
 		if !ok {
 			continue
 		}
 		a.transfer(id, state, true)
+		if err := a.contextErr(); err != nil {
+			return Result{}, stats, err
+		}
 	}
 
 	findings := make([]Finding, 0, len(a.findings))
@@ -213,15 +334,21 @@ func (a *procedureAnalyzer) runWithStatsAndRank(worklistRank map[cfg.BlockID]int
 	})
 	states := map[cfg.BlockID]map[string]State{}
 	for id, state := range inStates {
+		if err := a.contextErr(); err != nil {
+			return Result{}, stats, err
+		}
 		states[id] = map[string]State{}
 		for name, variable := range state.vars {
 			states[id][name] = variableState(variable)
 		}
 	}
-	return Result{Findings: findings, States: states}, stats
+	return Result{Findings: findings, States: states}, stats, nil
 }
 
 func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) abstractState {
+	if a.contextErr() != nil {
+		return abstractState{}
+	}
 	state := cloneState(input)
 	block, ok := a.blocksByID[id]
 	if !ok || block.Statement == nil {
@@ -240,6 +367,9 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 		state.vars[target] = assigned
 	}
 	for _, call := range a.callsByStatement[statement.ID] {
+		if a.contextErr() != nil {
+			return abstractState{}
+		}
 		a.applySourceWrite(call, state)
 		if collectFindings {
 			a.inspectSink(call, state)
@@ -256,6 +386,9 @@ func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state ab
 	// VBA's Input/Line Input/Get statements write their last argument(s),
 	// whereas function-style reads are handled by evalCall on the assignment.
 	for _, expressionID := range call.Arguments.ExpressionIDs[1:] {
+		if a.contextErr() != nil {
+			return
+		}
 		expression, exists := a.expressions[expressionID]
 		if !exists || expression.Kind != procedureir.ExpressionIdentifier {
 			continue
@@ -267,6 +400,9 @@ func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state ab
 }
 
 func (a *procedureAnalyzer) evalExpression(expression procedureir.Expression, state abstractState) value {
+	if a.contextErr() != nil {
+		return value{}
+	}
 	if canonical, ok := a.expressions[expression.ID]; ok {
 		expression = canonical
 	}
@@ -326,6 +462,9 @@ func (a *procedureAnalyzer) evalMemberChildren(expression procedureir.Expression
 	}
 	var values []value
 	for _, id := range expression.Children {
+		if a.contextErr() != nil {
+			return value{}
+		}
 		child, ok := a.expressions[id]
 		if !ok {
 			continue
@@ -380,6 +519,9 @@ func (a *procedureAnalyzer) evalCall(expression procedureir.Expression, state ab
 func (a *procedureAnalyzer) evalChildren(ids []int, state abstractState) value {
 	var values []value
 	for _, id := range ids {
+		if a.contextErr() != nil {
+			return value{}
+		}
 		if expression, ok := a.expressions[id]; ok {
 			values = append(values, a.evalExpression(expression, state))
 		}
@@ -390,6 +532,9 @@ func (a *procedureAnalyzer) evalChildren(ids []int, state abstractState) value {
 func (a *procedureAnalyzer) callArguments(call procedureir.CallSite, state abstractState) []value {
 	args := make([]value, 0, len(call.Arguments.ExpressionIDs))
 	for _, id := range call.Arguments.ExpressionIDs {
+		if a.contextErr() != nil {
+			return args
+		}
 		if expression, ok := a.expressions[id]; ok {
 			args = append(args, a.evalExpression(expression, state))
 		}
@@ -410,10 +555,16 @@ func (a *procedureAnalyzer) inspectSink(call procedureir.CallSite, state abstrac
 		origins := args[target.argument].origins
 		keys := make([]string, 0, len(origins))
 		for key := range origins {
+			if a.contextErr() != nil {
+				return
+			}
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
+			if a.contextErr() != nil {
+				return
+			}
 			origin := origins[key]
 			if origin.safe[target.kind] || (origin.state != StateTainted && origin.state != StateUnknown) {
 				continue
@@ -607,6 +758,9 @@ func looksHTTPReceiver(receiver, full string) bool {
 func (a *procedureAnalyzer) scanKnownShellObjects() {
 	assign := regexp.MustCompile(`(?i)\b(?:set\s+)?([a-z_][a-z0-9_]*)\s*=\s*(?:createobject\s*\(\s*"wscript\.shell"|new\s+wscript\.shell)`)
 	for _, statement := range a.procedure.Statements {
+		if a.contextErr() != nil {
+			return
+		}
 		if match := assign.FindStringSubmatch(statement.Text); len(match) > 1 {
 			a.knownShellObjects[canonicalName(match[1])] = true
 		}
@@ -733,6 +887,11 @@ func (a *procedureAnalyzer) outgoing(from cfg.BlockID) []cfg.Edge {
 }
 
 func (a *procedureAnalyzer) reversePostOrderRank(reachable map[cfg.BlockID]bool) map[cfg.BlockID]int {
+	rank, _ := a.reversePostOrderRankContext(reachable)
+	return rank
+}
+
+func (a *procedureAnalyzer) reversePostOrderRankContext(reachable map[cfg.BlockID]bool) (map[cfg.BlockID]int, error) {
 	visited := map[cfg.BlockID]bool{}
 	postorder := make([]cfg.BlockID, 0, len(reachable))
 	type frame struct {
@@ -742,12 +901,18 @@ func (a *procedureAnalyzer) reversePostOrderRank(reachable map[cfg.BlockID]bool)
 	visited[a.graph.Entry] = true
 	stack := []frame{{id: a.graph.Entry}}
 	for len(stack) > 0 {
+		if err := a.contextErr(); err != nil {
+			return nil, err
+		}
 		current := &stack[len(stack)-1]
 		edges := a.outgoing(current.id)
 		if current.next < len(edges) {
 			target := edges[current.next].To
 			current.next++
 			if reachable[target] && !visited[target] {
+				if err := a.contextErr(); err != nil {
+					return nil, err
+				}
 				visited[target] = true
 				stack = append(stack, frame{id: target})
 			}
@@ -758,9 +923,96 @@ func (a *procedureAnalyzer) reversePostOrderRank(reachable map[cfg.BlockID]bool)
 	}
 	rank := make(map[cfg.BlockID]int, len(postorder))
 	for index := len(postorder) - 1; index >= 0; index-- {
+		if index&0xff == 0 {
+			if err := a.contextErr(); err != nil {
+				return nil, err
+			}
+		}
 		rank[postorder[index]] = len(postorder) - 1 - index
 	}
-	return rank
+	return rank, nil
+}
+
+func (a *procedureAnalyzer) reachableContext() (map[cfg.BlockID]bool, error) {
+	seen := map[cfg.BlockID]bool{}
+	if err := a.contextErr(); err != nil {
+		return nil, err
+	}
+	seen[a.graph.Entry] = true
+	queue := []cfg.BlockID{a.graph.Entry}
+	for len(queue) > 0 {
+		if err := a.contextErr(); err != nil {
+			return nil, err
+		}
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range a.outgoing(current) {
+			if err := a.contextErr(); err != nil {
+				return nil, err
+			}
+			if seen[edge.To] {
+				continue
+			}
+			seen[edge.To] = true
+			queue = append(queue, edge.To)
+		}
+	}
+	unknownReached := false
+	for _, source := range a.graph.UnknownFlowSources {
+		if err := a.contextErr(); err != nil {
+			return nil, err
+		}
+		if seen[source] {
+			unknownReached = true
+			break
+		}
+	}
+	if unknownReached {
+		for _, block := range a.graph.Blocks {
+			if err := a.contextErr(); err != nil {
+				return nil, err
+			}
+			if block.Kind == cfg.BlockStatement {
+				seen[block.ID] = true
+			}
+		}
+		seen[a.graph.UnknownExit] = true
+		queue = queue[:0]
+		for id := range seen {
+			queue = append(queue, id)
+		}
+		for len(queue) > 0 {
+			if err := a.contextErr(); err != nil {
+				return nil, err
+			}
+			current := queue[0]
+			queue = queue[1:]
+			for _, edge := range a.outgoing(current) {
+				if a.contextErr() != nil {
+					return nil, a.contextErr()
+				}
+				if seen[edge.To] {
+					continue
+				}
+				seen[edge.To] = true
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+	reachable := make(map[cfg.BlockID]bool, len(seen))
+	for _, block := range a.graph.Blocks {
+		if seen[block.ID] {
+			reachable[block.ID] = true
+		}
+	}
+	return reachable, nil
+}
+
+func (a *procedureAnalyzer) contextErr() error {
+	if a == nil || a.ctx == nil {
+		return nil
+	}
+	return a.ctx.Err()
 }
 
 type rankedBlock struct {

@@ -7343,7 +7343,7 @@ func (a *app) analyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResult()
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("analyze", output.ExitEnvironment, "analyze_failed", err)
 			}
@@ -7381,7 +7381,7 @@ func (a *app) checkCommand() *cobra.Command {
 			}
 			issues := lintResult.Issues
 			check["lint"] = map[string]any{"status": statusForCount(len(issues)), "count": len(issues)}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResult()
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
 			if err != nil {
 				return a.writeFailure("check", output.ExitEnvironment, "analyze_failed", err)
 			}

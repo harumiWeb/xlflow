@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added context-aware cancellation to procedure-level `VBA224` dataflow
+  analysis and propagated explicit cancellation errors through batch and
+  real-time analyzer paths.
 - Defined reviewed static-analysis corpus evidence with exact expected and
   forbidden diagnostic contracts, durable false-positive records, and
   reviewed-only per-rule precision metrics. Added developer tasks for printing
