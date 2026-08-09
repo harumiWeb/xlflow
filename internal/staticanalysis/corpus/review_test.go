@@ -142,7 +142,7 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshotRoot := filepath.Join(corpusRoot, "snapshots")
-	ids, err := discoverCommittedSnapshotIDs(snapshotRoot)
+	ids, err := DiscoverSnapshotIDs(snapshotRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,29 +158,6 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 		t.Fatalf("committed review metrics = %#v", metrics)
 	}
 	t.Log(FormatReviewMetrics(metrics))
-}
-
-func discoverCommittedSnapshotIDs(root string) ([]SnapshotID, error) {
-	ids := make([]SnapshotID, 0)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		parts := strings.SplitN(filepath.ToSlash(relative), "/", 2)
-		if len(parts) != 2 {
-			return nil
-		}
-		ids = append(ids, SnapshotID{Project: strings.TrimSuffix(parts[1], ".jsonl"), Surface: Surface(parts[0])})
-		return nil
-	})
-	return ids, err
 }
 
 func TestEvaluateDiagnosticReviewsEnforcesTrueAndFalsePositiveContracts(t *testing.T) {

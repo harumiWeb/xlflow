@@ -7,6 +7,8 @@ design rationale and boundaries.
 
 ## Scope and public contract
 
+<!-- xlflow-rule-contract: {"id":"VBA225","family":"analyze","category":"performance","default_severity":"warning","scope":"interprocedural","realtime":true,"configuration_key":"detect_excel_cell_access_in_loops","inline_suppressible":true,"preflight_blocking":false} -->
+
 `VBA225` is a default-enabled `analyze` warning in batch analysis and the
 shared real-time editor path. It is interprocedural when a uniquely resolved
 project-local helper contributes the Excel access, remains non-blocking for
@@ -27,19 +29,18 @@ The rule adds no fields to the `analysis` finding object. It uses the existing
 `code`, `severity`, `file`, `module`, `procedure`, `line`, `message`, `reason`,
 `suggestion`, and `nearby_code` fields. The message and reason identify the
 access kind and explain that each iteration can add an Excel COM round trip.
-Nested-loop findings use `error` severity, but remain advisory and do not
-change the source-preflight policy.
+Nested-loop findings retain `warning` severity and remain advisory.
 
 ## Loop boundaries and reachability
 
 The analyzer consumes the normalized procedure IR and conservative CFG. It
 recognizes `For`, `For Each`, `While`, and `Do` loops, including pre-test and
 post-test forms, and considers only reachable loop-body statements. The loop
-depth at the access site is retained for severity and remediation text:
+depth at the access site is retained for remediation text:
 
-- depth one produces a `warning`; and
-- depth two or greater produces an `error` because the nested loop multiplies
-  the possible number of COM calls.
+- every depth produces a `warning`; and
+- depth two or greater adds context explaining that nesting multiplies the
+  possible number of COM calls, without escalating severity.
 
 One finding is emitted for each loop with confirmed hot-loop evidence. It is
 located at the loop header, with deterministic source ordering. Additional

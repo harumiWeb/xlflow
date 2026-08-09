@@ -144,6 +144,32 @@ tasks:
       - cmd: rtk go test ./internal/staticanalysis/corpus -run '^TestCommittedCorpusReviewCandidates$' -count=1 -v
         platforms: [linux, darwin]
 
+  corpus:review-details:
+    desc: "Run selected corpus projects and print exact review ranges (usage: rtk proxy task corpus:review-details -- --rule VBA225 [--limit 20] [--project third_party/std-vba])"
+    silent: true
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus review-details {{.CLI_ARGS}}
+        platforms: [windows]
+      - cmd: go run ./cmd/xlflow-static-analysis-corpus review-details {{.CLI_ARGS}}
+        platforms: [linux, darwin]
+
+  corpus:review-draft:
+    desc: "Print schema-valid review JSONL without editing the ledger (invoke through rtk proxy task to preserve complete output)"
+    silent: true
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus review-draft {{.CLI_ARGS}}
+        platforms: [windows]
+      - cmd: go run ./cmd/xlflow-static-analysis-corpus review-draft {{.CLI_ARGS}}
+        platforms: [linux, darwin]
+
+  corpus:test-focused:
+    desc: "Read-only focused corpus verification (usage: task corpus:test-focused -- --project third_party/std-vba --rule VBA225)"
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus verify {{.CLI_ARGS}}
+        platforms: [windows]
+      - cmd: rtk go run ./cmd/xlflow-static-analysis-corpus verify {{.CLI_ARGS}}
+        platforms: [linux, darwin]
+
   bench:lsp:
     desc: Run deterministic LSP performance benchmarks
     cmds:
