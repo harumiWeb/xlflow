@@ -160,6 +160,11 @@ copies, then reports a changed assignment when a normal, exceptional,
 termination, or unknown exit can retain that change. Cleanup labels and error
 handlers therefore participate naturally. Effect summaries remain the narrow
 interprocedural Push/Pop exemption only; they do not prove a caller's paths.
+At a control-flow join, a clean path is neutral for restore coverage belonging
+to an origin that exists only on a dirty path. A recognized saved-value restore
+is the cleanup boundary even on the restore statement's exceptional edge;
+failures inside that restoration assignment are outside VBA203's lifecycle
+model.
 
 The integration preserves the `VBA203` diagnostic ID, severity, ordering,
 inline suppression, configuration, and `analyze --json` field shape. Its

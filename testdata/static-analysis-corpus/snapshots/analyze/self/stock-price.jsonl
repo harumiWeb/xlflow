@@ -62,7 +62,6 @@
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA227","severity":"warning","line":671,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA227","severity":"warning","line":673,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA203","severity":"warning","line":709,"column":0}
-{"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA203","severity":"warning","line":717,"column":0}
 {"project":"self/stock-price","file":"src/modules/TwelveDataClient.bas","surface":"analyze","code":"VBA224","severity":"warning","line":62,"column":0}
 {"project":"self/stock-price","file":"src/modules/TwelveDataClient.bas","surface":"analyze","code":"VBA225","severity":"warning","line":105,"column":0}
 {"project":"self/stock-price","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":186,"column":0}

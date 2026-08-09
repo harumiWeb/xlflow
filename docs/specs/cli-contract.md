@@ -933,6 +933,18 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA227`: an array lifecycle, allocation, dimension, bound, or object-array assignment assumption is not proven safe
 - `VBA229`: a procedure-local `Dim` or `Static ... As <Type>` declaration uses a type name that cannot be resolved
 
+`VBA203` correlates each changed `Application` property with its saved prior
+value across control-flow joins. A path on which the property was never changed
+does not invalidate restoration coverage for a dirty path that saved and
+restored the value. `Err.Raise` has no normal lexical continuation, and matching
+direct `If` guards may establish a conditional save/restore pair only when they
+read the same resolved bindings and those bindings are not written between the
+guards. A restore that may use an uninitialized or overwritten saved value, or
+an error path that can fail before reaching restoration, remains diagnostic. A
+recognized saved-value restore is the cleanup boundary even on its own
+exceptional edge; failures inside the restoration assignment are outside this
+rule, as they are for the other resource-lifecycle analyses.
+
 Projects should disable configurable analyzer rules with `[analyze].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VBA205", "VBA211"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
 
 `[analyze].disabled_rules` uses the same case-insensitive lookup, deterministic

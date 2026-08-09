@@ -242,9 +242,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":68,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":69,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":70,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":74,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":75,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":76,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":138,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA225","severity":"warning","line":187,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":248,"column":0}
@@ -380,7 +377,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modSettings.bas","surface":"analyze","code":"VBA225","severity":"warning","line":378,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSettings.bas","surface":"analyze","code":"VBA227","severity":"warning","line":443,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA225","severity":"warning","line":48,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA203","severity":"warning","line":114,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA203","severity":"warning","line":129,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA225","severity":"warning","line":143,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA227","severity":"warning","line":143,"column":0}
