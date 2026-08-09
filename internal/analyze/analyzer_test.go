@@ -3540,6 +3540,95 @@ End Sub
 	}
 }
 
+func TestAnalyzerArrayComparisonUsesDirectExpressionOperands(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values() As Variant
+  Dim other() As Variant
+  Dim scalar As Long
+  Dim i As Long
+  Dim flag As Boolean
+  values = Split("a", ",")
+  values = scalar
+  other = values
+  If UBound(values) > 0 Then Debug.Print "bounds"
+  If CountValues(values) = 0 Then Debug.Print "count"
+  For i = LBound(values) To UBound(values)
+    If values = scalar Then Debug.Print "bad"
+  Next i
+  If (values) <> other Then Debug.Print "bad"
+  flag = (values = scalar)
+  values(i) = scalar
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 4 {
+		t.Fatalf("expected four direct array-operand findings, got %+v", got)
+	}
+	wantLines := []int{14, 16, 16, 17}
+	for i, finding := range got {
+		if finding.Line != wantLines[i] {
+			t.Fatalf("VBA209[%d] line = %d, want %d: %+v", i, finding.Line, wantLines[i], got)
+		}
+	}
+	if strings.Contains(got[0].Message, "other") {
+		t.Fatalf("unexpected array assignment or argument finding: %+v", got)
+	}
+	if !strings.Contains(got[1].Message, "other") || !strings.Contains(got[2].Message, "values") || !strings.Contains(got[3].Message, "values") {
+		t.Fatalf("unexpected direct operand findings: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayComparisonDoesNotTreatColonDeclarationsAsArrays(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim objectValue As Object: Set objectValue = CreateObject("Scripting.Dictionary")
+  If objectValue Is Nothing Then Debug.Print "missing"
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA209"); len(got) != 0 {
+		t.Fatalf("colon-separated object declaration must not become an array comparison: %+v", got)
+	}
+}
+
+func TestVBA209BatchAndRealtimeResultsMatch(t *testing.T) {
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  Dim values() As Variant
+  Dim scalar As Long
+  values = Split("a", ",")
+  If values = scalar Then Debug.Print "bad"
+  If UBound(values) > 0 Then Debug.Print "safe"
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := findingsByCode(realtime, "VBA209"), findingsByCode(batch, "VBA209"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("batch/realtime VBA209 findings differ:\nbatch=%+v\nrealtime=%+v", want, got)
+	}
+}
+
 func TestAnalyzerArrayLifecycleAndDimensionSafety(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -69,11 +69,15 @@ warning.
 `VBA208` remains the owner of `ReDim Preserve` safety. It warns when a
 non-final dimension changes and remains conservative when the prior shape is
 unknown. `VBA209` remains the owner of scalar object comparisons and receives
-array comparison findings from the common model. The common model also supplies
-object-array element assignments without `Set` to the existing `VBA101` /
-`VBA102` finding constructors. `VBA226` remains the owner of `Range.Value` /
-`Value2` shape diagnostics; Range-origin values are excluded from duplicate
-`VBA227` access and bound findings.
+array comparison findings from the common model. For arrays, VBA209 applies
+only when an array identifier is a direct operand of a comparison expression;
+an array assignment, function or bound-call argument such as `LBound(values)`,
+an indexed element, and a member access are not scalar array comparisons. A
+parenthesized array identifier remains the same direct operand. The common
+model also supplies object-array element assignments without `Set` to the
+existing `VBA101` / `VBA102` finding constructors. `VBA226` remains the owner
+of `Range.Value` / `Value2` shape diagnostics; Range-origin values are excluded
+from duplicate `VBA227` access and bound findings.
 
 ## Function and property summaries
 

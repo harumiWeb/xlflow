@@ -7,12 +7,6 @@
 {"project":"self/gen-qrcode","file":"src/modules/App.bas","surface":"analyze","code":"VBA225","severity":"warning","line":95,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/App.bas","surface":"analyze","code":"VBA227","severity":"warning","line":95,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/App.bas","surface":"analyze","code":"VBA227","severity":"warning","line":97,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":21,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":23,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":24,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":25,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":50,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":51,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA226","severity":"warning","line":52,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA226","severity":"warning","line":54,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":54,"column":0}
@@ -20,12 +14,9 @@
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":54,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA226","severity":"warning","line":55,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":55,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":166,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":169,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":176,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":177,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":193,"column":0}
-{"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA209","severity":"warning","line":196,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":293,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":294,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/QrCode.bas","surface":"analyze","code":"VBA227","severity":"warning","line":300,"column":0}

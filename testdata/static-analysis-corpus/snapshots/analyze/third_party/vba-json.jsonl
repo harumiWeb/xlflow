@@ -41,12 +41,6 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":659,"column":43}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":926,"column":20}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":926,"column":55}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":963,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":964,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":967,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":969,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":979,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":980,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":982,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":982,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":983,"column":0}
@@ -55,7 +49,6 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":986,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":987,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":989,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":994,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":998,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":998,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":999,"column":0}
@@ -64,10 +57,7 @@
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1002,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1003,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1005,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1068,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1069,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1069,"column":0}
-{"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1070,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1070,"column":0}
 {"project":"third_party/vba-json","file":"JsonConverter.bas","surface":"analyze","code":"VBA204","severity":"warning","line":1102,"column":0}
 {"project":"third_party/vba-json","file":"specs/Specs.bas","surface":"analyze","code":"VBA222","severity":"warning","line":2,"column":0}
