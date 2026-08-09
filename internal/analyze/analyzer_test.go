@@ -1947,6 +1947,194 @@ End Sub
 	}
 }
 
+func TestAnalyzerApplicationStatePreservesRestoreCoverageAcrossHandlerMerge(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub HandlerMerge()
+  On Error GoTo Handler
+  Dim savedAlerts As Boolean
+  savedAlerts = Application.DisplayAlerts
+  Application.DisplayAlerts = False
+  Call Work
+Cleanup:
+  Application.DisplayAlerts = savedAlerts
+  Exit Sub
+Handler:
+  Resume Cleanup
+End Sub
+
+Private Sub Work()
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("handler merge findings = %+v, want only the potentially uninitialized cleanup restore on line 9", got)
+	}
+}
+
+func TestAnalyzerApplicationStateDoesNotFollowErrRaiseIntoLexicalCleanup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ReraiseBeforeCleanup()
+  On Error GoTo Handler
+  Dim savedAlerts As Boolean
+  savedAlerts = Application.DisplayAlerts
+  Application.DisplayAlerts = False
+  Call Work
+  GoTo Cleanup
+Handler:
+  Application.DisplayAlerts = savedAlerts
+  Err.Raise Err.Number
+Cleanup:
+  Application.DisplayAlerts = savedAlerts
+End Sub
+
+Private Sub Work()
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	if len(got) != 1 || got[0].Line != 10 {
+		t.Fatalf("reraise cleanup findings = %+v, want only the potentially uninitialized handler restore on line 10", got)
+	}
+}
+
+func TestAnalyzerApplicationStateRecognizesRepeatedGuardedRestore(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub GuardedRestore(ByVal itemCount As Long)
+  Dim savedUpdating As Boolean
+  If itemCount > 0 Then
+    savedUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = True
+  End If
+  Call Work
+  If itemCount > 0 Then
+    Application.ScreenUpdating = savedUpdating
+  End If
+End Sub
+
+Private Sub Work()
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	if len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("repeated guard findings = %+v, want only the state change that can fail before restoration on line 6", got)
+	}
+}
+
+func TestAnalyzerApplicationStateRejectsChangedGuardBindings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleEnabled As Boolean
+
+Public Sub ReassignedLocalGuard(ByVal itemCount As Long)
+  Dim savedUpdating As Boolean
+  If itemCount > 0 Then
+    savedUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = True
+  End If
+  itemCount = 0
+  If itemCount > 0 Then
+    Application.ScreenUpdating = savedUpdating
+  End If
+End Sub
+
+Public Sub StableModuleGuard()
+  Dim savedUpdating As Boolean
+  If moduleEnabled Then
+    savedUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = True
+  End If
+  If moduleEnabled Then
+    Application.ScreenUpdating = savedUpdating
+  End If
+End Sub
+
+Public Sub CalledModuleGuard()
+  Dim savedUpdating As Boolean
+  If moduleEnabled Then
+    savedUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = True
+  End If
+  MutateModuleGuard
+  If moduleEnabled Then
+    Application.ScreenUpdating = savedUpdating
+  End If
+End Sub
+
+Private Sub MutateModuleGuard()
+  moduleEnabled = False
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	restoreFindings := map[string]bool{}
+	for _, finding := range got {
+		if finding.Line == 12 || finding.Line == 35 {
+			restoreFindings[finding.Procedure] = true
+		}
+		if finding.Procedure == "StableModuleGuard" && finding.Line == 23 {
+			t.Fatalf("stable module guard restore should remain recognized: %+v", got)
+		}
+	}
+	for _, procedure := range []string{"ReassignedLocalGuard", "CalledModuleGuard"} {
+		if !restoreFindings[procedure] {
+			t.Fatalf("%s should retain its guarded-restore finding: %+v", procedure, got)
+		}
+	}
+}
+
+func TestAnalyzerApplicationStateGuardComparisonPreservesStringLiterals(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub DifferentStringGuards(ByVal value As String)
+  Dim savedUpdating As Boolean
+  If value = "a b" Then
+    savedUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = True
+  End If
+  If value = "ab" Then
+    Application.ScreenUpdating = savedUpdating
+  End If
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA203")
+	for _, finding := range got {
+		if finding.Line == 9 {
+			return
+		}
+	}
+	t.Fatalf("different string-literal guards should retain the restore finding: %+v", got)
+}
+
 func TestVBA221ReportsImmediateCallerAndUncertainCalleeOncePerProperty(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

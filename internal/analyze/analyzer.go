@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
@@ -1789,8 +1790,10 @@ func applicationStateProperties() []applicationStateProperty {
 }
 
 type applicationStateSnapshot struct {
-	Dirty   map[int]bool
-	Unknown bool
+	Dirty     map[int]bool
+	Restores  map[int]bool
+	GuardedBy map[int]bool
+	Unknown   bool
 }
 
 type applicationStateFlow struct {
@@ -1819,11 +1822,11 @@ func (w applicationStateExitWitness) description() string {
 // restoration is the cleanup boundary itself, so it clears state on its own
 // exceptional transition as well.
 func applicationStateExitWitnesses(proc sourceProcedure, property string, byID map[int]procedureir.Statement) map[int]applicationStateExitWitness {
-	graph := proc.Graph
+	flowGraph := graphWithoutNormalErrRaiseContinuation(*proc.Graph)
+	graph := &flowGraph
 	in := map[vbacfg.BlockID]applicationStateFlow{graph.Entry: newApplicationStateFlow()}
 	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
 	queue := []vbacfg.BlockID{graph.Entry}
-	witnesses := map[int]applicationStateExitWitness{}
 
 	for len(queue) > 0 {
 		blockID := queue[0]
@@ -1838,22 +1841,7 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, byID m
 			if edge.From != blockID {
 				continue
 			}
-			out := cloneApplicationStateFlow(state)
-			out.ViaExceptional = out.ViaExceptional || edge.Class == vbacfg.EdgeExceptional
-			if block.Statement != nil && (edge.Class == vbacfg.EdgeNormal || applicationStateSavedRestore(proc, state, *block.Statement, property, byID)) {
-				out = applyApplicationStateStatement(proc, out, *block.Statement, property, byID)
-			}
-			if applicationStateExitKind(*graph, edge.To) != "" {
-				kind := applicationStateExitKind(*graph, edge.To)
-				if out.ViaExceptional && kind == "normal exit" {
-					kind = "error-handler path to normal exit"
-				}
-				for origin := range out.Dirty {
-					if existing, exists := witnesses[origin]; !exists || applicationStateWitnessRank(kind) > applicationStateWitnessRank(existing.Kind) {
-						witnesses[origin] = applicationStateExitWitness{Kind: kind, Line: edge.Range.StartLine}
-					}
-				}
-			}
+			out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, byID)
 			merged, changed := mergeApplicationStateFlow(in[edge.To], out)
 			if !changed {
 				continue
@@ -1865,7 +1853,47 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, byID m
 			}
 		}
 	}
+	witnesses := map[int]applicationStateExitWitness{}
+	for _, edge := range graph.Edges {
+		kind := applicationStateExitKind(*graph, edge.To)
+		if kind == "" {
+			continue
+		}
+		state, reachable := in[edge.From]
+		if !reachable || state.Dirty == nil {
+			continue
+		}
+		block, ok := applicationStateBlock(*graph, edge.From)
+		if !ok {
+			continue
+		}
+		out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, byID)
+		if out.ViaExceptional && kind == "normal exit" {
+			kind = "error-handler path to normal exit"
+		}
+		for origin := range out.Dirty {
+			if existing, exists := witnesses[origin]; !exists || applicationStateWitnessRank(kind) > applicationStateWitnessRank(existing.Kind) {
+				witnesses[origin] = applicationStateExitWitness{Kind: kind, Line: edge.Range.StartLine}
+			}
+		}
+	}
 	return witnesses
+}
+
+func applicationStateFlowAcrossEdge(proc sourceProcedure, state applicationStateFlow, block vbacfg.Block, edge vbacfg.Edge, property string, byID map[int]procedureir.Statement) applicationStateFlow {
+	out := cloneApplicationStateFlow(state)
+	out.ViaExceptional = out.ViaExceptional || edge.Class == vbacfg.EdgeExceptional
+	if block.Statement == nil {
+		return out
+	}
+	switch {
+	case edge.Class == vbacfg.EdgeNormal || applicationStateSavedRestore(proc, state, *block.Statement, property, byID):
+		return applyApplicationStateStatement(proc, out, *block.Statement, property, byID)
+	case edge.Class == vbacfg.EdgeExceptional:
+		return applyApplicationStateExceptionalRestore(proc, out, *block.Statement, property, byID)
+	default:
+		return out
+	}
 }
 
 func applicationStateWitnessRank(kind string) int {
@@ -1922,9 +1950,20 @@ func cloneApplicationStateFlow(in applicationStateFlow) applicationStateFlow {
 }
 
 func cloneApplicationStateSnapshot(in applicationStateSnapshot) applicationStateSnapshot {
-	out := applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: in.Unknown}
+	out := applicationStateSnapshot{
+		Dirty:     map[int]bool{},
+		Restores:  map[int]bool{},
+		GuardedBy: map[int]bool{},
+		Unknown:   in.Unknown,
+	}
 	for origin := range in.Dirty {
 		out.Dirty[origin] = true
+	}
+	for origin := range in.Restores {
+		out.Restores[origin] = true
+	}
+	for statementID := range in.GuardedBy {
+		out.GuardedBy[statementID] = true
 	}
 	return out
 }
@@ -1956,15 +1995,33 @@ func mergeApplicationStateFlow(current, incoming applicationStateFlow) (applicat
 		left, leftOK := current.Saved[key]
 		right, rightOK := incoming.Saved[key]
 		if !leftOK {
-			left = applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: true}
+			left = applicationStateSnapshot{Dirty: map[int]bool{}, Restores: map[int]bool{}, GuardedBy: map[int]bool{}, Unknown: true}
 		}
 		if !rightOK {
-			right = applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: true}
+			right = applicationStateSnapshot{Dirty: map[int]bool{}, Restores: map[int]bool{}, GuardedBy: map[int]bool{}, Unknown: true}
 		}
 		merged := cloneApplicationStateSnapshot(left)
 		merged.Unknown = left.Unknown || right.Unknown
 		for origin := range right.Dirty {
 			merged.Dirty[origin] = true
+		}
+		for statementID := range right.GuardedBy {
+			merged.GuardedBy[statementID] = true
+		}
+		restoreCandidates := map[int]bool{}
+		for origin := range left.Restores {
+			restoreCandidates[origin] = true
+		}
+		for origin := range right.Restores {
+			restoreCandidates[origin] = true
+		}
+		merged.Restores = map[int]bool{}
+		for origin := range restoreCandidates {
+			leftCovered := !current.Dirty[origin] || left.Restores[origin]
+			rightCovered := !incoming.Dirty[origin] || right.Restores[origin]
+			if leftCovered && rightCovered {
+				merged.Restores[origin] = true
+			}
 		}
 		if !applicationStateSnapshotEqual(current.Saved[key], merged) {
 			next.Saved[key] = merged
@@ -1975,11 +2032,21 @@ func mergeApplicationStateFlow(current, incoming applicationStateFlow) (applicat
 }
 
 func applicationStateSnapshotEqual(a, b applicationStateSnapshot) bool {
-	if a.Unknown != b.Unknown || len(a.Dirty) != len(b.Dirty) {
+	if a.Unknown != b.Unknown || len(a.Dirty) != len(b.Dirty) || len(a.Restores) != len(b.Restores) || len(a.GuardedBy) != len(b.GuardedBy) {
 		return false
 	}
 	for origin := range a.Dirty {
 		if !b.Dirty[origin] {
+			return false
+		}
+	}
+	for origin := range a.Restores {
+		if !b.Restores[origin] {
+			return false
+		}
+	}
+	for statementID := range a.GuardedBy {
+		if !b.GuardedBy[statementID] {
 			return false
 		}
 	}
@@ -1996,6 +2063,32 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 			state.Dirty = cloneApplicationStateSnapshot(state.Saved[variable]).Dirty
 			return state
 		}
+		if variable, ok := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead); ok {
+			if saved, exists := state.Saved[variable]; exists {
+				for origin := range saved.Restores {
+					delete(state.Dirty, origin)
+				}
+				if applicationStateMatchingGuard(proc, saved, statement, byID) {
+					for origin := range saved.Dirty {
+						state.Dirty[origin] = true
+					}
+					return state
+				}
+			}
+		}
+		// A fully known restore variable returned above. The remaining path can
+		// still carry merged per-origin coverage in an unknown snapshot.
+		for key, saved := range state.Saved {
+			// Loop backedges can revisit this assignment after its origin was saved;
+			// an origin must never be recorded as restoring itself.
+			if !saved.Unknown && !saved.Dirty[statement.ID] {
+				if saved.Restores == nil {
+					saved.Restores = map[int]bool{}
+				}
+				saved.Restores[statement.ID] = true
+				state.Saved[key] = saved
+			}
+		}
 		state.Dirty[statement.ID] = true
 		return state
 	}
@@ -2004,7 +2097,11 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 		return state
 	}
 	if isApplicationPropertyReference(statement.Value, statement, byID, property) {
-		state.Saved[variable] = applicationStateSnapshot{Dirty: cloneApplicationStateFlow(state).Dirty}
+		state.Saved[variable] = applicationStateSnapshot{
+			Dirty:     cloneApplicationStateFlow(state).Dirty,
+			Restores:  map[int]bool{},
+			GuardedBy: applicationStateDirectGuard(statement, byID),
+		}
 		return state
 	}
 	if source, ok := applicationStateVariable(proc, statement.ID, expressionText(statement.Value), procedureir.AccessRead); ok {
@@ -2013,8 +2110,157 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 			return state
 		}
 	}
-	state.Saved[variable] = applicationStateSnapshot{Dirty: map[int]bool{}, Unknown: true}
+	state.Saved[variable] = applicationStateSnapshot{Dirty: map[int]bool{}, Restores: map[int]bool{}, GuardedBy: map[int]bool{}, Unknown: true}
 	return state
+}
+
+func applicationStateDirectGuard(statement procedureir.Statement, byID map[int]procedureir.Statement) map[int]bool {
+	guards := map[int]bool{}
+	visited := map[int]bool{}
+	for parentID := statement.ParentID; parentID != 0; {
+		if visited[parentID] {
+			break
+		}
+		visited[parentID] = true
+		parent, ok := byID[parentID]
+		if !ok {
+			break
+		}
+		if parent.Kind == procedureir.StatementElse {
+			break
+		}
+		if parent.Kind == procedureir.StatementIf && parent.Condition != nil {
+			guards[parent.ID] = true
+			break
+		}
+		parentID = parent.ParentID
+	}
+	return guards
+}
+
+func applyApplicationStateExceptionalRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) applicationStateFlow {
+	assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, byID)
+	if !isPropertyWrite || assignedProperty != property {
+		return state
+	}
+	variable, ok := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead)
+	if !ok {
+		return state
+	}
+	saved, exists := state.Saved[variable]
+	if !exists {
+		return state
+	}
+	if applicationStateMatchingGuard(proc, saved, statement, byID) {
+		state.Dirty = cloneApplicationStateSnapshot(saved).Dirty
+		return state
+	}
+	for origin := range saved.Restores {
+		delete(state.Dirty, origin)
+	}
+	return state
+}
+
+func applicationStateMatchingGuard(proc sourceProcedure, saved applicationStateSnapshot, restore procedureir.Statement, byID map[int]procedureir.Statement) bool {
+	restoreGuards := applicationStateDirectGuard(restore, byID)
+	for savedID := range saved.GuardedBy {
+		savedGuard, savedOK := byID[savedID]
+		if !savedOK || savedGuard.Condition == nil {
+			continue
+		}
+		for restoreID := range restoreGuards {
+			restoreGuard, restoreOK := byID[restoreID]
+			if !restoreOK || restoreGuard.Condition == nil ||
+				applicationStateGuardConditionKey(savedGuard.Condition.Text) != applicationStateGuardConditionKey(restoreGuard.Condition.Text) {
+				continue
+			}
+			if applicationStateGuardBindingsStable(proc, savedGuard, restoreGuard) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func applicationStateGuardConditionKey(condition string) string {
+	runes := []rune(condition)
+	var key strings.Builder
+	inString := false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if inString {
+			key.WriteRune(r)
+			if r != '"' {
+				continue
+			}
+			if i+1 < len(runes) && runes[i+1] == '"' {
+				key.WriteRune(runes[i+1])
+				i++
+				continue
+			}
+			inString = false
+			continue
+		}
+		if r == '"' {
+			inString = true
+			key.WriteRune(r)
+			continue
+		}
+		if unicode.IsSpace(r) {
+			continue
+		}
+		key.WriteRune(unicode.ToLower(r))
+	}
+	return key.String()
+}
+
+func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, restoreGuard procedureir.Statement) bool {
+	type binding struct {
+		scope procedureir.SymbolScope
+		name  string
+	}
+	savedBindings := map[binding]bool{}
+	restoreBindings := map[binding]bool{}
+	for _, access := range proc.Accesses {
+		if access.Mode != procedureir.AccessRead || access.Scope == procedureir.ScopeUnresolved {
+			continue
+		}
+		key := binding{scope: access.Scope, name: strings.ToLower(access.Name)}
+		switch access.StatementID {
+		case savedGuard.ID:
+			savedBindings[key] = true
+		case restoreGuard.ID:
+			restoreBindings[key] = true
+		}
+	}
+	if len(savedBindings) == 0 || len(savedBindings) != len(restoreBindings) {
+		return false
+	}
+	for key := range savedBindings {
+		if !restoreBindings[key] {
+			return false
+		}
+	}
+	for key := range savedBindings {
+		if key.scope != procedureir.ScopeModule && key.scope != procedureir.ScopeProject {
+			continue
+		}
+		for _, call := range proc.Calls {
+			if call.StatementID > savedGuard.ID && call.StatementID < restoreGuard.ID {
+				return false
+			}
+		}
+	}
+	for _, access := range proc.Accesses {
+		if access.StatementID <= savedGuard.ID || access.StatementID >= restoreGuard.ID ||
+			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
+			continue
+		}
+		if savedBindings[binding{scope: access.Scope, name: strings.ToLower(access.Name)}] {
+			return false
+		}
+	}
+	return true
 }
 
 func applicationStateSavedRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) bool {

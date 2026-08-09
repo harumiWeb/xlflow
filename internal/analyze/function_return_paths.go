@@ -41,7 +41,7 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 	}
 
 	filter := vbacfg.EdgeFilter{}
-	graph := returnPathGraph(*proc.Graph)
+	graph := graphWithoutNormalErrRaiseContinuation(*proc.Graph)
 	if !graph.IsReachable(graph.NormalExit, filter) {
 		return nil
 	}
@@ -90,17 +90,17 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 	return []Finding{a.simpleFinding(file, proc, line, "VBA210", "warning", message, reason, suggestion)}
 }
 
-// returnPathGraph removes the normal continuation of Err.Raise. Err.Raise
+// graphWithoutNormalErrRaiseContinuation removes the normal continuation of Err.Raise. Err.Raise
 // transfers control through VBA error handling (or out of the procedure); it
 // never completes a normal procedure statement. The CFG still retains the
 // exceptional edges produced for the active On Error mode, including Resume
 // Next, so recoverable error paths remain visible to the analysis.
-func returnPathGraph(graph vbacfg.Graph) vbacfg.Graph {
+func graphWithoutNormalErrRaiseContinuation(graph vbacfg.Graph) vbacfg.Graph {
 	graph.Blocks = append([]vbacfg.Block(nil), graph.Blocks...)
 	edges := graph.Edges
 	graph.Edges = make([]vbacfg.Edge, 0, len(edges))
 	for _, edge := range edges {
-		if edge.Class == vbacfg.EdgeNormal && returnPathIsRaiseBlock(graph, edge.From) {
+		if edge.Class == vbacfg.EdgeNormal && isErrRaiseBlock(graph, edge.From) {
 			continue
 		}
 		graph.Edges = append(graph.Edges, edge)
@@ -108,7 +108,7 @@ func returnPathGraph(graph vbacfg.Graph) vbacfg.Graph {
 	return graph
 }
 
-func returnPathIsRaiseBlock(graph vbacfg.Graph, id vbacfg.BlockID) bool {
+func isErrRaiseBlock(graph vbacfg.Graph, id vbacfg.BlockID) bool {
 	if id <= 0 || int(id) > len(graph.Blocks) {
 		return false
 	}

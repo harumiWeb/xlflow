@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA203` false positives when a saved `Application` property value is
+  restored after a clean/dirty CFG merge, after `Err.Raise`, or under a repeated
+  unchanged guard.
 - Added developer-only corpus review commands for exact diagnostic ranges,
   schema-valid ledger drafts, and read-only project/rule-focused verification;
   added an extensible machine-checked rule-contract marker inventory to prevent
