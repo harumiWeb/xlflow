@@ -3694,6 +3694,81 @@ End Sub
 	}
 }
 
+func TestVBA208AllowsOneDimensionalAndStableNonFinalDimensions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal rowCount As Long)
+  Dim values() As Long
+  ReDim Preserve values(0 To rowCount)
+
+  Dim matrix() As Variant
+  ReDim matrix(1 To rowCount, 1 To 1)
+  Dim columnCount As Long
+  For columnCount = 2 To 3
+    ReDim Preserve matrix(1 To ROWCOUNT, 1 To columnCount)
+  Next columnCount
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA208"); len(got) != 0 {
+		t.Fatalf("one-dimensional Preserve and stable non-final dimensions should be safe: %+v", got)
+	}
+}
+
+func TestVBA208RejectsChangedSymbolicNonFinalDimension(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal rowCount As Long, ByVal actualRows As Long)
+  Dim matrix() As Variant
+  ReDim matrix(1 To rowCount, 1 To 1)
+  ReDim Preserve matrix(1 To actualRows, 1 To 2)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA208")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("a changed symbolic non-final dimension should report once: %+v", got)
+	}
+}
+
+func TestVBA208DoesNotTreatArrayMemberAsDirectReDimTarget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type Bucket
+  Elements() As Long
+End Type
+Private buckets() As Bucket
+
+Public Sub Grow(ByVal index As Long)
+  ReDim buckets(0 To 1, 0 To 1)
+  ReDim Preserve buckets(index).Elements(0 To 1)
+  ReDim Preserve buckets(0 To 1, 0 To 2)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA208"); len(got) != 0 {
+		t.Fatalf("a member array must not be attributed to its receiver array: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("nested member ReDim must preserve the receiver lifecycle result: %+v", got)
+	}
+}
+
 func TestAnalyzerArrayLifecycleIsDeterministicAcrossRuns(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA208` false positives for one-dimensional `ReDim Preserve`, stable
+  symbolic non-final dimensions across CFG joins, and indexed member-array
+  targets that were incorrectly attributed to their receiver arrays.
 - Fixed `VBA222` false positives for standard OLE Automation interfaces and
   the VBA `VbAppWinStyle` enum, and stopped qualified external types from
   resolving through an unrelated library's same-named type.
