@@ -265,7 +265,7 @@ func rangeValueFactsForProcedure(file parsedFile, proc sourceProcedure) rangeVal
 	for _, expression := range proc.Expressions {
 		facts.expressions[expression.ID] = expression
 	}
-	constants := rangeValueIntegerConstants(file, proc)
+	constants := rangeValueIntegerConstants(file.RangeValueModuleConstants, proc)
 	facts.constants = constants
 	for _, statement := range proc.Statements {
 		text := strings.TrimSpace(excelLoopHeaderText(statement.Text))
@@ -290,32 +290,44 @@ func rangeValueFactsForProcedure(file parsedFile, proc sourceProcedure) rangeVal
 	return facts
 }
 
-func rangeValueIntegerConstants(file parsedFile, proc sourceProcedure) map[string]int {
+func rangeValueModuleIntegerConstants(lines []string, ir procedureir.DocumentIR) map[string]int {
 	constants := map[string]int{}
-	add := func(line string) {
+	insideProcedure := make([]bool, len(lines)+1)
+	for _, candidate := range ir.Procedures {
+		start := max(candidate.Symbol.DeclarationRange.StartLine, 1)
+		end := min(candidate.Symbol.DeclarationRange.EndLine, len(lines))
+		for line := start; line <= end; line++ {
+			insideProcedure[line] = true
+		}
+	}
+	for lineIndex, line := range lines {
+		if insideProcedure[lineIndex+1] {
+			continue
+		}
 		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(line)))
 		if len(match) != 3 {
-			return
+			continue
 		}
 		if value, err := constantIntegerExpression(match[2], constants); err == nil {
 			constants[strings.ToLower(match[1])] = value
 		}
 	}
-	for lineIndex := range file.Lines {
-		line := lineIndex + 1
-		insideProcedure := false
-		for _, candidate := range file.IR.Procedures {
-			if line >= candidate.Symbol.DeclarationRange.StartLine && line <= candidate.Symbol.DeclarationRange.EndLine {
-				insideProcedure = true
-				break
-			}
-		}
-		if !insideProcedure {
-			add(file.Lines[lineIndex])
-		}
+	return constants
+}
+
+func rangeValueIntegerConstants(moduleConstants map[string]int, proc sourceProcedure) map[string]int {
+	constants := make(map[string]int, len(moduleConstants))
+	for name, value := range moduleConstants {
+		constants[name] = value
 	}
 	for _, statement := range proc.Statements {
-		add(statement.Text)
+		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
+		if len(match) != 3 {
+			continue
+		}
+		if value, err := constantIntegerExpression(match[2], constants); err == nil {
+			constants[strings.ToLower(match[1])] = value
+		}
 	}
 	return constants
 }
@@ -500,17 +512,30 @@ func rangeValueBoundsIssue(name string, args []string, shape rangeValueShape, st
 		return &rangeValueIssue{
 			message:    fmt.Sprintf("%s indexes row dimension outside 1..%d.", name, shape.rows),
 			reason:     "Range.Value arrays use row-first, column-second indexing and the inferred row range exceeds the source range.",
-			suggestion: fmt.Sprintf("Keep the first index within 1..%d and the second within 1..%d.", shape.rows, shape.cols),
+			suggestion: rangeValueBoundsSuggestion(shape),
 		}
 	}
 	if shape.cols > 0 && column.known && (column.min < 1 || column.max > shape.cols) {
 		return &rangeValueIssue{
 			message:    fmt.Sprintf("%s indexes column dimension outside 1..%d.", name, shape.cols),
 			reason:     "Range.Value arrays use row-first, column-second indexing and the inferred column range exceeds the source range.",
-			suggestion: fmt.Sprintf("Keep the first index within 1..%d and the second within 1..%d.", shape.rows, shape.cols),
+			suggestion: rangeValueBoundsSuggestion(shape),
 		}
 	}
 	return nil
+}
+
+func rangeValueBoundsSuggestion(shape rangeValueShape) string {
+	switch {
+	case shape.rows > 0 && shape.cols > 0:
+		return fmt.Sprintf("Keep the first index within 1..%d and the second within 1..%d.", shape.rows, shape.cols)
+	case shape.rows > 0:
+		return fmt.Sprintf("Keep the first index within 1..%d.", shape.rows)
+	case shape.cols > 0:
+		return fmt.Sprintf("Keep the second index within 1..%d.", shape.cols)
+	default:
+		return "Keep both indexes within the source range bounds."
+	}
 }
 
 func rangeValueIndexInterval(text string, state rangeValueFlowState, facts rangeValueFacts) rangeValueInterval {
@@ -790,7 +815,7 @@ func rangeValueCellsPairShape(start, end procedureir.Expression, facts rangeValu
 	cols, colsKnown := rangeValueAxisLength(startCol, startColKnown, endCol, endColKnown)
 	return rangeShape{
 		known:   rowsKnown && colsKnown,
-		array2D: rowsKnown && rows > 1 || colsKnown && cols > 1,
+		array2D: (rowsKnown && rows > 1) || (colsKnown && cols > 1),
 		rows:    rows,
 		cols:    cols,
 	}, true

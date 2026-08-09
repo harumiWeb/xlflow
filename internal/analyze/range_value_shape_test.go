@@ -391,12 +391,37 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA226")
-	if len(got) != 2 {
-		t.Fatalf("VBA226 findings = %+v, want uncertain and definite-scalar controls only", got)
-	}
+	counts := map[string]int{}
 	for _, finding := range got {
-		if finding.Procedure != "UncertainRun" && finding.Procedure != "ScalarRun" {
-			t.Fatalf("provably multi-cell dynamic range should be accepted: %+v", got)
-		}
+		counts[finding.Procedure]++
+	}
+	if counts["UncertainRun"] != 1 || counts["ScalarRun"] != 1 || len(counts) != 2 {
+		t.Fatalf("VBA226 findings per procedure = %v, want one UncertainRun and one ScalarRun: %+v", counts, got)
+	}
+}
+
+func TestVBA226PartialShapeSuggestionOmitsUnknownExtent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Const COLUMN_COUNT As Long = 14
+
+Public Sub Run(ByVal ws As Worksheet, ByVal lastRow As Long)
+  Dim values As Variant
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, COLUMN_COUNT)).Value2
+  Debug.Print values(1, 15)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA226")
+	if len(got) != 1 {
+		t.Fatalf("partial-shape findings = %+v, want one known-column violation", got)
+	}
+	if got[0].Suggestion != "Keep the second index within 1..14." || strings.Contains(got[0].Suggestion, "1..0") {
+		t.Fatalf("partial-shape suggestion = %q", got[0].Suggestion)
 	}
 }
