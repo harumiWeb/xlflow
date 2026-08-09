@@ -193,14 +193,9 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA227","severity":"warning","line":907,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":50,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":353,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA226","severity":"warning","line":661,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA226","severity":"warning","line":662,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":678,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA226","severity":"warning","line":683,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":683,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA226","severity":"warning","line":684,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":686,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA226","severity":"warning","line":687,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":687,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":695,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":695,"column":0}
@@ -253,7 +248,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":138,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA225","severity":"warning","line":187,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":248,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA226","severity":"warning","line":252,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA221","severity":"warning","line":275,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA221","severity":"warning","line":275,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA221","severity":"warning","line":275,"column":0}
@@ -360,7 +354,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":265,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":265,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":266,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTextSearch.bas","surface":"analyze","code":"VBA226","severity":"warning","line":62,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTextSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":351,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTextSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":351,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTextSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":355,"column":0}

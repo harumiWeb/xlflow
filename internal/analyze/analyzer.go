@@ -193,16 +193,17 @@ type parameterInfo struct {
 }
 
 type parsedFile struct {
-	Path          string
-	Lines         []string
-	Module        string
-	ModuleKind    string
-	Source        []byte
-	Root          *tree_sitter.Node
-	IR            procedureir.DocumentIR
-	CFG           vbacfg.Document
-	Parsed        *vbaast.ParsedDocument
-	IntelDocument intel.Document
+	Path                      string
+	Lines                     []string
+	Module                    string
+	ModuleKind                string
+	Source                    []byte
+	Root                      *tree_sitter.Node
+	IR                        procedureir.DocumentIR
+	CFG                       vbacfg.Document
+	Parsed                    *vbaast.ParsedDocument
+	IntelDocument             intel.Document
+	RangeValueModuleConstants map[string]int
 }
 
 type sourceProcedure struct {
@@ -326,16 +327,22 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			intelDocument = intel.Document{Path: file, Source: string(source), ModuleKind: moduleKind}
 			intelDocument.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(intelDocument, parsed)
 		}
+		lines := normalizedSourceLines(string(source))
+		var rangeValueConstants map[string]int
+		if a.Config.Analyze.DetectRangeValueArrayShape {
+			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
+		}
 		parsedFiles = append(parsedFiles, parsedFile{
-			Path:          file,
-			Lines:         normalizedSourceLines(string(source)),
-			Module:        strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
-			ModuleKind:    moduleKind,
-			Source:        source,
-			IR:            ir,
-			CFG:           controlFlow,
-			Parsed:        parsed,
-			IntelDocument: intelDocument,
+			Path:                      file,
+			Lines:                     lines,
+			Module:                    strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
+			ModuleKind:                moduleKind,
+			Source:                    source,
+			IR:                        ir,
+			CFG:                       controlFlow,
+			Parsed:                    parsed,
+			IntelDocument:             intelDocument,
+			RangeValueModuleConstants: rangeValueConstants,
 		})
 	}
 	defer closeParsedFiles(parsedFiles)
@@ -805,14 +812,20 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		lines := normalizedSourceLines(string(view.Source))
+		var rangeValueConstants map[string]int
+		if cfg.Analyze.DetectRangeValueArrayShape {
+			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
+		}
 		file := parsedFile{
-			Path:   view.Path,
-			Lines:  normalizedSourceLines(string(view.Source)),
-			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
-			Source: view.Source,
-			Root:   view.Root,
-			IR:     ir,
-			CFG:    controlFlow,
+			Path:                      view.Path,
+			Lines:                     lines,
+			Module:                    strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			Source:                    view.Source,
+			Root:                      view.Root,
+			IR:                        ir,
+			CFG:                       controlFlow,
+			RangeValueModuleConstants: rangeValueConstants,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB}
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)

@@ -27,10 +27,22 @@ or LSP capabilities.
   column-second indexing.
 - Dynamic ranges, unknown Range aliases, reassignments, and branch joins with
   different shapes are uncertain.
+- A range can be definitely two-dimensional even when only one extent is
+  known. For example, two `Cells` endpoints with statically different columns
+  prove a multi-cell result even when the ending row is dynamic. Bounds are
+  checked only for dimensions whose extent is known.
 
 Literal A1 ranges, two-literal `Range(start, end)` calls, literal `Cells(row,
-column)` calls, and simple `Set` Range aliases may be resolved. Arbitrary
-runtime expressions are not resolved into a guessed size.
+column)` calls, direct `Range(Cells(...), Cells(...))` calls, and simple `Set`
+Range aliases may be resolved. The receiver and direct arguments are read from
+Procedure IR; nested `Cells` calls are not mistaken for the outer receiver.
+Arbitrary runtime expressions are not resolved into a guessed size.
+
+Tracking begins only when an assignment's right-hand side is structurally a
+`Range.Value` / `Value2` read or an alias of an already tracked value. Ordinary
+array, scalar, string, or Variant assignments do not become Range-value facts.
+Reassigning an already tracked value from an unsupported expression remains
+uncertain so stale shape facts are not retained.
 
 ## Diagnostics and safe forms
 
