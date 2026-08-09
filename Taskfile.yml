@@ -148,18 +148,18 @@ tasks:
     desc: "Run selected corpus projects and print exact review ranges (usage: rtk proxy task corpus:review-details -- --rule VBA225 [--limit 20] [--project third_party/std-vba])"
     silent: true
     cmds:
-      - cmd: rtk proxy powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus review-details {{.CLI_ARGS}}
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus review-details {{.CLI_ARGS}}
         platforms: [windows]
-      - cmd: rtk proxy go run ./cmd/xlflow-static-analysis-corpus review-details {{.CLI_ARGS}}
+      - cmd: go run ./cmd/xlflow-static-analysis-corpus review-details {{.CLI_ARGS}}
         platforms: [linux, darwin]
 
   corpus:review-draft:
     desc: "Print schema-valid review JSONL without editing the ledger (invoke through rtk proxy task to preserve complete output)"
     silent: true
     cmds:
-      - cmd: rtk proxy powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus review-draft {{.CLI_ARGS}}
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' run ./cmd/xlflow-static-analysis-corpus review-draft {{.CLI_ARGS}}
         platforms: [windows]
-      - cmd: rtk proxy go run ./cmd/xlflow-static-analysis-corpus review-draft {{.CLI_ARGS}}
+      - cmd: go run ./cmd/xlflow-static-analysis-corpus review-draft {{.CLI_ARGS}}
         platforms: [linux, darwin]
 
   corpus:test-focused:

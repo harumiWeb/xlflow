@@ -61,6 +61,15 @@ func TestBuildReviewDraftsIsCanonicalAndRequiresHumanClassificationFields(t *tes
 	if _, err := BuildReviewDrafts([]ReviewDetail{detail}, ReviewFalsePositive, "reason", "", ""); err == nil {
 		t.Fatal("false-positive draft without regression evidence succeeded")
 	}
+	distinctRange := detail
+	distinctRange.EndLine = 4
+	drafts, err = BuildReviewDrafts([]ReviewDetail{detail, distinctRange}, ReviewTruePositive, "Reviewed against the rule contract.", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drafts) != 2 {
+		t.Fatalf("distinct ranges were grouped together: %#v", drafts)
+	}
 }
 
 func TestFilterReportAndSnapshotsKeepEmptySurfaces(t *testing.T) {

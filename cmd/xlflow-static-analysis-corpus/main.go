@@ -17,7 +17,13 @@ import (
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx := context.Background()
+	stop := func() {}
+	// Sync owns cancellable cleanup. Analysis commands keep the default
+	// interrupt behavior so Ctrl+C terminates their non-context-aware runners.
+	if len(os.Args) > 1 && os.Args[1] == "sync" {
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt)
+	}
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -132,7 +138,11 @@ func parseReviewOptions(name string, args []string, stderr io.Writer, draft bool
 }
 
 func runReviewDetails(args []string, stdout, stderr io.Writer, draft bool) error {
-	opts, err := parseReviewOptions(map[bool]string{false: "review-details", true: "review-draft"}[draft], args, stderr, draft)
+	name := "review-details"
+	if draft {
+		name = "review-draft"
+	}
+	opts, err := parseReviewOptions(name, args, stderr, draft)
 	if err != nil {
 		return err
 	}
@@ -183,7 +193,7 @@ func collectReviewDetails(opts reviewOptions) ([]corpus.ReviewDetail, error) {
 		snapshots = filterSnapshotProject(snapshots, opts.project)
 		reviews = corpus.FilterReviews(reviews, []string{opts.project}, "")
 		if len(snapshots) == 0 {
-			return nil, fmt.Errorf("unknown corpus project %q", opts.project)
+			return nil, fmt.Errorf("corpus snapshot project %q has no committed snapshots", opts.project)
 		}
 	}
 	candidates, err := corpus.FindSnapshotReviewCandidates(reviews, snapshots, opts.rule, opts.limit)

@@ -517,10 +517,12 @@ the analyzer's complete normalized ranges, use the developer-only detail task:
 ```powershell
 rtk proxy task corpus:review-details -- --rule VBA225 --limit 20
 rtk proxy task corpus:review-details -- --rule VBA225 --project third_party/std-vba
+rtk proxy task corpus:review-details -- --rule VBA225 --limit 20 --json
 ```
 
 `corpus:review-details` joins the start-only committed candidates to a fresh
-run and retains duplicate occurrences. It does not classify diagnostics or
+run and retains duplicate occurrences. Its default output is TSV; `--json`
+switches the output to indented JSON. It does not classify diagnostics or
 write the review ledger. After inspecting the source, a reviewer may request
 schema-valid, canonically sorted JSONL on stdout:
 
@@ -533,7 +535,7 @@ False-positive drafts additionally require exactly one of `--regression-test`
 or `--regression-exception`. The task never edits
 `reviews/diagnostics.jsonl`; the reviewer must inspect and merge its stdout.
 The outer `rtk proxy` is required for the detail and draft tasks because their
-TSV/JSONL stdout is an artifact and must not be summarized or truncated.
+TSV/JSON/JSONL stdout is an artifact and must not be summarized or truncated.
 
 During implementation, a read-only focused comparison can select a stable
 project ID, a rule ID, or both:

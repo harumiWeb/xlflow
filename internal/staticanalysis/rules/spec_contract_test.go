@@ -43,6 +43,10 @@ func TestSpecificationRuleContractsMatchRegistry(t *testing.T) {
 		for _, match := range specContractPattern.FindAllSubmatch(body, -1) {
 			markers++
 			var contract specRuleContract
+			if !json.Valid(match[1]) {
+				t.Errorf("%s: rule contract is not one complete JSON value", path)
+				continue
+			}
 			decoder := json.NewDecoder(bytes.NewReader(match[1]))
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&contract); err != nil {
