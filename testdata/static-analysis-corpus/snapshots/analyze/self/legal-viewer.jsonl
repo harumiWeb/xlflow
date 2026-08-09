@@ -43,12 +43,6 @@
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":677,"column":43}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":944,"column":20}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA206","severity":"warning","line":944,"column":55}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":981,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":982,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":985,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":987,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":997,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":998,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1000,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1000,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1001,"column":0}
@@ -57,7 +51,6 @@
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1004,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1005,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1007,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1012,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1016,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1016,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1017,"column":0}
@@ -66,10 +59,7 @@
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1020,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1021,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1023,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1086,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1087,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1087,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":1088,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1088,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA204","severity":"warning","line":1120,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/Main.bas","surface":"analyze","code":"VBA221","severity":"warning","line":400,"column":0}
@@ -414,7 +404,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA227","severity":"warning","line":185,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA227","severity":"warning","line":185,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA225","severity":"warning","line":267,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modTableFormatter.bas","surface":"analyze","code":"VBA209","severity":"warning","line":44,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modTableFormatter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":150,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modTableFormatter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":150,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modTableFormatter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":151,"column":0}

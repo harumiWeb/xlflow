@@ -88,17 +88,23 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison && !objectArrayDiagnosticsApplicable {
 		return nil
 	}
+	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
 	initial := arrayInitialState(variables)
 	if proc.Graph == nil {
-		return a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial)
+		findings := append([]Finding(nil), comparisonFindings...)
+		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial)...)
+		return uniqueArrayFindings(findings)
 	}
 
-	var findings []Finding
+	findings := append([]Finding(nil), comparisonFindings...)
 	seen := map[string]bool{}
+	for _, finding := range findings {
+		seen[arrayFindingKey(finding)] = true
+	}
 	walkArrayCFG(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
 		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line)
 		for _, finding := range issues {
-			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
+			key := arrayFindingKey(finding)
 			if !seen[key] {
 				seen[key] = true
 				findings = append(findings, finding)
@@ -108,6 +114,115 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	})
 	sortFindings(findings)
 	return findings
+}
+
+func uniqueArrayFindings(findings []Finding) []Finding {
+	seen := map[string]bool{}
+	out := make([]Finding, 0, len(findings))
+	for _, finding := range findings {
+		key := arrayFindingKey(finding)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, finding)
+	}
+	sortFindings(out)
+	return out
+}
+
+func arrayFindingKey(finding Finding) string {
+	return finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
+}
+
+// arrayComparisonFindings inspects the shared expression IR instead of the
+// CFG block text. A comparison's direct operand is the only position where
+// an array is being used as a scalar; an array nested inside a call, member
+// access, or indexed expression is a different semantic construct.
+func (a Analyzer) arrayComparisonFindings(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable) []Finding {
+	if !a.Config.Analyze.DetectObjectArrayComparison {
+		return nil
+	}
+	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
+	for _, expression := range proc.Expressions {
+		expressions[expression.ID] = expression
+	}
+	statements := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		statements[statement.ID] = statement
+	}
+
+	arrayNames := make([]string, 0, len(variables))
+	nonArrayNames := procedureIRNonArrayNames(proc)
+	for name, variable := range variables {
+		if variable.isArray && !nonArrayNames[name] {
+			arrayNames = append(arrayNames, name)
+		}
+	}
+	sort.Strings(arrayNames)
+
+	var findings []Finding
+	for _, comparison := range proc.Expressions {
+		if comparison.SyntaxKind != "comparison_expression" || comparison.Recovered {
+			continue
+		}
+		statement, ok := statements[comparison.StatementID]
+		if !ok || comparisonAssignmentCarrier(statement, comparison) {
+			continue
+		}
+		matched := map[string]bool{}
+		for _, childID := range comparison.Children {
+			child, ok := directComparisonOperand(expressions, childID)
+			if !ok || child.Recovered || child.Kind != procedureir.ExpressionIdentifier {
+				continue
+			}
+			name := strings.ToLower(cleanIdentifier(child.Text))
+			if variable, exists := variables[name]; exists && variable.isArray {
+				matched[name] = true
+			}
+		}
+		for _, name := range arrayNames {
+			if !matched[name] {
+				continue
+			}
+			variable := variables[name]
+			findings = append(findings, a.simpleFinding(file, proc, comparison.Range.StartLine, "VBA209", "warning", variable.name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself."))
+		}
+	}
+	sortFindings(findings)
+	return findings
+}
+
+func procedureIRNonArrayNames(proc sourceProcedure) map[string]bool {
+	names := map[string]bool{}
+	for _, declaration := range proc.Declarations {
+		if declaration.Recovered || declaration.Name == "" {
+			continue
+		}
+		isArray := declaration.IsArray
+		if declaration.Kind == "parameter" && strings.Contains(declaration.Type, "()") {
+			isArray = true
+		}
+		if !isArray {
+			names[strings.ToLower(declaration.Name)] = true
+		}
+	}
+	return names
+}
+
+func directComparisonOperand(expressions map[int]procedureir.Expression, id int) (procedureir.Expression, bool) {
+	child, ok := expressions[id]
+	for ok && child.Kind == procedureir.ExpressionParentheses && len(child.Children) == 1 {
+		child, ok = expressions[child.Children[0]]
+	}
+	return child, ok
+}
+
+func comparisonAssignmentCarrier(statement procedureir.Statement, expression procedureir.Expression) bool {
+	if expression.ParentID != 0 {
+		return false
+	}
+	return statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet
 }
 
 func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState) []Finding {
@@ -419,20 +534,6 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				if start, ok := integerLiteral(match[1]); ok && start != value.dimensions[0].lower.value {
 					add("VBA227", "The loop range assumes an inconsistent lower bound for "+variable.name+".", "The loop starts at a value different from the known lower bound of the array.", "Use LBound("+variable.name+") as the loop start.")
 				}
-			}
-		}
-	}
-
-	if a.Config.Analyze.DetectObjectArrayComparison {
-		names := make([]string, 0, len(variables))
-		for name := range variables {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			variable := variables[name]
-			if variable.isArray && identifierComparedAsOperand(strings.ToLower(text), name, proc) {
-				add("VBA209", variable.name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself.")
 			}
 		}
 	}

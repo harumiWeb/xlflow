@@ -553,11 +553,8 @@
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA229","severity":"error","line":92,"column":20}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA224","severity":"warning","line":96,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA224","severity":"warning","line":97,"column":0}
-{"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA209","severity":"warning","line":105,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA227","severity":"warning","line":105,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA227","severity":"warning","line":105,"column":0}
-{"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA209","severity":"warning","line":114,"column":0}
-{"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA209","severity":"warning","line":115,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA227","severity":"warning","line":115,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA227","severity":"warning","line":116,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA227","severity":"warning","line":117,"column":0}
