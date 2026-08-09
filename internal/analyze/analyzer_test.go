@@ -537,6 +537,56 @@ End Sub
 	}
 }
 
+func TestVBA219RequiresWorkbookTypedAcquisitionOwner(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "ResourceFactory.cls", `Option Explicit
+
+Public Function CustomReturn(ByVal path As String) As ResourceFactory
+  Set CustomReturn = Workbooks.Open(path)
+End Function
+
+Public Function WorkbookReturn(ByVal path As String) As Workbook
+  Set WorkbookReturn = Workbooks.Open(path)
+End Function
+
+Public Function QualifiedWorkbookReturn(ByVal path As String) As Excel.Workbook
+  Set QualifiedWorkbookReturn = Workbooks.Open(path)
+End Function
+
+Public Sub WorkbookLeak(ByVal path As String)
+  Dim wb As Workbook
+  Set wb = Workbooks.Open(path)
+End Sub
+
+Public Sub QualifiedWorkbookLeak(ByVal path As String)
+  Dim wb As Excel.Workbook
+  Set wb = Workbooks.Open(path)
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA219")
+	if len(got) != 2 || got[0].Procedure != "WorkbookLeak" || got[0].Line != 17 || got[1].Procedure != "QualifiedWorkbookLeak" || got[1].Line != 22 {
+		t.Fatalf("VBA219 findings = %+v, want only Workbook-typed local leaks", got)
+	}
+
+	source, err := os.ReadFile(filepath.Join(dir, "src", "classes", "ResourceFactory.cls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "classes", "ResourceFactory.cls"), config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA219"); len(got) != 2 || got[0].Procedure != "WorkbookLeak" || got[1].Procedure != "QualifiedWorkbookLeak" {
+		t.Fatalf("realtime VBA219 findings = %+v, want the same Workbook-typed local leaks", got)
+	}
+}
+
 func TestResourceLeakDoesNotTrustRecoveredRelease(t *testing.T) {
 	t.Parallel()
 	acquisition := procedureir.Statement{ID: 1, Kind: procedureir.StatementSet, Text: `Set wb = Workbooks.Open(path)`}
