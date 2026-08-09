@@ -11,6 +11,7 @@ import (
 )
 
 func TestAnalyzeProcedureContextReturnsCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -24,6 +25,7 @@ func TestAnalyzeProcedureContextReturnsCancellation(t *testing.T) {
 }
 
 func TestAnalyzeProcedureContextCancelsDuringLargeCFGTraversal(t *testing.T) {
+	t.Parallel()
 	const blockCount = 20000
 	blocks := make([]cfg.Block, 0, blockCount)
 	edges := make([]cfg.Edge, 0, blockCount-1)
@@ -58,6 +60,7 @@ func (c *cancelAfterChecksContext) Err() error {
 }
 
 func TestAnalyzeProcedureFindingsDoNotDependOnWorklistRank(t *testing.T) {
+	t.Parallel()
 	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit
 Sub Run(ByVal raw As String)
     Dim command As String
@@ -104,6 +107,7 @@ End Sub
 }
 
 func TestAnalyzeProcedureTracksParameterAliasAndConcatenation(t *testing.T) {
+	t.Parallel()
 	procedure := procedureir.ProcedureIR{
 		Symbol: procedureir.ProcedureSymbol{
 			Name:             "Run",
@@ -150,6 +154,7 @@ func hasPathKind(path []PathStep, kind string) bool {
 }
 
 func TestAnalyzeProcedureChoosesDeterministicRepresentativeAndUnknown(t *testing.T) {
+	t.Parallel()
 	procedure := procedureir.ProcedureIR{
 		Symbol: procedureir.ProcedureSymbol{Name: "Run", Kind: procedureir.ProcedureSub, DeclarationRange: lineRange(1), BodyRange: lineRange(6)},
 		Statements: []procedureir.Statement{
@@ -181,6 +186,7 @@ func TestAnalyzeProcedureChoosesDeterministicRepresentativeAndUnknown(t *testing
 }
 
 func TestJoinStateUsesConservativeStateAndShortestPath(t *testing.T) {
+	t.Parallel()
 	source := Source{Kind: SourceInputBox, Label: "InputBox", Range: lineRange(2)}
 	long := value{origins: map[string]provenance{sourceKey(source): {
 		source: source, state: StateTainted,
@@ -200,6 +206,7 @@ func TestJoinStateUsesConservativeStateAndShortestPath(t *testing.T) {
 }
 
 func TestRecoveredAssignmentDoesNotRestoreACleanValue(t *testing.T) {
+	t.Parallel()
 	procedure := procedureir.ProcedureIR{
 		Symbol: procedureir.ProcedureSymbol{Name: "Run", Kind: procedureir.ProcedureSub, DeclarationRange: lineRange(1), BodyRange: lineRange(5)},
 		Statements: []procedureir.Statement{
@@ -224,6 +231,7 @@ func TestRecoveredAssignmentDoesNotRestoreACleanValue(t *testing.T) {
 }
 
 func TestJoinStateDoesNotReportChangeForEquivalentMissingValue(t *testing.T) {
+	t.Parallel()
 	state := abstractState{vars: map[string]value{"raw": unknownStandaloneValue()}}
 	_, changed := joinState(state, abstractState{}, true)
 	if changed {
@@ -232,6 +240,7 @@ func TestJoinStateDoesNotReportChangeForEquivalentMissingValue(t *testing.T) {
 }
 
 func TestLooksDatabaseReceiverUsesIdentifierBoundaries(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		receiver string
 		full     string

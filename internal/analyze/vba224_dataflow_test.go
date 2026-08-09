@@ -12,6 +12,7 @@ import (
 )
 
 func TestAnalyzerRunResultContextReturnsCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -22,6 +23,7 @@ func TestAnalyzerRunResultContextReturnsCancellation(t *testing.T) {
 }
 
 func TestAnalyzerRunResultContextReturnsCancellationDuringFileLoop(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, module := range []string{"First", "Second", "Third"} {
 		writeModule(t, dir, module+".bas", `Attribute VB_Name = "`+module+`"
@@ -53,6 +55,7 @@ func (c *cancelAfterChecksContext) Err() error {
 }
 
 func TestVBA224DetectsDirectAliasAndConcatenation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -102,6 +105,7 @@ End Sub
 }
 
 func TestVBA224AcceptsConstantsAndExplicitURLSanitization(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -127,6 +131,7 @@ End Sub
 }
 
 func TestVBA224KeepsUnknownTransformationsAndHonorsDisable(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -158,6 +163,7 @@ End Sub
 }
 
 func TestVBA224AcceptsOnlyTheValidatedAllowlistBranch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Attribute VB_Name = "Main"
 Option Explicit
@@ -182,6 +188,7 @@ End Sub
 }
 
 func TestVBA224DetectsProcedureParameter(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -199,6 +206,7 @@ End Sub
 }
 
 func TestVBA224HonorsInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
@@ -217,6 +225,7 @@ End Sub
 }
 
 func TestVBA224AcceptsOnlyTheValidatedSelectCaseBranch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Attribute VB_Name = "Main"
 Option Explicit
@@ -240,6 +249,7 @@ End Sub
 }
 
 func TestVBA224RecognizesInitialSourceAndSinkCatalogMembers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Attribute VB_Name = "Main"
 Option Explicit
@@ -311,6 +321,7 @@ func sameStrings(got, want []string) bool {
 }
 
 func TestVBA224DoesNotMatchUnrelatedMembersOrUnreachableCode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit

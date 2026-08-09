@@ -105,6 +105,10 @@ The fast verification path currently runs non-COM test coverage via:
 go test ./...
 ```
 
+The repository's rules for safe intra-package test parallelization, corpus
+worker limits, and timing measurements are documented in
+[`docs/specs/go-test-parallelization.md`](docs/specs/go-test-parallelization.md).
+
 Run vulnerability and third-party licence inventory checks with:
 
 ```bash

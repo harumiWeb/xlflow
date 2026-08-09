@@ -31,6 +31,7 @@ func parseCharsProcedure(tb testing.TB) (procedureir.ProcedureIR, cfg.Graph) {
 }
 
 func TestAnalyzeProcedureParseCharsConvergesWithBoundedTransfers(t *testing.T) {
+	t.Parallel()
 	procedure, graph := parseCharsProcedure(t)
 	analyzer := newProcedureAnalyzer(procedure, graph, Options{})
 	result, stats := analyzer.runWithStats()
@@ -62,6 +63,7 @@ func BenchmarkAnalyzeProcedureParseChars(b *testing.B) {
 }
 
 func TestRankedWorklistHandlesDeepWideGraphDeterministically(t *testing.T) {
+	t.Parallel()
 	const (
 		depth = 8000
 		width = 4000

@@ -10,6 +10,7 @@ import (
 )
 
 func TestVBA226DetectsOneDimensionalRangeValueUse(t *testing.T) {
+	t.Parallel()
 	for _, member := range []string{"Value", "Value2"} {
 		t.Run(member, func(t *testing.T) {
 			dir := t.TempDir()
@@ -41,6 +42,7 @@ End Sub
 }
 
 func TestVBA226AcceptsSafeTwoDimensionalAccessAndPassThrough(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -61,6 +63,7 @@ End Sub
 }
 
 func TestVBA226DetectsSingleCellAndDynamicShapesButAcceptsGuardedArrayAccess(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal lastCell As String)
@@ -94,6 +97,7 @@ End Sub
 }
 
 func TestVBA226DetectsIncompatibleDestinationShape(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -114,6 +118,7 @@ End Sub
 }
 
 func TestVBA226DetectsHorizontalAndRectangularIndexOrder(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -150,6 +155,7 @@ End Sub
 }
 
 func TestVBA226RecognizesArrayGuardAndConservativeBranchMerge(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal useArray As Boolean)
@@ -193,6 +199,7 @@ End Sub
 }
 
 func TestVBA226ClearsArrayGuardAfterReassignment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal lastCell As String)
@@ -215,6 +222,7 @@ End Sub
 }
 
 func TestVBA226HonorsConfigurationAndInlineSuppression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
@@ -245,6 +253,7 @@ End Sub
 }
 
 func TestVBA226BatchAndRealtimeResultsMatch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := `Option Explicit
 Public Sub Run()
