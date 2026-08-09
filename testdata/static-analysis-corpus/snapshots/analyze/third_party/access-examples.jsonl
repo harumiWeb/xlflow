@@ -483,7 +483,6 @@
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA227","severity":"warning","line":119,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA214","severity":"warning","line":133,"column":0}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA214","severity":"warning","line":150,"column":0}
-{"project":"third_party/access-examples","file":"modOutlook.bas","surface":"analyze","code":"VBA202","severity":"warning","line":152,"column":0}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA206","severity":"warning","line":173,"column":26}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA204","severity":"warning","line":247,"column":0}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"analyze","code":"VBA204","severity":"warning","line":288,"column":0}

@@ -1,7 +1,6 @@
 {"project":"self/world-news","file":"src/modules/NewsApi.bas","surface":"analyze","code":"VBA224","severity":"warning","line":43,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsApi.bas","surface":"analyze","code":"VBA224","severity":"warning","line":45,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA225","severity":"warning","line":150,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":231,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":314,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}

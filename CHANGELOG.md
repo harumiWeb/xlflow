@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA202` false positives for `For Each` object iterators, module and
+  persistent `Static` object state, and type qualifiers that share a name with
+  a local object variable.
 - Fixed `VBA224` false positives where built-in, module, and local constant
   identifiers were treated as separate unknown inputs flowing to sensitive
   APIs.

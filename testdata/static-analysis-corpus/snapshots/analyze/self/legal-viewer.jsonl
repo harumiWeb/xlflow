@@ -380,7 +380,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modSettings.bas","surface":"analyze","code":"VBA225","severity":"warning","line":378,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSettings.bas","surface":"analyze","code":"VBA227","severity":"warning","line":443,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA225","severity":"warning","line":48,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA202","severity":"warning","line":81,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA203","severity":"warning","line":114,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA203","severity":"warning","line":129,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modSheetStore.bas","surface":"analyze","code":"VBA225","severity":"warning","line":143,"column":0}
@@ -418,8 +417,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modTableFormatter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":239,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modTableFormatter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":240,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modTempCache.bas","surface":"analyze","code":"VBA221","severity":"warning","line":7,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modUiState.bas","surface":"analyze","code":"VBA202","severity":"warning","line":43,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modUiState.bas","surface":"analyze","code":"VBA202","severity":"warning","line":55,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VB045","severity":"error","line":10,"column":5}
 {"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VB045","severity":"error","line":12,"column":5}
 {"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VBA205","severity":"warning","line":142,"column":0}
