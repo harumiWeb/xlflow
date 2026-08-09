@@ -56,11 +56,15 @@ explicit catalog match; `SaveAs` is the explicit workbook-save sink contract.
 
 ## Safety contracts and guards
 
-Literal and constant-only expressions are clean. The initial sink-specific
-contracts additionally recognize `EncodeURL` for HTTP URLs and a proven
-constant allowlist expressed by exact equality or `Select Case`. A guard only
-applies on the CFG branch where it is true; an unsafe alternative branch keeps
-the value unsafe after the join.
+Literal and constant-only expressions are clean. Constant identifiers include
+local and current-module `Const` declarations plus host constants resolved by
+the shared VBA type database, such as `vbCrLf` and `vbNullString`. A local or
+module variable with the same name takes precedence and remains subject to the
+conservative variable-state rules. The initial sink-specific contracts
+additionally recognize `EncodeURL` for HTTP URLs and a proven constant allowlist
+expressed by exact equality or `Select Case`. A guard only applies on the CFG
+branch where it is true; an unsafe alternative branch keeps the value unsafe
+after the join.
 
 `Trim`, `CStr`, generic `Replace`, `IsNumeric`, and `Len` do not clear taint.
 User-defined sanitizer functions and interprocedural validation summaries are

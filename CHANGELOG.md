@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA224` false positives where built-in, module, and local constant
+  identifiers were treated as separate unknown inputs flowing to sensitive
+  APIs.
 - Fixed `VBA226` false positives where ordinary arrays were treated as
   `Range.Value` results, nested `Cells` calls were mistaken for the outer
   `Range` receiver, or a dynamic range was provably multi-cell from one known

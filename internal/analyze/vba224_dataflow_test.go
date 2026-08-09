@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestAnalyzerRunResultContextReturnsCancellation(t *testing.T) {
@@ -127,6 +128,63 @@ End Sub
 	got := findingsByCode(findings, "VBA224")
 	if len(got) != 0 {
 		t.Fatalf("safe constant/EncodeURL findings = %+v", got)
+	}
+}
+
+func TestVBA224TreatsNamedConstantsAsClean(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+
+Private Const MODULE_SQL As String = "SELECT 1"
+
+Public Sub Run(raw As String)
+    Const LOCAL_SQL As String = "SELECT 2"
+    Dim sql As String
+
+    CurrentDb.Execute MODULE_SQL & vbCrLf & LOCAL_SQL
+
+    sql = MODULE_SQL & vbCrLf & raw
+    CurrentDb.Execute sql
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA224")
+	if len(got) != 1 || got[0].DataFlow == nil || got[0].DataFlow.Source.Label != "raw" {
+		t.Fatalf("named constant VBA224 findings = %+v, want only raw parameter flow", got)
+	}
+
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA224")
+	if len(got) != 1 || got[0].DataFlow == nil || got[0].DataFlow.Source.Label != "raw" {
+		t.Fatalf("realtime named constant VBA224 findings = %+v, want only raw parameter flow", got)
+	}
+}
+
+func TestVBA224ModuleBindingsShadowHostConstants(t *testing.T) {
+	t.Parallel()
+	db, err := vbadb.LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyzer := Analyzer{typeDB: db}
+	if !analyzer.isKnownDataFlowConstant(parsedFile{}, "vbCrLf") {
+		t.Fatal("vbCrLf was not resolved from the host constant database")
+	}
+	if analyzer.isKnownDataFlowConstant(parsedFile{DataFlowModuleBindings: map[string]bool{"vbcrlf": false}}, "vbCrLf") {
+		t.Fatal("module variable did not shadow the host constant")
+	}
+	if !analyzer.isKnownDataFlowConstant(parsedFile{DataFlowModuleBindings: map[string]bool{"fixedsql": true}}, "FixedSQL") {
+		t.Fatal("module Const was not resolved case-insensitively")
 	}
 }
 

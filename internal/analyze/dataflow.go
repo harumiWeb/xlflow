@@ -17,7 +17,10 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 	if !ok {
 		return nil, nil
 	}
-	result, err := vbadf.AnalyzeProcedureContext(ctx, ir, *proc.Graph, vbadf.Options{Conservative: true})
+	result, err := vbadf.AnalyzeProcedureContext(ctx, ir, *proc.Graph, vbadf.Options{
+		Conservative:    true,
+		IsKnownConstant: func(name string) bool { return a.isKnownDataFlowConstant(file, name) },
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +54,30 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 		findings = append(findings, finding)
 	}
 	return findings, nil
+}
+
+func dataFlowBindings(declarations []procedureir.Declaration) map[string]bool {
+	bindings := make(map[string]bool, len(declarations))
+	for _, declaration := range declarations {
+		name := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if name == "" {
+			continue
+		}
+		bindings[name] = declaration.Kind == "const"
+	}
+	return bindings
+}
+
+func (a Analyzer) isKnownDataFlowConstant(file parsedFile, name string) bool {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if constant, bound := file.DataFlowModuleBindings[key]; bound {
+		return constant
+	}
+	if a.typeDB == nil {
+		return false
+	}
+	_, ok := a.typeDB.ResolveConstant(name)
+	return ok
 }
 
 func procedureIRForSource(document procedureir.DocumentIR, proc sourceProcedure) (procedureir.ProcedureIR, bool) {

@@ -3,6 +3,7 @@ package dataflow
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -103,6 +104,37 @@ End Sub
 	reversed, _ := reversedAnalyzer.runWithStatsAndRank(reversedRank)
 	if !reflect.DeepEqual(reversed, normal) {
 		t.Fatalf("analysis depends on worklist rank:\nnormal   = %#v\nreversed = %#v", normal, reversed)
+	}
+}
+
+func TestAnalyzeProcedureTreatsKnownConstantsAsCleanAndRespectsLocalBindings(t *testing.T) {
+	t.Parallel()
+	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit
+Sub SafeRun()
+    Const LocalCommand As String = "fixed"
+    Shell LocalCommand & ExternalCommand
+End Sub
+
+Sub ShadowedRun()
+    Dim ExternalCommand As String
+    Shell ExternalCommand
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Options{IsKnownConstant: func(name string) bool {
+		return strings.EqualFold(name, "ExternalCommand")
+	}}
+
+	safe := AnalyzeProcedure(document.Procedures[0], cfg.Build(document.Procedures[0]), options)
+	if len(safe.Findings) != 0 {
+		t.Fatalf("constant findings = %+v, want none", safe.Findings)
+	}
+
+	shadowed := AnalyzeProcedure(document.Procedures[1], cfg.Build(document.Procedures[1]), options)
+	if len(shadowed.Findings) != 1 || shadowed.Findings[0].Source.Kind != SourceUnknown {
+		t.Fatalf("shadowed constant findings = %+v, want one unknown local flow", shadowed.Findings)
 	}
 }
 

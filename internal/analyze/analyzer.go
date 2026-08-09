@@ -204,6 +204,7 @@ type parsedFile struct {
 	Parsed                    *vbaast.ParsedDocument
 	IntelDocument             intel.Document
 	RangeValueModuleConstants map[string]int
+	DataFlowModuleBindings    map[string]bool
 }
 
 type sourceProcedure struct {
@@ -281,7 +282,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
 	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops
-	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety
+	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || a.Config.Analyze.DetectUntrustedDataFlow
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -332,6 +333,10 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		if a.Config.Analyze.DetectRangeValueArrayShape {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
+		var dataFlowModuleBindings map[string]bool
+		if a.Config.Analyze.DetectUntrustedDataFlow {
+			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
+		}
 		parsedFiles = append(parsedFiles, parsedFile{
 			Path:                      file,
 			Lines:                     lines,
@@ -343,6 +348,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			Parsed:                    parsed,
 			IntelDocument:             intelDocument,
 			RangeValueModuleConstants: rangeValueConstants,
+			DataFlowModuleBindings:    dataFlowModuleBindings,
 		})
 	}
 	defer closeParsedFiles(parsedFiles)
@@ -800,7 +806,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops) && typeDB == nil {
+	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectUntrustedDataFlow) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -817,6 +823,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 		if cfg.Analyze.DetectRangeValueArrayShape {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
+		var dataFlowModuleBindings map[string]bool
+		if cfg.Analyze.DetectUntrustedDataFlow {
+			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
+		}
 		file := parsedFile{
 			Path:                      view.Path,
 			Lines:                     lines,
@@ -826,6 +836,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 			IR:                        ir,
 			CFG:                       controlFlow,
 			RangeValueModuleConstants: rangeValueConstants,
+			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB}
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)
