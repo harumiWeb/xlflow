@@ -277,3 +277,126 @@ End Sub
 		t.Fatalf("batch/realtime VBA226 findings differ:\nbatch=%+v\nrealtime=%+v", want, got)
 	}
 }
+
+func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef source() As Byte, ByVal text As String)
+  Dim bytes() As Byte
+  Dim ansiBytes() As Byte
+  Dim index As Long
+  bytes = source
+  ReDim ansiBytes(UBound(bytes))
+  For index = LBound(bytes) To UBound(bytes)
+    ansiBytes(index) = bytes(index)
+  Next index
+  bytes = text
+  Debug.Print LBound(bytes), UBound(bytes), bytes(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA226"); len(got) != 0 {
+		t.Fatalf("ordinary arrays and string-to-byte assignments are not Range.Value origins: %+v", got)
+	}
+}
+
+func TestVBA226UsesDirectNestedCellsReceiverShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal ws As Worksheet, ByVal lastRow As Long)
+  Dim values As Variant
+  Dim nestedValues As Variant
+  Dim rowIndex As Long
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, 14)).Value2
+  If IsArray(values) Then
+    For rowIndex = 1 To UBound(values, 1)
+      Debug.Print values(rowIndex, 1)
+    Next rowIndex
+  End If
+  nestedValues = ws.Range(ws.Range("A1"), ws.Range("B2")).Value2
+  If IsArray(nestedValues) Then
+    Debug.Print nestedValues(1, 1)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA226"); len(got) != 0 {
+		t.Fatalf("outer Range receiver must not be classified as its first nested Cells call: %+v", got)
+	}
+}
+
+func TestVBA226PreservesStructuralRangeAliases(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal ws As Worksheet)
+  Dim sourceRange As Range
+  Dim values As Variant
+  Set sourceRange = ws.Range("A1:B2")
+  values = sourceRange.Value2
+  Debug.Print values(1, 1)
+  ws.Range("D1:E2").Value2 = values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA226"); len(got) != 0 {
+		t.Fatalf("structural Range aliases should preserve their exact shape: %+v", got)
+	}
+}
+
+func TestVBA226RecognizesProvablyMultiCellDynamicRange(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Const COLUMN_COUNT As Long = 14
+
+Public Sub SafeRun(ByVal ws As Worksheet, ByVal lastRow As Long)
+  Dim values As Variant
+  Dim rowIndex As Long
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, COLUMN_COUNT)).Value2
+  For rowIndex = 1 To UBound(values, 1)
+    Debug.Print values(rowIndex, 1)
+  Next rowIndex
+End Sub
+
+Public Sub UncertainRun(ByVal ws As Worksheet, ByVal lastRow As Long)
+  Dim values As Variant
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, 1)).Value2
+  Debug.Print values(1, 1)
+End Sub
+
+Public Sub ScalarRun(ByVal ws As Worksheet)
+  Dim value As Variant
+  value = ws.Range(ws.Cells(2, 1), ws.Cells(2, 1)).Value2
+  Debug.Print value(1, 1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA226")
+	if len(got) != 2 {
+		t.Fatalf("VBA226 findings = %+v, want uncertain and definite-scalar controls only", got)
+	}
+	for _, finding := range got {
+		if finding.Procedure != "UncertainRun" && finding.Procedure != "ScalarRun" {
+			t.Fatalf("provably multi-cell dynamic range should be accepted: %+v", got)
+		}
+	}
+}

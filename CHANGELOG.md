@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA226` false positives where ordinary arrays were treated as
+  `Range.Value` results, nested `Cells` calls were mistaken for the outer
+  `Range` receiver, or a dynamic range was provably multi-cell from one known
+  extent.
 - Fixed `VBA223` false positives for credential-adjacent URL/resource names,
   qualified assignment receivers, Digest header fragments, nested `With`
   statement rescans, and obvious self-describing test credentials.
