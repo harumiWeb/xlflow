@@ -155,6 +155,9 @@ End Function
 Public Function VariantEnumerator() As IEnumVARIANT
 End Function
 
+Public Function QualifiedVariantEnumerator() As stdole.IEnumVARIANT
+End Function
+
 Public Sub SetWindowStyle(ByVal style As VbAppWinStyle)
 End Sub
 
@@ -178,7 +181,7 @@ End Function
 func TestAPITypeIndexDoesNotDiscardTypeLibraryQualifier(t *testing.T) {
 	db := vbadb.New()
 	if err := db.MergeJSON([]byte(`{
-  "types": [{"name": "ADODB.DataTypeEnum", "kind": "enum", "aliases": ["DataTypeEnum"]}]
+  "types": [{"name": "DataTypeEnum", "library": "ADODB", "kind": "enum"}]
 }`)); err != nil {
 		t.Fatal(err)
 	}
