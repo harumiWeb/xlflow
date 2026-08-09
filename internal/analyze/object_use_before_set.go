@@ -23,13 +23,17 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 	for _, expression := range proc.Expressions {
 		expressions[expression.ID] = expression
 	}
+	statements := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		statements[statement.ID] = statement
+	}
 
 	reported := map[string]bool{}
 	var findings []Finding
 	for _, access := range proc.Accesses {
 		if access.Scope != procedureir.ScopeLocal ||
 			(access.Mode != procedureir.AccessRead && access.Mode != procedureir.AccessReadWrite) ||
-			!objectMemberReceiver(expressions, access.ExpressionID) {
+			!objectMemberReceiver(expressions, statements, access) {
 			continue
 		}
 		key := strings.ToLower(access.Name)
@@ -79,13 +83,17 @@ func explicitObjectSetBefore(statements []procedureir.Statement, name string, li
 	return false
 }
 
-func objectMemberReceiver(expressions map[int]procedureir.Expression, expressionID int) bool {
-	expression, ok := expressions[expressionID]
-	if !ok || expression.ParentID == 0 {
+func objectMemberReceiver(expressions map[int]procedureir.Expression, statements map[int]procedureir.Statement, access procedureir.VariableAccess) bool {
+	expression, ok := expressions[access.ExpressionID]
+	if !ok {
 		return false
 	}
-	parent, ok := expressions[expression.ParentID]
-	return ok && parent.Kind == procedureir.ExpressionMember
+	if parent, ok := expressions[expression.ParentID]; expression.ParentID != 0 && ok && parent.Kind == procedureir.ExpressionMember {
+		return true
+	}
+	statement, ok := statements[access.StatementID]
+	return ok && statement.Kind == procedureir.StatementWith &&
+		(statement.TargetID == access.ExpressionID || statement.ValueID == access.ExpressionID)
 }
 
 func objectDefinitelyAssigned(assigned []vbacfg.Variable, name string) bool {

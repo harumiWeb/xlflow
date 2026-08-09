@@ -54,6 +54,13 @@ Public Sub TypeQualifierIsNotObjectUse()
   Dim Outlook As Outlook.Application
   Dim session As Outlook.NameSpace
 End Sub
+
+Public Sub UninitializedWithReceiver()
+  Dim ws As Worksheet
+  With ws
+    Debug.Print .Name
+  End With
+End Sub
 `)
 
 	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
@@ -61,10 +68,10 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA202")
-	if len(got) != 2 {
-		t.Fatalf("VBA202 findings = %+v, want after-loop and Set-RHS findings", got)
+	if len(got) != 3 {
+		t.Fatalf("VBA202 findings = %+v, want after-loop, Set-RHS, and With-receiver findings", got)
 	}
-	wantLines := []int{16, 30}
+	wantLines := []int{16, 30, 49}
 	for index, line := range wantLines {
 		if got[index].Line != line {
 			t.Fatalf("VBA202 finding %d = %+v, want line %d", index, got[index], line)
