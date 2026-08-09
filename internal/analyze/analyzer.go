@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
@@ -2075,7 +2076,11 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 				}
 			}
 		}
+		// A fully known restore variable returned above. The remaining path can
+		// still carry merged per-origin coverage in an unknown snapshot.
 		for key, saved := range state.Saved {
+			// Loop backedges can revisit this assignment after its origin was saved;
+			// an origin must never be recorded as restoring itself.
 			if !saved.Unknown && !saved.Dirty[statement.ID] {
 				if saved.Restores == nil {
 					saved.Restores = map[int]bool{}
@@ -2111,7 +2116,12 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 
 func applicationStateDirectGuard(statement procedureir.Statement, byID map[int]procedureir.Statement) map[int]bool {
 	guards := map[int]bool{}
+	visited := map[int]bool{}
 	for parentID := statement.ParentID; parentID != 0; {
+		if visited[parentID] {
+			break
+		}
+		visited[parentID] = true
 		parent, ok := byID[parentID]
 		if !ok {
 			break
@@ -2161,7 +2171,7 @@ func applicationStateMatchingGuard(proc sourceProcedure, saved applicationStateS
 		for restoreID := range restoreGuards {
 			restoreGuard, restoreOK := byID[restoreID]
 			if !restoreOK || restoreGuard.Condition == nil ||
-				!strings.EqualFold(compactStatement(savedGuard.Condition.Text), compactStatement(restoreGuard.Condition.Text)) {
+				applicationStateGuardConditionKey(savedGuard.Condition.Text) != applicationStateGuardConditionKey(restoreGuard.Condition.Text) {
 				continue
 			}
 			if applicationStateGuardBindingsStable(proc, savedGuard, restoreGuard) {
@@ -2170,6 +2180,38 @@ func applicationStateMatchingGuard(proc sourceProcedure, saved applicationStateS
 		}
 	}
 	return false
+}
+
+func applicationStateGuardConditionKey(condition string) string {
+	runes := []rune(condition)
+	var key strings.Builder
+	inString := false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if inString {
+			key.WriteRune(r)
+			if r != '"' {
+				continue
+			}
+			if i+1 < len(runes) && runes[i+1] == '"' {
+				key.WriteRune(runes[i+1])
+				i++
+				continue
+			}
+			inString = false
+			continue
+		}
+		if r == '"' {
+			inString = true
+			key.WriteRune(r)
+			continue
+		}
+		if unicode.IsSpace(r) {
+			continue
+		}
+		key.WriteRune(unicode.ToLower(r))
+	}
+	return key.String()
 }
 
 func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, restoreGuard procedureir.Statement) bool {
@@ -2197,6 +2239,16 @@ func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, resto
 	for key := range savedBindings {
 		if !restoreBindings[key] {
 			return false
+		}
+	}
+	for key := range savedBindings {
+		if key.scope != procedureir.ScopeModule && key.scope != procedureir.ScopeProject {
+			continue
+		}
+		for _, call := range proc.Calls {
+			if call.StatementID > savedGuard.ID && call.StatementID < restoreGuard.ID {
+				return false
+			}
 		}
 	}
 	for _, access := range proc.Accesses {
