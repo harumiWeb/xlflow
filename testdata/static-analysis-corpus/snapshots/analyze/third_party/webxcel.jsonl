@@ -1,10 +1,8 @@
 {"project":"third_party/webxcel","file":"src/Classes/Assert.cls","surface":"analyze","code":"VBA206","severity":"warning","line":22,"column":24}
-{"project":"third_party/webxcel","file":"src/Classes/FastCGIParams.cls","surface":"analyze","code":"VBA202","severity":"warning","line":34,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA205","severity":"warning","line":17,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":31,"column":11}
 {"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":32,"column":11}
 {"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":53,"column":16}
-{"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA202","severity":"warning","line":64,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":94,"column":12}
 {"project":"third_party/webxcel","file":"src/Classes/FileSystemWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":95,"column":12}
 {"project":"third_party/webxcel","file":"src/Classes/HttpRequest.cls","surface":"analyze","code":"VBA206","severity":"warning","line":60,"column":5}
@@ -12,8 +10,6 @@
 {"project":"third_party/webxcel","file":"src/Classes/HttpRequest.cls","surface":"analyze","code":"VBA206","severity":"warning","line":82,"column":9}
 {"project":"third_party/webxcel","file":"src/Classes/HttpRequest.cls","surface":"analyze","code":"VBA206","severity":"warning","line":100,"column":5}
 {"project":"third_party/webxcel","file":"src/Classes/HttpServer.cls","surface":"analyze","code":"VBA205","severity":"warning","line":31,"column":0}
-{"project":"third_party/webxcel","file":"src/Classes/JsonArray.cls","surface":"analyze","code":"VBA202","severity":"warning","line":21,"column":0}
-{"project":"third_party/webxcel","file":"src/Classes/JsonArray.cls","surface":"analyze","code":"VBA202","severity":"warning","line":26,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":86,"column":33}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":91,"column":36}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":101,"column":29}
@@ -23,7 +19,6 @@
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":251,"column":28}
 {"project":"third_party/webxcel","file":"src/Classes/TcpClient.cls","surface":"analyze","code":"VBA206","severity":"warning","line":44,"column":18}
 {"project":"third_party/webxcel","file":"src/Classes/TcpServer.cls","surface":"analyze","code":"VBA206","severity":"warning","line":83,"column":14}
-{"project":"third_party/webxcel","file":"src/Classes/WebControllerCollection.cls","surface":"analyze","code":"VBA202","severity":"warning","line":19,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorkbookWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":54,"column":21}
 {"project":"third_party/webxcel","file":"src/Classes/WorkbookWebController.cls","surface":"analyze","code":"VBA201","severity":"warning","line":91,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":36,"column":0}

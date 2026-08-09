@@ -943,6 +943,17 @@ Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, and `VBA214` through `VBA227` are enabled by default. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types, ambiguous names, and unresolved external types are conservative warnings that include the type name; host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`.
 
+`VBA202` is a batch-only, procedure-local warning for a local object variable
+whose member is read before an obvious `Set` assignment. Parameters and `As
+New` locals begin initialized. `For Each` assigns its object iterator only on
+the loop-body edge, so member use in the body is accepted while use after a
+possibly empty loop is not proven initialized. Module variables and persistent
+`Static` locals have unknown entry state and are not treated as freshly
+uninitialized on every procedure invocation. Type references and member names
+are not object-variable reads. A preceding explicit `Set` or supported ByRef
+initializer retains the rule's compatibility exemption without attempting
+arbitrary branch-condition correlation.
+
 `VBA223` is also default-enabled, non-blocking, file-local, and realtime. It uses structural credential patterns, ignores obvious placeholders where possible, and redacts source snippets with `[REDACTED]`.
 
 `VBA226` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. Its legacy configuration key is `detect_range_value_array_shape`; add `VBA226` to `[analyze].disabled_rules` to disable it. Known single-cell values are scalars, known multi-cell values are two-dimensional arrays, and dynamic or merged shapes remain uncertain unless unsafe consumption or a statically proven mismatch is visible.

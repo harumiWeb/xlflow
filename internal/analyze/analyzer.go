@@ -235,6 +235,7 @@ type sourceDeclaration struct {
 	Array         bool
 	NewExpression bool
 	Parameter     bool
+	Static        bool
 }
 
 type withInfo struct {
@@ -1144,8 +1145,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
 	}
 	withStack := make([]withInfo, 0)
-	initialized := initialObjectState(decls)
-	maybeInitializedByCall := map[string]bool{}
+	maybeInitializedByCall := map[string]int{}
 	findAssignments := map[string]int{}
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
@@ -1214,12 +1214,6 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			findings = append(findings, a.legacyMemberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)...)
 		}
 		if setAssignRe.MatchString(stmt) {
-			if a.Config.Analyze.DetectObjectUseBeforeSet {
-				findings = append(findings, a.objectUseBeforeSetFindings(file, proc, lineNo, stmt, decls, initialized, maybeInitializedByCall)...)
-			}
-			if m := setAssignRe.FindStringSubmatch(stmt); len(m) > 0 {
-				initialized[strings.ToLower(m[1])] = true
-			}
 			if name, ok := rangeFindAssignment(stmt); ok {
 				findAssignments[strings.ToLower(name)] = lineNo
 			}
@@ -1245,17 +1239,17 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
 		}
-		if a.Config.Analyze.DetectObjectUseBeforeSet {
-			findings = append(findings, a.objectUseBeforeSetFindings(file, proc, lineNo, stmt, decls, initialized, maybeInitializedByCall)...)
-		}
 		if a.Config.Analyze.DetectDictionaryCollectionGuard {
 			findings = append(findings, a.dictionaryCollectionFindings(file, proc, lineNo, stmt, decls)...)
 		}
 		if a.Config.Analyze.DetectObjectArrayComparison {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
-		markCallInitialized(stmt, decls, ctx, maybeInitializedByCall)
+		markCallInitialized(stmt, lineNo, decls, ctx, maybeInitializedByCall)
 		_ = lower
+	}
+	if a.Config.Analyze.DetectObjectUseBeforeSet {
+		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, maybeInitializedByCall)...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	if a.Config.Analyze.DetectApplicationStateRestore {
@@ -1377,7 +1371,7 @@ func procedureDeclarations(lines []string, proc sourceProcedure) map[string]sour
 			if name == "" {
 				continue
 			}
-			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr}
+			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr, Static: strings.HasPrefix(lower, "static ")}
 		}
 	}
 	return decls
@@ -1465,16 +1459,6 @@ func declarationNameAndType(text string) (string, string, bool, bool) {
 	return cleanIdentifier(nameFields[0]), typ, array, newExpr
 }
 
-func initialObjectState(decls map[string]sourceDeclaration) map[string]bool {
-	out := map[string]bool{}
-	for key, decl := range decls {
-		if decl.Object {
-			out[key] = decl.Parameter || decl.NewExpression
-		}
-	}
-	return out
-}
-
 func (a Analyzer) legacyMemberMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration, withStack []withInfo) []Finding {
 	all := a.memberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)
 	filtered := all[:0]
@@ -1533,22 +1517,7 @@ func (a Analyzer) rangeFindFindings(file parsedFile, proc sourceProcedure, lineN
 	return findings
 }
 
-func (a Analyzer) objectUseBeforeSetFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration, initialized, maybeInitializedByCall map[string]bool) []Finding {
-	var findings []Finding
-	lower := strings.ToLower(stmt)
-	for key, decl := range decls {
-		if !decl.Object || initialized[key] || maybeInitializedByCall[key] || lineNo <= decl.Line {
-			continue
-		}
-		if strings.Contains(lower, key+".") {
-			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA202", "warning", decl.Name+" may be used before it is assigned with Set.", "Object variables are Nothing until assigned with Set; member access before initialization can raise runtime error 91.", "Assign `Set "+decl.Name+" = ...` before using members, or guard `If "+decl.Name+" Is Nothing Then`."))
-			initialized[key] = true
-		}
-	}
-	return findings
-}
-
-func markCallInitialized(stmt string, decls map[string]sourceDeclaration, ctx analysisContext, maybeInitialized map[string]bool) {
+func markCallInitialized(stmt string, line int, decls map[string]sourceDeclaration, ctx analysisContext, maybeInitialized map[string]int) {
 	if strings.Contains(stmt, "=") {
 		return
 	}
@@ -1570,7 +1539,9 @@ func markCallInitialized(stmt string, decls map[string]sourceDeclaration, ctx an
 		}
 		key := strings.ToLower(cleanIdentifier(arg))
 		if decl, ok := decls[key]; ok && decl.Object {
-			maybeInitialized[key] = true
+			if previous := maybeInitialized[key]; previous == 0 || line < previous {
+				maybeInitialized[key] = line
+			}
 		}
 	}
 }
