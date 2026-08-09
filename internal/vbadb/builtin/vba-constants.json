@@ -583,6 +583,54 @@
       "type": "Long",
       "value": "64",
       "enum_group": "VbFileAttribute"
+    },
+    {
+      "name": "vbHide",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "VbAppWinStyle"
+    },
+    {
+      "name": "vbNormalFocus",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "VbAppWinStyle"
+    },
+    {
+      "name": "vbMinimizedFocus",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "VbAppWinStyle"
+    },
+    {
+      "name": "vbMaximizedFocus",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "3",
+      "enum_group": "VbAppWinStyle"
+    },
+    {
+      "name": "vbNormalNoFocus",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "4",
+      "enum_group": "VbAppWinStyle"
+    },
+    {
+      "name": "vbMinimizedNoFocus",
+      "library": "VBA",
+      "kind": "constant",
+      "type": "Long",
+      "value": "6",
+      "enum_group": "VbAppWinStyle"
     }
   ]
 }

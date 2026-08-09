@@ -30,6 +30,12 @@ type is reported as inaccessible, while multiple remaining candidates are
 reported as ambiguous. Intrinsic VBA types, `Object`, `Variant`, and types
 resolved from the embedded built-in or generated TypeLib database are allowed.
 
+The embedded baseline includes the VBA `VbAppWinStyle` enum and the standard
+OLE Automation interfaces `IUnknown` and `IEnumVARIANT`, including their
+`stdole`-qualified spellings. A qualified external type may use a short-name
+database entry only when that entry belongs to the same library; an unrelated
+type such as `ADODB.DataTypeEnum` must not satisfy `DAO.DataTypeEnum`.
+
 An external type absent from both the project index and the available TypeLib
 database is reported conservatively as unresolved. This rule does not attempt
 to prove the complete VBE reference configuration or whether an optional

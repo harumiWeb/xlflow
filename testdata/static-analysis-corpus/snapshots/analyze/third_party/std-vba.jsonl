@@ -938,7 +938,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"analyze","code":"VB045","severity":"error","line":930,"column":11}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"analyze","code":"VB045","severity":"error","line":945,"column":11}
 {"project":"third_party/std-vba","file":"src/WIP/stdEndpoint.cls","surface":"analyze","code":"VBA202","severity":"warning","line":51,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"analyze","code":"VBA222","severity":"warning","line":46,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"analyze","code":"VBA206","severity":"warning","line":83,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"analyze","code":"VBA206","severity":"warning","line":103,"column":15}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"analyze","code":"VBA206","severity":"warning","line":110,"column":15}
@@ -1414,8 +1413,6 @@
 {"project":"third_party/std-vba","file":"src/stdArray.cls","surface":"analyze","code":"VBA206","severity":"warning","line":745,"column":3}
 {"project":"third_party/std-vba","file":"src/stdArray.cls","surface":"analyze","code":"VB045","severity":"error","line":934,"column":36}
 {"project":"third_party/std-vba","file":"src/stdCOM.cls","surface":"analyze","code":"VB045","severity":"error","line":514,"column":3}
-{"project":"third_party/std-vba","file":"src/stdCOM.cls","surface":"analyze","code":"VBA222","severity":"warning","line":577,"column":0}
-{"project":"third_party/std-vba","file":"src/stdCOM.cls","surface":"analyze","code":"VBA222","severity":"warning","line":731,"column":0}
 {"project":"third_party/std-vba","file":"src/stdCOM.cls","surface":"analyze","code":"VB045","severity":"error","line":805,"column":3}
 {"project":"third_party/std-vba","file":"src/stdCOM.cls","surface":"analyze","code":"VB045","severity":"error","line":810,"column":3}
 {"project":"third_party/std-vba","file":"src/stdCOM.cls","surface":"analyze","code":"VBA227","severity":"warning","line":923,"column":0}

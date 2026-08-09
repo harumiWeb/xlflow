@@ -18,9 +18,18 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if _, ok := db.ResolveType("Workbook"); !ok {
 		t.Fatal("Workbook alias did not resolve")
 	}
-	for _, enumName := range []string{"VbVarType", "XlCalculation"} {
+	for _, enumName := range []string{"VbAppWinStyle", "VbVarType", "XlCalculation"} {
 		if typ, ok := db.ResolveType(enumName); !ok || typ.Kind != "enum" {
 			t.Fatalf("ResolveType(%s) = %+v, %v; want embedded enum type", enumName, typ, ok)
+		}
+	}
+	for name, want := range map[string]string{
+		"IUnknown":        "stdole.IUnknown",
+		"stdole.IUnknown": "stdole.IUnknown",
+		"IEnumVARIANT":    "stdole.IEnumVARIANT",
+	} {
+		if typ, ok := db.ResolveType(name); !ok || typ.Name != want {
+			t.Fatalf("ResolveType(%s) = %+v, %v; want %s", name, typ, ok, want)
 		}
 	}
 	if typ, ok := db.ResolveProgID("Scripting.Dictionary"); !ok || typ.Name != "Scripting.Dictionary" {
@@ -329,7 +338,9 @@ func TestBuiltinVBAStandardLibraryCoverage(t *testing.T) {
 		"vbCurrency", "vbDate", "vbString", "vbObject", "vbError", "vbBoolean",
 		"vbVariant", "vbDataObject", "vbDecimal", "vbByte", "vbLongLong",
 		"vbUserDefinedType", "vbArray", "vbNormal", "vbReadOnly", "vbHidden",
-		"vbSystem", "vbVolume", "vbDirectory", "vbArchive", "vbAlias",
+		"vbSystem", "vbVolume", "vbDirectory", "vbArchive", "vbAlias", "vbHide",
+		"vbNormalFocus", "vbMinimizedFocus", "vbMaximizedFocus", "vbNormalNoFocus",
+		"vbMinimizedNoFocus",
 	}
 	for _, name := range expectedConstants {
 		if _, ok := db.ResolveConstant(name); !ok {

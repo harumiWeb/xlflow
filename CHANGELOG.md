@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA222` false positives for standard OLE Automation interfaces and
+  the VBA `VbAppWinStyle` enum, and stopped qualified external types from
+  resolving through an unrelated library's same-named type.
 - Fixed `VBA228` false positives for literal ByRef temporaries, array-valued
   Function return slots, local value symbols that shadow same-named project
   procedures, and module-qualified project types. Literal temporaries remain advisory

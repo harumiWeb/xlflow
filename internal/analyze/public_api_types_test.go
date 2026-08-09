@@ -11,6 +11,7 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
 func TestVBA222ChecksPublicProceduresPropertiesEventsAndProjectTypes(t *testing.T) {
@@ -138,6 +139,58 @@ End Sub
 	got := findingsByCode(findings, "VBA222")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "ambiguous") || !strings.Contains(got[0].Message, "Duplicate") {
 		t.Fatalf("ambiguous project type finding = %+v", got)
+	}
+}
+
+func TestVBA222AllowsBuiltinVBAAndOLEAutomationTypes(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(typedb.EnvDir, filepath.Join(dir, "missing-typelib-db"))
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Enumerator() As IUnknown
+End Function
+
+Public Function QualifiedEnumerator() As stdole.IUnknown
+End Function
+
+Public Function VariantEnumerator() As IEnumVARIANT
+End Function
+
+Public Function QualifiedVariantEnumerator() As stdole.IEnumVARIANT
+End Function
+
+Public Sub SetWindowStyle(ByVal style As VbAppWinStyle)
+End Sub
+
+Public Sub SetQualifiedWindowStyle(ByVal style As VBA.VbAppWinStyle)
+End Sub
+
+Public Function Missing() As Acme.Widget
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA222")
+	if len(got) != 1 || got[0].Procedure != "Missing" || !strings.Contains(got[0].Message, "Acme.Widget") {
+		t.Fatalf("VBA222 findings = %+v, want only unresolved Acme.Widget", got)
+	}
+}
+
+func TestAPITypeIndexDoesNotDiscardTypeLibraryQualifier(t *testing.T) {
+	db := vbadb.New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{"name": "DataTypeEnum", "library": "ADODB", "kind": "enum"}]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	index := &apiTypeIndex{byName: map[string][]apiTypeInfo{}, db: db}
+	if got := index.resolve("ADODB.DataTypeEnum", "Main"); got != apiTypeAllowed {
+		t.Fatalf("ADODB.DataTypeEnum status = %v, want allowed", got)
+	}
+	if got := index.resolve("DAO.DataTypeEnum", "Main"); got != apiTypeUnresolved {
+		t.Fatalf("DAO.DataTypeEnum status = %v, want unresolved", got)
 	}
 }
 
