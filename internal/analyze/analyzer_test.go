@@ -3751,7 +3751,9 @@ End Type
 Private buckets() As Bucket
 
 Public Sub Grow(ByVal index As Long)
+  ReDim buckets(0 To 1, 0 To 1)
   ReDim Preserve buckets(index).Elements(0 To 1)
+  ReDim Preserve buckets(0 To 1, 0 To 2)
 End Sub
 `)
 
@@ -3761,6 +3763,9 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA208"); len(got) != 0 {
 		t.Fatalf("a member array must not be attributed to its receiver array: %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("nested member ReDim must preserve the receiver lifecycle result: %+v", got)
 	}
 }
 

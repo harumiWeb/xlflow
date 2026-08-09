@@ -494,7 +494,13 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				add("VBA208", "ReDim Preserve may change a non-final or unknown array dimension.", "VBA can only preserve an array while changing its final dimension, and that cannot be proven when the prior shape is unknown.", "Only change the final dimension, or copy values into a newly sized array explicitly.")
 			}
 			if known && variable.isArray && !variable.fixed {
-				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, preserveShape: dimensions, origin: arrayOriginLocal}
+				next := arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, origin: arrayOriginLocal}
+				if direct {
+					next.preserveShape = dimensions
+				} else {
+					next.preserveShape = append([]arrayDimension(nil), old.preserveShape...)
+				}
+				state[name] = next
 			}
 		}
 		return state, findings
