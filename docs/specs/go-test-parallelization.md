@@ -50,8 +50,8 @@ using Go 1.26.5, `-count=1`, and the repository's
 | real-world corpus verify-only | 171.054 s | 86.584 s median of 2 |
 
 Repeat timing measurements with the same toolchain and machine before drawing
-performance conclusions. Use `go test -json` to retain package/test timing, and
-run the corpus through `task corpus:test` so the opt-in environment and
+performance conclusions. Use `-json` test output to retain package/test timing,
+and run the corpus through `rtk task corpus:test` so the opt-in environment and
 verify-only snapshot mode are explicit.
 
 ## Verification commands
@@ -59,10 +59,10 @@ verify-only snapshot mode are explicit.
 On Windows, invoke Go through `scripts/dev/go.ps1`:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -count=1 -json ./...
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./...
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -shuffle=on -count=10 ./...
-task corpus:test
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -count=1 -json ./...
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./...
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -shuffle=on -count=10 ./...
+rtk task corpus:test
 ```
 
 The opt-in corpus suite should also be exercised with race detection and
