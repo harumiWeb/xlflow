@@ -61,6 +61,8 @@ Public Function ParseJson(ByVal JsonString As String, Optional ByRef Strict As B
 Start:
 10  Debug.Print JsonString
 End Function
+Public Function ReadBytes() As Byte()
+End Function
 Public Sub UseValues(ByVal values() As Variant, ByRef target As Object)
 End Sub
 Dim implicitValues()
@@ -100,6 +102,10 @@ End Sub
 	}
 	if parseJson.Parameters[1].Default == nil || *parseJson.Parameters[1].Default != "False" {
 		t.Fatalf("unexpected optional default: %+v", parseJson.Parameters[1].Default)
+	}
+	readBytes := assertSymbol(t, file.Symbols, "ReadBytes", "function")
+	if readBytes.ReturnType != "Byte" || !readBytes.IsArray {
+		t.Fatalf("ReadBytes = %+v, want Byte array return", readBytes)
 	}
 	assertNoSymbol(t, file.Symbols, "Hidden")
 	assertNoSymbol(t, file.Symbols, "Start")

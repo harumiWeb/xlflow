@@ -201,7 +201,7 @@
 {"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA222","severity":"warning","line":22,"column":0}
 {"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA214","severity":"warning","line":30,"column":0}
 {"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA206","severity":"warning","line":71,"column":14}
-{"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA228","severity":"error","line":112,"column":9}
+{"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA206","severity":"warning","line":112,"column":9}
 {"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA206","severity":"warning","line":137,"column":20}
 {"project":"third_party/vba-web","file":"specs/Specs_WebAsyncWrapper.bas","surface":"analyze","code":"VBA206","severity":"warning","line":137,"column":43}
 {"project":"third_party/vba-web","file":"specs/Specs_WebClient.bas","surface":"analyze","code":"VBA222","severity":"warning","line":12,"column":0}
@@ -625,7 +625,7 @@
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":674,"column":17}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":675,"column":17}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":675,"column":17}
-{"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA228","severity":"error","line":682,"column":21}
+{"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":682,"column":21}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":693,"column":17}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":693,"column":41}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":694,"column":17}

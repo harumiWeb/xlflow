@@ -740,6 +740,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `skipped_legacy_entries`
 - `skipped_paths`
 - `skipped_reasons`
+- `sockaddr_in`
 - `source_applied`
 - `source_artifacts`
 - `source_bytes`

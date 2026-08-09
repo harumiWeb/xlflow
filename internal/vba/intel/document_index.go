@@ -69,6 +69,7 @@ func buildDocumentIndex(source string, lines []string, procedures []ProcedureInf
 				Name:       sym.Name,
 				Kind:       "function_return",
 				ReturnType: sym.ReturnType,
+				IsArray:    sym.IsArray,
 				File:       sym.File,
 				Parent:     sym.Name,
 				Range:      sym.Range,

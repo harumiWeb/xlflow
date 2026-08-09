@@ -196,6 +196,7 @@ type Signature struct {
 	Documentation      string
 	DocumentationModel doccomments.SymbolDocumentation
 	projectLocal       bool
+	declaringModule    string
 	receiverType       string
 	memberName         string
 }
@@ -1618,7 +1619,7 @@ func signatureFromSymbol(sym Symbol) Signature {
 		label = symbolSignatureLabel(sym)
 	}
 	params = parametersWithDocumentation(params, sym.Documentation)
-	return Signature{Label: label, Parameters: params, Documentation: doccomments.Markdown(sym.Documentation, ""), DocumentationModel: sym.Documentation, projectLocal: true}
+	return Signature{Label: label, Parameters: params, Documentation: doccomments.Markdown(sym.Documentation, ""), DocumentationModel: sym.Documentation, projectLocal: true, declaringModule: sym.Module}
 }
 
 func (a Analyzer) argumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {

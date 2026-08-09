@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA228` false positives for literal ByRef temporaries, array-valued
+  Function return slots, local value symbols that shadow same-named project
+  procedures, and module-qualified project types. Literal temporaries remain advisory
+  `VBA206` warnings instead of blocking source preflight.
 - Fixed `VBA229` false positives for project UserForm/document types and
   embedded VBA/Excel enum types, and prevented a missing or incomplete generated
   TypeLib manifest from turning an unsupported type-name absence claim into a

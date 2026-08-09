@@ -37,6 +37,10 @@
       "path": "cases/byref-parenthesized-variable/case.json"
     },
     { "id": "byref-bare-variable", "path": "cases/byref-bare-variable/case.json" },
+    {
+      "id": "byref-literal-temporaries",
+      "path": "cases/byref-literal-temporaries/case.json"
+    },
     { "id": "unknown-as-type", "path": "cases/unknown-as-type/case.json" },
     { "id": "known-as-type", "path": "cases/known-as-type/case.json" },
     { "id": "known-enum-as-type", "path": "cases/known-enum-as-type/case.json" },
