@@ -22,8 +22,9 @@ const (
 )
 
 type arrayBound struct {
-	known bool
-	value int
+	known      bool
+	value      int
+	expression string
 }
 
 type arrayDimension struct {
@@ -51,10 +52,11 @@ type arrayVariable struct {
 }
 
 type arrayValue struct {
-	kind       arrayAllocation
-	knownArray bool
-	dimensions []arrayDimension
-	origin     arrayOrigin
+	kind          arrayAllocation
+	knownArray    bool
+	dimensions    []arrayDimension
+	preserveShape []arrayDimension
+	origin        arrayOrigin
 }
 
 type arrayFlowState map[string]arrayValue
@@ -64,13 +66,19 @@ type arrayUse struct {
 	args []string
 }
 
+type directArrayRedimClause struct {
+	name       string
+	dimensions string
+}
+
 var (
-	arrayRedimRe       = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
-	arrayRedimClauseRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
-	arrayEraseRe       = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
-	arrayEraseNameRe   = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
-	arrayBoundCallRe   = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
-	arrayForBoundRe    = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayRedimRe           = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
+	arrayRedimClauseRe     = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
+	arrayRedimTypeSuffixRe = regexp.MustCompile(`(?i)^as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?$`)
+	arrayEraseRe           = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
+	arrayEraseNameRe       = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
+	arrayBoundCallRe       = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
+	arrayForBoundRe        = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
 )
 
 func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
@@ -338,7 +346,13 @@ func meetArrayState(left, right arrayFlowState) arrayFlowState {
 }
 
 func meetArrayValue(left, right arrayValue) arrayValue {
-	out := arrayValue{kind: left.kind, knownArray: left.knownArray, origin: left.origin, dimensions: append([]arrayDimension(nil), left.dimensions...)}
+	out := arrayValue{
+		kind:          left.kind,
+		knownArray:    left.knownArray,
+		origin:        left.origin,
+		dimensions:    append([]arrayDimension(nil), left.dimensions...),
+		preserveShape: append([]arrayDimension(nil), left.preserveShape...),
+	}
 	if left.kind != right.kind {
 		out.kind = arrayUnknown
 	}
@@ -351,13 +365,36 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	if !arrayDimensionsEqual(left.dimensions, right.dimensions) {
 		out.dimensions = nil
 	}
+	out.preserveShape = meetArrayDimensions(left.preserveShape, right.preserveShape)
 	return out
+}
+
+func meetArrayDimensions(left, right []arrayDimension) []arrayDimension {
+	if len(left) == 0 || len(left) != len(right) {
+		return nil
+	}
+	out := make([]arrayDimension, len(left))
+	for i := range left {
+		out[i] = arrayDimension{
+			lower: meetArrayBound(left[i].lower, right[i].lower),
+			upper: meetArrayBound(left[i].upper, right[i].upper),
+		}
+	}
+	return out
+}
+
+func meetArrayBound(left, right arrayBound) arrayBound {
+	if arrayBoundsEquivalent(left, right) {
+		return left
+	}
+	return arrayBound{}
 }
 
 func cloneArrayState(state arrayFlowState) arrayFlowState {
 	out := arrayFlowState{}
 	for name, value := range state {
 		value.dimensions = append([]arrayDimension(nil), value.dimensions...)
+		value.preserveShape = append([]arrayDimension(nil), value.preserveShape...)
 		out[name] = value
 	}
 	return out
@@ -369,7 +406,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.origin != r.origin || !arrayDimensionsEqual(l.dimensions, r.dimensions) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.origin != r.origin || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}
@@ -395,7 +432,12 @@ func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 			state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
 			continue
 		}
-		value := arrayValue{knownArray: variable.isArray, origin: arrayOriginLocal, dimensions: append([]arrayDimension(nil), variable.dimensions...)}
+		value := arrayValue{
+			knownArray:    variable.isArray,
+			origin:        arrayOriginLocal,
+			dimensions:    append([]arrayDimension(nil), variable.dimensions...),
+			preserveShape: append([]arrayDimension(nil), variable.dimensions...),
+		}
 		if variable.parameter {
 			value.kind = arrayUnknown
 		} else if variable.fixed {
@@ -430,21 +472,29 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	}
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
 		for _, clause := range splitArgs(match[2]) {
-			clauseMatch := arrayRedimClauseRe.FindStringSubmatch(clause)
-			if len(clauseMatch) == 0 {
-				continue
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if !direct {
+				// Keep the existing receiver-array state transition for nested
+				// member ReDim statements. VBA208 must not attribute the member
+				// shape to that receiver, but changing the shared VBA227 state is
+				// a separate analyzer contract.
+				legacy := arrayRedimClauseRe.FindStringSubmatch(clause)
+				if len(legacy) == 0 {
+					continue
+				}
+				redim = directArrayRedimClause{name: legacy[1], dimensions: legacy[2]}
 			}
-			name := strings.ToLower(clauseMatch[1])
+			name := strings.ToLower(redim.name)
 			variable, known := variables[name]
 			old := state[name]
-			dimensions := parseArrayDimensions(clauseMatch[2], 0)
+			dimensions := parseArrayDimensions(redim.dimensions, 0)
 			if !known || !variable.isArray || variable.fixed {
-				add("VBA227", clauseMatch[1]+" is not a dynamic array and cannot be resized with ReDim.", "ReDim requires a dynamic array; fixed-size arrays and scalar values have no resizable allocation state.", "Declare the value as a dynamic array, or remove ReDim and use its declared bounds.")
-			} else if match[1] != "" && (len(old.dimensions) == 0 || !preserveDimensionsSafe(old.dimensions, dimensions)) {
+				add("VBA227", redim.name+" is not a dynamic array and cannot be resized with ReDim.", "ReDim requires a dynamic array; fixed-size arrays and scalar values have no resizable allocation state.", "Declare the value as a dynamic array, or remove ReDim and use its declared bounds.")
+			} else if direct && match[1] != "" && !preserveDimensionsSafe(old.preserveShape, dimensions) {
 				add("VBA208", "ReDim Preserve may change a non-final or unknown array dimension.", "VBA can only preserve an array while changing its final dimension, and that cannot be proven when the prior shape is unknown.", "Only change the final dimension, or copy values into a newly sized array explicitly.")
 			}
 			if known && variable.isArray && !variable.fixed {
-				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, origin: arrayOriginLocal}
+				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, preserveShape: dimensions, origin: arrayOriginLocal}
 			}
 		}
 		return state, findings
@@ -457,7 +507,13 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 			if variable, ok := variables[name]; ok {
 				if variable.fixed {
-					state[name] = arrayValue{kind: arrayAllocated, knownArray: true, dimensions: append([]arrayDimension(nil), variable.dimensions...), origin: arrayOriginLocal}
+					state[name] = arrayValue{
+						kind:          arrayAllocated,
+						knownArray:    true,
+						dimensions:    append([]arrayDimension(nil), variable.dimensions...),
+						preserveShape: append([]arrayDimension(nil), variable.dimensions...),
+						origin:        arrayOriginLocal,
+					}
 				} else if variable.isArray {
 					state[name] = arrayValue{kind: arrayUnallocated, knownArray: true, origin: arrayOriginLocal}
 				} else if variable.isVariant {
@@ -646,14 +702,14 @@ func parseArrayDimensions(text string, base int) []arrayDimension {
 			continue
 		}
 		upper := integerBound(part)
-		dimensions = append(dimensions, arrayDimension{lower: arrayBound{known: true, value: base}, upper: upper})
+		dimensions = append(dimensions, arrayDimension{lower: integerBound(strconv.Itoa(base)), upper: upper})
 	}
 	return dimensions
 }
 
 func integerBound(text string) arrayBound {
 	value, ok := integerLiteral(text)
-	return arrayBound{known: ok, value: value}
+	return arrayBound{known: ok, value: value, expression: canonicalArrayBoundExpression(text)}
 }
 
 func integerLiteral(text string) (int, bool) {
@@ -662,15 +718,84 @@ func integerLiteral(text string) (int, bool) {
 }
 
 func preserveDimensionsSafe(previous, next []arrayDimension) bool {
+	if len(next) == 1 {
+		return len(previous) <= 1
+	}
 	if len(previous) != len(next) || len(previous) == 0 {
 		return false
 	}
 	for i := 0; i < len(previous)-1; i++ {
-		if !previous[i].lower.known || !previous[i].upper.known || !next[i].lower.known || !next[i].upper.known || previous[i] != next[i] {
+		if !arrayBoundsEquivalent(previous[i].lower, next[i].lower) || !arrayBoundsEquivalent(previous[i].upper, next[i].upper) {
 			return false
 		}
 	}
 	return true
+}
+
+func arrayBoundsEquivalent(left, right arrayBound) bool {
+	if left.known && right.known {
+		return left.value == right.value
+	}
+	return left.expression != "" && left.expression == right.expression
+}
+
+func canonicalArrayBoundExpression(text string) string {
+	var out strings.Builder
+	inString := false
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		if ch == '"' {
+			out.WriteByte(ch)
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				out.WriteByte(text[i+1])
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if !inString {
+			if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' {
+				continue
+			}
+			if ch >= 'A' && ch <= 'Z' {
+				ch += 'a' - 'A'
+			}
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
+}
+
+func parseDirectArrayRedimClause(clause string) (directArrayRedimClause, bool) {
+	clause = strings.TrimSpace(clause)
+	if clause == "" || !isIdentifierStart(clause[0]) {
+		return directArrayRedimClause{}, false
+	}
+	endName := 1
+	for endName < len(clause) && isIdentifierPart(clause[endName]) {
+		endName++
+	}
+	open := endName
+	for open < len(clause) && (clause[open] == ' ' || clause[open] == '\t') {
+		open++
+	}
+	if open >= len(clause) || clause[open] != '(' {
+		return directArrayRedimClause{}, false
+	}
+	close := matchingParen(clause, open)
+	if close < 0 {
+		return directArrayRedimClause{}, false
+	}
+	remainder := strings.TrimSpace(clause[close+1:])
+	if remainder != "" && !arrayRedimTypeSuffixRe.MatchString(remainder) {
+		return directArrayRedimClause{}, false
+	}
+	dimensions := strings.TrimSpace(clause[open+1 : close])
+	if dimensions == "" {
+		return directArrayRedimClause{}, false
+	}
+	return directArrayRedimClause{name: clause[:endName], dimensions: dimensions}, true
 }
 
 func arrayIndexedUses(text string, variables map[string]arrayVariable) []arrayUse {
@@ -765,14 +890,16 @@ func arrayAssignment(text string) (lhs, rhs string, indexed, ok bool) {
 func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext) (arrayValue, bool) {
 	lower := strings.ToLower(strings.TrimSpace(rhs))
 	if strings.HasPrefix(lower, "array(") || lower == "array" {
-		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: []arrayDimension{{}}, origin: arrayOriginLocal}, true
+		shape := []arrayDimension{{}}
+		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: shape, preserveShape: shape, origin: arrayOriginLocal}, true
 	}
 	if strings.Contains(lower, ".value") || strings.Contains(lower, ".value2") {
 		return arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginRangeValue}, true
 	}
 	name := arrayCallName(rhs)
 	if name == "split" || name == "filter" {
-		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: []arrayDimension{{}}, origin: arrayOriginLocal}, true
+		shape := []arrayDimension{{}}
+		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: shape, preserveShape: shape, origin: arrayOriginLocal}, true
 	}
 	if value, ok := state[name]; ok && value.kind == arrayAllocated && value.knownArray {
 		return value, true
@@ -870,5 +997,5 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 }
 
 func arrayValueEqual(left, right arrayValue) bool {
-	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && arrayDimensionsEqual(left.dimensions, right.dimensions)
+	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
 }

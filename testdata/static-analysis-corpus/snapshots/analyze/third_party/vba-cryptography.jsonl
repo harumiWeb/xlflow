@@ -46,7 +46,6 @@
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":748,"column":20}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":858,"column":5}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":890,"column":12}
-{"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA208","severity":"warning","line":936,"column":0}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA227","severity":"warning","line":948,"column":0}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA227","severity":"warning","line":952,"column":0}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":952,"column":13}
@@ -66,7 +65,6 @@
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1141,"column":12}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1141,"column":12}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1191,"column":0}
-{"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA208","severity":"warning","line":1194,"column":0}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1205,"column":9}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1207,"column":9}
 {"project":"third_party/vba-cryptography","file":"BCrypt.bas","surface":"analyze","code":"VBA206","severity":"warning","line":1207,"column":9}
