@@ -70,6 +70,7 @@ type procedureAnalyzer struct {
 	callsByExpression map[int]procedureir.CallSite
 	callsByStatement  map[int][]procedureir.CallSite
 	declaredNames     map[string]bool
+	constantNames     map[string]bool
 	knownShellObjects map[string]bool
 	selectVariables   map[int]string
 	findings          map[string]Finding
@@ -103,6 +104,7 @@ func newProcedureAnalyzerContext(ctx context.Context, procedure procedureir.Proc
 		callsByExpression: map[int]procedureir.CallSite{},
 		callsByStatement:  map[int][]procedureir.CallSite{},
 		declaredNames:     map[string]bool{},
+		constantNames:     map[string]bool{},
 		knownShellObjects: map[string]bool{},
 		selectVariables:   map[int]string{},
 		findings:          map[string]Finding{},
@@ -152,7 +154,11 @@ func newProcedureAnalyzerContext(ctx context.Context, procedure procedureir.Proc
 				return nil, err
 			}
 		}
-		a.declaredNames[canonicalName(declaration.Name)] = true
+		name := canonicalName(declaration.Name)
+		a.declaredNames[name] = true
+		if declaration.Kind == "const" {
+			a.constantNames[name] = true
+		}
 	}
 	for i, parameter := range procedure.Symbol.Parameters {
 		if i&0xff == 0 {
@@ -418,11 +424,18 @@ func (a *procedureAnalyzer) evalExpression(expression procedureir.Expression, st
 	case procedureir.ExpressionLiteral:
 		return value{}
 	case procedureir.ExpressionIdentifier:
-		if variable, ok := state.vars[canonicalName(expression.Text)]; ok {
+		name := canonicalName(expression.Text)
+		if variable, ok := state.vars[name]; ok {
 			return cloneValue(variable)
 		}
-		if a.declaredNames[canonicalName(expression.Text)] {
+		if a.constantNames[name] {
+			return value{}
+		}
+		if a.declaredNames[name] {
 			return a.unknownValue(expression.Range, expression.StatementID, "unassigned declared value")
+		}
+		if a.options.IsKnownConstant != nil && a.options.IsKnownConstant(expression.Text) {
+			return value{}
 		}
 		if kind, label, ok := sourceIdentifier(expression.Text); ok {
 			return valueFromSource(Source{Kind: kind, Label: label, Range: expression.Range, StatementID: expression.StatementID}, PathStep{Kind: "source", Label: expression.Text, Range: expression.Range, StatementID: expression.StatementID})

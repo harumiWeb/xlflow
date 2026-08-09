@@ -105,6 +105,10 @@ type Options struct {
 	// Conservative is retained as an explicit API marker. False does not turn
 	// off conservative handling; the first implementation has no unsound mode.
 	Conservative bool
+	// IsKnownConstant reports whether an identifier not bound in the current
+	// procedure resolves to a module, project, or host-provided constant.
+	// Local declarations still take precedence over this callback.
+	IsKnownConstant func(name string) bool
 }
 
 // Source identifies the origin of a value.
