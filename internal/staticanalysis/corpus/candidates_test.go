@@ -116,7 +116,7 @@ func TestCommittedCorpusReviewCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshotRoot := filepath.Join(corpusRoot, "snapshots")
-	ids, err := discoverCommittedSnapshotIDs(snapshotRoot)
+	ids, err := DiscoverSnapshotIDs(snapshotRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

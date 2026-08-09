@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added developer-only corpus review commands for exact diagnostic ranges,
+  schema-valid ledger drafts, and read-only project/rule-focused verification;
+  added an extensible machine-checked rule-contract marker inventory to prevent
+  protected specification metadata from drifting from the registry.
 - Fixed `VBA219` false positives for `Workbooks.Open` assignments to
   non-Workbook locals or return slots and for direct ownership transfer through
   a Workbook-valued Function return.

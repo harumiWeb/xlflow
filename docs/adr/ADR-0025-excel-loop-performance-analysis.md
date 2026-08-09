@@ -14,11 +14,11 @@ tell whether the receiver is an Excel object, whether a statement is inside a
 reachable loop, or whether a range operation is already a bulk transfer.
 
 Issue #452 requires a diagnostic that covers indexed and `For Each` loops,
-distinguishes reads, writes, formulas, and formatting, increases severity for
-nested loops, explains the COM cost, suggests array or bulk-range operations,
-and avoids clearly trivial fixed-size loops. The rule must also account for
-uniquely resolved local helpers without turning ambiguous or late-bound VBA
-into false certainty.
+distinguishes reads, writes, formulas, and formatting, retains nested-loop
+depth as explanatory context, explains the COM cost, suggests array or
+bulk-range operations, and avoids clearly trivial fixed-size loops. The rule
+must also account for uniquely resolved local helpers without turning
+ambiguous or late-bound VBA into false certainty.
 
 ## Decision
 

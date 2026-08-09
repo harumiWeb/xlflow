@@ -511,6 +511,43 @@ aid, not a ledger-row generator or an exact forbidden-contract check; obtain
 the full normalized range from the analyzer before committing semantic
 evidence, and use `task corpus:test` for exact TP/FP verification.
 
+To execute only the projects represented by a bounded candidate set and print
+the analyzer's complete normalized ranges, use the developer-only detail task:
+
+```powershell
+rtk proxy task corpus:review-details -- --rule VBA225 --limit 20
+rtk proxy task corpus:review-details -- --rule VBA225 --project third_party/std-vba
+```
+
+`corpus:review-details` joins the start-only committed candidates to a fresh
+run and retains duplicate occurrences. It does not classify diagnostics or
+write the review ledger. After inspecting the source, a reviewer may request
+schema-valid, canonically sorted JSONL on stdout:
+
+```powershell
+rtk proxy task corpus:review-draft -- --rule VBA225 --classification false-positive --rationale "Receiver resolution is incorrect." --regression-test "internal/analyze/analyzer_test.go::TestName"
+```
+
+True-positive drafts require `--classification true-positive` and a rationale.
+False-positive drafts additionally require exactly one of `--regression-test`
+or `--regression-exception`. The task never edits
+`reviews/diagnostics.jsonl`; the reviewer must inspect and merge its stdout.
+The outer `rtk proxy` is required for the detail and draft tasks because their
+TSV/JSONL stdout is an artifact and must not be summarized or truncated.
+
+During implementation, a read-only focused comparison can select a stable
+project ID, a rule ID, or both:
+
+```powershell
+rtk task corpus:test-focused -- --project third_party/std-vba --rule VBA225
+rtk task corpus:test-focused -- --rule VBA225
+```
+
+Rule-only verification still executes every project so a new diagnostic in a
+previously empty project cannot be hidden. Focused verification checks the
+selected snapshot and exact TP/FP contracts, cannot update snapshots, and is
+only a fast development loop. `corpus:test` remains the required full gate.
+
 Then verify the checked-in observed behavior without writing files:
 
 ```powershell
