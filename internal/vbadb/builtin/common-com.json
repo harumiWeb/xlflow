@@ -346,6 +346,22 @@
       ],
       "confidence": "curated",
       "source": "xlflow"
+    },
+    {
+      "name": "stdole.IUnknown",
+      "library": "stdole",
+      "kind": "interface",
+      "aliases": ["IUnknown"],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "stdole.IEnumVARIANT",
+      "library": "stdole",
+      "kind": "interface",
+      "aliases": ["IEnumVARIANT"],
+      "confidence": "curated",
+      "source": "xlflow"
     }
   ],
   "progids": {

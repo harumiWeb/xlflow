@@ -216,12 +216,27 @@ func (index *apiTypeIndex) resolve(typeName, ownerModule string) apiTypeStatus {
 	if knownAPITypeInDB(index.db, typeName) {
 		return apiTypeAllowed
 	}
-	if shortName != typeName {
-		if knownAPITypeInDB(index.db, shortName) {
+	if qualifiedModule != "" {
+		if knownAPITypeInLibrary(index.db, shortName, qualifiedModule) {
 			return apiTypeAllowed
 		}
 	}
 	return apiTypeUnresolved
+}
+
+func knownAPITypeInLibrary(db *vbadb.DB, name, library string) bool {
+	if db == nil {
+		return false
+	}
+	if typ, ok := db.ResolveType(name); ok && strings.EqualFold(typ.Library, library) {
+		return true
+	}
+	for _, constant := range db.Constants {
+		if strings.EqualFold(constant.EnumGroup, name) && strings.EqualFold(constant.Library, library) {
+			return true
+		}
+	}
+	return false
 }
 
 func knownAPITypeInDB(db *vbadb.DB, name string) bool {
