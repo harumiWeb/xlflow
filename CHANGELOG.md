@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA219` false positives for `Workbooks.Open` assignments to
+  non-Workbook locals or return slots and for direct ownership transfer through
+  a Workbook-valued Function return.
 - Fixed `VBA202` false positives for `For Each` object iterators, module and
   persistent `Static` object state, and type qualifiers that share a name with
   a local object variable.

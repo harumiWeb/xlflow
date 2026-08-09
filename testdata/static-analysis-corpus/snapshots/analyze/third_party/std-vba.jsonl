@@ -968,9 +968,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdError/stdError.cls","surface":"analyze","code":"VBA227","severity":"warning","line":115,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdError/stdError.cls","surface":"analyze","code":"VBA227","severity":"warning","line":117,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":16,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA219","severity":"warning","line":33,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":33,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA219","severity":"warning","line":39,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":39,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA214","severity":"warning","line":183,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA204","severity":"warning","line":190,"column":0}

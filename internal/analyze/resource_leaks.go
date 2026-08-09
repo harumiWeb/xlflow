@@ -79,7 +79,7 @@ func resourceAcquisitions(proc sourceProcedure) []resourceAcquisition {
 		if statement.Recovered {
 			continue
 		}
-		if target, ok := resourceWorkbookOpenTarget(statement.Text); ok && resourceLocalVariable(proc, target) {
+		if target, ok := resourceWorkbookOpenTarget(statement.Text); ok && resourceWorkbookOwner(proc, target) {
 			acquisitions = append(acquisitions, resourceAcquisition{
 				StatementID: statement.ID, Kind: resourceWorkbook, Owner: target, Line: statement.Range.StartLine,
 			})
@@ -118,6 +118,9 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 			continue
 		}
 		if kind := applicationStateExitKind(*graph, edge.To); kind != "" {
+			if resourceTransfersAtExit(proc, acquisition.Kind, kind, initialAliases) {
+				continue
+			}
 			witness = chooseResourceWitness(witness, resourceExitWitness{Kind: kind, Line: edge.Range.StartLine})
 			found = true
 			continue
@@ -290,6 +293,20 @@ func resourceLocalVariable(proc sourceProcedure, name string) bool {
 		if declaration.Scope == procedureir.ScopeLocal && strings.EqualFold(declaration.Name, name) {
 			return true
 		}
+	}
+	return false
+}
+
+func resourceWorkbookOwner(proc sourceProcedure, name string) bool {
+	for _, declaration := range proc.Declarations {
+		if declaration.Scope != procedureir.ScopeLocal || !strings.EqualFold(declaration.Name, name) {
+			continue
+		}
+		typeName := strings.TrimSpace(declaration.Type)
+		if separator := strings.LastIndex(typeName, "."); separator >= 0 {
+			typeName = typeName[separator+1:]
+		}
+		return strings.EqualFold(cleanIdentifier(strings.TrimSpace(typeName)), "Workbook")
 	}
 	return false
 }

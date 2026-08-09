@@ -10,7 +10,8 @@ The rule recognizes only these v1 acquisition forms:
 
 - `Set <local> = Workbooks.Open(...)` or
   `Set <local> = Application.Workbooks.Open(...)` for a procedure-local
-  Workbook variable; and
+  variable declared as `Workbook` (including a qualified type such as
+  `Excel.Workbook`); and
 - `Open ... For Input|Output|Append|Binary|Random As #<local-or-literal>`.
 
 The acquisition takes effect only along the CFG statement's normal successor.
@@ -19,8 +20,11 @@ Parameters are borrowed references and do not create an obligation. A local
 Workbook is transferred only when `Set <FunctionName> = <local>` remains intact
 through an object-returning Function's normal exit. An exceptional, unknown, or
 termination exit after that assignment still requires a Close, as does a later
-overwrite of the return slot. ByRef parameters, module variables, helper calls,
-and external APIs do not establish transfer or release in v1.
+overwrite of the return slot. A direct
+`Set <FunctionName> = Workbooks.Open(...)` assignment to a `Workbook` return
+slot establishes the same transfer when it reaches a normal exit. Non-Workbook
+locals and return slots, ByRef parameters, module variables, helper calls, and
+external APIs do not establish acquisition, transfer, or release in v1.
 
 ## Releases and paths
 
