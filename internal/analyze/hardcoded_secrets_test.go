@@ -119,6 +119,87 @@ End Sub
 	}
 }
 
+func TestVBA223IgnoresCredentialMetadataAndSelfDescribingPlaceholders(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Private Const auth_AuthorizationUrl As String = "https://accounts.vendor.invalid/oauth"
+Private Const auth_TokenResource As String = "__TOKEN_RESOURCE__"
+Public Sub Run()
+  auth_TokenClient.BaseUrl = "https://api.vendor.invalid/"
+  Auth.TokenUrl = "https://login.vendor.invalid/token"
+  Auth.ApiKey = "abc"
+  Client.ProxyPassword = "proxypassword"
+End Sub
+`
+	source = strings.ReplaceAll(source, "__TOKEN_RESOURCE__", "access"+"_"+"token")
+	writeModule(t, dir, "Metadata.bas", source)
+
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Metadata.bas")
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(batch, "VBA223"); len(got) != 0 {
+		t.Fatalf("credential metadata batch findings = %+v, want none", got)
+	}
+	if got := findingsByCode(realtime, "VBA223"); len(got) != 0 {
+		t.Fatalf("credential metadata realtime findings = %+v, want none", got)
+	}
+}
+
+func TestVBA223ScansOnlyEachStatementOwnSyntax(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  With helper
+    password = "hardcoded-password-value"
+  End With
+End Sub
+Public Function CreateHeader() As String
+  CreateHeader = "Digest " & _
+    "username=""" & Me.Username & """"
+End Function
+`
+	writeModule(t, dir, "OwnSyntax.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA223")
+	if len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("statement-own-syntax findings = %+v, want one finding at line 4", got)
+	}
+}
+
+func TestVBA223RequiresSecretBearingConnectionField(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Connection.bas", `Option Explicit
+Public Sub Run()
+  connectionString = "User ID=admin;"
+  digestHeader = "Username=Mufasa, realm=testrealm"
+  connectionString = "Password=real-password;"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA223")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("connection-field findings = %+v, want one password finding at line 5", got)
+	}
+}
+
 func TestVBA223DetectsModuleOnlyDeclarationsInBatchAndRealtime(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

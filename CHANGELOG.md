@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA223` false positives for credential-adjacent URL/resource names,
+  qualified assignment receivers, Digest header fragments, nested `With`
+  statement rescans, and obvious self-describing test credentials.
 - Fixed `VBA208` false positives for one-dimensional `ReDim Preserve`, stable
   symbolic non-final dimensions across CFG joins, and indexed member-array
   targets that were incorrectly attributed to their receiver arrays.

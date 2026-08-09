@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	secretConnectionFieldRe  = regexp.MustCompile(`(?i)(^|[;,&[:space:]])(password|pwd|user[[:space:]]*id|uid|username|account[[:space:]]*key|client[[:space:]]*secret|access[[:space:]]*token)[[:space:]]*=[[:space:]]*([^;,&]+)`)
+	secretConnectionFieldRe  = regexp.MustCompile(`(?i)(^|[;,&[:space:]])(password|pwd|account[[:space:]]*key|client[[:space:]]*secret|access[[:space:]]*token)[[:space:]]*=[[:space:]]*([^;,&]+)`)
 	secretAuthSchemeRe       = regexp.MustCompile(`(?i)\b(bearer|basic)[[:space:]]+([A-Za-z0-9._~+/=-]{16,})`)
 	secretURLCredentialRe    = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*://[^/[:space:]@:]+:([^@[:space:]/]+)@`)
 	secretPrivateKeyRe       = regexp.MustCompile(`(?i)-----begin([[:space:]][a-z0-9-]+)? private key-----`)
@@ -25,7 +25,10 @@ var credentialVariableNames = []string{
 	"secret", "credential", "authorization", "privatekey", "webhooktoken", "awssecretaccesskey",
 }
 
-var credentialUINameSuffixes = []string{"label", "prompt", "hint", "message", "caption", "field", "input"}
+var credentialMetadataNameSuffixes = []string{
+	"label", "prompt", "hint", "message", "caption", "field", "input",
+	"url", "uri", "endpoint", "resource",
+}
 
 // hardcodedSecretFindings scans each parsed statement once. Keeping this at
 // document scope lets it cover module-level Const declarations and prevents
@@ -89,16 +92,20 @@ func statementHasHardcodedSecret(statement procedureir.Statement) bool {
 	targetIsCredential := isCredentialVariable(target)
 
 	if targetIsCredential && statement.Value != nil && statement.Value.Kind == procedureir.ExpressionLiteral {
-		if value, ok := singleStringLiteral(statement.Value.Text); ok && !isSecretPlaceholder(value) {
+		if value, ok := singleStringLiteral(statement.Value.Text); ok && !isSecretPlaceholderForTarget(value, target) {
 			return true
 		}
 	}
 	if targetIsCredential {
-		if value, ok := directAssignmentStringLiteral(statement.Text); ok && !isSecretPlaceholder(value) {
+		if value, ok := directAssignmentStringLiteral(statement.Text); ok && !isSecretPlaceholderForTarget(value, target) {
 			return true
 		}
 	}
-	for _, literal := range extractStringLiterals(statement.Text) {
+	text := statement.Text
+	if statement.Kind == procedureir.StatementWith && statement.Value != nil {
+		text = statement.Value.Text
+	}
+	for _, literal := range extractStringLiterals(text) {
 		if credentialLiteralEvidence(literal) {
 			return true
 		}
@@ -109,7 +116,8 @@ func statementHasHardcodedSecret(statement procedureir.Statement) bool {
 func sourceLineHasHardcodedSecret(code string) bool {
 	targetIsCredential := isCredentialVariable(assignmentTarget(code))
 	if targetIsCredential {
-		if value, ok := directAssignmentStringLiteral(code); ok && !isSecretPlaceholder(value) {
+		target := assignmentTarget(code)
+		if value, ok := directAssignmentStringLiteral(code); ok && !isSecretPlaceholderForTarget(value, target) {
 			return true
 		}
 	}
@@ -126,7 +134,7 @@ func credentialLiteralEvidence(literal string) bool {
 		return false
 	}
 	for _, match := range secretConnectionFieldRe.FindAllStringSubmatch(literal, -1) {
-		if len(match) > 3 && !isSecretPlaceholder(strings.TrimSpace(match[3])) {
+		if len(match) > 3 && isSubstantiveSecretValue(match[3]) {
 			return true
 		}
 	}
@@ -148,20 +156,12 @@ func credentialLiteralEvidence(literal string) bool {
 }
 
 func isCredentialVariable(raw string) bool {
-	name := strings.ToLower(cleanIdentifier(strings.TrimSpace(raw)))
-	if name == "" || strings.ContainsAny(name, "()") {
+	name := credentialTargetName(raw)
+	if name == "" {
 		return false
 	}
-	compact := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			return r
-		}
-		if r >= 'A' && r <= 'Z' {
-			return r + ('a' - 'A')
-		}
-		return -1
-	}, name)
-	for _, suffix := range credentialUINameSuffixes {
+	compact := compactCredentialText(name)
+	for _, suffix := range credentialMetadataNameSuffixes {
 		if strings.HasSuffix(compact, suffix) {
 			return false
 		}
@@ -173,6 +173,45 @@ func isCredentialVariable(raw string) bool {
 		}
 	}
 	return false
+}
+
+func credentialTargetName(raw string) string {
+	name := strings.TrimSpace(raw)
+	if name == "" || strings.ContainsAny(name, "()") {
+		return ""
+	}
+	if _, member, _, ok := splitExcelMemberAccess(name); ok {
+		name = member
+	}
+	return strings.ToLower(cleanIdentifier(name))
+}
+
+func compactCredentialText(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return -1
+	}, text)
+}
+
+func isSecretPlaceholderForTarget(raw, target string) bool {
+	if isSecretPlaceholder(raw) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(raw), "abc") {
+		return true
+	}
+	targetName := credentialTargetName(target)
+	return targetName != "" && compactCredentialText(raw) == compactCredentialText(targetName)
+}
+
+func isSubstantiveSecretValue(raw string) bool {
+	value := strings.Trim(strings.TrimSpace(raw), `"'`)
+	return value != "" && !isSecretPlaceholder(value)
 }
 
 func isSecretPlaceholder(raw string) bool {
