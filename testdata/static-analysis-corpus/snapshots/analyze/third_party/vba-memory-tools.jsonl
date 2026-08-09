@@ -48,8 +48,6 @@
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA222","severity":"warning","line":559,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA222","severity":"warning","line":560,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA222","severity":"warning","line":648,"column":0}
-{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA229","severity":"error","line":660,"column":15}
-{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA229","severity":"error","line":683,"column":15}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":978,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":981,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":987,"column":0}
@@ -58,7 +56,6 @@
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1020,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1021,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA204","severity":"warning","line":1023,"column":0}
-{"project":"third_party/vba-memory-tools","file":"src/LibMemory.bas","surface":"analyze","code":"VBA229","severity":"error","line":1106,"column":17}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":837,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":837,"column":0}
 {"project":"third_party/vba-memory-tools","file":"src/Test/TestLibMemory.bas","surface":"analyze","code":"VBA227","severity":"warning","line":838,"column":0}

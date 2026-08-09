@@ -241,7 +241,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawRevision.bas","surface":"analyze","code":"VBA227","severity":"warning","line":357,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawRevision.bas","surface":"analyze","code":"VBA227","severity":"warning","line":358,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawRevision.bas","surface":"analyze","code":"VBA227","severity":"warning","line":358,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA229","severity":"error","line":17,"column":32}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":21,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":22,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA203","severity":"warning","line":23,"column":0}

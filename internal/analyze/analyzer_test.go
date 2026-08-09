@@ -11,6 +11,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
@@ -4911,7 +4912,7 @@ func containsAll(text string, parts ...string) bool {
 }
 
 func TestAnalyzerVBA229IsBlockingAndUnsuppressible(t *testing.T) {
-	t.Parallel()
+	useCompleteTestTypeDB(t)
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Probe()
@@ -4933,7 +4934,7 @@ End Sub
 }
 
 func TestAnalyzerVBA229AcceptsQualifiedProjectType(t *testing.T) {
-	t.Parallel()
+	useCompleteTestTypeDB(t)
 	dir := t.TempDir()
 	writeModule(t, dir, "Types.bas", `Option Explicit
 Public Type Payload
@@ -4952,4 +4953,84 @@ End Sub
 	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
 		t.Fatalf("qualified project type should resolve: %+v", findings)
 	}
+}
+
+func TestAnalyzerVBA229FailsClosedWithoutTypeDBManifest(t *testing.T) {
+	typeDBDir := t.TempDir()
+	t.Setenv(typedb.EnvDir, typeDBDir)
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe()
+    Dim value As ReferencedLibraryType
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
+		t.Fatalf("missing TypeDB manifest must not produce VBA229: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA229AcceptsUserFormAndProjectQualifiedClass(t *testing.T) {
+	useCompleteTestTypeDB(t)
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "CalendarPicker.bas", `Option Explicit
+Public Sub ShowPicker()
+End Sub
+`)
+	writeClass(t, dir, "WebDriver.cls", `Attribute VB_Name = "WebDriver"
+Option Explicit
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe()
+    Dim picker As CalendarPicker
+    Dim driver As SeleniumVBA.WebDriver
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Project.Name = "SeleniumVBA"
+	cfg.UserForm.CodeSource = "sidecar"
+	result, err := (Analyzer{RootDir: dir, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
+		t.Fatalf("project object types should resolve: %+v", findings)
+	}
+}
+
+func TestAnalyzerVBA229AcceptsEmbeddedEnumGroups(t *testing.T) {
+	useCompleteTestTypeDB(t)
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe()
+    Dim valueKind As VbVarType
+    Dim calculation As XlCalculation
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA229"); len(findings) != 0 {
+		t.Fatalf("embedded enum groups should resolve: %+v", findings)
+	}
+}
+
+func useCompleteTestTypeDB(t *testing.T) {
+	t.Helper()
+	typeDBDir := t.TempDir()
+	output := "test.generated.json"
+	if err := os.WriteFile(filepath.Join(typeDBDir, output), []byte(`{"types":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+		GeneratorVersion: "test",
+		Libraries:        []typedb.ManifestLibrary{{Name: "Test", Output: output}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
 }

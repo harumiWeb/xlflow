@@ -18,6 +18,11 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if _, ok := db.ResolveType("Workbook"); !ok {
 		t.Fatal("Workbook alias did not resolve")
 	}
+	for _, enumName := range []string{"VbVarType", "XlCalculation"} {
+		if typ, ok := db.ResolveType(enumName); !ok || typ.Kind != "enum" {
+			t.Fatalf("ResolveType(%s) = %+v, %v; want embedded enum type", enumName, typ, ok)
+		}
+	}
 	if typ, ok := db.ResolveProgID("Scripting.Dictionary"); !ok || typ.Name != "Scripting.Dictionary" {
 		t.Fatalf("ResolveProgID(Scripting.Dictionary) = %+v, %v", typ, ok)
 	}

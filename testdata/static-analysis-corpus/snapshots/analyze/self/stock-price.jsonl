@@ -50,7 +50,6 @@
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA227","severity":"warning","line":448,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA203","severity":"warning","line":511,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA225","severity":"warning","line":536,"column":0}
-{"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA229","severity":"error","line":546,"column":22}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA221","severity":"warning","line":568,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA221","severity":"warning","line":577,"column":0}
 {"project":"self/stock-price","file":"src/modules/MarketDashboard.bas","surface":"analyze","code":"VBA227","severity":"warning","line":628,"column":0}
