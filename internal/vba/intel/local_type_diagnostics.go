@@ -113,6 +113,18 @@ func (a Analyzer) resolveLocalTypeName(doc Document, target string) (resolved, c
 				return true, true
 			}
 		}
+		qualifier, short := splitQualifiedTypeName(target)
+		if qualifier != "" && short != "" && strings.EqualFold(qualifier, strings.TrimSpace(a.Config.Project.Name)) {
+			projectSymbols, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: short, Mode: WorkspaceSymbolQueryExact})
+			if err != nil {
+				return false, false
+			}
+			for _, symbol := range projectSymbols {
+				if projectTypeSymbol(symbol) {
+					return true, true
+				}
+			}
+		}
 		return false, true
 	} else if short := shortTypeName(target); short != target {
 		// The production workspace view indexes qualified names separately, but
@@ -137,10 +149,23 @@ func projectTypeSymbol(symbol Symbol) bool {
 	case "type", "enum", "class":
 		return true
 	case "module":
-		return strings.EqualFold(symbol.ModuleKind, "class")
+		switch strings.ToLower(strings.TrimSpace(symbol.ModuleKind)) {
+		case "class", "form", "document":
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}
+}
+
+func splitQualifiedTypeName(name string) (string, string) {
+	index := strings.LastIndex(name, ".")
+	if index <= 0 || index == len(name)-1 {
+		return "", ""
+	}
+	return strings.TrimSpace(name[:index]), strings.TrimSpace(name[index+1:])
 }
 
 func isBuiltinLocalTypeName(name string) bool {

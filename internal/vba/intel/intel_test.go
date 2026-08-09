@@ -4710,6 +4710,27 @@ func TestLocalTypeNameDiagnosticsAcceptProjectClassSymbols(t *testing.T) {
 	}
 }
 
+func TestLocalTypeNameDiagnosticsAcceptProjectObjectModules(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact {
+			return nil, nil
+		}
+		switch strings.ToLower(query.Text) {
+		case "calendarpicker":
+			return []Symbol{{Name: "CalendarPicker", Kind: "module", Module: "CalendarPicker", ModuleKind: "form"}}, nil
+		case "sheet1":
+			return []Symbol{{Name: "Sheet1", Kind: "module", Module: "Sheet1", ModuleKind: "document"}}, nil
+		default:
+			return nil, nil
+		}
+	}
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), ModuleKind: "standard", Source: "Option Explicit\nPublic Sub Probe()\n    Dim picker As CalendarPicker\n    Dim sheet As Sheet1\nEnd Sub\n"}
+	if diagnostics := analyzer.LocalTypeNameDiagnosticsContext(context.Background(), doc); len(diagnostics) != 0 {
+		t.Fatalf("project object-module types should resolve: %+v", diagnostics)
+	}
+}
+
 func TestLocalTypeNameDiagnosticsRejectsQualifiedShortAlias(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	if err := analyzer.DB.MergeJSON([]byte(`{"types":[{"name":"Widget","kind":"class"}]}`)); err != nil {

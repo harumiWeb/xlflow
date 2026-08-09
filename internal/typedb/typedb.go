@@ -252,6 +252,14 @@ func LoadForRuntime(dir string) (LoadResult, error) {
 	result := LoadResult{GeneratedDir: resolved, Complete: true}
 	files, missing, manifestErr := runtimeGeneratedFiles(resolved)
 	result.GeneratedFiles = files
+	manifest, readManifestErr := ReadManifest(resolved)
+	if errors.Is(readManifestErr, os.ErrNotExist) {
+		result.Complete = false
+		result.Warnings = append(result.Warnings, "generated TypeLib manifest is missing; unresolved type-name diagnostics are disabled")
+	} else if readManifestErr == nil && len(manifest.Libraries) == 0 {
+		result.Complete = false
+		result.Warnings = append(result.Warnings, "generated TypeLib manifest contains no libraries; unresolved type-name diagnostics are disabled")
+	}
 	if manifestErr != nil {
 		result.Complete = false
 		result.Warnings = append(result.Warnings, "generated TypeLib manifest could not be loaded: "+manifestErr.Error())

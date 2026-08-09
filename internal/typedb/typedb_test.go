@@ -25,6 +25,24 @@ func TestStatusForMissingManifestReportsStale(t *testing.T) {
 	}
 }
 
+func TestLoadForRuntimeMarksMissingManifestIncomplete(t *testing.T) {
+	dir := t.TempDir()
+
+	result, err := LoadForRuntime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Complete {
+		t.Fatal("a missing manifest must not prove complete TypeLib resolution")
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "manifest is missing") {
+		t.Fatalf("warnings = %+v, want missing-manifest warning", result.Warnings)
+	}
+	if _, ok := result.DB.ResolveType("Workbook"); !ok {
+		t.Fatal("embedded built-in types must remain available")
+	}
+}
+
 func TestStatusForManifestChecksOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "excel.generated.json"), []byte(`{"types":[]}`), 0o644); err != nil {
@@ -111,7 +129,8 @@ func TestCleanRejectsNonTypeDBDirectory(t *testing.T) {
 
 func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "custom.generated.json"), []byte(`{
+	const output = "custom.generated.json"
+	if err := os.WriteFile(filepath.Join(dir, output), []byte(`{
   "types": [
     {
       "name": "Vendor.Widget",
@@ -129,6 +148,12 @@ func TestLoadForRuntimeLoadsGeneratedThenBuiltinOverlay(t *testing.T) {
     }
   ]
 }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManifest(dir, Manifest{
+		GeneratorVersion: "test",
+		Libraries:        []ManifestLibrary{{Name: "Test", Output: output}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 

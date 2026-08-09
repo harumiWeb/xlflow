@@ -179,6 +179,19 @@ func (db *DB) MergeData(data fileData) {
 		db.addType(typ)
 	}
 	for _, c := range data.Constants {
+		if strings.TrimSpace(c.EnumGroup) != "" {
+			name := strings.TrimSpace(c.EnumGroup)
+			if library := strings.TrimSpace(c.Library); library != "" {
+				name = library + "." + name
+			}
+			db.addType(TypeInfo{
+				Name:       name,
+				Library:    strings.TrimSpace(c.Library),
+				Kind:       "enum",
+				Confidence: "curated",
+				Source:     "xlflow",
+			})
+		}
 		db.Constants[fold(c.Name)] = c
 	}
 	for progID, typ := range data.ProgIDs {

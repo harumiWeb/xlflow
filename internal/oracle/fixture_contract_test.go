@@ -10,6 +10,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
@@ -18,6 +19,19 @@ import (
 // the same sources usable by batch lint/analyze and the realtime/LSP analyzer,
 // while the VBE observations remain an optional local developer step.
 func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
+	typeDBDir := t.TempDir()
+	const typeDBOutput = "oracle.generated.json"
+	if err := os.WriteFile(filepath.Join(typeDBDir, typeDBOutput), []byte(`{"types":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := typedb.WriteManifest(typeDBDir, typedb.Manifest{
+		GeneratorVersion: "test",
+		Libraries:        []typedb.ManifestLibrary{{Name: "Oracle", Output: typeDBOutput}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, typeDBDir)
+
 	manifestPath := filepath.Join("..", "..", "testdata", "vbe-oracle", "manifest.json")
 	manifest, root, err := LoadManifest(manifestPath)
 	if err != nil {
@@ -127,7 +141,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 23 || report.BoundFixtures != 13 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 24 || report.BoundFixtures != 14 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -142,6 +156,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"byref-incompatible",
 		"duplicate-named-argument",
 		"known-as-type",
+		"known-enum-as-type",
 		"known-named-argument",
 		"missing-required-argument",
 		"optional-argument-omitted",
