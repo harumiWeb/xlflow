@@ -3174,8 +3174,9 @@ Public Function MissingReturn() As Range
 End Function
 Public Sub Run()
   Dim dict As Dictionary
+  Dim text As String
   Set dict = CreateObject("Scripting.Dictionary")
-  NeedsLong "abc"
+  NeedsLong text
   Debug.Print dict("missing")
 End Sub
 `)
@@ -3187,8 +3188,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertFinding(t, findings, "VBA228", 9)
-	assertFinding(t, findings, "VBA207", 10)
+	assertFinding(t, findings, "VBA228", 10)
+	assertFinding(t, findings, "VBA207", 11)
 	assertFinding(t, findings, "VBA210", 4)
 }
 
@@ -3377,14 +3378,15 @@ func TestAnalyzerByRefMismatchHandlesLowercaseCallKeyword(t *testing.T) {
 Public Sub NeedsLong(ByRef value As Long)
 End Sub
 Public Sub Run()
-  call NeedsLong("abc")
+  Dim text As String
+  call NeedsLong(text)
 End Sub
 `)
 	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertFinding(t, findings, "VBA228", 5)
+	assertFinding(t, findings, "VBA228", 6)
 }
 
 func TestAnalyzerCompileEquivalentByRefMismatchIgnoresVBA206Disable(t *testing.T) {
@@ -3453,8 +3455,9 @@ Public Sub TakeLong(ByRef target As Long)
 End Sub
 Public Sub Run()
   Dim value As Long
+  Dim text As String
   TakeText value
-	  TakeLong "temporary" ' xlflow:disable-line VBA206
+	  TakeLong text ' xlflow:disable-line VBA206
 End Sub
 `)
 

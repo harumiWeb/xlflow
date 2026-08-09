@@ -725,8 +725,22 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 	sym.Signature = declarationHeader(node.Utf8Text(e.source))
 	sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 	sym.ReturnType = typeText(node, e.source)
+	sym.IsArray = procedureReturnsArray(node, e.source)
 	sym.Parameters = parameters(node, e.source)
 	return sym
+}
+
+func procedureReturnsArray(node *tree_sitter.Node, source []byte) bool {
+	asType := firstNamedChildKind(node, "as_type_clause")
+	if asType == nil {
+		return false
+	}
+	text := strings.TrimSpace(asType.Utf8Text(source))
+	if !strings.HasSuffix(text, ")") {
+		return false
+	}
+	open := strings.LastIndex(text, "(")
+	return open >= 0 && strings.TrimSpace(text[open+1:len(text)-1]) == ""
 }
 
 func (e *extractor) constSymbols(node *tree_sitter.Node, parentProc string) {

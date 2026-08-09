@@ -63,7 +63,7 @@ func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Docum
 				if !ok || param.ParamArray || !isByRefParameter(param) {
 					continue
 				}
-				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param); found && (diagnostic.Code != "VBA206" || a.Config.Analyze.DetectByRefArgumentMismatch) {
+				if diagnostic, found := a.byRefArgumentDiagnostic(doc, callRange.Start, callRange.Start.Line, call, arg.Text, param, sig.declaringModule); found && (diagnostic.Code != "VBA206" || a.Config.Analyze.DetectByRefArgumentMismatch) {
 					out = append(out, diagnostic)
 				}
 			}
@@ -115,6 +115,9 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
 	module := moduleNameForDocument(doc)
 	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
+	if !qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localCandidates, target) {
+		return Signature{}, false, nil
+	}
 	localMatches := matchingProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, receiver, member, qualified)
 	if !qualified {
 		localMatches = symbolsInModule(localMatches, module)
@@ -143,6 +146,27 @@ func (a Analyzer) resolveProjectLocalCallSignature(doc Document, localSymbolsByN
 		return Signature{}, false, nil
 	}
 	return signatureFromSymbol(matches[0]), true, nil
+}
+
+func nonCallableLocalShadowsProjectCall(a Analyzer, doc Document, currentProcedure string, syms []Symbol, target string) bool {
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, target) || !symbolCanShadowProjectCall(sym) {
+			continue
+		}
+		if a.visibleCompletionSymbol(doc, currentProcedure, sym) {
+			return true
+		}
+	}
+	return false
+}
+
+func symbolCanShadowProjectCall(sym Symbol) bool {
+	switch strings.ToLower(strings.TrimSpace(sym.Kind)) {
+	case "const", "field", "local_variable", "module_variable", "parameter", "withevents_field":
+		return true
+	default:
+		return false
+	}
 }
 
 func matchingProjectCallSymbols(a Analyzer, doc Document, currentProcedure string, syms []Symbol, target, receiver, member string, qualified bool) []Symbol {
@@ -177,7 +201,7 @@ func isByRefParameter(param Parameter) bool {
 	return !strings.EqualFold(strings.TrimSpace(param.Passing), "ByVal")
 }
 
-func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int, call parsedCall, text string, param Parameter) (Diagnostic, bool) {
+func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int, call parsedCall, text string, param Parameter, declaringModule string) (Diagnostic, bool) {
 	expr := strings.TrimSpace(text)
 	if expr == "" {
 		return Diagnostic{}, false
@@ -185,10 +209,7 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 	if hasWholeExpressionParentheses(expr) {
 		return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is parenthesized. VBA evaluates it into a temporary value, so changes made by the procedure do not update the original argument.", expr, param.Name)), true
 	}
-	if literalType, literal := byRefLiteralType(expr); literal {
-		if byRefTypesMismatch(literalType, false, param.Type, param.IsArray) {
-			return byRefTypeMismatchDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, literalType, param.Name, displayParameterType(param))), true
-		}
+	if _, literal := byRefLiteralType(expr); literal {
 		return byRefDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` for ByRef parameter `%s` is a literal. Pass a writable variable because procedure changes cannot update a literal.", expr, param.Name)), true
 	}
 	if strings.HasPrefix(strings.ToLower(expr), "new ") {
@@ -199,7 +220,7 @@ func (a Analyzer) byRefArgumentDiagnostic(doc Document, pos Position, lineNo int
 		if !ok || lowConfidenceDiagnosticType(inferred.Type) {
 			return Diagnostic{}, false
 		}
-		if byRefTypesMismatch(inferred.Type, inferred.IsArray, param.Type, param.IsArray) {
+		if byRefTypesMismatch(inferred.Type, inferred.IsArray, param.Type, param.IsArray, declaringModule) {
 			return byRefTypeMismatchDiagnostic(lineNo, call, fmt.Sprintf("Argument `%s` has type %s, but ByRef parameter `%s` requires %s.", expr, displayInferredType(inferred), param.Name, displayParameterType(param))), true
 		}
 		return Diagnostic{}, false
@@ -284,7 +305,7 @@ func looksIndexedExpression(expr string) bool {
 	return open > 0 && strings.HasSuffix(strings.TrimSpace(expr), ")")
 }
 
-func byRefTypesMismatch(actual string, actualArray bool, expected string, expectedArray bool) bool {
+func byRefTypesMismatch(actual string, actualArray bool, expected string, expectedArray bool, declaringModule string) bool {
 	actual = byRefCanonicalType(actual)
 	expected = byRefCanonicalType(expected)
 	if actual == "" || expected == "" || actual == "variant" || actual == "object" || actual == "any" || expected == "variant" || expected == "object" || expected == "any" {
@@ -293,7 +314,21 @@ func byRefTypesMismatch(actual string, actualArray bool, expected string, expect
 	if actualArray != expectedArray {
 		return true
 	}
+	if byRefQualifiedTypeMatchesDeclaringModule(actual, expected, declaringModule) {
+		return false
+	}
 	return actual != expected
+}
+
+func byRefQualifiedTypeMatchesDeclaringModule(actual, expected, declaringModule string) bool {
+	if strings.Contains(expected, ".") || strings.TrimSpace(declaringModule) == "" {
+		return false
+	}
+	separator := strings.LastIndex(actual, ".")
+	if separator <= 0 || separator == len(actual)-1 {
+		return false
+	}
+	return strings.EqualFold(actual[:separator], strings.TrimSpace(declaringModule)) && actual[separator+1:] == expected
 }
 
 func byRefCanonicalType(typ string) string {

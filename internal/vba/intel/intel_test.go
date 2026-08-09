@@ -1186,6 +1186,109 @@ End Sub
 	}
 }
 
+func TestByRefArgumentDiagnosticsTreatLiteralsAsTemporaryValues(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub TakeInteger(ByRef value As Integer)
+End Sub
+Public Sub TakeByte(ByRef value As Byte)
+End Sub
+Public Sub TakeString(ByRef value As String)
+End Sub
+Public Sub TakeLong(ByRef value As Long)
+End Sub
+Public Sub Run()
+    TakeInteger -1
+    TakeByte 255
+    TakeString 0
+    TakeLong "abc"
+    Dim text As String
+    TakeLong text
+End Sub
+`
+	diagnostics := analyzer.ByRefArgumentDiagnostics(Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source})
+	var warnings, errors int
+	for _, diagnostic := range diagnostics {
+		switch diagnostic.Code {
+		case "VBA206":
+			warnings++
+		case "VBA228":
+			errors++
+		}
+	}
+	if warnings != 4 || errors != 1 {
+		t.Fatalf("literal and variable ByRef diagnostics = %+v, want four VBA206 warnings and one VBA228 error", diagnostics)
+	}
+	if !hasDiagnosticMessage(diagnostics, "Argument `text` has type String, but ByRef parameter `value` requires Long") {
+		t.Fatalf("bare incompatible variable must remain VBA228: %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsPreserveArrayFunctionReturnsAndLocalShadows(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "HashBytes") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name:       "HashBytes",
+			Kind:       "function",
+			Module:     "Other",
+			Visibility: "Public",
+			Parameters: []Parameter{{Name: "Block", Type: "Byte", IsArray: true, Passing: "ByRef"}},
+		}}, nil
+	}
+	source := `Attribute VB_Name = "ShellWait"
+Option Explicit
+Private Sub TakeBytes(ByRef values() As Byte)
+End Sub
+Public Function ReadBytes() As Byte()
+    ReDim ReadBytes(0)
+    TakeBytes ReadBytes
+End Function
+Public Sub Run()
+    Dim HashBytes() As Byte
+    ReDim HashBytes(0)
+    Debug.Print HashBytes(0)
+End Sub
+Public Function ShellWait(ByRef value As Long) As Long
+    ShellWait = ShellWait(value)
+End Function
+`
+	diagnostics := analyzer.ByRefArgumentDiagnostics(Document{Path: filepath.Join(t.TempDir(), "ShellWait.bas"), Source: source})
+	if len(diagnostics) != 0 {
+		t.Fatalf("array return and local array index must not be treated as incompatible calls: %+v", diagnostics)
+	}
+}
+
+func TestByRefArgumentDiagnosticsCompareQualifiedTypesInDeclaringModule(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "Connect") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name:       "Connect",
+			Kind:       "sub",
+			Module:     "wsock32",
+			Visibility: "Public",
+			Parameters: []Parameter{{Name: "address", Type: "sockaddr_in", Passing: "ByRef"}},
+		}}, nil
+	}
+	source := `Option Explicit
+Public Sub Run()
+    Dim matching As wsock32.sockaddr_in
+    Dim different As other.sockaddr_in
+    wsock32.Connect matching
+    wsock32.Connect different
+End Sub
+`
+	diagnostics := analyzer.ByRefArgumentDiagnostics(Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source})
+	if len(diagnostics) != 1 || diagnostics[0].Code != "VBA228" || !strings.Contains(diagnostics[0].Message, "other.sockaddr_in") {
+		t.Fatalf("qualified ByRef type diagnostics = %+v, want only the different-module type mismatch", diagnostics)
+	}
+}
+
 func TestByRefArgumentDiagnosticsCheckPtrSafePointerWidths(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
