@@ -106,6 +106,42 @@ func TestDiagnosticsBuildsOneWorkspaceResolutionSnapshot(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsResolvesWorkspacePublicVB029Declarations(t *testing.T) {
+	doc := Document{
+		Path:       "Form1.frm",
+		Source:     "Option Explicit\nPublic Sub Run()\n  sharedFlag = True\n  hiddenFlag = False\n  missingValue = 1\nEnd Sub\n",
+		ModuleKind: "form",
+		Version:    1,
+	}
+	analyzer := Analyzer{
+		DB: vbadb.New(),
+		WorkspaceSymbolsSnapshotFunc: func([]Document) ([]Symbol, error) {
+			return []Symbol{
+				{
+					Name:       "sharedFlag",
+					Kind:       "module_variable",
+					Module:     "Globals",
+					ModuleKind: "standard",
+					Visibility: "Public",
+					File:       "Globals.bas",
+				},
+				{
+					Name:       "hiddenFlag",
+					Kind:       "module_variable",
+					Module:     "Globals",
+					ModuleKind: "standard",
+					File:       "Globals.bas",
+				},
+			}, nil
+		},
+	}
+
+	got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB029")
+	if len(got) != 2 || !strings.Contains(got[0].Message, "hiddenFlag") || !strings.Contains(got[1].Message, "missingValue") {
+		t.Fatalf("VB029 diagnostics = %+v, want hiddenFlag and missingValue", got)
+	}
+}
+
 func TestAnalysisSnapshotSourceMapHandlesCRLFAndUTF16(t *testing.T) {
 	doc := Document{Source: "A\r\n😀B\rC", Version: 1}
 	snapshot := NewAnalysisSnapshot(doc)

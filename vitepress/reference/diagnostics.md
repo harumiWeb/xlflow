@@ -30,7 +30,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB026`](#vb026)   | lint    | warning  | procedure-local | yes     | Dangerous Resume                                   |
 | [`VB027`](#vb027)   | lint    | warning  | procedure-local | no      | Ambiguous nested With member                       |
 | [`VB028`](#vb028)   | lint    | error    | project-wide    | yes     | Bare dialog call with XlflowUI                     |
-| [`VB029`](#vb029)   | lint    | error    | file-local      | yes     | Undeclared variable                                |
+| [`VB029`](#vb029)   | lint    | error    | project-wide    | yes     | Undeclared variable                                |
 | [`VB030`](#vb030)   | lint    | warning  | procedure-local | yes     | Argument mismatch                                  |
 | [`VB031`](#vb031)   | lint    | error    | file-local      | yes     | Missing module name attribute                      |
 | [`VB032`](#vb032)   | lint    | error    | file-local      | yes     | Repeated Debug.Print shorthand                     |
@@ -621,7 +621,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB029
 
-**Undeclared variable.** Option Explicit is present but a referenced assignment or loop variable is undeclared.
+**Undeclared variable.** Option Explicit is present but a referenced assignment or loop variable is undeclared in the project-visible namespace.
 
 | Property                    | Value                |
 | --------------------------- | -------------------- |
@@ -632,7 +632,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Default severity            | `error`              |
 | Supported severities        | `error`              |
 | Surfaces                    | `lint`, `lsp`        |
-| Scope                       | `file-local`         |
+| Scope                       | `project-wide`       |
 | Precision                   | `high`               |
 | Enabled by default          | yes                  |
 | Configuration               | not configurable     |

@@ -532,7 +532,7 @@
     {
       "id": "VB029",
       "title": "Undeclared variable",
-      "description": "Option Explicit is present but a referenced assignment or loop variable is undeclared.",
+      "description": "Option Explicit is present but a referenced assignment or loop variable is undeclared in the project-visible namespace.",
       "family": "lint",
       "category": "correctness",
       "evidence_class": "compile-equivalent",
@@ -541,7 +541,7 @@
       "supported_severities": ["error"],
       "surfaces": ["lint", "lsp"],
       "default_enabled": true,
-      "scope": "file-local",
+      "scope": "project-wide",
       "realtime": true,
       "precision": "high",
       "fix_available": false,

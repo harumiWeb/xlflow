@@ -68,6 +68,7 @@ type Analyzer struct {
 	WorkspaceSymbolQueryFunc     WorkspaceSymbolQueryFunc
 	WorkspaceSymbolsSnapshotFunc WorkspaceSymbolsSnapshotFunc
 	RealtimeFindingsFunc         RealtimeFindingsFunc
+	visibleDeclarations          map[string]bool
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
@@ -271,7 +272,11 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 	}
 	defer closeParsed()
 	finishStage := analysisstats.Measure(ctx, "lint")
-	issues, err := lint.Linter{RootDir: a.RootDir, Config: a.Config}.LintParsedContext(ctx, parsed)
+	issues, err := lint.Linter{
+		RootDir:             a.RootDir,
+		Config:              a.Config,
+		VisibleDeclarations: a.visibleDeclarations,
+	}.LintParsedContext(ctx, parsed)
 	finishStage(len(issues), err)
 	if ctx.Err() != nil {
 		return nil

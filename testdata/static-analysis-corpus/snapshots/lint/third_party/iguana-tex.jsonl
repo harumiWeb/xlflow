@@ -61,7 +61,6 @@
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"lint","code":"VB007","severity":"warning","line":721,"column":0}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"lint","code":"VB007","severity":"warning","line":725,"column":0}
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"lint","code":"VB010","severity":"error","line":162,"column":0}
-{"project":"third_party/iguana-tex","file":"RegenerateForm.frm","surface":"lint","code":"VB029","severity":"error","line":35,"column":5}
 {"project":"third_party/iguana-tex","file":"RegistryAccess.bas","surface":"lint","code":"VB007","severity":"warning","line":36,"column":0}
 {"project":"third_party/iguana-tex","file":"RegistryAccess.bas","surface":"lint","code":"VB007","severity":"warning","line":65,"column":0}
 {"project":"third_party/iguana-tex","file":"RegistryAccess.bas","surface":"lint","code":"VB007","severity":"warning","line":74,"column":0}

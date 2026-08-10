@@ -70,7 +70,7 @@ The summary below explains the lint findings in workflow terms.
 | `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                                         |
 | `VB045` | error    | Deterministic argument-count or named-argument binding error; blocks source preflight.                                               |
 
-Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`.
+Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`. `VB029` also resolves public declarations from standard modules across the project, so a valid project-level assignment is not reported as undeclared.
 
 Disable configurable lint rules with `[lint].disabled_rules`:
 
