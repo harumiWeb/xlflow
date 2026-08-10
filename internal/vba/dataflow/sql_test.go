@@ -43,7 +43,7 @@ End Sub
 	for _, finding := range result.SQLFindings {
 		seen[finding.RiskKind] = true
 	}
-	if !seen[SQLRiskManualQuoting] && !seen[SQLRiskWildcardLikeInput] {
+	if !seen[SQLRiskManualQuoting] || !seen[SQLRiskWildcardLikeInput] {
 		t.Fatalf("risk kinds = %#v", seen)
 	}
 }
@@ -225,6 +225,40 @@ End Sub
 `)
 	if len(safe.SQLFindings) != 0 {
 		t.Fatalf("safe overwrite findings = %#v, want none", safe.SQLFindings)
+	}
+}
+
+func TestAnalyzeProcedureSQLLoopWithConflictingObjectKindsConverges(t *testing.T) {
+	result := analyzeSQLFixture(t, `Option Explicit
+Sub Run(raw As String, choose As Boolean)
+    Dim obj As Object
+    Dim i As Long
+    For i = 1 To 2
+        If choose Then
+            Set obj = CreateObject("ADODB.Command")
+        Else
+            Set obj = CreateObject("ADODB.Recordset")
+        End If
+    Next i
+    obj.CommandText = "SELECT * FROM Users WHERE Id = " & raw
+    obj.Execute
+End Sub
+`)
+	if len(result.SQLFindings) != 0 {
+		t.Fatalf("conflicting loop object findings = %#v, want none", result.SQLFindings)
+	}
+}
+
+func TestJoinSQLObjectStateKeepsUnknownAndEmptyIdentity(t *testing.T) {
+	command := sqlObjectState{kind: sqlObjectCommand, identity: "left"}
+	recordset := sqlObjectState{kind: sqlObjectRecordset, identity: "right"}
+	merged := joinSQLObjectState(command, recordset)
+	if merged.kind != sqlObjectUnknown || merged.identity != "" {
+		t.Fatalf("conflicting object join = %#v, want unknown kind and empty identity", merged)
+	}
+	recovered := joinSQLObjectState(merged, command)
+	if recovered.kind != sqlObjectUnknown || recovered.identity != "" {
+		t.Fatalf("absorbing object join = %#v, want unknown kind and empty identity", recovered)
 	}
 }
 

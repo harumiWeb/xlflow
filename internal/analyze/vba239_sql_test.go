@@ -224,3 +224,28 @@ End Sub
 		t.Fatalf("records-affected argument leaked through VBA224 fallback = %+v", got)
 	}
 }
+
+func TestVBA224FallbackKeepsNonCommandReceiverSQLSinks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Dim commandDb As Object
+    Dim RunCommandSql As Object
+    Dim cmd As Object
+    commandDb.Execute "SELECT * FROM Users WHERE Id = " & raw
+    RunCommandSql.Execute "SELECT * FROM Users WHERE Id = " & raw
+    cmd.Execute "SELECT * FROM Users WHERE Id = " & raw
+End Sub
+`)
+	cfg := vba239TestConfig()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA224"); len(got) != 3 {
+		t.Fatalf("fallback SQL sinks = %+v, want three", got)
+	}
+}

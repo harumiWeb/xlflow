@@ -163,9 +163,8 @@ type SQLExecution struct {
 }
 
 // SQLFinding is a SQL-specific source-to-sink observation. Parameterized is
-// true when the originating value reaches an explicitly bound database
-// parameter rather than SQL text; such flows are retained for consumers that
-// need to explain why a value was considered safe.
+// true when the executed command has recognized database parameter bindings.
+// A finding is emitted only when unsafe provenance reaches SQL text.
 type SQLFinding struct {
 	State         State        `json:"state"`
 	Source        Source       `json:"source"`

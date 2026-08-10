@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbadf "github.com/harumiWeb/xlflow/internal/vba/dataflow"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -61,21 +62,7 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 		if !a.Config.Analyze.DetectUntrustedDataFlow {
 			continue
 		}
-		line := flow.Sink.Range.StartLine
-		if line <= 0 {
-			line = flow.Source.Range.StartLine
-		}
-		if line <= 0 {
-			line = proc.StartLine
-		}
-		sourceLine := flow.Source.Range.StartLine
-		if sourceLine <= 0 {
-			sourceLine = line
-		}
-		sinkLine := flow.Sink.Range.StartLine
-		if sinkLine <= 0 {
-			sinkLine = line
-		}
+		line, sourceLine, sinkLine := dataFlowLines(flow.Sink.Range, flow.Source.Range, proc.StartLine)
 		path := formatDataFlowPath(flow.Path)
 		message := fmt.Sprintf("Conservative analysis: %s flows to %s. Source: %s; sink: %s; path: %s.", flow.Source.Label, flow.Sink.Label, flow.Source.Label, flow.Sink.Label, path)
 		reason := fmt.Sprintf("Conservative analysis keeps potentially untrusted data from %s through the propagation path %s until it reaches the sensitive sink %s.", flow.Source.Label, path, flow.Sink.Label)
@@ -115,25 +102,11 @@ func isCommandExecutionSink(kind string) bool {
 }
 
 func isSQLExecutionSink(kind string) bool {
-	return strings.EqualFold(strings.TrimSpace(kind), "sql_execution")
+	return strings.EqualFold(strings.TrimSpace(kind), string(vbadf.SinkSQLExecution))
 }
 
 func (a Analyzer) sqlFinding(file parsedFile, proc sourceProcedure, sql vbadf.SQLFinding) Finding {
-	line := sql.Execution.Range.StartLine
-	if line <= 0 {
-		line = sql.Source.Range.StartLine
-	}
-	if line <= 0 {
-		line = proc.StartLine
-	}
-	sourceLine := sql.Source.Range.StartLine
-	if sourceLine <= 0 {
-		sourceLine = line
-	}
-	sinkLine := sql.Execution.Range.StartLine
-	if sinkLine <= 0 {
-		sinkLine = line
-	}
+	line, sourceLine, sinkLine := dataFlowLines(sql.Execution.Range, sql.Source.Range, proc.StartLine)
 	path := formatDataFlowPath(sql.Path)
 	message, reason, suggestion := sqlRiskProjection(sql.RiskKind, sql.Execution.API, sql.Source.Label, path)
 	finding := a.simpleFinding(file, proc, line, "VBA239", "warning", message, reason, suggestion)
@@ -181,21 +154,7 @@ func sqlRiskProjection(kind vbadf.SQLRiskKind, api, source, path string) (messag
 }
 
 func (a Analyzer) commandFlowFinding(file parsedFile, proc sourceProcedure, flow vbadf.Finding) Finding {
-	line := flow.Sink.Range.StartLine
-	if line <= 0 {
-		line = flow.Source.Range.StartLine
-	}
-	if line <= 0 {
-		line = proc.StartLine
-	}
-	sourceLine := flow.Source.Range.StartLine
-	if sourceLine <= 0 {
-		sourceLine = line
-	}
-	sinkLine := flow.Sink.Range.StartLine
-	if sinkLine <= 0 {
-		sinkLine = line
-	}
+	line, sourceLine, sinkLine := dataFlowLines(flow.Sink.Range, flow.Source.Range, proc.StartLine)
 	path := formatDataFlowPath(flow.Path)
 	call, _ := commandCallForFlow(proc, flow)
 	launcher, interpreter, role := commandLauncherDetails(flow, call, proc)
@@ -222,6 +181,25 @@ func (a Analyzer) commandFlowFinding(file parsedFile, proc sourceProcedure, flow
 		Interpreter: interpreter, CommandRole: role, OriginState: origin,
 	}
 	return finding
+}
+
+func dataFlowLines(sinkRange, sourceRange vbaast.Range, procedureLine int) (line, sourceLine, sinkLine int) {
+	line = sinkRange.StartLine
+	if line <= 0 {
+		line = sourceRange.StartLine
+	}
+	if line <= 0 {
+		line = procedureLine
+	}
+	sourceLine = sourceRange.StartLine
+	if sourceLine <= 0 {
+		sourceLine = line
+	}
+	sinkLine = sinkRange.StartLine
+	if sinkLine <= 0 {
+		sinkLine = line
+	}
+	return line, sourceLine, sinkLine
 }
 
 func (a Analyzer) commandFinding(file parsedFile, proc sourceProcedure, command vbadf.CommandFinding) Finding {
