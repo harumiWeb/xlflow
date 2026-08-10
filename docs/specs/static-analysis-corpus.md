@@ -198,8 +198,9 @@ Profiles are selected in the corpus adapter, not in the shared static-analysis
 registry. `excel` keeps the normal rule set. `generic-vba` and `access` omit
 the Excel object-model rules `VB002`, `VB003`, `VB027`, `VBA104`, `VBA201`,
 `VBA203`, `VBA205`, `VBA211`, `VBA215`, `VBA216`, `VBA217`, `VBA218`, `VBA221`,
-`VBA225`, and `VBA226` from corpus evidence. Configurable rules are disabled
-in the generated project config; always-on `VBA104` and `VBA211` are filtered
+`VBA225`, `VBA226`, and `VBA238` from corpus evidence. Configurable rules are
+disabled in the generated project config; always-on `VBA104` and `VBA211` are
+filtered
 at normalization. This policy affects corpus evidence only and does not alter
 production analyzer semantics.
 

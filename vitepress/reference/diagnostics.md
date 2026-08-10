@@ -90,6 +90,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA235`](#vba235) | analyze | warning  | procedure-local | yes     | Collection index origin confusion                  |
 | [`VBA236`](#vba236) | analyze | warning  | procedure-local | yes     | Unsafe command construction                        |
 | [`VBA237`](#vba237) | analyze | warning  | interprocedural | yes     | Suppressed error propagation                       |
+| [`VBA238`](#vba238) | analyze | warning  | procedure-local | yes     | Loop-invariant Excel object resolution             |
 
 ## VB001
 
@@ -1938,3 +1939,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                     |
 | Real-time editor diagnostic | yes                                    |
 | Fix available               | no                                     |
+
+## VBA238
+
+**Loop-invariant Excel object resolution.** A loop repeatedly resolves an Excel object-model member chain that does not depend on the loop variable and could be cached outside the loop.
+
+| Property                    | Value                                           |
+| --------------------------- | ----------------------------------------------- |
+| Family                      | `analyze`                                       |
+| Category                    | `performance`                                   |
+| Evidence class              | `maintainability`                               |
+| Compile-equivalent          | no                                              |
+| Default severity            | `warning`                                       |
+| Supported severities        | `warning`                                       |
+| Surfaces                    | `analyze`, `lsp`                                |
+| Scope                       | `procedure-local`                               |
+| Precision                   | `medium`                                        |
+| Enabled by default          | yes                                             |
+| Configuration               | `detect_loop_invariant_excel_object_resolution` |
+| Inline suppression          | yes                                             |
+| Blocks source preflight     | no                                              |
+| Real-time editor diagnostic | yes                                             |
+| Fix available               | no                                              |

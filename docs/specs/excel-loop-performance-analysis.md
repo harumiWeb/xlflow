@@ -1,9 +1,11 @@
 # Excel Loop Performance Analysis
 
-This specification defines the `VBA225` analyzer rule for issue #452. The
-rule identifies conservative, repeated Excel object-model work inside VBA
-loops and recommends bulk range or array operations. ADR-0025 records the
-design rationale and boundaries.
+This specification defines the `VBA225` and `VBA238` analyzer rules for the
+Excel loop-performance issues #452 and #453. `VBA225` identifies conservative,
+repeated Excel object-model work inside VBA loops and recommends bulk range or
+array operations. `VBA238` identifies loop-invariant Excel object expressions
+that are repeatedly resolved and recommends hoisting them into cached locals.
+ADR-0025 records the design rationale and boundaries.
 
 ## Scope and public contract
 
@@ -131,6 +133,50 @@ such as `VBA215` and `VBA218`.
 The generated diagnostic catalog must be regenerated from the static-analysis
 registry after the registry implementation is updated. The generated
 `vitepress/reference/diagnostics.md` file is not a hand-edited source of truth.
+
+## Loop-invariant Excel object resolution (`VBA238`)
+
+<!-- xlflow-rule-contract: {"id":"VBA238","family":"analyze","category":"performance","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_loop_invariant_excel_object_resolution","inline_suppressible":true,"preflight_blocking":false} -->
+
+`VBA238` is a default-enabled, warning-level performance diagnostic for
+loop-invariant Excel object-model resolution. It reports a repeated member
+chain whose receiver and constant arguments do not depend on the active loop
+iterator, such as `ThisWorkbook.Worksheets("Data")`,
+`Workbooks("Book.xlsx").Worksheets("Data")`, `ListObjects("Sales")`, named
+ranges, pivot tables, or charts. The rule is available in batch analysis and
+the shared real-time editor path, remains non-blocking, and supports normal
+inline suppression.
+
+The analyzer normalizes equivalent member chains across whitespace, line
+continuations, and `With` blocks before comparing them. It ignores simple local
+variable access and expressions that reference the loop variable (for example,
+`Cells(i, 1)`), because those values must be resolved per iteration. Nested
+loops are supported: an expression is eligible only when it is invariant with
+respect to the loop in which it is reported. Ambiguous or unresolved chains do
+not establish a finding.
+
+The suggested remediation extracts the invariant chain into a local object
+outside the loop and reuses it:
+
+```vb
+Dim dataSheet As Worksheet
+Set dataSheet = ThisWorkbook.Worksheets("Data")
+For i = 1 To lastRow
+    dataSheet.Cells(i, 1).Value2 = i
+Next
+```
+
+Projects can disable the rule with:
+
+```toml
+[analyze]
+disabled_rules = ["VBA238"]
+```
+
+An intentional local exception can use `xlflow:disable-line VBA238` or
+`xlflow:disable-next-line VBA238`. `VBA238` is separate from `VBA225`:
+`VBA225` reports the repeated per-cell or per-item Excel work itself, whereas
+`VBA238` reports the avoidable repeated lookup of an invariant object chain.
 
 ## Related
 

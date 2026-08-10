@@ -68,6 +68,14 @@ func TestErrorSuppressionPropagationDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestLoopInvariantExcelObjectResolutionDefaultsEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA238"); !ok || !enabled || !cfg.Analyze.DetectLoopInvariantExcelObjectResolution {
+		t.Fatalf("VBA238 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectLoopInvariantExcelObjectResolution)
+	}
+}
+
 func TestLoadDictionaryCollectionMisuseCompatibilityKeysAndDisabledRules(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]
@@ -189,7 +197,7 @@ exclude = ["src/modules/Tests/**"]
 		!cfg.Analyze.DetectApplicationStateRestore || !cfg.Analyze.DetectErrorHandlerFallthrough ||
 		!cfg.Analyze.ForbidUnqualifiedExcelObjects || !cfg.Analyze.DetectRedimPreserveDimension ||
 		!cfg.Analyze.DetectObjectArrayComparison || !cfg.Analyze.DetectExcelObjectMemberMismatch ||
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard || !cfg.Analyze.DetectPublicAPITypeSafety || !cfg.Analyze.DetectUntrustedDataFlow || !cfg.Analyze.DetectUnsafeCommandConstruction || !cfg.Analyze.DetectExcelCellAccessInLoops || !cfg.Analyze.DetectRangeValueArrayShape {
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard || !cfg.Analyze.DetectPublicAPITypeSafety || !cfg.Analyze.DetectUntrustedDataFlow || !cfg.Analyze.DetectUnsafeCommandConstruction || !cfg.Analyze.DetectExcelCellAccessInLoops || !cfg.Analyze.DetectLoopInvariantExcelObjectResolution || !cfg.Analyze.DetectRangeValueArrayShape {
 		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
 	}
 	if cfg.Analyze.DetectDictionaryCollectionGuard ||
@@ -465,7 +473,7 @@ entry = "Main.Run"
 path = "build/Book.xlsm"
 
 [analyze]
-disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "vba224", "VBA225", "VBA226", "VBA227", "VBA201"]
+disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "VBA215", "VBA216", "vba217", "VBA218", "VBA219", "VBA220", "VBA221", "VBA222", "VBA223", "vba224", "VBA225", "VBA226", "VBA227", "VBA238", "VBA201"]
 `)
 	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -531,11 +539,14 @@ disabled_rules = ["VBA201", "vba205", "VBA206", "VBA212", "VBA213", "VBA214", "V
 	if cfg.Analyze.DetectArrayLifecycleSafety {
 		t.Fatal("expected VBA227/detect_array_lifecycle_safety to be disabled")
 	}
+	if cfg.Analyze.DetectLoopInvariantExcelObjectResolution {
+		t.Fatal("expected VBA238/detect_loop_invariant_excel_object_resolution to be disabled")
+	}
 	if !cfg.Analyze.DetectObjectUseBeforeSet {
 		t.Fatal("expected unrelated analyze rule to remain enabled")
 	}
-	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226,VBA227" {
-		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226,VBA227", got)
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226,VBA227,VBA238" {
+		t.Fatalf("disabled analyze rules = %q, want VBA201,VBA205,VBA206,VBA212,VBA213,VBA214,VBA215,VBA216,VBA217,VBA218,VBA219,VBA220,VBA221,VBA222,VBA223,VBA224,VBA225,VBA226,VBA227,VBA238", got)
 	}
 }
 
@@ -1071,6 +1082,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.Analyze.DetectLeakedOnErrorResumeNextScopes = false
 	cfg.Analyze.DetectStatefulExcelCallArguments = false
 	cfg.Analyze.DetectExcelAPIFailureContracts = false
+	cfg.Analyze.DetectLoopInvariantExcelObjectResolution = false
 
 	p := filepath.Join(dir, FileName)
 	if err := Write(p, cfg); err != nil {
@@ -1095,6 +1107,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, `"VBA218"`) {
 		t.Fatalf("expected generated config to disable VBA218 by ID:\n%s", text)
+	}
+	if !strings.Contains(text, `"VBA238"`) {
+		t.Fatalf("expected generated config to disable VBA238 by ID:\n%s", text)
 	}
 	if strings.Contains(text, "forbid_interactive_input = false") || strings.Contains(text, "require_option_explicit = true") {
 		t.Fatalf("generated config should prefer disabled_rules over legacy lint booleans:\n%s", text)
@@ -1202,6 +1217,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.Analyze.DetectExcelAPIFailureContracts {
 		t.Fatal("expected detect_excel_api_failure_contracts=false after Write/Load")
+	}
+	if loaded.Analyze.DetectLoopInvariantExcelObjectResolution {
+		t.Fatal("expected detect_loop_invariant_excel_object_resolution=false after Write/Load")
 	}
 }
 

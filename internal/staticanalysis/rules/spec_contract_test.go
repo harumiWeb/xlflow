@@ -14,6 +14,7 @@ var specContractPattern = regexp.MustCompile(`<!-- xlflow-rule-contract: (\{[^\n
 
 var requiredSpecContracts = map[string]string{
 	"VBA225": "excel-loop-performance-analysis.md",
+	"VBA238": "excel-loop-performance-analysis.md",
 }
 
 type specRuleContract struct {

@@ -20,6 +20,12 @@ bulk-range operations, and avoids clearly trivial fixed-size loops. The rule
 must also account for uniquely resolved local helpers without turning
 ambiguous or late-bound VBA into false certainty.
 
+Issue #453 adds a related but distinct cost: a loop can repeatedly resolve the
+same workbook, worksheet, table, named-range, pivot, or chart member chain
+even when the chain does not depend on the loop iterator. Those invariant
+lookups should be hoisted into a cached local while iterator-dependent cell
+access remains inside the loop.
+
 ## Decision
 
 Add `VBA225`, a default-enabled `analyze` rule in the performance category. It
@@ -61,6 +67,18 @@ uses the existing analyzer finding envelope. Its static-analysis registry entry
 and generated diagnostic catalog are follow-up projections of this contract;
 the generated catalog must be regenerated rather than edited manually.
 
+Add `VBA238` for issue #453. It is a default-enabled, warning-level,
+procedure-local performance rule in batch analysis and the shared real-time
+path. It normalizes repeated Excel member chains, ignores chains that reference
+the active loop variable or are only trivial local-variable access, and reports
+an invariant chain that can be extracted into a cached local before the loop.
+Nested loops are handled by requiring invariance at the selected loop boundary.
+`VBA238` is non-blocking, inline suppressible, and configured with
+`[analyze].disabled_rules = ["VBA238"]` (with the legacy
+`detect_loop_invariant_excel_object_resolution` Boolean retained during the
+compatibility window). `VBA238` owns lookup-hoisting guidance; `VBA225` retains
+ownership of repeated per-cell or per-item object-model work.
+
 ## Consequences
 
 - Positive: common cell-by-cell loop patterns receive actionable guidance before
@@ -75,6 +93,9 @@ the generated catalog must be regenerated rather than edited manually.
   provenance so one loop does not produce duplicate helper findings.
 - Negative: the fixed small-loop threshold is a deliberate heuristic; projects
   with unusual workloads may still need a local suppression.
+- Negative: invariant-chain normalization is conservative around dynamic
+  dispatch and ambiguous `With` receivers, so some cacheable lookups remain
+  unreported.
 
 ## Alternatives Considered
 
@@ -97,6 +118,8 @@ the generated catalog must be regenerated rather than edited manually.
 ## Evidence
 
 - Requirements: xlflow issue #452.
+- Related requirements: xlflow issue #453 (loop-invariant Excel object
+  resolution and cache-hoisting guidance).
 - Analyzer ownership and public diagnostic policy:
   `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`.
 - Procedure syntax and resolution: `docs/specs/vba-analysis-ir.md` and
@@ -119,3 +142,4 @@ the generated catalog must be regenerated rather than edited manually.
 - `docs/adr/ADR-0023-procedure-effect-summaries.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - xlflow issue #452
+- xlflow issue #453

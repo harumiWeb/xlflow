@@ -19,6 +19,12 @@ All notable changes to xlflow will be documented in this file.
   failure information across uniquely resolved local call chains. Batch and
   LSP Full diagnostics share provenance-preserving procedure summaries and
   report the location where the failure signal is lost.
+- Added default-enabled `VBA238` performance warnings for loop-invariant Excel
+  object-model member chains. Batch and real-time analysis normalize equivalent
+  constant lookups, ignore iterator-dependent expressions, and suggest hoisting
+  the invariant chain into a cached local. Configure it with
+  `detect_loop_invariant_excel_object_resolution` or disable it with
+  `[analyze].disabled_rules = ["VBA238"]`.
 - Fix false-positive `VBA205` findings for local, parameter, and project symbols that shadow Excel root names, including procedure declaration and `Attribute` lines.
 
 - Expanded `VBA212` to analyze AST operand relationships across eager `And`,

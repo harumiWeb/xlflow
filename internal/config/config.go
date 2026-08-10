@@ -124,42 +124,43 @@ type ProcedureNameConstantConfig struct {
 }
 
 type AnalyzeConfig struct {
-	DisabledRules                       []string `toml:"disabled_rules"`
-	DetectRangeFindNothingCheck         bool     `toml:"detect_range_find_nothing_check"`
-	DetectObjectUseBeforeSet            bool     `toml:"detect_object_use_before_set"`
-	DetectApplicationStateRestore       bool     `toml:"detect_application_state_restore"`
-	DetectErrorHandlerFallthrough       bool     `toml:"detect_error_handler_fallthrough"`
-	ForbidUnqualifiedExcelObjects       bool     `toml:"forbid_unqualified_excel_objects"`
-	DetectByRefArgumentMismatch         bool     `toml:"detect_byref_argument_mismatch"`
-	DetectDictionaryCollectionGuard     bool     `toml:"detect_dictionary_collection_guard"`
-	DetectRedimPreserveDimension        bool     `toml:"detect_redim_preserve_dimension"`
-	DetectObjectArrayComparison         bool     `toml:"detect_object_array_comparison"`
-	DetectFunctionReturnPath            bool     `toml:"detect_function_return_path"`
-	DetectExcelObjectMemberMismatch     bool     `toml:"detect_excel_object_member_mismatch"`
-	DetectNonShortCircuitObjectGuard    bool     `toml:"detect_non_short_circuit_object_guard"`
-	DetectDictionaryIterationValueUsage bool     `toml:"detect_dictionary_iteration_value_usage"`
-	DetectLeakedOnErrorResumeNextScopes bool     `toml:"detect_leaked_on_error_resume_next_scopes"`
-	DetectStatefulExcelCallArguments    bool     `toml:"detect_stateful_excel_call_arguments"`
-	DetectWorksheetRootMismatch         bool     `toml:"detect_worksheet_root_mismatch"`
-	DetectUnstableLastRowPatterns       bool     `toml:"detect_unstable_last_row_patterns"`
-	DetectExcelAPIFailureContracts      bool     `toml:"detect_excel_api_failure_contracts"`
-	DetectResourceLeaks                 bool     `toml:"detect_resource_leaks"`
-	DetectEventHandlerReentry           bool     `toml:"detect_event_handler_reentry"`
-	DetectApplicationStateCallEffects   bool     `toml:"detect_application_state_call_effects"`
-	DetectHardcodedSecrets              bool     `toml:"detect_hardcoded_secrets"`
-	DetectPublicAPITypeSafety           bool     `toml:"detect_public_api_type_safety"`
-	DetectUntrustedDataFlow             bool     `toml:"detect_untrusted_data_flow"`
-	DetectExcelCellAccessInLoops        bool     `toml:"detect_excel_cell_access_in_loops"`
-	DetectRangeValueArrayShape          bool     `toml:"detect_range_value_array_shape"`
-	DetectArrayLifecycleSafety          bool     `toml:"detect_array_lifecycle_safety"`
-	DetectDictionaryCompareModeOrder    bool     `toml:"detect_dictionary_compare_mode_order"`
-	DetectDictionaryLoopMaterialization bool     `toml:"detect_dictionary_loop_materialization"`
-	DetectDictionaryKeyNormalization    bool     `toml:"detect_dictionary_key_normalization"`
-	DetectLateBoundDictionaryConstants  bool     `toml:"detect_late_bound_dictionary_constants"`
-	DetectCollectionIterationMutation   bool     `toml:"detect_collection_iteration_mutation"`
-	DetectCollectionIndexOrigin         bool     `toml:"detect_collection_index_origin"`
-	DetectUnsafeCommandConstruction     bool     `toml:"detect_unsafe_command_construction"`
-	DetectErrorSuppressionPropagation   bool     `toml:"detect_error_suppression_propagation"`
+	DisabledRules                            []string `toml:"disabled_rules"`
+	DetectRangeFindNothingCheck              bool     `toml:"detect_range_find_nothing_check"`
+	DetectObjectUseBeforeSet                 bool     `toml:"detect_object_use_before_set"`
+	DetectApplicationStateRestore            bool     `toml:"detect_application_state_restore"`
+	DetectErrorHandlerFallthrough            bool     `toml:"detect_error_handler_fallthrough"`
+	ForbidUnqualifiedExcelObjects            bool     `toml:"forbid_unqualified_excel_objects"`
+	DetectByRefArgumentMismatch              bool     `toml:"detect_byref_argument_mismatch"`
+	DetectDictionaryCollectionGuard          bool     `toml:"detect_dictionary_collection_guard"`
+	DetectRedimPreserveDimension             bool     `toml:"detect_redim_preserve_dimension"`
+	DetectObjectArrayComparison              bool     `toml:"detect_object_array_comparison"`
+	DetectFunctionReturnPath                 bool     `toml:"detect_function_return_path"`
+	DetectExcelObjectMemberMismatch          bool     `toml:"detect_excel_object_member_mismatch"`
+	DetectNonShortCircuitObjectGuard         bool     `toml:"detect_non_short_circuit_object_guard"`
+	DetectDictionaryIterationValueUsage      bool     `toml:"detect_dictionary_iteration_value_usage"`
+	DetectLeakedOnErrorResumeNextScopes      bool     `toml:"detect_leaked_on_error_resume_next_scopes"`
+	DetectStatefulExcelCallArguments         bool     `toml:"detect_stateful_excel_call_arguments"`
+	DetectWorksheetRootMismatch              bool     `toml:"detect_worksheet_root_mismatch"`
+	DetectUnstableLastRowPatterns            bool     `toml:"detect_unstable_last_row_patterns"`
+	DetectExcelAPIFailureContracts           bool     `toml:"detect_excel_api_failure_contracts"`
+	DetectResourceLeaks                      bool     `toml:"detect_resource_leaks"`
+	DetectEventHandlerReentry                bool     `toml:"detect_event_handler_reentry"`
+	DetectApplicationStateCallEffects        bool     `toml:"detect_application_state_call_effects"`
+	DetectHardcodedSecrets                   bool     `toml:"detect_hardcoded_secrets"`
+	DetectPublicAPITypeSafety                bool     `toml:"detect_public_api_type_safety"`
+	DetectUntrustedDataFlow                  bool     `toml:"detect_untrusted_data_flow"`
+	DetectExcelCellAccessInLoops             bool     `toml:"detect_excel_cell_access_in_loops"`
+	DetectRangeValueArrayShape               bool     `toml:"detect_range_value_array_shape"`
+	DetectArrayLifecycleSafety               bool     `toml:"detect_array_lifecycle_safety"`
+	DetectDictionaryCompareModeOrder         bool     `toml:"detect_dictionary_compare_mode_order"`
+	DetectDictionaryLoopMaterialization      bool     `toml:"detect_dictionary_loop_materialization"`
+	DetectDictionaryKeyNormalization         bool     `toml:"detect_dictionary_key_normalization"`
+	DetectLateBoundDictionaryConstants       bool     `toml:"detect_late_bound_dictionary_constants"`
+	DetectCollectionIterationMutation        bool     `toml:"detect_collection_iteration_mutation"`
+	DetectCollectionIndexOrigin              bool     `toml:"detect_collection_index_origin"`
+	DetectUnsafeCommandConstruction          bool     `toml:"detect_unsafe_command_construction"`
+	DetectErrorSuppressionPropagation        bool     `toml:"detect_error_suppression_propagation"`
+	DetectLoopInvariantExcelObjectResolution bool     `toml:"detect_loop_invariant_excel_object_resolution"`
 }
 
 type lintRuleAdapter struct {
@@ -244,6 +245,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA235": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIndexOrigin }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIndexOrigin = v }},
 	"VBA236": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeCommandConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeCommandConstruction = v }},
 	"VBA237": {Get: func(c AnalyzeConfig) bool { return c.DetectErrorSuppressionPropagation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectErrorSuppressionPropagation = v }},
+	"VBA238": {Get: func(c AnalyzeConfig) bool { return c.DetectLoopInvariantExcelObjectResolution }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLoopInvariantExcelObjectResolution = v }},
 }
 
 var (
