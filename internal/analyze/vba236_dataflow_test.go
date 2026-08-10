@@ -111,6 +111,62 @@ End Sub
 	}
 }
 
+func TestVBA236TreatsNumericShellArgumentsAsProcessLaunchRisk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run(port As Long)
+    Shell "tool.exe --port=" & port
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA236")
+	if len(got) != 1 || got[0].CommandExecution == nil {
+		t.Fatalf("numeric argument finding = %+v", got)
+	}
+	context := got[0].CommandExecution
+	if context.RiskClass != "process_launch" || context.RiskKind != "unknown_origin" || context.CommandRole != "arguments" {
+		t.Fatalf("numeric argument context = %+v", context)
+	}
+	if strings.Contains(strings.ToLower(got[0].Message), "injection") {
+		t.Fatalf("numeric argument was presented as injection: %s", got[0].Message)
+	}
+}
+
+func TestVBA236TreatsFixedExecutableArgumentConcatenationAsProcessLaunchRisk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run(raw As String)
+    Shell "tool.exe --name=" & raw
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA236")
+	if len(got) != 1 || got[0].CommandExecution == nil {
+		t.Fatalf("argument concatenation finding = %+v", got)
+	}
+	context := got[0].CommandExecution
+	if context.RiskClass != "process_launch" || context.RiskKind != "unknown_origin" || context.CommandRole != "arguments" {
+		t.Fatalf("argument concatenation context = %+v", context)
+	}
+	if strings.Contains(strings.ToLower(got[0].Message), "injection") {
+		t.Fatalf("ordinary argument was presented as injection: %s", got[0].Message)
+	}
+}
+
 func TestVBA224RetainsNonProcessSinkFlows(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

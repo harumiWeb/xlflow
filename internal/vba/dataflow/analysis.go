@@ -662,6 +662,19 @@ func (a *procedureAnalyzer) inspectCommand(call procedureir.CallSite, state abst
 			continue
 		}
 		target.execution.Interpreter = commandInterpreter(expression.Text)
+		// VBA Shell accepts one combined command string.  When the expression is
+		// a concatenation without an explicit interpreter, dynamic fragments are
+		// ordinary arguments rather than executable text.  Keep the executable
+		// role for a direct value (for example Shell raw), and let the interpreter
+		// handling below upgrade cmd/PowerShell/script-host command strings.
+		if target.kind == SinkShell && target.role == CommandRoleExecutable && expression.Kind == procedureir.ExpressionBinary {
+			target.role = CommandRoleArguments
+			target.execution.Role = target.role
+		}
+		if target.kind == SinkShell && target.role == CommandRoleArguments && strings.Contains(strings.ToLower(expression.Text), "/c") {
+			target.role = CommandRoleShellCommand
+			target.execution.Role = target.role
+		}
 		if strings.HasPrefix(strings.ToLower(vbaStringContent(expression.Text)), "http") && (target.role == CommandRoleDocument || target.role == CommandRoleExecutable) {
 			target.role = CommandRoleURL
 			target.execution.Role = target.role
@@ -695,14 +708,23 @@ func (a *procedureAnalyzer) inspectCommand(call procedureir.CallSite, state abst
 			if origin.safe[target.kind] || (origin.state != StateTainted && origin.state != StateUnknown) {
 				continue
 			}
+			role := target.role
+			if target.kind == SinkShell && role == CommandRoleExecutable && nonStringParameter(a.procedure, origin.source) {
+				// Numeric and Boolean parameters cannot inject shell metacharacters
+				// into an executable path.  They remain a process-launch observation
+				// because the value still changes the launched command's arguments.
+				role = CommandRoleArguments
+			}
+			execution := target.execution
+			execution.Role = role
 			class := CommandRiskProcessLaunch
 			kind := CommandRiskUnknownOrigin
-			if origin.state == StateTainted && (target.role == CommandRoleExecutable || target.role == CommandRoleShellCommand) {
+			if origin.state == StateTainted && (role == CommandRoleExecutable || role == CommandRoleShellCommand) {
 				class = CommandRiskInjection
 				kind = CommandRiskTaintedCommandText
 			}
 			a.recordCommand(CommandFinding{
-				State: origin.state, Source: origin.source, Execution: target.execution,
+				State: origin.state, Source: origin.source, Execution: execution,
 				RiskClass: class, RiskKind: kind, OriginState: origin.state,
 				Path:    append([]PathStep(nil), origin.path...),
 				Message: fmt.Sprintf("Command input from %s reaches %s.", origin.source.Label, target.execution.Launcher),
@@ -859,6 +881,29 @@ func commandInterpreter(text string) string {
 	default:
 		return ""
 	}
+}
+
+func nonStringParameter(procedure procedureir.ProcedureIR, source Source) bool {
+	if source.Kind != SourceParameter {
+		return false
+	}
+	wanted := canonicalName(source.Label)
+	for _, parameter := range procedure.Symbol.Parameters {
+		if canonicalName(parameter.Name) != wanted {
+			continue
+		}
+		typ := strings.ToLower(strings.TrimSpace(parameter.Type))
+		if typ == "" || typ == "string" || strings.Contains(typ, "string") {
+			return false
+		}
+		for _, numeric := range []string{"byte", "integer", "long", "single", "double", "currency", "decimal", "date", "boolean"} {
+			if strings.Contains(typ, numeric) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func powershellUsesCommand(text string) bool {
