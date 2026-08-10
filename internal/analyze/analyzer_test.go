@@ -5250,6 +5250,78 @@ End Sub
 	}
 }
 
+func TestVBA220ReportsOneFindingPerResolvedCallSite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.cls"), []byte(`Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
+  TriggerSelectionChange
+End Sub
+
+Private Sub TriggerSelectionChange()
+  Application.Goto Range("A1")
+  MysteryOperation
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 {
+		t.Fatalf("VBA220 findings = %+v, want one finding at the resolved call site", got)
+	}
+	if got[0].Line != 3 || !strings.Contains(got[0].Message, "broader event-chain") {
+		t.Fatalf("VBA220 finding = %+v, want the confirmed event risk on line 3", got[0])
+	}
+}
+
+func TestVBA220KeepsDistinctResolvedCallsInOneStatement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.cls"), []byte(`Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
+  If WriteCell(TriggerSelection()) Then
+  End If
+End Sub
+
+Private Function WriteCell(ByVal triggered As Boolean) As Boolean
+  Range("A1").Value = 1
+  WriteCell = triggered
+End Function
+
+Private Function TriggerSelection() As Boolean
+  Application.Goto Range("A1")
+  TriggerSelection = True
+End Function
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 2 {
+		t.Fatalf("VBA220 findings = %+v, want one finding for each resolved call boundary", got)
+	}
+	if !strings.Contains(got[0].Message, "same-event") || !strings.Contains(got[1].Message, "broader event-chain") {
+		t.Fatalf("VBA220 findings = %+v, want same-event and broader event-chain risks", got)
+	}
+}
+
 func writeWorkbookModule(t *testing.T, dir, name string) {
 	t.Helper()
 	src := filepath.Join(dir, "src", "workbook")
