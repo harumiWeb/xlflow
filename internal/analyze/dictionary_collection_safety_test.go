@@ -71,14 +71,11 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA207")
-	if len(got) != 2 {
-		t.Fatalf("VBA207 findings = %+v, want definite and unknown only", got)
+	if len(got) != 1 {
+		t.Fatalf("VBA207 findings = %+v, want definite key warning only (VBA202 owns nullable receiver)", got)
 	}
 	if got[0].Line != 5 || got[0].Severity != "warning" {
 		t.Fatalf("definitely absent VBA207 = %+v", got[0])
-	}
-	if got[1].Line != 9 || got[1].Severity != "information" {
-		t.Fatalf("unknown VBA207 = %+v", got[1])
 	}
 }
 

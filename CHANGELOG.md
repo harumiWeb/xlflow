@@ -8,6 +8,11 @@ All notable changes to xlflow will be documented in this file.
   DAO execution boundaries. Findings track SQL value/identifier/LIKE roles,
   locale-sensitive formatting, manual quoting, and parameterized
   `ADODB.Command` usage without claiming complete SQL-injection proof.
+- Strengthened `VBA202` object use-before-`Set` analysis with CFG-based,
+  branch- and interprocedural tracking across locals, parameters, module and
+  `Static` state, explicit `Nothing` resets, `ByRef` mutations,
+  `As New`/constructor initialization, exceptional paths, and nullable
+  function/callee returns. Unresolved calls no longer imply initialization.
 
 - Fixed `VB014` false positives for valid date-literal and named-argument colons,
   UDT fields named `Next`, and repeated conditional-compilation guards.
