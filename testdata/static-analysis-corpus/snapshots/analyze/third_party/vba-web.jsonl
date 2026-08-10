@@ -134,6 +134,7 @@
 {"project":"third_party/vba-web","file":"examples/salesforce/Salesforce.bas","surface":"analyze","code":"VBA206","severity":"warning","line":78,"column":19}
 {"project":"third_party/vba-web","file":"examples/salesforce/SalesforceSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":64,"column":23}
 {"project":"third_party/vba-web","file":"examples/salesforce/SalesforceSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":64,"column":23}
+{"project":"third_party/vba-web","file":"examples/salesforce/SalesforceSheet.cls","surface":"analyze","code":"VBA237","severity":"warning","line":70,"column":0}
 {"project":"third_party/vba-web","file":"examples/salesforce/SalesforceSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":72,"column":5}
 {"project":"third_party/vba-web","file":"examples/salesforce/SalesforceSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":72,"column":5}
 {"project":"third_party/vba-web","file":"examples/salesforce/SalesforceSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":78,"column":9}
@@ -156,6 +157,7 @@
 {"project":"third_party/vba-web","file":"specs/Credentials.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
 {"project":"third_party/vba-web","file":"specs/Credentials.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
 {"project":"third_party/vba-web","file":"specs/Credentials.bas","surface":"analyze","code":"VBA204","severity":"warning","line":74,"column":0}
+{"project":"third_party/vba-web","file":"specs/Credentials.bas","surface":"analyze","code":"VBA237","severity":"warning","line":74,"column":0}
 {"project":"third_party/vba-web","file":"specs/Specs_DigestAuthenticator.bas","surface":"analyze","code":"VBA222","severity":"warning","line":12,"column":0}
 {"project":"third_party/vba-web","file":"specs/Specs_DigestAuthenticator.bas","surface":"analyze","code":"VBA206","severity":"warning","line":44,"column":26}
 {"project":"third_party/vba-web","file":"specs/Specs_DigestAuthenticator.bas","surface":"analyze","code":"VBA206","severity":"warning","line":63,"column":34}
@@ -678,6 +680,7 @@
 {"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA224","severity":"warning","line":577,"column":0}
 {"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA224","severity":"warning","line":577,"column":0}
 {"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA206","severity":"warning","line":728,"column":21}
+{"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA237","severity":"warning","line":750,"column":0}
 {"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA206","severity":"warning","line":752,"column":5}
 {"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA206","severity":"warning","line":752,"column":5}
 {"project":"third_party/vba-web","file":"src/WebClient.cls","surface":"analyze","code":"VBA206","severity":"warning","line":752,"column":5}
@@ -755,6 +758,7 @@
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2274,"column":13}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2279,"column":21}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2309,"column":13}
+{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA237","severity":"warning","line":2319,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2336,"column":43}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2366,"column":43}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2407,"column":47}

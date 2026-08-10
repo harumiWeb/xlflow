@@ -1826,6 +1826,28 @@
       "configuration_key": "detect_unsafe_command_construction",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA237",
+      "title": "Suppressed error propagation",
+      "description": "A procedure or call boundary loses failure information by returning normally without rethrowing, returning a success flag that the caller ignores, or otherwise failing to signal failure.",
+      "family": "analyze",
+      "category": "runtime-safety",
+      "evidence_class": "runtime-safety",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "interprocedural",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba237",
+      "configurable": true,
+      "configuration_key": "detect_error_suppression_propagation",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

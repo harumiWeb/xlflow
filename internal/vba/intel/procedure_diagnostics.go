@@ -10,6 +10,9 @@ import (
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 type DiagnosticMode uint8
@@ -34,6 +37,24 @@ type DiagnosticRequest struct {
 type DiagnosticResult struct {
 	Diagnostics []Diagnostic
 	Cache       *DiagnosticCache
+}
+
+// ProjectAnalysisDocument is an immutable, protocol-neutral document input for
+// project-aware Full diagnostics. IR calls are resolved against the exact
+// workspace snapshot represented by Revision; CFG is built from the same IR.
+type ProjectAnalysisDocument struct {
+	IR  procedureir.DocumentIR
+	CFG vbacfg.Document
+}
+
+// ProjectAnalysisSnapshot is a coherent view of saved files and published
+// editor overlays. Complete is false while any newer overlay is pending, so a
+// project-aware diagnostic must not publish results from this snapshot.
+type ProjectAnalysisSnapshot struct {
+	Revision  uint64
+	Complete  bool
+	Documents []ProjectAnalysisDocument
+	CallGraph callgraph.Snapshot
 }
 
 type ProcedureIdentity struct {
@@ -415,7 +436,7 @@ func fastDiagnosticForProcedure(diagnostic Diagnostic, entry ProcedureCatalogEnt
 
 func interproceduralDiagnostic(code string) bool {
 	switch strings.ToUpper(code) {
-	case "VBA206", "VBA218":
+	case "VBA206", "VBA218", "VBA237":
 		return true
 	default:
 		return false

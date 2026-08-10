@@ -46,6 +46,8 @@ type ProcedureIdentity struct {
 	QualifiedName   string
 	Kind            procedureir.ProcedureKind
 	Visibility      string
+	IsEventHandler  bool
+	EventKind       string
 	DeclarationLine int
 }
 
@@ -67,6 +69,14 @@ type Evidence struct {
 	Value       string
 }
 
+// ErrorFailureOutput describes a ByRef parameter that carries an explicit
+// failure sentinel from a handled-error path.
+type ErrorFailureOutput struct {
+	ParameterIndex int
+	ParameterName  string
+	Value          string
+}
+
 type UncertaintyKind string
 
 const (
@@ -85,8 +95,56 @@ type CallUncertainty struct {
 	Callee      string
 }
 
+// ErrorBehaviorKind is a procedure-level runtime error behavior. The string
+// values intentionally match the analyzer-facing summary vocabulary.
+type ErrorBehaviorKind string
+
+const (
+	ErrorHasHandler       ErrorBehaviorKind = "has_error_handler"
+	ErrorUsesResumeNext   ErrorBehaviorKind = "uses_resume_next"
+	ErrorSuppresses       ErrorBehaviorKind = "suppresses_errors"
+	ErrorRethrows         ErrorBehaviorKind = "rethrows_errors"
+	ErrorReturnsSuccess   ErrorBehaviorKind = "returns_success_flag"
+	ErrorMayRaise         ErrorBehaviorKind = "may_raise"
+	ErrorLogsAndContinues ErrorBehaviorKind = "logs_and_continues"
+)
+
+// ErrorEvidence preserves the procedure and source statement at which an
+// error behavior originated. Propagation copies evidence unchanged, allowing
+// consumers to diagnose the procedure where failure information was lost.
+type ErrorEvidence struct {
+	Behavior ErrorBehaviorKind
+	Origin   ProcedureIdentity
+	// CallChain is one stable representative route from the summary owner to
+	// Origin. Direct evidence contains only Origin; propagated evidence is
+	// prefixed at each uniquely resolved caller boundary.
+	CallChain      []ProcedureIdentity
+	Range          vbaast.Range
+	StatementID    int
+	CallID         int
+	Target         string
+	Value          string
+	FailureOutputs []ErrorFailureOutput
+}
+
+// ErrorSummary is derived from CFG error paths and error statements. The
+// booleans cover both Direct and Propagated evidence; callers that need the
+// local contract should inspect Direct and evidence Origin.
+type ErrorSummary struct {
+	HasErrorHandler    bool
+	UsesResumeNext     bool
+	SuppressesErrors   bool
+	RethrowsErrors     bool
+	ReturnsSuccessFlag bool
+	MayRaise           bool
+	LogsAndContinues   bool
+	Direct             []ErrorEvidence
+	Propagated         []ErrorEvidence
+}
+
 type ProcedureSummary struct {
 	Identity              ProcedureIdentity
+	Error                 ErrorSummary
 	Direct                []Evidence
 	Propagated            []Evidence
 	DirectUncertainty     []CallUncertainty
@@ -159,6 +217,8 @@ func identity(doc procedureir.DocumentIR, proc procedureir.ProcedureIR) Procedur
 		File: canonicalPath(doc.Path), Module: doc.ModuleName, ModuleKind: doc.ModuleKind,
 		Name: proc.Symbol.Name, QualifiedName: proc.Symbol.QualifiedName, Kind: proc.Symbol.Kind,
 		Visibility:      proc.Symbol.Visibility,
+		IsEventHandler:  proc.Symbol.IsEventHandler,
+		EventKind:       proc.Symbol.EventKind,
 		DeclarationLine: proc.Symbol.DeclarationRange.StartLine,
 	}
 }
@@ -168,7 +228,18 @@ func cloneProcedureSummary(in ProcedureSummary) ProcedureSummary {
 	in.Propagated = append([]Evidence(nil), in.Propagated...)
 	in.DirectUncertainty = append([]CallUncertainty(nil), in.DirectUncertainty...)
 	in.PropagatedUncertainty = append([]CallUncertainty(nil), in.PropagatedUncertainty...)
+	in.Error.Direct = cloneErrorEvidence(in.Error.Direct)
+	in.Error.Propagated = cloneErrorEvidence(in.Error.Propagated)
 	return in
+}
+
+func cloneErrorEvidence(items []ErrorEvidence) []ErrorEvidence {
+	out := append([]ErrorEvidence(nil), items...)
+	for i := range out {
+		out[i].CallChain = append([]ProcedureIdentity(nil), out[i].CallChain...)
+		out[i].FailureOutputs = append([]ErrorFailureOutput(nil), out[i].FailureOutputs...)
+	}
+	return out
 }
 
 func canonicalPath(path string) string {
@@ -201,6 +272,12 @@ func sortSummaries(items []ProcedureSummary) {
 		sort.Slice(items[i].PropagatedUncertainty, func(a, b int) bool {
 			return uncertaintyKey(items[i].PropagatedUncertainty[a]) < uncertaintyKey(items[i].PropagatedUncertainty[b])
 		})
+		sort.Slice(items[i].Error.Direct, func(a, b int) bool {
+			return errorEvidenceKey(items[i].Error.Direct[a]) < errorEvidenceKey(items[i].Error.Direct[b])
+		})
+		sort.Slice(items[i].Error.Propagated, func(a, b int) bool {
+			return errorEvidenceKey(items[i].Error.Propagated[a]) < errorEvidenceKey(items[i].Error.Propagated[b])
+		})
 	}
 }
 
@@ -210,4 +287,12 @@ func evidenceKey(e Evidence) string {
 
 func uncertaintyKey(u CallUncertainty) string {
 	return strings.Join([]string{string(u.Kind), u.Origin.Key(), decimal(u.Range.StartByte), decimal(u.Range.EndByte), decimal(u.StatementID), decimal(u.CallID), strings.ToLower(u.Callee)}, "\x00")
+}
+
+func errorEvidenceKey(e ErrorEvidence) string {
+	parts := []string{string(e.Behavior), e.Origin.Key(), decimal(e.Range.StartByte), decimal(e.Range.EndByte), decimal(e.StatementID), decimal(e.CallID), strings.ToLower(e.Target), strings.ToLower(e.Value)}
+	for _, output := range e.FailureOutputs {
+		parts = append(parts, decimal(output.ParameterIndex), strings.ToLower(output.ParameterName), strings.ToLower(output.Value))
+	}
+	return strings.Join(parts, "\x00")
 }

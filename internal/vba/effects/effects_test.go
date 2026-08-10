@@ -3,6 +3,7 @@ package effects
 import (
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -115,6 +116,493 @@ End Sub
 	raise := find(t, summary, "Errors.RaiseError")
 	if got := count(raise.Direct, RaisesError); got != 1 {
 		t.Fatalf("Error statement raises_error count = %d, want 1: %#v", got, raise.Direct)
+	}
+}
+
+func TestErrorSummaryClassifiesHandlerOutcomes(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Errors.bas", "Errors", `Public Sub Swallow()
+    On Error GoTo Handler
+    Workbooks.Open "missing.xlsx"
+    Exit Sub
+Handler:
+    Debug.Print Err.Description
+End Sub
+
+Public Sub Rethrow()
+    On Error GoTo Handler
+    Workbooks.Open "missing.xlsx"
+    Exit Sub
+Handler:
+    Err.Raise Err.Number, Err.Source, Err.Description
+End Sub
+
+Public Sub PartialRethrow()
+    On Error GoTo Handler
+    Workbooks.Open "missing.xlsx"
+    Exit Sub
+Handler:
+    If Err.Number = 53 Then
+        Err.Raise Err.Number
+    End If
+End Sub
+
+Public Sub CleanupRethrow()
+    On Error GoTo Cleanup
+    Workbooks.Open "missing.xlsx"
+Cleanup:
+    Debug.Print "cleanup"
+    If Err.Number <> 0 Then
+        Err.Raise Err.Number, Err.Source, Err.Description
+    End If
+End Sub
+
+Public Sub ZeroGuardedRethrow()
+    On Error GoTo Handler
+    Workbooks.Open "missing.xlsx"
+    Exit Sub
+Handler:
+    If Err.Number = 0 Then Exit Sub
+    Err.Raise Err.Number, Err.Source, Err.Description
+End Sub
+
+Public Sub ExpectedErrorRecovery()
+    Dim number As Long
+    On Error GoTo Handler
+    Workbooks.Open "missing.xlsx"
+    Exit Sub
+Handler:
+    number = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    If number <> 9 Then
+        Err.Raise number
+    End If
+End Sub
+
+Public Function TryOpen() As Boolean
+    On Error GoTo Failed
+    Workbooks.Open "book.xlsx"
+    TryOpen = True
+    Exit Function
+Failed:
+    TryOpen = False
+End Function
+
+Public Function ValueOrEmpty() As String
+    On Error GoTo Failed
+    ValueOrEmpty = "value"
+    Exit Function
+Failed:
+    ValueOrEmpty = vbNullString
+End Function
+
+Public Function ObjectOrNothing() As Object
+    On Error GoTo Failed
+    Set ObjectOrNothing = CreateObject("Scripting.Dictionary")
+    Exit Function
+Failed:
+    Set ObjectOrNothing = Nothing
+End Function
+
+Public Sub Recover()
+    On Error GoTo Failed
+    Workbooks.Open "book.xlsx"
+    Exit Sub
+Failed:
+    Resume Next
+End Sub
+
+Private Sub WriteDiagnostic(ByVal message As String)
+    Debug.Print message
+End Sub
+
+Private Sub ForwardDiagnostic(ByVal message As String)
+    WriteDiagnostic message
+End Sub
+
+Private Sub IgnoresSecondArgument(ByVal message As String, ByVal ignored As String)
+    Debug.Print message
+End Sub
+
+Public Sub WrapperLog()
+    On Error GoTo Handler
+    Workbooks.Open "book.xlsx"
+    Exit Sub
+Handler:
+    ForwardDiagnostic Err.Description
+End Sub
+
+Public Sub LoggerShapedNameOnly()
+    On Error GoTo Handler
+    Workbooks.Open "book.xlsx"
+    Exit Sub
+Handler:
+    LogError Err.Description
+End Sub
+
+
+Public Sub ErrorPassedToUnusedLoggerArgument()
+    On Error GoTo Handler
+    Workbooks.Open "book.xlsx"
+    Exit Sub
+Handler:
+    IgnoresSecondArgument "constant", Err.Description
+End Sub
+
+
+Public Sub CopiedErrorNotUsedBySink()
+    Dim e As String
+    On Error GoTo Handler
+    Workbooks.Open "book.xlsx"
+    Exit Sub
+Handler:
+    e = Err.Description
+    Debug.Print "unrelated"
+End Sub
+`})
+
+	swallow := find(t, summary, "Errors.Swallow")
+	if !swallow.Error.HasErrorHandler || !swallow.Error.SuppressesErrors || !swallow.Error.LogsAndContinues {
+		t.Fatalf("swallow summary = %#v", swallow.Error)
+	}
+	if evidence := firstErrorEvidence(swallow.Error.Direct, ErrorSuppresses); evidence.Target != errorTargetHandler || evidence.Value != "handler" {
+		t.Fatalf("swallow evidence = %#v", evidence)
+	}
+
+	rethrow := find(t, summary, "Errors.Rethrow")
+	if !rethrow.Error.RethrowsErrors || !rethrow.Error.MayRaise || rethrow.Error.SuppressesErrors {
+		t.Fatalf("rethrow summary = %#v", rethrow.Error)
+	}
+	partial := find(t, summary, "Errors.PartialRethrow")
+	if !partial.Error.RethrowsErrors || !partial.Error.SuppressesErrors {
+		t.Fatalf("partial rethrow summary = %#v", partial.Error)
+	}
+	cleanup := find(t, summary, "Errors.CleanupRethrow")
+	if !cleanup.Error.RethrowsErrors || cleanup.Error.SuppressesErrors {
+		t.Fatalf("cleanup rethrow summary = %#v", cleanup.Error)
+	}
+	zeroGuard := find(t, summary, "Errors.ZeroGuardedRethrow")
+	if !zeroGuard.Error.RethrowsErrors || zeroGuard.Error.SuppressesErrors {
+		t.Fatalf("zero-guarded rethrow summary = %#v", zeroGuard.Error)
+	}
+	expectedRecovery := find(t, summary, "Errors.ExpectedErrorRecovery")
+	if !expectedRecovery.Error.RethrowsErrors || expectedRecovery.Error.SuppressesErrors {
+		t.Fatalf("expected error recovery summary = %#v", expectedRecovery.Error)
+	}
+
+	tryOpen := find(t, summary, "Errors.TryOpen")
+	if !tryOpen.Error.ReturnsSuccessFlag || tryOpen.Error.SuppressesErrors {
+		t.Fatalf("Try-style summary = %#v", tryOpen.Error)
+	}
+
+	fallback := find(t, summary, "Errors.ValueOrEmpty")
+	if fallback.Error.ReturnsSuccessFlag || fallback.Error.SuppressesErrors {
+		t.Fatalf("fallback summary = %#v", fallback.Error)
+	}
+	objectFallback := find(t, summary, "Errors.ObjectOrNothing")
+	if objectFallback.Error.SuppressesErrors {
+		t.Fatalf("object fallback summary = %#v", objectFallback.Error)
+	}
+
+	recover := find(t, summary, "Errors.Recover")
+	if recover.Error.UsesResumeNext || recover.Error.SuppressesErrors {
+		t.Fatalf("Resume recovery summary = %#v", recover.Error)
+	}
+	wrapper := find(t, summary, "Errors.WrapperLog")
+	if !wrapper.Error.SuppressesErrors || !wrapper.Error.LogsAndContinues {
+		t.Fatalf("local logger wrapper summary = %#v", wrapper.Error)
+	}
+	nameOnly := find(t, summary, "Errors.LoggerShapedNameOnly")
+	if !nameOnly.Error.SuppressesErrors || nameOnly.Error.LogsAndContinues {
+		t.Fatalf("logger-shaped unresolved call summary = %#v", nameOnly.Error)
+	}
+	logger := find(t, summary, "Errors.WriteDiagnostic")
+	if logger.Error.LogsAndContinues {
+		t.Fatalf("ordinary logger body is not itself logs-and-continues = %#v", logger.Error)
+	}
+	unused := find(t, summary, "Errors.ErrorPassedToUnusedLoggerArgument")
+	if !unused.Error.SuppressesErrors || unused.Error.LogsAndContinues {
+		t.Fatalf("error passed to unused logger argument = %#v", unused.Error)
+	}
+	copied := find(t, summary, "Errors.CopiedErrorNotUsedBySink")
+	if !copied.Error.SuppressesErrors || copied.Error.LogsAndContinues {
+		t.Fatalf("unrelated sink consumed copied error = %#v", copied.Error)
+	}
+}
+
+func TestErrorFallbackHelpersUseSourceOrder(t *testing.T) {
+	proc := procedureir.ProcedureIR{Symbol: procedureir.ProcedureSymbol{Name: "TryWork", Kind: procedureir.ProcedureFunction, ReturnType: "Boolean"}}
+	setup := procedureir.Statement{ID: 1, Range: vbaast.Range{StartByte: 10}}
+	earliest := procedureir.Statement{ID: 2, Kind: procedureir.StatementAssignment, Range: vbaast.Range{StartByte: 20}, Target: &procedureir.Expression{Text: "TryWork"}, Value: &procedureir.Expression{Text: "False"}}
+	later := procedureir.Statement{ID: 3, Kind: procedureir.StatementAssignment, Range: vbaast.Range{StartByte: 30}, Target: &procedureir.Expression{Text: "TryWork"}, Value: &procedureir.Expression{Text: "False"}}
+	statements := []procedureir.Statement{later, earliest, setup}
+	sort.SliceStable(statements, func(i, j int) bool { return statements[i].Range.StartByte < statements[j].Range.StartByte })
+
+	if got, ok := immediateLiteralResultFallback(proc, statements, setup); !ok || got.ID != earliest.ID {
+		t.Fatalf("immediate fallback = %#v, %v; want earliest source statement", got, ok)
+	}
+	if got := firstBooleanFailureAssignment(proc, statements, map[int]bool{2: true, 3: true}); got.ID != earliest.ID {
+		t.Fatalf("Boolean failure assignment = %#v, want earliest source statement", got)
+	}
+}
+
+func TestCallArgumentExpressionRejectsUnresolvedZeroID(t *testing.T) {
+	caller := procedureir.ProcedureIR{Expressions: []procedureir.Expression{{ID: 0, Text: "Err.Description"}}}
+	if expression, ok := callArgumentExpression(caller, procedureir.CallSite{}, procedureir.ProcedureIR{}, 0); ok || expression != "" {
+		t.Fatalf("unresolved call argument = %q, %v; want no expression", expression, ok)
+	}
+}
+
+func TestErrorSummaryDoesNotTreatOrdinaryBooleanPredicateAsSuccessContract(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Predicate.bas", "Predicate", `Public Function IsPositive(ByVal value As Long) As Boolean
+    If value > 0 Then
+        IsPositive = True
+    Else
+        IsPositive = False
+    End If
+End Function
+`})
+	predicate := find(t, summary, "Predicate.IsPositive")
+	if predicate.Error.ReturnsSuccessFlag {
+		t.Fatalf("ordinary predicate summary = %#v", predicate.Error)
+	}
+}
+
+func TestErrorSummaryDistinguishesCheckedAndUncheckedResumeNext(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Probe.bas", "Probe", `Public Sub CheckedProbe()
+    On Error Resume Next
+    Workbooks.Open "optional.xlsx"
+    If Err.Number <> 0 Then Exit Sub
+    On Error GoTo 0
+End Sub
+
+Public Sub UncheckedProbe()
+    On Error Resume Next
+    Workbooks.Open "one.xlsx"
+    Workbooks.Open "two.xlsx"
+End Sub
+
+Public Sub UnrelatedCheck()
+    On Error Resume Next
+    Workbooks.Open "optional.xlsx"
+    If ThisWorkbook.Saved Then Debug.Print "saved"
+    On Error GoTo 0
+End Sub
+
+Public Sub CapturedErrProbe()
+    Dim failed As Boolean
+    Dim detail As String
+    On Error Resume Next
+    Workbooks.Open "optional.xlsx"
+    detail = CStr(Err.Number) & ": " & Err.Description
+    failed = Err.Number <> 0
+    Err.Clear
+    On Error GoTo 0
+    If failed Then Debug.Print detail
+End Sub
+
+Public Sub RestoredResultProbe()
+    Dim value As Variant
+    On Error Resume Next
+    value = Workbooks("optional.xlsx")
+    On Error GoTo 0
+    If IsEmpty(value) Then Exit Sub
+End Sub
+
+Public Sub RestoredDerivedProbe()
+    Dim value As Variant
+    Dim kind As VbVarType
+    On Error Resume Next
+    value = Workbooks("optional.xlsx")
+    On Error GoTo 0
+    kind = VarType(value)
+    If kind = vbEmpty Then Exit Sub
+End Sub
+
+Public Sub RestoredBranchDerivedProbe(ByVal input As Variant)
+    Dim value As Variant
+    Dim kind As VbVarType
+    If IsObject(input) Then
+        On Error Resume Next
+        value = input
+        On Error GoTo 0
+        kind = VarType(value)
+    Else
+        kind = VarType(input)
+    End If
+    If kind = vbEmpty Then Exit Sub
+End Sub
+
+Public Sub AssertedErrProbe()
+    On Error Resume Next
+    Workbooks.Open "optional.xlsx"
+    Debug.Assert Err.Number <> 0
+    On Error GoTo 0
+End Sub
+
+Public Sub DerivedBooleanProbe(ByRef values() As Variant)
+    Dim hasAny As Boolean
+    On Error Resume Next
+    hasAny = (UBound(values) >= LBound(values))
+    On Error GoTo 0
+    If Not hasAny Then Err.Raise 5
+End Sub
+
+Public Function ExplicitResumeFallback() As Boolean
+    ExplicitResumeFallback = False
+    On Error Resume Next
+    ExplicitResumeFallback = (Workbooks.Count > 0)
+    On Error GoTo 0
+End Function
+`})
+	checked := find(t, summary, "Probe.CheckedProbe")
+	if !checked.Error.UsesResumeNext || checked.Error.SuppressesErrors {
+		t.Fatalf("checked probe summary = %#v", checked.Error)
+	}
+	unchecked := find(t, summary, "Probe.UncheckedProbe")
+	if !unchecked.Error.UsesResumeNext || !unchecked.Error.SuppressesErrors {
+		t.Fatalf("unchecked probe summary = %#v", unchecked.Error)
+	}
+	if evidence := firstErrorEvidence(unchecked.Error.Direct, ErrorSuppresses); evidence.Target != errorTargetResumeNext {
+		t.Fatalf("unchecked probe evidence = %#v", evidence)
+	}
+	unrelated := find(t, summary, "Probe.UnrelatedCheck")
+	if !unrelated.Error.SuppressesErrors {
+		t.Fatalf("unrelated condition accepted as probe check: %#v", unrelated.Error)
+	}
+	captured := find(t, summary, "Probe.CapturedErrProbe")
+	if !captured.Error.UsesResumeNext || captured.Error.SuppressesErrors {
+		t.Fatalf("captured Err probe summary = %#v", captured.Error)
+	}
+	for _, name := range []string{"Probe.RestoredResultProbe", "Probe.RestoredDerivedProbe", "Probe.RestoredBranchDerivedProbe", "Probe.AssertedErrProbe", "Probe.DerivedBooleanProbe", "Probe.ExplicitResumeFallback"} {
+		probe := find(t, summary, name)
+		if probe.Error.SuppressesErrors {
+			t.Fatalf("checked probe %s summary = %#v", name, probe.Error)
+		}
+	}
+}
+
+func TestErrorSummaryAcceptsRethrowWrapperAndExplicitFallbacks(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Fallbacks.bas", "Fallbacks", `Private Sub RaiseAgain()
+    Err.Raise Err.Number, Err.Source, Err.Description
+End Sub
+
+Private Sub StopNow()
+    End
+End Sub
+
+Public Sub WrappedRethrow()
+    On Error GoTo Failed
+    Err.Raise 5
+    Exit Sub
+Failed:
+    RaiseAgain
+End Sub
+
+Public Sub TerminalHandler()
+    On Error GoTo Failed
+    Err.Raise 5
+    Exit Sub
+Failed:
+    StopNow
+End Sub
+
+Public Function Preinitialized() As Boolean
+    Preinitialized = False
+    On Error GoTo Failed
+    Err.Raise 5
+    Preinitialized = True
+    Exit Function
+Failed:
+End Function
+
+Public Function InitializedAfterSetup() As Boolean
+    On Error GoTo Failed
+    InitializedAfterSetup = False
+    Err.Raise 5
+    InitializedAfterSetup = True
+    Exit Function
+Failed:
+End Function
+
+Public Function Composite() As ShellResult
+    On Error GoTo Failed
+    Err.Raise 5
+    Exit Function
+Failed:
+    Composite.ExitCode = Err.Number
+End Function
+`})
+	for _, name := range []string{"Fallbacks.WrappedRethrow", "Fallbacks.TerminalHandler", "Fallbacks.Preinitialized", "Fallbacks.InitializedAfterSetup", "Fallbacks.Composite"} {
+		got := find(t, summary, name)
+		if got.Error.SuppressesErrors {
+			t.Fatalf("explicit contract %s summary = %#v", name, got.Error)
+		}
+	}
+	if got := find(t, summary, "Fallbacks.WrappedRethrow"); !got.Error.RethrowsErrors {
+		t.Fatalf("wrapped rethrow summary = %#v", got.Error)
+	}
+	if got := find(t, summary, "Fallbacks.Preinitialized"); !got.Error.ReturnsSuccessFlag {
+		t.Fatalf("preinitialized Boolean summary = %#v", got.Error)
+	}
+}
+
+func TestErrorSummaryMayRaiseIncludesUnhandledCFGPath(t *testing.T) {
+	summary := buildSources(t, sourceFile{"Unhandled.bas", "Unhandled", `Public Sub Run()
+    Workbooks.Open "missing.xlsx"
+End Sub
+`})
+	run := find(t, summary, "Unhandled.Run")
+	if !run.Error.MayRaise {
+		t.Fatalf("unhandled fault path summary = %#v", run.Error)
+	}
+	evidence := firstErrorEvidence(run.Error.Direct, ErrorMayRaise)
+	if evidence.Target != "unhandled_fault" || evidence.StatementID == 0 {
+		t.Fatalf("unhandled fault evidence = %#v", evidence)
+	}
+}
+
+func TestErrorSummaryPropagatesProvenanceThroughUniqueCalls(t *testing.T) {
+	summary := buildSources(t,
+		sourceFile{"Entry.bas", "Entry", "Public Sub EntryPoint()\n Middle\nEnd Sub\n"},
+		sourceFile{"Middle.bas", "Middle", "Public Sub Middle()\n Leaf\nEnd Sub\n"},
+		sourceFile{"Leaf.bas", "Leaf", `Public Sub Leaf()
+    On Error GoTo Cleanup
+    Workbooks.Open "missing.xlsx"
+    Exit Sub
+Cleanup:
+End Sub
+`},
+	)
+	entry := find(t, summary, "Entry.EntryPoint")
+	if !entry.Error.SuppressesErrors || len(entry.Error.Propagated) == 0 {
+		t.Fatalf("entry error summary = %#v", entry.Error)
+	}
+	evidence := firstErrorEvidence(entry.Error.Propagated, ErrorSuppresses)
+	if evidence.Origin.QualifiedName != "Leaf.Leaf" || evidence.Target != errorTargetCleanup {
+		t.Fatalf("propagated provenance = %#v", evidence)
+	}
+	if len(evidence.CallChain) != 3 || evidence.CallChain[0].QualifiedName != "Entry.EntryPoint" ||
+		evidence.CallChain[1].QualifiedName != "Middle.Middle" || evidence.CallChain[2].QualifiedName != "Leaf.Leaf" {
+		t.Fatalf("representative call chain = %#v", evidence.CallChain)
+	}
+	entry.Error.Propagated[0].CallChain[0].QualifiedName = "mutated"
+	fresh := find(t, summary, "Entry.EntryPoint")
+	if fresh.Error.Propagated[0].CallChain[0].QualifiedName == "mutated" {
+		t.Fatal("ProjectSummary.Lookup returned an aliased error call chain")
+	}
+}
+
+func TestErrorSummaryPreservesExternalCallUncertainty(t *testing.T) {
+	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
+		manualProcedure("Calls.Root", 1, []procedureir.CallSite{manualCall(1, procedureir.ResolutionExternal)}),
+	}}
+	root := find(t, Build([]Document{{IR: doc, CFG: cfg.BuildDocument(doc)}}), "Calls.Root")
+	if root.Error.SuppressesErrors || !root.Error.MayRaise {
+		t.Fatalf("external call error outcome = %#v", root.Error)
+	}
+	if len(root.DirectUncertainty) != 1 || root.DirectUncertainty[0].Kind != UncertaintyExternal {
+		t.Fatalf("external uncertainty = %#v", root.DirectUncertainty)
 	}
 }
 
@@ -299,11 +787,12 @@ func TestBuildIsDeterministicAcrossDocumentOrder(t *testing.T) {
 }
 
 func TestProjectSummaryReturnsDefensiveCopies(t *testing.T) {
-	project := buildSources(t, sourceFile{"State.bas", "State", "Public Sub Run()\n Application.EnableEvents = False\nEnd Sub\n"})
+	project := buildSources(t, sourceFile{"State.bas", "State", "Public Sub Run()\n Application.EnableEvents = False\n On Error Resume Next\nEnd Sub\n"})
 	all := project.All()
 	id := all[0].Identity
 	all[0].Identity.Name = "mutated"
 	all[0].Direct[0].Target = "mutated"
+	all[0].Error.Direct[0].Target = "mutated"
 
 	first, ok := project.Lookup(id)
 	if !ok {
@@ -311,7 +800,7 @@ func TestProjectSummaryReturnsDefensiveCopies(t *testing.T) {
 	}
 	first.Direct[0].Target = "mutated again"
 	second, ok := project.Lookup(id)
-	if !ok || second.Identity.Name != "Run" || second.Direct[0].Target == "mutated" || second.Direct[0].Target == "mutated again" {
+	if !ok || second.Identity.Name != "Run" || second.Direct[0].Target == "mutated" || second.Direct[0].Target == "mutated again" || second.Error.Direct[0].Target == "mutated" {
 		t.Fatalf("project summary was mutated through a returned value: %#v", second)
 	}
 }
@@ -506,4 +995,13 @@ func uncertaintyKinds(items []CallUncertainty) []UncertaintyKind {
 		out[i] = items[i].Kind
 	}
 	return out
+}
+
+func firstErrorEvidence(items []ErrorEvidence, behavior ErrorBehaviorKind) ErrorEvidence {
+	for _, item := range items {
+		if item.Behavior == behavior {
+			return item
+		}
+	}
+	return ErrorEvidence{}
 }

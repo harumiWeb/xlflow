@@ -2,9 +2,45 @@ package cfg
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+// WithoutNormalErrRaiseContinuation returns a graph where normal-flow edges
+// leaving an Err.Raise or Error statement are removed. These statements never
+// complete through normal VBA flow; exceptional edges remain available so
+// active On Error modes, including Resume Next, are still represented.
+func (g Graph) WithoutNormalErrRaiseContinuation() Graph {
+	g.Blocks = append([]Block(nil), g.Blocks...)
+	edges := g.Edges
+	g.Edges = make([]Edge, 0, len(edges))
+	for _, edge := range edges {
+		if edge.Class == EdgeNormal && g.isNonReturningRaiseBlock(edge.From) {
+			continue
+		}
+		g.Edges = append(g.Edges, edge)
+	}
+	return g
+}
+
+func (g Graph) isNonReturningRaiseBlock(id BlockID) bool {
+	if id <= 0 || int(id) > len(g.Blocks) {
+		return false
+	}
+	statement := g.Blocks[int(id)-1].Statement
+	if statement == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(statement.Text))
+	if strings.HasPrefix(text, "call ") || strings.HasPrefix(text, "call\t") {
+		text = strings.TrimSpace(text[len("call"):])
+	}
+	if !strings.HasPrefix(text, "err.raise") {
+		return strings.HasPrefix(text, "error ") || strings.HasPrefix(text, "error\t")
+	}
+	return len(text) == len("err.raise") || text[len("err.raise")] == ' ' || text[len("err.raise")] == '\t' || text[len("err.raise")] == '('
+}
 
 // BlockForStatement returns the block owning statementID.
 func (g Graph) BlockForStatement(statementID int) (Block, bool) {

@@ -193,6 +193,14 @@ syntax-specific diagnostics for the batch and source-intelligence surfaces.
 Known non-returning `Err.Raise` statements are followed only through their
 exceptional edge; their normal textual continuation is not a return path.
 
+The non-returning classification is a shared CFG query rather than a
+`VBA210`-specific text check. `Err.Raise` and the VBA `Error` statement have no
+normal continuation in consumers that classify error outcomes. `VBA237` uses
+the same query when distinguishing an explicit rethrow from a handler or
+cleanup path that returns normally. Handler `Resume Next` remains a resume
+transition with a dynamic destination and is distinct from enabling the
+`On Error Resume Next` error mode.
+
 The analyzer uses conservative definite assignment, so an assignment that
 dominates the normal exit or occurs in a shared cleanup block satisfies every
 path. When a guarantee cannot be established, `VBA210` retains one

@@ -137,4 +137,5 @@ effect summaries do not alter that fallback.
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0021-procedure-analysis-ir.md`
 - `docs/adr/ADR-0022-conservative-vba-control-flow-graph.md`
+- `docs/adr/ADR-0033-vba-error-outcomes-and-lsp-project-cache.md`
 - xlflow issues #425, #428, #431, #438, and #439

@@ -60,6 +60,14 @@ func TestDictionaryCollectionMisuseRulesDefaultEnabled(t *testing.T) {
 	}
 }
 
+func TestErrorSuppressionPropagationDefaultsEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA237"); !ok || !enabled || !cfg.Analyze.DetectErrorSuppressionPropagation {
+		t.Fatalf("VBA237 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectErrorSuppressionPropagation)
+	}
+}
+
 func TestLoadDictionaryCollectionMisuseCompatibilityKeysAndDisabledRules(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

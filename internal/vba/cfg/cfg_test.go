@@ -19,6 +19,66 @@ func TestBuildDocumentContextReturnsCancellationWithoutPartialGraphs(t *testing.
 	}
 }
 
+func TestWithoutNormalErrRaiseContinuationKeepsExceptionalFlow(t *testing.T) {
+	t.Parallel()
+	doc := buildIR(t, `Public Sub Work()
+    On Error GoTo Handler
+    Err.Raise 5
+    Debug.Print "unreachable"
+    Exit Sub
+Handler:
+    Resume Next
+End Sub
+`)
+	graph := BuildDocument(doc).Graphs[0]
+	raise := 0
+	for _, statement := range doc.Procedures[0].Statements {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "err.raise") {
+			raise = statement.ID
+			break
+		}
+	}
+	block, ok := graph.BlockForStatement(raise)
+	if !ok {
+		t.Fatal("Err.Raise block not found")
+	}
+	filtered := graph.WithoutNormalErrRaiseContinuation()
+	var normal, exceptional bool
+	for _, edge := range filtered.Edges {
+		if edge.From != block.ID {
+			continue
+		}
+		normal = normal || edge.Class == EdgeNormal
+		exceptional = exceptional || edge.Class == EdgeExceptional
+	}
+	if normal || !exceptional {
+		t.Fatalf("Err.Raise outgoing flow: normal=%v exceptional=%v", normal, exceptional)
+	}
+	if len(graph.Edges) == len(filtered.Edges) {
+		t.Fatal("original graph was not filtered")
+	}
+}
+
+func TestWithoutNormalErrRaiseContinuationAlsoFiltersErrorStatement(t *testing.T) {
+	t.Parallel()
+	doc := buildIR(t, `Public Sub Work()
+    Error 5
+    Debug.Print "unreachable"
+End Sub
+`)
+	graph := BuildDocument(doc).Graphs[0]
+	statementID := doc.Procedures[0].Statements[0].ID
+	block, ok := graph.BlockForStatement(statementID)
+	if !ok {
+		t.Fatal("Error statement block not found")
+	}
+	for _, edge := range graph.WithoutNormalErrRaiseContinuation().Edges {
+		if edge.From == block.ID && edge.Class == EdgeNormal {
+			t.Fatalf("Error statement retained normal edge: %+v", edge)
+		}
+	}
+}
+
 func TestBuildDocumentIsDeterministicAndCloneIsDefensive(t *testing.T) {
 	t.Parallel()
 	doc := buildIR(t, `Public Sub First()

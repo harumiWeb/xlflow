@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -34,6 +35,7 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -65,23 +67,25 @@ type Options struct {
 }
 
 type Server struct {
-	opts                     Options
-	db                       *vbadb.DB
-	analyzer                 intel.Analyzer
-	handler                  protocol.Handler
-	docs                     *documents
-	logger                   *log.Logger
-	analysis                 *workspaceAnalysisIndex
-	semanticTokens           *semanticTokenCache
-	semanticTokenGenerator   func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
-	codeLensConfig           intel.CodeLensConfig
-	diagnostics              func(context.Context, intel.Document) []intel.Diagnostic
-	diagnosticsRequest       func(context.Context, intel.DiagnosticRequest) intel.DiagnosticResult
-	diagnosticsDebounce      time.Duration
-	diagnosticsOpenDelay     time.Duration
-	diagnosticsFullIdleDelay time.Duration
-	diagnosticsAfterFunc     func(time.Duration, func()) diagnosticTimer
-	beforeDiagnosticsPublish func()
+	opts                      Options
+	db                        *vbadb.DB
+	analyzer                  intel.Analyzer
+	handler                   protocol.Handler
+	docs                      *documents
+	logger                    *log.Logger
+	analysis                  *workspaceAnalysisIndex
+	semanticTokens            *semanticTokenCache
+	semanticTokenGenerator    func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
+	codeLensConfig            intel.CodeLensConfig
+	diagnostics               func(context.Context, intel.Document) []intel.Diagnostic
+	diagnosticsRequest        func(context.Context, intel.DiagnosticRequest) intel.DiagnosticResult
+	defaultDiagnosticsRequest uintptr
+	projectDiagnosticsRequest func(context.Context, intel.DiagnosticRequest, intel.ProjectAnalysisSnapshot) intel.DiagnosticResult
+	diagnosticsDebounce       time.Duration
+	diagnosticsOpenDelay      time.Duration
+	diagnosticsFullIdleDelay  time.Duration
+	diagnosticsAfterFunc      func(time.Duration, func()) diagnosticTimer
+	beforeDiagnosticsPublish  func()
 
 	diagMu              sync.Mutex
 	diagStates          map[string]*diagnosticState
@@ -91,8 +95,12 @@ type Server struct {
 	overlayBuilds       atomic.Uint64
 	overlayPublications atomic.Uint64
 
-	docLifecycleMu sync.Mutex
-	docLifecycles  map[string]*sync.Mutex
+	docLifecycleMu         sync.Mutex
+	docLifecycles          map[string]*sync.Mutex
+	projectSummaryMu       sync.Mutex
+	projectSummaryRevision uint64
+	projectSummary         effects.ProjectSummary
+	projectSummaryValid    bool
 }
 
 type diagnosticTimer interface {
@@ -100,28 +108,30 @@ type diagnosticTimer interface {
 }
 
 type diagnosticState struct {
-	mu                  sync.Mutex
-	generation          uint64
-	latest              intel.Document
-	notify              *glsp.Context
-	timer               diagnosticTimer
-	fullTimer           diagnosticTimer
-	running             bool
-	ready               bool
-	readyMode           intel.DiagnosticMode
-	runningMode         intel.DiagnosticMode
-	publishedMode       intel.DiagnosticMode
-	hasPublished        bool
-	open                bool
-	cancel              context.CancelFunc
-	buildOverlay        bool
-	runningOverlay      bool
-	dependentPending    bool
-	publishedSignatures map[string]procedureSignature
-	baselineKnown       bool
-	diagnosticCache     *intel.DiagnosticCache
-	changes             intel.ProcedureChangeSet
-	overlayGeneration   uint64
+	mu                   sync.Mutex
+	generation           uint64
+	latest               intel.Document
+	notify               *glsp.Context
+	timer                diagnosticTimer
+	fullTimer            diagnosticTimer
+	running              bool
+	ready                bool
+	readyMode            intel.DiagnosticMode
+	runningMode          intel.DiagnosticMode
+	publishedMode        intel.DiagnosticMode
+	hasPublished         bool
+	open                 bool
+	cancel               context.CancelFunc
+	buildOverlay         bool
+	runningOverlay       bool
+	dependentPending     bool
+	publishedSignatures  map[string]procedureSignature
+	baselineKnown        bool
+	diagnosticCache      *intel.DiagnosticCache
+	changes              intel.ProcedureChangeSet
+	overlayGeneration    uint64
+	dependencyGeneration uint64
+	projectReadyPending  bool
 }
 
 func Check(opts Options) error {
@@ -199,6 +209,31 @@ func New(opts Options) (*Server, func(), error) {
 	s.semanticTokenGenerator = s.analyzer.SemanticTokens
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
+	s.defaultDiagnosticsRequest = reflect.ValueOf(s.diagnosticsRequest).Pointer()
+	s.projectDiagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest, project intel.ProjectAnalysisSnapshot) intel.DiagnosticResult {
+		projectEffects := s.projectEffectSummary(project)
+		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
+		for _, projectDocument := range project.Documents {
+			projectByPath[symbolFileKey(projectDocument.IR.Path)] = projectDocument
+		}
+		analyzer := s.analyzer
+		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
+			if projectDocument, ok := projectByPath[symbolFileKey(ir.Path)]; ok {
+				ir = projectDocument.IR
+				controlFlow = projectDocument.CFG
+			}
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]intel.RealtimeFinding, 0, len(findings))
+			for _, finding := range findings {
+				out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
+			}
+			return out, nil
+		}
+		return analyzer.DiagnosticsRequestContext(ctx, request)
+	}
 	s.diagnosticsDebounce = diagnosticsDebounce
 	s.diagnosticsOpenDelay = diagnosticsOpenDelay
 	s.diagnosticsFullIdleDelay = diagnosticsFullIdleDelay
@@ -237,6 +272,30 @@ func New(opts Options) (*Server, func(), error) {
 		s.docs.closeAll()
 		cleanup()
 	}, nil
+}
+
+func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) effects.ProjectSummary {
+	s.projectSummaryMu.Lock()
+	if s.projectSummaryValid && s.projectSummaryRevision == project.Revision {
+		summary := s.projectSummary
+		s.projectSummaryMu.Unlock()
+		return summary
+	}
+	s.projectSummaryMu.Unlock()
+
+	documents := make([]effects.Document, len(project.Documents))
+	for i, document := range project.Documents {
+		documents[i] = effects.Document{IR: document.IR, CFG: document.CFG}
+	}
+	summary := effects.Build(documents)
+	s.projectSummaryMu.Lock()
+	if !s.projectSummaryValid || project.Revision >= s.projectSummaryRevision {
+		s.projectSummaryRevision = project.Revision
+		s.projectSummary = summary
+		s.projectSummaryValid = true
+	}
+	s.projectSummaryMu.Unlock()
+	return summary
 }
 
 func newLogger(opts Options) (*log.Logger, func(), error) {
@@ -493,6 +552,47 @@ func (s *Server) scheduleByRefDependentDiagnostics(ctx *glsp.Context, changedURI
 	}
 }
 
+func (s *Server) scheduleProjectDependentDiagnostics(ctx *glsp.Context, changedURI string, paths []string) {
+	if !s.opts.Config.Analyze.DetectErrorSuppressionPropagation || len(paths) == 0 {
+		return
+	}
+	openByPath := make(map[string]intel.Document)
+	for _, doc := range s.docs.openDocuments() {
+		if doc.URI != changedURI {
+			openByPath[symbolFileKey(doc.Path)] = doc
+		}
+	}
+	for _, path := range paths {
+		if caller, ok := openByPath[symbolFileKey(path)]; ok {
+			s.scheduleDiagnosticsOnly(ctx, caller)
+		}
+	}
+}
+
+func (s *Server) scheduleProjectReadyDiagnosticsForCompleteProject(project intel.ProjectAnalysisSnapshot) {
+	if !project.Complete {
+		return
+	}
+	type pendingDiagnostic struct {
+		notify *glsp.Context
+		doc    intel.Document
+	}
+	pending := []pendingDiagnostic{}
+	s.diagMu.Lock()
+	for _, state := range s.diagStates {
+		state.mu.Lock()
+		if state.projectReadyPending && state.open {
+			state.projectReadyPending = false
+			pending = append(pending, pendingDiagnostic{notify: state.notify, doc: state.latest})
+		}
+		state.mu.Unlock()
+	}
+	s.diagMu.Unlock()
+	for _, diagnostic := range pending {
+		s.scheduleDiagnosticsOnly(diagnostic.notify, diagnostic.doc)
+	}
+}
+
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
 	unlock := s.lockDocumentLifecycle(uri)
@@ -526,6 +626,7 @@ func (s *Server) scheduleCloseOverlayRefresh(ctx *glsp.Context, uri, path string
 			unlock()
 			return
 		}
+		_, _ = s.analysis.projectChange()
 		refresh := s.analysis.beginClearOverlay(path)
 		unlock()
 		disk, restored, err := s.analysis.finishClearOverlay(refresh)
@@ -538,10 +639,14 @@ func (s *Server) scheduleCloseOverlayRefresh(ctx *glsp.Context, uri, path string
 			diskSignatures = procedureSignaturesFromSymbols(disk.symbols)
 		}
 		s.scheduleByRefDependentDiagnostics(ctx, uri, changedProcedureNames(closingSignatures, diskSignatures))
+		project, impacted := s.analysis.projectChange()
+		s.scheduleProjectDependentDiagnostics(ctx, uri, impacted)
+		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 	}()
 }
 
-func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChangeWatchedFilesParams) error {
+func (s *Server) didChangeWatchedFiles(ctx *glsp.Context, params *protocol.DidChangeWatchedFilesParams) error {
+	_, _ = s.analysis.projectChange()
 	for _, event := range params.Changes {
 		path, err := fileURIToPath(string(event.URI))
 		if err != nil {
@@ -559,9 +664,13 @@ func (s *Server) didChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChan
 			s.docs.invalidateDisk(affected)
 			if err := s.analysis.updatePath(affected); err != nil {
 				s.logger.Printf("workspace analysis index watcher update failed for %q: %v", affected, err)
+				continue
 			}
 		}
 	}
+	project, impacted := s.analysis.projectChange()
+	s.scheduleProjectDependentDiagnostics(ctx, "", impacted)
+	s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 	s.semanticTokens.invalidateWorkspace()
 	return nil
 }
@@ -1197,6 +1306,7 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 	state.open = true
 	state.buildOverlay = s.documentKind(doc) == DocumentKindVBA
 	if state.buildOverlay {
+		_, _ = s.analysis.projectChange()
 		previous, exists := s.analysis.beginOverlay(doc, generation)
 		if exists {
 			state.publishedSignatures = procedureSignaturesFromSymbols(previous.symbols)
@@ -1278,6 +1388,7 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 	// A dependent refresh must not supersede a source generation before its
 	// overlay is published. Queue one follow-up diagnostic pass instead.
 	if !buildOverlay && (state.buildOverlay || (state.running && state.runningOverlay)) {
+		state.dependencyGeneration++
 		state.dependentPending = true
 		state.notify = ctx
 		state.mu.Unlock()
@@ -1285,6 +1396,9 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 		return
 	}
 	state.generation++
+	if !buildOverlay {
+		state.dependencyGeneration++
+	}
 	generation := state.generation
 	fastFull := buildOverlay && s.documentKind(doc) == DocumentKindVBA
 	state.latest = doc
@@ -1300,6 +1414,7 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 	state.open = true
 	state.buildOverlay = buildOverlay && s.documentKind(doc) == DocumentKindVBA
 	if state.buildOverlay {
+		_, _ = s.analysis.projectChange()
 		if previous, exists := s.analysis.beginOverlay(doc, generation); exists {
 			state.publishedSignatures = procedureSignaturesFromSymbols(previous.symbols)
 			state.baselineKnown = true
@@ -1457,6 +1572,9 @@ func (s *Server) runDocumentAnalysis(
 			}
 			state.mu.Unlock()
 			s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
+			project, impacted := s.analysis.projectChange()
+			s.scheduleProjectDependentDiagnostics(notify, doc.URI, impacted)
+			s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 		}
 	}
 	// Overlay failure deliberately does not suppress file-local diagnostics.
@@ -1517,10 +1635,26 @@ func (s *Server) runDiagnosticsBody(
 	state.mu.Lock()
 	previousCache := state.diagnosticCache
 	changes := state.changes
+	dependencyGeneration := state.dependencyGeneration
 	state.mu.Unlock()
 	var result intel.DiagnosticResult
 	if s.documentKind(doc) == DocumentKindVBA && s.diagnosticsRequest != nil {
-		result = s.diagnosticsRequest(runCtx, intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder})
+		request := intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder}
+		project := intel.ProjectAnalysisSnapshot{}
+		if mode == intel.DiagnosticModeFull {
+			project = s.analysis.projectSnapshot()
+			if !project.Complete && s.projectDiagnosticsEnabled() {
+				s.scheduleProjectReadyDiagnostics(state)
+			}
+		}
+		if mode == intel.DiagnosticModeFull && project.Complete && s.projectDiagnosticsEnabled() {
+			result = s.projectDiagnosticsRequest(runCtx, request, project)
+		} else {
+			result = s.diagnosticsRequest(runCtx, request)
+		}
+		if mode == intel.DiagnosticModeFast || (mode == intel.DiagnosticModeFull && !project.Complete) {
+			result.Diagnostics = diagnosticsWithoutCode(result.Diagnostics, "VBA237")
+		}
 	} else {
 		result.Diagnostics = s.documentDiagnostics(runCtx, doc)
 	}
@@ -1534,7 +1668,7 @@ func (s *Server) runDiagnosticsBody(
 	}
 
 	state.mu.Lock()
-	discarded := !state.open || state.generation != generation || runCtx.Err() != nil || (mode == intel.DiagnosticModeFull && state.dependentPending) || (mode == intel.DiagnosticModeFast && state.hasPublished && state.publishedMode == intel.DiagnosticModeFull)
+	discarded := !state.open || state.generation != generation || state.dependencyGeneration != dependencyGeneration || runCtx.Err() != nil || (mode == intel.DiagnosticModeFull && state.dependentPending) || (mode == intel.DiagnosticModeFast && state.hasPublished && state.publishedMode == intel.DiagnosticModeFull)
 	if !discarded && notify != nil {
 		notify.Notify(string(protocol.ServerTextDocumentPublishDiagnostics), protocol.PublishDiagnosticsParams{
 			URI:         protocol.DocumentUri(doc.URI),
@@ -1551,6 +1685,52 @@ func (s *Server) runDiagnosticsBody(
 	state.mu.Unlock()
 	measurement.finishDiagnostics(len(out), generation, discarded)
 	s.logDiagnosticStages(doc, generation, mode, recorder)
+}
+
+func (s *Server) projectDiagnosticsEnabled() bool {
+	return s.projectDiagnosticsRequest != nil && s.diagnosticsRequest != nil &&
+		reflect.ValueOf(s.diagnosticsRequest).Pointer() == s.defaultDiagnosticsRequest
+}
+
+func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
+	state.mu.Lock()
+	if state.projectReadyPending || !state.open {
+		state.mu.Unlock()
+		return
+	}
+	state.projectReadyPending = true
+	state.mu.Unlock()
+	if project := s.analysis.projectSnapshot(); project.Complete {
+		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
+		return
+	}
+	if s.analysis.initialReady() {
+		return
+	}
+	s.diagWorkers.Add(1)
+	go func() {
+		defer s.diagWorkers.Done()
+		err := s.analysis.waitReady()
+		if err != nil {
+			state.mu.Lock()
+			state.projectReadyPending = false
+			state.mu.Unlock()
+			s.logger.Printf("workspace project diagnostics readiness failed: %v", err)
+			return
+		}
+		project, _ := s.analysis.projectChange()
+		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
+	}()
+}
+
+func diagnosticsWithoutCode(in []intel.Diagnostic, code string) []intel.Diagnostic {
+	out := make([]intel.Diagnostic, 0, len(in))
+	for _, diagnostic := range in {
+		if !strings.EqualFold(diagnostic.Code, code) {
+			out = append(out, diagnostic)
+		}
+	}
+	return out
 }
 
 func toProtocolDiagnostic(diag intel.Diagnostic) protocol.Diagnostic {
@@ -1662,6 +1842,8 @@ func (state *diagnosticState) close() {
 	state.diagnosticCache = nil
 	state.hasPublished = false
 	state.overlayGeneration = 0
+	state.dependencyGeneration++
+	state.projectReadyPending = false
 	state.changes = intel.ProcedureChangeSet{}
 	if state.timer != nil {
 		state.timer.Stop()
@@ -1767,6 +1949,12 @@ func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Do
 	if err != nil {
 		return indexedFileAnalysis{}, err
 	}
+	controlFlow, _, err := snapshot.ControlFlowGraphsContext(ctx, func(loadCtx context.Context) (vbacfg.Document, error) {
+		return vbacfg.BuildDocumentContext(loadCtx, procedureIR)
+	})
+	if err != nil {
+		return indexedFileAnalysis{}, err
+	}
 	return indexedFileAnalysis{
 		path:           doc.Path,
 		version:        documentVersion(doc),
@@ -1775,6 +1963,8 @@ func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Do
 		symbols:        syms,
 		callSites:      rawCalls.CallSites,
 		typeReferences: rawCalls.TypeReferences,
+		procedureIR:    procedureir.Clone(procedureIR),
+		controlFlow:    vbacfg.CloneDocument(controlFlow),
 	}, nil
 }
 

@@ -183,6 +183,7 @@ type analysisContext struct {
 	procedures         map[string]procedureSignature
 	procedureResolver  procedureir.SymbolResolver
 	worksheetCodenames map[string]string
+	projectEffects     effects.ProjectSummary
 }
 
 type procedureSignature struct {
@@ -811,6 +812,14 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDB(rootDir string, cfg config.Conf
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBContext is the cancellable
 // variant of SourceRealtimeFindingsParsedIRCFGWithTypeDB.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, effects.ProjectSummary{})
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext adds a
+// caller-owned project effect snapshot to the real-time path. LSP Full
+// diagnostics use it for cross-file rules while legacy callers retain the
+// single-document entry point above.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -854,13 +863,14 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 			analyzer.dictionaryCollection = buildDictionaryCollectionIndex([]parsedFile{file})
 		}
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)
-		procedures := sourceProceduresFromIR(ir, controlFlow)
+		procedures := sourceProceduresWithEffects(file, projectEffects)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
 		findings = append(findings, analyzer.hardcodedSecretFindings(file, procedures)...)
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
 		analysisCtx := analyzer.buildContext([]parsedFile{file})
+		analysisCtx.projectEffects = projectEffects
 		for i, proc := range procedures {
 			if i&0x1f == 0 {
 				if err := ctx.Err(); err != nil {
@@ -909,7 +919,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -1012,6 +1022,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectErrorSuppressionPropagation {
+		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
 	}
 	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
 	if err != nil {
@@ -1312,6 +1325,9 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		findings = append(findings, a.leakedOnErrorResumeNextFindings(file, proc)...)
+	}
+	if a.Config.Analyze.DetectErrorSuppressionPropagation {
+		findings = append(findings, a.errorSuppressionFindings(file, proc, projectEffects)...)
 	}
 	if a.Config.Analyze.DetectRangeValueArrayShape {
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
@@ -1929,7 +1945,7 @@ func (w applicationStateExitWitness) description() string {
 // restoration is the cleanup boundary itself, so it clears state on its own
 // exceptional transition as well.
 func applicationStateExitWitnesses(proc sourceProcedure, property string, byID map[int]procedureir.Statement) map[int]applicationStateExitWitness {
-	flowGraph := graphWithoutNormalErrRaiseContinuation(*proc.Graph)
+	flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
 	graph := &flowGraph
 	in := map[vbacfg.BlockID]applicationStateFlow{graph.Entry: newApplicationStateFlow()}
 	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
@@ -2582,6 +2598,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 	}
 	var findings []Finding
 	if proc.Graph != nil {
+		flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
 		reachable := map[vbacfg.BlockID]bool{}
 		for _, blockID := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
 			reachable[blockID] = true
@@ -2599,10 +2616,9 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 				continue
 			}
 			implicitEntry := false
-			for _, edge := range proc.Graph.Edges {
+			for _, edge := range flowGraph.Edges {
 				if edge.To == block.ID && edge.Class == vbacfg.EdgeNormal && reachable[edge.From] &&
-					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown &&
-					!isErrRaiseBlock(*proc.Graph, edge.From) {
+					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
 					implicitEntry = true
 					break
 				}

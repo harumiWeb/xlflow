@@ -1913,6 +1913,8 @@ Private Sub InvokeStreamHelper(ByVal helperMacro As String, ByVal payload As Str
 	Application.Run "'" & ThisWorkbook.Name & "'!" & helperMacro, payload
 	Exit Sub
 
+	' The optional host stream must never break the caller.
+	' xlflow:disable-next-line VBA237
 Swallow:
 End Sub
 
