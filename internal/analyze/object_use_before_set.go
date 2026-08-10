@@ -500,7 +500,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 	for key, variable := range result.vars {
 		initial[key] = false
 		declaration, _ := objectDeclarationFor(variable.Name, variable.Scope, declarations)
-		if declaration.NewExpression || declaration.ModuleInitialized {
+		if declaration.NewExpression || objectClassLifecycleAssigned(proc, variable, summaries) {
 			initial[key] = true
 		}
 		// Parameters are intentionally not initialized at procedure entry.  A
@@ -560,6 +560,27 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 		result.normalExit = cloneObjectState(result.in[proc.Graph.NormalExit])
 	}
 	return result
+}
+
+// objectClassLifecycleAssigned recognizes only VBA's language-guaranteed class
+// construction hook.  Ordinary project procedures named Initialize, Setup,
+// Load, and similar are callable code, not implicit constructors; their effects
+// are applied only at resolved call sites.  The lifecycle summary itself is
+// produced by the CFG flow and therefore requires a non-Nothing assignment on
+// every reachable normal exit.
+func objectClassLifecycleAssigned(proc sourceProcedure, variable objectVariable, summaries map[string]objectProcedureSummary) bool {
+	if variable.Scope != procedureir.ScopeModule || !strings.EqualFold(proc.ModuleKind, "class") || strings.EqualFold(proc.Name, "Class_Initialize") {
+		return false
+	}
+	for _, summary := range summaries {
+		if !strings.EqualFold(summary.Module, proc.Module) || !strings.EqualFold(summary.QualifiedName, proc.Module+".Class_Initialize") {
+			continue
+		}
+		if summary.ModuleAssigned[strings.ToLower(cleanIdentifier(variable.Name))] {
+			return true
+		}
+	}
+	return false
 }
 
 // objectFlowApplyGuard refines the state on the edge selected by a direct

@@ -134,6 +134,57 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448DoesNotAssumeUncalledInitializerRuns(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedSheet As Worksheet
+
+Private Sub Initialize()
+  Set sharedSheet = ThisWorkbook.Worksheets(1)
+End Sub
+
+Public Sub UseWithoutCallingInitializer()
+  Debug.Print sharedSheet.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "UseWithoutCallingInitializer" {
+		t.Fatalf("an uncalled procedure must not initialize module state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RejectsConditionalModuleInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedSheet As Worksheet
+
+Private Sub Initialize(ByVal assignIt As Boolean)
+  If assignIt Then Set sharedSheet = ThisWorkbook.Worksheets(1)
+End Sub
+
+Public Sub UseAfterConditionalInitializer()
+  Initialize True
+  Debug.Print sharedSheet.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "UseAfterConditionalInitializer" {
+		t.Fatalf("a conditional initializer must not establish module state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksModuleResetAfterLifecycleInitialization(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
