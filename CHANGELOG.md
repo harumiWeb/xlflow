@@ -10,6 +10,8 @@ All notable changes to xlflow will be documented in this file.
   iteration, and one-based indexing. Guard analysis now distinguishes definite
   missing keys from uncertain existence and recognizes safe local probes,
   aliases, construction, and uniquely resolved helper effects.
+- Fixed `VBA204` false positives for qualified `_Cleanup` labels and handler
+  labels whose only implicit predecessor is a non-returning `Err.Raise` call.
 - Fixed `VBA203` false positives when a saved `Application` property value is
   restored after a clean/dirty CFG merge, after `Err.Raise`, or under a repeated
   unchanged guard.

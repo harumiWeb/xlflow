@@ -158,7 +158,15 @@ class does not remove uncertain edges of the retained class.
 that excludes exceptional edges. A handler is a fallthrough risk when its label
 block has a reachable implicit normal-flow predecessor. An explicit
 `GoTo <handler>` does not count as fallthrough, and a transfer caused only by an
-error does not make the handler normally reachable.
+error does not make the handler normally reachable. In particular, an
+`Err.Raise` block is not an implicit normal predecessor of the immediately
+following handler label; alternate conditional-compilation paths remain
+eligible normal predecessors.
+
+The cleanup-label exception is case-insensitive and accepts the existing exact
+names (`Cleanup`, `clean_up`, `Finally`, and `Done`) plus qualified labels whose
+final underscore-delimited component is `Cleanup` or `clean_up`, such as
+`auth_Cleanup` and `AutoProxy_Cleanup`.
 
 This replaces the previous preceding-text heuristic and correctly accounts for
 structured branches and jumps. The existing cleanup-label exception, inline
