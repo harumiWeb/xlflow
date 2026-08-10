@@ -119,3 +119,4 @@
 - Treat deterministic VBA formatting helpers such as `Chr$(34)` as clean when their arguments are constant; otherwise they create unknown-origin command findings that can obscure the real external-input flows at the same process sink.
 - Before assigning a new diagnostic ID, check active parallel work and reserve the next unclaimed ID; do not infer availability from the local registry alone.
 - For new diagnostics, review committed corpus candidates as TP/FP evidence before finalizing; add focused regressions for every confirmed FP and repeat the review after fixes so no new FP leaks into snapshots.
+- For interprocedural VBA object-state analysis, never infer module initialization from helper names such as `Initialize` or `Setup`. Require CFG-proven lifecycle/callee effects, add uncalled and conditional-initializer regressions, and update corpus review counts whenever reviewed TP evidence is added.
