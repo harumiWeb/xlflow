@@ -1082,6 +1082,35 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA205RespectsPrivateProcedureVisibility(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Rows(ByVal index As Long) As Object
+  Set Rows = Nothing
+End Function
+
+Public Sub Run()
+  Rows(1).Value = 1
+  Range("A1").Value = 2
+End Sub
+`)
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Private Function Range(ByVal address As String) As String
+  Range = address
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA205")
+	if len(got) != 1 || got[0].Line != 8 || !strings.Contains(got[0].Message, "Range") {
+		t.Fatalf("private procedure visibility = %+v, want only cross-module Range finding on line 8", got)
+	}
+}
+
 func TestAnalyzerAcceptsExplicitExcelScopeReferences(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
