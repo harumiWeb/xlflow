@@ -879,6 +879,56 @@ func TestLinterAcceptsVB014CorpusLexicalBoundaries(t *testing.T) {
 	}
 }
 
+func TestLinterRejectsUnclosedVB014CorpusLexicalBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"type declaration plus unclosed If": "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n    Debug.Print True\nEnd Sub\n",
+		"date literal in unclosed If":       "Sub Main()\n  If Time > #11:59:59 PM# Then\n    Debug.Print Time\nEnd Sub\n",
+		"named argument in unclosed If":     "Sub Main()\n  If IsReady(value:=1) Then\n    Debug.Print True\nEnd Sub\n",
+		"repeated conditional unclosed If":  "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n",
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "Main.bas")
+			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := issuesByCode(issues, "VB014"); len(got) == 0 {
+				t.Fatalf("unclosed source should trigger VB014: %+v", issues)
+			}
+		})
+	}
+}
+
+func TestSplitStatementsRecognizesFileNumberSeparators(t *testing.T) {
+	t.Parallel()
+	want := []string{"Close #1", "Open path For Input As #2"}
+	if got := splitStatements("Close #1: Open path For Input As #2"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("file-number statement split = %#v, want %#v", got, want)
+	}
+}
+
+func TestConditionalIfBalanceRejectsStateExplosion(t *testing.T) {
+	t.Parallel()
+	states := make(conditionalStateSet)
+	for i := 0; i <= maxConditionalBalanceStates; i++ {
+		addConditionalState(states, conditionalBalanceState{
+			runtime: strconv.Itoa(i),
+			decisions: map[string]bool{
+				"Feature": i%2 == 0,
+			},
+		})
+	}
+	if len(states) != maxConditionalBalanceStates+1 || !conditionalStateLimitExceeded(states) {
+		t.Fatalf("conditional state limit = %d, states=%d", maxConditionalBalanceStates, len(states))
+	}
+	addConditionalState(states, conditionalBalanceState{runtime: "overflow"})
+	if len(states) != maxConditionalBalanceStates+1 {
+		t.Fatalf("conditional state set exceeded fixed bound: %d", len(states))
+	}
+}
+
 func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "classes", "Example.cls")

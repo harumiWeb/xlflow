@@ -7,6 +7,13 @@ All notable changes to xlflow will be documented in this file.
 - Fixed `VB014` false positives for valid date-literal and named-argument colons,
   UDT fields named `Next`, and repeated conditional-compilation guards.
 
+- Added default-enabled `VBA236` command-execution safety analysis for VBA
+  `Shell`, `WScript.Shell.Run`/`Exec`, `ShellExecute`, `cmd.exe`, PowerShell,
+  and script-host launches. Findings distinguish potential injection from
+  general process-launch risk and expose launcher, interpreter, command-role,
+  origin, credential, observability, and unquoted-path context with Windows
+  quoting guidance. Process-launch ownership moves from generic `VBA224` to
+  the new configurable `detect_unsafe_command_construction` rule.
 - Fix false-positive `VBA205` findings for local, parameter, and project symbols that shadow Excel root names, including procedure declaration and `Attribute` lines.
 
 - Expanded `VBA212` to analyze AST operand relationships across eager `And`,

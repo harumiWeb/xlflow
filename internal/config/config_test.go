@@ -181,7 +181,7 @@ exclude = ["src/modules/Tests/**"]
 		!cfg.Analyze.DetectApplicationStateRestore || !cfg.Analyze.DetectErrorHandlerFallthrough ||
 		!cfg.Analyze.ForbidUnqualifiedExcelObjects || !cfg.Analyze.DetectRedimPreserveDimension ||
 		!cfg.Analyze.DetectObjectArrayComparison || !cfg.Analyze.DetectExcelObjectMemberMismatch ||
-		!cfg.Analyze.DetectNonShortCircuitObjectGuard || !cfg.Analyze.DetectPublicAPITypeSafety || !cfg.Analyze.DetectUntrustedDataFlow || !cfg.Analyze.DetectExcelCellAccessInLoops || !cfg.Analyze.DetectRangeValueArrayShape {
+		!cfg.Analyze.DetectNonShortCircuitObjectGuard || !cfg.Analyze.DetectPublicAPITypeSafety || !cfg.Analyze.DetectUntrustedDataFlow || !cfg.Analyze.DetectUnsafeCommandConstruction || !cfg.Analyze.DetectExcelCellAccessInLoops || !cfg.Analyze.DetectRangeValueArrayShape {
 		t.Fatalf("expected high-signal analyze defaults to be enabled: %+v", cfg.Analyze)
 	}
 	if cfg.Analyze.DetectDictionaryCollectionGuard ||

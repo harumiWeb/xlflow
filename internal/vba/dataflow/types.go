@@ -45,12 +45,16 @@ const (
 	SinkShell            SinkKind = "shell"
 	SinkWScriptShellRun  SinkKind = "wscript_shell_run"
 	SinkWScriptShellExec SinkKind = "wscript_shell_exec"
-	SinkSQLExecution     SinkKind = "sql_execution"
-	SinkDestructiveFile  SinkKind = "destructive_file_operation"
-	SinkWorkbooksOpen    SinkKind = "workbooks_open"
-	SinkSaveAs           SinkKind = "save_as"
-	SinkHTTPURL          SinkKind = "http_request_url"
-	SinkHTTPHeader       SinkKind = "http_request_header"
+	// SinkShellExecute covers both Shell.Application.ShellExecute and the
+	// Win32 ShellExecute/A/W entry points.  The launcher is retained in the
+	// command finding metadata so adapters can distinguish the two shapes.
+	SinkShellExecute    SinkKind = "shell_execute"
+	SinkSQLExecution    SinkKind = "sql_execution"
+	SinkDestructiveFile SinkKind = "destructive_file_operation"
+	SinkWorkbooksOpen   SinkKind = "workbooks_open"
+	SinkSaveAs          SinkKind = "save_as"
+	SinkHTTPURL         SinkKind = "http_request_url"
+	SinkHTTPHeader      SinkKind = "http_request_header"
 )
 
 // SourceSpec and SinkSpec are the public, protocol-neutral catalog entries.
@@ -58,6 +62,69 @@ type SourceSpec struct {
 	Kind        SourceKind `json:"kind"`
 	Label       string     `json:"label"`
 	Description string     `json:"description"`
+}
+
+// CommandRiskClass is the top-level distinction made by the command
+// construction analysis.  Injection is only used when a known tainted source
+// reaches a command-bearing role; unknown input remains a general launch
+// warning and is never presented as a confirmed vulnerability.
+type CommandRiskClass string
+
+const (
+	CommandRiskInjection     CommandRiskClass = "injection"
+	CommandRiskProcessLaunch CommandRiskClass = "process_launch"
+)
+
+// CommandRiskKind identifies the more specific observation behind a command
+// finding.  Values are stable wire strings for analyzer/LSP projections.
+type CommandRiskKind string
+
+const (
+	CommandRiskTaintedCommandText     CommandRiskKind = "tainted_command_text"
+	CommandRiskUnknownOrigin          CommandRiskKind = "unknown_origin"
+	CommandRiskUnquotedExecutablePath CommandRiskKind = "unquoted_executable_path"
+	CommandRiskCredentialExposure     CommandRiskKind = "credential_exposure"
+	CommandRiskObservability          CommandRiskKind = "observability"
+)
+
+// CommandRole identifies the argument role at a process-launch sink.
+type CommandRole string
+
+const (
+	CommandRoleExecutable   CommandRole = "executable"
+	CommandRoleArguments    CommandRole = "arguments"
+	CommandRoleShellCommand CommandRole = "shell_command"
+	CommandRoleURL          CommandRole = "url"
+	CommandRoleDocument     CommandRole = "document"
+	CommandRoleWindowStyle  CommandRole = "window_style"
+	CommandRoleWait         CommandRole = "wait"
+	CommandRoleUnknown      CommandRole = "unknown"
+)
+
+// CommandExecution describes the classified process-launch call.  It is
+// deliberately independent from the analyzer protocol and can be projected
+// into JSON, LSP, or other clients without exposing parser internals.
+type CommandExecution struct {
+	Launcher    string       `json:"launcher"`
+	Interpreter string       `json:"interpreter,omitempty"`
+	Role        CommandRole  `json:"command_role"`
+	Argument    int          `json:"argument"`
+	Range       vbaast.Range `json:"range"`
+}
+
+// CommandFinding is a command-specific source-to-sink observation.  Source
+// and Path are populated for known origins; static observations such as an
+// unquoted constant executable path have an empty Source and StateClean.
+type CommandFinding struct {
+	State       State            `json:"state"`
+	Source      Source           `json:"source,omitzero"`
+	Execution   CommandExecution `json:"command_execution"`
+	RiskClass   CommandRiskClass `json:"risk_class"`
+	RiskKind    CommandRiskKind  `json:"risk_kind"`
+	OriginState State            `json:"origin_state"`
+	Path        []PathStep       `json:"path,omitempty"`
+	Message     string           `json:"message"`
+	Reason      string           `json:"reason"`
 }
 
 type SinkSpec struct {
@@ -91,6 +158,7 @@ var sinkCatalog = []SinkSpec{
 	{Kind: SinkShell, Label: "Shell", Description: "Starts a process through the VBA Shell function."},
 	{Kind: SinkWScriptShellRun, Label: "WScript.Shell.Run", Description: "Runs a process through WScript.Shell."},
 	{Kind: SinkWScriptShellExec, Label: "WScript.Shell.Exec", Description: "Executes a process through WScript.Shell."},
+	{Kind: SinkShellExecute, Label: "ShellExecute", Description: "Launches an executable, document, or URL through ShellExecute."},
 	{Kind: SinkSQLExecution, Label: "SQL execution", Description: "Executes SQL through a recognized database object."},
 	{Kind: SinkDestructiveFile, Label: "destructive file operation", Description: "Deletes or removes a file or directory."},
 	{Kind: SinkWorkbooksOpen, Label: "Workbooks.Open", Description: "Opens a workbook from a path or URL."},
@@ -152,8 +220,9 @@ type Finding struct {
 // States is useful to protocol adapters and tests without exposing internal
 // provenance implementation details.
 type Result struct {
-	Findings []Finding                        `json:"findings"`
-	States   map[cfg.BlockID]map[string]State `json:"states,omitempty"`
+	Findings        []Finding                        `json:"findings"`
+	CommandFindings []CommandFinding                 `json:"command_findings,omitempty"`
+	States          map[cfg.BlockID]map[string]State `json:"states,omitempty"`
 }
 
 // Analyze is an alias for AnalyzeProcedure for callers that prefer the short

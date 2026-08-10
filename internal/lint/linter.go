@@ -2403,15 +2403,102 @@ func startsDateLiteral(line string, index int) bool {
 	if previous := index - 1; previous >= 0 && (isIdentifierChar(line[previous]) || strings.ContainsRune("$%&!@^", rune(line[previous]))) {
 		return false
 	}
-	for i := index + 1; i < len(line); i++ {
-		if line[i] == '#' {
-			return true
-		}
-		if line[i] == '"' {
+	closing := strings.IndexByte(line[index+1:], '#')
+	if closing < 0 {
+		return false
+	}
+	closing += index + 1
+	return looksLikeVBADateLiteral(line[index+1 : closing])
+}
+
+func looksLikeVBADateLiteral(body string) bool {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return false
+	}
+	fields := strings.Fields(body)
+	if isVBATimeLiteral(fields) {
+		return true
+	}
+	if len(fields) > 0 && isVBANumericDate(fields[0]) {
+		return len(fields) == 1 || isVBATimeLiteral(fields[1:])
+	}
+	return isVBAEnglishDate(fields)
+}
+
+func isVBATimeLiteral(fields []string) bool {
+	if len(fields) < 1 || len(fields) > 2 {
+		return false
+	}
+	clock := strings.Split(fields[0], ":")
+	if len(clock) < 2 || len(clock) > 3 {
+		return false
+	}
+	for _, part := range clock {
+		if !isASCIIDigits(part) {
 			return false
 		}
 	}
+	return len(fields) == 1 || strings.EqualFold(fields[1], "am") || strings.EqualFold(fields[1], "pm")
+}
+
+func isVBANumericDate(text string) bool {
+	separator := ""
+	for _, candidate := range []string{"/", "-", "."} {
+		if strings.Contains(text, candidate) {
+			if separator != "" {
+				return false
+			}
+			separator = candidate
+		}
+	}
+	if separator == "" {
+		return false
+	}
+	parts := strings.Split(text, separator)
+	if len(parts) < 2 || len(parts) > 3 {
+		return false
+	}
+	for _, part := range parts {
+		if !isASCIIDigits(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func isVBAEnglishDate(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	months := map[string]bool{
+		"january": true, "february": true, "march": true, "april": true,
+		"may": true, "june": true, "july": true, "august": true,
+		"september": true, "october": true, "november": true, "december": true,
+		"jan": true, "feb": true, "mar": true, "apr": true, "jun": true,
+		"jul": true, "aug": true, "sep": true, "oct": true, "nov": true, "dec": true,
+	}
+	if !months[strings.ToLower(strings.Trim(fields[0], ","))] {
+		return false
+	}
+	for _, field := range fields[1:] {
+		if isASCIIDigits(strings.Trim(field, ",")) {
+			return true
+		}
+	}
 	return false
+}
+
+func isASCIIDigits(text string) bool {
+	if text == "" {
+		return false
+	}
+	for _, r := range text {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func leadingWhitespaceLength(text string) int {
