@@ -2357,16 +2357,29 @@ func splitStatementsWithColumns(line string) []statementPart {
 	parts := make([]statementPart, 0, 1)
 	start := 0
 	inString := false
+	inDateLiteral := false
 	for i := 0; i < len(line); i++ {
 		switch line[i] {
 		case '"':
+			if inDateLiteral {
+				continue
+			}
 			if inString && i+1 < len(line) && line[i+1] == '"' {
 				i++
 				continue
 			}
 			inString = !inString
-		case ':':
+		case '#':
 			if inString {
+				continue
+			}
+			if inDateLiteral {
+				inDateLiteral = false
+			} else if startsDateLiteral(line, i) {
+				inDateLiteral = true
+			}
+		case ':':
+			if inString || inDateLiteral || (i+1 < len(line) && line[i+1] == '=') {
 				continue
 			}
 			statement := strings.TrimSpace(line[start:i])
@@ -2381,6 +2394,24 @@ func splitStatementsWithColumns(line string) []statementPart {
 		parts = append(parts, statementPart{text: statement, start: start + leadingWhitespaceLength(line[start:])})
 	}
 	return parts
+}
+
+func startsDateLiteral(line string, index int) bool {
+	if index+1 >= len(line) {
+		return false
+	}
+	if previous := index - 1; previous >= 0 && (isIdentifierChar(line[previous]) || strings.ContainsRune("$%&!@^", rune(line[previous]))) {
+		return false
+	}
+	for i := index + 1; i < len(line); i++ {
+		if line[i] == '#' {
+			return true
+		}
+		if line[i] == '"' {
+			return false
+		}
+	}
+	return false
 }
 
 func leadingWhitespaceLength(text string) int {

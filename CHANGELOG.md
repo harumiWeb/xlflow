@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VB014` false positives for valid date-literal and named-argument colons,
+  UDT fields named `Next`, and repeated conditional-compilation guards.
+
 - Fix false-positive `VBA205` findings for local, parameter, and project symbols that shadow Excel root names, including procedure declaration and `Attribute` lines.
 
 - Expanded `VBA212` to analyze AST operand relationships across eager `And`,

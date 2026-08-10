@@ -14,7 +14,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"lint","code":"VB007","severity":"warning","line":580,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"lint","code":"VB007","severity":"warning","line":587,"column":0}
 {"project":"third_party/selenium-vba","file":"test/test_All.bas","surface":"lint","code":"VB007","severity":"warning","line":126,"column":0}
-{"project":"third_party/selenium-vba","file":"test/test_Authentication.bas","surface":"lint","code":"VB014","severity":"error","line":1,"column":1}
 {"project":"third_party/selenium-vba","file":"test/test_Error.bas","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/selenium-vba","file":"test/test_Frames.bas","surface":"lint","code":"VB020","severity":"warning","line":164,"column":9}
 {"project":"third_party/selenium-vba","file":"test/test_UpdateDriver.bas","surface":"lint","code":"VB007","severity":"warning","line":32,"column":0}

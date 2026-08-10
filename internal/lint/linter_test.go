@@ -857,6 +857,28 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 	}
 }
 
+func TestLinterAcceptsVB014CorpusLexicalBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"date literal colon":         "Sub Main()\n  If Time > #11:59:59 PM# Then\n  End If\nEnd Sub\n",
+		"named argument colon":       "Sub Main()\n  If IsReady(value:=1) Then\n  End If\nEnd Sub\n",
+		"keyword field plus block":   "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n  End If\nEnd Sub\n",
+		"repeated conditional guard": "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n  End If\n#End If\nEnd Sub\n",
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "Main.bas")
+			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+				t.Fatalf("valid source should not trigger VB014: %+v", got)
+			}
+		})
+	}
+}
+
 func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "classes", "Example.cls")
