@@ -6,6 +6,9 @@ All notable changes to xlflow will be documented in this file.
 
 - Fixed `VB014` false positives for valid date-literal and named-argument colons,
   UDT fields named `Next`, and repeated conditional-compilation guards.
+- Fixed `VB029` false positives for project-visible public assignments, intrinsic
+  `Err` assignments, bang-member targets, and function names with VBA type
+  declaration suffixes.
 
 - Added default-enabled `VBA236` command-execution safety analysis for VBA
   `Shell`, `WScript.Shell.Run`/`Exec`, `ShellExecute`, `cmd.exe`, PowerShell,

@@ -48,9 +48,10 @@ type Result struct {
 }
 
 type Linter struct {
-	RootDir    string
-	Config     config.Config
-	PathFilter func(string) bool
+	RootDir             string
+	Config              config.Config
+	PathFilter          func(string) bool
+	VisibleDeclarations map[string]bool
 }
 
 type procedureFrame struct {
@@ -116,12 +117,18 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	visibleDeclarations := l.VisibleDeclarations
+	if visibleDeclarations == nil {
+		visibleDeclarations = l.projectVisibleDeclarationsContext(ctx, files)
+	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
-		fileIssues, err := l.lintFileContext(ctx, file)
+		fileLinter := l
+		fileLinter.VisibleDeclarations = visibleDeclarations
+		fileIssues, err := fileLinter.lintFileContext(ctx, file)
 		if err != nil {
 			return Result{}, err
 		}
@@ -377,6 +384,77 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		issues, _ = applyInlineSuppressions(issues, directives)
 	}
 	return issues, nil
+}
+
+func (l Linter) projectVisibleDeclarationsContext(ctx context.Context, files []string) map[string]bool {
+	visible := make(map[string]bool)
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return visible
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		file, err := symbols.InspectSourceContext(ctx, symbols.SourceOptions{
+			RootDir:        l.RootDir,
+			Path:           path,
+			ModuleKind:     l.moduleKindForPath(path),
+			IncludePrivate: true,
+		}, source)
+		if err != nil {
+			continue
+		}
+		for _, sym := range file.Symbols {
+			if !projectVisibleDeclaration(sym, file.ModuleKind) {
+				continue
+			}
+			visible[canonicalDeclarationKey(sym.Name)] = true
+		}
+	}
+	return visible
+}
+
+func (l Linter) moduleKindForPath(path string) string {
+	cleanPath := filepath.Clean(path)
+	if pathInside(cleanPath, filepath.Join(l.RootDir, l.Config.Src.Workbook)) {
+		return "document"
+	}
+	if pathInside(cleanPath, filepath.Join(l.RootDir, l.Config.Src.Forms, "code")) {
+		return "form"
+	}
+	if pathInside(cleanPath, filepath.Join(l.RootDir, l.Config.Src.Classes)) || strings.EqualFold(filepath.Ext(cleanPath), ".cls") {
+		return "class"
+	}
+	if strings.EqualFold(filepath.Ext(cleanPath), ".frm") {
+		return "form"
+	}
+	return "standard"
+}
+
+func pathInside(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	if strings.EqualFold(path, root) {
+		return true
+	}
+	separator := string(os.PathSeparator)
+	return strings.HasPrefix(strings.ToLower(path), strings.ToLower(root)+separator)
+}
+
+func projectVisibleDeclaration(sym symbols.Symbol, moduleKind string) bool {
+	if sym.Parent != "" || !strings.EqualFold(sym.Visibility, "Public") {
+		return false
+	}
+	if !strings.EqualFold(moduleKind, "standard") && !strings.EqualFold(sym.ModuleKind, "standard") {
+		return false
+	}
+	switch strings.ToLower(sym.Kind) {
+	case "module_variable", "const", "type", "enum":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l Linter) standardModuleAttributeIssues(path string, source string) []Issue {
@@ -770,6 +848,9 @@ func (l Linter) undeclaredVariableIssuesContext(ctx context.Context, path string
 			}
 		}
 		declared := scope.declaredForProcedure(proc.Name)
+		for name := range l.VisibleDeclarations {
+			declared[canonicalDeclarationKey(name)] = true
+		}
 		for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
 			if i&0xff == 0 {
 				if err := ctx.Err(); err != nil {
@@ -783,7 +864,10 @@ func (l Linter) undeclaredVariableIssuesContext(ctx context.Context, path string
 				if !ok {
 					continue
 				}
-				key := strings.ToLower(name)
+				key := canonicalDeclarationKey(name)
+				if isBuiltinAssignmentTarget(key) {
+					continue
+				}
 				if hadParens && !declared[key] {
 					continue
 				}
@@ -813,7 +897,7 @@ func declarationScopeFromSymbols(syms []symbols.Symbol) declarationScope {
 		local:  map[string]map[string]bool{},
 	}
 	for _, sym := range syms {
-		key := strings.ToLower(sym.Name)
+		key := canonicalDeclarationKey(sym.Name)
 		if key == "" {
 			continue
 		}
@@ -821,7 +905,7 @@ func declarationScopeFromSymbols(syms []symbols.Symbol) declarationScope {
 			scope.procedures = append(scope.procedures, sym)
 			scope.module[key] = true
 			for _, param := range sym.Parameters {
-				paramKey := strings.ToLower(param.Name)
+				paramKey := canonicalDeclarationKey(param.Name)
 				if paramKey == "" {
 					continue
 				}
@@ -833,7 +917,7 @@ func declarationScopeFromSymbols(syms []symbols.Symbol) declarationScope {
 			continue
 		}
 		if sym.Parent != "" {
-			parentKey := strings.ToLower(sym.Parent)
+			parentKey := canonicalDeclarationKey(sym.Parent)
 			if scope.local[parentKey] == nil {
 				scope.local[parentKey] = map[string]bool{}
 			}
@@ -856,7 +940,7 @@ func (s declarationScope) declaredForProcedure(procName string) map[string]bool 
 	for name := range s.module {
 		declared[name] = true
 	}
-	procKey := strings.ToLower(procName)
+	procKey := canonicalDeclarationKey(procName)
 	declared[procKey] = true
 	for name := range s.local[procKey] {
 		declared[name] = true
@@ -866,7 +950,7 @@ func (s declarationScope) declaredForProcedure(procName string) map[string]bool 
 
 func (s declarationScope) addTextDeclarations(lines []string, procedures []sourceProcedure) {
 	for _, proc := range procedures {
-		procKey := strings.ToLower(proc.Name)
+		procKey := canonicalDeclarationKey(proc.Name)
 		if procKey == "" {
 			continue
 		}
@@ -918,6 +1002,9 @@ func undeclaredAssignmentTarget(statement string) (string, bool, bool) {
 	}
 	left = stripAssignmentModifier(left, "Set")
 	left = stripAssignmentModifier(left, "Let")
+	if bang := strings.IndexByte(left, '!'); bang >= 0 {
+		return cleanUndeclaredTarget(left[:bang])
+	}
 	if strings.Contains(left, ".") {
 		return "", false, false
 	}
@@ -991,6 +1078,19 @@ func cleanUndeclaredTarget(text string) (string, bool, bool) {
 		return "", false, false
 	}
 	return name, hadParens, true
+}
+
+func canonicalDeclarationKey(name string) string {
+	return strings.ToLower(cleanIdentifier(name))
+}
+
+func isBuiltinAssignmentTarget(key string) bool {
+	switch key {
+	case "err", "me":
+		return true
+	default:
+		return false
+	}
 }
 
 func isBareVBAIdentifier(name string) bool {

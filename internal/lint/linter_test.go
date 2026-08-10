@@ -2605,6 +2605,40 @@ End Function
 	assertIssue(t, PushBlockingIssues(issues), "VB029", 10)
 }
 
+func TestLinterResolvesVB029VBAVisibleAssignmentTargets(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Globals.bas", `Attribute VB_Name = "Globals"
+Option Explicit
+Public sharedFlag As Boolean
+Dim hiddenFlag As Boolean
+`)
+	writeLintModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Private Function DisplayName$()
+  Dim recordset As Object
+  recordset!DisplayName = "value"
+  Err = 0
+  sharedFlag = True
+  DisplayName = "ok"
+End Function
+
+Public Sub Run()
+  hiddenFlag = False
+  missingValue = 1
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB029")
+	if len(got) != 2 || got[0].Symbol != "hiddenFlag" || got[1].Symbol != "missingValue" {
+		t.Fatalf("VB029 findings = %+v, want hiddenFlag and missingValue only", got)
+	}
+}
+
 func TestLinterDoesNotTreatMultilineComparisonArgumentsAsAssignments(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

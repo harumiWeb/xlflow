@@ -102,6 +102,7 @@ func (a Analyzer) withRequestWorkspaceResolution(ctx context.Context, open []Doc
 	if err != nil || ctx.Err() != nil {
 		return a
 	}
+	a.visibleDeclarations = visibleAssignmentDeclarations(symbols)
 	view := NewWorkspaceResolutionView(symbols)
 	if recorder := analysisstats.FromContext(ctx); recorder != nil {
 		recorder.Add("workspace_resolution_views", 1)
@@ -111,6 +112,20 @@ func (a Analyzer) withRequestWorkspaceResolution(ctx context.Context, open []Doc
 	}
 	a.WorkspaceSymbolsFunc = nil
 	return a
+}
+
+func visibleAssignmentDeclarations(symbols []Symbol) map[string]bool {
+	visible := make(map[string]bool)
+	for _, symbol := range symbols {
+		if symbol.Parent != "" || !strings.EqualFold(symbol.Visibility, "Public") || !strings.EqualFold(symbol.ModuleKind, "standard") {
+			continue
+		}
+		switch strings.ToLower(symbol.Kind) {
+		case "module_variable", "const", "type", "enum":
+			visible[symbol.Name] = true
+		}
+	}
+	return visible
 }
 
 func normalizeWorkspaceResolutionKey(value string) string {

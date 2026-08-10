@@ -93,7 +93,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB005","severity":"warning","line":30,"column":31}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB005","severity":"warning","line":30,"column":42}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB005","severity":"warning","line":30,"column":57}
-{"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB029","severity":"error","line":96,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdError.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdError.cls","surface":"lint","code":"VB005","severity":"warning","line":31,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdError.cls","surface":"lint","code":"VB004","severity":"warning","line":43,"column":5}
