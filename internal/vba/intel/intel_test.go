@@ -226,7 +226,7 @@ func TestProcedureNameConstantQuickFixPreservesCRLFRange(t *testing.T) {
 func TestDiagnosticsIncludeAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
 	analyzer := withRealtimeFindings(newTestAnalyzer(t), []RealtimeFinding{{
 		Code: "VBA212", Severity: "warning", Line: 4,
-		Message: "deck is guarded against Nothing and dereferenced in the same non-short-circuit expression.",
+		Message: "deck.Count dereferences deck in the same non-short-circuit boolean expression (OR).",
 	}})
 	doc := Document{
 		Path: filepath.Join(t.TempDir(), "Main.bas"),
@@ -240,7 +240,7 @@ End Sub
 
 	diagnostics := analyzer.Diagnostics(doc)
 	vba212 := diagnosticsByCode(diagnostics, "VBA212")
-	if len(vba212) != 1 || !strings.Contains(vba212[0].Message, "deck is guarded against Nothing") {
+	if len(vba212) != 1 || !strings.Contains(vba212[0].Message, "deck.Count dereferences deck") {
 		t.Fatalf("VBA212 diagnostic missing: %+v", diagnostics)
 	}
 	if vba212[0].Range.Start.Line != 3 {

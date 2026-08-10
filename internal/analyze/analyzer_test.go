@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -4444,9 +4445,9 @@ End Sub
 		assertFinding(t, findings, "VBA212", line)
 	}
 	finding := findFinding(t, findings, "VBA212", 7)
-	if !containsAll(finding.Message, "deck", "non-short-circuit") ||
-		!containsAll(finding.Reason, "And/Or", "runtime error 91") ||
-		!containsAll(finding.Suggestion, "separate If statements") {
+	if !containsAll(finding.Message, "deck", "deck.Count", "non-short-circuit") ||
+		!containsAll(finding.Reason, "And/Or", "eager", "runtime error 91") ||
+		!containsAll(finding.Suggestion, "If/ElseIf") {
 		t.Fatalf("unexpected VBA212 text: %+v", finding)
 	}
 }
@@ -4557,6 +4558,139 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA212"); len(got) != 0 {
 		t.Fatalf("VBA212 should be suppressed: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA212ExpandedEagerContainersAndAccessPaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim parent As Object
+  Dim arr As Variant
+  Dim arr2 As Variant
+  Dim dict As Object
+  If (parent Is Nothing Or parent.Child.Count = 0) Then Exit Sub
+  If IsArray(arr) And arr(0) = 1 Then Exit Sub
+  If Not IsArray(arr2) And arr2(0) = 1 Then Exit Sub
+  If dict Is Nothing Or dict("k").Count = 0 Then Exit Sub
+  If IIf(parent Is Nothing, True, parent.Child.Count = 0) Then Exit Sub
+  If Choose(1, parent Is Nothing, parent.Child.Count = 0) Then Exit Sub
+  If Switch(parent Is Nothing, True, parent.Child.Count = 0) Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA212")
+	if len(got) < 6 {
+		t.Fatalf("expanded VBA212 findings = %+v, want nested/member/index/eager hazards", got)
+	}
+	var sawNested, sawArray, sawDict, sawIIf, sawChoose, sawSwitch bool
+	for _, finding := range got {
+		sawNested = sawNested || containsAll(finding.Message, "parent", "parent.Child.Count")
+		sawArray = sawArray || containsAll(finding.Message, "arr", "arr(0)")
+		sawDict = sawDict || containsAll(finding.Message, "dict", `dict("k").Count`)
+		sawIIf = sawIIf || containsAll(finding.Suggestion, "IIf", "If/Else")
+		sawChoose = sawChoose || containsAll(finding.Suggestion, "Choose", "Select Case")
+		sawSwitch = sawSwitch || containsAll(finding.Suggestion, "Switch", "If/ElseIf")
+		if finding.Column == 0 || finding.EndColumn <= finding.Column {
+			t.Fatalf("VBA212 should identify unsafe operand range: %+v", finding)
+		}
+	}
+	if !sawNested || !sawArray || !sawDict || !sawIIf || !sawChoose || !sawSwitch {
+		t.Fatalf("missing expanded VBA212 categories: nested=%v array=%v dict=%v iif=%v choose=%v switch=%v findings=%+v", sawNested, sawArray, sawDict, sawIIf, sawChoose, sawSwitch, got)
+	}
+}
+
+func TestAnalyzerVBA212ResolvedSideEffectGetterOnlyInEagerExpressions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Widget.cls", `Option Explicit
+Public Property Get Value() As Long
+  Application.Calculate
+  Value = 1
+End Property
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim widget As Widget
+  If widget.Value > 0 Then Exit Sub
+  If widget Is Nothing Or widget.Value > 0 Then Exit Sub
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA212")
+	if len(got) != 2 {
+		t.Fatalf("resolved getter findings = %+v, want object guard plus getter hazard", got)
+	}
+	sawGuard, sawGetter := false, false
+	for _, finding := range got {
+		if finding.Line != 5 || !strings.Contains(finding.Message, "widget.Value") {
+			t.Fatalf("unexpected resolved getter finding: %+v", finding)
+		}
+		sawGuard = sawGuard || strings.Contains(finding.Message, "dereferences widget")
+		sawGetter = sawGetter || strings.Contains(finding.Message, "getter")
+	}
+	if !sawGuard || !sawGetter {
+		t.Fatalf("resolved getter findings should retain guard and getter diagnostics: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA212IgnoresSafeValuesOtherOperatorsAndUserFunctions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function IIf(ByVal condition As Boolean, ByVal yesValue As Variant, ByVal noValue As Variant) As Variant
+  IIf = yesValue
+End Function
+Public Sub Run()
+  Dim obj As Object
+  Dim other As Object
+  Dim arr As Variant
+  If obj Is Nothing Or 1 = 0 Then Exit Sub
+  If obj Is Nothing Or other Is Nothing Then Exit Sub
+  If obj Is Nothing Xor obj.Count = 0 Then Exit Sub
+  If obj Is Nothing Eqv obj.Count = 0 Then Exit Sub
+  If obj Is Nothing Imp obj.Count = 0 Then Exit Sub
+  If IsArray(arr) Or 1 = 0 Then Exit Sub
+  If IIf(obj Is Nothing, True, obj.Count) Then Exit Sub
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA212"); len(got) != 0 {
+		t.Fatalf("safe/value-only/operator/user-function expressions should be ignored: %+v", got)
+	}
+}
+
+func TestRealtimeVBA212ResolvesOnlySameDocumentGetterEffects(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Widget.cls")
+	source := []byte(`Option Explicit
+Public Property Get Value() As Boolean
+  Application.Calculate
+  Value = True
+End Property
+Public Sub Run()
+  If Me.Value And True Then Exit Sub
+End Sub
+`)
+	findings, err := SourceRealtimeFindingsContext(context.Background(), dir, path, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA212")
+	if len(got) != 1 || !containsAll(got[0].Message, "Me.Value", "getter") {
+		t.Fatalf("same-document realtime getter finding = %+v", got)
 	}
 }
 

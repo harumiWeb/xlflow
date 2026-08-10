@@ -915,7 +915,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA209`: object or array comparison mistake
 - `VBA210`: a `Function` or `Property Get` may reach normal exit without a valid return assignment on every reachable path
 - `VBA211`: expanded known Excel object/member mismatch
-- `VBA212`: object `Nothing` guard and dereference are combined in a non-short-circuit boolean expression
+- `VBA212`: a `Nothing`/`IsArray` guard and matching nested member, object/index, bound, or resolved side-effecting getter access share an eagerly evaluated `And`, `Or`, `IIf`, `Choose`, or `Switch` expression
 - `VBA213`: direct `Scripting.Dictionary` iteration is used as if it yielded values or objects
 - `VBA214`: `On Error Resume Next` remains active across an unsafe scope; it is a warning even for resolved project-local calls
 - `VBA215`: a resolved `Range.Find` or `Range.Replace` call omits Excel settings that can inherit saved UI or macro state
@@ -971,6 +971,20 @@ uninitialized on every procedure invocation. Type references and member names
 are not object-variable reads. A preceding explicit `Set` or supported ByRef
 initializer retains the rule's compatibility exemption without attempting
 arbitrary branch-condition correlation.
+
+`VBA212` is warning-only, non-blocking, inline-suppressible, and available in
+batch and realtime analysis. It pairs guards and unsafe operands by their AST
+access path, including nested members and array/Collection/Dictionary index
+calls. `IsArray` is paired only with index, `LBound`, or `UBound` operations;
+general array allocation and dimension safety remains owned by `VBA227`.
+`And`, `Or`, `IIf`, `Choose`, and `Switch` operands are eager in VBA, so a
+matching access in a different operand is reported while value-only and
+independently safe operands are ignored. Built-ins are recognized only when a
+same-project procedure with that name does not resolve. Property getters are
+reported only when a unique project getter has a proven direct or propagated
+effect; batch analysis resolves the project, while realtime analysis uses the
+active document only. Unknown, ambiguous, external, and effect-free getters,
+and standalone getter predicates, remain allowed.
 
 `VBA223` is also default-enabled, non-blocking, file-local, and realtime. It uses structural credential patterns, ignores obvious placeholders where possible, and redacts source snippets with `[REDACTED]`.
 

@@ -134,11 +134,11 @@ func TestIssue491SmallFixtureDiagnosticContract(t *testing.T) {
 	want := intel.Diagnostic{
 		Code:     "VBA212",
 		Severity: "warning",
-		Message:  "deck is guarded against Nothing and dereferenced in the same non-short-circuit boolean expression.",
+		Message:  "deck.Count dereferences deck in the same non-short-circuit boolean expression (OR).",
 		Source:   "xlflow",
 		Range: intel.Range{
-			Start: intel.Position{Line: 5, Character: 0},
-			End:   intel.Position{Line: 5, Character: 1},
+			Start: intel.Position{Line: 5, Character: 25},
+			End:   intel.Position{Line: 5, Character: 35},
 		},
 	}
 	if got[0] != want {

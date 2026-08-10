@@ -48,49 +48,49 @@ The generated [static-analysis diagnostic catalog](../reference/diagnostics) is
 the authoritative reference for rule metadata, including configuration,
 default state, scope, precision, preflight behavior, and inline suppression.
 
-| Code     | Severity              | Description                                                                                    |
-| -------- | --------------------- | ---------------------------------------------------------------------------------------------- |
-| `VBA101` | warning               | Object variable assignment likely missing `Set`.                                               |
-| `VBA102` | warning               | Object-returning project function assignment likely missing `Set`.                             |
-| `VBA103` | warning               | Object-returning function body likely missing `Set <FunctionName> = ...`.                      |
-| `VBA104` | error                 | Known Excel object/member mismatch such as `Worksheet.DisplayGridlines`.                       |
-| `VBA105` | error                 | Removed `XlflowLog` trace helper call.                                                         |
-| `VBA106` | error                 | Removed `XlflowSetTraceFile` trace helper call.                                                |
-| `VBA201` | warning               | `Range.Find` result is dereferenced before a `Nothing` check.                                  |
-| `VBA202` | warning               | Object variable may be used before an obvious `Set` assignment.                                |
-| `VBA203` | warning               | `Application` state is changed without an obvious restore path.                                |
-| `VBA204` | warning               | Normal execution can fall through into an error-handler label.                                 |
-| `VBA205` | warning               | Ambiguous Excel workbook or worksheet scope depends on UI state or ordering.                   |
-| `VBA206` | warning               | Runtime-safety warning for temporary, property/member, indirect, or uncertain ByRef arguments. |
-| `VBA207` | warning / information | `Dictionary` or `Collection` item access has no obvious existence guard.                       |
-| `VBA208` | warning               | `ReDim Preserve` is used on a multi-dimensional array.                                         |
-| `VBA209` | warning               | Object or array is compared with scalar equality.                                              |
-| `VBA210` | warning               | Function or Property Get may reach normal exit without a valid return assignment.              |
-| `VBA211` | error                 | Expanded known Excel object/member mismatch.                                                   |
-| `VBA212` | warning               | Object `Nothing` guard and dereference share a non-short-circuit expression.                   |
-| `VBA213` | warning               | Direct Dictionary iteration key is used as an object or value.                                 |
-| `VBA214` | warning               | `On Error Resume Next` extends beyond a narrow compatibility probe.                            |
-| `VBA215` | warning               | `Range.Find`/`Replace` omits saved Excel search settings.                                      |
-| `VBA216` | error                 | A range expression mixes distinct explicit worksheet roots.                                    |
-| `VBA217` | warning               | A last-row calculation has an implicit root or unstable boundary strategy.                     |
-| `VBA218` | warning               | An Excel API failure contract is consumed without its required guard.                          |
-| `VBA219` | warning               | A local Workbook or VBA file handle can exit without a matching Close.                         |
-| `VBA220` | warning               | An Excel or UserForm event handler can re-enter itself or a related event.                     |
-| `VBA221` | warning               | A local helper can leave an Application property changed for its caller.                       |
-| `VBA222` | warning               | A public API exposes an inaccessible, ambiguous, or unresolved type.                           |
-| `VBA223` | warning               | Likely hardcoded secret detected in VBA source.                                                |
-| `VBA224` | warning               | Conservative procedure-local analysis finds untrusted data at a sensitive API.                 |
-| `VBA225` | warning               | Cell-by-cell Excel object-model work is repeated inside a non-trivial loop.                    |
-| `VBA226` | warning               | A `Range.Value` result is used with an unsafe scalar or array shape assumption.                |
-| `VBA227` | warning               | Array allocation, lifecycle, dimension, bound, or object-element safety is not proven.         |
-| `VBA228` | error                 | Definite ByRef type or array-shape mismatch rejected by the VBE; blocks source preflight.      |
-| `VBA229` | error                 | Unresolved procedure-local `As <Type>` identifier; blocks source preflight.                    |
-| `VBA230` | warning               | Dictionary `CompareMode` is changed after an entry was added.                                  |
-| `VBA231` | warning               | Dictionary `Keys` or `Items` is repeatedly materialized in a loop.                             |
-| `VBA232` | warning               | Dictionary key normalization is inconsistent.                                                  |
-| `VBA233` | warning               | A late-bound Dictionary uses an undefined Scripting comparison constant.                       |
-| `VBA234` | warning               | A Collection is mutated while the same object is being enumerated.                             |
-| `VBA235` | warning               | A zero-based index is used directly with a one-based Collection.                               |
+| Code     | Severity              | Description                                                                                       |
+| -------- | --------------------- | ------------------------------------------------------------------------------------------------- |
+| `VBA101` | warning               | Object variable assignment likely missing `Set`.                                                  |
+| `VBA102` | warning               | Object-returning project function assignment likely missing `Set`.                                |
+| `VBA103` | warning               | Object-returning function body likely missing `Set <FunctionName> = ...`.                         |
+| `VBA104` | error                 | Known Excel object/member mismatch such as `Worksheet.DisplayGridlines`.                          |
+| `VBA105` | error                 | Removed `XlflowLog` trace helper call.                                                            |
+| `VBA106` | error                 | Removed `XlflowSetTraceFile` trace helper call.                                                   |
+| `VBA201` | warning               | `Range.Find` result is dereferenced before a `Nothing` check.                                     |
+| `VBA202` | warning               | Object variable may be used before an obvious `Set` assignment.                                   |
+| `VBA203` | warning               | `Application` state is changed without an obvious restore path.                                   |
+| `VBA204` | warning               | Normal execution can fall through into an error-handler label.                                    |
+| `VBA205` | warning               | Ambiguous Excel workbook or worksheet scope depends on UI state or ordering.                      |
+| `VBA206` | warning               | Runtime-safety warning for temporary, property/member, indirect, or uncertain ByRef arguments.    |
+| `VBA207` | warning / information | `Dictionary` or `Collection` item access has no obvious existence guard.                          |
+| `VBA208` | warning               | `ReDim Preserve` is used on a multi-dimensional array.                                            |
+| `VBA209` | warning               | Object or array is compared with scalar equality.                                                 |
+| `VBA210` | warning               | Function or Property Get may reach normal exit without a valid return assignment.                 |
+| `VBA211` | error                 | Expanded known Excel object/member mismatch.                                                      |
+| `VBA212` | warning               | `Nothing`/`IsArray` guard and matching nested access share an eager Boolean/selection expression. |
+| `VBA213` | warning               | Direct Dictionary iteration key is used as an object or value.                                    |
+| `VBA214` | warning               | `On Error Resume Next` extends beyond a narrow compatibility probe.                               |
+| `VBA215` | warning               | `Range.Find`/`Replace` omits saved Excel search settings.                                         |
+| `VBA216` | error                 | A range expression mixes distinct explicit worksheet roots.                                       |
+| `VBA217` | warning               | A last-row calculation has an implicit root or unstable boundary strategy.                        |
+| `VBA218` | warning               | An Excel API failure contract is consumed without its required guard.                             |
+| `VBA219` | warning               | A local Workbook or VBA file handle can exit without a matching Close.                            |
+| `VBA220` | warning               | An Excel or UserForm event handler can re-enter itself or a related event.                        |
+| `VBA221` | warning               | A local helper can leave an Application property changed for its caller.                          |
+| `VBA222` | warning               | A public API exposes an inaccessible, ambiguous, or unresolved type.                              |
+| `VBA223` | warning               | Likely hardcoded secret detected in VBA source.                                                   |
+| `VBA224` | warning               | Conservative procedure-local analysis finds untrusted data at a sensitive API.                    |
+| `VBA225` | warning               | Cell-by-cell Excel object-model work is repeated inside a non-trivial loop.                       |
+| `VBA226` | warning               | A `Range.Value` result is used with an unsafe scalar or array shape assumption.                   |
+| `VBA227` | warning               | Array allocation, lifecycle, dimension, bound, or object-element safety is not proven.            |
+| `VBA228` | error                 | Definite ByRef type or array-shape mismatch rejected by the VBE; blocks source preflight.         |
+| `VBA229` | error                 | Unresolved procedure-local `As <Type>` identifier; blocks source preflight.                       |
+| `VBA230` | warning               | Dictionary `CompareMode` is changed after an entry was added.                                     |
+| `VBA231` | warning               | Dictionary `Keys` or `Items` is repeatedly materialized in a loop.                                |
+| `VBA232` | warning               | Dictionary key normalization is inconsistent.                                                     |
+| `VBA233` | warning               | A late-bound Dictionary uses an undefined Scripting comparison constant.                          |
+| `VBA234` | warning               | A Collection is mutated while the same object is being enumerated.                                |
+| `VBA235` | warning               | A zero-based index is used directly with a one-based Collection.                                  |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
