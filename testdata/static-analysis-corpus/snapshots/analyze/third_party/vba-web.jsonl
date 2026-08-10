@@ -15,7 +15,6 @@
 {"project":"third_party/vba-web","file":"authenticators/DigestAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":215,"column":29}
 {"project":"third_party/vba-web","file":"authenticators/DigestAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":225,"column":24}
 {"project":"third_party/vba-web","file":"authenticators/DigestAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":235,"column":24}
-{"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":122,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":130,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":130,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":134,"column":0}
@@ -27,7 +26,6 @@
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":231,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":270,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":270,"column":9}
-{"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":275,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":292,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":292,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":333,"column":29}
@@ -39,7 +37,6 @@
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":389,"column":5}
 {"project":"third_party/vba-web","file":"authenticators/FacebookAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":399,"column":43}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":110,"column":19}
-{"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":156,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":164,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":164,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":168,"column":0}
@@ -49,7 +46,6 @@
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":215,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":223,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":223,"column":0}
-{"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":324,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":341,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":341,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/GoogleAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":385,"column":25}
@@ -69,17 +65,14 @@
 {"project":"third_party/vba-web","file":"authenticators/OAuth1Authenticator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":280,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/OAuth1Authenticator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":281,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/OAuth1Authenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":298,"column":67}
-{"project":"third_party/vba-web","file":"authenticators/OAuth2Authenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":147,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/OAuth2Authenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":164,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/OAuth2Authenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":164,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/OPSAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":117,"column":9}
-{"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":151,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":159,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":159,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":163,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":178,"column":5}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":178,"column":5}
-{"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":302,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":319,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":319,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":337,"column":25}
@@ -93,7 +86,6 @@
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":385,"column":25}
 {"project":"third_party/vba-web","file":"authenticators/TodoistAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":386,"column":28}
 {"project":"third_party/vba-web","file":"authenticators/TwitterAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":133,"column":20}
-{"project":"third_party/vba-web","file":"authenticators/TwitterAuthenticator.cls","surface":"analyze","code":"VBA204","severity":"warning","line":144,"column":0}
 {"project":"third_party/vba-web","file":"authenticators/TwitterAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":161,"column":9}
 {"project":"third_party/vba-web","file":"authenticators/TwitterAuthenticator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":161,"column":9}
 {"project":"third_party/vba-web","file":"examples/analytics/AnalyticsSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":16,"column":5}
@@ -791,7 +783,6 @@
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2938,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA204","severity":"warning","line":2970,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA204","severity":"warning","line":3120,"column":0}
-{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA204","severity":"warning","line":3146,"column":0}
 {"project":"third_party/vba-web","file":"src/WebRequest.cls","surface":"analyze","code":"VBA206","severity":"warning","line":383,"column":23}
 {"project":"third_party/vba-web","file":"src/WebRequest.cls","surface":"analyze","code":"VBA206","severity":"warning","line":383,"column":23}
 {"project":"third_party/vba-web","file":"src/WebRequest.cls","surface":"analyze","code":"VBA206","severity":"warning","line":410,"column":18}

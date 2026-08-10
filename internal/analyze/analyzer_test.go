@@ -2448,6 +2448,117 @@ End Sub
 	}
 }
 
+func TestAnalyzerCFGVBA204AllowsQualifiedCleanupLabels(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub AuthCleanup()
+  On Error GoTo auth_Cleanup
+  Debug.Print "work"
+auth_Cleanup:
+  Debug.Print "cleanup"
+End Sub
+
+Public Sub AutoProxyCleanup()
+  On Error GoTo AutoProxy_Cleanup
+  Debug.Print "work"
+AutoProxy_Cleanup:
+  Debug.Print "cleanup"
+End Sub
+
+Public Sub CleanupNamedHandler()
+  On Error GoTo CleanupErrorHandler
+  Debug.Print "work"
+CleanupErrorHandler:
+  Debug.Print "handled"
+End Sub
+
+Public Sub LegacyCleanUp()
+  On Error GoTo worker_clean_up
+  Debug.Print "work"
+worker_clean_up:
+  Debug.Print "cleanup"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "CleanupNamedHandler" || got[0].Line != 19 {
+		t.Fatalf("VBA204 findings = %+v, want only the non-cleanup suffix control", got)
+	}
+	modulePath := filepath.Join(dir, "src", "modules", "Main.bas")
+	source, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, modulePath, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "CleanupNamedHandler" || got[0].Line != 19 {
+		t.Fatalf("realtime VBA204 findings = %+v, want only the non-cleanup suffix control", got)
+	}
+}
+
+func TestAnalyzerCFGVBA204DoesNotTreatDirectErrRaiseAsFallthrough(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UnconditionalRaise()
+  On Error GoTo Handler
+  Err.Raise 5
+Handler:
+  Debug.Print "handled"
+End Sub
+
+Public Sub ConditionalRaise(ByVal fail As Boolean)
+  On Error GoTo Handler
+  If fail Then Err.Raise 5
+Handler:
+  Debug.Print "handled"
+End Sub
+
+Public Sub ConditionalCompilationPath()
+  On Error GoTo Handler
+#If Mac Then
+  Err.Raise 5
+#Else
+  Debug.Print "work"
+#End If
+Handler:
+  Debug.Print "handled"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 2 || got[0].Procedure != "ConditionalRaise" || got[0].Line != 12 ||
+		got[1].Procedure != "ConditionalCompilationPath" || got[1].Line != 23 {
+		t.Fatalf("VBA204 findings = %+v, want the conditional and alternate-compilation fallthroughs", got)
+	}
+	modulePath := filepath.Join(dir, "src", "modules", "Main.bas")
+	source, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, modulePath, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA204")
+	if len(got) != 2 || got[0].Procedure != "ConditionalRaise" || got[0].Line != 12 ||
+		got[1].Procedure != "ConditionalCompilationPath" || got[1].Line != 23 {
+		t.Fatalf("realtime VBA204 findings = %+v, want the conditional and alternate-compilation fallthroughs", got)
+	}
+}
+
 func TestAnalyzerVBA214AllowsNarrowCompatibilityProbes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -5270,6 +5381,78 @@ End Sub
 	got := findingsByCode(findings, "VBA220")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "ambiguous") || strings.Contains(got[0].Message, "same-event") {
 		t.Fatalf("ambiguous event call must be an uncertainty, not a confirmed recursion: %+v", got)
+	}
+}
+
+func TestVBA220ReportsOneFindingPerResolvedCallSite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.cls"), []byte(`Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
+  TriggerSelectionChange
+End Sub
+
+Private Sub TriggerSelectionChange()
+  Application.Goto Range("A1")
+  MysteryOperation
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 1 {
+		t.Fatalf("VBA220 findings = %+v, want one finding at the resolved call site", got)
+	}
+	if got[0].Line != 3 || !strings.Contains(got[0].Message, "broader event-chain") {
+		t.Fatalf("VBA220 finding = %+v, want the confirmed event risk on line 3", got[0])
+	}
+}
+
+func TestVBA220KeepsDistinctResolvedCallsInOneStatement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "src", "workbook")
+	if err := os.MkdirAll(workbook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workbook, "Sheet1.cls"), []byte(`Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
+  If WriteCell(TriggerSelection()) Then
+  End If
+End Sub
+
+Private Function WriteCell(ByVal triggered As Boolean) As Boolean
+  Range("A1").Value = 1
+  WriteCell = triggered
+End Function
+
+Private Function TriggerSelection() As Boolean
+  Application.Goto Range("A1")
+  TriggerSelection = True
+End Function
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA220")
+	if len(got) != 2 {
+		t.Fatalf("VBA220 findings = %+v, want one finding for each resolved call boundary", got)
+	}
+	if !strings.Contains(got[0].Message, "same-event") || !strings.Contains(got[1].Message, "broader event-chain") {
+		t.Fatalf("VBA220 findings = %+v, want same-event and broader event-chain risks", got)
 	}
 }
 

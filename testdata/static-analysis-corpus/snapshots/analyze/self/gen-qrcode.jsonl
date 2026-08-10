@@ -198,9 +198,5 @@
 {"project":"self/gen-qrcode","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA227","severity":"warning","line":530,"column":0}
 {"project":"self/gen-qrcode","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":543,"column":0}
 {"project":"self/gen-qrcode","file":"src/workbook/Sheet1.bas","surface":"analyze","code":"VBA220","severity":"warning","line":8,"column":0}
-{"project":"self/gen-qrcode","file":"src/workbook/Sheet1.bas","surface":"analyze","code":"VBA220","severity":"warning","line":8,"column":0}
 {"project":"self/gen-qrcode","file":"src/workbook/Sheet1.bas","surface":"analyze","code":"VBA220","severity":"warning","line":12,"column":0}
-{"project":"self/gen-qrcode","file":"src/workbook/Sheet1.bas","surface":"analyze","code":"VBA220","severity":"warning","line":12,"column":0}
-{"project":"self/gen-qrcode","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":4,"column":0}
-{"project":"self/gen-qrcode","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":4,"column":0}
 {"project":"self/gen-qrcode","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":4,"column":0}

@@ -2494,7 +2494,8 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 			implicitEntry := false
 			for _, edge := range proc.Graph.Edges {
 				if edge.To == block.ID && edge.Class == vbacfg.EdgeNormal && reachable[edge.From] &&
-					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
+					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown &&
+					!isErrRaiseBlock(*proc.Graph, edge.From) {
 					implicitEntry = true
 					break
 				}
@@ -3062,11 +3063,12 @@ func rangeFindAssignment(stmt string) (string, bool) {
 }
 
 func isCleanupFallthroughLabel(label string) bool {
-	switch strings.ToLower(label) {
+	normalized := strings.ToLower(label)
+	switch normalized {
 	case "cleanup", "clean_up", "finally", "done":
 		return true
 	default:
-		return false
+		return strings.HasSuffix(normalized, "_cleanup") || strings.HasSuffix(normalized, "_clean_up")
 	}
 }
 
