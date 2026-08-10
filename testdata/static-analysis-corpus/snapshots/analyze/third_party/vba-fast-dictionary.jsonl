@@ -6,7 +6,6 @@
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/BenchTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":169,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/BenchTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":175,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/BenchTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":176,"column":0}
-{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA202","severity":"warning","line":61,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA206","severity":"warning","line":67,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA206","severity":"warning","line":67,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":71,"column":0}
@@ -221,7 +220,6 @@
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VB045","severity":"error","line":93,"column":26}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA230","severity":"warning","line":153,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA214","severity":"warning","line":158,"column":0}
-{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA202","severity":"warning","line":222,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VB045","severity":"error","line":272,"column":22}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA237","severity":"warning","line":277,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA237","severity":"warning","line":283,"column":0}

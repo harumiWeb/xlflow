@@ -9,9 +9,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1020,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1021,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1026,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1028,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1029,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1030,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1213,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1214,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebActionChain.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1214,"column":0}
@@ -38,7 +35,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA227","severity":"warning","line":614,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA202","severity":"warning","line":615,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCapabilities.cls","surface":"analyze","code":"VBA227","severity":"warning","line":621,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebCookies.cls","surface":"analyze","code":"VBA202","severity":"warning","line":113,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCookies.cls","surface":"analyze","code":"VBA227","severity":"warning","line":115,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebCookies.cls","surface":"analyze","code":"VBA202","severity":"warning","line":141,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA222","severity":"warning","line":343,"column":0}
@@ -53,7 +49,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":496,"column":5}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":520,"column":16}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA202","severity":"warning","line":635,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA202","severity":"warning","line":645,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":694,"column":27}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":700,"column":32}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":706,"column":34}
@@ -84,7 +79,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":914,"column":29}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":930,"column":16}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA202","severity":"warning","line":932,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA202","severity":"warning","line":987,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1066,"column":16}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1067,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1089,"column":16}

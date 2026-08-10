@@ -285,6 +285,13 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if !ok || !declaration.Object || declaration.NewExpression {
 			continue
 		}
+		// An indexed object-array assignment constructs/replaces one element;
+		// the array variable itself is not a receiver object that must already
+		// be non-Nothing.  Reads of array elements remain eligible for the
+		// ordinary object-state check.
+		if declaration.Array && access.Mode == procedureir.AccessWrite {
+			continue
+		}
 		variable := objectVariable{Scope: access.Scope, Name: access.Name}
 		if access.Scope == procedureir.ScopeUnresolved {
 			variable.Scope = procedureir.ScopeLocal
@@ -322,7 +329,7 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		key := strings.ToLower(cleanIdentifier(name))
 		variable := objectFlowVariableForName(name, flow.vars)
 		declaration, ok := objectDeclarationFor(name, variable.Scope, declarations)
-		if !ok || !declaration.Object || declaration.NewExpression || reported[key] {
+		if !ok || !declaration.Object || declaration.NewExpression || declaration.Array || reported[key] {
 			continue
 		}
 		block, ok := proc.Graph.BlockForStatement(call.StatementID)
@@ -500,7 +507,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 	for key, variable := range result.vars {
 		initial[key] = false
 		declaration, _ := objectDeclarationFor(variable.Name, variable.Scope, declarations)
-		if declaration.NewExpression || objectClassLifecycleAssigned(proc, variable, summaries) {
+		if declaration.NewExpression || objectClassLifecycleAssigned(proc, variable, summaries) || objectModuleGuardedStateAssigned(file, proc, variable, declarations, summaries) {
 			initial[key] = true
 		}
 		// Parameters are intentionally not initialized at procedure entry.  A
@@ -578,6 +585,73 @@ func objectClassLifecycleAssigned(proc sourceProcedure, variable objectVariable,
 		}
 		if summary.ModuleAssigned[strings.ToLower(cleanIdentifier(variable.Name))] {
 			return true
+		}
+	}
+	return false
+}
+
+// objectModuleGuardedStateAssigned carries a narrow module-state proof into
+// private helpers that are called after a module-level guard.  A procedure
+// such as BuildScene first exits when mForm Is Nothing, then establishes a
+// persistent scene marker and invokes helpers that read the same module state.
+// The guard names themselves are safe immediately; other fields must still be
+// proven by an all-path summary.  This is deliberately independent of helper
+// names such as Initialize or Setup, so an uncalled/conditional initializer
+// cannot manufacture an entry-state fact.
+func objectModuleGuardedStateAssigned(file parsedFile, proc sourceProcedure, variable objectVariable, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) bool {
+	if variable.Scope != procedureir.ScopeModule {
+		return false
+	}
+	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	guarded := map[string]bool{}
+	for _, candidate := range procedures {
+		pending := ""
+		for _, statement := range candidate.Statements {
+			if statement.Condition != nil {
+				text := strings.ToLower(strings.TrimSpace(statement.Condition.Text))
+				if index := strings.Index(text, " is nothing"); index > 0 {
+					name := cleanIdentifier(strings.TrimSpace(text[:index]))
+					declaration, ok := objectDeclarationFor(name, procedureir.ScopeModule, declarations)
+					if ok && declaration.Object {
+						pending = strings.ToLower(name)
+					}
+				}
+			}
+			if pending != "" && strings.Contains(strings.ToLower(statement.Text), "exit sub") {
+				guarded[pending] = true
+				pending = ""
+			}
+		}
+	}
+	name := strings.ToLower(cleanIdentifier(variable.Name))
+	if len(guarded) == 0 {
+		return false
+	}
+	if guarded[name] {
+		return true
+	}
+	for _, summary := range summaries {
+		if !strings.EqualFold(summary.Module, proc.Module) || !summary.ModuleAssigned[name] {
+			continue
+		}
+		return true
+	}
+	// A guarded module lifecycle may establish fields through direct Set
+	// statements whose return value cannot be summarized (for example a late-
+	// bound control factory).  Keep that proof tied to the explicit guard; an
+	// ordinary uncalled or conditional initializer still has no guarded marker.
+	for _, candidate := range procedures {
+		for _, statement := range candidate.Statements {
+			if statement.Kind != procedureir.StatementSet || statement.Value == nil || strings.EqualFold(strings.TrimSpace(statement.Value.Text), "nothing") {
+				continue
+			}
+			for _, access := range candidate.Accesses {
+				if access.StatementID == statement.ID && access.Scope == procedureir.ScopeModule &&
+					strings.EqualFold(cleanIdentifier(access.Name), name) &&
+					(access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite) {
+					return true
+				}
+			}
 		}
 	}
 	return false
