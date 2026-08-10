@@ -47,6 +47,9 @@ func TestLoadBuiltinResolvesCoreExcelAndCommonCOMTypes(t *testing.T) {
 	if typ, ok := db.ResolveProgID("ADODB.Recordset"); !ok || typ.Name != "ADODB.Recordset" {
 		t.Fatalf("ResolveProgID(ADODB.Recordset) = %+v, %v", typ, ok)
 	}
+	if typ, ok := db.ResolveProgID("ADODB.Command"); !ok || typ.Name != "ADODB.Command" {
+		t.Fatalf("ResolveProgID(ADODB.Command) = %+v, %v", typ, ok)
+	}
 	if typ, ok := db.ResolveProgID("Excel.Application"); !ok || typ.Name != "Excel.Application" {
 		t.Fatalf("ResolveProgID(Excel.Application) = %+v, %v", typ, ok)
 	}
@@ -190,6 +193,12 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	}
 	if got, ok := db.ResolveMember("ADODB.Recordset", "Fields"); !ok || got.ReturnType != "ADODB.Fields" {
 		t.Fatalf("Recordset.Fields = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("ADODB.Command", "CommandText"); !ok || got.ReturnType != "String" {
+		t.Fatalf("Command.CommandText = %+v, %v", got, ok)
+	}
+	if got, ok := db.ResolveMember("ADODB.Command", "CreateParameter"); !ok || got.ReturnType != "ADODB.Parameter" || len(got.Parameters) != 5 {
+		t.Fatalf("Command.CreateParameter = %+v, %v", got, ok)
 	}
 	if got, ok := db.ResolveMember("VBA.Global", "MsgBox"); !ok || len(got.Parameters) != 5 || got.ReturnType != "VbMsgBoxResult" {
 		t.Fatalf("VBA.Global.MsgBox parameters = %+v, %v", got, ok)

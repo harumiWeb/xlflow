@@ -91,6 +91,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA236`](#vba236) | analyze | warning  | procedure-local | yes     | Unsafe command construction                        |
 | [`VBA237`](#vba237) | analyze | warning  | interprocedural | yes     | Suppressed error propagation                       |
 | [`VBA238`](#vba238) | analyze | warning  | procedure-local | yes     | Loop-invariant Excel object resolution             |
+| [`VBA239`](#vba239) | analyze | warning  | procedure-local | yes     | Unsafe SQL construction                            |
 
 ## VB001
 
@@ -1961,3 +1962,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                              |
 | Real-time editor diagnostic | yes                                             |
 | Fix available               | no                                              |
+
+## VBA239
+
+**Unsafe SQL construction.** A SQL statement may combine external input, dynamic identifiers, locale-sensitive values, manual quoting, or wildcard input before execution.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `security`                       |
+| Evidence class              | `policy`                         |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `medium`                         |
+| Enabled by default          | yes                              |
+| Configuration               | `detect_unsafe_sql_construction` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |

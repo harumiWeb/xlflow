@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA239` SQL-construction safety analysis for ADO and
+  DAO execution boundaries. Findings track SQL value/identifier/LIKE roles,
+  locale-sensitive formatting, manual quoting, and parameterized
+  `ADODB.Command` usage without claiming complete SQL-injection proof.
+
 - Fixed `VB014` false positives for valid date-literal and named-argument colons,
   UDT fields named `Next`, and repeated conditional-compilation guards.
 - Fixed `VB029` false positives for project-visible public assignments, intrinsic

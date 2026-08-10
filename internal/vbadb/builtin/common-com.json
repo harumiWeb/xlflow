@@ -234,6 +234,65 @@
       "source": "xlflow"
     },
     {
+      "name": "ADODB.Command",
+      "library": "ADODB",
+      "kind": "class",
+      "aliases": ["Command"],
+      "properties": [
+        { "name": "CommandText", "return_type": "String" },
+        { "name": "Parameters", "return_type": "ADODB.Parameters" }
+      ],
+      "methods": [
+        {
+          "name": "Execute",
+          "return_type": "ADODB.Recordset",
+          "parameters": [
+            { "name": "RecordsAffected", "type": "Variant", "optional": true },
+            { "name": "Parameters", "type": "Variant", "optional": true },
+            { "name": "Options", "type": "Long", "optional": true }
+          ]
+        },
+        {
+          "name": "CreateParameter",
+          "return_type": "ADODB.Parameter",
+          "parameters": [
+            { "name": "Name", "type": "String", "optional": true },
+            { "name": "Type", "type": "ADODB.DataTypeEnum", "optional": true },
+            { "name": "Direction", "type": "ADODB.ParameterDirectionEnum", "optional": true },
+            { "name": "Size", "type": "Long", "optional": true },
+            { "name": "Value", "type": "Variant", "optional": true }
+          ]
+        }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "ADODB.Parameters",
+      "library": "ADODB",
+      "kind": "collection",
+      "aliases": ["Parameters"],
+      "element_type": "ADODB.Parameter",
+      "properties": [{ "name": "Count", "return_type": "Long", "read_only": true }],
+      "methods": [
+        { "name": "Append", "parameters": [{ "name": "Parameter", "type": "ADODB.Parameter" }] }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
+      "name": "ADODB.Parameter",
+      "library": "ADODB",
+      "kind": "class",
+      "aliases": ["Parameter"],
+      "properties": [
+        { "name": "Name", "return_type": "String" },
+        { "name": "Value", "return_type": "Variant" }
+      ],
+      "confidence": "curated",
+      "source": "xlflow"
+    },
+    {
       "name": "ADODB.Field",
       "library": "ADODB",
       "kind": "class",
@@ -397,6 +456,7 @@
     "WScript.Shell": "WScript.Shell",
     "VBScript.RegExp": "VBScript.RegExp",
     "ADODB.Connection": "ADODB.Connection",
-    "ADODB.Recordset": "ADODB.Recordset"
+    "ADODB.Recordset": "ADODB.Recordset",
+    "ADODB.Command": "ADODB.Command"
   }
 }

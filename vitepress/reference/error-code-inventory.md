@@ -217,6 +217,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
 - `detect_unsafe_command_construction`
+- `detect_unsafe_sql_construction`
 - `detect_unstable_last_row_patterns`
 - `detect_untrusted_data_flow`
 - `detect_unused_local_variables`
@@ -255,6 +256,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `duplicate_test_name`
 - `duplicate_todo`
 - `duration_ms`
+- `dynamic_identifier`
 - `edit_args_invalid`
 - `edit_coordinates_unreconciled`
 - `else_clause`
@@ -315,6 +317,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `external_reference`
 - `external_session_detached`
 - `external_sub_declaration`
+- `external_value_concatenation`
 - `fail_fast_with_max_failures`
 - `failed_entries`
 - `file_input`
@@ -452,6 +455,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `legacy_backup_entry`
 - `legacy_entry`
 - `let_statement`
+- `like_pattern`
 - `likely_cause`
 - `line_number_label`
 - `line_number_literal`
@@ -472,6 +476,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `live_workbook`
 - `local_type_diagnostics`
 - `local_variable`
+- `locale_sensitive_value`
 - `location_capture`
 - `logical_line`
 - `logical_value_expression`
@@ -492,6 +497,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `manifest_exists`
 - `manifest_missing`
 - `manifest_path`
+- `manual_quoting`
 - `max_age_days`
 - `max_cols`
 - `max_concurrent`
@@ -929,6 +935,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `wait_will_resolve`
 - `while_statement`
 - `width_px`
+- `wildcard_like_input`
 - `window_not_found`
 - `window_style`
 - `windows_path`

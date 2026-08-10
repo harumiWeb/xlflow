@@ -2,7 +2,8 @@
 
 This specification defines the generic procedure-local dataflow contract for
 `VBA224`. Process-launch-specific classification and diagnostics belong to
-`VBA236`, which reuses these states and paths with sink argument-role metadata.
+`VBA236`, and SQL-specific classification belongs to `VBA239`; both rules
+reuse these states and paths with sink-specific metadata.
 The implementation is protocol-neutral and consumes `procedureir.ProcedureIR`
 and one `cfg.Graph`; it does not parse source or depend on CLI/LSP types.
 
@@ -44,9 +45,9 @@ sources without the required receiver shape or type evidence.
 
 ## Initial sinks
 
-The shared data-flow catalog also carries process-launch entries for the
-`VBA236` projection; the generic `VBA224` finding set uses only the non-process
-entries listed here.
+The shared data-flow catalog also carries process-launch and SQL entries for
+the `VBA236`/`VBA239` projections; the generic `VBA224` finding set uses only
+the entries not owned by an enabled specialized rule.
 
 The sink catalog recognizes:
 
