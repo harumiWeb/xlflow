@@ -1190,7 +1190,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			continue
 		}
 		if worksheetStatementStart && a.Config.Analyze.ForbidUnqualifiedExcelObjects {
-			findings = append(findings, a.unqualifiedExcelFindings(file, proc, lineNo, normalizedCodeLine(worksheetStmt))...)
+			findings = append(findings, a.unqualifiedExcelFindings(file, proc, lineNo, normalizedCodeLine(worksheetStmt), decls, ctx)...)
 		}
 		if m := withRe.FindStringSubmatch(stmt); len(m) > 0 {
 			withStack = append(withStack, resolveWithInfo(m[1], decls))
@@ -1557,31 +1557,50 @@ func markCallInitialized(stmt string, line int, decls map[string]sourceDeclarati
 	}
 }
 
-func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string) []Finding {
+func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration, ctx analysisContext) []Finding {
+	if vba205NonExecutableStatement(stmt) {
+		return nil
+	}
+	shadowed := vba205ShadowedIdentifiers(proc, decls, ctx)
 	var findings []Finding
-	for _, m := range unqualifiedExcelRe.FindAllStringSubmatch(stmt, -1) {
-		name := m[2]
+	for _, m := range unqualifiedExcelRe.FindAllStringSubmatchIndex(stmt, -1) {
+		name := stmt[m[4]:m[5]]
+		if vba205QualifiedOrShadowedRoot(stmt[m[0]:m[1]], name, shadowed) {
+			continue
+		}
 		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "Unqualified "+name+" access depends on the active worksheet.", "Unqualified Excel object access is resolved through the active sheet or selection at runtime.", "Qualify "+name+" with an explicit Worksheet or Range object."))
 	}
-	for _, m := range activeExcelRe.FindAllStringSubmatch(stmt, -1) {
-		name := m[1]
+	for _, m := range activeExcelRe.FindAllStringSubmatchIndex(stmt, -1) {
+		name := stmt[m[2]:m[3]]
+		if vba205QualifiedOrShadowedRoot(stmt[m[0]:m[1]], name, shadowed) {
+			continue
+		}
 		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", name+" creates an active Excel object dependency.", name+" depends on the user's current Excel UI state and can target a different object during automation.", "Pass an explicit Workbook, Worksheet, or Range argument instead."))
 	}
-	for _, m := range unqualifiedSheetCollectionRe.FindAllStringSubmatch(stmt, -1) {
-		name := m[1]
+	for _, m := range unqualifiedSheetCollectionRe.FindAllStringSubmatchIndex(stmt, -1) {
+		name := stmt[m[2]:m[3]]
+		if vba205QualifiedOrShadowedRoot(stmt[m[0]:m[1]], name, shadowed) {
+			continue
+		}
 		suggestion := "Use ThisWorkbook." + name + "(...) or select " + name + " from an explicit Workbook argument."
 		if addInStandardModule(a.Config, file) {
 			suggestion = "Select " + name + " from an explicit caller Workbook argument."
 		}
 		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "Unqualified "+name+" access depends on the active workbook.", "The unqualified "+name+" collection is resolved from Excel's active workbook at runtime.", suggestion))
 	}
-	for _, m := range positionalExcelCollectionRe.FindAllStringSubmatch(stmt, -1) {
-		name := m[1]
-		index := m[2]
+	for _, m := range positionalExcelCollectionRe.FindAllStringSubmatchIndex(stmt, -1) {
+		name := stmt[m[2]:m[3]]
+		if vba205QualifiedOrShadowedRoot(stmt[m[0]:m[1]], name, shadowed) {
+			continue
+		}
+		index := stmt[m[4]:m[5]]
 		root := name + "(" + index + ")"
 		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", root+" depends on Excel collection ordering.", root+" can select a different object when workbook or window order changes.", "Select the target by name or receive an explicit "+strings.TrimSuffix(name, "s")+" argument."))
 	}
 	for _, open := range workbooksOpenRe.FindAllStringSubmatchIndex(stmt, -1) {
+		if vba205QualifiedOrShadowedRoot(stmt[open[0]:open[1]], stmt[open[2]:open[3]], shadowed) {
+			continue
+		}
 		if !capturedWorkbooksOpen(stmt, open[2]) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "Workbooks.Open result is not captured.", "An uncaptured Workbooks.Open result forces later code to depend on active workbook state.", "Capture the opened workbook: Set wb = Workbooks.Open(...)."))
 		}
@@ -1590,6 +1609,52 @@ func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure
 		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA205", "warning", "ThisWorkbook in an add-in targets the add-in workbook.", "Inside an add-in standard module, ThisWorkbook is the add-in rather than the caller workbook.", "Receive the caller workbook as an explicit Workbook argument."))
 	}
 	return findings
+}
+
+func vba205NonExecutableStatement(stmt string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stmt))
+	return isProcedureHeaderLine(lower) ||
+		strings.HasPrefix(lower, "attribute ") ||
+		strings.HasPrefix(lower, "option ") ||
+		strings.HasPrefix(lower, "implements ") ||
+		strings.HasPrefix(lower, "declare ")
+}
+
+func vba205ShadowedIdentifiers(proc sourceProcedure, decls map[string]sourceDeclaration, ctx analysisContext) map[string]bool {
+	shadowed := make(map[string]bool, len(decls)+len(proc.Accesses)+len(proc.Declarations)+len(ctx.procedures))
+	for name := range decls {
+		shadowed[strings.ToLower(name)] = true
+	}
+	for _, declaration := range proc.Declarations {
+		switch declaration.Scope {
+		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
+			shadowed[strings.ToLower(declaration.Name)] = true
+		}
+	}
+	for _, access := range proc.Accesses {
+		switch access.Scope {
+		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
+			shadowed[strings.ToLower(access.Name)] = true
+		}
+	}
+	for name := range ctx.procedures {
+		if !strings.Contains(name, ".") {
+			shadowed[name] = true
+		}
+	}
+	return shadowed
+}
+
+func vba205QualifiedOrShadowedRoot(match, name string, shadowed map[string]bool) bool {
+	lowerMatch := strings.ToLower(match)
+	if strings.Contains(lowerMatch, "application.") {
+		return false
+	}
+	rootName := strings.ToLower(name)
+	if dot := strings.IndexByte(rootName, '.'); dot >= 0 {
+		rootName = rootName[:dot]
+	}
+	return shadowed[rootName]
 }
 
 func addInStandardModule(cfg config.Config, file parsedFile) bool {

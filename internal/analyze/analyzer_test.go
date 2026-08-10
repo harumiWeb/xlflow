@@ -1038,6 +1038,50 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA205RespectsProcedureIRSymbolResolution(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Range(ByVal start As Long, ByVal count As Long) As Long
+  Range = start + count
+End Function
+
+Public Function Rows() As Long
+  Rows = 1
+End Function
+
+Public Sub UseLocalNames(ByVal cells As Collection, ByVal rows As Collection)
+  Dim columns As Collection
+  Set columns = New Collection
+  cells.Add 1
+  rows.Add 1
+  columns.Add 1
+End Sub
+`)
+	writeClass(t, dir, "Table.cls", `Attribute VB_Name = "Table"
+Public Property Get Columns() As Collection
+Attribute Columns.VB_Description = "Returns local columns."
+  Set Columns = New Collection
+End Property
+
+Public Property Get Rows() As Collection
+  Set Rows = New Collection
+End Property
+
+Public Sub AddRow(ByVal cells As Collection)
+  Rows.Add cells
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA205"); len(got) != 0 {
+		t.Fatalf("resolved project and local symbols should not report VBA205: %+v", got)
+	}
+}
+
 func TestAnalyzerAcceptsExplicitExcelScopeReferences(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
