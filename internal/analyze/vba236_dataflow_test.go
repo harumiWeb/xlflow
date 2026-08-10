@@ -167,6 +167,59 @@ End Sub
 	}
 }
 
+func TestVBA236TreatsVbNullStringInitializerOnColonLineAsClean(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+    Dim commandStr As String, serviceArgs As String
+    commandStr = vbNullString: serviceArgs = vbNullString
+    commandStr = commandStr & "tool.exe" & serviceArgs
+    Shell commandStr
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA236"); len(got) != 0 {
+		t.Fatalf("vbNullString initializer findings = %+v", got)
+	}
+}
+
+func TestVBA236TreatsModuleLevelConstantQuotingAsClean(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+
+Private commandStr As String
+Private serviceArgs As String
+
+Public Sub Run(driverPath As String, port As Long, logPath As String)
+    commandStr = vbNullString: serviceArgs = vbNullString
+    serviceArgs = " --log-path=" & logPath
+    commandStr = commandStr & Chr$(34) & driverPath & Chr$(34) & " --port=" & port & serviceArgs
+    Shell commandStr
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA236")
+	for _, finding := range got {
+		if finding.DataFlow != nil && finding.DataFlow.Source.Kind == "unknown" {
+			t.Fatalf("fixed Chr$(34) quoting fragment propagated as unknown: path=%+v context=%+v", finding.DataFlow.Path, finding.CommandExecution)
+		}
+	}
+}
+
 func TestVBA224RetainsNonProcessSinkFlows(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

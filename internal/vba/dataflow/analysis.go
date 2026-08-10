@@ -556,6 +556,17 @@ func (a *procedureAnalyzer) evalCall(expression procedureir.Expression, state ab
 	if name == "isnumeric" || name == "len" {
 		return value{}
 	}
+	// Chr/Chr$ are deterministic formatting helpers.  A literal character
+	// code (the common Windows quoting idiom Chr$(34)) contributes no unknown
+	// provenance; a dynamic character code still carries any origins from its
+	// argument through the transformation below.
+	if name == "chr" || name == "chr$" {
+		result := joinValues(args)
+		if !isEmptyValue(result) {
+			return appendPath(result, PathStep{Kind: "transformation", Label: call.Callee.Text, Range: call.Range, StatementID: call.StatementID})
+		}
+		return result
+	}
 	result := joinValues(args)
 	if isEmptyValue(result) {
 		return a.unknownValue(expression.Range, expression.StatementID, "unknown transformation")
