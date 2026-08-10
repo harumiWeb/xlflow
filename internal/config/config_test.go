@@ -50,6 +50,54 @@ func TestConfigRuleDefaultsComeFromRegistry(t *testing.T) {
 	}
 }
 
+func TestDictionaryCollectionMisuseRulesDefaultEnabled(t *testing.T) {
+	cfg := Default()
+	for _, id := range []string{"VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"} {
+		enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, id)
+		if !ok || !enabled {
+			t.Errorf("%s enabled = %v, known = %v; want enabled configurable rule", id, enabled, ok)
+		}
+	}
+}
+
+func TestLoadDictionaryCollectionMisuseCompatibilityKeysAndDisabledRules(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_dictionary_compare_mode_order = false
+detect_dictionary_loop_materialization = false
+detect_dictionary_key_normalization = false
+detect_late_bound_dictionary_constants = false
+detect_collection_iteration_mutation = false
+detect_collection_index_origin = true
+disabled_rules = ["VBA235"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"} {
+		if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, id); !ok || enabled {
+			t.Errorf("%s enabled = %v, known = %v; want disabled", id, enabled, ok)
+		}
+		if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", id) {
+			t.Errorf("missing compatibility-key deprecation warning for %s: %+v", id, cfg.Warnings)
+		}
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA235") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA235") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA235, got %+v", cfg.Warnings)
+	}
+}
+
 func TestLoadDefaultsAndConfiguredValues(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

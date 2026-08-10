@@ -13,7 +13,8 @@ VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
-VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229`)
+VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
+VBA230 VBA231 VBA232 VBA233 VBA234 VBA235`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -127,6 +128,16 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	arrayLifecycle, ok := Lookup("VBA227")
 	if !ok || arrayLifecycle.Family != FamilyAnalyze || arrayLifecycle.Category != CategoryRuntimeSafety || arrayLifecycle.DefaultSeverity != SeverityWarning || !reflect.DeepEqual(arrayLifecycle.SupportedSeverities, []RuleSeverity{SeverityWarning}) || !reflect.DeepEqual(arrayLifecycle.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) || !arrayLifecycle.DefaultEnabled || arrayLifecycle.Scope != ScopeInterprocedural || !arrayLifecycle.Realtime || arrayLifecycle.Precision != PrecisionMedium || !arrayLifecycle.Configurable || arrayLifecycle.ConfigurationKey != "detect_array_lifecycle_safety" || !arrayLifecycle.InlineSuppressible || arrayLifecycle.PreflightBlocking {
 		t.Fatalf("unexpected VBA227 metadata: %+v, %v", arrayLifecycle, ok)
+	}
+	guard, ok := Lookup("VBA207")
+	if !ok || !reflect.DeepEqual(guard.SupportedSeverities, []RuleSeverity{SeverityWarning, SeverityInformation}) {
+		t.Fatalf("unexpected VBA207 severities: %+v, %v", guard, ok)
+	}
+	for _, id := range []string{"VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"} {
+		rule, found := Lookup(id)
+		if !found || rule.DefaultSeverity != SeverityWarning || !rule.DefaultEnabled || !rule.Configurable || rule.PreflightBlocking || !rule.InlineSuppressible || !rule.Realtime || rule.Precision != PrecisionHigh {
+			t.Errorf("unexpected %s metadata: %+v, %v", id, rule, found)
+		}
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {

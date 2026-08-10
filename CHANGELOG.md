@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added high-confidence `Scripting.Dictionary` and `Collection` safety
+  diagnostics for `CompareMode` ordering, repeated key/item materialization,
+  key normalization, late-bound comparison constants, mutation during
+  iteration, and one-based indexing. Guard analysis now distinguishes definite
+  missing keys from uncertain existence and recognizes safe local probes,
+  aliases, construction, and uniquely resolved helper effects.
 - Fixed `VBA203` false positives when a saved `Application` property value is
   restored after a clean/dirty CFG merge, after `Err.Raise`, or under a repeated
   unchanged guard.

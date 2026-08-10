@@ -66,8 +66,9 @@ const (
 type RuleSeverity string
 
 const (
-	SeverityError   RuleSeverity = "error"
-	SeverityWarning RuleSeverity = "warning"
+	SeverityError       RuleSeverity = "error"
+	SeverityWarning     RuleSeverity = "warning"
+	SeverityInformation RuleSeverity = "information"
 )
 
 // RuleSurface identifies a public analysis surface that can emit a rule.
@@ -102,7 +103,7 @@ type RuleMetadata struct {
 	PreflightBlocking   bool              `json:"preflight_blocking"`
 }
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 type Catalog struct {
 	SchemaVersion int            `json:"schema_version"`
@@ -258,7 +259,9 @@ func validCategory(v RuleCategory) bool {
 func validEvidenceClass(v RuleEvidenceClass) bool {
 	return v == EvidenceCompileEquivalent || v == EvidenceInference || v == EvidenceRuntimeSafety || v == EvidencePolicy || v == EvidenceMaintainability
 }
-func validSeverity(v RuleSeverity) bool { return v == SeverityError || v == SeverityWarning }
+func validSeverity(v RuleSeverity) bool {
+	return v == SeverityError || v == SeverityWarning || v == SeverityInformation
+}
 func validSurface(v RuleSurface) bool {
 	return v == SurfaceLint || v == SurfaceAnalyze || v == SurfaceLSP
 }

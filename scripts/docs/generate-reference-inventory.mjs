@@ -17,10 +17,10 @@ if (
   typeof registryDocument !== "object" ||
   registryDocument === null ||
   Array.isArray(registryDocument) ||
-  registryDocument.schema_version !== 1 ||
+  registryDocument.schema_version !== 2 ||
   !Array.isArray(registryDocument.items)
 ) {
-  throw new Error("diagnostic registry must use schema_version 1 with an items array");
+  throw new Error("diagnostic registry must use schema_version 2 with an items array");
 }
 const registryRules = registryDocument.items;
 

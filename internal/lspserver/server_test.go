@@ -849,6 +849,23 @@ func TestProtocolDiagnosticUsesRegistrySeverityAndPreservesNestedVBA225Range(t *
 	}
 }
 
+func TestProtocolDiagnosticPreservesSupportedInformationSeverity(t *testing.T) {
+	for _, severity := range []string{"information", "info"} {
+		diagnostic := toProtocolDiagnostic(intel.Diagnostic{
+			Code:     "VBA207",
+			Severity: severity,
+			Source:   "xlflow",
+			Message:  "Dictionary key existence is unknown.",
+		})
+		if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityInformation {
+			t.Fatalf("VBA207 %s severity = %#v, want information", severity, diagnostic.Severity)
+		}
+		if diagnostic.CodeDescription == nil || string(diagnostic.CodeDescription.HRef) != "https://harumiweb.github.io/xlflow/reference/diagnostics#vba207" {
+			t.Fatalf("VBA207 %s code description = %#v", severity, diagnostic.CodeDescription)
+		}
+	}
+}
+
 func TestLSPDiagnosticsReportUnsafeProjectLocalByRefArgument(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

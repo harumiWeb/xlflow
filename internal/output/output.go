@@ -1761,7 +1761,7 @@ func (r renderer) severityBadge(severity string) string {
 			return r.style("⚠ warning", "214", true)
 		}
 		return "[warning]"
-	case "info", "":
+	case "information", "info", "":
 		if r.color {
 			return r.style("ℹ info", "39", true)
 		}

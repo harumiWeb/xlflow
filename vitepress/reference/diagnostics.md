@@ -82,6 +82,12 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA227`](#vba227) | analyze | warning  | interprocedural | yes     | Array lifecycle and dimension safety               |
 | [`VBA228`](#vba228) | analyze | error    | interprocedural | yes     | ByRef type mismatch                                |
 | [`VBA229`](#vba229) | analyze | error    | procedure-local | yes     | Unresolved local As type name                      |
+| [`VBA230`](#vba230) | analyze | warning  | interprocedural | yes     | Dictionary CompareMode changed after insertion     |
+| [`VBA231`](#vba231) | analyze | warning  | interprocedural | yes     | Repeated Dictionary loop materialization           |
+| [`VBA232`](#vba232) | analyze | warning  | procedure-local | yes     | Inconsistent Dictionary key normalization          |
+| [`VBA233`](#vba233) | analyze | warning  | project-wide    | yes     | Undefined late-bound Dictionary constant           |
+| [`VBA234`](#vba234) | analyze | warning  | interprocedural | yes     | Collection mutation during iteration               |
+| [`VBA235`](#vba235) | analyze | warning  | procedure-local | yes     | Collection index origin confusion                  |
 
 ## VB001
 
@@ -1260,7 +1266,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Evidence class              | `inference`                          |
 | Compile-equivalent          | no                                   |
 | Default severity            | `warning`                            |
-| Supported severities        | `warning`                            |
+| Supported severities        | `warning`, `information`             |
 | Surfaces                    | `analyze`                            |
 | Scope                       | `procedure-local`                    |
 | Precision                   | `medium`                             |
@@ -1754,3 +1760,135 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                  |
 | Real-time editor diagnostic | yes                  |
 | Fix available               | no                   |
+
+## VBA230
+
+**Dictionary CompareMode changed after insertion.** A Dictionary CompareMode is changed after entries have been added to the same dictionary instance.
+
+| Property                    | Value                                  |
+| --------------------------- | -------------------------------------- |
+| Family                      | `analyze`                              |
+| Category                    | `runtime-safety`                       |
+| Evidence class              | `runtime-safety`                       |
+| Compile-equivalent          | no                                     |
+| Default severity            | `warning`                              |
+| Supported severities        | `warning`                              |
+| Surfaces                    | `analyze`, `lsp`                       |
+| Scope                       | `interprocedural`                      |
+| Precision                   | `high`                                 |
+| Enabled by default          | yes                                    |
+| Configuration               | `detect_dictionary_compare_mode_order` |
+| Inline suppression          | yes                                    |
+| Blocks source preflight     | no                                     |
+| Real-time editor diagnostic | yes                                    |
+| Fix available               | no                                     |
+
+## VBA231
+
+**Repeated Dictionary loop materialization.** Dictionary Keys or Items is repeatedly materialized inside a loop instead of being cached or enumerated once.
+
+| Property                    | Value                                    |
+| --------------------------- | ---------------------------------------- |
+| Family                      | `analyze`                                |
+| Category                    | `performance`                            |
+| Evidence class              | `inference`                              |
+| Compile-equivalent          | no                                       |
+| Default severity            | `warning`                                |
+| Supported severities        | `warning`                                |
+| Surfaces                    | `analyze`, `lsp`                         |
+| Scope                       | `interprocedural`                        |
+| Precision                   | `high`                                   |
+| Enabled by default          | yes                                      |
+| Configuration               | `detect_dictionary_loop_materialization` |
+| Inline suppression          | yes                                      |
+| Blocks source preflight     | no                                       |
+| Real-time editor diagnostic | yes                                      |
+| Fix available               | no                                       |
+
+## VBA232
+
+**Inconsistent Dictionary key normalization.** The same Dictionary key source is used with inconsistent raw, case-normalized, or trimmed forms.
+
+| Property                    | Value                                 |
+| --------------------------- | ------------------------------------- |
+| Family                      | `analyze`                             |
+| Category                    | `runtime-safety`                      |
+| Evidence class              | `inference`                           |
+| Compile-equivalent          | no                                    |
+| Default severity            | `warning`                             |
+| Supported severities        | `warning`                             |
+| Surfaces                    | `analyze`, `lsp`                      |
+| Scope                       | `procedure-local`                     |
+| Precision                   | `high`                                |
+| Enabled by default          | yes                                   |
+| Configuration               | `detect_dictionary_key_normalization` |
+| Inline suppression          | yes                                   |
+| Blocks source preflight     | no                                    |
+| Real-time editor diagnostic | yes                                   |
+| Fix available               | no                                    |
+
+## VBA233
+
+**Undefined late-bound Dictionary constant.** A late-bound Dictionary CompareMode uses a Scripting enum constant that is not defined in the project.
+
+| Property                    | Value                                    |
+| --------------------------- | ---------------------------------------- |
+| Family                      | `analyze`                                |
+| Category                    | `correctness`                            |
+| Evidence class              | `inference`                              |
+| Compile-equivalent          | no                                       |
+| Default severity            | `warning`                                |
+| Supported severities        | `warning`                                |
+| Surfaces                    | `analyze`, `lsp`                         |
+| Scope                       | `project-wide`                           |
+| Precision                   | `high`                                   |
+| Enabled by default          | yes                                      |
+| Configuration               | `detect_late_bound_dictionary_constants` |
+| Inline suppression          | yes                                      |
+| Blocks source preflight     | no                                       |
+| Real-time editor diagnostic | yes                                      |
+| Fix available               | no                                       |
+
+## VBA234
+
+**Collection mutation during iteration.** A Collection is mutated while a For Each loop is iterating the same collection instance.
+
+| Property                    | Value                                  |
+| --------------------------- | -------------------------------------- |
+| Family                      | `analyze`                              |
+| Category                    | `runtime-safety`                       |
+| Evidence class              | `runtime-safety`                       |
+| Compile-equivalent          | no                                     |
+| Default severity            | `warning`                              |
+| Supported severities        | `warning`                              |
+| Surfaces                    | `analyze`, `lsp`                       |
+| Scope                       | `interprocedural`                      |
+| Precision                   | `high`                                 |
+| Enabled by default          | yes                                    |
+| Configuration               | `detect_collection_iteration_mutation` |
+| Inline suppression          | yes                                    |
+| Blocks source preflight     | no                                     |
+| Real-time editor diagnostic | yes                                    |
+| Fix available               | no                                     |
+
+## VBA235
+
+**Collection index origin confusion.** A one-based Collection is accessed with a zero index or an unadjusted zero-based loop or array index.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `runtime-safety`                 |
+| Evidence class              | `runtime-safety`                 |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`                        |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `high`                           |
+| Enabled by default          | yes                              |
+| Configuration               | `detect_collection_index_origin` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |

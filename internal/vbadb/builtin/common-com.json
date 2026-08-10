@@ -8,6 +8,7 @@
       "default_member": "Item",
       "properties": [
         { "name": "Count", "return_type": "Long", "read_only": true },
+        { "name": "CompareMode", "return_type": "Scripting.CompareMethod" },
         {
           "name": "Item",
           "return_type": "Variant",
@@ -362,6 +363,32 @@
       "aliases": ["IEnumVARIANT"],
       "confidence": "curated",
       "source": "xlflow"
+    }
+  ],
+  "constants": [
+    {
+      "name": "BinaryCompare",
+      "library": "Scripting",
+      "kind": "constant",
+      "type": "Long",
+      "value": "0",
+      "enum_group": "CompareMethod"
+    },
+    {
+      "name": "TextCompare",
+      "library": "Scripting",
+      "kind": "constant",
+      "type": "Long",
+      "value": "1",
+      "enum_group": "CompareMethod"
+    },
+    {
+      "name": "DatabaseCompare",
+      "library": "Scripting",
+      "kind": "constant",
+      "type": "Long",
+      "value": "2",
+      "enum_group": "CompareMethod"
     }
   ],
   "progids": {

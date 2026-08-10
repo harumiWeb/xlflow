@@ -1558,6 +1558,17 @@ func toProtocolDiagnostic(diag intel.Diagnostic) protocol.Diagnostic {
 	metadata, hasMetadata := staticrules.Lookup(diag.Code)
 	if hasMetadata {
 		severityName = string(metadata.DefaultSeverity)
+		requestedName := strings.ToLower(diag.Severity)
+		if requestedName == "info" {
+			requestedName = "information"
+		}
+		requested := staticrules.RuleSeverity(requestedName)
+		for _, supported := range metadata.SupportedSeverities {
+			if requested == supported {
+				severityName = string(requested)
+				break
+			}
+		}
 	}
 	severity := diagnosticSeverity(severityName)
 	source := diag.Source
@@ -2728,7 +2739,7 @@ func diagnosticSeverity(severity string) protocol.DiagnosticSeverity {
 	switch strings.ToLower(severity) {
 	case "error":
 		return protocol.DiagnosticSeverityError
-	case "info":
+	case "information", "info":
 		return protocol.DiagnosticSeverityInformation
 	case "hint":
 		return protocol.DiagnosticSeverityHint
