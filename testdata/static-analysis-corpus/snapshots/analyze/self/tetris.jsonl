@@ -60,7 +60,4 @@
 {"project":"self/tetris","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA227","severity":"warning","line":530,"column":0}
 {"project":"self/tetris","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":543,"column":0}
 {"project":"self/tetris","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":5,"column":0}
-{"project":"self/tetris","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":5,"column":0}
-{"project":"self/tetris","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":5,"column":0}
-{"project":"self/tetris","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":5,"column":0}
 {"project":"self/tetris","file":"src/workbook/ThisWorkbook.bas","surface":"analyze","code":"VBA220","severity":"warning","line":9,"column":0}

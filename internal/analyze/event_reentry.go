@@ -1,12 +1,23 @@
 package analyze
 
 import (
+	"sort"
 	"strings"
 
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+type eventFindingCandidate struct {
+	line           int
+	statementID    int
+	category       string
+	classification string
+	uncertainty    string
+	effect         effects.Evidence
+	same           bool
+}
 
 // VBA220 deliberately reports only the initial event surface. The IR records
 // broader event metadata, but treating every document procedure as a handler
@@ -43,9 +54,8 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 	if handler == "" || proc.Effects == nil {
 		return nil
 	}
-	var out []Finding
-	reported := map[string]bool{}
-	report := func(line int, statementID int, effect effects.Evidence, uncertainty string) {
+	candidates := map[string]eventFindingCandidate{}
+	record := func(line int, statementID int, effect effects.Evidence, uncertainty string) {
 		if uncertainty == "" && a.eventSafeProcedures[effect.Origin.Key()] {
 			return
 		}
@@ -60,29 +70,23 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 		if same {
 			classification = "same-event recursion hazard"
 		}
-		key := strings.Join([]string{strconvItoa(line), classification, category, uncertainty}, ":")
-		if reported[key] {
+		candidate := eventFindingCandidate{
+			line: line, statementID: statementID, category: category,
+			classification: classification, uncertainty: uncertainty,
+			effect: effect, same: same,
+		}
+		key := strings.Join([]string{strconvItoa(line), strconvItoa(statementID)}, ":")
+		if previous, exists := candidates[key]; exists && !eventFindingCandidatePreferred(candidate, previous) {
 			return
 		}
-		reported[key] = true
-		message := "Event handler " + proc.Name + " has a " + classification + "."
-		reason := "This handler can trigger " + category + " event processing"
-		if uncertainty != "" {
-			message = "Event handler " + proc.Name + " reaches an " + uncertainty + " call that may trigger an event."
-			reason = "The call cannot be resolved safely, so its event-triggering effects are uncertain."
-		} else if effect.Origin.QualifiedName != "" && !strings.EqualFold(effect.Origin.QualifiedName, proc.Effects.Identity.QualifiedName) {
-			reason += " through " + effect.Origin.QualifiedName + "."
-		} else {
-			reason += "."
-		}
-		out = append(out, a.simpleFinding(file, proc, line, "VBA220", "warning", message, reason, "Disable Application.EnableEvents around Excel event-triggering work and restore it on every exit; use a re-entry guard for UserForm controls."))
+		candidates[key] = candidate
 	}
 
 	for _, evidence := range proc.Effects.Direct {
-		report(evidence.Range.StartLine, evidence.StatementID, evidence, "")
+		record(evidence.Range.StartLine, evidence.StatementID, evidence, "")
 	}
 	for _, uncertainty := range proc.Effects.DirectUncertainty {
-		report(uncertainty.Range.StartLine, uncertainty.StatementID, effects.Evidence{}, string(uncertainty.Kind))
+		record(uncertainty.Range.StartLine, uncertainty.StatementID, effects.Evidence{}, string(uncertainty.Kind))
 	}
 	for _, call := range proc.Calls {
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
@@ -97,13 +101,64 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 			if safeCallee {
 				continue
 			}
-			report(call.Range.StartLine, call.StatementID, evidence, "")
+			record(call.Range.StartLine, call.StatementID, evidence, "")
 		}
 		for _, uncertainty := range append(append([]effects.CallUncertainty{}, summary.DirectUncertainty...), summary.PropagatedUncertainty...) {
-			report(call.Range.StartLine, call.StatementID, effects.Evidence{}, string(uncertainty.Kind))
+			record(call.Range.StartLine, call.StatementID, effects.Evidence{}, string(uncertainty.Kind))
 		}
 	}
+
+	ordered := make([]eventFindingCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		ordered = append(ordered, candidate)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].line != ordered[j].line {
+			return ordered[i].line < ordered[j].line
+		}
+		if ordered[i].statementID != ordered[j].statementID {
+			return ordered[i].statementID < ordered[j].statementID
+		}
+		return eventFindingCandidateKey(ordered[i]) < eventFindingCandidateKey(ordered[j])
+	})
+
+	out := make([]Finding, 0, len(ordered))
+	for _, candidate := range ordered {
+		message := "Event handler " + proc.Name + " has a " + candidate.classification + "."
+		reason := "This handler can trigger " + candidate.category + " event processing"
+		if candidate.uncertainty != "" {
+			message = "Event handler " + proc.Name + " reaches an " + candidate.uncertainty + " call that may trigger an event."
+			reason = "The call cannot be resolved safely, so its event-triggering effects are uncertain."
+		} else if candidate.effect.Origin.QualifiedName != "" && !strings.EqualFold(candidate.effect.Origin.QualifiedName, proc.Effects.Identity.QualifiedName) {
+			reason += " through " + candidate.effect.Origin.QualifiedName + "."
+		} else {
+			reason += "."
+		}
+		out = append(out, a.simpleFinding(file, proc, candidate.line, "VBA220", "warning", message, reason, "Disable Application.EnableEvents around Excel event-triggering work and restore it on every exit; use a re-entry guard for UserForm controls."))
+	}
 	return out
+}
+
+func eventFindingCandidatePreferred(candidate, previous eventFindingCandidate) bool {
+	candidateRank, previousRank := eventFindingCandidateRank(candidate), eventFindingCandidateRank(previous)
+	if candidateRank != previousRank {
+		return candidateRank > previousRank
+	}
+	return eventFindingCandidateKey(candidate) < eventFindingCandidateKey(previous)
+}
+
+func eventFindingCandidateRank(candidate eventFindingCandidate) int {
+	if candidate.uncertainty != "" {
+		return 1
+	}
+	if candidate.same {
+		return 3
+	}
+	return 2
+}
+
+func eventFindingCandidateKey(candidate eventFindingCandidate) string {
+	return strings.Join([]string{candidate.classification, candidate.category, candidate.uncertainty, candidate.effect.Origin.QualifiedName}, ":")
 }
 
 func eventEffectRisk(proc sourceProcedure, handler string, evidence effects.Evidence) (string, bool, bool) {

@@ -52,6 +52,9 @@ All notable changes to xlflow will be documented in this file.
 - Fixed VBA209 false positives for whole-array assignments and arrays nested in
   function, `LBound`, or `UBound` arguments, including incorrect CFG block-start
   source attribution.
+- Reduced duplicate VBA220 event-reentry warnings when one resolved call
+  carries multiple effect and uncertainty facts; one representative warning is
+  retained per statement/call boundary.
 - Reduced conservative data-flow analysis allocation pressure by comparing
   deterministic propagation paths without repeatedly serializing them, and
   indexed effect-summary candidate lookup so matching one call no longer

@@ -188,7 +188,11 @@ broader-chain risks. Only uniquely resolved project-local calls prove a
 triggering effect; other calls remain explicit uncertainty. `EnableEvents`
 suppresses only Excel events when its False assignment dominates the effect and
 the existing CFG analysis proves restoration on every exit; it does not
-suppress UserForm control events.
+suppress UserForm control events. For one reachable statement or resolved call
+boundary, VBA220 emits at most one finding: a confirmed same-event risk takes
+precedence over a broader-chain risk, and either takes precedence over call
+uncertainty. The underlying effect summary retains every evidence item for other
+consumers.
 
 The CFG retains its existing fallback that every executable statement is a
 potential fault site. Effect summaries are not embedded into CFG construction
