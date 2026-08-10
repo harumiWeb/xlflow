@@ -4,6 +4,8 @@
 
 This spec defines the xlflow behavior that helps AI agents debug VBA runtime failures without relying on workbook-only state or implicit macro naming assumptions.
 
+Process-launch safety findings are owned by `VBA236` (`detect_unsafe_command_construction`); `VBA224` remains the generic source-to-sink rule for SQL, file, workbook, and HTTP sinks. `VBA236` is a policy diagnostic and does not require Excel/VBE runtime semantics.
+
 ## Recommended Workflow
 
 The legacy debugging command and removed run flag are gone. The supported workbook-side debugging surface is `XlflowDebug.Log`, and the supported machine-readable execution surface is `xlflow run --json`.

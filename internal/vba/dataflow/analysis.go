@@ -71,9 +71,10 @@ type procedureAnalyzer struct {
 	callsByStatement  map[int][]procedureir.CallSite
 	declaredNames     map[string]bool
 	constantNames     map[string]bool
-	knownShellObjects map[string]bool
+	knownShellObjects map[string]string
 	selectVariables   map[int]string
 	findings          map[string]Finding
+	commandFindings   map[string]CommandFinding
 	blocksByID        map[cfg.BlockID]cfg.Block
 	outgoingEdges     map[cfg.BlockID][]cfg.Edge
 	ctx               context.Context
@@ -105,9 +106,10 @@ func newProcedureAnalyzerContext(ctx context.Context, procedure procedureir.Proc
 		callsByStatement:  map[int][]procedureir.CallSite{},
 		declaredNames:     map[string]bool{},
 		constantNames:     map[string]bool{},
-		knownShellObjects: map[string]bool{},
+		knownShellObjects: map[string]string{},
 		selectVariables:   map[int]string{},
 		findings:          map[string]Finding{},
+		commandFindings:   map[string]CommandFinding{},
 		blocksByID:        map[cfg.BlockID]cfg.Block{},
 		outgoingEdges:     map[cfg.BlockID][]cfg.Edge{},
 		ctx:               ctx,
@@ -251,7 +253,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 		return Result{}, stats, err
 	}
 	if len(reachable) == 0 {
-		return Result{Findings: nil, States: nil}, stats, nil
+		return Result{Findings: nil, CommandFindings: nil, States: nil}, stats, nil
 	}
 	inStates := map[cfg.BlockID]abstractState{a.graph.Entry: entry}
 	if worklistRank == nil {
@@ -303,6 +305,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 	// a side effect of the worklist schedule. This keeps diagnostics and their
 	// representative paths stable when the fixed-point traversal order changes.
 	a.findings = map[string]Finding{}
+	a.commandFindings = map[string]CommandFinding{}
 	blockIDs := make([]cfg.BlockID, 0, len(reachable))
 	for id := range reachable {
 		if err := a.contextErr(); err != nil {
@@ -328,6 +331,20 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 	for _, finding := range a.findings {
 		findings = append(findings, finding)
 	}
+	commandFindings := make([]CommandFinding, 0, len(a.commandFindings))
+	for _, finding := range a.commandFindings {
+		commandFindings = append(commandFindings, finding)
+	}
+	sort.SliceStable(commandFindings, func(i, j int) bool {
+		left, right := commandFindings[i], commandFindings[j]
+		if left.Execution.Range.StartByte != right.Execution.Range.StartByte {
+			return left.Execution.Range.StartByte < right.Execution.Range.StartByte
+		}
+		if left.RiskKind != right.RiskKind {
+			return left.RiskKind < right.RiskKind
+		}
+		return sourceKey(left.Source) < sourceKey(right.Source)
+	})
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Sink.Range.StartByte != findings[j].Sink.Range.StartByte {
 			return findings[i].Sink.Range.StartByte < findings[j].Sink.Range.StartByte
@@ -347,7 +364,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 			states[id][name] = variableState(variable)
 		}
 	}
-	return Result{Findings: findings, States: states}, stats, nil
+	return Result{Findings: findings, CommandFindings: commandFindings, States: states}, stats, nil
 }
 
 func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) (abstractState, error) {
@@ -381,6 +398,7 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 		a.applySourceWrite(call, state)
 		if collectFindings {
 			a.inspectSink(call, state)
+			a.inspectCommand(call, state)
 		}
 	}
 	if err := a.contextErr(); err != nil {
@@ -610,13 +628,299 @@ func (a *procedureAnalyzer) inspectSink(call procedureir.CallSite, state abstrac
 	}
 }
 
+// inspectCommand records process-launch-specific observations. It runs only
+// after the CFG fixed point has converged, so aliases and branch guards use
+// the same state as the generic source-to-sink analysis.
+func (a *procedureAnalyzer) inspectCommand(call procedureir.CallSite, state abstractState) {
+	targets := commandTargets(call, a.knownShellObjects)
+	if len(targets) == 0 {
+		return
+	}
+	for _, target := range targets {
+		// Window-style and wait flags are retained in the classifier for role
+		// awareness, but they do not make command text unsafe by themselves.
+		// Hidden/unobserved execution is handled separately below.
+		if target.role == CommandRoleWindowStyle || target.role == CommandRoleWait {
+			continue
+		}
+		if target.argument < 0 || target.argument >= len(call.Arguments.ExpressionIDs) {
+			continue
+		}
+		expression, ok := a.expressions[call.Arguments.ExpressionIDs[target.argument]]
+		if !ok {
+			continue
+		}
+		target.execution.Interpreter = commandInterpreter(expression.Text)
+		if strings.HasPrefix(strings.ToLower(vbaStringContent(expression.Text)), "http") && (target.role == CommandRoleDocument || target.role == CommandRoleExecutable) {
+			target.role = CommandRoleURL
+			target.execution.Role = target.role
+		}
+		if target.execution.Interpreter != "" && target.role == CommandRoleExecutable {
+			switch target.execution.Interpreter {
+			case "cmd.exe":
+				target.role = CommandRoleShellCommand
+			case "powershell":
+				if powershellUsesCommand(expression.Text) {
+					target.role = CommandRoleShellCommand
+				} else {
+					target.role = CommandRoleArguments
+				}
+			case "script_host":
+				// Script hosts receive a script path plus interpreter options in
+				// one command string; without a structured argument list, keep
+				// the conservative command-text role.
+				target.role = CommandRoleShellCommand
+			}
+			target.execution.Role = target.role
+		}
+		value := a.evalExpression(expression, state)
+		origins := make([]string, 0, len(value.origins))
+		for key := range value.origins {
+			origins = append(origins, key)
+		}
+		sort.Strings(origins)
+		for _, key := range origins {
+			origin := value.origins[key]
+			if origin.safe[target.kind] || (origin.state != StateTainted && origin.state != StateUnknown) {
+				continue
+			}
+			class := CommandRiskProcessLaunch
+			kind := CommandRiskUnknownOrigin
+			if origin.state == StateTainted && (target.role == CommandRoleExecutable || target.role == CommandRoleShellCommand) {
+				class = CommandRiskInjection
+				kind = CommandRiskTaintedCommandText
+			}
+			a.recordCommand(CommandFinding{
+				State: origin.state, Source: origin.source, Execution: target.execution,
+				RiskClass: class, RiskKind: kind, OriginState: origin.state,
+				Path:    append([]PathStep(nil), origin.path...),
+				Message: fmt.Sprintf("Command input from %s reaches %s.", origin.source.Label, target.execution.Launcher),
+				Reason:  "External or unknown input reaches a process-launch argument; the origin and command role must be validated before execution.",
+			})
+		}
+		if len(origins) > 0 && looksCredentialArgument(expression.Text, target.role) {
+			origin := value.origins[origins[0]]
+			a.recordCommand(CommandFinding{
+				State: origin.state, Source: origin.source, Execution: target.execution,
+				RiskClass: CommandRiskProcessLaunch, RiskKind: CommandRiskCredentialExposure,
+				OriginState: origin.state, Path: append([]PathStep(nil), origin.path...),
+				Message: "A credential-like value reaches a process command or argument.",
+				Reason:  "Secrets passed on a command line may be exposed through process listings, logs, or child-process diagnostics.",
+			})
+		}
+		if len(value.origins) == 0 {
+			if looksUnquotedExecutable(expression.Text, target.role) {
+				a.recordCommand(staticCommandFinding(target, CommandRiskUnquotedExecutablePath, "The executable path contains spaces without an outer pair of quotes."))
+			}
+			if looksCredentialArgument(expression.Text, target.role) {
+				a.recordCommand(staticCommandFinding(target, CommandRiskCredentialExposure, "A credential-like value appears in a process command or argument."))
+			}
+		}
+	}
+	if commandHidden(call, a.expressions) && commandResultDiscarded(call, a.statements) {
+		target := commandTargets(call, a.knownShellObjects)[0]
+		a.recordCommand(staticCommandFinding(target, CommandRiskObservability, "The launch is hidden or unobserved and its process result is discarded."))
+	}
+}
+
+type commandTarget struct {
+	execution CommandExecution
+	kind      SinkKind
+	argument  int
+	role      CommandRole
+}
+
+func commandTargets(call procedureir.CallSite, knownShellObjects map[string]string) []commandTarget {
+	base := strings.ToLower(strings.TrimSpace(call.Callee.BaseName))
+	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
+	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
+	receiver := ""
+	if call.Callee.Receiver != nil {
+		receiver = strings.ToLower(strings.TrimSpace(*call.Callee.Receiver))
+	}
+	var out []commandTarget
+	add := func(kind SinkKind, label string, index int, role CommandRole) {
+		if index >= 0 && index < call.Arguments.Count {
+			out = append(out, commandTarget{kind: kind, argument: index, role: role, execution: CommandExecution{Launcher: label, Role: role, Argument: index, Range: call.Range}})
+		}
+	}
+	if base == "shell" && receiver == "" && !userDefinedLauncher(call) {
+		add(SinkShell, "Shell", 0, CommandRoleExecutable)
+		add(SinkShell, "Shell", 1, CommandRoleWindowStyle)
+	}
+	if (member == "run" || member == "exec") && isWScriptShellReceiver(receiver, full, knownShellObjects) {
+		kind, label := SinkWScriptShellRun, "WScript.Shell.Run"
+		if member == "exec" {
+			kind, label = SinkWScriptShellExec, "WScript.Shell.Exec"
+		}
+		add(kind, label, 0, CommandRoleExecutable)
+		if member == "run" {
+			add(kind, label, 1, CommandRoleWindowStyle)
+			add(kind, label, 2, CommandRoleWait)
+		}
+	}
+	if isShellExecuteCall(base, member, full, receiver, knownShellObjects) && !userDefinedLauncher(call) {
+		primary := 2
+		label := shellExecuteLabel(call, knownShellObjects)
+		if strings.Contains(full, "shell.application") || knownShellObjects[receiver] == "shell.application" {
+			primary = 0
+		}
+		role := CommandRoleDocument
+		if primary == 2 {
+			role = CommandRoleExecutable
+		}
+		add(SinkShellExecute, label, primary, role)
+		if primary+1 < call.Arguments.Count {
+			add(SinkShellExecute, label, primary+1, CommandRoleArguments)
+		}
+		show := 4
+		if primary == 2 {
+			show = 5
+		}
+		add(SinkShellExecute, label, show, CommandRoleWindowStyle)
+	}
+	return out
+}
+
+func staticCommandFinding(target commandTarget, kind CommandRiskKind, reason string) CommandFinding {
+	return CommandFinding{State: StateClean, Execution: target.execution, RiskClass: CommandRiskProcessLaunch, RiskKind: kind, OriginState: StateClean, Reason: reason, Message: reason}
+}
+
+func isShellExecuteCall(base, member, full, receiver string, knownShellObjects map[string]string) bool {
+	switch base {
+	case "shellexecute", "shellexecutea", "shellexecutew":
+		return true
+	}
+	if member != "shellexecute" {
+		return false
+	}
+	return strings.Contains(full, "shell.application") || knownShellObjects[receiver] == "shell.application"
+}
+
+func isWScriptShellReceiver(receiver, full string, knownShellObjects map[string]string) bool {
+	if knownShellObjects[receiver] == "wscript.shell" || strings.Contains(full, "wscript.shell") {
+		return true
+	}
+	return strings.Contains(receiver, "createobject") &&
+		(strings.Contains(receiver, "wscript") || strings.Contains(receiver, "wshell"))
+}
+
+func userDefinedLauncher(call procedureir.CallSite) bool {
+	if call.Resolution.Status != procedureir.ResolutionMatched && call.Resolution.Status != procedureir.ResolutionAmbiguous {
+		return false
+	}
+	if len(call.Resolution.Candidates) == 0 {
+		return true
+	}
+	for _, candidate := range call.Resolution.Candidates {
+		kind := strings.ToLower(strings.TrimSpace(candidate.Kind))
+		if !strings.HasPrefix(kind, "declare") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *procedureAnalyzer) recordCommand(finding CommandFinding) {
+	key := fmt.Sprintf("%d\x00%s\x00%d\x00%d", finding.Execution.Range.StartByte, finding.RiskKind, finding.Source.Range.StartByte, finding.Execution.Argument)
+	if previous, ok := a.commandFindings[key]; ok {
+		if betterPath(finding.Path, previous.Path) {
+			previous.Path = append([]PathStep(nil), finding.Path...)
+		}
+		if previous.State == StateUnknown && finding.State == StateTainted {
+			previous.State = finding.State
+			previous.OriginState = finding.OriginState
+		}
+		a.commandFindings[key] = previous
+		return
+	}
+	a.commandFindings[key] = finding
+}
+
+func commandInterpreter(text string) string {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case regexp.MustCompile(`(?i)\bcmd(?:\.exe)?\b`).MatchString(lower) && strings.Contains(lower, "/c"):
+		return "cmd.exe"
+	case regexp.MustCompile(`(?i)\b(?:powershell|pwsh)(?:\.exe)?\b`).MatchString(lower):
+		return "powershell"
+	case regexp.MustCompile(`(?i)\b(?:wscript|cscript|mshta)(?:\.exe)?\b`).MatchString(lower):
+		return "script_host"
+	default:
+		return ""
+	}
+}
+
+func powershellUsesCommand(text string) bool {
+	return regexp.MustCompile(`(?i)(?:^|\s)[/-](?:command|c)(?:\s|$)`).MatchString(strings.TrimSpace(text))
+}
+
+func looksUnquotedExecutable(text string, role CommandRole) bool {
+	if role != CommandRoleExecutable && role != CommandRoleShellCommand {
+		return false
+	}
+	trimmed := vbaStringContent(text)
+	if strings.HasPrefix(trimmed, `"`) {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, extension := range []string{".exe", ".com", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".wsf", ".hta"} {
+		if index := strings.Index(lower, extension); index >= 0 && strings.Contains(trimmed[:index], " ") {
+			return true
+		}
+	}
+	return false
+}
+
+func vbaStringContent(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) >= 2 && strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`) {
+		trimmed = trimmed[1 : len(trimmed)-1]
+		trimmed = strings.ReplaceAll(trimmed, `""`, `"`)
+	}
+	return trimmed
+}
+
+func looksCredentialArgument(text string, role CommandRole) bool {
+	if role != CommandRoleArguments && role != CommandRoleExecutable && role != CommandRoleShellCommand {
+		return false
+	}
+	return regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\s*=`).MatchString(text) ||
+		regexp.MustCompile(`(?i)\b(?:password|passwd|secret|token|apikey|api_key)\b`).MatchString(strings.TrimSpace(text))
+}
+
+func commandHidden(call procedureir.CallSite, expressions map[int]procedureir.Expression) bool {
+	base := strings.ToLower(strings.TrimSpace(call.Callee.BaseName))
+	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
+	if base != "shell" && member != "run" {
+		return false
+	}
+	if len(call.Arguments.ExpressionIDs) < 2 {
+		return false
+	}
+	expression, ok := expressions[call.Arguments.ExpressionIDs[1]]
+	if !ok {
+		return false
+	}
+	value := strings.ToLower(strings.TrimSpace(expression.Text))
+	return value == "0" || value == "vbhide" || value == "vb_hide"
+}
+
+func commandResultDiscarded(call procedureir.CallSite, statements map[int]procedureir.Statement) bool {
+	statement, ok := statements[call.StatementID]
+	if !ok {
+		return true
+	}
+	return assignmentTarget(statement) == ""
+}
+
 type sinkTarget struct {
 	kind     SinkKind
 	label    string
 	argument int
 }
 
-func sinkTargets(call procedureir.CallSite, knownShellObjects map[string]bool) []sinkTarget {
+func sinkTargets(call procedureir.CallSite, knownShellObjects map[string]string) []sinkTarget {
 	base := strings.ToLower(strings.TrimSpace(call.Callee.BaseName))
 	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
 	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
@@ -625,15 +929,18 @@ func sinkTargets(call procedureir.CallSite, knownShellObjects map[string]bool) [
 		receiver = strings.ToLower(strings.TrimSpace(*call.Callee.Receiver))
 	}
 	var out []sinkTarget
-	if base == "shell" && receiver == "" {
+	if base == "shell" && receiver == "" && !userDefinedLauncher(call) {
 		out = append(out, sinkTarget{SinkShell, "Shell", 0})
 	}
-	if (member == "run" || member == "exec") && (strings.Contains(full, "wscript.shell") || knownShellObjects[receiver] || strings.Contains(receiver, "shell")) {
+	if (member == "run" || member == "exec") && isWScriptShellReceiver(receiver, full, knownShellObjects) {
 		kind, label := SinkWScriptShellRun, "WScript.Shell.Run"
 		if member == "exec" {
 			kind, label = SinkWScriptShellExec, "WScript.Shell.Exec"
 		}
 		out = append(out, sinkTarget{kind, label, 0})
+	}
+	if isShellExecuteCall(base, member, full, receiver, knownShellObjects) && !userDefinedLauncher(call) {
+		out = append(out, sinkTarget{SinkShellExecute, "ShellExecute", shellExecutePrimaryArgument(call, knownShellObjects)})
 	}
 	if member == "execute" || base == "execute" || member == "executenonquery" || base == "executenonquery" || member == "openrecordset" || base == "openrecordset" || member == "runsql" || base == "runsql" || member == "executesql" || base == "executesql" {
 		if looksDatabaseReceiver(receiver, full) {
@@ -656,6 +963,37 @@ func sinkTargets(call procedureir.CallSite, knownShellObjects map[string]bool) [
 		out = append(out, sinkTarget{SinkHTTPHeader, "HTTP request header", 0}, sinkTarget{SinkHTTPHeader, "HTTP request header", 1})
 	}
 	return out
+}
+
+func shellExecutePrimaryArgument(call procedureir.CallSite, knownShellObjects map[string]string) int {
+	// Shell.Application.ShellExecute(File, Args, ...) starts at argument 0;
+	// the Win32 ShellExecute signature has hWnd, operation, file, parameters,
+	// directory, show, so the file is argument 2.
+	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
+	receiver := ""
+	if call.Callee.Receiver != nil {
+		receiver = strings.ToLower(strings.TrimSpace(*call.Callee.Receiver))
+	}
+	if strings.Contains(full, "shell.application") || knownShellObjects[receiver] == "shell.application" {
+		return 0
+	}
+	return 2
+}
+
+func shellExecuteLabel(call procedureir.CallSite, knownShellObjects map[string]string) string {
+	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
+	receiver := ""
+	if call.Callee.Receiver != nil {
+		receiver = strings.ToLower(strings.TrimSpace(*call.Callee.Receiver))
+	}
+	if strings.Contains(full, "shell.application") || knownShellObjects[receiver] == "shell.application" {
+		return "Shell.Application.ShellExecute"
+	}
+	base := strings.TrimSpace(call.Callee.BaseName)
+	if base != "" {
+		return base
+	}
+	return "ShellExecute"
 }
 
 func sourceCall(call procedureir.CallSite) (SourceKind, string, bool) {
@@ -774,13 +1112,22 @@ func looksHTTPReceiver(receiver, full string) bool {
 }
 
 func (a *procedureAnalyzer) scanKnownShellObjects() {
-	assign := regexp.MustCompile(`(?i)\b(?:set\s+)?([a-z_][a-z0-9_]*)\s*=\s*(?:createobject\s*\(\s*"wscript\.shell"|new\s+wscript\.shell)`)
+	assign := regexp.MustCompile(`(?i)\b(?:set\s+)?([a-z_][a-z0-9_]*)\s*=\s*(?:createobject\s*\(\s*"(wscript\.shell|shell\.application)"|new\s+(wscript\.shell|shell\.application))`)
 	for _, statement := range a.procedure.Statements {
 		if a.contextErr() != nil {
 			return
 		}
 		if match := assign.FindStringSubmatch(statement.Text); len(match) > 1 {
-			a.knownShellObjects[canonicalName(match[1])] = true
+			kind := ""
+			if len(match) > 2 {
+				kind = strings.ToLower(strings.TrimSpace(match[2]))
+			}
+			if kind == "" && len(match) > 3 {
+				kind = strings.ToLower(strings.TrimSpace(match[3]))
+			}
+			if kind != "" {
+				a.knownShellObjects[canonicalName(match[1])] = kind
+			}
 		}
 	}
 }

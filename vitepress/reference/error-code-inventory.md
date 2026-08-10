@@ -104,6 +104,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cli_paths`
 - `clipboard_retry_succeeded`
 - `closes_workbook`
+- `cmd_exe`
 - `code_path`
 - `code_source`
 - `code_source_after`
@@ -113,8 +114,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `column_width`
 - `com_activation`
 - `combining_mark`
+- `command_execution`
 - `command_line_argument`
 - `command_reads_saved_file`
+- `command_role`
+- `command_text`
 - `comparison_expression`
 - `compile_equivalent`
 - `compile_invoked`
@@ -148,6 +152,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `coordination_wait_unsupported`
 - `created_at`
 - `created_parent_dirs`
+- `credential_exposure`
 - `current_version`
 - `customer_name`
 - `data_flow`
@@ -209,6 +214,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_resource_leaks`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
+- `detect_unsafe_command_construction`
 - `detect_unstable_last_row_patterns`
 - `detect_untrusted_data_flow`
 - `detect_unused_local_variables`
@@ -555,6 +561,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `oracle_already_running`
 - `oracle_failure`
 - `oracle_lock_failed`
+- `origin_state`
 - `original_error`
 - `original_workbook_path`
 - `output_file_exists`
@@ -615,6 +622,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `process_cancelled`
 - `process_cleanup_failed`
 - `process_enumeration_failed`
+- `process_launch`
 - `process_no_fallback`
 - `process_not_found`
 - `process_termination_failed`
@@ -689,6 +697,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `return_type`
 - `returned_range`
 - `returns_error_value`
+- `risk_class`
+- `risk_kind`
 - `rollback_args_invalid`
 - `rollback_backup_failed`
 - `rollback_failed`
@@ -715,6 +725,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `schema_version`
 - `schema_version_changed`
 - `script_failed`
+- `script_host`
 - `script_not_found`
 - `search_order`
 - `select_statement`
@@ -737,6 +748,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `sheet_exists`
 - `sheet_id`
 - `sheet_not_found`
+- `shell_command`
+- `shell_execute`
 - `shows_dialog`
 - `single_line_if_statement`
 - `single_space`
@@ -791,6 +804,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `systemprofile_desktop_missing`
 - `tab_index`
 - `tag_name`
+- `tainted_command_text`
 - `target_dir`
 - `target_info`
 - `target_line`
@@ -839,8 +853,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unknown_command`
 - `unknown_exit`
 - `unknown_inline_suppression_rule`
+- `unknown_origin`
 - `unknown_transformation`
 - `unnamed_control_placeholder`
+- `unquoted_executable_path`
 - `unsafe_backup_file_path`
 - `unsafe_original_workbook_path`
 - `unsupported_form_control`
@@ -862,6 +878,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `update_check`
 - `update_check_failed`
 - `upstream_callers`
+- `url_document_launch`
 - `use_interactive`
 - `used_range`
 - `user_form`
@@ -879,6 +896,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `uses_type`
 - `variable_declaration`
 - `variable_declarator`
+- `vb_hide`
 - `vba_compile_failed`
 - `vba_component_import_name_mismatch`
 - `vba_component_remove_failed`
@@ -903,6 +921,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `while_statement`
 - `width_px`
 - `window_not_found`
+- `window_style`
 - `windows_path`
 - `windows_xlflow_execution_failed`
 - `windows_xlflow_not_found`

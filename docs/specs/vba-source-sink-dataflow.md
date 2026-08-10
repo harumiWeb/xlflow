@@ -1,6 +1,8 @@
 # Conservative VBA Source-to-Sink Dataflow
 
-This specification defines the procedure-local dataflow contract for `VBA224`.
+This specification defines the generic procedure-local dataflow contract for
+`VBA224`. Process-launch-specific classification and diagnostics belong to
+`VBA236`, which reuses these states and paths with sink argument-role metadata.
 The implementation is protocol-neutral and consumes `procedureir.ProcedureIR`
 and one `cfg.Graph`; it does not parse source or depend on CLI/LSP types.
 
@@ -42,9 +44,12 @@ sources without the required receiver shape or type evidence.
 
 ## Initial sinks
 
+The shared data-flow catalog also carries process-launch entries for the
+`VBA236` projection; the generic `VBA224` finding set uses only the non-process
+entries listed here.
+
 The sink catalog recognizes:
 
-- `Shell` and `WScript.Shell.Run`/`Exec` command arguments;
 - recognized ADO SQL execution arguments;
 - `Kill`, `RmDir`, `FileSystemObject.DeleteFile`/`DeleteFolder`, and similar
   destructive file paths;
@@ -53,6 +58,11 @@ The sink catalog recognizes:
 
 Generic `.Run`, `.Execute`, or `.Open` members do not become sinks without an
 explicit catalog match; `SaveAs` is the explicit workbook-save sink contract.
+Process-launch sinks are intentionally excluded from `VBA224`; `VBA236` owns
+VBA `Shell`, `WScript.Shell.Run`/`Exec`, `Shell.Application.ShellExecute`, and
+Win32 `ShellExecute` variants so executable paths, interpreter command text,
+arguments, URL/document targets, and observation state can be classified
+without duplicate diagnostics.
 
 ## Safety contracts and guards
 
@@ -80,7 +90,7 @@ deterministic representative path:
 ```json
 {
   "source": { "kind": "inputbox", "label": "InputBox", "line": 3 },
-  "sink": { "kind": "shell", "label": "Shell", "line": 5 },
+  "sink": { "kind": "sql_execution", "label": "SQL execution", "line": 5 },
   "path": [
     { "kind": "assignment", "label": "raw = InputBox(...)", "line": 3 },
     { "kind": "concatenation", "label": "command = prefix & raw", "line": 4 }
@@ -96,6 +106,10 @@ its converged block-entry state, so transient states and worklist priority
 cannot add or remove diagnostics. Changing the fixed-point traversal order
 must preserve the finding set, state, source/sink identity, and representative
 path.
+
+When the sink is a process launch, this generic context is projected by
+`VBA236` into its additive `command_execution` object; `VBA224` does not emit a
+second process-launch finding.
 
 ## Non-goals
 

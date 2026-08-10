@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA236` command-execution safety analysis for VBA
+  `Shell`, `WScript.Shell.Run`/`Exec`, `ShellExecute`, `cmd.exe`, PowerShell,
+  and script-host launches. Findings distinguish potential injection from
+  general process-launch risk and expose launcher, interpreter, command-role,
+  origin, credential, observability, and unquoted-path context with Windows
+  quoting guidance. Process-launch ownership moves from generic `VBA224` to
+  the new configurable `detect_unsafe_command_construction` rule.
+
 - Expanded `VBA212` to analyze AST operand relationships across eager `And`,
   `Or`, `IIf`, `Choose`, and `Switch` expressions, including nested
   member/index access, `IsArray` bounds operations, and uniquely resolved

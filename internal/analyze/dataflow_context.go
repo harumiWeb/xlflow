@@ -17,11 +17,31 @@ type DataFlowStep struct {
 	Line  int    `json:"line"`
 }
 
-// DataFlowContext is the additive JSON context attached to VBA224 findings.
-// The human and LSP projections also summarize this context in their message
-// and reason fields.
+// DataFlowContext is the additive JSON context attached to source-to-sink
+// findings (VBA224 and the command-launch projection VBA236). The human and
+// LSP projections also summarize this context in their message and reason
+// fields.
 type DataFlowContext struct {
 	Source DataFlowEndpoint `json:"source"`
 	Sink   DataFlowEndpoint `json:"sink"`
 	Path   []DataFlowStep   `json:"path,omitempty"`
+}
+
+// CommandExecutionContext describes the role and risk classification of a
+// process-launch sink. It is deliberately additive to DataFlowContext so
+// clients that only understand generic source-to-sink flows can continue to
+// consume diagnostics emitted by older analyzer versions.
+//
+// risk_class is either "injection" (the command text/executable is known to
+// contain tainted input) or "process_launch" (the launch is risky but the
+// input origin or command role is not sufficiently precise to claim
+// injection). risk_kind carries the more specific policy observation such as
+// unquoted_executable_path or observability.
+type CommandExecutionContext struct {
+	RiskClass   string `json:"risk_class"`
+	RiskKind    string `json:"risk_kind"`
+	Launcher    string `json:"launcher,omitempty"`
+	Interpreter string `json:"interpreter,omitempty"`
+	CommandRole string `json:"command_role,omitempty"`
+	OriginState string `json:"origin_state,omitempty"`
 }
