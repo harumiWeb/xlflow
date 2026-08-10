@@ -58,8 +58,8 @@ The stable `risk_kind` values are:
   precise enough to claim injection;
 - `credential_exposure`: a credential-like literal or known secret binding is
   placed in command-line arguments;
-- `observability`: a constant hidden window style is used and the process ID,
-  `Run` exit code, or `Exec` result is discarded; and
+- `observability`: a constant hidden window style is used and the process ID
+  or `Run` exit code is discarded; and
 - `unquoted_executable_path`: a statically reconstructed executable path
   contains spaces without an outer pair of quotes.
 

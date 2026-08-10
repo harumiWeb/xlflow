@@ -7,7 +7,27 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbadf "github.com/harumiWeb/xlflow/internal/vba/dataflow"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestVBA236FallbackFlowUsesDeclaredCommandRoles(t *testing.T) {
+	t.Parallel()
+	flow := vbadf.Finding{
+		State: vbadf.StateTainted,
+		Sink:  vbadf.Sink{Kind: vbadf.SinkShell, Label: "Shell"},
+	}
+	if class, kind := commandRiskClassification(flow, string(vbadf.CommandRoleExecutable)); class != "injection" || kind != "tainted_command_text" {
+		t.Fatalf("known executable role classification = (%q, %q)", class, kind)
+	}
+	launcher, _, role := commandLauncherDetails(flow, procedureir.CallSite{}, sourceProcedure{})
+	if launcher != "Shell" || role != string(vbadf.CommandRoleUnknown) {
+		t.Fatalf("fallback command details = (%q, %q), want Shell/unknown", launcher, role)
+	}
+	if class, kind := commandRiskClassification(flow, role); class != "process_launch" || kind != "unknown_origin" {
+		t.Fatalf("unknown fallback classification = (%q, %q)", class, kind)
+	}
+}
 
 func TestVBA236OwnsProcessLaunchFlowsAndAddsCommandContext(t *testing.T) {
 	t.Parallel()

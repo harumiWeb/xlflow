@@ -117,7 +117,7 @@ type CommandExecution struct {
 // unquoted constant executable path have an empty Source and StateClean.
 type CommandFinding struct {
 	State       State            `json:"state"`
-	Source      Source           `json:"source,omitempty"`
+	Source      Source           `json:"source,omitzero"`
 	Execution   CommandExecution `json:"command_execution"`
 	RiskClass   CommandRiskClass `json:"risk_class"`
 	RiskKind    CommandRiskKind  `json:"risk_kind"`

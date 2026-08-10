@@ -305,7 +305,7 @@ func commandLauncherDetails(flow vbadf.Finding, call procedureir.CallSite, proc 
 	if call.Callee.Text != "" {
 		launcher = strings.TrimSpace(call.Callee.Text)
 	}
-	role = "command_text"
+	role = string(vbadf.CommandRoleUnknown)
 	command := ""
 	if len(call.Arguments.ExpressionIDs) > 0 {
 		for _, expressionID := range call.Arguments.ExpressionIDs {

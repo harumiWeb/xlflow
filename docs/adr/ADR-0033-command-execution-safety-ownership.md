@@ -66,6 +66,10 @@ off command lines.
 Transfer process-launch sink ownership from `VBA224` to `VBA236`. `VBA224`
 continues to report generic source-to-sink flows for non-process APIs. The two
 rules must not emit duplicate findings for the same process-launch call.
+When `VBA236` is disabled, `VBA224` remains the compatibility fallback for
+process-launch flows. Existing `VBA224` suppressions do not suppress the new
+`VBA236` findings, so projects that intentionally exempt a process launch must
+migrate the suppression or disable/suppress both rule IDs during the transition.
 
 ## Consequences
 

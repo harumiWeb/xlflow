@@ -132,6 +132,22 @@ End Sub
 	}
 }
 
+func TestCommandInterpreterRequiresStandaloneCmdSwitch(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		`cmd.exe /c echo x`:       "cmd.exe",
+		`cmd /k echo x`:           "cmd.exe",
+		`cmd -c echo x`:           "cmd.exe",
+		`cmd.exe d:/code/run.bat`: "",
+		`tool.exe /c`:             "",
+	}
+	for input, want := range cases {
+		if got := commandInterpreter(input); got != want {
+			t.Errorf("commandInterpreter(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestAnalyzeProcedureTreatsKnownConstantsAsCleanAndRespectsLocalBindings(t *testing.T) {
 	t.Parallel()
 	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit

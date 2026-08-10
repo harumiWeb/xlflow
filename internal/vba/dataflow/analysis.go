@@ -13,6 +13,17 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
+var (
+	cmdInterpreterPattern        = regexp.MustCompile(`(?i)\bcmd(?:\.exe)?\b`)
+	cmdSwitchPattern             = regexp.MustCompile(`(?i)(?:^|\s)[/-][ck](?:\s|$)`)
+	powershellInterpreterPattern = regexp.MustCompile(`(?i)\b(?:powershell|pwsh)(?:\.exe)?\b`)
+	scriptHostInterpreterPattern = regexp.MustCompile(`(?i)\b(?:wscript|cscript|mshta)(?:\.exe)?\b`)
+	powershellCommandPattern     = regexp.MustCompile(`(?i)(?:^|\s)[/-](?:command|c)(?:\s|$)`)
+	credentialAssignmentPattern  = regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\s*=`)
+	credentialWordPattern        = regexp.MustCompile(`(?i)\b(?:password|passwd|secret|token|apikey|api_key)\b`)
+	knownShellObjectPattern      = regexp.MustCompile(`(?i)\b(?:set\s+)?([a-z_][a-z0-9_]*)\s*=\s*(?:createobject\s*\(\s*"(wscript\.shell|shell\.application)"|new\s+(wscript\.shell|shell\.application))`)
+)
+
 // AnalyzeProcedure performs a conservative, intra-procedural forward
 // may-analysis. A supplied graph is used as-is; when it is empty a graph is
 // built from the procedure so small protocol adapters can use the API safely.
@@ -718,8 +729,7 @@ func (a *procedureAnalyzer) inspectCommand(call procedureir.CallSite, state abst
 		}
 	}
 	if commandHidden(call, a.expressions) && commandResultDiscarded(call, a.statements) {
-		target := commandTargets(call, a.knownShellObjects)[0]
-		a.recordCommand(staticCommandFinding(target, CommandRiskObservability, "The launch is hidden or unobserved and its process result is discarded."))
+		a.recordCommand(staticCommandFinding(targets[0], CommandRiskObservability, "The launch is hidden or unobserved and its process result is discarded."))
 	}
 }
 
@@ -840,11 +850,11 @@ func (a *procedureAnalyzer) recordCommand(finding CommandFinding) {
 func commandInterpreter(text string) string {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	switch {
-	case regexp.MustCompile(`(?i)\bcmd(?:\.exe)?\b`).MatchString(lower) && strings.Contains(lower, "/c"):
+	case cmdInterpreterPattern.MatchString(lower) && cmdSwitchPattern.MatchString(lower):
 		return "cmd.exe"
-	case regexp.MustCompile(`(?i)\b(?:powershell|pwsh)(?:\.exe)?\b`).MatchString(lower):
+	case powershellInterpreterPattern.MatchString(lower):
 		return "powershell"
-	case regexp.MustCompile(`(?i)\b(?:wscript|cscript|mshta)(?:\.exe)?\b`).MatchString(lower):
+	case scriptHostInterpreterPattern.MatchString(lower):
 		return "script_host"
 	default:
 		return ""
@@ -852,7 +862,7 @@ func commandInterpreter(text string) string {
 }
 
 func powershellUsesCommand(text string) bool {
-	return regexp.MustCompile(`(?i)(?:^|\s)[/-](?:command|c)(?:\s|$)`).MatchString(strings.TrimSpace(text))
+	return powershellCommandPattern.MatchString(strings.TrimSpace(text))
 }
 
 func looksUnquotedExecutable(text string, role CommandRole) bool {
@@ -885,8 +895,8 @@ func looksCredentialArgument(text string, role CommandRole) bool {
 	if role != CommandRoleArguments && role != CommandRoleExecutable && role != CommandRoleShellCommand {
 		return false
 	}
-	return regexp.MustCompile(`(?i)(?:password|passwd|secret|token|api[_-]?key|authorization)\s*=`).MatchString(text) ||
-		regexp.MustCompile(`(?i)\b(?:password|passwd|secret|token|apikey|api_key)\b`).MatchString(strings.TrimSpace(text))
+	return credentialAssignmentPattern.MatchString(text) ||
+		credentialWordPattern.MatchString(strings.TrimSpace(text))
 }
 
 func commandHidden(call procedureir.CallSite, expressions map[int]procedureir.Expression) bool {
@@ -1112,12 +1122,11 @@ func looksHTTPReceiver(receiver, full string) bool {
 }
 
 func (a *procedureAnalyzer) scanKnownShellObjects() {
-	assign := regexp.MustCompile(`(?i)\b(?:set\s+)?([a-z_][a-z0-9_]*)\s*=\s*(?:createobject\s*\(\s*"(wscript\.shell|shell\.application)"|new\s+(wscript\.shell|shell\.application))`)
 	for _, statement := range a.procedure.Statements {
 		if a.contextErr() != nil {
 			return
 		}
-		if match := assign.FindStringSubmatch(statement.Text); len(match) > 1 {
+		if match := knownShellObjectPattern.FindStringSubmatch(statement.Text); len(match) > 1 {
 			kind := ""
 			if len(match) > 2 {
 				kind = strings.ToLower(strings.TrimSpace(match[2]))

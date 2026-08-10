@@ -138,14 +138,19 @@ call shape permits. The additive context reports `injection`,
 `credential_exposure`, `observability`, or `unquoted_executable_path` risk
 kinds. Only known tainted input with a known
 origin and role is a potential command-injection claim; unknown input is a
-general process-launch warning. Constant commands and quoted paths are safe
-for injection, but independent path, secret, and observability risks remain
-visible. For Windows guidance, quote the complete executable path, avoid
-interpolated `cmd.exe /c` and PowerShell `-Command` text, prefer PowerShell
-`-File` with fixed arguments, and keep secrets out of command lines. Use
-`xlflow:disable-line VBA236`, `xlflow:disable-next-line VBA236`, or
-`[analyze].disabled_rules = ["VBA236"]` for intentional exceptions. Generic
-non-process source-to-sink findings remain owned by `VBA224`.
+general process-launch warning. Constant command text avoids the
+tainted-command-text risk. Quoting a trusted executable path addresses the
+unquoted-path risk only; it does not sanitize ordinary arguments or interpreter
+command text such as `cmd.exe /c` and PowerShell `-Command`. Independent
+credential and observability risks remain visible. For Windows guidance, quote
+the complete executable path, avoid interpolated `cmd.exe /c` and PowerShell
+`-Command` text, prefer PowerShell `-File` with fixed arguments, and keep
+secrets out of command lines. Use `xlflow:disable-line VBA236`,
+`xlflow:disable-next-line VBA236`, or `[analyze].disabled_rules = ["VBA236"]`
+for intentional exceptions. When retaining the legacy `VBA224` fallback,
+disable or suppress both `VBA224` and `VBA236` for a complete process-launch
+exception. Generic non-process source-to-sink findings remain owned by
+`VBA224`.
 
 `VBA229` is a realtime and batch compile-equivalent error for unresolved type identifiers in procedure-local `Dim` and `Static ... As <Type>` declarations. It uses the production built-in/host/TypeLib and project-symbol resolver, including enum, class, UserForm, and document-module types, points at the type identifier, cannot be suppressed, and blocks source preflight. When the generated TypeLib manifest is missing, malformed, empty, or otherwise incomplete, lookup misses are left unreported because none of those metadata states proves that a referenced type is absent. Parameters, return types, and module-level declarations are outside the v1 rule scope.
 
