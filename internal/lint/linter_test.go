@@ -857,6 +857,98 @@ func TestUnmatchedBlockCandidatesStayConservative(t *testing.T) {
 	}
 }
 
+func TestLinterAcceptsVB014CorpusLexicalBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"date literal colon":         "Sub Main()\n  If Time > #11:59:59 PM# Then\n  End If\nEnd Sub\n",
+		"named argument colon":       "Sub Main()\n  If IsReady(value:=1) Then\n  End If\nEnd Sub\n",
+		"keyword field plus block":   "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n  End If\nEnd Sub\n",
+		"repeated conditional guard": "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n  End If\n#End If\nEnd Sub\n",
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "Main.bas")
+			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+				t.Fatalf("valid source should not trigger VB014: %+v", got)
+			}
+		})
+	}
+}
+
+func TestLinterRejectsUnclosedVB014CorpusLexicalBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		source         string
+		openingLine    int
+		expectedCloser string
+	}{
+		"type declaration plus unclosed If": {
+			source: "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n    Debug.Print True\nEnd Sub\n", openingLine: 5, expectedCloser: "End If",
+		},
+		"date literal in unclosed If": {
+			source: "Sub Main()\n  If Time > #11:59:59 PM# Then\n    Debug.Print Time\nEnd Sub\n", openingLine: 2, expectedCloser: "End If",
+		},
+		"named argument in unclosed If": {
+			source: "Sub Main()\n  If IsReady(value:=1) Then\n    Debug.Print True\nEnd Sub\n", openingLine: 2, expectedCloser: "End If",
+		},
+		"repeated conditional unclosed If": {
+			source: "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n", openingLine: 0,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "Main.bas")
+			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(test.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := issuesByCode(issues, "VB014")
+			if len(got) != 1 {
+				t.Fatalf("unclosed source should trigger VB014: %+v", issues)
+			}
+			if test.openingLine > 0 {
+				if got[0].OpeningLine != test.openingLine || got[0].ExpectedCloser != test.expectedCloser {
+					t.Fatalf("VB014 should identify the unclosed If: %+v", got[0])
+				}
+			} else if got[0].Kind != "parser_recovery" || got[0].Message != parserRecoveryMessage {
+				t.Fatalf("conditional recovery should remain conservative: %+v", got[0])
+			}
+		})
+	}
+}
+
+func TestSplitStatementsRecognizesFileNumberSeparators(t *testing.T) {
+	t.Parallel()
+	want := []string{"Close #1", "Open path For Input As #2"}
+	if got := splitStatements("Close #1: Open path For Input As #2"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("file-number statement split = %#v, want %#v", got, want)
+	}
+}
+
+func TestConditionalIfBalanceRejectsStateExplosion(t *testing.T) {
+	t.Parallel()
+	states := make(conditionalStateSet)
+	for i := 0; i <= maxConditionalBalanceStates; i++ {
+		addConditionalState(states, conditionalBalanceState{
+			runtime: strconv.Itoa(i),
+			decisions: map[string]bool{
+				"Feature": i%2 == 0,
+			},
+		})
+	}
+	if len(states) != maxConditionalBalanceStates+1 || !conditionalStateLimitExceeded(states) {
+		t.Fatalf("conditional state limit = %d, states=%d", maxConditionalBalanceStates, len(states))
+	}
+	addConditionalState(states, conditionalBalanceState{runtime: "overflow"})
+	if len(states) != maxConditionalBalanceStates+1 {
+		t.Fatalf("conditional state set exceeded fixed bound: %d", len(states))
+	}
+}
+
 func TestLinterAcceptsNextPrefixedIdentifiersWithoutParserRecovery(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "src", "classes", "Example.cls")

@@ -262,7 +262,6 @@
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"lint","code":"VB020","severity":"warning","line":1503,"column":5}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"lint","code":"VB020","severity":"warning","line":1602,"column":5}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"lint","code":"VB020","severity":"warning","line":1603,"column":5}
-{"project":"third_party/access-examples","file":"modDate.bas","surface":"lint","code":"VB014","severity":"error","line":1,"column":1}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"lint","code":"VB005","severity":"warning","line":15,"column":5}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"lint","code":"VB005","severity":"warning","line":29,"column":11}
 {"project":"third_party/access-examples","file":"modDate.bas","surface":"lint","code":"VB005","severity":"warning","line":29,"column":22}

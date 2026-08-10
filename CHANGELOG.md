@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VB014` false positives for valid date-literal and named-argument colons,
+  UDT fields named `Next`, and repeated conditional-compilation guards.
+
 - Added default-enabled `VBA236` command-execution safety analysis for VBA
   `Shell`, `WScript.Shell.Run`/`Exec`, `ShellExecute`, `cmd.exe`, PowerShell,
   and script-host launches. Findings distinguish potential injection from

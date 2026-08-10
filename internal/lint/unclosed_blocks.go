@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 
@@ -19,6 +20,7 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 
 	stack := make([]openBlock, 0)
 	candidates := make([]unclosedBlockCandidate, 0)
+	inTypeDeclaration := false
 	for i := 0; i < len(statements); i++ {
 		statement := statements[i]
 		text := strings.TrimSpace(statement.text)
@@ -33,6 +35,18 @@ func unmatchedBlockCandidates(source string) ([]unclosedBlockCandidate, bool) {
 		}
 		lower := strings.ToLower(text)
 		anchor := blockAnchor{line: statement.line, column: statement.column}
+
+		if isTypeDeclarationEnd(lower) {
+			inTypeDeclaration = false
+			continue
+		}
+		if isTypeDeclarationStart(lower) {
+			inTypeDeclaration = true
+			continue
+		}
+		if inTypeDeclaration {
+			continue
+		}
 
 		if isProcedureEndStatement(lower) {
 			candidates = appendUnclosedBlockCandidates(candidates, stack, anchor)
@@ -132,11 +146,40 @@ func hasBlockBoundarySyntax(source string) bool {
 	return false
 }
 
-type conditionalIfFrame struct {
-	baseline map[string]struct{}
-	branches map[string]struct{}
-	sawElse  bool
+func isTypeDeclarationStart(lower string) bool {
+	fields := strings.Fields(lower)
+	if len(fields) == 1 {
+		return fields[0] == "type"
+	}
+	if len(fields) == 2 {
+		return fields[0] == "type" && fields[1] != ""
+	}
+	return len(fields) == 3 &&
+		(fields[0] == "private" || fields[0] == "public" || fields[0] == "friend") &&
+		fields[1] == "type" && fields[2] != ""
 }
+
+func isTypeDeclarationEnd(lower string) bool {
+	return lower == "end type"
+}
+
+type conditionalIfFrame struct {
+	baseline  conditionalStateSet
+	branches  conditionalStateSet
+	condition string
+	sawElse   bool
+}
+
+type conditionalBalanceState struct {
+	runtime   string
+	decisions map[string]bool
+}
+
+type conditionalStateSet map[string]conditionalBalanceState
+
+// The bound keeps ambiguous conditional-compilation analysis finite while
+// allowing large modules with many independent repeated guards to converge.
+const maxConditionalBalanceStates = 512
 
 func conditionalIfBalanceInvalid(source string) bool {
 	statements, reliable := conditionalBlockStatements(source)
@@ -144,16 +187,25 @@ func conditionalIfBalanceInvalid(source string) bool {
 		return true
 	}
 
-	states := map[string]struct{}{"": {}}
+	trackedConditions, lastConditionOccurrences := repeatedConditionalConditions(statements)
+	states := conditionalStateSet{}
+	addConditionalState(states, conditionalBalanceState{decisions: map[string]bool{}})
 	frames := make([]conditionalIfFrame, 0)
 	for i, statement := range statements {
 		lower := strings.ToLower(strings.TrimSpace(statement.text))
 		switch {
 		case strings.HasPrefix(lower, "#if ") && strings.HasSuffix(lower, " then"):
-			frames = append(frames, conditionalIfFrame{
-				baseline: cloneConditionalIfStates(states),
-				branches: make(map[string]struct{}),
-			})
+			condition := conditionalCompilationCondition(lower, "#if ")
+			frame := conditionalIfFrame{branches: make(conditionalStateSet), condition: condition}
+			if trackedConditions[condition] {
+				states, frame.baseline = splitConditionalIfStates(states, condition)
+			} else {
+				frame.baseline = cloneConditionalIfStates(states)
+			}
+			if conditionalStateLimitExceeded(states, frame.baseline) {
+				return true
+			}
+			frames = append(frames, frame)
 		case strings.HasPrefix(lower, "#elseif ") && strings.HasSuffix(lower, " then"):
 			if len(frames) == 0 {
 				return true
@@ -163,7 +215,19 @@ func conditionalIfBalanceInvalid(source string) bool {
 				return true
 			}
 			mergeConditionalIfStates(frame.branches, states)
-			states = cloneConditionalIfStates(frame.baseline)
+			if conditionalStateLimitExceeded(frame.branches) {
+				return true
+			}
+			condition := conditionalCompilationCondition(lower, "#elseif ")
+			frame.condition = condition
+			if trackedConditions[condition] {
+				states, frame.baseline = splitConditionalIfStates(frame.baseline, condition)
+			} else {
+				states = cloneConditionalIfStates(frame.baseline)
+			}
+			if conditionalStateLimitExceeded(states, frame.baseline) {
+				return true
+			}
 		case lower == "#else":
 			if len(frames) == 0 {
 				return true
@@ -173,8 +237,14 @@ func conditionalIfBalanceInvalid(source string) bool {
 				return true
 			}
 			mergeConditionalIfStates(frame.branches, states)
+			if conditionalStateLimitExceeded(frame.branches) {
+				return true
+			}
 			frame.sawElse = true
 			states = cloneConditionalIfStates(frame.baseline)
+			if conditionalStateLimitExceeded(states) {
+				return true
+			}
 		case lower == "#end if":
 			if len(frames) == 0 {
 				return true
@@ -182,83 +252,205 @@ func conditionalIfBalanceInvalid(source string) bool {
 			frame := frames[len(frames)-1]
 			frames = frames[:len(frames)-1]
 			mergeConditionalIfStates(frame.branches, states)
+			if conditionalStateLimitExceeded(frame.branches) {
+				return true
+			}
 			if !frame.sawElse {
 				mergeConditionalIfStates(frame.branches, frame.baseline)
+				if conditionalStateLimitExceeded(frame.branches) {
+					return true
+				}
 			}
 			states = frame.branches
+			states = pruneConditionalStateDecisions(states, lastConditionOccurrences, i, frames)
 		case isIfBranchStatement(lower):
 			var valid bool
 			states, valid = applyConditionalIfBranch(states, lower == "else")
-			if !valid {
+			if !valid || conditionalStateLimitExceeded(states) {
 				return true
 			}
 		case lower == "end if":
 			var valid bool
 			states, valid = closeConditionalIfStates(states)
-			if !valid {
+			if !valid || conditionalStateLimitExceeded(states) {
 				return true
 			}
 		default:
 			block, ok := blockOpener(lower, i+1 < len(statements) && statements[i+1].group == statement.group)
 			if ok && block.kind == "if" {
 				states = openConditionalIfStates(states)
+				if conditionalStateLimitExceeded(states) {
+					return true
+				}
 			}
 		}
 	}
 	if len(frames) != 0 {
 		return true
 	}
-	for state := range states {
-		if state != "" {
+	for _, state := range states {
+		if state.runtime != "" {
 			return true
 		}
 	}
 	return false
 }
 
-func cloneConditionalIfStates(source map[string]struct{}) map[string]struct{} {
-	cloned := make(map[string]struct{}, len(source))
-	mergeConditionalIfStates(cloned, source)
+func cloneConditionalIfStates(source conditionalStateSet) conditionalStateSet {
+	cloned := make(conditionalStateSet, len(source))
+	for key, state := range source {
+		cloned[key] = cloneConditionalBalanceState(state)
+	}
 	return cloned
 }
 
-func mergeConditionalIfStates(target, source map[string]struct{}) {
-	for state := range source {
-		target[state] = struct{}{}
+func mergeConditionalIfStates(target, source conditionalStateSet) {
+	for key, state := range source {
+		target[key] = cloneConditionalBalanceState(state)
 	}
 }
 
-func openConditionalIfStates(source map[string]struct{}) map[string]struct{} {
-	opened := make(map[string]struct{}, len(source))
-	for state := range source {
-		opened[state+"0"] = struct{}{}
+func openConditionalIfStates(source conditionalStateSet) conditionalStateSet {
+	opened := make(conditionalStateSet, len(source))
+	for _, state := range source {
+		state.runtime += "0"
+		addConditionalState(opened, state)
 	}
 	return opened
 }
 
-func applyConditionalIfBranch(source map[string]struct{}, isElse bool) (map[string]struct{}, bool) {
-	branched := make(map[string]struct{}, len(source))
-	for state := range source {
-		if state == "" || state[len(state)-1] == '1' {
+func applyConditionalIfBranch(source conditionalStateSet, isElse bool) (conditionalStateSet, bool) {
+	branched := make(conditionalStateSet, len(source))
+	for _, state := range source {
+		if state.runtime == "" || state.runtime[len(state.runtime)-1] == '1' {
 			return nil, false
 		}
 		if isElse {
-			state = state[:len(state)-1] + "1"
+			state.runtime = state.runtime[:len(state.runtime)-1] + "1"
 		}
-		branched[state] = struct{}{}
+		addConditionalState(branched, state)
 	}
 	return branched, true
 }
 
-func closeConditionalIfStates(source map[string]struct{}) (map[string]struct{}, bool) {
-	closed := make(map[string]struct{}, len(source))
-	for state := range source {
-		if state == "" {
+func closeConditionalIfStates(source conditionalStateSet) (conditionalStateSet, bool) {
+	closed := make(conditionalStateSet, len(source))
+	for _, state := range source {
+		if state.runtime == "" {
 			return nil, false
 		}
-		closed[state[:len(state)-1]] = struct{}{}
+		state.runtime = state.runtime[:len(state.runtime)-1]
+		addConditionalState(closed, state)
 	}
 	return closed, true
+}
+
+func repeatedConditionalConditions(statements []blockStatement) (map[string]bool, map[string]int) {
+	counts := make(map[string]int)
+	lastOccurrences := make(map[string]int)
+	for index, statement := range statements {
+		lower := strings.ToLower(strings.TrimSpace(statement.text))
+		for _, prefix := range []string{"#if ", "#elseif "} {
+			if strings.HasPrefix(lower, prefix) && strings.HasSuffix(lower, " then") {
+				condition := conditionalCompilationCondition(lower, prefix)
+				counts[condition]++
+				lastOccurrences[condition] = index
+				break
+			}
+		}
+	}
+	repeated := make(map[string]bool)
+	for condition, count := range counts {
+		if count > 1 {
+			repeated[condition] = true
+		}
+	}
+	return repeated, lastOccurrences
+}
+
+func conditionalCompilationCondition(lower, prefix string) string {
+	condition := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(lower, prefix), "then"))
+	return strings.Join(strings.Fields(condition), " ")
+}
+
+func splitConditionalIfStates(source conditionalStateSet, condition string) (conditionalStateSet, conditionalStateSet) {
+	active := make(conditionalStateSet)
+	baseline := make(conditionalStateSet)
+	for _, state := range source {
+		if value, ok := state.decisions[condition]; ok {
+			if value {
+				addConditionalState(active, state)
+			} else {
+				addConditionalState(baseline, state)
+			}
+			continue
+		}
+		trueState := cloneConditionalBalanceState(state)
+		trueState.decisions[condition] = true
+		addConditionalState(active, trueState)
+		falseState := cloneConditionalBalanceState(state)
+		falseState.decisions[condition] = false
+		addConditionalState(baseline, falseState)
+	}
+	return active, baseline
+}
+
+func cloneConditionalBalanceState(source conditionalBalanceState) conditionalBalanceState {
+	decisions := make(map[string]bool, len(source.decisions))
+	for condition, value := range source.decisions {
+		decisions[condition] = value
+	}
+	source.decisions = decisions
+	return source
+}
+
+func pruneConditionalStateDecisions(source conditionalStateSet, lastOccurrences map[string]int, statementIndex int, frames []conditionalIfFrame) conditionalStateSet {
+	activeConditions := make(map[string]bool, len(frames))
+	for _, frame := range frames {
+		if frame.condition != "" {
+			activeConditions[frame.condition] = true
+		}
+	}
+	pruned := make(conditionalStateSet, len(source))
+	for _, state := range source {
+		state = cloneConditionalBalanceState(state)
+		for condition := range state.decisions {
+			if lastOccurrences[condition] <= statementIndex && !activeConditions[condition] {
+				delete(state.decisions, condition)
+			}
+		}
+		addConditionalState(pruned, state)
+	}
+	return pruned
+}
+
+func addConditionalState(target conditionalStateSet, state conditionalBalanceState) {
+	if len(target) > maxConditionalBalanceStates {
+		return
+	}
+	target[conditionalStateKey(state)] = cloneConditionalBalanceState(state)
+}
+
+func conditionalStateLimitExceeded(sets ...conditionalStateSet) bool {
+	for _, set := range sets {
+		if len(set) > maxConditionalBalanceStates {
+			return true
+		}
+	}
+	return false
+}
+
+func conditionalStateKey(state conditionalBalanceState) string {
+	conditions := make([]string, 0, len(state.decisions))
+	for condition, value := range state.decisions {
+		marker := "0"
+		if value {
+			marker = "1"
+		}
+		conditions = append(conditions, condition+"="+marker)
+	}
+	sort.Strings(conditions)
+	return state.runtime + "\x1f" + strings.Join(conditions, ";")
 }
 
 type blockStatement struct {
