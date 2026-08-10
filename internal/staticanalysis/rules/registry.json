@@ -1870,6 +1870,28 @@
       "configuration_key": "detect_loop_invariant_excel_object_resolution",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA239",
+      "title": "Unsafe SQL construction",
+      "description": "A SQL statement may combine external input, dynamic identifiers, locale-sensitive values, manual quoting, or wildcard input before execution.",
+      "family": "analyze",
+      "category": "security",
+      "evidence_class": "policy",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba239",
+      "configurable": true,
+      "configuration_key": "detect_unsafe_sql_construction",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

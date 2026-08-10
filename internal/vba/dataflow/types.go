@@ -127,6 +127,56 @@ type CommandFinding struct {
 	Reason      string           `json:"reason"`
 }
 
+// SQLRiskKind identifies the SQL-specific observation behind a database flow.
+// The values are stable wire strings for analyzer/LSP projections.
+type SQLRiskKind string
+
+const (
+	SQLRiskDynamicIdentifier          SQLRiskKind = "dynamic_identifier"
+	SQLRiskWildcardLikeInput          SQLRiskKind = "wildcard_like_input"
+	SQLRiskLocaleSensitiveValue       SQLRiskKind = "locale_sensitive_value"
+	SQLRiskManualQuoting              SQLRiskKind = "manual_quoting"
+	SQLRiskExternalValueConcatenation SQLRiskKind = "external_value_concatenation"
+	SQLRiskUnknownOrigin              SQLRiskKind = "unknown_origin"
+)
+
+// SQLInputRole identifies the role occupied by a value in an SQL API call.
+// Value is the default for a statement value; identifier and like_pattern are
+// used when the surrounding SQL text indicates a more sensitive role.
+type SQLInputRole string
+
+const (
+	SQLInputRoleValue       SQLInputRole = "value"
+	SQLInputRoleIdentifier  SQLInputRole = "identifier"
+	SQLInputRoleLikePattern SQLInputRole = "like_pattern"
+	SQLInputRoleUnknown     SQLInputRole = "unknown"
+)
+
+// SQLExecution describes the database API receiving SQL text. It is kept
+// independent from analyzer and LSP protocols so adapters can project the
+// observation without exposing parser internals.
+type SQLExecution struct {
+	API      string       `json:"api"`
+	Role     SQLInputRole `json:"role"`
+	Range    vbaast.Range `json:"range"`
+	Argument int          `json:"argument"`
+}
+
+// SQLFinding is a SQL-specific source-to-sink observation. Parameterized is
+// true when the executed command has recognized database parameter bindings.
+// A finding is emitted only when unsafe provenance reaches SQL text.
+type SQLFinding struct {
+	State         State        `json:"state"`
+	Source        Source       `json:"source"`
+	Execution     SQLExecution `json:"sql_execution"`
+	RiskKind      SQLRiskKind  `json:"risk_kind"`
+	OriginState   State        `json:"origin_state"`
+	Parameterized bool         `json:"parameterized"`
+	Path          []PathStep   `json:"path,omitempty"`
+	Message       string       `json:"message"`
+	Reason        string       `json:"reason"`
+}
+
 type SinkSpec struct {
 	Kind        SinkKind `json:"kind"`
 	Label       string   `json:"label"`
@@ -222,6 +272,7 @@ type Finding struct {
 type Result struct {
 	Findings        []Finding                        `json:"findings"`
 	CommandFindings []CommandFinding                 `json:"command_findings,omitempty"`
+	SQLFindings     []SQLFinding                     `json:"sql_findings,omitempty"`
 	States          map[cfg.BlockID]map[string]State `json:"states,omitempty"`
 }
 

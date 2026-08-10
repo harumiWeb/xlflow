@@ -161,6 +161,7 @@ type AnalyzeConfig struct {
 	DetectUnsafeCommandConstruction          bool     `toml:"detect_unsafe_command_construction"`
 	DetectErrorSuppressionPropagation        bool     `toml:"detect_error_suppression_propagation"`
 	DetectLoopInvariantExcelObjectResolution bool     `toml:"detect_loop_invariant_excel_object_resolution"`
+	DetectUnsafeSQLConstruction              bool     `toml:"detect_unsafe_sql_construction"`
 }
 
 type lintRuleAdapter struct {
@@ -246,6 +247,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA236": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeCommandConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeCommandConstruction = v }},
 	"VBA237": {Get: func(c AnalyzeConfig) bool { return c.DetectErrorSuppressionPropagation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectErrorSuppressionPropagation = v }},
 	"VBA238": {Get: func(c AnalyzeConfig) bool { return c.DetectLoopInvariantExcelObjectResolution }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLoopInvariantExcelObjectResolution = v }},
+	"VBA239": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeSQLConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeSQLConstruction = v }},
 }
 
 var (

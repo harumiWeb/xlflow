@@ -117,3 +117,5 @@
 - Normalize project and file separators before sorting diagnostic delta rows, not only while rendering them, so deterministic output does not depend on the runner OS.
 - For process-launch corpus review, a single normalized sink range can contain both constant-initializer FPs and real input flows. Never merge that collision into one TP ledger row; keep the occurrences unreviewed until source-specific identity is available. Also classify typed numeric/Boolean values and fixed-executable argument concatenations as process-launch risk, not command injection.
 - Treat deterministic VBA formatting helpers such as `Chr$(34)` as clean when their arguments are constant; otherwise they create unknown-origin command findings that can obscure the real external-input flows at the same process sink.
+- Before assigning a new diagnostic ID, check active parallel work and reserve the next unclaimed ID; do not infer availability from the local registry alone.
+- For new diagnostics, review committed corpus candidates as TP/FP evidence before finalizing; add focused regressions for every confirmed FP and repeat the review after fixes so no new FP leaks into snapshots.

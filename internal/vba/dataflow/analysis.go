@@ -68,8 +68,30 @@ type value struct {
 	origins map[string]provenance
 }
 
+type sqlObjectKind string
+
+const (
+	sqlObjectUnknown    sqlObjectKind = "unknown"
+	sqlObjectCommand    sqlObjectKind = "command"
+	sqlObjectRecordset  sqlObjectKind = "recordset"
+	sqlObjectQueryDef   sqlObjectKind = "querydef"
+	sqlObjectConnection sqlObjectKind = "connection"
+)
+
+// sqlObjectState is intentionally small. It records only the state needed to
+// connect a CommandText/property assignment or an appended parameter with a
+// later Execute/Open call in the same procedure.
+type sqlObjectState struct {
+	kind          sqlObjectKind
+	identity      string
+	commandText   value
+	parameters    map[string]value
+	parameterized bool
+}
+
 type abstractState struct {
-	vars map[string]value
+	vars       map[string]value
+	sqlObjects map[string]sqlObjectState
 }
 
 type procedureAnalyzer struct {
@@ -86,6 +108,7 @@ type procedureAnalyzer struct {
 	selectVariables   map[int]string
 	findings          map[string]Finding
 	commandFindings   map[string]CommandFinding
+	sqlFindings       map[string]SQLFinding
 	blocksByID        map[cfg.BlockID]cfg.Block
 	outgoingEdges     map[cfg.BlockID][]cfg.Edge
 	ctx               context.Context
@@ -121,6 +144,7 @@ func newProcedureAnalyzerContext(ctx context.Context, procedure procedureir.Proc
 		selectVariables:   map[int]string{},
 		findings:          map[string]Finding{},
 		commandFindings:   map[string]CommandFinding{},
+		sqlFindings:       map[string]SQLFinding{},
 		blocksByID:        map[cfg.BlockID]cfg.Block{},
 		outgoingEdges:     map[cfg.BlockID][]cfg.Edge{},
 		ctx:               ctx,
@@ -244,7 +268,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 	if err := a.contextErr(); err != nil {
 		return Result{}, stats, err
 	}
-	entry := abstractState{vars: map[string]value{}}
+	entry := abstractState{vars: map[string]value{}, sqlObjects: map[string]sqlObjectState{}}
 	for i, parameter := range a.procedure.Symbol.Parameters {
 		if i&0xff == 0 {
 			if err := a.contextErr(); err != nil {
@@ -264,7 +288,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 		return Result{}, stats, err
 	}
 	if len(reachable) == 0 {
-		return Result{Findings: nil, CommandFindings: nil, States: nil}, stats, nil
+		return Result{Findings: nil, CommandFindings: nil, SQLFindings: nil, States: nil}, stats, nil
 	}
 	inStates := map[cfg.BlockID]abstractState{a.graph.Entry: entry}
 	if worklistRank == nil {
@@ -317,6 +341,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 	// representative paths stable when the fixed-point traversal order changes.
 	a.findings = map[string]Finding{}
 	a.commandFindings = map[string]CommandFinding{}
+	a.sqlFindings = map[string]SQLFinding{}
 	blockIDs := make([]cfg.BlockID, 0, len(reachable))
 	for id := range reachable {
 		if err := a.contextErr(); err != nil {
@@ -346,6 +371,20 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 	for _, finding := range a.commandFindings {
 		commandFindings = append(commandFindings, finding)
 	}
+	sqlFindings := make([]SQLFinding, 0, len(a.sqlFindings))
+	for _, finding := range a.sqlFindings {
+		sqlFindings = append(sqlFindings, finding)
+	}
+	sort.SliceStable(sqlFindings, func(i, j int) bool {
+		left, right := sqlFindings[i], sqlFindings[j]
+		if left.Execution.Range.StartByte != right.Execution.Range.StartByte {
+			return left.Execution.Range.StartByte < right.Execution.Range.StartByte
+		}
+		if left.RiskKind != right.RiskKind {
+			return left.RiskKind < right.RiskKind
+		}
+		return sourceKey(left.Source) < sourceKey(right.Source)
+	})
 	sort.SliceStable(commandFindings, func(i, j int) bool {
 		left, right := commandFindings[i], commandFindings[j]
 		if left.Execution.Range.StartByte != right.Execution.Range.StartByte {
@@ -375,7 +414,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 			states[id][name] = variableState(variable)
 		}
 	}
-	return Result{Findings: findings, CommandFindings: commandFindings, States: states}, stats, nil
+	return Result{Findings: findings, CommandFindings: commandFindings, SQLFindings: sqlFindings, States: states}, stats, nil
 }
 
 func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collectFindings bool) (abstractState, error) {
@@ -402,13 +441,18 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 		assigned = appendPath(assigned, PathStep{Kind: "assignment", Label: statement.Text, Range: statement.Range, StatementID: statement.ID})
 		state.vars[target] = assigned
 	}
+	if !recovered {
+		a.applySQLAssignment(statement, state)
+	}
 	for _, call := range a.callsByStatement[statement.ID] {
 		if err := a.contextErr(); err != nil {
 			return abstractState{}, err
 		}
 		a.applySourceWrite(call, state)
+		a.applySQLCallState(call, state)
 		if collectFindings {
 			a.inspectSink(call, state)
+			a.inspectSQL(call, state)
 			a.inspectCommand(call, state)
 		}
 	}
@@ -416,6 +460,507 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 		return abstractState{}, err
 	}
 	return state, nil
+}
+
+// applySQLAssignment records the small amount of object/property state needed
+// to connect a CommandText assignment with a later Command.Execute call. It
+// deliberately does not attempt whole-project aliasing or interprocedural
+// propagation; those remain outside the procedure-local data-flow contract.
+func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, state abstractState) {
+	if state.sqlObjects == nil {
+		state.sqlObjects = map[string]sqlObjectState{}
+	}
+	if statement.Target != nil && statement.Target.Kind == procedureir.ExpressionMember {
+		receiver, member := sqlMemberTarget(statement.Target.Text)
+		if strings.EqualFold(member, "commandtext") && receiver != "" {
+			object := state.sqlObjects[receiver]
+			if object.kind == sqlObjectUnknown {
+				object.kind = a.sqlObjectKind(receiver)
+			}
+			if object.identity == "" {
+				object.identity = receiver
+			}
+			if statement.Value != nil {
+				object.commandText = a.evalExpression(*statement.Value, state)
+			}
+			state.sqlObjects[receiver] = object
+			propagateSQLAlias(state, receiver, object)
+		}
+		return
+	}
+	target := assignmentTarget(statement)
+	if target == "" {
+		return
+	}
+	rhs := ""
+	if statement.Value != nil {
+		rhs = statement.Value.Text
+	}
+	if rhs == "" {
+		if _, after, ok := strings.Cut(statement.Text, "="); ok {
+			rhs = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(after), "Set "))
+		}
+	}
+	if kind := sqlObjectKindFromText(rhs); kind != sqlObjectUnknown {
+		state.sqlObjects[target] = sqlObjectState{kind: kind, identity: target, parameters: map[string]value{}}
+		return
+	}
+	if source := canonicalName(rhs); source != "" {
+		if object, ok := state.sqlObjects[source]; ok {
+			if object.identity == "" {
+				object.identity = source
+			}
+			state.sqlObjects[target] = cloneSQLObjectState(object)
+			return
+		}
+	}
+	if kind := a.sqlObjectKind(target); kind != sqlObjectUnknown {
+		object := state.sqlObjects[target]
+		object.kind = kind
+		if object.identity == "" {
+			object.identity = target
+		}
+		if object.parameters == nil {
+			object.parameters = map[string]value{}
+		}
+		state.sqlObjects[target] = object
+	}
+}
+
+func (a *procedureAnalyzer) applySQLCallState(call procedureir.CallSite, state abstractState) {
+	if state.sqlObjects == nil {
+		state.sqlObjects = map[string]sqlObjectState{}
+	}
+	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
+	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
+	rawReceiver := strings.TrimSpace(receiverText(call))
+	receiver := canonicalName(rawReceiver)
+	if strings.HasSuffix(strings.ToLower(rawReceiver), ".parameters") {
+		receiver = canonicalName(rawReceiver[:len(rawReceiver)-len(".parameters")])
+	}
+	if strings.EqualFold(call.Callee.BaseName, "CallByName") {
+		if target, name, invocation, valueID, ok := callByNameSQLParts(call, a.expressions); ok {
+			switch strings.ToLower(name) {
+			case "commandtext":
+				if strings.EqualFold(invocation, "vblet") {
+					object := state.sqlObjects[target]
+					if object.kind == sqlObjectUnknown {
+						object.kind = a.sqlObjectKind(target)
+					}
+					if object.identity == "" {
+						object.identity = target
+					}
+					if expression, exists := a.expressions[valueID]; exists {
+						object.commandText = a.evalExpression(expression, state)
+					}
+					state.sqlObjects[target] = object
+					propagateSQLAlias(state, target, object)
+				}
+			case "append", "createparameter":
+				markSQLParameterized(state, target)
+			}
+		}
+		return
+	}
+	if member == "append" && strings.Contains(full, ".parameters") {
+		markSQLParameterized(state, receiver)
+	}
+	if member == "createparameter" || strings.HasSuffix(full, ".createparameter") {
+		markSQLParameterized(state, receiver)
+	}
+}
+
+func propagateSQLAlias(state abstractState, name string, object sqlObjectState) {
+	for aliasName, alias := range state.sqlObjects {
+		if aliasName == name || alias.identity != object.identity {
+			continue
+		}
+		alias.commandText = cloneValue(object.commandText)
+		alias.parameterized = object.parameterized
+		state.sqlObjects[aliasName] = alias
+	}
+}
+
+func markSQLParameterized(state abstractState, command string) {
+	object, ok := state.sqlObjects[command]
+	if !ok {
+		return
+	}
+	object.parameterized = true
+	if object.identity == "" {
+		object.identity = command
+	}
+	state.sqlObjects[command] = object
+	for aliasName, alias := range state.sqlObjects {
+		if aliasName == command || alias.identity != object.identity {
+			continue
+		}
+		alias.parameterized = true
+		state.sqlObjects[aliasName] = alias
+	}
+}
+
+func callByNameSQLParts(call procedureir.CallSite, expressions map[int]procedureir.Expression) (target, member, invocation string, valueID int, ok bool) {
+	ids := call.Arguments.ExpressionIDs
+	if len(ids) < 3 {
+		return "", "", "", 0, false
+	}
+	first, firstOK := expressions[ids[0]]
+	second, secondOK := expressions[ids[1]]
+	third, thirdOK := expressions[ids[2]]
+	if !firstOK || !secondOK || !thirdOK || first.Kind != procedureir.ExpressionIdentifier || second.Kind != procedureir.ExpressionLiteral {
+		return "", "", "", 0, false
+	}
+	target = canonicalName(first.Text)
+	member = strings.Trim(strings.TrimSpace(second.Text), "\"")
+	invocation = strings.Trim(strings.TrimSpace(third.Text), "\"")
+	if len(ids) >= 4 {
+		valueID = ids[3]
+	}
+	return target, member, invocation, valueID, true
+}
+
+func (a *procedureAnalyzer) inspectSQL(call procedureir.CallSite, state abstractState) {
+	api, argument, receiver, commandExecute, ok := a.sqlCallTarget(call, state)
+	if !ok {
+		return
+	}
+	var input value
+	var expressionText string
+	parameterized := false
+	if commandExecute {
+		object, exists := state.sqlObjects[receiver]
+		if !exists {
+			return
+		}
+		input = object.commandText
+		parameterized = object.parameterized
+		if len(input.origins) == 0 {
+			return
+		}
+		for _, origin := range input.origins {
+			for index := len(origin.path) - 1; index >= 0; index-- {
+				if origin.path[index].Kind == "concatenation" {
+					expressionText = origin.path[index].Label
+					break
+				}
+			}
+			if expressionText != "" {
+				break
+			}
+		}
+	} else {
+		args := a.callArguments(call, state)
+		if argument < 0 || argument >= len(args) {
+			return
+		}
+		input = args[argument]
+		if argument < len(call.Arguments.ExpressionIDs) {
+			if expression, exists := a.expressions[call.Arguments.ExpressionIDs[argument]]; exists {
+				expressionText = expression.Text
+			}
+		}
+	}
+	if len(input.origins) == 0 {
+		return
+	}
+	for _, origin := range input.origins {
+		if origin.state != StateTainted && origin.state != StateUnknown {
+			continue
+		}
+		role := classifySQLRole(expressionText, origin.path, origin.source.Label)
+		risk := classifySQLRisk(a, origin, role, expressionText)
+		finding := SQLFinding{
+			State:         origin.state,
+			Source:        origin.source,
+			Execution:     SQLExecution{API: api, Role: role, Range: call.Range, Argument: argument},
+			RiskKind:      risk,
+			OriginState:   origin.state,
+			Parameterized: parameterized,
+			Path:          append([]PathStep(nil), origin.path...),
+			Message:       fmt.Sprintf("Potential SQL construction risk: %s reaches %s.", origin.source.Label, api),
+			Reason:        "Conservative analysis found external or unknown data in SQL text; this is not proof of a SQL-injection exploit.",
+		}
+		findingKey := fmt.Sprintf("%d:%s:%s:%s", call.Range.StartByte, risk, sourceKey(origin.source), api)
+		if previous, exists := a.sqlFindings[findingKey]; exists {
+			if betterPath(finding.Path, previous.Path) {
+				previous.Path = finding.Path
+			}
+			a.sqlFindings[findingKey] = previous
+		} else {
+			a.sqlFindings[findingKey] = finding
+		}
+	}
+}
+
+func (a *procedureAnalyzer) sqlCallTarget(call procedureir.CallSite, state abstractState) (api string, argument int, receiver string, commandExecute bool, ok bool) {
+	base := strings.ToLower(strings.TrimSpace(call.Callee.BaseName))
+	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
+	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
+	receiver = canonicalName(receiverText(call))
+	if strings.EqualFold(call.Callee.BaseName, "CallByName") {
+		if target, name, invocation, valueID, partsOK := callByNameSQLParts(call, a.expressions); partsOK {
+			receiver = target
+			switch strings.ToLower(name) {
+			case "execute":
+				if strings.EqualFold(invocation, "vbmethod") {
+					switch sqlObjectKindForState(a, receiver, state) {
+					case sqlObjectCommand:
+						return "ADODB.Command.Execute", -1, receiver, true, true
+					case sqlObjectConnection:
+						if valueID != 0 {
+							return "ADODB.Connection.Execute", 3, receiver, false, true
+						}
+					case sqlObjectQueryDef:
+						if valueID != 0 {
+							return "Database.Execute", 3, receiver, false, true
+						}
+					}
+				}
+			case "open":
+				if strings.EqualFold(invocation, "vbmethod") && sqlObjectKindForState(a, receiver, state) == sqlObjectRecordset {
+					if valueID == 0 {
+						return "", -1, receiver, false, false
+					}
+					return "ADODB.Recordset.Open", 3, receiver, false, true
+				}
+			case "runsql":
+				if strings.EqualFold(invocation, "vbmethod") && (receiver == "docmd" || receiver == "") {
+					if valueID == 0 {
+						return "", -1, receiver, false, false
+					}
+					return "DoCmd.RunSQL", 3, receiver, false, true
+				}
+			case "openrecordset":
+				if strings.EqualFold(invocation, "vbmethod") && (receiver == "currentdb" || sqlObjectKindForState(a, receiver, state) == sqlObjectQueryDef) {
+					if valueID == 0 {
+						return "", -1, receiver, false, false
+					}
+					return "DAO.OpenRecordset", 3, receiver, false, true
+				}
+			}
+		}
+		return "", -1, receiver, false, false
+	}
+	if (member == "execute" || base == "execute" || member == "executenonquery" || base == "executenonquery") && sqlObjectKindForState(a, receiver, state) == sqlObjectCommand {
+		return "ADODB.Command.Execute", -1, receiver, true, true
+	}
+	if member == "open" && sqlObjectKindForState(a, receiver, state) == sqlObjectRecordset {
+		return "ADODB.Recordset.Open", 0, receiver, false, true
+	}
+	if member == "runsql" || base == "runsql" {
+		if strings.Contains(full, "docmd") || receiver == "docmd" || receiver == "" {
+			return "DoCmd.RunSQL", 0, receiver, false, true
+		}
+	}
+	if member == "openrecordset" || base == "openrecordset" {
+		if receiver == "currentdb" || sqlObjectKindForState(a, receiver, state) == sqlObjectQueryDef {
+			return "DAO.OpenRecordset", 0, receiver, false, true
+		}
+	}
+	if member == "execute" || base == "execute" || member == "executesql" || base == "executesql" {
+		kind := sqlObjectKindForState(a, receiver, state)
+		if receiver == "currentdb" || kind == sqlObjectQueryDef || kind == sqlObjectCommand {
+			return "Database.Execute", 0, receiver, false, true
+		}
+		if kind == sqlObjectConnection {
+			return "ADODB.Connection.Execute", 0, receiver, false, true
+		}
+	}
+	return "", -1, receiver, false, false
+}
+
+func (a *procedureAnalyzer) sqlObjectKind(name string) sqlObjectKind {
+	name = canonicalName(name)
+	if name == "currentdb" {
+		return sqlObjectQueryDef
+	}
+	for _, declaration := range a.procedure.Declarations {
+		if canonicalName(declaration.Name) != name {
+			continue
+		}
+		typ := strings.ToLower(strings.TrimSpace(declaration.Type))
+		switch {
+		case strings.Contains(typ, "command"):
+			return sqlObjectCommand
+		case strings.Contains(typ, "recordset"):
+			return sqlObjectRecordset
+		case strings.Contains(typ, "connection"):
+			return sqlObjectConnection
+		case strings.Contains(typ, "database"), strings.Contains(typ, "querydef"):
+			return sqlObjectQueryDef
+		}
+	}
+	return sqlObjectUnknown
+}
+
+func sqlObjectKindForState(a *procedureAnalyzer, name string, state abstractState) sqlObjectKind {
+	if object, ok := state.sqlObjects[canonicalName(name)]; ok {
+		if object.kind != sqlObjectUnknown {
+			return object.kind
+		}
+	}
+	return a.sqlObjectKind(name)
+}
+
+func sqlObjectKindFromText(text string) sqlObjectKind {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case strings.Contains(lower, "adodb.command"), strings.Contains(lower, "createcommand"):
+		return sqlObjectCommand
+	case strings.Contains(lower, "adodb.recordset"), strings.Contains(lower, "openrecordset"):
+		return sqlObjectRecordset
+	case strings.Contains(lower, "querydef"):
+		return sqlObjectQueryDef
+	case strings.Contains(lower, "adodb.connection"), strings.Contains(lower, "currentdb"), strings.Contains(lower, "database"):
+		if strings.Contains(lower, "adodb.connection") {
+			return sqlObjectConnection
+		}
+		return sqlObjectQueryDef
+	default:
+		return sqlObjectUnknown
+	}
+}
+
+func sqlMemberTarget(text string) (string, string) {
+	text = strings.TrimSpace(text)
+	index := strings.LastIndex(text, ".")
+	if index < 0 {
+		return "", ""
+	}
+	return canonicalName(text[:index]), canonicalName(text[index+1:])
+}
+
+func classifySQLRole(text string, path []PathStep, sourceLabel string) SQLInputRole {
+	lowerText := strings.ToLower(strings.TrimSpace(text))
+	lowerSource := strings.ToLower(strings.TrimSpace(sourceLabel))
+	if lowerSource != "" {
+		for index := len(path) - 1; index >= 0; index-- {
+			if path[index].Kind != "concatenation" {
+				continue
+			}
+			segment := strings.ToLower(path[index].Label)
+			labels := []string{lowerSource}
+			for sourceIndex := index - 1; sourceIndex >= 0; sourceIndex-- {
+				if path[sourceIndex].Kind == "source" {
+					label := strings.ToLower(strings.TrimSpace(path[sourceIndex].Label))
+					if label != "" && label != lowerSource {
+						labels = append(labels, label)
+					}
+					break
+				}
+				if path[sourceIndex].Kind == "assignment" {
+					if equals := strings.Index(path[sourceIndex].Label, "="); equals > 0 {
+						label := strings.ToLower(strings.TrimSpace(path[sourceIndex].Label[:equals]))
+						if label != "" && label != lowerSource {
+							labels = append(labels, label)
+						}
+					}
+				}
+			}
+			// Prefer the last occurrence: short source names such as `id` or
+			// `name` often also appear in constant SQL column names before the
+			// concatenated variable token.
+			position := -1
+			for _, label := range labels {
+				if candidate := strings.LastIndex(segment, label); candidate > position {
+					position = candidate
+				}
+			}
+			if position < 0 {
+				continue
+			}
+			prefix := strings.TrimRight(strings.TrimSpace(segment[:position]), "&'\" ")
+			if strings.Contains(prefix, " like ") {
+				return SQLInputRoleLikePattern
+			}
+			for _, marker := range []string{" from ", " join ", " into ", " table ", " order by ", " group by ", " select ", " update ", " set "} {
+				if strings.HasSuffix(prefix, strings.TrimSpace(marker)) {
+					return SQLInputRoleIdentifier
+				}
+			}
+			return SQLInputRoleValue
+		}
+	}
+	if strings.Contains(lowerText, " like ") && (strings.Contains(lowerText, "%") || strings.Contains(lowerText, "*")) {
+		return SQLInputRoleLikePattern
+	}
+	if lowerText == "" {
+		return SQLInputRoleUnknown
+	}
+	return SQLInputRoleValue
+}
+
+func classifySQLRisk(a *procedureAnalyzer, origin provenance, role SQLInputRole, text string) SQLRiskKind {
+	lower := strings.ToLower(text)
+	for _, step := range origin.path {
+		if step.Kind == "transformation" || step.Kind == "assignment" || step.Kind == "concatenation" {
+			lower += " " + strings.ToLower(step.Label)
+		}
+	}
+	if role == SQLInputRoleIdentifier {
+		return SQLRiskDynamicIdentifier
+	}
+	if role == SQLInputRoleLikePattern || (strings.Contains(lower, "like") && (strings.Contains(lower, "%") || strings.Contains(lower, "*"))) {
+		return SQLRiskWildcardLikeInput
+	}
+	if sqlLocaleSensitive(a, origin, lower) {
+		return SQLRiskLocaleSensitiveValue
+	}
+	if strings.Contains(lower, "'") || strings.Contains(lower, "#") || strings.Contains(lower, "replace(") {
+		return SQLRiskManualQuoting
+	}
+	if origin.state == StateUnknown {
+		return SQLRiskUnknownOrigin
+	}
+	return SQLRiskExternalValueConcatenation
+}
+
+func sqlLocaleSensitive(a *procedureAnalyzer, origin provenance, text string) bool {
+	if strings.Contains(text, "format(") || strings.Contains(text, "format$(") || strings.Contains(text, "cstr(") || strings.Contains(text, "cdbl(") || strings.Contains(text, "cdate(") {
+		return true
+	}
+	label := canonicalName(origin.source.Label)
+	for _, parameter := range a.procedure.Symbol.Parameters {
+		if canonicalName(parameter.Name) != label {
+			continue
+		}
+		return localeSensitiveTypeName(parameter.Type)
+	}
+	for _, step := range origin.path {
+		if step.Kind != "assignment" {
+			continue
+		}
+		target := step.Label
+		if equals := strings.Index(target, "="); equals >= 0 {
+			target = target[:equals]
+		}
+		target = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "Set "))
+		assignmentLabel := canonicalName(target)
+		for _, declaration := range a.procedure.Declarations {
+			if canonicalName(declaration.Name) != assignmentLabel {
+				continue
+			}
+			return localeSensitiveTypeName(declaration.Type)
+		}
+	}
+	for _, declaration := range a.procedure.Declarations {
+		if canonicalName(declaration.Name) != label {
+			continue
+		}
+		return localeSensitiveTypeName(declaration.Type)
+	}
+	return false
+}
+
+func localeSensitiveTypeName(typ string) bool {
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	for _, marker := range []string{"date", "double", "single", "currency", "decimal"} {
+		if strings.Contains(typ, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state abstractState) {
@@ -601,7 +1146,7 @@ func (a *procedureAnalyzer) callArguments(call procedureir.CallSite, state abstr
 }
 
 func (a *procedureAnalyzer) inspectSink(call procedureir.CallSite, state abstractState) {
-	targets := sinkTargets(call, a.knownShellObjects)
+	targets := a.sinkTargets(call, state)
 	if len(targets) == 0 {
 		return
 	}
@@ -986,7 +1531,8 @@ type sinkTarget struct {
 	argument int
 }
 
-func sinkTargets(call procedureir.CallSite, knownShellObjects map[string]string) []sinkTarget {
+func (a *procedureAnalyzer) sinkTargets(call procedureir.CallSite, state abstractState) []sinkTarget {
+	knownShellObjects := a.knownShellObjects
 	base := strings.ToLower(strings.TrimSpace(call.Callee.BaseName))
 	member := strings.ToLower(strings.TrimSpace(call.Callee.Member))
 	full := strings.ToLower(strings.TrimSpace(call.Callee.Text))
@@ -1009,7 +1555,10 @@ func sinkTargets(call procedureir.CallSite, knownShellObjects map[string]string)
 		out = append(out, sinkTarget{SinkShellExecute, "ShellExecute", shellExecutePrimaryArgument(call, knownShellObjects)})
 	}
 	if member == "execute" || base == "execute" || member == "executenonquery" || base == "executenonquery" || member == "openrecordset" || base == "openrecordset" || member == "runsql" || base == "runsql" || member == "executesql" || base == "executesql" {
-		if looksDatabaseReceiver(receiver, full) {
+		// ADODB.Command.Execute receives recordsAffected/parameters/options;
+		// its SQL text is stored in CommandText and must not be inferred from
+		// the first output argument by the generic VBA224 fallback.
+		if looksDatabaseReceiver(receiver, full) && !a.looksADODBCommandReceiver(receiver, full, state) {
 			out = append(out, sinkTarget{SinkSQLExecution, "SQL execution", 0})
 		}
 	}
@@ -1145,6 +1694,13 @@ func looksDatabaseReceiver(receiver, full string) bool {
 		}
 	}
 	return false
+}
+
+func (a *procedureAnalyzer) looksADODBCommandReceiver(receiver, full string, state abstractState) bool {
+	if sqlObjectKindFromText(receiver) == sqlObjectCommand || sqlObjectKindFromText(full) == sqlObjectCommand {
+		return true
+	}
+	return sqlObjectKindForState(a, receiver, state) == sqlObjectCommand
 }
 
 func containsIdentifierToken(text, token string) bool {
@@ -1546,6 +2102,30 @@ func joinState(a, b abstractState, initialized bool) (abstractState, bool) {
 			changed = true
 		}
 	}
+	sqlKeys := map[string]bool{}
+	for key := range a.sqlObjects {
+		sqlKeys[key] = true
+	}
+	for key := range b.sqlObjects {
+		sqlKeys[key] = true
+	}
+	for key := range sqlKeys {
+		left, leftOK := a.sqlObjects[key]
+		right, rightOK := b.sqlObjects[key]
+		if !leftOK {
+			result.sqlObjects[key] = cloneSQLObjectState(right)
+			changed = true
+			continue
+		}
+		if !rightOK {
+			continue
+		}
+		merged := joinSQLObjectState(left, right)
+		if !sameSQLObjectState(left, merged) {
+			result.sqlObjects[key] = merged
+			changed = true
+		}
+	}
 	return result, changed
 }
 
@@ -1554,11 +2134,59 @@ func unknownStandaloneValue() value {
 }
 
 func cloneState(state abstractState) abstractState {
-	result := abstractState{vars: map[string]value{}}
+	result := abstractState{vars: map[string]value{}, sqlObjects: map[string]sqlObjectState{}}
 	for key, variable := range state.vars {
 		result.vars[key] = cloneValue(variable)
 	}
+	for key, object := range state.sqlObjects {
+		result.sqlObjects[key] = cloneSQLObjectState(object)
+	}
 	return result
+}
+
+func cloneSQLObjectState(input sqlObjectState) sqlObjectState {
+	result := input
+	result.commandText = cloneValue(input.commandText)
+	result.parameters = map[string]value{}
+	for key, parameter := range input.parameters {
+		result.parameters[key] = cloneValue(parameter)
+	}
+	return result
+}
+
+func joinSQLObjectState(a, b sqlObjectState) sqlObjectState {
+	result := cloneSQLObjectState(a)
+	if result.identity == "" || b.identity == "" || result.identity != b.identity {
+		result.identity = ""
+	}
+	if result.kind == sqlObjectUnknown || b.kind == sqlObjectUnknown || result.kind != b.kind {
+		result.kind = sqlObjectUnknown
+	}
+	result.commandText, _ = joinValue(result.commandText, b.commandText, true)
+	result.parameterized = a.parameterized && b.parameterized
+	if result.parameters == nil {
+		result.parameters = map[string]value{}
+	}
+	for key, parameter := range b.parameters {
+		if previous, ok := result.parameters[key]; ok {
+			result.parameters[key], _ = joinValue(previous, parameter, true)
+		} else {
+			result.parameters[key] = cloneValue(parameter)
+		}
+	}
+	return result
+}
+
+func sameSQLObjectState(a, b sqlObjectState) bool {
+	if a.kind != b.kind || a.identity != b.identity || a.parameterized != b.parameterized || !isSameValue(a.commandText, b.commandText) || len(a.parameters) != len(b.parameters) {
+		return false
+	}
+	for key, value := range a.parameters {
+		if other, ok := b.parameters[key]; !ok || !isSameValue(value, other) {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneValue(input value) value {

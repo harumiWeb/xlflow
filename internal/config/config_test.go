@@ -76,6 +76,45 @@ func TestLoopInvariantExcelObjectResolutionDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestUnsafeSQLConstructionDefaultsEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA239"); !ok || !enabled || !cfg.Analyze.DetectUnsafeSQLConstruction {
+		t.Fatalf("VBA239 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectUnsafeSQLConstruction)
+	}
+}
+
+func TestLoadUnsafeSQLConstructionCompatibilityKeyAndDisabledRule(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_unsafe_sql_construction = true
+disabled_rules = ["VBA239"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA239"); !ok || enabled || cfg.Analyze.DetectUnsafeSQLConstruction {
+		t.Fatalf("VBA239 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectUnsafeSQLConstruction)
+	}
+	if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", "VBA239") {
+		t.Fatalf("missing compatibility-key deprecation warning for VBA239: %+v", cfg.Warnings)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA239") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA239") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA239, got %+v", cfg.Warnings)
+	}
+}
+
 func TestLoadDictionaryCollectionMisuseCompatibilityKeysAndDisabledRules(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

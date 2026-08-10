@@ -45,3 +45,13 @@ type CommandExecutionContext struct {
 	CommandRole string `json:"command_role,omitempty"`
 	OriginState string `json:"origin_state,omitempty"`
 }
+
+// SQLExecutionContext describes the SQL API, input role, and conservative risk
+// classification attached to a VBA239 finding.
+type SQLExecutionContext struct {
+	RiskKind      string `json:"risk_kind"`
+	API           string `json:"api,omitempty"`
+	InputRole     string `json:"input_role,omitempty"`
+	OriginState   string `json:"origin_state,omitempty"`
+	Parameterized bool   `json:"parameterized"`
+}

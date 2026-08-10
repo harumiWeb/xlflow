@@ -15,6 +15,7 @@ import (
 func vba224TestConfig() config.Config {
 	cfg := config.Default()
 	cfg.Analyze.DetectUnsafeCommandConstruction = false
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
 	return cfg
 }
 
