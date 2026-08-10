@@ -19,6 +19,7 @@ type vba212Context struct {
 	projectEffects effects.ProjectSummary
 	userDefined    map[string]bool
 	getterEffects  map[string]bool
+	declarations   map[int]map[string]sourceDeclaration
 }
 
 type vba212Guard struct {
@@ -56,6 +57,9 @@ func (a Analyzer) vba212ScanWithContext(ctx context.Context, file parsedFile, pr
 	}
 	procedures = append([]sourceProcedure(nil), procedures...)
 	sortSourceProcedures(procedures)
+	if scanCtx.declarations == nil {
+		scanCtx.declarations = vba212DeclarationIndexes(file.Lines, procedures)
+	}
 	summaries := scanCtx.projectEffects.All()
 	if len(summaries) == 0 && file.Root != nil && vba212SourceMayHaveGetter(file) {
 		// Standalone/realtime callers do not have a project summary.  Building a
@@ -64,27 +68,21 @@ func (a Analyzer) vba212ScanWithContext(ctx context.Context, file parsedFile, pr
 		scanCtx.projectEffects = buildProjectEffects([]parsedFile{file})
 		summaries = scanCtx.projectEffects.All()
 	}
-	if scanCtx.userDefined == nil {
-		scanCtx.userDefined = map[string]bool{}
-		for _, summary := range summaries {
-			name := strings.ToLower(summary.Identity.Name)
-			if name == "iif" || name == "choose" || name == "switch" {
-				scanCtx.userDefined[name] = true
-			}
+	userDefined := make(map[string]bool, len(scanCtx.userDefined)+3)
+	for name, defined := range scanCtx.userDefined {
+		userDefined[name] = defined
+	}
+	scanCtx.userDefined = userDefined
+	for _, summary := range summaries {
+		name := strings.ToLower(summary.Identity.Name)
+		if name == "iif" || name == "choose" || name == "switch" {
+			scanCtx.userDefined[name] = true
 		}
 	}
 	for _, procedure := range file.IR.Procedures {
 		name := strings.ToLower(procedure.Symbol.Name)
 		if name == "iif" || name == "choose" || name == "switch" {
 			scanCtx.userDefined[name] = true
-		}
-	}
-	for _, line := range file.Lines {
-		lower := strings.ToLower(strings.TrimSpace(line))
-		for _, name := range []string{"iif", "choose", "switch"} {
-			if strings.Contains(lower, "function "+name) || strings.Contains(lower, "sub "+name) || strings.Contains(lower, "property get "+name) {
-				scanCtx.userDefined[name] = true
-			}
 		}
 	}
 	if scanCtx.getterEffects == nil {
@@ -111,7 +109,7 @@ func (a Analyzer) vba212ScanWithContext(ctx context.Context, file parsedFile, pr
 		}
 	}
 	seen := map[string]bool{}
-	factCache := map[int]vba212OperandFacts{}
+	factCache := map[vba212NodeKey]vba212OperandFacts{}
 	var findings []Finding
 	if stats != nil {
 		stats.RootTraversals++
@@ -171,6 +169,30 @@ func sortSourceProcedures(procedures []sourceProcedure) {
 	}
 }
 
+func vba212DeclarationIndexes(lines []string, procedures []sourceProcedure) map[int]map[string]sourceDeclaration {
+	moduleDecls := moduleDeclarations(lines, procedures)
+	indexes := make(map[int]map[string]sourceDeclaration, len(procedures))
+	for _, proc := range procedures {
+		decls := make(map[string]sourceDeclaration, len(moduleDecls)+len(proc.Declarations)+len(proc.Params))
+		for name, decl := range moduleDecls {
+			decls[name] = decl
+		}
+		for _, decl := range proc.Declarations {
+			decls[strings.ToLower(decl.Name)] = sourceDeclaration{Name: decl.Name, Type: decl.Type}
+		}
+		for _, param := range proc.Params {
+			decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Parameter: true}
+		}
+		indexes[proc.StartByte] = decls
+	}
+	return indexes
+}
+
+type vba212NodeKey struct {
+	start uint
+	end   uint
+}
+
 func vba212ContainerForNode(node *tree_sitter.Node, source []byte, userDefined map[string]bool) (vba212Container, bool) {
 	if node == nil {
 		return vba212Container{}, false
@@ -180,7 +202,7 @@ func vba212ContainerForNode(node *tree_sitter.Node, source []byte, userDefined m
 		if node.ChildCount() < 2 {
 			return vba212Container{}, false
 		}
-		left, right := node.Child(0), node.Child(1)
+		left, right := node.NamedChild(0), node.NamedChild(1)
 		if left == nil || right == nil || right.StartByte() < left.EndByte() {
 			return vba212Container{}, false
 		}
@@ -229,6 +251,9 @@ func vba212OperatorFromGap(gap string) string {
 			for i < len(gap) && gap[i] != '\n' {
 				i++
 			}
+			if i < len(gap) {
+				i--
+			}
 			continue
 		}
 		if !inString {
@@ -245,10 +270,10 @@ func vba212OperatorFromGap(gap string) string {
 	return ""
 }
 
-func (a Analyzer) vba212FindingsForContainer(file parsedFile, proc sourceProcedure, container vba212Container, scanCtx vba212Context, seen map[string]bool, factCache map[int]vba212OperandFacts) []Finding {
+func (a Analyzer) vba212FindingsForContainer(file parsedFile, proc sourceProcedure, container vba212Container, scanCtx vba212Context, seen map[string]bool, factCache map[vba212NodeKey]vba212OperandFacts) []Finding {
 	facts := make([]vba212OperandFacts, len(container.operands))
 	for i, operand := range container.operands {
-		key := int(operand.StartByte())
+		key := vba212NodeKey{start: operand.StartByte(), end: operand.EndByte()}
 		if cached, ok := factCache[key]; ok {
 			facts[i] = cached
 		} else {
@@ -313,9 +338,9 @@ func (a Analyzer) vba212Finding(file parsedFile, proc sourceProcedure, container
 		suggestion = "Read " + unsafe.text + " once into a local variable before the Boolean expression, then use nested If statements."
 	}
 	finding := a.simpleFinding(file, proc, r.StartLine, "VBA212", "warning", message, reason, suggestion)
-	finding.Column = vba212UTF16Column(file.Source, r.StartLine, r.StartColumn)
+	finding.Column = vba212UTF16Column(file.Lines, r.StartLine, r.StartColumn)
 	finding.EndLine = r.EndLine
-	finding.EndColumn = vba212UTF16Column(file.Source, r.EndLine, r.EndColumn)
+	finding.EndColumn = vba212UTF16Column(file.Lines, r.EndLine, r.EndColumn)
 	return finding
 }
 
@@ -355,7 +380,11 @@ func vba212Facts(node *tree_sitter.Node, source []byte, file parsedFile, proc so
 			// Only report the outermost member in a chain; it gives the user the
 			// exact unsafe operand rather than an internal receiver fragment.
 			parent := current.Parent()
-			if parent == nil || parent.Kind() != "qualified_member_expression" || parent.ChildByFieldName("receiver") == nil || parent.ChildByFieldName("receiver").StartByte() != current.StartByte() {
+			var parentReceiver *tree_sitter.Node
+			if parent != nil && parent.Kind() == "qualified_member_expression" {
+				parentReceiver = parent.ChildByFieldName("receiver")
+			}
+			if parentReceiver == nil || parentReceiver.StartByte() != current.StartByte() {
 				if path := vba212AccessPath(current, source); path != "" {
 					getter := vba212ResolvedGetter(current, source, file, proc, scanCtx)
 					facts.unsafe = append(facts.unsafe, vba212Unsafe{path: path, text: strings.TrimSpace(current.Utf8Text(source)), node: current, getter: getter})
@@ -470,7 +499,7 @@ func vba212ResolvedGetter(node *tree_sitter.Node, source []byte, file parsedFile
 	if member == nil || receiver == nil {
 		return false
 	}
-	typ := vba212ReceiverType(receiver, source, file, proc)
+	typ := vba212ReceiverType(receiver, source, file, proc, scanCtx.declarations)
 	if typ == "" {
 		return false
 	}
@@ -478,7 +507,7 @@ func vba212ResolvedGetter(node *tree_sitter.Node, source []byte, file parsedFile
 	return scanCtx.getterEffects[strings.ToLower(typ)+"\x00"+memberName]
 }
 
-func vba212ReceiverType(receiver *tree_sitter.Node, source []byte, file parsedFile, proc sourceProcedure) string {
+func vba212ReceiverType(receiver *tree_sitter.Node, source []byte, file parsedFile, proc sourceProcedure, declarationIndexes map[int]map[string]sourceDeclaration) string {
 	path := vba212AccessPath(receiver, source)
 	if path == "" {
 		return ""
@@ -493,24 +522,17 @@ func vba212ReceiverType(receiver *tree_sitter.Node, source []byte, file parsedFi
 	if root == "me" {
 		return file.Module
 	}
-	decls := moduleDeclarations(file.Lines, []sourceProcedure{proc})
-	for _, decl := range proc.Declarations {
-		decls[strings.ToLower(decl.Name)] = sourceDeclaration{Name: decl.Name, Type: decl.Type}
-	}
-	for _, param := range proc.Params {
-		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Parameter: true}
-	}
+	decls := declarationIndexes[proc.StartByte]
 	if decl, ok := decls[strings.ToLower(root)]; ok {
 		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(decl.Type), "New "))
 	}
 	return ""
 }
 
-func vba212UTF16Column(source []byte, line, oneBasedByteColumn int) int {
+func vba212UTF16Column(lines []string, line, oneBasedByteColumn int) int {
 	if line < 1 || oneBasedByteColumn < 1 {
 		return 0
 	}
-	lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
 	if line > len(lines) {
 		return 0
 	}

@@ -4782,6 +4782,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA212BuiltinNamesIgnoreCommentsStringsAndLongerDeclarations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+' Function IIfSafe should not shadow the builtin IIf.
+Public Function IIfSafe(ByVal value As Variant) As Variant
+  IIfSafe = value
+End Function
+Public Sub Run()
+  Dim obj As Object
+  Dim text As String
+  text = "Function IIf is only text"
+  If IIf(obj Is Nothing, True, obj.Count) Then Exit Sub
+End Sub
+`)
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA212")
+	if len(got) != 1 || !containsAll(got[0].Message, "obj", "obj.Count") || !containsAll(got[0].Suggestion, "IIf", "If/Else") {
+		t.Fatalf("builtin IIf should not be shadowed by comments, strings, or IIfSafe: %+v", got)
+	}
+}
+
 func TestRealtimeVBA212ResolvesOnlySameDocumentGetterEffects(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
