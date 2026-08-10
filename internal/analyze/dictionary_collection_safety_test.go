@@ -82,6 +82,80 @@ End Sub
 	}
 }
 
+func TestVBA207KeepsBranchJoinedContentUnknown(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal clearValues As Boolean)
+  Dim dict As Scripting.Dictionary
+  Set dict = New Scripting.Dictionary
+  dict.Add "key", 1
+  If clearValues Then
+    dict.RemoveAll
+  End If
+  Debug.Print dict("key")
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectDictionaryCollectionGuard = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA207")
+	if len(got) != 1 || got[0].Line != 9 || got[0].Severity != "information" {
+		t.Fatalf("branch-joined VBA207 = %+v, want one information finding", got)
+	}
+}
+
+func TestDictionaryCollectionOverlayPreservesFlowContentFacts(t *testing.T) {
+	t.Parallel()
+	flow := &dcFlowState{
+		Bindings: map[string]string{"dict": "object"},
+		Objects: map[string]dcObjectState{
+			"object": {Kind: dcDictionary, Empty: 0, Keys: map[string]int{"key|": 0}, Normalizations: map[string]string{"key": ""}},
+		},
+		Scalars: map[string]dcKeyExpr{},
+	}
+	linear := &dcFlowState{
+		Bindings: map[string]string{"dict": "object"},
+		Objects: map[string]dcObjectState{
+			"object": {Kind: dcDictionary, Empty: 1, Keys: map[string]int{}, Normalizations: map[string]string{}},
+		},
+		Scalars: map[string]dcKeyExpr{},
+	}
+
+	got := dcOverlayState(flow, linear).Objects["object"]
+	keyState, keyExists := got.Keys["key|"]
+	if got.Empty != 0 || !keyExists || keyState != 0 {
+		t.Fatalf("overlay content facts = %+v, want CFG facts", got)
+	}
+}
+
+func TestVBA207DoesNotInferFactsFromCompoundExistsCondition(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal dict As Scripting.Dictionary, ByVal key As String, ByVal useDefault As Boolean)
+  If dict.Exists(key) Or useDefault Then
+    Debug.Print "selected"
+  Else
+    Debug.Print dict(key)
+  End If
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectDictionaryCollectionGuard = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA207")
+	if len(got) != 1 || got[0].Line != 6 || got[0].Severity != "information" {
+		t.Fatalf("compound Exists VBA207 = %+v, want one information finding", got)
+	}
+}
+
 func TestDictionaryCollectionSafetyAcceptsSafePatterns(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -187,6 +261,30 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA231"); len(got) != 0 {
 		t.Fatalf("untyped Keys helper must remain unknown: %+v", got)
+	}
+}
+
+func TestQualifiedMemberCallDoesNotResolveProjectHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Remove(ByVal values As Collection)
+  values.Remove 1
+End Sub
+
+Public Sub Run(ByVal dict As Scripting.Dictionary, ByVal values As Collection)
+  Dim item As Variant
+  For Each item In values
+    dict.Remove values
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA234"); len(got) != 0 {
+		t.Fatalf("qualified member call resolved project helper: %+v", got)
 	}
 }
 

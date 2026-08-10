@@ -132,11 +132,12 @@ func dcPropagateHelperSummary(proc sourceProcedure, summary *dcHelperSummary, he
 		text := dcStatementSource(statement)
 		if assignment := dcSetAssignment(text); assignment != nil && strings.EqualFold(assignment.target, proc.Name) {
 			if name, args, ok := dcSimpleFunctionCall(assignment.rhs); ok {
-				if callee, found := helpers[strings.ToLower(lastName(name))]; found && summary.Factory == dcUnknown && callee.Factory != dcUnknown {
+				callee, found := helpers[strings.ToLower(lastName(name))]
+				if found && summary.Factory == dcUnknown && callee.Factory != dcUnknown {
 					summary.Factory, summary.FactoryLate = callee.Factory, callee.FactoryLate
 					changed = true
 				}
-				if callee, found := helpers[strings.ToLower(lastName(name))]; found && summary.ExistsObject < 0 && callee.ExistsObject >= 0 && callee.ExistsKey >= 0 && callee.ExistsObject < len(args) && callee.ExistsKey < len(args) {
+				if found && summary.ExistsObject < 0 && callee.ExistsObject >= 0 && callee.ExistsKey >= 0 && callee.ExistsObject < len(args) && callee.ExistsKey < len(args) {
 					objectParam, objectOK := params[strings.ToLower(cleanIdentifier(args[callee.ExistsObject]))]
 					keyParam, keyOK := params[strings.ToLower(cleanIdentifier(args[callee.ExistsKey]))]
 					if objectOK && keyOK {
@@ -228,7 +229,6 @@ func directDictionaryCollectionSummary(file parsedFile, proc sourceProcedure) dc
 						summary.Materializes = true
 					}
 				}
-				_ = args
 			}
 		}
 		if strings.Contains(lower, returnName+" = ") {
@@ -370,13 +370,22 @@ func dcOverlayState(flow, linear *dcFlowState) *dcFlowState {
 	}
 	out := flow.clone()
 	for key, id := range linear.Bindings {
-		out.Bindings[key] = id
+		if _, exists := out.Bindings[key]; !exists {
+			out.Bindings[key] = id
+		}
 		if object, ok := linear.Objects[id]; ok {
+			if flowObject, exists := out.Objects[id]; exists {
+				object.Empty = flowObject.Empty
+				object.Keys = dcCloneIntMap(flowObject.Keys)
+				object.Normalizations = dcCloneStringMap(flowObject.Normalizations)
+			}
 			out.Objects[id] = object
 		}
 	}
 	for key, value := range linear.Scalars {
-		out.Scalars[key] = value
+		if _, exists := out.Scalars[key]; !exists {
+			out.Scalars[key] = value
+		}
 	}
 	return out
 }
@@ -502,9 +511,11 @@ func (a Analyzer) dcTransfer(file parsedFile, proc sourceProcedure, statement pr
 		}
 	}
 	if name, args, ok := parseSimpleCall(text); ok {
-		if summary, found := a.dcHelper(name); found {
-			a.dcApplyHelperEffects(summary, args, state)
-			return
+		if dcCallTargetUnqualified(text) {
+			if summary, found := a.dcHelper(name); found {
+				a.dcApplyHelperEffects(summary, args, state)
+				return
+			}
 		}
 		for _, arg := range args {
 			if id := state.Bindings[strings.ToLower(cleanIdentifier(arg))]; id != "" && dcBareIdentifier(arg) {
@@ -670,9 +681,8 @@ func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, sta
 			}
 		}
 		if a.Config.Analyze.DetectDictionaryKeyNormalization && object.Kind == dcDictionary && (lowerMember == "add" || lowerMember == "exists" || lowerMember == "item" || lowerMember == "remove") {
-			keyArg := 0
-			if keyArg < len(args) {
-				findings = append(findings, a.dcNormalizationFinding(file, proc, line, receiver, args[keyArg], object, state, seen)...)
+			if len(args) > 0 {
+				findings = append(findings, a.dcNormalizationFinding(file, proc, line, receiver, args[0], object, state, seen)...)
 			}
 		}
 		if a.Config.Analyze.DetectDictionaryLoopMaterialization && object.Kind == dcDictionary && (lowerMember == "keys" || lowerMember == "items") && dcStatementInRepeatedLoop(statement, loops) && !dcLoopHeaderMaterialization(statement, loops) {
@@ -710,11 +720,12 @@ func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, sta
 			}
 		}
 	}
-	if name, callArgs, ok := parseSimpleCall(text); ok {
-		if summary, found := a.dcHelper(name); found && summary.Materializes && a.Config.Analyze.DetectDictionaryLoopMaterialization && dcStatementInRepeatedLoop(statement, loops) {
+	if name, callArgs, ok := parseSimpleCall(text); ok && dcCallTargetUnqualified(text) {
+		summary, found := a.dcHelper(name)
+		if found && summary.Materializes && a.Config.Analyze.DetectDictionaryLoopMaterialization && dcStatementInRepeatedLoop(statement, loops) {
 			findings = dcAppendFinding(findings, seen, a.simpleFinding(file, proc, line, "VBA231", "warning", name+" repeatedly materializes Dictionary Keys or Items inside a loop.", "The resolved helper evaluates a Dictionary snapshot on each invocation.", "Move the helper call before the loop or pass a cached Keys/Items array."))
 		}
-		if summary, found := a.dcHelper(name); found && a.Config.Analyze.DetectCollectionIterationMutation {
+		if found && a.Config.Analyze.DetectCollectionIterationMutation {
 			for _, effect := range summary.Effects {
 				if effect.Member != "add" && effect.Member != "remove" || effect.Param < 0 || effect.Param >= len(callArgs) {
 					continue
@@ -1099,8 +1110,18 @@ func dcDefaultAssignment(text string) (string, string, bool) {
 }
 
 func dcBalancedContent(text string) (string, bool) {
+	inside, _, ok := dcBalancedContentSpan(text)
+	return inside, ok
+}
+
+func dcBalancedContentExact(text string) (string, bool) {
+	inside, end, ok := dcBalancedContentSpan(text)
+	return inside, ok && strings.TrimSpace(text[end:]) == ""
+}
+
+func dcBalancedContentSpan(text string) (string, int, bool) {
 	if text == "" || text[0] != '(' {
-		return "", false
+		return "", 0, false
 	}
 	depth := 0
 	inString := false
@@ -1120,12 +1141,12 @@ func dcBalancedContent(text string) (string, bool) {
 			if !inString {
 				depth--
 				if depth == 0 {
-					return text[1:i], true
+					return text[1:i], i + 1, true
 				}
 			}
 		}
 	}
-	return "", false
+	return "", 0, false
 }
 
 func dcSplitArgs(text string) []string {
@@ -1192,28 +1213,61 @@ func dcSimpleFunctionCall(text string) (string, []string, bool) {
 	if !dcBareIdentifier(lastName(name)) {
 		return "", nil, false
 	}
-	inside, ok := dcBalancedContent(trimmed[at:])
+	inside, ok := dcBalancedContentExact(trimmed[at:])
 	return name, dcSplitArgs(inside), ok
 }
 
 func dcExistsCondition(text string) (string, string, bool, bool) {
-	lower := strings.ToLower(text)
-	at := strings.Index(lower, ".exists(")
-	if at < 0 {
-		return "", "", false, false
-	}
-	start := at - 1
-	for start >= 0 && (text[start] == '_' || text[start] >= '0' && text[start] <= '9' || text[start] >= 'A' && text[start] <= 'Z' || text[start] >= 'a' && text[start] <= 'z') {
-		start--
-	}
-	receiver := cleanIdentifier(text[start+1 : at])
-	inside, ok := dcBalancedContent(text[at+len(".exists"):])
+	condition, ok := dcBareCondition(text)
 	if !ok {
 		return "", "", false, false
 	}
-	prefix := strings.ToLower(text[:start+1])
-	negated := strings.Contains(prefix, "not ")
+	negated := false
+	if strings.HasPrefix(strings.ToLower(condition), "not ") {
+		negated = true
+		condition = strings.TrimSpace(condition[4:])
+	}
+	lower := strings.ToLower(condition)
+	at := strings.Index(lower, ".exists")
+	if at < 0 {
+		return "", "", false, false
+	}
+	receiver := strings.TrimSpace(condition[:at])
+	if !dcBareIdentifier(receiver) {
+		return "", "", false, false
+	}
+	rest := strings.TrimSpace(condition[at+len(".exists"):])
+	inside, ok := dcBalancedContentExact(rest)
+	if !ok {
+		return "", "", false, false
+	}
 	return receiver, dcFirstArgument(inside), negated, true
+}
+
+func dcBareCondition(text string) (string, bool) {
+	trimmed := strings.TrimSpace(dcStatementSource(procedureir.Statement{Text: text}))
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "if ") && !strings.HasPrefix(lower, "elseif ") {
+		return "", false
+	}
+	condition := strings.TrimSpace(trimmed[strings.Index(lower, "if ")+len("if "):])
+	if then := strings.Index(strings.ToLower(condition), " then"); then >= 0 {
+		condition = strings.TrimSpace(condition[:then])
+	}
+	return condition, condition != ""
+}
+
+func dcCallTargetUnqualified(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(trimmed), "call ") {
+		trimmed = strings.TrimSpace(trimmed[len("call "):])
+	}
+	end := len(trimmed)
+	if stop := strings.IndexAny(trimmed, "( \t"); stop >= 0 {
+		end = stop
+	}
+	target := strings.TrimSpace(trimmed[:end])
+	return !strings.Contains(target, ".") && dcBareIdentifier(target)
 }
 
 func dcHelperCondition(text string) (string, []string, bool, bool) {
@@ -1237,38 +1291,31 @@ func dcHelperCondition(text string) (string, []string, bool, bool) {
 
 func dcParseKeyExpr(text string, aliases map[string]dcKeyExpr) (dcKeyExpr, bool) {
 	trimmed := strings.TrimSpace(text)
-	for {
-		lower := strings.ToLower(trimmed)
-		matched := false
-		for _, fn := range []struct {
-			names []string
-			norm  string
-		}{
-			{[]string{"lcase", "lcase$"}, "lower"}, {[]string{"ucase", "ucase$"}, "upper"}, {[]string{"trim", "trim$"}, "trim"},
-		} {
-			for _, name := range fn.names {
-				prefix := name + "("
-				if !strings.HasPrefix(lower, prefix) {
-					continue
-				}
-				inside, ok := dcBalancedContent(trimmed[len(name):])
-				if !ok {
-					return dcKeyExpr{}, false
-				}
-				inner, ok := dcParseKeyExpr(inside, aliases)
-				if !ok {
-					return dcKeyExpr{}, false
-				}
-				if inner.Norm == "" {
-					inner.Norm = fn.norm
-				} else {
-					inner.Norm += "+" + fn.norm
-				}
-				return inner, true
+	lower := strings.ToLower(trimmed)
+	for _, fn := range []struct {
+		names []string
+		norm  string
+	}{
+		{[]string{"lcase", "lcase$"}, "lower"}, {[]string{"ucase", "ucase$"}, "upper"}, {[]string{"trim", "trim$"}, "trim"},
+	} {
+		for _, name := range fn.names {
+			if !strings.HasPrefix(lower, name+"(") {
+				continue
 			}
-		}
-		if !matched {
-			break
+			inside, ok := dcBalancedContent(trimmed[len(name):])
+			if !ok {
+				return dcKeyExpr{}, false
+			}
+			inner, ok := dcParseKeyExpr(inside, aliases)
+			if !ok {
+				return dcKeyExpr{}, false
+			}
+			if inner.Norm == "" {
+				inner.Norm = fn.norm
+			} else {
+				inner.Norm += "+" + fn.norm
+			}
+			return inner, true
 		}
 	}
 	if dcBareIdentifier(trimmed) {
@@ -1293,10 +1340,8 @@ func dcObserveNormalization(object *dcObjectState, expr dcKeyExpr) {
 	if expr.Base == "" {
 		return
 	}
-	if previous, exists := object.Normalizations[expr.Base]; !exists {
+	if _, exists := object.Normalizations[expr.Base]; !exists {
 		object.Normalizations[expr.Base] = expr.Norm
-	} else if previous != expr.Norm {
-		object.Normalizations[expr.Base] = previous
 	}
 }
 
@@ -1516,8 +1561,8 @@ func dcZeroIndex(arg string, statement procedureir.Statement, proc sourceProcedu
 		return false
 	}
 	statements := map[int]procedureir.Statement{}
-	for _, statement := range proc.Statements {
-		statements[statement.ID] = statement
+	for _, candidate := range proc.Statements {
+		statements[candidate.ID] = candidate
 	}
 	for current := statement; current.ParentID != 0; {
 		parent, ok := statements[current.ParentID]
