@@ -374,6 +374,7 @@ func (x *workspaceAnalysisIndex) abandonOverlay(doc intel.Document, generation u
 		moduleKind: doc.ModuleKind,
 	}
 	x.removeEffectiveLocked(key)
+	x.revision++
 	return true
 }
 
@@ -496,16 +497,24 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	entries := make([]indexedFileAnalysis, 0, len(keys))
-	resolverSymbols := make([]procedureir.ResolverSymbol, 0, len(x.all))
-	graphSymbols := make([]callgraph.Symbol, 0, len(x.all))
+	rawEntries := make([]indexedFileAnalysis, 0, len(keys))
+	symbolCapacity := len(x.all)
 	for _, key := range keys {
-		entry := x.effective[key]
-		entries = append(entries, indexedFileAnalysis{
-			path: entry.path, procedureIR: procedureir.Clone(entry.procedureIR),
-			controlFlow: vbacfg.CloneDocument(entry.controlFlow),
-			callSites:   cloneCallSites(entry.callSites), typeReferences: cloneTypeReferences(entry.typeReferences),
-		})
+		rawEntries = append(rawEntries, x.effective[key])
+	}
+	x.mu.RUnlock()
+
+	entries := make([]indexedFileAnalysis, 0, len(rawEntries))
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0, symbolCapacity)
+	graphSymbols := make([]callgraph.Symbol, 0, symbolCapacity)
+	for _, raw := range rawEntries {
+		entry := indexedFileAnalysis{
+			path: raw.path, procedureIR: procedureir.Clone(raw.procedureIR),
+			controlFlow: vbacfg.CloneDocument(raw.controlFlow),
+			callSites:   cloneCallSites(raw.callSites), typeReferences: cloneTypeReferences(raw.typeReferences),
+			symbols: append([]intel.Symbol(nil), raw.symbols...),
+		}
+		entries = append(entries, entry)
 		file := workspaceDisplayPath(x.root, entry.path)
 		for _, sym := range entry.symbols {
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
@@ -520,7 +529,6 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 			})
 		}
 	}
-	x.mu.RUnlock()
 
 	resolver := procedureir.NewResolver(resolverSymbols)
 	callResolverSymbols := make([]calls.ResolverSymbol, len(graphSymbols))
@@ -536,8 +544,8 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 	var typeReferences []calls.TypeReference
 	for _, entry := range entries {
 		resolvedIR := procedureir.Resolve(entry.procedureIR, resolver)
-		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: vbacfg.CloneDocument(entry.controlFlow)})
-		sites = append(sites, cloneCallSites(entry.callSites)...)
+		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: entry.controlFlow})
+		sites = append(sites, entry.callSites...)
 		typeReferences = append(typeReferences, entry.typeReferences...)
 	}
 	resolvedCalls := make([]calls.Call, len(sites))
@@ -579,6 +587,10 @@ func (x *workspaceAnalysisIndex) projectChange() (intel.ProjectAnalysisSnapshot,
 	}
 	x.projectMu.Lock()
 	previous := x.lastProjectSnapshot
+	if previous.Complete && current.Revision <= previous.Revision {
+		x.projectMu.Unlock()
+		return current, nil
+	}
 	x.lastProjectSnapshot = current
 	x.projectMu.Unlock()
 	if !previous.Complete {

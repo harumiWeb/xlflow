@@ -67,7 +67,7 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 			if outcome.swallows {
 				fallback, ok := dominatingResultFallback(proc, graph, statement.ID)
 				if !ok {
-					fallback, ok = immediateLiteralResultFallback(proc, statement)
+					fallback, ok = immediateLiteralResultFallback(proc, statements, statement)
 				}
 				if ok {
 					outcome.swallows = false
@@ -81,8 +81,8 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 				addErrorEvidence(summary, outcome.rethrowRange, outcome.rethrowStatementID, 0, ErrorRethrows, errorTargetHandler, target)
 			}
 			if outcome.returnsSuccess && explicitBooleanResults(proc, reachable) {
-				addErrorEvidence(summary, outcome.returnRange, outcome.returnStatementID, 0, ErrorReturnsSuccess, "boolean", target)
-				summary.Error.Direct[len(summary.Error.Direct)-1].FailureOutputs = append([]ErrorFailureOutput(nil), outcome.failureOutputs...)
+				evidenceIndex := addErrorEvidence(summary, outcome.returnRange, outcome.returnStatementID, 0, ErrorReturnsSuccess, "boolean", target)
+				summary.Error.Direct[evidenceIndex].FailureOutputs = append([]ErrorFailureOutput(nil), outcome.failureOutputs...)
 			}
 			if outcome.swallows {
 				category := errorTargetHandler
@@ -108,7 +108,7 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 	// success and failure values are explicit. This also covers helpers that
 	// use a checked Resume Next probe rather than a label handler.
 	if checkedResumeNext && explicitBooleanResults(proc, reachable) {
-		statement := firstBooleanFailureAssignment(proc, reachable)
+		statement := firstBooleanFailureAssignment(proc, statements, reachable)
 		if statement.ID != 0 {
 			addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorReturnsSuccess, "boolean", "False")
 		}
@@ -140,8 +140,8 @@ func explicitResumeNextFallback(proc procedureir.ProcedureIR, graph cfg.Graph, s
 	return false
 }
 
-func immediateLiteralResultFallback(proc procedureir.ProcedureIR, setup procedureir.Statement) (procedureir.Statement, bool) {
-	for _, statement := range proc.Statements {
+func immediateLiteralResultFallback(proc procedureir.ProcedureIR, statements []procedureir.Statement, setup procedureir.Statement) (procedureir.Statement, bool) {
+	for _, statement := range statements {
 		if statement.Range.StartByte <= setup.Range.StartByte || statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel {
 			continue
 		}
@@ -216,6 +216,14 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 		return handlerOutcome{swallows: true}
 	}
 	byID := statementIndex(proc)
+	blocks := make(map[cfg.BlockID]cfg.Block, len(graph.Blocks))
+	outgoing := make(map[cfg.BlockID][]cfg.Edge)
+	for _, block := range graph.Blocks {
+		blocks[block.ID] = block
+	}
+	for _, edge := range graph.Edges {
+		outgoing[edge.From] = append(outgoing[edge.From], edge)
+	}
 	type state struct {
 		block       cfg.BlockID
 		returned    bool
@@ -243,7 +251,7 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 		if current.block == graph.ExceptionalExit || current.block == graph.TerminationExit || current.block == graph.UnknownExit {
 			continue
 		}
-		block := graphBlock(graph, current.block)
+		block := blocks[current.block]
 		errorGuard := errorGuardUnknown
 		if block.Statement != nil {
 			statement := byID[block.StatementID]
@@ -283,10 +291,7 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 			}
 			errorGuard = errorPresentCondition(statement)
 		}
-		for _, edge := range graph.Edges {
-			if edge.From != current.block {
-				continue
-			}
+		for _, edge := range outgoing[current.block] {
 			// Fault transitions from statements in the handler describe a new
 			// error, not an outcome of the original exceptional path.
 			if edge.Kind == cfg.EdgeError && edge.Class == cfg.EdgeExceptional {
@@ -625,6 +630,9 @@ func callArgumentExpression(caller procedureir.ProcedureIR, call procedureir.Cal
 			}
 		}
 	}
+	if expressionID == 0 {
+		return "", false
+	}
 	for _, expression := range caller.Expressions {
 		if expression.ID == expressionID {
 			return expression.Text, true
@@ -807,8 +815,8 @@ func explicitBooleanResults(proc procedureir.ProcedureIR, reachable map[int]bool
 	return hasTrue && hasFalse
 }
 
-func firstBooleanFailureAssignment(proc procedureir.ProcedureIR, reachable map[int]bool) procedureir.Statement {
-	for _, statement := range proc.Statements {
+func firstBooleanFailureAssignment(proc procedureir.ProcedureIR, statements []procedureir.Statement, reachable map[int]bool) procedureir.Statement {
+	for _, statement := range statements {
 		if reachable[statement.ID] && booleanFalseAssignment(proc, statement) {
 			return statement
 		}
@@ -925,11 +933,12 @@ func normalizedErrorLabel(value string) string {
 	return strings.ToLower(strings.Trim(strings.TrimSpace(value), "[]:"))
 }
 
-func addErrorEvidence(summary *ProcedureSummary, sourceRange vbaast.Range, statementID, callID int, behavior ErrorBehaviorKind, target, value string) {
+func addErrorEvidence(summary *ProcedureSummary, sourceRange vbaast.Range, statementID, callID int, behavior ErrorBehaviorKind, target, value string) int {
 	summary.Error.Direct = append(summary.Error.Direct, ErrorEvidence{
 		Behavior: behavior, Origin: summary.Identity, CallChain: []ProcedureIdentity{summary.Identity}, Range: sourceRange,
 		StatementID: statementID, CallID: callID, Target: target, Value: value,
 	})
+	return len(summary.Error.Direct) - 1
 }
 
 func refreshErrorFlags(summary *ErrorSummary) {

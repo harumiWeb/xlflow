@@ -3,6 +3,7 @@ package effects
 import (
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -326,6 +327,29 @@ End Sub
 	copied := find(t, summary, "Errors.CopiedErrorNotUsedBySink")
 	if !copied.Error.SuppressesErrors || copied.Error.LogsAndContinues {
 		t.Fatalf("unrelated sink consumed copied error = %#v", copied.Error)
+	}
+}
+
+func TestErrorFallbackHelpersUseSourceOrder(t *testing.T) {
+	proc := procedureir.ProcedureIR{Symbol: procedureir.ProcedureSymbol{Name: "TryWork", Kind: procedureir.ProcedureFunction, ReturnType: "Boolean"}}
+	setup := procedureir.Statement{ID: 1, Range: vbaast.Range{StartByte: 10}}
+	earliest := procedureir.Statement{ID: 2, Kind: procedureir.StatementAssignment, Range: vbaast.Range{StartByte: 20}, Target: &procedureir.Expression{Text: "TryWork"}, Value: &procedureir.Expression{Text: "False"}}
+	later := procedureir.Statement{ID: 3, Kind: procedureir.StatementAssignment, Range: vbaast.Range{StartByte: 30}, Target: &procedureir.Expression{Text: "TryWork"}, Value: &procedureir.Expression{Text: "False"}}
+	statements := []procedureir.Statement{later, earliest, setup}
+	sort.SliceStable(statements, func(i, j int) bool { return statements[i].Range.StartByte < statements[j].Range.StartByte })
+
+	if got, ok := immediateLiteralResultFallback(proc, statements, setup); !ok || got.ID != earliest.ID {
+		t.Fatalf("immediate fallback = %#v, %v; want earliest source statement", got, ok)
+	}
+	if got := firstBooleanFailureAssignment(proc, statements, map[int]bool{2: true, 3: true}); got.ID != earliest.ID {
+		t.Fatalf("Boolean failure assignment = %#v, want earliest source statement", got)
+	}
+}
+
+func TestCallArgumentExpressionRejectsUnresolvedZeroID(t *testing.T) {
+	caller := procedureir.ProcedureIR{Expressions: []procedureir.Expression{{ID: 0, Text: "Err.Description"}}}
+	if expression, ok := callArgumentExpression(caller, procedureir.CallSite{}, procedureir.ProcedureIR{}, 0); ok || expression != "" {
+		t.Fatalf("unresolved call argument = %q, %v; want no expression", expression, ok)
 	}
 }
 

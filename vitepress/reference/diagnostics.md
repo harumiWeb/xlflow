@@ -1919,7 +1919,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA237
 
-**Suppressed error propagation.** A procedure or call boundary loses failure information by returning normally without rethrowing, returning a checked failure flag, or otherwise signaling failure.
+**Suppressed error propagation.** A procedure or call boundary loses failure information by returning normally without rethrowing, returning a success flag that the caller ignores, or otherwise failing to signal failure.
 
 | Property                    | Value                                  |
 | --------------------------- | -------------------------------------- |

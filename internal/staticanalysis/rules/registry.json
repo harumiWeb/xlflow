@@ -1830,7 +1830,7 @@
     {
       "id": "VBA237",
       "title": "Suppressed error propagation",
-      "description": "A procedure or call boundary loses failure information by returning normally without rethrowing, returning a checked failure flag, or otherwise signaling failure.",
+      "description": "A procedure or call boundary loses failure information by returning normally without rethrowing, returning a success flag that the caller ignores, or otherwise failing to signal failure.",
       "family": "analyze",
       "category": "runtime-safety",
       "evidence_class": "runtime-safety",

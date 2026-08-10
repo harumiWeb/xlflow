@@ -818,6 +818,33 @@ func TestDiagnosticsShutdownStopsTimersCancelsAndWaitsForWorkers(t *testing.T) {
 	waitClosed(t, shutdownDone, "shutdown")
 }
 
+func TestDiagnosticsWithoutCodeDoesNotMutateInput(t *testing.T) {
+	input := []intel.Diagnostic{{Code: "VBA237", Message: "remove"}, {Code: "VBA205", Message: "keep"}}
+	got := diagnosticsWithoutCode(input, "vba237")
+	if len(got) != 1 || got[0].Code != "VBA205" {
+		t.Fatalf("filtered diagnostics = %+v", got)
+	}
+	if input[0].Code != "VBA237" || input[1].Code != "VBA205" {
+		t.Fatalf("input diagnostics were mutated: %+v", input)
+	}
+}
+
+func TestCompleteProjectReschedulesDiagnosticsSuppressedWhileIncomplete(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	doc := intel.Document{URI: "file:///pending.bas", Path: filepath.Join(t.TempDir(), "pending.bas"), Source: "Option Explicit", ModuleKind: "standard"}
+	state := &diagnosticState{open: true, latest: doc, projectReadyPending: true}
+	s.diagStates[doc.URI] = state
+
+	s.scheduleProjectReadyDiagnosticsForCompleteProject(intel.ProjectAnalysisSnapshot{Complete: true})
+	if state.projectReadyPending {
+		t.Fatal("completed project left the diagnostic pending")
+	}
+	if got := len(timers.snapshot()); got != 1 {
+		t.Fatalf("scheduled diagnostic timers = %d, want 1", got)
+	}
+}
+
 type fakeDiagnosticTimers struct {
 	mu     sync.Mutex
 	timers []*fakeDiagnosticTimer

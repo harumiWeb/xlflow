@@ -212,14 +212,15 @@ func New(opts Options) (*Server, func(), error) {
 	s.defaultDiagnosticsRequest = reflect.ValueOf(s.diagnosticsRequest).Pointer()
 	s.projectDiagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest, project intel.ProjectAnalysisSnapshot) intel.DiagnosticResult {
 		projectEffects := s.projectEffectSummary(project)
+		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
+		for _, projectDocument := range project.Documents {
+			projectByPath[symbolFileKey(projectDocument.IR.Path)] = projectDocument
+		}
 		analyzer := s.analyzer
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
-			for _, projectDocument := range project.Documents {
-				if symbolFileKey(projectDocument.IR.Path) == symbolFileKey(ir.Path) {
-					ir = procedureir.Clone(projectDocument.IR)
-					controlFlow = vbacfg.CloneDocument(projectDocument.CFG)
-					break
-				}
+			if projectDocument, ok := projectByPath[symbolFileKey(ir.Path)]; ok {
+				ir = projectDocument.IR
+				controlFlow = projectDocument.CFG
 			}
 			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects)
 			if err != nil {
@@ -284,7 +285,7 @@ func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) eff
 
 	documents := make([]effects.Document, len(project.Documents))
 	for i, document := range project.Documents {
-		documents[i] = effects.Document{IR: procedureir.Clone(document.IR), CFG: vbacfg.CloneDocument(document.CFG)}
+		documents[i] = effects.Document{IR: document.IR, CFG: document.CFG}
 	}
 	summary := effects.Build(documents)
 	s.projectSummaryMu.Lock()
@@ -568,6 +569,30 @@ func (s *Server) scheduleProjectDependentDiagnostics(ctx *glsp.Context, changedU
 	}
 }
 
+func (s *Server) scheduleProjectReadyDiagnosticsForCompleteProject(project intel.ProjectAnalysisSnapshot) {
+	if !project.Complete {
+		return
+	}
+	type pendingDiagnostic struct {
+		notify *glsp.Context
+		doc    intel.Document
+	}
+	pending := []pendingDiagnostic{}
+	s.diagMu.Lock()
+	for _, state := range s.diagStates {
+		state.mu.Lock()
+		if state.projectReadyPending && state.open {
+			state.projectReadyPending = false
+			pending = append(pending, pendingDiagnostic{notify: state.notify, doc: state.latest})
+		}
+		state.mu.Unlock()
+	}
+	s.diagMu.Unlock()
+	for _, diagnostic := range pending {
+		s.scheduleDiagnosticsOnly(diagnostic.notify, diagnostic.doc)
+	}
+}
+
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
 	unlock := s.lockDocumentLifecycle(uri)
@@ -614,8 +639,9 @@ func (s *Server) scheduleCloseOverlayRefresh(ctx *glsp.Context, uri, path string
 			diskSignatures = procedureSignaturesFromSymbols(disk.symbols)
 		}
 		s.scheduleByRefDependentDiagnostics(ctx, uri, changedProcedureNames(closingSignatures, diskSignatures))
-		_, impacted := s.analysis.projectChange()
+		project, impacted := s.analysis.projectChange()
 		s.scheduleProjectDependentDiagnostics(ctx, uri, impacted)
+		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 	}()
 }
 
@@ -640,10 +666,11 @@ func (s *Server) didChangeWatchedFiles(ctx *glsp.Context, params *protocol.DidCh
 				s.logger.Printf("workspace analysis index watcher update failed for %q: %v", affected, err)
 				continue
 			}
-			_, impacted := s.analysis.projectChange()
-			s.scheduleProjectDependentDiagnostics(ctx, "", impacted)
 		}
 	}
+	project, impacted := s.analysis.projectChange()
+	s.scheduleProjectDependentDiagnostics(ctx, "", impacted)
+	s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 	s.semanticTokens.invalidateWorkspace()
 	return nil
 }
@@ -1545,8 +1572,9 @@ func (s *Server) runDocumentAnalysis(
 			}
 			state.mu.Unlock()
 			s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
-			_, impacted := s.analysis.projectChange()
+			project, impacted := s.analysis.projectChange()
 			s.scheduleProjectDependentDiagnostics(notify, doc.URI, impacted)
+			s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 		}
 	}
 	// Overlay failure deliberately does not suppress file-local diagnostics.
@@ -1615,8 +1643,8 @@ func (s *Server) runDiagnosticsBody(
 		project := intel.ProjectAnalysisSnapshot{}
 		if mode == intel.DiagnosticModeFull {
 			project = s.analysis.projectSnapshot()
-			if !project.Complete && !s.analysis.initialReady() && s.projectDiagnosticsEnabled() {
-				s.scheduleProjectReadyDiagnostics(uri, state)
+			if !project.Complete && s.projectDiagnosticsEnabled() {
+				s.scheduleProjectReadyDiagnostics(state)
 			}
 		}
 		if mode == intel.DiagnosticModeFull && project.Complete && s.projectDiagnosticsEnabled() {
@@ -1664,7 +1692,7 @@ func (s *Server) projectDiagnosticsEnabled() bool {
 		reflect.ValueOf(s.diagnosticsRequest).Pointer() == s.defaultDiagnosticsRequest
 }
 
-func (s *Server) scheduleProjectReadyDiagnostics(uri string, state *diagnosticState) {
+func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 	state.mu.Lock()
 	if state.projectReadyPending || !state.open {
 		state.mu.Unlock()
@@ -1672,28 +1700,31 @@ func (s *Server) scheduleProjectReadyDiagnostics(uri string, state *diagnosticSt
 	}
 	state.projectReadyPending = true
 	state.mu.Unlock()
+	if project := s.analysis.projectSnapshot(); project.Complete {
+		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
+		return
+	}
+	if s.analysis.initialReady() {
+		return
+	}
 	s.diagWorkers.Add(1)
 	go func() {
 		defer s.diagWorkers.Done()
 		err := s.analysis.waitReady()
-		state.mu.Lock()
-		state.projectReadyPending = false
-		open := state.open
-		doc := state.latest
-		notify := state.notify
-		state.mu.Unlock()
 		if err != nil {
+			state.mu.Lock()
+			state.projectReadyPending = false
+			state.mu.Unlock()
 			s.logger.Printf("workspace project diagnostics readiness failed: %v", err)
 			return
 		}
-		if open {
-			s.scheduleDiagnosticsOnly(notify, doc)
-		}
+		project, _ := s.analysis.projectChange()
+		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 	}()
 }
 
 func diagnosticsWithoutCode(in []intel.Diagnostic, code string) []intel.Diagnostic {
-	out := in[:0]
+	out := make([]intel.Diagnostic, 0, len(in))
 	for _, diagnostic := range in {
 		if !strings.EqualFold(diagnostic.Code, code) {
 			out = append(out, diagnostic)

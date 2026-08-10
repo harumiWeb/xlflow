@@ -85,11 +85,32 @@ func TestWorkspaceProjectSnapshotHoldsResolvedIRAndDefensiveCFG(t *testing.T) {
 	}
 
 	index.beginOverlay(doc, 2)
-	if pending := index.projectSnapshot(); pending.Complete || pending.Revision <= snapshot.Revision {
+	pending := index.projectSnapshot()
+	if pending.Complete || pending.Revision <= snapshot.Revision {
 		t.Fatalf("pending overlay snapshot = %#v, want incomplete newer revision", pending)
 	}
-	if !index.abandonOverlay(doc, 2) || index.projectSnapshot().Complete {
+	if !index.abandonOverlay(doc, 2) {
+		t.Fatal("failed overlay was not abandoned")
+	}
+	abandoned := index.projectSnapshot()
+	if abandoned.Complete || abandoned.Revision <= pending.Revision {
 		t.Fatal("failed overlay produced a complete project snapshot")
+	}
+}
+
+func TestProjectChangeRejectsStaleSnapshotBaseline(t *testing.T) {
+	index := newWorkspaceAnalysisIndex(t.TempDir(), config.Default(), func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{}, nil
+	}, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	current := index.projectSnapshot()
+	index.lastProjectSnapshot = intel.ProjectAnalysisSnapshot{Revision: current.Revision + 1, Complete: true}
+
+	_, impacted := index.projectChange()
+	if len(impacted) != 0 || index.lastProjectSnapshot.Revision != current.Revision+1 {
+		t.Fatalf("stale project change replaced baseline: impacted=%v baseline=%d", impacted, index.lastProjectSnapshot.Revision)
 	}
 }
 

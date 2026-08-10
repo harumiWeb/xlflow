@@ -190,6 +190,9 @@ func callerArgumentExpression(proc sourceProcedure, call procedureir.CallSite, o
 			}
 		}
 	}
+	if expressionID == 0 {
+		return "", false
+	}
 	for _, expression := range proc.Expressions {
 		if expression.ID == expressionID {
 			return expression.Text, true

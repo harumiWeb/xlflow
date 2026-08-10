@@ -146,7 +146,8 @@ End Sub
 	}
 	got := findingsByCode(findings, "VBA237")
 	if len(got) != 3 || got[0].Procedure != "Ignored" || got[0].Line != 26 ||
-		got[1].Procedure != "PartiallyChecked" || got[1].Line != 31 || got[2].Procedure != "StoredButUnused" {
+		got[1].Procedure != "PartiallyChecked" || got[1].Line != 31 ||
+		got[2].Procedure != "StoredButUnused" || got[2].Line != 50 {
 		t.Fatalf("VBA237 Try result findings = %+v, want ignored, partially checked, and unused stored results", got)
 	}
 	if !strings.Contains(got[0].Message, "ignores the Boolean success result") {
@@ -165,16 +166,38 @@ Public Sub Run()
 Handler:
 End Sub
 `)
-	cfg := config.Default()
-	cfg.Analyze.DisabledRules = []string{"VBA237"}
-	cfg.Analyze.DetectErrorSuppressionPropagation = false
-	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
-		t.Fatalf("disabled VBA237 findings = %+v", got)
-	}
+	t.Run("disabled_rules", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.Analyze.DisabledRules = []string{"VBA237"}
+		if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := config.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Analyze.DetectErrorSuppressionPropagation {
+			t.Fatal("VBA237 should be disabled after disabled_rules normalization")
+		}
+		findings, err := (Analyzer{RootDir: dir, Config: loaded}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+			t.Fatalf("disabled_rules VBA237 findings = %+v", got)
+		}
+	})
+	t.Run("legacy boolean", func(t *testing.T) {
+		cfg := config.Default()
+		cfg.Analyze.DetectErrorSuppressionPropagation = false
+		findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := findingsByCode(findings, "VBA237"); len(got) != 0 {
+			t.Fatalf("legacy boolean disabled VBA237 findings = %+v", got)
+		}
+	})
 }
 
 func TestVBA237HonorsInlineSuppressionAtLossLocation(t *testing.T) {
