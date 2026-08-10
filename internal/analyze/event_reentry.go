@@ -12,6 +12,7 @@ import (
 type eventFindingCandidate struct {
 	line           int
 	statementID    int
+	boundary       string
 	category       string
 	classification string
 	uncertainty    string
@@ -55,7 +56,7 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 		return nil
 	}
 	candidates := map[string]eventFindingCandidate{}
-	record := func(line int, statementID int, effect effects.Evidence, uncertainty string) {
+	record := func(line int, statementID int, boundary string, effect effects.Evidence, uncertainty string) {
 		if uncertainty == "" && a.eventSafeProcedures[effect.Origin.Key()] {
 			return
 		}
@@ -71,11 +72,11 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 			classification = "same-event recursion hazard"
 		}
 		candidate := eventFindingCandidate{
-			line: line, statementID: statementID, category: category,
+			line: line, statementID: statementID, boundary: boundary, category: category,
 			classification: classification, uncertainty: uncertainty,
 			effect: effect, same: same,
 		}
-		key := strings.Join([]string{strconvItoa(line), strconvItoa(statementID)}, ":")
+		key := strings.Join([]string{strconvItoa(line), boundary}, ":")
 		if previous, exists := candidates[key]; exists && !eventFindingCandidatePreferred(candidate, previous) {
 			return
 		}
@@ -83,10 +84,10 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 	}
 
 	for _, evidence := range proc.Effects.Direct {
-		record(evidence.Range.StartLine, evidence.StatementID, evidence, "")
+		record(evidence.Range.StartLine, evidence.StatementID, eventStatementBoundary(evidence.StatementID), evidence, "")
 	}
 	for _, uncertainty := range proc.Effects.DirectUncertainty {
-		record(uncertainty.Range.StartLine, uncertainty.StatementID, effects.Evidence{}, string(uncertainty.Kind))
+		record(uncertainty.Range.StartLine, uncertainty.StatementID, eventStatementBoundary(uncertainty.StatementID), effects.Evidence{}, string(uncertainty.Kind))
 	}
 	for _, call := range proc.Calls {
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
@@ -97,14 +98,15 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 			continue
 		}
 		safeCallee := a.eventSafeProcedures[summary.Identity.Key()]
+		boundary := eventCallBoundary(call)
 		for _, evidence := range append(append([]effects.Evidence{}, summary.Direct...), summary.Propagated...) {
 			if safeCallee {
 				continue
 			}
-			record(call.Range.StartLine, call.StatementID, evidence, "")
+			record(call.Range.StartLine, call.StatementID, boundary, evidence, "")
 		}
 		for _, uncertainty := range append(append([]effects.CallUncertainty{}, summary.DirectUncertainty...), summary.PropagatedUncertainty...) {
-			record(call.Range.StartLine, call.StatementID, effects.Evidence{}, string(uncertainty.Kind))
+			record(call.Range.StartLine, call.StatementID, boundary, effects.Evidence{}, string(uncertainty.Kind))
 		}
 	}
 
@@ -118,6 +120,9 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 		}
 		if ordered[i].statementID != ordered[j].statementID {
 			return ordered[i].statementID < ordered[j].statementID
+		}
+		if ordered[i].boundary != ordered[j].boundary {
+			return ordered[i].boundary < ordered[j].boundary
 		}
 		return eventFindingCandidateKey(ordered[i]) < eventFindingCandidateKey(ordered[j])
 	})
@@ -158,7 +163,22 @@ func eventFindingCandidateRank(candidate eventFindingCandidate) int {
 }
 
 func eventFindingCandidateKey(candidate eventFindingCandidate) string {
-	return strings.Join([]string{candidate.classification, candidate.category, candidate.uncertainty, candidate.effect.Origin.QualifiedName}, ":")
+	return strings.Join([]string{candidate.boundary, candidate.classification, candidate.category, candidate.uncertainty, candidate.effect.Origin.QualifiedName}, ":")
+}
+
+func eventStatementBoundary(statementID int) string {
+	return "statement:" + strconvItoa(statementID)
+}
+
+func eventCallBoundary(call procedureir.CallSite) string {
+	if call.ID != 0 {
+		return "call:" + strconvItoa(call.ID)
+	}
+	return strings.Join([]string{
+		"call-range",
+		strconvItoa(call.Range.StartByte),
+		strconvItoa(call.Range.EndByte),
+	}, ":")
 }
 
 func eventEffectRisk(proc sourceProcedure, handler string, evidence effects.Evidence) (string, bool, bool) {
