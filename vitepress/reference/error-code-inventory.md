@@ -583,6 +583,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `param_array`
 - `paramarray_modifier`
 - `parameter_list`
+- `parenthesized_condition_expression`
 - `parenthesized_expression`
 - `parse_status`
 - `parse_status_summary`

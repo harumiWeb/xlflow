@@ -1367,7 +1367,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA212
 
-**Non-short-circuit object guard.** An object Nothing guard and dereference share a non-short-circuit expression.
+**Non-short-circuit object guard.** A Nothing or IsArray guard and a matching object, index, bound, or resolved side-effecting getter access share an eagerly evaluated And, Or, IIf, Choose, or Switch expression.
 
 | Property                    | Value                                   |
 | --------------------------- | --------------------------------------- |

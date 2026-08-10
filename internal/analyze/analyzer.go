@@ -719,7 +719,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
 		procedures := sourceProceduresFromIR(ir)
 		var scanErr error
-		findings, scanErr = analyzer.nonShortCircuitObjectGuardDocumentFindings(ctx, file, procedures, nil)
+		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
 		if scanErr != nil {
 			return scanErr
 		}
@@ -869,7 +869,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 			findings = append(findings, procedureFindings...)
 		}
 		if cfg.Analyze.DetectNonShortCircuitObjectGuard {
-			guardFindings, err := analyzer.nonShortCircuitObjectGuardDocumentFindings(ctx, file, procedures, nil)
+			guardFindings, err := analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
 			if err != nil {
 				return err
 			}
@@ -1135,7 +1135,7 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 		findings = append(findings, procedureFindings...)
 	}
 	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
-		guardFindings, err := a.nonShortCircuitObjectGuardDocumentFindings(cancelCtx, file, procedures, nil)
+		guardFindings, err := a.vba212ScanWithContext(cancelCtx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
 		if err != nil {
 			return nil, err
 		}
@@ -2827,84 +2827,7 @@ type vba212ScanStats struct {
 // procedures x document-nodes traversal while preserving outer-expression
 // priority and per-procedure diagnostics.
 func (a Analyzer) nonShortCircuitObjectGuardDocumentFindings(ctx context.Context, file parsedFile, procedures []sourceProcedure, stats *vba212ScanStats) ([]Finding, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if len(procedures) == 0 {
-		procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
-	}
-	// IR is source ordered today, but sorting the local copy keeps ownership
-	// deterministic for recovered trees and synthetic test IR.
-	procedures = append([]sourceProcedure(nil), procedures...)
-	sort.SliceStable(procedures, func(i, j int) bool {
-		return procedures[i].StartByte < procedures[j].StartByte
-	})
-
-	seen := map[string]bool{}
-	var findings []Finding
-	if stats != nil {
-		stats.RootTraversals++
-	}
-	visited := 0
-	var visit func(*tree_sitter.Node) error
-	visit = func(node *tree_sitter.Node) error {
-		if node == nil {
-			return nil
-		}
-		visited++
-		if stats != nil {
-			stats.NodesVisited = visited
-		}
-		if visited&0xff == 0 {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-		}
-		proc, owned := vba212ProcedureAtByte(procedures, int(node.StartByte()), int(node.EndByte()))
-		if owned && isBooleanBinaryExpression(node) && hasTopLevelAndOrOperator(node, file.Source) {
-			r := vbaast.NodeRange(node)
-			guards := map[string]string{}
-			accesses := map[string]string{}
-			collectNothingGuards(node, file.Source, guards)
-			collectDirectMemberAccesses(node, file.Source, accesses)
-			for key, name := range guards {
-				if _, ok := accesses[key]; !ok {
-					continue
-				}
-				dedupeKey := strconvItoa(proc.StartByte) + ":" + strconvItoa(r.StartLine) + ":" + key
-				if seen[dedupeKey] {
-					continue
-				}
-				seen[dedupeKey] = true
-				findings = append(findings, a.simpleFinding(
-					file,
-					proc,
-					r.StartLine,
-					"VBA212",
-					"warning",
-					name+" is guarded against Nothing and dereferenced in the same non-short-circuit boolean expression.",
-					"VBA And/Or expressions do not short-circuit, so the member access can still run when the object is Nothing and raise runtime error 91.",
-					"Split the Nothing guard and the member access into separate If statements.",
-				))
-			}
-			// Preserve the previous outer-expression preference: once a boolean
-			// expression is analyzed its nested boolean expressions are not.
-			return nil
-		}
-		for i := uint(0); i < node.NamedChildCount(); i++ {
-			if err := visit(node.NamedChild(i)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := visit(file.Root); err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return findings, nil
+	return a.vba212ScanWithContext(ctx, file, procedures, stats, vba212Context{})
 }
 
 func vba212ProcedureAtByte(procedures []sourceProcedure, startByte, endByte int) (sourceProcedure, bool) {
@@ -2919,84 +2842,6 @@ func vba212ProcedureAtByte(procedures []sourceProcedure, startByte, endByte int)
 		return sourceProcedure{}, false
 	}
 	return proc, true
-}
-
-func isBooleanBinaryExpression(node *tree_sitter.Node) bool {
-	if node == nil {
-		return false
-	}
-	switch node.Kind() {
-	case "condition_binary_expression", "binary_expression":
-		return true
-	default:
-		return false
-	}
-}
-
-func hasTopLevelAndOrOperator(node *tree_sitter.Node, source []byte) bool {
-	if node == nil {
-		return false
-	}
-	if node.Kind() == "condition_binary_expression" {
-		return true
-	}
-	text := strings.ToLower(node.Utf8Text(source))
-	return hasWord(text, "And") || hasWord(text, "Or")
-}
-
-func collectNothingGuards(node *tree_sitter.Node, source []byte, guards map[string]string) {
-	if node == nil {
-		return
-	}
-	if node.Kind() == "comparison_expression" {
-		if name, ok := nothingGuardIdentifier(node, source); ok {
-			guards[strings.ToLower(name)] = name
-		}
-	}
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		collectNothingGuards(node.NamedChild(i), source, guards)
-	}
-}
-
-func nothingGuardIdentifier(node *tree_sitter.Node, source []byte) (string, bool) {
-	left := node.ChildByFieldName("left")
-	right := node.ChildByFieldName("right")
-	operator := node.ChildByFieldName("operator")
-	if left == nil || right == nil || operator == nil || !strings.EqualFold(strings.TrimSpace(operator.Utf8Text(source)), "Is") {
-		return "", false
-	}
-	if left.Kind() == "identifier" && right.Kind() == "nothing_literal" {
-		name := cleanIdentifier(left.Utf8Text(source))
-		return name, name != ""
-	}
-	if right.Kind() == "identifier" && left.Kind() == "nothing_literal" {
-		name := cleanIdentifier(right.Utf8Text(source))
-		return name, name != ""
-	}
-	return "", false
-}
-
-func collectDirectMemberAccesses(node *tree_sitter.Node, source []byte, accesses map[string]string) {
-	if node == nil {
-		return
-	}
-	if node.Kind() == "qualified_member_expression" {
-		if name, ok := directMemberReceiverIdentifier(node, source); ok {
-			accesses[strings.ToLower(name)] = name
-		}
-	}
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		collectDirectMemberAccesses(node.NamedChild(i), source, accesses)
-	}
-}
-
-func directMemberReceiverIdentifier(node *tree_sitter.Node, source []byte) (string, bool) {
-	receiver := node.ChildByFieldName("receiver")
-	if receiver == nil || receiver.Kind() != "identifier" {
-		return "", false
-	}
-	name := cleanIdentifier(receiver.Utf8Text(source))
-	return name, name != ""
 }
 
 func (a Analyzer) memberFinding(file parsedFile, proc sourceProcedure, line int, target, typ, member string, rule invalidMemberRule) Finding {

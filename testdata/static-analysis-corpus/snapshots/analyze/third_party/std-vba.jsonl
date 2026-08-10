@@ -1297,6 +1297,10 @@
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":892,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":925,"column":0}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA214","severity":"warning","line":937,"column":0}
+{"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA212","severity":"warning","line":1057,"column":17}
+{"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA212","severity":"warning","line":1057,"column":30}
+{"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA212","severity":"warning","line":1057,"column":43}
+{"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA212","severity":"warning","line":1057,"column":56}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1142,"column":52}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1161,"column":51}
 {"project":"third_party/std-vba","file":"src/stdAcc.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1184,"column":56}
@@ -2229,6 +2233,7 @@
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VB045","severity":"error","line":103,"column":3}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VB045","severity":"error","line":105,"column":3}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":427,"column":1}
+{"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA212","severity":"warning","line":756,"column":22}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":796,"column":29}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":807,"column":29}
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1007,"column":0}

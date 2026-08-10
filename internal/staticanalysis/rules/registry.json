@@ -1258,7 +1258,7 @@
     {
       "id": "VBA212",
       "title": "Non-short-circuit object guard",
-      "description": "An object Nothing guard and dereference share a non-short-circuit expression.",
+      "description": "A Nothing or IsArray guard and a matching object, index, bound, or resolved side-effecting getter access share an eagerly evaluated And, Or, IIf, Choose, or Switch expression.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",

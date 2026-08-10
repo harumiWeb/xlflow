@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Expanded `VBA212` to analyze AST operand relationships across eager `And`,
+  `Or`, `IIf`, `Choose`, and `Switch` expressions, including nested
+  member/index access, `IsArray` bounds operations, and uniquely resolved
+  side-effecting property getters. Diagnostics now identify the guarded object
+  and unsafe operand range precisely.
+
 - Added high-confidence `Scripting.Dictionary` and `Collection` safety
   diagnostics for `CompareMode` ordering, repeated key/item materialization,
   key normalization, late-bound comparison constants, mutation during
