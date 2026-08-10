@@ -881,21 +881,41 @@ func TestLinterAcceptsVB014CorpusLexicalBoundaries(t *testing.T) {
 
 func TestLinterRejectsUnclosedVB014CorpusLexicalBoundaries(t *testing.T) {
 	t.Parallel()
-	tests := map[string]string{
-		"type declaration plus unclosed If": "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n    Debug.Print True\nEnd Sub\n",
-		"date literal in unclosed If":       "Sub Main()\n  If Time > #11:59:59 PM# Then\n    Debug.Print Time\nEnd Sub\n",
-		"named argument in unclosed If":     "Sub Main()\n  If IsReady(value:=1) Then\n    Debug.Print True\nEnd Sub\n",
-		"repeated conditional unclosed If":  "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n",
+	tests := map[string]struct {
+		source         string
+		openingLine    int
+		expectedCloser string
+	}{
+		"type declaration plus unclosed If": {
+			source: "Private Type Item\n  Next As Long\nEnd Type\nSub Main()\n  If True Then\n    Debug.Print True\nEnd Sub\n", openingLine: 5, expectedCloser: "End If",
+		},
+		"date literal in unclosed If": {
+			source: "Sub Main()\n  If Time > #11:59:59 PM# Then\n    Debug.Print Time\nEnd Sub\n", openingLine: 2, expectedCloser: "End If",
+		},
+		"named argument in unclosed If": {
+			source: "Sub Main()\n  If IsReady(value:=1) Then\n    Debug.Print True\nEnd Sub\n", openingLine: 2, expectedCloser: "End If",
+		},
+		"repeated conditional unclosed If": {
+			source: "Sub Main()\n#If Feature Then\n  If ready Then\n#End If\n  Debug.Print ready\n#If Feature Then\n  Else\n    Debug.Print False\n#End If\nEnd Sub\n", openingLine: 0,
+		},
 	}
-	for name, source := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "Main.bas")
-			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(source))
+			issues, err := (Linter{Config: config.Default()}).LintSource(path, []byte(test.source))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := issuesByCode(issues, "VB014"); len(got) == 0 {
+			got := issuesByCode(issues, "VB014")
+			if len(got) != 1 {
 				t.Fatalf("unclosed source should trigger VB014: %+v", issues)
+			}
+			if test.openingLine > 0 {
+				if got[0].OpeningLine != test.openingLine || got[0].ExpectedCloser != test.expectedCloser {
+					t.Fatalf("VB014 should identify the unclosed If: %+v", got[0])
+				}
+			} else if got[0].Kind != "parser_recovery" || got[0].Message != parserRecoveryMessage {
+				t.Fatalf("conditional recovery should remain conservative: %+v", got[0])
 			}
 		})
 	}
