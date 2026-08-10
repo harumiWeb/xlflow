@@ -41,6 +41,9 @@ type Finding struct {
 	Suggestion   string           `json:"suggestion"`
 	NearbyCode   []string         `json:"nearby_code,omitempty"`
 	DataFlow     *DataFlowContext `json:"data_flow,omitempty"`
+	// CommandExecution is present on VBA236 findings and augments the generic
+	// data-flow context with process-launch role/risk metadata.
+	CommandExecution *CommandExecutionContext `json:"command_execution,omitempty"`
 }
 
 // ParseError reports that tree-sitter could not produce a complete VBA
@@ -287,7 +290,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
 	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops
-	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || a.Config.Analyze.DetectUntrustedDataFlow
+	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -339,7 +342,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var dataFlowModuleBindings map[string]bool
-		if a.Config.Analyze.DetectUntrustedDataFlow {
+		if a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
 		parsedFiles = append(parsedFiles, parsedFile{
@@ -814,7 +817,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectUntrustedDataFlow) && typeDB == nil {
+	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -832,7 +835,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var dataFlowModuleBindings map[string]bool
-		if cfg.Analyze.DetectUntrustedDataFlow {
+		if cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
 		file := parsedFile{
@@ -906,7 +909,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {

@@ -88,6 +88,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA233`](#vba233) | analyze | warning  | project-wide    | yes     | Undefined late-bound Dictionary constant           |
 | [`VBA234`](#vba234) | analyze | warning  | interprocedural | yes     | Collection mutation during iteration               |
 | [`VBA235`](#vba235) | analyze | warning  | procedure-local | yes     | Collection index origin confusion                  |
+| [`VBA236`](#vba236) | analyze | warning  | procedure-local | yes     | Unsafe command construction                        |
 
 ## VB001
 
@@ -1892,3 +1893,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                               |
 | Real-time editor diagnostic | yes                              |
 | Fix available               | no                               |
+
+## VBA236
+
+**Unsafe command construction.** A process-launch command may combine external input, an unquoted executable path, secrets, or unobserved execution.
+
+| Property                    | Value                                |
+| --------------------------- | ------------------------------------ |
+| Family                      | `analyze`                            |
+| Category                    | `security`                           |
+| Evidence class              | `policy`                             |
+| Compile-equivalent          | no                                   |
+| Default severity            | `warning`                            |
+| Supported severities        | `warning`                            |
+| Surfaces                    | `analyze`, `lsp`                     |
+| Scope                       | `procedure-local`                    |
+| Precision                   | `medium`                             |
+| Enabled by default          | yes                                  |
+| Configuration               | `detect_unsafe_command_construction` |
+| Inline suppression          | yes                                  |
+| Blocks source preflight     | no                                   |
+| Real-time editor diagnostic | yes                                  |
+| Fix available               | no                                   |

@@ -158,6 +158,7 @@ type AnalyzeConfig struct {
 	DetectLateBoundDictionaryConstants  bool     `toml:"detect_late_bound_dictionary_constants"`
 	DetectCollectionIterationMutation   bool     `toml:"detect_collection_iteration_mutation"`
 	DetectCollectionIndexOrigin         bool     `toml:"detect_collection_index_origin"`
+	DetectUnsafeCommandConstruction     bool     `toml:"detect_unsafe_command_construction"`
 }
 
 type lintRuleAdapter struct {
@@ -240,6 +241,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA233": {Get: func(c AnalyzeConfig) bool { return c.DetectLateBoundDictionaryConstants }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLateBoundDictionaryConstants = v }},
 	"VBA234": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIterationMutation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIterationMutation = v }},
 	"VBA235": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIndexOrigin }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIndexOrigin = v }},
+	"VBA236": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeCommandConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeCommandConstruction = v }},
 }
 
 var (

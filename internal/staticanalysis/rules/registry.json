@@ -1804,6 +1804,28 @@
       "configuration_key": "detect_collection_index_origin",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA236",
+      "title": "Unsafe command construction",
+      "description": "A process-launch command may combine external input, an unquoted executable path, secrets, or unobserved execution.",
+      "family": "analyze",
+      "category": "security",
+      "evidence_class": "policy",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba236",
+      "configurable": true,
+      "configuration_key": "detect_unsafe_command_construction",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

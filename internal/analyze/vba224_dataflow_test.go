@@ -12,12 +12,18 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
+func vba224TestConfig() config.Config {
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeCommandConstruction = false
+	return cfg
+}
+
 func TestAnalyzerRunResultContextReturnsCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := (Analyzer{RootDir: t.TempDir(), Config: config.Default()}).RunResultContext(ctx)
+	_, err := (Analyzer{RootDir: t.TempDir(), Config: vba224TestConfig()}).RunResultContext(ctx)
 	if err != context.Canceled {
 		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
 	}
@@ -36,7 +42,7 @@ End Sub
 	}
 
 	ctx := &cancelAfterChecksContext{Context: context.Background(), remaining: 2}
-	_, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResultContext(ctx)
+	_, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).RunResultContext(ctx)
 	if err != context.Canceled {
 		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
 	}
@@ -70,7 +76,7 @@ Public Sub Run()
 End Sub
 `)
 
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +95,7 @@ End Sub
 		t.Fatalf("JSON data_flow context = %s, err=%v", encoded, err)
 	}
 
-	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), []byte(`Attribute VB_Name = "Main"
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), vba224TestConfig(), []byte(`Attribute VB_Name = "Main"
 Option Explicit
 Public Sub Run()
     Dim raw As String
@@ -121,7 +127,7 @@ Public Sub Run(raw As String)
 End Sub
 `)
 
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +157,7 @@ End Sub
 `
 	writeModule(t, dir, "Main.bas", source)
 
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +166,7 @@ End Sub
 		t.Fatalf("named constant VBA224 findings = %+v, want only raw parameter flow", got)
 	}
 
-	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), []byte(source))
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), vba224TestConfig(), []byte(source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +207,7 @@ Public Sub Run(raw As String)
 End Sub
 `)
 
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +215,7 @@ End Sub
 		t.Fatalf("unknown transform findings = %+v", got)
 	}
 
-	cfg := config.Default()
+	cfg := vba224TestConfig()
 	cfg.Analyze.DetectUntrustedDataFlow = false
 	findings, err = (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
@@ -235,7 +241,7 @@ Public Sub Run(raw As String)
 End Sub
 `
 	writeModule(t, dir, "Main.bas", source)
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +260,7 @@ Public Sub Run(raw As String)
     Shell raw
 End Sub
 `)
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +279,7 @@ Public Sub Run(raw As String)
     Shell raw
 End Sub
 `)
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +303,7 @@ Public Sub Run(raw As String)
 End Sub
 `
 	writeModule(t, dir, "Main.bas", source)
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +346,7 @@ Public Sub Run(raw As String)
 End Sub
 	`
 	writeModule(t, dir, "Main.bas", source)
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	findings, err := (Analyzer{RootDir: dir, Config: vba224TestConfig()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}

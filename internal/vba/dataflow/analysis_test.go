@@ -107,6 +107,47 @@ End Sub
 	}
 }
 
+func TestAnalyzeProcedureCommandFindingsClassifyTaintAndStaticPathRisk(t *testing.T) {
+	t.Parallel()
+	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit
+Sub Run(ByVal raw As String)
+    Shell "cmd.exe /c echo " & raw
+    Shell "C:\Program Files\Tool\tool.exe"
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	procedure := document.Procedures[0]
+	result := AnalyzeProcedure(procedure, cfg.Build(procedure), Options{})
+	if len(result.CommandFindings) != 2 {
+		t.Fatalf("command findings = %+v, want taint and unquoted-path findings", result.CommandFindings)
+	}
+	seen := map[CommandRiskKind]bool{}
+	for _, finding := range result.CommandFindings {
+		seen[finding.RiskKind] = true
+	}
+	if !seen[CommandRiskTaintedCommandText] || !seen[CommandRiskUnquotedExecutablePath] {
+		t.Fatalf("risk kinds = %v", seen)
+	}
+}
+
+func TestCommandInterpreterRequiresStandaloneCmdSwitch(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		`cmd.exe /c echo x`:       "cmd.exe",
+		`cmd /k echo x`:           "cmd.exe",
+		`cmd -c echo x`:           "cmd.exe",
+		`cmd.exe d:/code/run.bat`: "",
+		`tool.exe /c`:             "",
+	}
+	for input, want := range cases {
+		if got := commandInterpreter(input); got != want {
+			t.Errorf("commandInterpreter(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestAnalyzeProcedureTreatsKnownConstantsAsCleanAndRespectsLocalBindings(t *testing.T) {
 	t.Parallel()
 	document, err := procedureir.BuildSource(procedureir.BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Option Explicit
