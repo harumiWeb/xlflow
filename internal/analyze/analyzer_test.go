@@ -451,6 +451,15 @@ End Sub
 	for _, finding := range got {
 		joined = append(joined, finding.Message)
 	}
+	rangeSuggestions := make([]string, 0, 2)
+	for _, finding := range got {
+		if strings.Contains(finding.Message, "Range(") {
+			rangeSuggestions = append(rangeSuggestions, finding.Suggestion)
+		}
+	}
+	if len(rangeSuggestions) != 2 || rangeSuggestions[0] == rangeSuggestions[1] {
+		t.Fatalf("VBA238 cache names should be unique: %+v", rangeSuggestions)
+	}
 	for _, want := range []string{"Workbooks(\"Book.xlsx\")", "Names(\"SalesTotal\")", "Range(\"A1\", \"B2\")", "PivotFields(\"Amount\")", "ChartObjects(\"Trend\")", "Charts(\"Trend2\")"} {
 		found := false
 		for _, message := range joined {
@@ -624,12 +633,71 @@ End Sub
 	}
 	cfg := config.Default()
 	cfg.Analyze.DetectLoopInvariantExcelObjectResolution = false
+	if err := os.WriteFile(path, realtimeSource, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	findings, err = (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := findingsByCode(findings, "VBA238"); len(got) != 0 {
 		t.Fatalf("disabled VBA238 findings = %+v", got)
+	}
+}
+
+func TestVBA238RealtimeCoversDocumentedSelectors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets("Data")
+  For i = 1 To 100
+    Workbooks("Book.xlsx").Worksheets("Data").Range("A1").Value2 = i
+    ThisWorkbook.Names("SalesTotal").RefersToRange.Value2 = i
+    ws.ListObjects("Sales").ListRows(i).Range.Value2 = i
+    ws.PivotTables("Summary").PivotFields("Amount").DataRange.Value2 = i
+    ws.ChartObjects("Trend").Chart.ChartTitle.Text = CStr(i)
+    ws.Charts("Trend2").ChartTitle.Text = CStr(i)
+    ThisWorkbook.Worksheets(CStr(i)).Cells(1, 1).Value2 = i
+    With ThisWorkbook.Worksheets( _
+        "Data" _
+      )
+      For j = 1 To 100
+        .ListObjects("Sales").ListRows(j).Range.Value2 = i
+      Next j
+    End With
+  Next i
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 7 {
+		t.Fatalf("realtime VBA238 documented selector findings = %+v, want seven", got)
+	}
+	for _, want := range []string{"Workbooks(\"Book.xlsx\")", "Names(\"SalesTotal\")", "ListObjects(\"Sales\")", "PivotFields(\"Amount\")", "ChartObjects(\"Trend\")", "Charts(\"Trend2\")"} {
+		found := false
+		for _, finding := range got {
+			if strings.Contains(finding.Message, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("realtime VBA238 findings missing %q: %+v", want, got)
+		}
+	}
+	for _, finding := range got {
+		if strings.Contains(finding.Message, `Worksheets(CStr(i))`) {
+			t.Fatalf("realtime loop-dependent selector was reported: %+v", finding)
+		}
 	}
 }
 

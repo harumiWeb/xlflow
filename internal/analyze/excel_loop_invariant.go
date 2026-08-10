@@ -50,6 +50,10 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	if len(regions) == 0 {
 		return nil
 	}
+	statements := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		statements[statement.ID] = statement
+	}
 	constants := loopInvariantStringConstants(file, proc)
 	expressionsByStatement := make(map[int][]procedureir.Expression)
 	for _, statement := range proc.Statements {
@@ -58,12 +62,12 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	seen := map[string]loopInvariantCandidate{}
 	for _, statement := range proc.Statements {
 		for _, expression := range expressionsByStatement[statement.ID] {
-			candidate, ok := a.loopInvariantCandidate(file, proc, statement, expression, constants)
+			candidate, ok := a.loopInvariantCandidate(file, proc, statement, expression, constants, statements)
 			if !ok {
 				continue
 			}
 			owners := containingExcelLoops(regions, statement.ID, expression.Range.StartLine)
-			owner, ok := loopInvariantOwner(proc, owners, statement, expression)
+			owner, ok := loopInvariantOwner(proc, owners, statement, expression, statements)
 			if !ok {
 				continue
 			}
@@ -105,8 +109,9 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 		return candidates[i].Key < candidates[j].Key
 	})
 	findings := make([]Finding, 0, len(candidates))
+	issuedNames := map[string]bool{}
 	for _, candidate := range candidates {
-		variable := loopInvariantVariableName(proc, candidate.Type)
+		variable := loopInvariantVariableName(proc, candidate.Type, issuedNames)
 		message := "Loop repeatedly resolves invariant Excel object " + candidate.Chain + "."
 		if candidate.Depth >= 2 {
 			message += " Nested loop depth: " + strconvItoa(candidate.Depth) + "."
@@ -124,7 +129,7 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	return findings
 }
 
-func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, statement procedureir.Statement, expression procedureir.Expression, constants map[string]string) (loopInvariantCandidate, bool) {
+func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, statement procedureir.Statement, expression procedureir.Expression, constants map[string]string, statements map[int]procedureir.Statement) (loopInvariantCandidate, bool) {
 	expression.Text = loopInvariantExpressionSource(file.Source, expression)
 	loopInvariantExpandRange(&expression, expression.Text)
 	segments := splitLoopInvariantChain(expression.Text)
@@ -138,7 +143,7 @@ func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, 
 	if !loopInvariantConstantSelector(normalizeLoopInvariantChain(last.Arguments), constants) {
 		return loopInvariantCandidate{}, false
 	}
-	withPrefix, _ := loopInvariantWithPrefix(proc, statement.ID)
+	withPrefix, _ := loopInvariantWithPrefix(statement.ID, statements)
 	chain := strings.TrimSpace(expression.Text)
 	if withPrefix != "" && (strings.HasPrefix(strings.TrimSpace(chain), ".") || !strings.Contains(chain, ".")) {
 		chain = strings.TrimSpace(withPrefix) + strings.TrimSpace(chain)
@@ -167,9 +172,6 @@ func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, 
 		return loopInvariantCandidate{}, false
 	}
 	if !loopInvariantHasSelector(chain) {
-		return loopInvariantCandidate{}, false
-	}
-	if loopInvariantHasTrivialLocalRoot(chain, withPrefix) {
 		return loopInvariantCandidate{}, false
 	}
 	return loopInvariantCandidate{
@@ -263,12 +265,12 @@ func loopInvariantCallEnd(source []byte, open int) int {
 	return 0
 }
 
-func loopInvariantOwner(proc sourceProcedure, owners []excelLoopRegion, statement procedureir.Statement, expression procedureir.Expression) (excelLoopRegion, bool) {
+func loopInvariantOwner(proc sourceProcedure, owners []excelLoopRegion, statement procedureir.Statement, expression procedureir.Expression, statements map[int]procedureir.Statement) (excelLoopRegion, bool) {
+	withStatements := candidateWithStatements(statement.ID, statements)
 	for _, owner := range owners {
 		if owner.Small || owner.StatementID == statement.ID {
 			continue
 		}
-		withStatements := candidateWithStatements(proc, statement.ID)
 		if loopInvariantDependsOnLoopVariable(proc, expression, withStatements, &owner) {
 			continue
 		}
@@ -363,11 +365,7 @@ func loopInvariantLoopVariables(owner excelLoopRegion, proc sourceProcedure) map
 	return variables
 }
 
-func loopInvariantWithPrefix(proc sourceProcedure, statementID int) (string, []procedureir.Statement) {
-	statements := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		statements[statement.ID] = statement
-	}
+func loopInvariantWithPrefix(statementID int, statements map[int]procedureir.Statement) (string, []procedureir.Statement) {
 	var chain []string
 	var withStatements []procedureir.Statement
 	current, ok := statements[statementID]
@@ -426,9 +424,9 @@ func loopInvariantWithHeaderText(text string) string {
 	return strings.Join(parts, " ")
 }
 
-func candidateWithStatements(proc sourceProcedure, statementID int) []procedureir.Statement {
-	_, statements := loopInvariantWithPrefix(proc, statementID)
-	return statements
+func candidateWithStatements(statementID int, statements map[int]procedureir.Statement) []procedureir.Statement {
+	_, withStatements := loopInvariantWithPrefix(statementID, statements)
+	return withStatements
 }
 
 func loopInvariantRangeContains(outer, inner vbaast.Range) bool {
@@ -442,14 +440,6 @@ func loopInvariantHasSelector(chain string) bool {
 		}
 	}
 	return false
-}
-
-func loopInvariantHasTrivialLocalRoot(chain, withPrefix string) bool {
-	if withPrefix != "" || strings.HasPrefix(strings.TrimSpace(chain), ".") {
-		return false
-	}
-	segments := splitLoopInvariantChain(chain)
-	return len(segments) == 1 && !segments[0].IsCall
 }
 
 func isLoopInvariantExcelObjectType(typ string) bool {
@@ -701,9 +691,12 @@ func loopInvariantFriendlyType(typ string) string {
 	return typ
 }
 
-func loopInvariantVariableName(proc sourceProcedure, typ string) string {
+func loopInvariantVariableName(proc sourceProcedure, typ string, issued map[string]bool) string {
 	base := "cached" + loopInvariantFriendlyType(typ)
 	used := map[string]bool{}
+	for name := range issued {
+		used[name] = true
+	}
 	for _, declaration := range proc.Declarations {
 		used[strings.ToLower(declaration.Name)] = true
 	}
@@ -717,5 +710,6 @@ func loopInvariantVariableName(proc sourceProcedure, typ string) string {
 	for index := 2; used[strings.ToLower(name)]; index++ {
 		name = base + strconvItoa(index)
 	}
+	issued[strings.ToLower(name)] = true
 	return name
 }
