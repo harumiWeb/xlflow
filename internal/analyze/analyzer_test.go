@@ -2471,6 +2471,13 @@ Public Sub CleanupNamedHandler()
 CleanupErrorHandler:
   Debug.Print "handled"
 End Sub
+
+Public Sub LegacyCleanUp()
+  On Error GoTo worker_clean_up
+  Debug.Print "work"
+worker_clean_up:
+  Debug.Print "cleanup"
+End Sub
 `)
 
 	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
