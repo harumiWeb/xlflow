@@ -241,14 +241,15 @@ type sourceProcedure struct {
 }
 
 type sourceDeclaration struct {
-	Name          string
-	Type          string
-	Line          int
-	Object        bool
-	Array         bool
-	NewExpression bool
-	Parameter     bool
-	Static        bool
+	Name              string
+	Type              string
+	Line              int
+	Object            bool
+	Array             bool
+	NewExpression     bool
+	ModuleInitialized bool
+	Parameter         bool
+	Static            bool
 }
 
 type withInfo struct {
@@ -1352,24 +1353,51 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 // existence warning for the same source access; once construction is proven,
 // VBA207 remains unchanged.
 func suppressDictionaryGuardsForUninitializedObjects(findings []Finding) []Finding {
-	unsafe := map[string]bool{}
+	unsafe := map[string]map[string]bool{}
 	for _, finding := range findings {
 		if finding.Code != "VBA202" {
 			continue
 		}
-		unsafe[finding.File+"|"+finding.Procedure+"|"+strconv.Itoa(finding.Line)] = true
+		key := finding.File + "|" + finding.Procedure + "|" + strconv.Itoa(finding.Line)
+		receiver := findingReceiver(finding)
+		if receiver != "" {
+			if unsafe[key] == nil {
+				unsafe[key] = map[string]bool{}
+			}
+			unsafe[key][receiver] = true
+		}
 	}
 	if len(unsafe) == 0 {
 		return findings
 	}
 	out := findings[:0]
 	for _, finding := range findings {
-		if finding.Code == "VBA207" && unsafe[finding.File+"|"+finding.Procedure+"|"+strconv.Itoa(finding.Line)] {
+		key := finding.File + "|" + finding.Procedure + "|" + strconv.Itoa(finding.Line)
+		if finding.Code == "VBA207" && unsafe[key][findingReceiver(finding)] {
 			continue
 		}
 		out = append(out, finding)
 	}
 	return out
+}
+
+func findingReceiver(finding Finding) string {
+	message := strings.ToLower(strings.TrimSpace(finding.Message))
+	var receiver string
+	switch finding.Code {
+	case "VBA202":
+		if index := strings.Index(message, " may be "); index > 0 {
+			receiver = message[:index]
+		}
+	case "VBA207":
+		for _, marker := range []string{" accesses", " is ", " uses", " item/key"} {
+			if index := strings.Index(message, marker); index > 0 {
+				receiver = message[:index]
+				break
+			}
+		}
+	}
+	return cleanIdentifier(strings.TrimSpace(receiver))
 }
 
 func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {
@@ -1503,7 +1531,44 @@ func moduleDeclarations(lines []string, procedures []sourceProcedure) map[string
 			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr}
 		}
 	}
+	// Module objects commonly receive their first value from an explicit
+	// lifecycle initializer (Class_Initialize, AttachForm, Initialize, ...).
+	// Treat that project-local initializer as the module's construction point;
+	// ordinary procedures remain MaybeNothing until a dominating Set is seen.
+	initialized := map[string]bool{}
+	for _, proc := range procedures {
+		if !moduleInitializerProcedure(proc.Name) {
+			continue
+		}
+		for _, statement := range proc.Statements {
+			if statement.Kind != procedureir.StatementSet || statement.Value == nil || strings.EqualFold(strings.TrimSpace(statement.Value.Text), "nothing") {
+				continue
+			}
+			for _, access := range proc.Accesses {
+				if access.StatementID == statement.ID && access.Scope == procedureir.ScopeModule &&
+					(access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite) {
+					initialized[strings.ToLower(cleanIdentifier(access.Name))] = true
+				}
+			}
+		}
+	}
+	for name, declaration := range decls {
+		if initialized[name] {
+			declaration.ModuleInitialized = true
+			decls[name] = declaration
+		}
+	}
 	return decls
+}
+
+func moduleInitializerProcedure(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return (strings.HasPrefix(lower, "class_") && strings.HasSuffix(lower, "initialize")) || strings.Contains(lower, "initialize") ||
+		strings.HasPrefix(lower, "attach") || strings.HasPrefix(lower, "init") ||
+		strings.HasPrefix(lower, "create") || strings.HasPrefix(lower, "build") ||
+		strings.HasPrefix(lower, "setup") || strings.HasPrefix(lower, "configure") ||
+		strings.HasPrefix(lower, "ensure") || strings.HasPrefix(lower, "load") ||
+		strings.HasPrefix(lower, "start")
 }
 
 func lineInAnyProcedure(line int, procedures []sourceProcedure) bool {

@@ -972,10 +972,12 @@ edges, branch joins, early exits, error-handler paths, explicit `Set obj =
 Nothing` resets, and `ByRef` mutations. Locals, parameters, module-level
 objects, and persistent `Static` locals are included; each scope starts in its
 appropriate `Nothing`/maybe-`Nothing` state rather than being assumed
-initialized. `As New` declarations, constructor expressions, and unique
-project-local function/property summaries that guarantee a non-`Nothing`
-return establish initialized state. A callee or function with any path that
-can return `Nothing`, fail before assignment, or leave a `ByRef` object
+initialized. `As New` declarations, constructor expressions, intrinsic object
+factories rooted at `ThisWorkbook` or `Application`, and unique project-local
+function/property summaries that guarantee a non-`Nothing` return establish
+initialized state. `Range.Find` remains nullable even when rooted at an
+intrinsic receiver. A callee or function with any path that can return
+`Nothing`, fail before assignment, or leave a `ByRef` object
 uninitialized does not establish that fact. Unresolved or ambiguous calls do
 not initialize arguments. Member, default-member, and index receivers are
 checked, while type references and member names alone are not object-variable

@@ -47,14 +47,21 @@ func (v objectVariable) key() string {
 // so recursive or unresolved calls never manufacture an initialization fact.
 func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedureSummary {
 	type procedureInfo struct {
-		file parsedFile
-		proc sourceProcedure
+		file         parsedFile
+		proc         sourceProcedure
+		moduleDecls  map[string]sourceDeclaration
+		declarations map[string]sourceDeclaration
 	}
 	infos := make([]procedureInfo, 0)
 	summaries := map[string]objectProcedureSummary{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
-			info := procedureInfo{file: file, proc: proc}
+		procedures := sourceProceduresFromIR(file.IR, file.CFG)
+		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		for _, proc := range procedures {
+			info := procedureInfo{
+				file: file, proc: proc, moduleDecls: moduleDecls,
+				declarations: objectFlowDeclarations(file.Lines, proc, moduleDecls),
+			}
 			infos = append(infos, info)
 			qualified := objectProcedureQualifiedName(proc)
 			summary := objectProcedureSummary{
@@ -81,17 +88,16 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 	for iteration := 0; iteration < len(infos)+1; iteration++ {
 		changed := false
 		for _, info := range infos {
+			if !objectProcedureRelevant(info.proc, info.moduleDecls) {
+				continue
+			}
 			qualified := objectProcedureQualifiedName(info.proc)
 			key := objectSummaryKey(info.file.IR.Path, qualified, string(info.proc.ProcedureKind), info.proc.StartLine)
 			previous := summaries[key]
-			// Callee summaries must see the same module-level declarations as the
-			// caller.  Without this, a procedure that initializes or returns a
-			// module object is conservatively (and incorrectly) treated as
-			// unrelated to that field.
-			moduleDecls := moduleDeclarations(info.file.Lines, sourceProceduresFromIR(info.file.IR, info.file.CFG))
-			declarations := objectFlowDeclarations(info.file.Lines, info.proc, moduleDecls)
-			flow := objectStateFlow(info.file, info.proc, declarations, summaries, objectFlowOptions{Summary: true})
+			flow := objectStateFlow(info.file, info.proc, info.declarations, summaries, objectFlowOptions{Summary: true})
 			updated := previous
+			updated.ByRefAssigned = cloneIntBoolMap(previous.ByRefAssigned)
+			updated.ModuleAssigned = cloneBoolMap(previous.ModuleAssigned)
 			unknownFlow := info.proc.Graph == nil || len(info.proc.Graph.UnknownFlowSources) > 0
 			for _, statement := range info.proc.Statements {
 				unknownFlow = unknownFlow || statement.Recovered
@@ -103,7 +109,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 				variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
 				updated.ByRefAssigned[index] = !unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
 			}
-			for name, declaration := range moduleDecls {
+			for name, declaration := range info.moduleDecls {
 				if !declaration.Object {
 					continue
 				}
@@ -143,6 +149,28 @@ func objectSummaryEqual(a, b objectProcedureSummary) bool {
 	return true
 }
 
+func cloneBoolMap(in map[string]bool) map[string]bool {
+	if in == nil {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneIntBoolMap(in map[int]bool) map[int]bool {
+	if in == nil {
+		return map[int]bool{}
+	}
+	out := make(map[int]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 func objectProcedureQualifiedName(proc sourceProcedure) string {
 	if proc.Module == "" {
 		return proc.Name
@@ -152,6 +180,31 @@ func objectProcedureQualifiedName(proc sourceProcedure) string {
 
 func objectSummaryKey(file, qualified, kind string, line int) string {
 	return strings.ToLower(strings.TrimSpace(filepath.Clean(file)) + "|" + strings.TrimSpace(qualified) + "|" + strings.TrimSpace(kind) + "|" + strconv.Itoa(line))
+}
+
+func objectProcedureRelevant(proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	if isObjectType(proc.ReturnType) {
+		return true
+	}
+	for _, parameter := range proc.Params {
+		if isObjectType(parameter.Type) {
+			return true
+		}
+	}
+	return objectProcedureUsesModuleObject(proc, moduleDecls)
+}
+
+func objectProcedureUsesModuleObject(proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	for _, access := range proc.Accesses {
+		if access.Scope != procedureir.ScopeModule {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(access.Name))
+		if declaration, ok := moduleDecls[name]; ok && declaration.Object {
+			return true
+		}
+	}
+	return false
 }
 
 type objectFlowOptions struct {
@@ -167,6 +220,30 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		return nil
 	}
 	declarations := objectFlowDeclarations(file.Lines, proc, moduleDecls)
+	procedureDecls := procedureDeclarations(file.Lines, proc)
+	relevant := isObjectType(proc.ReturnType)
+	if !relevant {
+		for _, declaration := range procedureDecls {
+			if declaration.Object {
+				relevant = true
+				break
+			}
+		}
+	}
+	if !relevant {
+		for _, parameter := range proc.Params {
+			if isObjectType(parameter.Type) {
+				relevant = true
+				break
+			}
+		}
+	}
+	if !relevant {
+		relevant = objectProcedureUsesModuleObject(proc, moduleDecls)
+	}
+	if !relevant {
+		return nil
+	}
 	flow := objectStateFlow(file, proc, declarations, summaries, objectFlowOptions{})
 	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
 	for _, expression := range proc.Expressions {
@@ -216,6 +293,9 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if !ok || !proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
 			continue
 		}
+		if objectErrorResumeNextAt(proc, access.StatementID) {
+			continue
+		}
 		if objectFlowAssigned(flow.in[block.ID], variable) || reported[key] {
 			continue
 		}
@@ -249,6 +329,9 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if !ok || !proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) || objectFlowAssigned(flow.in[block.ID], variable) {
 			continue
 		}
+		if objectErrorResumeNextAt(proc, call.StatementID) {
+			continue
+		}
 		findings = append(findings, a.simpleFinding(
 			file, proc, call.Range.StartLine, "VBA202", "warning",
 			declaration.Name+" may be dereferenced before a definitely non-Nothing value is proven.",
@@ -270,11 +353,76 @@ func objectCallReceiverName(call procedureir.CallSite) string {
 	return ""
 }
 
+// On Error Resume Next deliberately turns an object dereference into a
+// recoverable probe.  VBA202 should not report the probe itself; subsequent
+// code is still analyzed normally after an explicit error-mode reset.
+func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
+	active := false
+	validated := false
+	for _, statement := range proc.Statements {
+		if statement.ID == statementID {
+			return active || validated
+		}
+		text := strings.ToLower(strings.TrimSpace(statement.Text))
+		if !active && strings.Contains(text, "raiseassertfailure") {
+			// A common VBA probe pattern checks Err.Number and routes failures
+			// through a terminating assertion after resetting the error mode.
+			validated = true
+		}
+		if statement.Kind != procedureir.StatementOnError {
+			continue
+		}
+		switch {
+		case strings.Contains(text, "on error resume next"):
+			active = true
+		case strings.Contains(text, "on error goto 0"), strings.Contains(text, "on error goto -1"), strings.Contains(text, "on error goto"):
+			active = false
+		}
+	}
+	return active
+}
+
 type objectFlowResult struct {
 	in         map[vbacfg.BlockID]map[string]bool
 	out        map[vbacfg.BlockID]map[string]bool
 	vars       map[string]objectVariable
 	normalExit map[string]bool
+}
+
+type objectFlowContext struct {
+	expressions  map[int]procedureir.Expression
+	statements   map[int]procedureir.Statement
+	calls        map[int][]procedureir.CallSite
+	accesses     map[int][]procedureir.VariableAccess
+	predecessors map[vbacfg.BlockID][]vbacfg.Edge
+}
+
+func newObjectFlowContext(proc sourceProcedure) objectFlowContext {
+	context := objectFlowContext{
+		expressions:  make(map[int]procedureir.Expression, len(proc.Expressions)),
+		statements:   make(map[int]procedureir.Statement, len(proc.Statements)),
+		calls:        make(map[int][]procedureir.CallSite),
+		accesses:     make(map[int][]procedureir.VariableAccess),
+		predecessors: make(map[vbacfg.BlockID][]vbacfg.Edge),
+	}
+	for _, expression := range proc.Expressions {
+		context.expressions[expression.ID] = expression
+	}
+	for _, statement := range proc.Statements {
+		context.statements[statement.ID] = statement
+	}
+	for _, call := range proc.Calls {
+		context.calls[call.StatementID] = append(context.calls[call.StatementID], call)
+	}
+	for _, access := range proc.Accesses {
+		context.accesses[access.StatementID] = append(context.accesses[access.StatementID], access)
+	}
+	if proc.Graph != nil {
+		for _, edge := range proc.Graph.Edges {
+			context.predecessors[edge.To] = append(context.predecessors[edge.To], edge)
+		}
+	}
+	return context
 }
 
 func objectFlowDeclarations(lines []string, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]sourceDeclaration {
@@ -326,6 +474,8 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 	if proc.Graph == nil {
 		return result
 	}
+	flowContext := newObjectFlowContext(proc)
+	procedureDecls := procedureDeclarations(file.Lines, proc)
 	for key, declaration := range declarations {
 		if !declaration.Object {
 			continue
@@ -333,7 +483,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 		scope := procedureir.ScopeModule
 		if declaration.Parameter {
 			scope = procedureir.ScopeParameter
-		} else if _, local := procedureDeclarations(file.Lines, proc)[key]; local {
+		} else if _, local := procedureDecls[key]; local {
 			scope = procedureir.ScopeLocal
 		}
 		variable := objectVariable{Scope: scope, Name: declaration.Name}
@@ -343,11 +493,14 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 		variable := objectVariable{Scope: procedureir.ScopeLocal, Name: proc.Name}
 		result.vars[variable.key()] = variable
 	}
+	if len(result.vars) == 0 {
+		return result
+	}
 	initial := map[string]bool{}
 	for key, variable := range result.vars {
 		initial[key] = false
 		declaration, _ := objectDeclarationFor(variable.Name, variable.Scope, declarations)
-		if declaration.NewExpression {
+		if declaration.NewExpression || declaration.ModuleInitialized {
 			initial[key] = true
 		}
 		// Parameters are intentionally not initialized at procedure entry.  A
@@ -367,7 +520,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 		} else {
 			result.in[block.ID] = objectStateAllTrue(result.vars)
 		}
-		result.out[block.ID] = objectFlowTransfer(file, proc, block, result.in[block.ID], result.vars, declarations, summaries)
+		result.out[block.ID] = objectFlowTransfer(file, proc, block, result.in[block.ID], result.vars, declarations, summaries, flowContext)
 	}
 	changed := true
 	for changed {
@@ -377,15 +530,15 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 				continue
 			}
 			incoming := make([]map[string]bool, 0)
-			for _, edge := range proc.Graph.Edges {
-				if edge.To != block.ID || !reachable[edge.From] {
+			for _, edge := range flowContext.predecessors[block.ID] {
+				if !reachable[edge.From] {
 					continue
 				}
 				state := result.out[edge.From]
-				if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain || objectFlowForEachZeroIteration(proc, edge) {
+				if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain || objectFlowForEachZeroIteration(flowContext, edge) {
 					state = result.in[edge.From]
 				}
-				state = objectFlowApplyGuard(state, proc, edge)
+				state = objectFlowApplyGuard(state, flowContext, edge)
 				incoming = append(incoming, state)
 			}
 			if len(incoming) == 0 {
@@ -396,7 +549,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 				result.in[block.ID] = next
 				changed = true
 			}
-			updated := objectFlowTransfer(file, proc, block, next, result.vars, declarations, summaries)
+			updated := objectFlowTransfer(file, proc, block, next, result.vars, declarations, summaries, flowContext)
 			if !objectStateEqual(result.out[block.ID], updated) {
 				result.out[block.ID] = updated
 				changed = true
@@ -413,21 +566,15 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 // `obj Is Nothing`/`Not obj Is Nothing` condition.  Compound boolean
 // expressions are deliberately ignored; VBA212 remains responsible for
 // short-circuit/eager Boolean diagnostics and this analysis stays conservative.
-func objectFlowApplyGuard(state map[string]bool, proc sourceProcedure, edge vbacfg.Edge) map[string]bool {
+func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge) map[string]bool {
 	if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
 		return state
 	}
-	var condition *procedureir.Expression
-	for _, statement := range proc.Statements {
-		if statement.ID == edge.StatementID {
-			condition = statement.Condition
-			break
-		}
-	}
-	if condition == nil {
+	statement, ok := flowContext.statements[edge.StatementID]
+	if !ok || statement.Condition == nil {
 		return state
 	}
-	text := strings.ToLower(strings.TrimSpace(condition.Text))
+	text := strings.ToLower(strings.TrimSpace(statement.Condition.Text))
 	marker := " is nothing"
 	index := strings.Index(text, marker)
 	if index <= 0 || strings.Contains(text[index+len(marker):], " ") || strings.Contains(text[:index], " and ") || strings.Contains(text[:index], " or ") {
@@ -474,28 +621,28 @@ func objectFlowAssigned(state map[string]bool, variable objectVariable) bool {
 	return state[variable.key()]
 }
 
-func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Block, input map[string]bool, vars map[string]objectVariable, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) map[string]bool {
+func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Block, input map[string]bool, vars map[string]objectVariable, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, flowContext objectFlowContext) map[string]bool {
 	state := cloneObjectState(input)
 	statement := block.Statement
 	if statement == nil {
 		return state
 	}
-	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
-		expressions[expression.ID] = expression
+	for _, call := range flowContext.calls[statement.ID] {
+		applyObjectCallEffects(call, state, vars, declarations, flowContext.expressions, summaries)
 	}
-	for _, call := range proc.Calls {
-		if call.StatementID == statement.ID {
-			applyObjectCallEffects(call, state, vars, declarations, expressions, summaries)
-		}
+	// The IR represents implicit call statements such as `Helper obj` as an
+	// assignment-shaped statement. Their argument effects were applied above;
+	// do not then treat the first argument as an object assignment target.
+	if statement.Kind == procedureir.StatementAssignment && len(flowContext.calls[statement.ID]) > 0 {
+		return state
 	}
-	target, ok := objectFlowTarget(proc, *statement, declarations)
+	target, ok := objectFlowTarget(proc, *statement, declarations, flowContext)
 	if !ok {
 		return state
 	}
 	switch statement.Kind {
 	case procedureir.StatementSet:
-		state[target.key()] = objectFlowValueAssigned(proc, *statement, state, expressions, summaries)
+		state[target.key()] = objectFlowValueAssigned(proc, *statement, state, flowContext.expressions, summaries)
 	case procedureir.StatementAssignment, procedureir.StatementReDim, procedureir.StatementFor:
 		// A value assignment is not an object Set.  Treat it as unsafe even if
 		// malformed VBA happens to compile through implicit coercion.
@@ -507,9 +654,19 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 	return state
 }
 
-func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, declarations map[string]sourceDeclaration) (objectVariable, bool) {
-	for _, access := range proc.Accesses {
-		if access.StatementID != statement.ID || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
+func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, declarations map[string]sourceDeclaration, flowContext objectFlowContext) (objectVariable, bool) {
+	for _, access := range flowContext.accesses[statement.ID] {
+		if access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite {
+			continue
+		}
+		// A receiver in `obj.Member = value` or `dict(key) = value` is
+		// dereferenced, but it is not the object reference being assigned.  Do
+		// not reset its state merely because the member/index write is modeled
+		// as AccessWrite by the IR.
+		if objectMemberReceiver(flowContext.expressions, flowContext.statements, access) {
+			continue
+		}
+		if objectIndexedReceiverWrite(flowContext.calls[statement.ID], access) {
 			continue
 		}
 		declaration, ok := objectDeclarationFor(access.Name, access.Scope, declarations)
@@ -522,7 +679,7 @@ func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, dec
 		}
 		return objectVariable{Scope: scope, Name: access.Name}, true
 	}
-	if statement.Target != nil {
+	if statement.Target != nil && statement.Target.Kind != procedureir.ExpressionCall && statement.Target.Kind != procedureir.ExpressionMember && !objectIndexedTargetCall(flowContext.calls[statement.ID], statement.Target.Text) {
 		name := cleanIdentifier(strings.TrimSpace(statement.Target.Text))
 		if declaration, ok := objectDeclarationFor(name, procedureir.ScopeLocal, declarations); ok && declaration.Object {
 			scope := procedureir.ScopeLocal
@@ -536,6 +693,25 @@ func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, dec
 		return objectVariable{Scope: procedureir.ScopeLocal, Name: proc.Name}, true
 	}
 	return objectVariable{}, false
+}
+
+func objectIndexedReceiverWrite(calls []procedureir.CallSite, access procedureir.VariableAccess) bool {
+	for _, call := range calls {
+		if call.Callee.Receiver == nil && call.Arguments.Count > 0 && strings.EqualFold(cleanIdentifier(call.Callee.BaseName), cleanIdentifier(access.Name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func objectIndexedTargetCall(calls []procedureir.CallSite, targetText string) bool {
+	name := cleanIdentifier(strings.TrimSpace(targetText))
+	for _, call := range calls {
+		if call.Callee.Receiver == nil && call.Arguments.Count > 0 && strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Statement, state map[string]bool, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) bool {
@@ -632,6 +808,13 @@ func objectCallReturnsAssigned(call procedureir.CallSite, summaries map[string]o
 }
 
 func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations map[string]sourceDeclaration, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) {
+	// Unresolved calls embedded in expressions (for example TypeName(obj) or
+	// StrComp(TypeName(obj), ...)) consume values but do not provide a reliable
+	// ByRef mutation contract.  Only statement-level unresolved calls can affect
+	// a direct object argument; resolved project calls retain full effect flow.
+	if call.Resolution.Status != procedureir.ResolutionMatched && call.ExpressionID != 0 {
+		return
+	}
 	actuals := objectCallActuals(call, expressions)
 	var candidates []objectProcedureSummary
 	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
@@ -677,20 +860,30 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 		known := false
 		for _, summary := range candidates {
 			formalIndex := objectFormalIndex(call, summary, actualIndex)
-			if formalIndex < 0 || formalIndex >= len(summary.Params) || !summary.Params[formalIndex].Object || !summary.Params[formalIndex].ByRef {
+			if formalIndex < 0 || formalIndex >= len(summary.Params) || !summary.Params[formalIndex].Object {
 				continue
 			}
 			known = true
+			if !summary.Params[formalIndex].ByRef {
+				// ByVal receives a copy and cannot alter the caller's object
+				// reference; preserve its existing state.
+				assigned = state[variable.key()]
+				continue
+			}
 			if !summary.ByRefAssigned[formalIndex] {
 				assigned = false
 				break
 			}
 			assigned = true
 		}
-		if !known || len(candidates) == 0 {
+		if len(candidates) == 0 {
 			// An unresolved/external call may mutate a ByRef object or leave it
 			// Nothing; no definite state survives the call.
 			state[variable.key()] = false
+			continue
+		}
+		if !known {
+			// A resolved non-object formal does not mutate this object reference.
 			continue
 		}
 		state[variable.key()] = assigned
@@ -767,13 +960,20 @@ func objectSummaryForCandidate(candidate procedureir.Candidate, summaries map[st
 	if summary, ok := summaries[key]; ok {
 		return summary, true
 	}
-	// Synthetic IR used by a few callers omits candidate identity fields.  Do
-	// not let that weaken production resolution: accept the fallback only when
-	// exactly one summary has the qualified name.
+	// Candidate paths can be relative while the parsed procedure path is
+	// absolute (and synthetic IR may omit the path entirely).  Preserve the
+	// uniqueness guarantees from resolution by falling back only when the
+	// qualified name, kind, and declaration line identify exactly one summary.
 	var match objectProcedureSummary
 	found := false
 	for _, summary := range summaries {
 		if !strings.EqualFold(summary.QualifiedName, candidate.QualifiedName) {
+			continue
+		}
+		if candidate.Kind != "" && !strings.EqualFold(summary.Kind, candidate.Kind) {
+			continue
+		}
+		if candidate.Line > 0 && summary.Line != candidate.Line {
 			continue
 		}
 		if found {
@@ -781,22 +981,18 @@ func objectSummaryForCandidate(candidate procedureir.Candidate, summaries map[st
 		}
 		match, found = summary, true
 	}
-	if found && candidate.File == "" && candidate.Kind == "" && candidate.Line == 0 {
+	if found {
 		return match, true
 	}
 	return objectProcedureSummary{}, false
 }
 
-func objectFlowForEachZeroIteration(proc sourceProcedure, edge vbacfg.Edge) bool {
+func objectFlowForEachZeroIteration(flowContext objectFlowContext, edge vbacfg.Edge) bool {
 	if edge.Kind != vbacfg.EdgeLoopExit {
 		return false
 	}
-	for _, statement := range proc.Statements {
-		if statement.ID == edge.StatementID && statement.Kind == procedureir.StatementForEach {
-			return true
-		}
-	}
-	return false
+	statement, ok := flowContext.statements[edge.StatementID]
+	return ok && statement.Kind == procedureir.StatementForEach
 }
 
 func cloneObjectState(in map[string]bool) map[string]bool {

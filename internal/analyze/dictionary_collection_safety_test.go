@@ -77,6 +77,22 @@ End Sub
 	if got[0].Line != 5 || got[0].Severity != "warning" {
 		t.Fatalf("definitely absent VBA207 = %+v", got[0])
 	}
+	vba202 := findingsByCode(findings, "VBA202")
+	if len(vba202) != 1 || vba202[0].Line != 9 {
+		t.Fatalf("nullable external receiver should be owned by VBA202 at line 9: %+v", vba202)
+	}
+}
+
+func TestVBA202SuppressesOnlyMatchingDictionaryReceiver(t *testing.T) {
+	findings := []Finding{
+		{Code: "VBA202", File: "Main.bas", Procedure: "Run", Line: 10, Message: "external may be dereferenced before a definitely non-Nothing value is proven."},
+		{Code: "VBA207", File: "Main.bas", Procedure: "Run", Line: 10, Message: "localDict accesses or removes a key that is definitely absent."},
+		{Code: "VBA207", File: "Main.bas", Procedure: "Run", Line: 10, Message: "external accesses or removes a key that is definitely absent."},
+	}
+	got := suppressDictionaryGuardsForUninitializedObjects(findings)
+	if len(got) != 2 || got[0].Code != "VBA202" || got[1].Message[:9] != "localDict" {
+		t.Fatalf("only the matching receiver's VBA207 should be suppressed: %+v", got)
+	}
 }
 
 func TestVBA207KeepsBranchJoinedContentUnknown(t *testing.T) {

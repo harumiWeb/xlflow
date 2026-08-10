@@ -134,6 +134,29 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448TracksModuleResetAfterLifecycleInitialization(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedSheet As Worksheet
+
+Private Sub InitializeModuleState()
+  Set sharedSheet = ThisWorkbook.Worksheets(1)
+  Set sharedSheet = Nothing
+  Debug.Print sharedSheet.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("module reset should invalidate lifecycle initialization: %+v", got)
+	}
+}
+
 func TestVBA202Issue448RefinesNotNothingGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -196,5 +219,68 @@ End Sub
 	got := findingsByCode(findings, "VBA202")
 	if len(got) != 1 || got[0].Line != 6 {
 		t.Fatalf("explicit Nothing reset should invalidate later use: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesStateAcrossByValObjectArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Observe(ByVal target As Worksheet)
+End Sub
+
+Public Sub UseByVal()
+  Dim target As Worksheet
+  Set target = ThisWorkbook.Worksheets(1)
+  Observe target
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("ByVal object calls must preserve caller state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448CoversErrorAndEarlyExitPathsAndIndexedWrites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ErrorPath()
+  Dim target As Worksheet
+  On Error GoTo Handler
+  Err.Raise 5
+  Set target = ThisWorkbook.Worksheets(1)
+Handler:
+  Debug.Print target.Name
+End Sub
+
+Public Sub EarlyGoto(ByVal skipSet As Boolean)
+  Dim target As Worksheet
+  If skipSet Then GoTo UseTarget
+  Set target = ThisWorkbook.Worksheets(1)
+UseTarget:
+  Debug.Print target.Name
+End Sub
+
+Public Sub IndexedWrite()
+  Dim dict As Object
+  Set dict = CreateObject("Scripting.Dictionary")
+  dict("key") = 1
+  Debug.Print dict("key")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 2 || got[0].Procedure != "ErrorPath" || got[1].Procedure != "EarlyGoto" {
+		t.Fatalf("error and early-exit paths should warn while initialized indexed writes stay safe: %+v", got)
 	}
 }
