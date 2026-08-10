@@ -73,8 +73,13 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findingsByCode(realtime, "VBA236")) != 1 || len(findingsByCode(realtime, "VBA224")) != 0 {
+	realtimeVBA236 := findingsByCode(realtime, "VBA236")
+	if len(realtimeVBA236) != 1 || len(findingsByCode(realtime, "VBA224")) != 0 {
 		t.Fatalf("realtime process launch projection = %+v", realtime)
+	}
+	context := realtimeVBA236[0].CommandExecution
+	if context == nil || context.RiskClass != "injection" || context.RiskKind != "tainted_command_text" || context.CommandRole != "executable" || context.Interpreter != "" {
+		t.Fatalf("realtime command context = %+v", context)
 	}
 }
 
@@ -193,13 +198,20 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA236")
-	if len(got) < 2 {
-		t.Fatalf("ShellExecute findings = %+v, want Shell.Application and Win32 calls", got)
-	}
+	seen := make(map[string]*CommandExecutionContext, len(got))
 	for _, finding := range got {
 		if finding.CommandExecution == nil || finding.CommandExecution.Launcher == "" {
 			t.Fatalf("missing ShellExecute context = %+v", finding)
 		}
+		seen[finding.CommandExecution.Launcher] = finding.CommandExecution
+	}
+	app := seen["Shell.Application.ShellExecute"]
+	if app == nil || app.CommandRole != "document" || app.RiskClass != "process_launch" || app.RiskKind != "unknown_origin" {
+		t.Fatalf("Shell.Application.ShellExecute context = %+v", app)
+	}
+	win32 := seen["ShellExecuteA"]
+	if win32 == nil || win32.CommandRole != "executable" || win32.RiskClass != "injection" || win32.RiskKind != "tainted_command_text" {
+		t.Fatalf("ShellExecuteA context = %+v", win32)
 	}
 }
 
@@ -331,13 +343,15 @@ End Sub
 `)
 	cfg := config.Default()
 	cfg.Analyze.DetectUnsafeCommandConstruction = false
-	cfg.Analyze.DetectUntrustedDataFlow = false
 	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := findingsByCode(findings, "VBA236"); len(got) != 0 {
 		t.Fatalf("disabled VBA236 findings = %+v", got)
+	}
+	if got := findingsByCode(findings, "VBA224"); len(got) != 1 {
+		t.Fatalf("VBA224 fallback findings = %+v, want one finding", findings)
 	}
 }
 
