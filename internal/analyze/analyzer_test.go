@@ -359,6 +359,348 @@ End Sub
 	}
 }
 
+func TestVBA238DetectsLoopInvariantExcelObjectResolution(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  For i = 1 To 100
+    ThisWorkbook.Worksheets("Data").Cells(i, 1).Value2 = i
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 1 {
+		t.Fatalf("VBA238 findings = %+v, want one", got)
+	}
+	if got[0].Line != 5 || !strings.Contains(got[0].Message, `ThisWorkbook.Worksheets("Data")`) || !strings.Contains(got[0].Suggestion, "Dim cachedWorksheet As Worksheet") || !strings.Contains(got[0].Suggestion, "Set cachedWorksheet") {
+		t.Fatalf("unexpected VBA238 finding: %+v", got[0])
+	}
+}
+
+func TestVBA238PreservesCRLFMultilineRange(t *testing.T) {
+	t.Parallel()
+	expression := procedureir.Expression{Range: vbaast.Range{StartLine: 4, StartColumn: 3}}
+	loopInvariantExpandRange(&expression, "Worksheets( _\r\n  \"Data\"\r\n)")
+	if expression.Range.EndLine != 6 || expression.Range.EndColumn != 2 {
+		t.Fatalf("VBA238 CRLF range = %+v, want end line 6 column 2", expression.Range)
+	}
+}
+
+func TestVBA238SkipsLoopDependentAndTrivialLocalAccess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets("Data")
+  For i = 1 To 100
+    ws.ListObjects("Sales").ListRows(i).Range.Value2 = i
+    ThisWorkbook.Worksheets(CStr(i)).Cells(1, 1).Value2 = i
+    ThisWorkbook.Worksheets(OtherSheet).Cells(1, 1).Value2 = i
+    Debug.Print ws
+  Next i
+End Sub
+Public Sub Other()
+  Const OtherSheet As String = "Data"
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 1 || !strings.Contains(got[0].Message, `ws.ListObjects("Sales")`) {
+		t.Fatalf("unexpected dependent/local VBA238 findings: %+v", got)
+	}
+}
+
+func TestVBA238DetectsNamedRangePivotAndChartSelectors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets("Data")
+  For i = 1 To 100
+    ThisWorkbook.Names("SalesTotal").RefersToRange.Value2 = i
+    ThisWorkbook.Worksheets("Data").Range("A1", "B2").Value2 = i
+    Workbooks("Book.xlsx").Worksheets("Data").Range("A1").Value2 = i
+    ws.PivotTables("Summary").PivotFields("Amount").DataRange.Value2 = i
+    ws.ChartObjects("Trend").Chart.ChartTitle.Text = CStr(i)
+    ws.Charts("Trend2").ChartTitle.Text = CStr(i)
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 6 {
+		t.Fatalf("VBA238 selector findings = %+v, want two range, named range, pivot field, and chart selectors", got)
+	}
+	joined := make([]string, 0, len(got))
+	for _, finding := range got {
+		joined = append(joined, finding.Message)
+	}
+	rangeSuggestions := make([]string, 0, 2)
+	for _, finding := range got {
+		if strings.Contains(finding.Message, "Range(") {
+			rangeSuggestions = append(rangeSuggestions, finding.Suggestion)
+		}
+	}
+	if len(rangeSuggestions) != 2 || rangeSuggestions[0] == rangeSuggestions[1] {
+		t.Fatalf("VBA238 cache names should be unique: %+v", rangeSuggestions)
+	}
+	for _, want := range []string{"Workbooks(\"Book.xlsx\")", "Names(\"SalesTotal\")", "Range(\"A1\", \"B2\")", "PivotFields(\"Amount\")", "ChartObjects(\"Trend\")", "Charts(\"Trend2\")"} {
+		found := false
+		for _, message := range joined {
+			if strings.Contains(message, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("VBA238 selector findings missing %q: %+v", want, got)
+		}
+	}
+}
+
+func TestVBA238NormalizesMultilineAndSupportsWithNestedLoops(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  For i = 1 To 100
+    With ThisWorkbook.Worksheets( _
+        "Data" _
+      )
+      For j = 1 To 100
+        .ListObjects("Sales").ListRows(j).Range.Value2 = i
+      Next j
+    End With
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 1 {
+		t.Fatalf("VBA238 nested/With findings = %+v, want the maximal table resolution", got)
+	}
+	sawListObject := false
+	for _, finding := range got {
+		if finding.Severity != "warning" {
+			t.Fatalf("unexpected nested VBA238 finding: %+v", finding)
+		}
+		sawListObject = sawListObject || strings.Contains(finding.Message, "ListObjects")
+	}
+	if !sawListObject {
+		t.Fatalf("nested/With VBA238 finding missing table chain: %+v", got)
+	}
+}
+
+func TestVBA238DeduplicatesEquivalentMultilineChains(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  For i = 1 To 100
+    Debug.Print ThisWorkbook.Worksheets("Data").Range("A1").Value2
+    Debug.Print ThisWorkbook.Worksheets( _
+      "Data" _
+    ).Range("A1").Value2
+  Next i
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 1 {
+		t.Fatalf("VBA238 normalized findings = %+v, want one maximal range chain", got)
+	}
+	if !strings.Contains(got[0].Message, `Range("A1")`) {
+		t.Fatalf("VBA238 normalized chain missing maximal range: %+v", got)
+	}
+}
+
+func TestVBA238HandlesForEachDoAndWhileBoundaries(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub ForEachHeader()
+  Dim row As ListRow
+  For Each row In ThisWorkbook.Worksheets("Data").ListObjects("Sales").ListRows
+    Debug.Print row.Index
+  Next row
+End Sub
+
+Public Sub ForEachNested()
+  Dim row As ListRow
+  Dim i As Long
+  For i = 1 To 100
+    For Each row In ThisWorkbook.Worksheets("Data").ListObjects("Sales").ListRows
+      Debug.Print row.Index
+    Next row
+  Next i
+End Sub
+
+Public Sub DoAndWhile()
+  Dim i As Long
+  Do While i < 100
+    ThisWorkbook.Worksheets(CStr(i)).Cells(1, 1).Value2 = i
+    ThisWorkbook.Worksheets("Data").Cells(i, 1).Value2 = i
+    i = i + 1
+  Loop
+  i = 0
+  While i < 100
+    ThisWorkbook.Worksheets(CStr(i)).Cells(1, 1).Value2 = i
+    ThisWorkbook.Worksheets("Data").Cells(i, 1).Value2 = i
+    i = i + 1
+  Wend
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 3 {
+		t.Fatalf("VBA238 loop boundary findings = %+v, want nested For Each and two invariant Do/While chains", got)
+	}
+	for _, finding := range got {
+		if strings.Contains(finding.Message, `Worksheets(CStr(i))`) {
+			t.Fatalf("loop-dependent selector was reported: %+v", finding)
+		}
+	}
+}
+
+func TestVBA238CanBeDisabledAndSuppressed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+  Dim i As Long
+  For i = 1 To 100
+    ' xlflow:disable-next-line VBA238
+    ThisWorkbook.Worksheets("Data").Cells(i, 1).Value2 = i
+  Next i
+End Sub
+`)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA238"); len(got) != 0 {
+		t.Fatalf("suppressed VBA238 findings = %+v", got)
+	}
+	realtimeSource := []byte(`Option Explicit
+Public Sub Run()
+  Dim i As Long
+  For i = 1 To 100
+    ThisWorkbook.Worksheets("Data").Cells(i, 1).Value2 = i
+  Next i
+End Sub
+`)
+	realtime, err := SourceRealtimeFindings(dir, path, config.Default(), realtimeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA238"); len(got) != 1 {
+		t.Fatalf("realtime VBA238 findings = %+v, want one", got)
+	}
+	cfg := config.Default()
+	cfg.Analyze.DetectLoopInvariantExcelObjectResolution = false
+	if err := os.WriteFile(path, realtimeSource, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err = (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA238"); len(got) != 0 {
+		t.Fatalf("disabled VBA238 findings = %+v", got)
+	}
+}
+
+func TestVBA238RealtimeCoversDocumentedSelectors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  Dim i As Long
+  Dim j As Long
+  Dim ws As Worksheet
+  Set ws = ThisWorkbook.Worksheets("Data")
+  For i = 1 To 100
+    Workbooks("Book.xlsx").Worksheets("Data").Range("A1").Value2 = i
+    ThisWorkbook.Names("SalesTotal").RefersToRange.Value2 = i
+    ws.ListObjects("Sales").ListRows(i).Range.Value2 = i
+    ws.PivotTables("Summary").PivotFields("Amount").DataRange.Value2 = i
+    ws.ChartObjects("Trend").Chart.ChartTitle.Text = CStr(i)
+    ws.Charts("Trend2").ChartTitle.Text = CStr(i)
+    ThisWorkbook.Worksheets(CStr(i)).Cells(1, 1).Value2 = i
+    With ThisWorkbook.Worksheets( _
+        "Data" _
+      )
+      For j = 1 To 100
+        .ListObjects("Sales").ListRows(j).Range.Value2 = i
+      Next j
+    End With
+  Next i
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	findings, err := SourceRealtimeFindings(dir, path, config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA238")
+	if len(got) != 7 {
+		t.Fatalf("realtime VBA238 documented selector findings = %+v, want seven", got)
+	}
+	for _, want := range []string{"Workbooks(\"Book.xlsx\")", "Names(\"SalesTotal\")", "ListObjects(\"Sales\")", "PivotFields(\"Amount\")", "ChartObjects(\"Trend\")", "Charts(\"Trend2\")"} {
+		found := false
+		for _, finding := range got {
+			if strings.Contains(finding.Message, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("realtime VBA238 findings missing %q: %+v", want, got)
+		}
+	}
+	for _, finding := range got {
+		if strings.Contains(finding.Message, `Worksheets(CStr(i))`) {
+			t.Fatalf("realtime loop-dependent selector was reported: %+v", finding)
+		}
+	}
+}
+
 func TestAnalyzerDetectsProcedureLocalResourceLeaks(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

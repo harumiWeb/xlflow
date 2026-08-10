@@ -1848,6 +1848,28 @@
       "configuration_key": "detect_error_suppression_propagation",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA238",
+      "title": "Loop-invariant Excel object resolution",
+      "description": "A loop repeatedly resolves an Excel object-model member chain that does not depend on the loop variable and could be cached outside the loop.",
+      "family": "analyze",
+      "category": "performance",
+      "evidence_class": "maintainability",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba238",
+      "configurable": true,
+      "configuration_key": "detect_loop_invariant_excel_object_resolution",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

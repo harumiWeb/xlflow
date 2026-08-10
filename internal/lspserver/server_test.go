@@ -849,6 +849,28 @@ func TestProtocolDiagnosticUsesRegistrySeverityAndPreservesNestedVBA225Range(t *
 	}
 }
 
+func TestProtocolDiagnosticUsesRegistryMetadataForVBA238(t *testing.T) {
+	diagnostic := toProtocolDiagnostic(intel.Diagnostic{
+		Code:     "VBA238",
+		Severity: "error",
+		Source:   "xlflow",
+		Range: intel.Range{
+			Start: intel.Position{Line: 6, Character: 2},
+			End:   intel.Position{Line: 7, Character: 42},
+		},
+		Message: "Loop repeatedly resolves invariant Excel object.",
+	})
+	if diagnostic.Severity == nil || *diagnostic.Severity != protocol.DiagnosticSeverityWarning {
+		t.Fatalf("VBA238 severity = %#v, want warning", diagnostic.Severity)
+	}
+	if diagnostic.Range.Start.Line != 6 || diagnostic.Range.End.Line != 7 || diagnostic.Range.End.Character != 42 {
+		t.Fatalf("VBA238 range = %#v, want multiline candidate range", diagnostic.Range)
+	}
+	if diagnostic.CodeDescription == nil || string(diagnostic.CodeDescription.HRef) != "https://harumiweb.github.io/xlflow/reference/diagnostics#vba238" {
+		t.Fatalf("VBA238 code description = %#v", diagnostic.CodeDescription)
+	}
+}
+
 func TestProtocolDiagnosticPreservesSupportedInformationSeverity(t *testing.T) {
 	for _, severity := range []string{"information", "info"} {
 		diagnostic := toProtocolDiagnostic(intel.Diagnostic{
