@@ -11,6 +11,7 @@ All notable changes to xlflow will be documented in this file.
   origin, credential, observability, and unquoted-path context with Windows
   quoting guidance. Process-launch ownership moves from generic `VBA224` to
   the new configurable `detect_unsafe_command_construction` rule.
+- Fix false-positive `VBA205` findings for local, parameter, and project symbols that shadow Excel root names, including procedure declaration and `Attribute` lines.
 
 - Expanded `VBA212` to analyze AST operand relationships across eager `And`,
   `Or`, `IIf`, `Choose`, and `Switch` expressions, including nested

@@ -26,8 +26,6 @@
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":76,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":149,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":235,"column":0}
-{"project":"third_party/webxcel","file":"src/Classes/WorksheetTable.cls","surface":"analyze","code":"VBA205","severity":"warning","line":31,"column":0}
-{"project":"third_party/webxcel","file":"src/Classes/WorksheetTable.cls","surface":"analyze","code":"VBA205","severity":"warning","line":35,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTable.cls","surface":"analyze","code":"VBA217","severity":"warning","line":77,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTableCollection.cls","surface":"analyze","code":"VBA225","severity":"warning","line":17,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTableCollection.cls","surface":"analyze","code":"VBA205","severity":"warning","line":19,"column":0}

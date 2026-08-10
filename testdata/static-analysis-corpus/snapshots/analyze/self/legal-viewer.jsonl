@@ -168,7 +168,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modBookmark.bas","surface":"analyze","code":"VBA227","severity":"warning","line":689,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modCitation.bas","surface":"analyze","code":"VBA225","severity":"warning","line":193,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modCitation.bas","surface":"analyze","code":"VBA225","severity":"warning","line":233,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modCitation.bas","surface":"analyze","code":"VBA205","severity":"warning","line":237,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modCitation.bas","surface":"analyze","code":"VBA227","severity":"warning","line":348,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modCitation.bas","surface":"analyze","code":"VBA227","severity":"warning","line":351,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modCompare.bas","surface":"analyze","code":"VBA227","severity":"warning","line":117,"column":0}
@@ -186,8 +185,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA225","severity":"warning","line":276,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA225","severity":"warning","line":465,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA227","severity":"warning","line":725,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA205","severity":"warning","line":727,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA205","severity":"warning","line":771,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA227","severity":"warning","line":903,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA227","severity":"warning","line":903,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawNavigator.bas","surface":"analyze","code":"VBA227","severity":"warning","line":907,"column":0}
@@ -337,16 +334,11 @@
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":891,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawSearch.bas","surface":"analyze","code":"VBA227","severity":"warning","line":891,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA225","severity":"warning","line":15,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA205","severity":"warning","line":98,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA205","severity":"warning","line":120,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA205","severity":"warning","line":144,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA205","severity":"warning","line":145,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":153,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":157,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":159,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":161,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":163,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA205","severity":"warning","line":211,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":265,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":265,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modLawTableParser.bas","surface":"analyze","code":"VBA227","severity":"warning","line":265,"column":0}
