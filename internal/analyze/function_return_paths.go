@@ -41,7 +41,7 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 	}
 
 	filter := vbacfg.EdgeFilter{}
-	graph := graphWithoutNormalErrRaiseContinuation(*proc.Graph)
+	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
 	if !graph.IsReachable(graph.NormalExit, filter) {
 		return nil
 	}
@@ -88,42 +88,6 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 		suggestion = "Use " + proc.Name + " = ... (or Let " + proc.Name + " = ...) on every successful return path."
 	}
 	return []Finding{a.simpleFinding(file, proc, line, "VBA210", "warning", message, reason, suggestion)}
-}
-
-// graphWithoutNormalErrRaiseContinuation removes the normal continuation of Err.Raise. Err.Raise
-// transfers control through VBA error handling (or out of the procedure); it
-// never completes a normal procedure statement. The CFG still retains the
-// exceptional edges produced for the active On Error mode, including Resume
-// Next, so recoverable error paths remain visible to the analysis.
-func graphWithoutNormalErrRaiseContinuation(graph vbacfg.Graph) vbacfg.Graph {
-	graph.Blocks = append([]vbacfg.Block(nil), graph.Blocks...)
-	edges := graph.Edges
-	graph.Edges = make([]vbacfg.Edge, 0, len(edges))
-	for _, edge := range edges {
-		if edge.Class == vbacfg.EdgeNormal && isErrRaiseBlock(graph, edge.From) {
-			continue
-		}
-		graph.Edges = append(graph.Edges, edge)
-	}
-	return graph
-}
-
-func isErrRaiseBlock(graph vbacfg.Graph, id vbacfg.BlockID) bool {
-	if id <= 0 || int(id) > len(graph.Blocks) {
-		return false
-	}
-	statement := graph.Blocks[int(id)-1].Statement
-	if statement == nil {
-		return false
-	}
-	text := strings.ToLower(strings.TrimSpace(statement.Text))
-	if strings.HasPrefix(text, "call ") || strings.HasPrefix(text, "call\t") {
-		text = strings.TrimSpace(text[len("call"):])
-	}
-	if !strings.HasPrefix(text, "err.raise") {
-		return false
-	}
-	return len(text) == len("err.raise") || text[len("err.raise")] == ' ' || text[len("err.raise")] == '\t' || text[len("err.raise")] == '('
 }
 
 func returnSlotVariable(name string) vbacfg.Variable {

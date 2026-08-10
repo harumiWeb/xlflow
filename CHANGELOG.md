@@ -14,6 +14,11 @@ All notable changes to xlflow will be documented in this file.
   origin, credential, observability, and unquoted-path context with Windows
   quoting guidance. Process-launch ownership moves from generic `VBA224` to
   the new configurable `detect_unsafe_command_construction` rule.
+- Added default-enabled `VBA237` warnings for handlers, cleanup paths,
+  `On Error Resume Next` regions, and ignored Boolean success results that lose
+  failure information across uniquely resolved local call chains. Batch and
+  LSP Full diagnostics share provenance-preserving procedure summaries and
+  report the location where the failure signal is lost.
 - Fix false-positive `VBA205` findings for local, parameter, and project symbols that shadow Excel root names, including procedure declaration and `Attribute` lines.
 
 - Expanded `VBA212` to analyze AST operand relationships across eager `And`,

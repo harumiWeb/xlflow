@@ -252,6 +252,7 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":428,"column":13}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":433,"column":21}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":463,"column":13}
+{"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA237","severity":"warning","line":478,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":500,"column":43}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":530,"column":43}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":571,"column":47}
@@ -290,6 +291,7 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebPrintSettings.cls","surface":"analyze","code":"VBA227","severity":"warning","line":310,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"analyze","code":"VBA206","severity":"warning","line":118,"column":14}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"analyze","code":"VBA224","severity":"warning","line":196,"column":0}
+{"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"analyze","code":"VBA237","severity":"warning","line":211,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"analyze","code":"VBA214","severity":"warning","line":346,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"analyze","code":"VBA206","severity":"warning","line":515,"column":17}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebShared.bas","surface":"analyze","code":"VBA227","severity":"warning","line":595,"column":0}

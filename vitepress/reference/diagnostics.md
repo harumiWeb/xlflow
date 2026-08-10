@@ -89,6 +89,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA234`](#vba234) | analyze | warning  | interprocedural | yes     | Collection mutation during iteration               |
 | [`VBA235`](#vba235) | analyze | warning  | procedure-local | yes     | Collection index origin confusion                  |
 | [`VBA236`](#vba236) | analyze | warning  | procedure-local | yes     | Unsafe command construction                        |
+| [`VBA237`](#vba237) | analyze | warning  | interprocedural | yes     | Suppressed error propagation                       |
 
 ## VB001
 
@@ -1915,3 +1916,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                   |
 | Real-time editor diagnostic | yes                                  |
 | Fix available               | no                                   |
+
+## VBA237
+
+**Suppressed error propagation.** A procedure or call boundary loses failure information by returning normally without rethrowing, returning a checked failure flag, or otherwise signaling failure.
+
+| Property                    | Value                                  |
+| --------------------------- | -------------------------------------- |
+| Family                      | `analyze`                              |
+| Category                    | `runtime-safety`                       |
+| Evidence class              | `runtime-safety`                       |
+| Compile-equivalent          | no                                     |
+| Default severity            | `warning`                              |
+| Supported severities        | `warning`                              |
+| Surfaces                    | `analyze`, `lsp`                       |
+| Scope                       | `interprocedural`                      |
+| Precision                   | `high`                                 |
+| Enabled by default          | yes                                    |
+| Configuration               | `detect_error_suppression_propagation` |
+| Inline suppression          | yes                                    |
+| Blocks source preflight     | no                                     |
+| Real-time editor diagnostic | yes                                    |
+| Fix available               | no                                     |

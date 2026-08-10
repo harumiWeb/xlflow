@@ -192,6 +192,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_dictionary_key_normalization`
 - `detect_dictionary_loop_materialization`
 - `detect_error_handler_fallthrough`
+- `detect_error_suppression_propagation`
 - `detect_event_handler_reentry`
 - `detect_excel_api_failure_contracts`
 - `detect_excel_cell_access_in_loops`
@@ -390,6 +391,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `gui_boundary_detected`
 - `gui_preflight_failed`
 - `h_result`
+- `has_error_handler`
 - `has_frx`
 - `has_workbook`
 - `height_px`
@@ -472,6 +474,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `location_capture`
 - `logical_line`
 - `logical_value_expression`
+- `logs_and_continues`
 - `loop_back`
 - `loop_body`
 - `loop_exit`
@@ -494,6 +497,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `max_count`
 - `max_rows`
 - `max_total_size_mb`
+- `may_raise`
 - `member_access`
 - `member_call`
 - `member_diagnostics`
@@ -692,11 +696,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `resume_next`
 - `resume_retry`
 - `resume_statement`
+- `rethrows_errors`
 - `retryable_when_busy`
 - `return_slot`
 - `return_type`
 - `returned_range`
 - `returns_error_value`
+- `returns_success_flag`
 - `risk_class`
 - `risk_kind`
 - `rollback_args_invalid`
@@ -850,6 +856,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `uncertain_edges`
 - `undeclared_variable`
 - `unexpected_helper_mode`
+- `unhandled_fault`
 - `unknown_command`
 - `unknown_exit`
 - `unknown_inline_suppression_rule`
@@ -893,6 +900,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userform_unsaved_session_state`
 - `userforms_known`
 - `userforms_present`
+- `uses_resume_next`
 - `uses_type`
 - `variable_declaration`
 - `variable_declarator`

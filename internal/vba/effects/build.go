@@ -40,6 +40,7 @@ func (i *membershipIndex[T]) add(value T) bool {
 type summaryMembership struct {
 	identityKey string
 	evidence    membershipIndex[Evidence]
+	error       membershipIndex[ErrorEvidence]
 	uncertainty membershipIndex[CallUncertainty]
 }
 
@@ -47,6 +48,7 @@ func newSummaryMembership(summary *ProcedureSummary) *summaryMembership {
 	index := &summaryMembership{
 		identityKey: summary.Identity.Key(),
 		evidence:    newMembershipIndex(len(summary.Direct)+len(summary.Propagated), evidenceKey),
+		error:       newMembershipIndex(len(summary.Error.Direct)+len(summary.Error.Propagated), errorEvidenceKey),
 		uncertainty: newMembershipIndex(len(summary.DirectUncertainty)+len(summary.PropagatedUncertainty), uncertaintyKey),
 	}
 	for _, fact := range summary.Direct {
@@ -54,6 +56,12 @@ func newSummaryMembership(summary *ProcedureSummary) *summaryMembership {
 	}
 	for _, fact := range summary.Propagated {
 		index.evidence.add(fact)
+	}
+	for _, fact := range summary.Error.Direct {
+		index.error.add(fact)
+	}
+	for _, fact := range summary.Error.Propagated {
+		index.error.add(fact)
 	}
 	for _, fact := range summary.DirectUncertainty {
 		index.uncertainty.add(fact)
@@ -70,12 +78,16 @@ func Build(documents []Document) ProjectSummary {
 	inputs := collectInputs(documents)
 	summaries := make(map[string]*ProcedureSummary, len(inputs))
 	candidateKeys := candidateIndex(inputs)
+	loggerTargets := loggerProcedureIndex(inputs, candidateKeys)
+	rethrowTargets := rethrowProcedureIndex(inputs, candidateKeys)
+	terminalTargets := terminalProcedureIndex(inputs, candidateKeys)
 	var edges []edge
 	for _, input := range inputs {
 		summary := &ProcedureSummary{Identity: input.id}
 		reachable := reachableStatements(input.proc, input.graph)
 		statements := statementIndex(input.proc)
 		extractStatements(summary, input.proc, reachable)
+		extractErrorSummary(summary, input.proc, input.graph, reachable, candidateKeys, loggerTargets, rethrowTargets, terminalTargets)
 		for _, call := range input.proc.Calls {
 			statement := statements[call.StatementID]
 			if !reachable[call.StatementID] || statement.Recovered {
@@ -95,6 +107,7 @@ func Build(documents []Document) ProjectSummary {
 			}
 		}
 		dedupeDirect(summary)
+		refreshErrorFlags(&summary.Error)
 		summaries[input.id.Key()] = summary
 	}
 	sort.Slice(edges, func(i, j int) bool {
@@ -193,6 +206,7 @@ func uncertainty(origin ProcedureIdentity, call procedureir.CallSite) CallUncert
 
 func dedupeDirect(summary *ProcedureSummary) {
 	summary.Direct = uniqueEvidence(summary.Direct)
+	summary.Error.Direct = uniqueErrorEvidence(summary.Error.Direct)
 	summary.DirectUncertainty = uniqueUncertainty(summary.DirectUncertainty)
 }
 
@@ -235,6 +249,47 @@ func propagate(summaries map[string]*ProcedureSummary, edges []edge) {
 			propagateEvidence(callee.Direct)
 			propagateEvidence(callee.Propagated)
 
+			propagateErrors := func(facts []ErrorEvidence) {
+				for _, fact := range facts {
+					// MayRaise is already a local CFG outcome for a reachable call
+					// site and can occur in nearly every non-trivial procedure. Its
+					// per-origin transitive expansion is redundant and quadratic on
+					// large call graphs; loss diagnostics require provenance only for
+					// the more specific handled-error outcomes below.
+					if fact.Behavior == ErrorMayRaise {
+						continue
+					}
+					if fact.Origin.Key() == callerMembership.identityKey {
+						continue
+					}
+					fact.CallChain = prependErrorCaller(caller.Identity, fact.CallChain, fact.Origin)
+					if !callerMembership.error.add(fact) {
+						continue
+					}
+					caller.Error.Propagated = append(caller.Error.Propagated, fact)
+					changed = true
+				}
+			}
+			propagateErrors(callee.Error.Direct)
+			propagateErrors(callee.Error.Propagated)
+			if callee.Error.MayRaise && !caller.Error.MayRaise {
+				fact := ErrorEvidence{
+					Behavior: ErrorMayRaise,
+					Origin:   callee.Identity,
+					CallChain: []ProcedureIdentity{
+						caller.Identity,
+						callee.Identity,
+					},
+					Target: "callee",
+					Value:  callee.Identity.QualifiedName,
+				}
+				if callerMembership.error.add(fact) {
+					caller.Error.Propagated = append(caller.Error.Propagated, fact)
+					changed = true
+				}
+			}
+			refreshErrorFlags(&caller.Error)
+
 			propagateUncertainty := func(facts []CallUncertainty) {
 				for _, fact := range facts {
 					if fact.Origin.Key() == callerMembership.identityKey || !callerMembership.uncertainty.add(fact) {
@@ -254,6 +309,21 @@ func propagate(summaries map[string]*ProcedureSummary, edges []edge) {
 	}
 }
 
+func prependErrorCaller(caller ProcedureIdentity, chain []ProcedureIdentity, origin ProcedureIdentity) []ProcedureIdentity {
+	for _, item := range chain {
+		if item.Key() == caller.Key() {
+			return append([]ProcedureIdentity(nil), chain...)
+		}
+	}
+	if len(chain) == 0 {
+		chain = []ProcedureIdentity{origin}
+	}
+	out := make([]ProcedureIdentity, 0, len(chain)+1)
+	out = append(out, caller)
+	out = append(out, chain...)
+	return out
+}
+
 func uniqueEvidence(in []Evidence) []Evidence {
 	index := newMembershipIndex(len(in), evidenceKey)
 	out := make([]Evidence, 0, len(in))
@@ -270,6 +340,17 @@ func uniqueUncertainty(in []CallUncertainty) []CallUncertainty {
 	for _, v := range in {
 		if index.add(v) {
 			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func uniqueErrorEvidence(in []ErrorEvidence) []ErrorEvidence {
+	index := newMembershipIndex(len(in), errorEvidenceKey)
+	out := make([]ErrorEvidence, 0, len(in))
+	for _, value := range in {
+		if index.add(value) {
+			out = append(out, value)
 		}
 	}
 	return out

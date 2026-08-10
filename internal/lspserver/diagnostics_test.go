@@ -103,6 +103,148 @@ func TestFastDiagnosticsAreCompletelyReplacedByFullDiagnostics(t *testing.T) {
 	}
 }
 
+func TestFastDiagnosticsExcludeVBA237(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	notifications := &diagnosticNotificationRecorder{}
+	ctx := diagnosticTestContext(notifications)
+	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{
+			{Code: "VBA237", Severity: "warning", Message: "project"},
+			{Code: "LOCAL", Severity: "warning", Message: fmt.Sprintf("local %d", request.Document.Version)},
+		}}
+	}
+	uri := openDiagnosticsTestDocument(t, s, ctx, 1)
+	notifications.waitForCount(t, 1)
+	notifications.clear()
+
+	changeDiagnosticsTestDocument(t, s, ctx, uri, 2)
+	timers.snapshot()[0].Fire()
+	publication := notifications.waitForCount(t, 1)[0]
+	if len(publication.Diagnostics) != 1 || publication.Diagnostics[0].Message != "local 2" {
+		t.Fatalf("Fast diagnostics = %+v, want VBA237 excluded", publication.Diagnostics)
+	}
+}
+
+func TestProjectFullDiagnosticsReportCrossFileIgnoredSuccessAndFastExcludesIt(t *testing.T) {
+	root := t.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	callee := `Attribute VB_Name = "Helpers"
+Option Explicit
+Public Function TryWork() As Boolean
+  On Error GoTo Failed
+  Workbooks.Open "book.xlsx"
+  TryWork = True
+  Exit Function
+Failed:
+  TryWork = False
+End Function
+`
+	caller := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+  TryWork
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(modules, "Helpers.bas"), []byte(callee), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	callerPath := filepath.Join(modules, "Main.bas")
+	if err := os.WriteFile(callerPath, []byte(caller), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := s.analysis.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	notifications := &diagnosticNotificationRecorder{}
+	ctx := diagnosticTestContext(notifications)
+	uri := pathToFileURI(callerPath)
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: caller,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForDiagnosticCode(t, notifications, "VBA237", 10*time.Second)
+	notifications.clear()
+
+	calleeURI := pathToFileURI(filepath.Join(modules, "Helpers.bas"))
+	unsavedCallee := `Attribute VB_Name = "Helpers"
+Option Explicit
+Public Sub TryWork()
+End Sub
+`
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(calleeURI), Version: 1, Text: unsavedCallee,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForURIDiagnostics(t, notifications, uri, "VBA237", false, 10*time.Second)
+	notifications.clear()
+	if err := s.didClose(ctx, &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(calleeURI)}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForURIDiagnostics(t, notifications, uri, "VBA237", true, 10*time.Second)
+	notifications.clear()
+
+	change := caller + "' unsaved\n"
+	if err := s.didChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)}, Version: 2},
+		ContentChanges: []any{protocol.TextDocumentContentChangeEventWhole{Text: change}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fast := notifications.waitForCount(t, 1)[0]
+	if protocolDiagnosticsContainCode(fast.Diagnostics, "VBA237") {
+		t.Fatalf("Fast diagnostics included VBA237: %+v", fast.Diagnostics)
+	}
+	waitForDiagnosticCode(t, notifications, "VBA237", 10*time.Second)
+}
+
+func waitForURIDiagnostics(t *testing.T, recorder *diagnosticNotificationRecorder, uri, code string, contains bool, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, publication := range recorder.snapshot() {
+			if string(publication.URI) == uri && protocolDiagnosticsContainCode(publication.Diagnostics, code) == contains {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("diagnostics for %s with %s presence=%t missing: %+v", uri, code, contains, recorder.snapshot())
+}
+
+func waitForDiagnosticCode(t *testing.T, recorder *diagnosticNotificationRecorder, code string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, publication := range recorder.snapshot() {
+			if protocolDiagnosticsContainCode(publication.Diagnostics, code) {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("diagnostic %s missing from publications: %+v", code, recorder.snapshot())
+}
+
+func protocolDiagnosticsContainCode(diagnostics []protocol.Diagnostic, want string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != nil && fmt.Sprint(diagnostic.Code.Value) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEditingCancelsRunningFullBeforeLatestFastPublishes(t *testing.T) {
 	s, timers, cleanup := newDiagnosticsTestServer(t)
 	defer cleanup()
@@ -788,6 +930,7 @@ func newDiagnosticsTestServer(t *testing.T) (*Server, *fakeDiagnosticTimers, fun
 	s.diagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
 		return intel.DiagnosticResult{Diagnostics: s.diagnostics(ctx, request.Document)}
 	}
+	s.projectDiagnosticsRequest = nil
 	return s, timers, cleanup
 }
 

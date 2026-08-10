@@ -159,6 +159,7 @@ type AnalyzeConfig struct {
 	DetectCollectionIterationMutation   bool     `toml:"detect_collection_iteration_mutation"`
 	DetectCollectionIndexOrigin         bool     `toml:"detect_collection_index_origin"`
 	DetectUnsafeCommandConstruction     bool     `toml:"detect_unsafe_command_construction"`
+	DetectErrorSuppressionPropagation   bool     `toml:"detect_error_suppression_propagation"`
 }
 
 type lintRuleAdapter struct {
@@ -242,6 +243,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA234": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIterationMutation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIterationMutation = v }},
 	"VBA235": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIndexOrigin }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIndexOrigin = v }},
 	"VBA236": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeCommandConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeCommandConstruction = v }},
+	"VBA237": {Get: func(c AnalyzeConfig) bool { return c.DetectErrorSuppressionPropagation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectErrorSuppressionPropagation = v }},
 }
 
 var (

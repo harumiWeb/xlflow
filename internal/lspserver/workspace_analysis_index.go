@@ -15,7 +15,9 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
@@ -44,20 +46,27 @@ type workspaceAnalysisIndex struct {
 	// newer in-memory document generation is being analyzed.  Workspace
 	// queries therefore remain conservative instead of returning stale data.
 	pending    map[string]uint64
+	incomplete map[string]bool
 	effective  map[string]indexedFileAnalysis
 	generation map[string]uint64
 	diskParses map[string]*diskParse
-	exactName  map[string][]symbolRef
-	qualified  map[string][]symbolRef
-	moduleName map[string][]symbolRef
-	symbolKind map[string][]symbolRef
-	exactKeys  []string
-	qualKeys   []string
-	all        []symbolRef
-	allCalls   []callRef
-	byCaller   map[string][]callRef
-	byBaseName map[string][]callRef
-	byText     map[string][]callRef
+	// revision changes only when a complete effective entry is published or
+	// removed. Pending overlays make projectSnapshot incomplete and therefore
+	// cannot seed project-aware diagnostics.
+	revision            uint64
+	exactName           map[string][]symbolRef
+	qualified           map[string][]symbolRef
+	moduleName          map[string][]symbolRef
+	symbolKind          map[string][]symbolRef
+	exactKeys           []string
+	qualKeys            []string
+	all                 []symbolRef
+	allCalls            []callRef
+	byCaller            map[string][]callRef
+	byBaseName          map[string][]callRef
+	byText              map[string][]callRef
+	projectMu           sync.Mutex
+	lastProjectSnapshot intel.ProjectAnalysisSnapshot
 }
 
 type diskParse struct {
@@ -82,6 +91,8 @@ type indexedFileAnalysis struct {
 	symbols        []intel.Symbol
 	callSites      []calls.CallSite
 	typeReferences []calls.TypeReference
+	procedureIR    procedureir.DocumentIR
+	controlFlow    vbacfg.Document
 }
 
 type symbolRef struct {
@@ -106,7 +117,7 @@ type workspaceCallQuery struct {
 func newWorkspaceAnalysisIndex(root string, cfg config.Config, parse func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error), logInitial func(int, time.Time, error)) *workspaceAnalysisIndex {
 	return &workspaceAnalysisIndex{
 		root: root, config: cfg, parse: parse, log: logInitial, ready: make(chan struct{}),
-		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, pending: map[string]uint64{}, effective: map[string]indexedFileAnalysis{},
+		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, pending: map[string]uint64{}, incomplete: map[string]bool{}, effective: map[string]indexedFileAnalysis{},
 		generation: map[string]uint64{}, diskParses: map[string]*diskParse{}, exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{}, moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
 		byCaller: map[string][]callRef{}, byBaseName: map[string][]callRef{}, byText: map[string][]callRef{},
 	}
@@ -244,6 +255,7 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 	x.disk[key] = entry
 	if _, open := x.overlays[key]; !open && x.pending[key] == 0 {
 		x.replaceEffectiveLocked(key, entry)
+		x.revision++
 	}
 	return nil
 }
@@ -261,7 +273,11 @@ func (x *workspaceAnalysisIndex) removePath(path string) error {
 	}
 	delete(x.disk, key)
 	if _, open := x.overlays[key]; !open && x.pending[key] == 0 {
+		_, existed := x.effective[key]
 		x.removeEffectiveLocked(key)
+		if existed {
+			x.revision++
+		}
 	}
 	x.mu.Unlock()
 	return nil
@@ -282,8 +298,10 @@ func (x *workspaceAnalysisIndex) setOverlay(doc intel.Document, analysis indexed
 		delete(x.diskParses, key)
 	}
 	delete(x.pending, key)
+	delete(x.incomplete, key)
 	x.overlays[key] = analysis
 	x.replaceEffectiveLocked(key, analysis)
+	x.revision++
 	x.mu.Unlock()
 }
 
@@ -304,8 +322,10 @@ func (x *workspaceAnalysisIndex) beginOverlay(doc intel.Document, generation uin
 		delete(x.diskParses, key)
 	}
 	x.pending[key] = generation
+	delete(x.incomplete, key)
 	delete(x.overlays, key)
 	x.removeEffectiveLocked(key)
+	x.revision++
 	x.mu.Unlock()
 	return previous, ok
 }
@@ -326,8 +346,10 @@ func (x *workspaceAnalysisIndex) publishOverlay(doc intel.Document, generation u
 		return false
 	}
 	delete(x.pending, key)
+	delete(x.incomplete, key)
 	x.overlays[key] = analysis
 	x.replaceEffectiveLocked(key, analysis)
+	x.revision++
 	return true
 }
 
@@ -345,6 +367,7 @@ func (x *workspaceAnalysisIndex) abandonOverlay(doc intel.Document, generation u
 		return false
 	}
 	delete(x.pending, key)
+	x.incomplete[key] = true
 	x.overlays[key] = indexedFileAnalysis{
 		path:       doc.Path,
 		version:    documentVersion(doc),
@@ -379,9 +402,11 @@ func (x *workspaceAnalysisIndex) beginClearOverlay(path string) *diskRefresh {
 		delete(x.diskParses, key)
 	}
 	delete(x.pending, key)
+	x.incomplete[key] = true
 	delete(x.overlays, key)
 	delete(x.disk, key)
 	x.removeEffectiveLocked(key)
+	x.revision++
 	ctx, cancel := context.WithCancel(context.Background())
 	active := &diskParse{generation: observed, cancel: cancel}
 	x.diskParses[key] = active
@@ -407,11 +432,13 @@ func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (index
 		return indexedFileAnalysis{}, false, err
 	}
 	if !included {
+		x.completeClearWithoutEntry(refresh)
 		return indexedFileAnalysis{}, false, nil
 	}
 	source, err := os.ReadFile(file.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			x.completeClearWithoutEntry(refresh)
 			return indexedFileAnalysis{}, false, nil
 		}
 		return indexedFileAnalysis{}, false, err
@@ -433,8 +460,150 @@ func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (index
 		return indexedFileAnalysis{}, false, nil
 	}
 	x.disk[refresh.key] = entry
+	delete(x.incomplete, refresh.key)
 	x.replaceEffectiveLocked(refresh.key, entry)
+	x.revision++
 	return entry, true, nil
+}
+
+func (x *workspaceAnalysisIndex) completeClearWithoutEntry(refresh *diskRefresh) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.generation[refresh.key] != refresh.generation || x.diskParses[refresh.key] != refresh.active {
+		return
+	}
+	delete(x.incomplete, refresh.key)
+	x.revision++
+}
+
+// projectSnapshot returns a defensive, coherent project view. A snapshot is
+// incomplete until the initial scan finishes and whenever a newer editor
+// overlay is pending. Callers must not publish project diagnostics from an
+// incomplete view.
+func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot {
+	x.start()
+	x.mu.RLock()
+	complete := len(x.pending) == 0 && len(x.incomplete) == 0
+	select {
+	case <-x.ready:
+		complete = complete && x.readyErr == nil
+	default:
+		complete = false
+	}
+	revision := x.revision
+	keys := make([]string, 0, len(x.effective))
+	for key := range x.effective {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	entries := make([]indexedFileAnalysis, 0, len(keys))
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0, len(x.all))
+	graphSymbols := make([]callgraph.Symbol, 0, len(x.all))
+	for _, key := range keys {
+		entry := x.effective[key]
+		entries = append(entries, indexedFileAnalysis{
+			path: entry.path, procedureIR: procedureir.Clone(entry.procedureIR),
+			controlFlow: vbacfg.CloneDocument(entry.controlFlow),
+			callSites:   cloneCallSites(entry.callSites), typeReferences: cloneTypeReferences(entry.typeReferences),
+		})
+		file := workspaceDisplayPath(x.root, entry.path)
+		for _, sym := range entry.symbols {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: sym.Name, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
+				Visibility: sym.Visibility, File: entry.procedureIR.Path, Line: sym.Range.Start.Line + 1,
+			})
+			graphSymbols = append(graphSymbols, callgraph.Symbol{
+				Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
+				Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1,
+				EndLine: sym.Range.End.Line + 1, EndColumn: sym.Range.End.Character + 1,
+				Parent: sym.Parent, Visibility: sym.Visibility, ReturnType: sym.ReturnType, Signature: sym.Detail,
+			})
+		}
+	}
+	x.mu.RUnlock()
+
+	resolver := procedureir.NewResolver(resolverSymbols)
+	callResolverSymbols := make([]calls.ResolverSymbol, len(graphSymbols))
+	for i, sym := range graphSymbols {
+		callResolverSymbols[i] = calls.ResolverSymbol{
+			Name: sym.Name, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
+			Visibility: sym.Visibility, File: sym.File, Line: sym.Line,
+		}
+	}
+	callResolver := calls.NewResolverFromSymbols(callResolverSymbols)
+	result := intel.ProjectAnalysisSnapshot{Revision: revision, Complete: complete}
+	var sites []calls.CallSite
+	var typeReferences []calls.TypeReference
+	for _, entry := range entries {
+		resolvedIR := procedureir.Resolve(entry.procedureIR, resolver)
+		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: vbacfg.CloneDocument(entry.controlFlow)})
+		sites = append(sites, cloneCallSites(entry.callSites)...)
+		typeReferences = append(typeReferences, entry.typeReferences...)
+	}
+	resolvedCalls := make([]calls.Call, len(sites))
+	for i, site := range sites {
+		resolvedCalls[i] = callResolver.Resolve(site)
+	}
+	sort.SliceStable(resolvedCalls, func(i, j int) bool { return callSiteLess(resolvedCalls[i].CallSite, resolvedCalls[j].CallSite) })
+	sort.SliceStable(typeReferences, func(i, j int) bool {
+		if typeReferences[i].File != typeReferences[j].File {
+			return typeReferences[i].File < typeReferences[j].File
+		}
+		if typeReferences[i].Range.StartLine != typeReferences[j].Range.StartLine {
+			return typeReferences[i].Range.StartLine < typeReferences[j].Range.StartLine
+		}
+		return typeReferences[i].Range.StartColumn < typeReferences[j].Range.StartColumn
+	})
+	result.CallGraph = callgraph.Snapshot{Symbols: graphSymbols, Calls: resolvedCalls, TypeReferences: typeReferences}
+	return result
+}
+
+func (x *workspaceAnalysisIndex) initialReady() bool {
+	x.start()
+	select {
+	case <-x.ready:
+		return true
+	default:
+		return false
+	}
+}
+
+// projectChange advances the last complete snapshot and returns the affected
+// transitive caller files. Incomplete snapshots never replace the baseline,
+// so overlapping pending overlays are compared once the workspace becomes
+// coherent again.
+func (x *workspaceAnalysisIndex) projectChange() (intel.ProjectAnalysisSnapshot, []string) {
+	current := x.projectSnapshot()
+	if !current.Complete {
+		return current, nil
+	}
+	x.projectMu.Lock()
+	previous := x.lastProjectSnapshot
+	x.lastProjectSnapshot = current
+	x.projectMu.Unlock()
+	if !previous.Complete {
+		return current, nil
+	}
+	return current, projectImpactPaths(previous, current)
+}
+
+func cloneCallSites(in []calls.CallSite) []calls.CallSite {
+	out := make([]calls.CallSite, len(in))
+	for i := range in {
+		out[i] = calls.CloneCallSite(in[i])
+	}
+	return out
+}
+
+func cloneTypeReferences(in []calls.TypeReference) []calls.TypeReference {
+	out := append([]calls.TypeReference(nil), in...)
+	for i := range out {
+		if out[i].Caller != nil {
+			caller := *out[i].Caller
+			out[i].Caller = &caller
+		}
+	}
+	return out
 }
 
 func (x *workspaceAnalysisIndex) searchContains(query string) ([]intel.Symbol, error) {

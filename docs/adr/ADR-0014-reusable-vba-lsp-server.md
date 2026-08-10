@@ -145,3 +145,4 @@ The VS Code extension should remain a thin language client that launches:
 - `internal/vba/intel`
 - `internal/vbadb`
 - `vitepress/commands/lsp.md`
+- `docs/adr/ADR-0033-vba-error-outcomes-and-lsp-project-cache.md`

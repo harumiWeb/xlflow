@@ -61,6 +61,15 @@ internally, are derived from these deduplicated collections rather than stored
 as independently mutable totals. `ProjectSummary` contains the sorted procedure
 summaries and supports exact stable-identity lookup.
 
+For issue #446, `ProcedureSummary` additionally carries an `ErrorSummary`
+derived from reachable CFG outcomes. It records provenance for handler
+presence, resume-next use, suppression, explicit rethrow, Boolean success
+returns, possible raises, and logging followed by continuation. These outcomes
+reuse the confirmed call edges and fixed-point rules below but are not inferred
+from the `suppresses_errors` or `raises_error` effect kinds alone. The complete
+outcome and diagnostic contract is defined in
+[VBA Error Suppression and Propagation Analysis](vba-error-propagation-analysis.md).
+
 ## Direct Effect Detection
 
 Direct effects are positive semantic claims and therefore require a
@@ -196,6 +205,8 @@ consumers.
 
 The CFG retains its existing fallback that every executable statement is a
 potential fault site. Effect summaries are not embedded into CFG construction
-and do not narrow exceptional edges under issue #428. LSP workspace-generation
-cache and invalidation behavior will be specified when an LSP effect consumer
-is introduced.
+and do not narrow exceptional edges under issue #428. `VBA237` is the first LSP
+consumer of a project effect summary; its complete-workspace cache, Full-only
+publication, dependency generations, and old-plus-new reverse-call-graph
+invalidation are specified in
+[VBA Error Suppression and Propagation Analysis](vba-error-propagation-analysis.md).

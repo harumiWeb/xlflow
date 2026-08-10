@@ -62,6 +62,7 @@
 {"project":"third_party/iguana-tex","file":"ExternalEditorForm.frm","surface":"analyze","code":"VBA236","severity":"warning","line":85,"column":0}
 {"project":"third_party/iguana-tex","file":"ExternalEditorForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":85,"column":15}
 {"project":"third_party/iguana-tex","file":"ExternalEditorForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":85,"column":52}
+{"project":"third_party/iguana-tex","file":"ExternalEditorForm.frm","surface":"analyze","code":"VBA237","severity":"warning","line":92,"column":0}
 {"project":"third_party/iguana-tex","file":"IconvWrapper.bas","surface":"analyze","code":"VBA227","severity":"warning","line":22,"column":0}
 {"project":"third_party/iguana-tex","file":"IconvWrapper.bas","surface":"analyze","code":"VBA227","severity":"warning","line":28,"column":0}
 {"project":"third_party/iguana-tex","file":"IconvWrapper.bas","surface":"analyze","code":"VBA227","severity":"warning","line":33,"column":0}
@@ -283,6 +284,7 @@
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":960,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA224","severity":"warning","line":960,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA224","severity":"warning","line":960,"column":0}
+{"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA237","severity":"warning","line":970,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":978,"column":31}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":1081,"column":23}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"analyze","code":"VBA219","severity":"warning","line":1087,"column":0}
@@ -532,6 +534,7 @@
 {"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA227","severity":"warning","line":164,"column":0}
 {"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA227","severity":"warning","line":164,"column":0}
 {"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA227","severity":"warning","line":164,"column":0}
+{"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA237","severity":"warning","line":169,"column":0}
 {"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA227","severity":"warning","line":174,"column":0}
 {"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA227","severity":"warning","line":174,"column":0}
 {"project":"third_party/iguana-tex","file":"MacUtils.bas","surface":"analyze","code":"VBA227","severity":"warning","line":174,"column":0}
@@ -592,6 +595,7 @@
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VBA206","severity":"warning","line":30,"column":1}
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VB045","severity":"error","line":129,"column":27}
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VB045","severity":"error","line":220,"column":16}
+{"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VBA237","severity":"warning","line":256,"column":0}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":24,"column":0}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":24,"column":0}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":25,"column":0}
@@ -832,6 +836,7 @@
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":761,"column":39}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":762,"column":39}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA206","severity":"warning","line":763,"column":39}
+{"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA237","severity":"warning","line":779,"column":0}
 {"project":"third_party/iguana-tex","file":"ShellWait.bas","surface":"analyze","code":"VBA206","severity":"warning","line":7,"column":18}
 {"project":"third_party/iguana-tex","file":"ShellWait.bas","surface":"analyze","code":"VBA206","severity":"warning","line":17,"column":9}
 {"project":"third_party/iguana-tex","file":"ShellWait.bas","surface":"analyze","code":"VBA206","severity":"warning","line":17,"column":9}
