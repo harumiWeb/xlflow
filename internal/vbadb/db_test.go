@@ -278,6 +278,9 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 	if got, ok := db.ResolveMember("Scripting.Dictionary", "Item"); !ok || got.ReturnType != "Variant" || !got.Default || len(got.Parameters) != 1 {
 		t.Fatalf("Dictionary.Item = %+v, %v", got, ok)
 	}
+	if got, ok := db.ResolveMember("Scripting.Dictionary", "CompareMode"); !ok || got.ReturnType != "Scripting.CompareMethod" || got.ReadOnly {
+		t.Fatalf("Dictionary.CompareMode = %+v, %v", got, ok)
+	}
 	if got, ok := db.ResolveMember("MSForms.Controls", "Item"); !ok || got.ReturnType != "MSForms.Control" || len(got.Parameters) != 1 {
 		t.Fatalf("Controls.Item = %+v, %v", got, ok)
 	}
@@ -415,6 +418,34 @@ func TestResolveConstant(t *testing.T) {
 	}
 	if constant.EnumGroup != "XlPageOrientation" {
 		t.Fatalf("unexpected xlLandscape metadata: %+v", constant)
+	}
+}
+
+func TestBuiltinScriptingCompareMethodMetadataDoesNotReplaceVBAConstants(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if typ, ok := db.ResolveType("Scripting.CompareMethod"); !ok || typ.Kind != "enum" || typ.Library != "Scripting" {
+		t.Fatalf("ResolveType(Scripting.CompareMethod) = %+v, %v", typ, ok)
+	}
+	for scriptingName, vbaName := range map[string]string{
+		"BinaryCompare":   "vbBinaryCompare",
+		"TextCompare":     "vbTextCompare",
+		"DatabaseCompare": "vbDatabaseCompare",
+	} {
+		scriptingConstant, ok := db.ResolveConstant(scriptingName)
+		if !ok || scriptingConstant.Library != "Scripting" || scriptingConstant.EnumGroup != "CompareMethod" {
+			t.Fatalf("ResolveConstant(%s) = %+v, %v", scriptingName, scriptingConstant, ok)
+		}
+		vbaConstant, ok := db.ResolveConstant(vbaName)
+		if !ok || vbaConstant.Library != "VBA" || vbaConstant.EnumGroup != "VbCompareMethod" {
+			t.Fatalf("ResolveConstant(%s) = %+v, %v", vbaName, vbaConstant, ok)
+		}
+		if scriptingConstant.Value != vbaConstant.Value {
+			t.Fatalf("%s value = %s, %s value = %s", scriptingName, scriptingConstant.Value, vbaName, vbaConstant.Value)
+		}
 	}
 }
 

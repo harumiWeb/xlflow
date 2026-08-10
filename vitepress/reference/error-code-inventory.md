@@ -177,10 +177,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_application_state_restore`
 - `detect_array_lifecycle_safety`
 - `detect_byref_argument_mismatch`
+- `detect_collection_index_origin`
+- `detect_collection_iteration_mutation`
 - `detect_confusing_call_syntax`
 - `detect_dangerous_resume`
 - `detect_dictionary_collection_guard`
+- `detect_dictionary_compare_mode_order`
 - `detect_dictionary_iteration_value_usage`
+- `detect_dictionary_key_normalization`
+- `detect_dictionary_loop_materialization`
 - `detect_error_handler_fallthrough`
 - `detect_event_handler_reentry`
 - `detect_excel_api_failure_contracts`
@@ -190,6 +195,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_function_return_path`
 - `detect_hardcoded_secrets`
 - `detect_implicit_variant`
+- `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`
 - `detect_multiple_declarator_clarity`
 - `detect_nested_with_ambiguity`

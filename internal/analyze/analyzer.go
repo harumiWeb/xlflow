@@ -76,6 +76,7 @@ type Analyzer struct {
 	eventSafeProcedures        map[string]bool
 	applicationStateLeaks      *applicationStateLeakIndex
 	excelLoopAccess            *excelLoopAccessIndex
+	dictionaryCollection       *dictionaryCollectionIndex
 }
 
 var (
@@ -361,6 +362,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	}
 	analysisCtx := a.buildContext(parsedFiles)
 	analysis := a
+	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
+		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
+	}
 	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
 		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
 	}
@@ -841,6 +845,9 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB}
+		if dictionaryCollectionAnalysisEnabled(cfg.Analyze) {
+			analyzer.dictionaryCollection = buildDictionaryCollectionIndex([]parsedFile{file})
+		}
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)
 		procedures := sourceProceduresFromIR(ir, controlFlow)
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
@@ -897,7 +904,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -943,6 +950,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(worksheetCodenames)
 	var findings []Finding
+	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
+		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
+	}
 	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
@@ -1151,6 +1161,9 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
+	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
+		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
+	}
 	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
@@ -1239,9 +1252,6 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		}
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
-		}
-		if a.Config.Analyze.DetectDictionaryCollectionGuard {
-			findings = append(findings, a.dictionaryCollectionFindings(file, proc, lineNo, stmt, decls)...)
 		}
 		if a.Config.Analyze.DetectObjectArrayComparison {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
@@ -1597,24 +1607,6 @@ func capturedWorkbooksOpen(stmt string, openStart int) bool {
 	return setAssignmentPrefixRe.MatchString(stmt[branchStart:openStart])
 }
 
-func (a Analyzer) dictionaryCollectionFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration) []Finding {
-	lower := strings.ToLower(stmt)
-	if strings.Contains(lower, ".exists(") || strings.Contains(lower, "on error") {
-		return nil
-	}
-	var findings []Finding
-	for key, decl := range decls {
-		typ := strings.ToLower(cleanIdentifier(decl.Type))
-		if typ != "dictionary" && typ != "collection" && typ != "scripting.dictionary" {
-			continue
-		}
-		if strings.Contains(lower, key+"(") || strings.Contains(lower, key+".item(") {
-			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA207", "warning", decl.Name+" item access has no obvious existence guard.", "Dictionary and Collection item lookup can fail at runtime when the key is missing.", "Guard the access with Exists, explicit error handling, or a prior key validation path."))
-		}
-	}
-	return findings
-}
-
 type dictionaryIterationLoop struct {
 	item     string
 	dict     string
@@ -1682,6 +1674,14 @@ func (a Analyzer) dictionaryIterationValueUsageFindings(file parsedFile, proc so
 			rhs := strings.TrimSpace(rawStmt[strings.Index(rawStmt, "=")+1:])
 			if dictionaryCreateRe.MatchString(rhs) || dictionaryNewRe.MatchString(rhs) {
 				inferredDictionaries[target] = true
+			} else if source := strings.ToLower(cleanIdentifier(rhs)); dcBareIdentifier(rhs) && (declaredDictionaries[source] || inferredDictionaries[source]) {
+				inferredDictionaries[target] = true
+			} else if helper, _, called := dcSimpleFunctionCall(rhs); called {
+				if summary, ok := a.dcHelper(helper); ok && summary.Factory == dcDictionary {
+					inferredDictionaries[target] = true
+				} else {
+					delete(inferredDictionaries, target)
+				}
 			} else {
 				delete(inferredDictionaries, target)
 			}

@@ -2089,6 +2089,12 @@ func TestSeverityBadgeColorizesUnknownSeverity(t *testing.T) {
 	}
 }
 
+func TestSeverityBadgeRendersInformationSeverity(t *testing.T) {
+	if got := (renderer{}).severityBadge("information"); got != "[info]" {
+		t.Fatalf("information severity badge = %q, want [info]", got)
+	}
+}
+
 func TestWriteWithOptionsRendersLintIssuesAsTable(t *testing.T) {
 	env := Failure("lint", Error{Code: "lint_failed", Message: "2 lint issue(s) found"})
 	env.Issues = []map[string]any{

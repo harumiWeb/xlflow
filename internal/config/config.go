@@ -152,6 +152,12 @@ type AnalyzeConfig struct {
 	DetectExcelCellAccessInLoops        bool     `toml:"detect_excel_cell_access_in_loops"`
 	DetectRangeValueArrayShape          bool     `toml:"detect_range_value_array_shape"`
 	DetectArrayLifecycleSafety          bool     `toml:"detect_array_lifecycle_safety"`
+	DetectDictionaryCompareModeOrder    bool     `toml:"detect_dictionary_compare_mode_order"`
+	DetectDictionaryLoopMaterialization bool     `toml:"detect_dictionary_loop_materialization"`
+	DetectDictionaryKeyNormalization    bool     `toml:"detect_dictionary_key_normalization"`
+	DetectLateBoundDictionaryConstants  bool     `toml:"detect_late_bound_dictionary_constants"`
+	DetectCollectionIterationMutation   bool     `toml:"detect_collection_iteration_mutation"`
+	DetectCollectionIndexOrigin         bool     `toml:"detect_collection_index_origin"`
 }
 
 type lintRuleAdapter struct {
@@ -228,6 +234,12 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA225": {Get: func(c AnalyzeConfig) bool { return c.DetectExcelCellAccessInLoops }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExcelCellAccessInLoops = v }},
 	"VBA226": {Get: func(c AnalyzeConfig) bool { return c.DetectRangeValueArrayShape }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRangeValueArrayShape = v }},
 	"VBA227": {Get: func(c AnalyzeConfig) bool { return c.DetectArrayLifecycleSafety }, Set: func(c *AnalyzeConfig, v bool) { c.DetectArrayLifecycleSafety = v }},
+	"VBA230": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryCompareModeOrder }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryCompareModeOrder = v }},
+	"VBA231": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryLoopMaterialization }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryLoopMaterialization = v }},
+	"VBA232": {Get: func(c AnalyzeConfig) bool { return c.DetectDictionaryKeyNormalization }, Set: func(c *AnalyzeConfig, v bool) { c.DetectDictionaryKeyNormalization = v }},
+	"VBA233": {Get: func(c AnalyzeConfig) bool { return c.DetectLateBoundDictionaryConstants }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLateBoundDictionaryConstants = v }},
+	"VBA234": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIterationMutation }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIterationMutation = v }},
+	"VBA235": {Get: func(c AnalyzeConfig) bool { return c.DetectCollectionIndexOrigin }, Set: func(c *AnalyzeConfig, v bool) { c.DetectCollectionIndexOrigin = v }},
 }
 
 var (

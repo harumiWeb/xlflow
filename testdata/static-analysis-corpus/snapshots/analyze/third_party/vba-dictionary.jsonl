@@ -86,6 +86,7 @@
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":416,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":417,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA214","severity":"warning","line":431,"column":0}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA230","severity":"warning","line":437,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA206","severity":"warning","line":503,"column":24}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA206","severity":"warning","line":507,"column":19}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA206","severity":"warning","line":510,"column":5}
