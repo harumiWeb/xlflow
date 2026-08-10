@@ -2447,6 +2447,110 @@ End Sub
 	}
 }
 
+func TestAnalyzerCFGVBA204AllowsQualifiedCleanupLabels(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub AuthCleanup()
+  On Error GoTo auth_Cleanup
+  Debug.Print "work"
+auth_Cleanup:
+  Debug.Print "cleanup"
+End Sub
+
+Public Sub AutoProxyCleanup()
+  On Error GoTo AutoProxy_Cleanup
+  Debug.Print "work"
+AutoProxy_Cleanup:
+  Debug.Print "cleanup"
+End Sub
+
+Public Sub CleanupNamedHandler()
+  On Error GoTo CleanupErrorHandler
+  Debug.Print "work"
+CleanupErrorHandler:
+  Debug.Print "handled"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "CleanupNamedHandler" || got[0].Line != 19 {
+		t.Fatalf("VBA204 findings = %+v, want only the non-cleanup suffix control", got)
+	}
+	modulePath := filepath.Join(dir, "src", "modules", "Main.bas")
+	source, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, modulePath, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "CleanupNamedHandler" || got[0].Line != 19 {
+		t.Fatalf("realtime VBA204 findings = %+v, want only the non-cleanup suffix control", got)
+	}
+}
+
+func TestAnalyzerCFGVBA204DoesNotTreatDirectErrRaiseAsFallthrough(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UnconditionalRaise()
+  On Error GoTo Handler
+  Err.Raise 5
+Handler:
+  Debug.Print "handled"
+End Sub
+
+Public Sub ConditionalRaise(ByVal fail As Boolean)
+  On Error GoTo Handler
+  If fail Then Err.Raise 5
+Handler:
+  Debug.Print "handled"
+End Sub
+
+Public Sub ConditionalCompilationPath()
+  On Error GoTo Handler
+#If Mac Then
+  Err.Raise 5
+#Else
+  Debug.Print "work"
+#End If
+Handler:
+  Debug.Print "handled"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 2 || got[0].Procedure != "ConditionalRaise" || got[0].Line != 12 ||
+		got[1].Procedure != "ConditionalCompilationPath" || got[1].Line != 23 {
+		t.Fatalf("VBA204 findings = %+v, want the conditional and alternate-compilation fallthroughs", got)
+	}
+	modulePath := filepath.Join(dir, "src", "modules", "Main.bas")
+	source, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, modulePath, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA204")
+	if len(got) != 2 || got[0].Procedure != "ConditionalRaise" || got[0].Line != 12 ||
+		got[1].Procedure != "ConditionalCompilationPath" || got[1].Line != 23 {
+		t.Fatalf("realtime VBA204 findings = %+v, want the conditional and alternate-compilation fallthroughs", got)
+	}
+}
+
 func TestAnalyzerVBA214AllowsNarrowCompatibilityProbes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

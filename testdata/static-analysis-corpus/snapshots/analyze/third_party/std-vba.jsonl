@@ -2296,7 +2296,6 @@
 {"project":"third_party/std-vba","file":"src/stdWindow.cls","surface":"analyze","code":"VBA206","severity":"warning","line":2875,"column":22}
 {"project":"third_party/std-vba","file":"tests/Main.bas","surface":"analyze","code":"VBA214","severity":"warning","line":8,"column":0}
 {"project":"third_party/std-vba","file":"tests/lib/Test.cls","surface":"analyze","code":"VBA214","severity":"warning","line":159,"column":0}
-{"project":"third_party/std-vba","file":"tests/lib/xlsProjectBuilder.cls","surface":"analyze","code":"VBA204","severity":"warning","line":165,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdArrayTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":50,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdArrayTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":51,"column":0}
 {"project":"third_party/std-vba","file":"tests/stdArrayTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":52,"column":0}
