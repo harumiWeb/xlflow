@@ -2048,6 +2048,33 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeProcedureAndPropertySignatureContracts(t *testing.T) {
+	source := `Option Explicit
+Public Sub Bad(Optional first As Long = 1, ByVal required As Long)
+End Sub
+Public Property Get Item(ByVal index As Long) As String
+End Property
+Public Property Let Item(ByRef index As String, ByVal value As Long)
+End Property
+`
+	analyzer := Analyzer{DB: vbadb.New()}
+	diagnostics := analyzer.Diagnostics(Document{Path: filepath.Join(t.TempDir(), "Thing.cls"), Source: source})
+	if got := diagnosticsByCode(diagnostics, "VB048"); len(got) == 0 {
+		t.Fatalf("VB048 missing from full LSP diagnostics: %+v", diagnostics)
+	}
+	if got := diagnosticsByCode(diagnostics, "VB049"); len(got) == 0 {
+		t.Fatalf("VB049 missing from full LSP diagnostics: %+v", diagnostics)
+	}
+	for _, diagnostic := range append(diagnosticsByCode(diagnostics, "VB048"), diagnosticsByCode(diagnostics, "VB049")...) {
+		if diagnostic.Severity != "error" {
+			t.Fatalf("signature diagnostic severity = %q, want error: %+v", diagnostic.Severity, diagnostic)
+		}
+		if diagnostic.Range.Start.Line < 1 || diagnostic.Range.Start.Character < 0 {
+			t.Fatalf("invalid UTF-16 diagnostic range: %+v", diagnostic)
+		}
+	}
+}
+
 func TestE2ESmokeMemberCompletionsAfterInferredTypes(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit

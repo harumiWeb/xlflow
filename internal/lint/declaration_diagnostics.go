@@ -72,6 +72,11 @@ func (l Linter) declarationIssuesContext(ctx context.Context, path string, sourc
 		}
 		seen[key] = append(seen[key], record)
 	}
+	signatureIssues, signatureErr := l.procedureSignatureIssuesContext(ctx, path, source, root, index)
+	if signatureErr != nil {
+		return nil, signatureErr
+	}
+	issues = append(issues, signatureIssues...)
 	issues = append(issues, l.declarationPlacementIssues(path, index.records)...)
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Line != issues[j].Line {

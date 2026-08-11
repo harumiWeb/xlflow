@@ -2,6 +2,7 @@ package procedureir
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -18,6 +19,7 @@ type visitContext struct {
 	callIndex    int
 	suppressCall bool
 	inBody       bool
+	conditional  []ConditionalBranch
 }
 
 type argumentFact struct {
@@ -70,9 +72,8 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 			return
 		}
 	}
-
 	if isProcedureNode(node.Kind()) {
-		ctx = v.enterProcedure(node)
+		ctx = v.enterProcedure(node, ctx)
 	}
 	procedure := v.procedure(ctx.procedure)
 
@@ -146,8 +147,11 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 	}
 }
 
-func (v *singleVisitor) enterProcedure(node *tree_sitter.Node) visitContext {
+func (v *singleVisitor) enterProcedure(node *tree_sitter.Node, parent visitContext) visitContext {
 	symbol := v.builder.procedureSymbol(node)
+	if len(parent.conditional) > 0 {
+		symbol.ConditionalBranches = append(symbol.ConditionalBranches, parent.conditional...)
+	}
 	procedure := ProcedureIR{
 		Symbol: symbol, Declarations: []Declaration{}, Statements: []Statement{},
 		Expressions: []Expression{}, Calls: []CallSite{}, Accesses: []VariableAccess{},
@@ -170,7 +174,7 @@ func (v *singleVisitor) enterProcedure(node *tree_sitter.Node) visitContext {
 	}
 	v.document.Procedures = append(v.document.Procedures, procedure)
 	v.callFacts = append(v.callFacts, []callFact{})
-	return visitContext{procedure: len(v.document.Procedures) - 1, callIndex: -1}
+	return visitContext{procedure: len(v.document.Procedures) - 1, callIndex: -1, conditional: append([]ConditionalBranch(nil), parent.conditional...)}
 }
 
 func (v *singleVisitor) procedure(index int) *ProcedureIR {
@@ -585,6 +589,26 @@ func (v *singleVisitor) visitNamedArgument(node *tree_sitter.Node, ctx visitCont
 
 func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitContext) visitContext {
 	childCtx := ctx
+	if parent.Kind() == "preprocessor_if" {
+		if body := parent.ChildByFieldName("body"); sameNode(child, body) {
+			childCtx.conditional = appendConditionalBranch(ctx.conditional, parent, child, 0, v.builder.source)
+		} else if strings.HasPrefix(child.Kind(), "preprocessor_else") || child.Kind() == "preprocessor_elseif" {
+			branch := 0
+			for i := uint(0); i < parent.NamedChildCount(); i++ {
+				sibling := parent.NamedChild(i)
+				if sibling == nil {
+					continue
+				}
+				if strings.HasPrefix(sibling.Kind(), "preprocessor_else") || sibling.Kind() == "preprocessor_elseif" {
+					branch++
+				}
+				if sameNode(sibling, child) {
+					break
+				}
+			}
+			childCtx.conditional = appendConditionalBranch(ctx.conditional, parent, child, branch, v.builder.source)
+		}
+	}
 	if parent.Kind() == "single_line_if_statement" {
 		switch {
 		case sameNode(child, parent.ChildByFieldName("consequence")):
@@ -706,6 +730,19 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 		}
 	}
 	return childCtx
+}
+
+func appendConditionalBranch(path []ConditionalBranch, parent, branch *tree_sitter.Node, branchNumber int, source []byte) []ConditionalBranch {
+	if parent == nil || branch == nil {
+		return path
+	}
+	condition := nodeText(parent.ChildByFieldName("condition"), source)
+	if branch.Kind() == "preprocessor_elseif" {
+		condition = nodeText(branch.ChildByFieldName("condition"), source)
+	}
+	return append(append([]ConditionalBranch(nil), path...), ConditionalBranch{
+		Group: strconv.Itoa(int(parent.StartByte())), Condition: condition, Branch: branchNumber, Range: vbaast.NodeRange(branch),
+	})
 }
 
 func (v *singleVisitor) finalize() {

@@ -230,3 +230,22 @@ func TestFastDiagnosticsFallsBackForBroadInvalidation(t *testing.T) {
 		})
 	}
 }
+
+func TestFastDiagnosticsRecomputesPropertyAccessorContracts(t *testing.T) {
+	oldSource := "Property Get Name() As String\nEnd Property\nProperty Let Name(ByVal value As String)\nEnd Property\n"
+	newSource := "Property Get Name() As String\nEnd Property\nProperty Let Name(ByVal value As Long)\nEnd Property\n"
+	oldDoc := Document{Path: "Module1.bas", Source: oldSource, ModuleKind: "standard", Version: 1}
+	oldCatalog := procedureCatalogForDocument(oldDoc)
+	cache := buildDiagnosticCache(oldCatalog, nil)
+	newDoc := Document{Path: oldDoc.Path, Source: newSource, ModuleKind: oldDoc.ModuleKind, Version: 2}
+	result := Analyzer{DB: vbadb.New()}.DiagnosticsRequestContext(context.Background(), DiagnosticRequest{
+		Document: newDoc, Mode: DiagnosticModeFast, PreviousCache: cache,
+		Changes: ProcedureChangeSet{Ranges: []Range{{Start: Position{Line: 2}, End: Position{Line: 2}}}},
+	})
+	if len(diagnosticsByCode(result.Diagnostics, "VB049")) == 0 {
+		t.Fatalf("property contract change was not recomputed in fast mode: %+v", result.Diagnostics)
+	}
+	if result.Cache == nil {
+		t.Fatal("property fallback did not publish a refreshed diagnostic cache")
+	}
+}

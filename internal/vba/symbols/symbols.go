@@ -12,6 +12,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -1026,41 +1027,27 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 }
 
 func parameters(node *tree_sitter.Node, source []byte) []Parameter {
-	list := node.ChildByFieldName("parameters")
-	if list == nil {
-		list = firstNamedChildKind(node, "parameter_list")
-	}
-	if list == nil {
+	canonical := procedureir.ParametersFromNode(node, source)
+	if len(canonical) == 0 {
 		return nil
 	}
-	params := make([]Parameter, 0)
-	for i := uint(0); i < list.NamedChildCount(); i++ {
-		child := list.NamedChild(i)
-		if child == nil || child.Kind() != "parameter" {
-			continue
+	params := make([]Parameter, 0, len(canonical))
+	for _, canonicalParam := range canonical {
+		param := Parameter{
+			Name:       canonicalParam.Name,
+			Type:       canonicalParam.Type,
+			IsArray:    canonicalParam.IsArray,
+			Optional:   canonicalParam.Optional,
+			ParamArray: canonicalParam.ParamArray,
 		}
-		param := Parameter{Name: nodeName(child, source), Type: typeText(child, source), IsArray: isArrayDeclarator(child, source)}
 		if param.IsArray && param.Type == "" {
 			param.Type = "Variant"
 		}
-		if passing := child.ChildByFieldName("passing_mode"); passing != nil {
-			param.Passing = modifierKeyword(passing)
-		} else {
-			text := child.Utf8Text(source)
-			if hasWord(text, "ByVal") {
-				param.Passing = "ByVal"
-			} else if hasWord(text, "ByRef") {
-				param.Passing = "ByRef"
-			}
+		if canonicalParam.PassingExplicit {
+			param.Passing = canonicalParam.Passing
 		}
-		param.Optional = hasField(child, "optional_modifier") || hasWord(child.Utf8Text(source), "Optional")
-		param.ParamArray = hasWord(child.Utf8Text(source), "ParamArray")
-		initializer := child.ChildByFieldName("default_value")
-		if initializer == nil {
-			initializer = firstNamedChildKind(child, "initializer")
-		}
-		if initializer != nil {
-			value := initializerText(initializer, source)
+		if canonicalParam.HasDefault {
+			value := canonicalParam.Default
 			param.Default = &value
 		}
 		params = append(params, param)
@@ -1089,26 +1076,6 @@ func isArrayDeclarator(node *tree_sitter.Node, source []byte) bool {
 
 func hasField(node *tree_sitter.Node, field string) bool {
 	return node != nil && node.ChildByFieldName(field) != nil
-}
-
-func initializerText(node *tree_sitter.Node, source []byte) string {
-	if value := node.ChildByFieldName("value"); value != nil {
-		return strings.TrimSpace(value.Utf8Text(source))
-	}
-	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(node.Utf8Text(source)), "="))
-}
-
-func modifierKeyword(node *tree_sitter.Node) string {
-	if node == nil {
-		return ""
-	}
-	switch node.Kind() {
-	case "byval_modifier":
-		return "ByVal"
-	case "byref_modifier":
-		return "ByRef"
-	}
-	return normalizeKeyword(strings.TrimSuffix(node.Kind(), "_modifier"))
 }
 
 func firstLine(text string) string {

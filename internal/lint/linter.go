@@ -50,10 +50,12 @@ type Result struct {
 }
 
 type Linter struct {
-	RootDir             string
-	Config              config.Config
-	PathFilter          func(string) bool
-	VisibleDeclarations map[string]bool
+	RootDir                string
+	Config                 config.Config
+	PathFilter             func(string) bool
+	VisibleDeclarations    map[string]bool
+	TypeDeclarations       map[string]int
+	ObjectTypeDeclarations map[string]int
 }
 
 type procedureFrame struct {
@@ -123,6 +125,14 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 	if visibleDeclarations == nil {
 		visibleDeclarations = l.projectVisibleDeclarationsContext(ctx, files)
 	}
+	typeDeclarations := l.TypeDeclarations
+	if typeDeclarations == nil {
+		typeDeclarations = l.projectTypeDeclarationsContext(ctx, files)
+	}
+	objectTypeDeclarations := l.ObjectTypeDeclarations
+	if objectTypeDeclarations == nil {
+		objectTypeDeclarations = l.projectObjectTypeDeclarationsContext(ctx, files)
+	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -130,6 +140,8 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		}
 		fileLinter := l
 		fileLinter.VisibleDeclarations = visibleDeclarations
+		fileLinter.TypeDeclarations = typeDeclarations
+		fileLinter.ObjectTypeDeclarations = objectTypeDeclarations
 		fileIssues, err := fileLinter.lintFileContext(ctx, file)
 		if err != nil {
 			return Result{}, err
@@ -433,6 +445,54 @@ func (l Linter) projectVisibleDeclarationsContext(ctx context.Context, files []s
 		}
 	}
 	return visible
+}
+
+func (l Linter) projectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
+	types := make(map[string]int)
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return types
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		file, err := symbols.InspectSourceContext(ctx, symbols.SourceOptions{
+			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path), IncludePrivate: true,
+		}, source)
+		if err != nil {
+			continue
+		}
+		for _, sym := range file.Symbols {
+			if sym.Parent == "" && strings.EqualFold(sym.Kind, "type") {
+				types[canonicalDeclarationKey(sym.Name)]++
+			}
+		}
+	}
+	return types
+}
+
+func (l Linter) projectObjectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
+	objects := make(map[string]int)
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return objects
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		file, err := symbols.InspectSourceContext(ctx, symbols.SourceOptions{
+			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path), IncludePrivate: true,
+		}, source)
+		if err != nil || !strings.EqualFold(file.ModuleKind, "class") {
+			continue
+		}
+		if name := canonicalDeclarationKey(file.ModuleName); name != "" {
+			objects[name]++
+		}
+	}
+	return objects
 }
 
 func (l Linter) moduleKindForPath(path string) string {

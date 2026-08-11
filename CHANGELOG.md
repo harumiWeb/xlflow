@@ -25,6 +25,12 @@ All notable changes to xlflow will be documented in this file.
   errors emitted by batch lint and the LSP, block source preflight, and cannot be
   disabled or suppressed inline.
 
+- Added default-enabled, compile-equivalent `VB048` procedure-parameter and
+  `VB049` Property-accessor contract lint diagnostics. The checks validate VBA
+  parameter declaration constraints and same-name Get/Let/Set signatures in
+  batch lint and the LSP, fail open only where type resolution is unknown or
+  ambiguous, and block source preflight without allowing inline suppression.
+
 - Added opt-in `VBA240` project-wide analysis for module-level mutable state.
   The analyzer builds per-procedure read/write sets, aggregates field readers
   and writers across uniquely resolved call paths, reports structural lifecycle

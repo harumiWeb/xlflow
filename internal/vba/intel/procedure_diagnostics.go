@@ -124,6 +124,18 @@ func (a Analyzer) DiagnosticsRequestContext(ctx context.Context, request Diagnos
 		}
 		return DiagnosticResult{Diagnostics: diagnostics, Cache: buildDiagnosticCache(catalog, diagnostics)}
 	}
+	// Property accessor contracts span sibling procedures. A procedure-sized
+	// fast fragment cannot validate the group, so signature edits in any
+	// Property accessor force a document-wide recomputation and a fresh cache.
+	for _, entry := range changedProcedureEntries(catalog, request.PreviousCache, request.Changes) {
+		if strings.HasPrefix(entry.Identity.Kind, "property_") {
+			diagnostics := a.diagnosticsFullContext(ctx, doc)
+			if ctx.Err() != nil {
+				return DiagnosticResult{}
+			}
+			return DiagnosticResult{Diagnostics: diagnostics, Cache: buildDiagnosticCache(catalog, diagnostics)}
+		}
+	}
 	return DiagnosticResult{Diagnostics: a.fastDiagnosticsContext(ctx, doc, catalog, request), Cache: request.PreviousCache}
 }
 

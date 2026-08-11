@@ -38,7 +38,7 @@ func TestRulesCommandWritesV1JSONEnvelope(t *testing.T) {
 			t.Fatalf("rules metadata missing additive surface/severity fields for %s: %#v", item.ID, item)
 		}
 	}
-	for _, id := range []string{"VB037", "VB045", "VB046", "VB047", "VBA228", "VBA229"} {
+	for _, id := range []string{"VB037", "VB045", "VB046", "VB047", "VB048", "VB049", "VBA228", "VBA229"} {
 		found := false
 		for _, item := range got.Rules.Items {
 			if item.ID == id {

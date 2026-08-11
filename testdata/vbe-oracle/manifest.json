@@ -83,6 +83,30 @@
     {
       "id": "option-in-procedure-valid-controls",
       "path": "cases/option-in-procedure-valid-controls/case.json"
+    },
+    {
+      "id": "procedure-signature-invalid",
+      "path": "cases/procedure-signature-invalid/case.json"
+    },
+    {
+      "id": "procedure-signature-valid",
+      "path": "cases/procedure-signature-valid/case.json"
+    },
+    {
+      "id": "procedure-parameter-limit-60",
+      "path": "cases/procedure-parameter-limit-60/case.json"
+    },
+    {
+      "id": "procedure-parameter-limit-61",
+      "path": "cases/procedure-parameter-limit-61/case.json"
+    },
+    {
+      "id": "property-signature-invalid",
+      "path": "cases/property-signature-invalid/case.json"
+    },
+    {
+      "id": "property-signature-valid",
+      "path": "cases/property-signature-valid/case.json"
     }
   ]
 }

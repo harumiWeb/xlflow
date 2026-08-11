@@ -103,6 +103,8 @@ func (a Analyzer) withRequestWorkspaceResolution(ctx context.Context, open []Doc
 		return a
 	}
 	a.visibleDeclarations = visibleAssignmentDeclarations(symbols)
+	a.typeDeclarations = workspaceTypeDeclarations(symbols)
+	a.objectTypeDeclarations = workspaceObjectTypeDeclarations(symbols)
 	view := NewWorkspaceResolutionView(symbols)
 	if recorder := analysisstats.FromContext(ctx); recorder != nil {
 		recorder.Add("workspace_resolution_views", 1)
@@ -112,6 +114,32 @@ func (a Analyzer) withRequestWorkspaceResolution(ctx context.Context, open []Doc
 	}
 	a.WorkspaceSymbolsFunc = nil
 	return a
+}
+
+func workspaceTypeDeclarations(symbols []Symbol) map[string]int {
+	types := make(map[string]int)
+	for _, symbol := range symbols {
+		if symbol.Parent == "" && strings.EqualFold(symbol.Kind, "type") {
+			types[strings.ToLower(strings.TrimSpace(symbol.Name))]++
+		}
+	}
+	if len(types) == 0 {
+		return nil
+	}
+	return types
+}
+
+func workspaceObjectTypeDeclarations(symbols []Symbol) map[string]int {
+	objects := make(map[string]int)
+	for _, symbol := range symbols {
+		if symbol.Parent == "" && strings.EqualFold(symbol.Kind, "module") && strings.EqualFold(symbol.ModuleKind, "class") {
+			objects[strings.ToLower(strings.TrimSpace(symbol.Name))]++
+		}
+	}
+	if len(objects) == 0 {
+		return nil
+	}
+	return objects
 }
 
 func visibleAssignmentDeclarations(symbols []Symbol) map[string]bool {

@@ -7190,6 +7190,7 @@ func TestSourcePreflightBlocksCompileEquivalentSemanticFindings(t *testing.T) {
 		body          string
 		code          string
 		projectToLint bool
+		path          string
 	}{
 		{
 			name: "scalar-set",
@@ -7242,6 +7243,27 @@ Private lateValue As Long
 			projectToLint: true,
 		},
 		{
+			name: "procedure-signature",
+			body: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Bad(Optional first As Long = 1, ByVal required As Long)
+End Sub
+`,
+			code:          "VB048",
+			projectToLint: true,
+		},
+		{
+			name: "property-signature",
+			body: `Public Property Get Value() As String
+End Property
+Public Property Let Value(ByVal value As Long)
+End Property
+`,
+			code:          "VB049",
+			projectToLint: true,
+			path:          filepath.Join("src", "classes", "Thing.cls"),
+		},
+		{
 			name: "byref-type-mismatch",
 			body: `Attribute VB_Name = "Main"
 Option Explicit
@@ -7262,11 +7284,15 @@ End Sub
 				if err := config.Write(filepath.Join(dir, config.FileName), config.Default()); err != nil {
 					t.Fatal(err)
 				}
-				src := filepath.Join(dir, "src", "modules")
-				if err := os.MkdirAll(src, 0o755); err != nil {
+				relativePath := tc.path
+				if relativePath == "" {
+					relativePath = filepath.Join("src", "modules", "Main.bas")
+				}
+				filePath := filepath.Join(dir, relativePath)
+				if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(tc.body), 0o644); err != nil {
+				if err := os.WriteFile(filePath, []byte(tc.body), 0o644); err != nil {
 					t.Fatal(err)
 				}
 

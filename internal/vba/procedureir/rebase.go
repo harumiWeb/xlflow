@@ -9,11 +9,34 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	rebase := func(r vbaast.Range) vbaast.Range { return RebaseRange(r, oldBase, newBase) }
 	out.Symbol.DeclarationRange = rebase(out.Symbol.DeclarationRange)
 	out.Symbol.BodyRange = rebase(out.Symbol.BodyRange)
+	for i := range out.Symbol.ConditionalBranches {
+		out.Symbol.ConditionalBranches[i].Range = rebase(out.Symbol.ConditionalBranches[i].Range)
+	}
 	for i := range out.Symbol.Parameters {
 		out.Symbol.Parameters[i].Range = rebase(out.Symbol.Parameters[i].Range)
+		out.Symbol.Parameters[i].DefaultRange = rebase(out.Symbol.Parameters[i].DefaultRange)
+		out.Symbol.Parameters[i].BoundsRange = rebase(out.Symbol.Parameters[i].BoundsRange)
+		for j := range out.Symbol.Parameters[i].ArrayBounds {
+			bound := &out.Symbol.Parameters[i].ArrayBounds[j]
+			bound.Range = rebase(bound.Range)
+			bound.LowerRange = rebase(bound.LowerRange)
+			bound.UpperRange = rebase(bound.UpperRange)
+		}
 	}
 	for i := range out.Declarations {
 		out.Declarations[i].Range = rebase(out.Declarations[i].Range)
+		for j := range out.Declarations[i].Parameters {
+			parameter := &out.Declarations[i].Parameters[j]
+			parameter.Range = rebase(parameter.Range)
+			parameter.DefaultRange = rebase(parameter.DefaultRange)
+			parameter.BoundsRange = rebase(parameter.BoundsRange)
+			for k := range parameter.ArrayBounds {
+				bound := &parameter.ArrayBounds[k]
+				bound.Range = rebase(bound.Range)
+				bound.LowerRange = rebase(bound.LowerRange)
+				bound.UpperRange = rebase(bound.UpperRange)
+			}
+		}
 	}
 	for i := range out.Statements {
 		out.Statements[i].Range = rebase(out.Statements[i].Range)

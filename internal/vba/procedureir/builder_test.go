@@ -112,6 +112,80 @@ End Function
 	}
 }
 
+func TestProcedureSignatureRetainsArrayDefaultsAndRecoveryFacts(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Signature(ByRef dynamic() As Long, ByVal bounded(1 To 2, 0 To 3) As String, Optional label As String = "x", ParamArray rest() As Variant)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := doc.Procedures[0].Symbol.Parameters
+	if len(params) != 4 {
+		t.Fatalf("parameters = %#v", params)
+	}
+	if !params[0].IsArray || params[0].ArrayShape != ArrayShapeDynamic || params[0].BoundsRange.StartByte >= params[0].BoundsRange.EndByte {
+		t.Fatalf("dynamic array facts = %#v", params[0])
+	}
+	if !params[1].IsArray || params[1].ArrayShape != ArrayShapeBounded || len(params[1].ArrayBounds) != 2 {
+		t.Fatalf("bounded array facts = %#v", params[1])
+	}
+	if got := params[1].ArrayBounds[0]; got.Lower != "1" || got.Upper != "2" || got.LowerRange.StartByte >= got.UpperRange.EndByte {
+		t.Fatalf("first bound = %#v", got)
+	}
+	if !params[2].Optional || !params[2].HasDefault || params[2].Default != `"x"` || params[2].DefaultRange.StartByte >= params[2].DefaultRange.EndByte {
+		t.Fatalf("optional default facts = %#v", params[2])
+	}
+	if !params[3].ParamArray || !params[3].IsArray || params[3].ArrayShape != ArrayShapeDynamic || params[3].Passing != "ByRef" || params[3].PassingExplicit {
+		t.Fatalf("ParamArray facts = %#v", params[3])
+	}
+}
+
+func TestProcedureSignatureMarksMalformedArrayBoundsAsInvalid(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Broken.bas"}, []byte("Public Sub Broken(ByVal values(1 To) As Long)\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) == 0 || len(doc.Procedures[0].Symbol.Parameters) != 1 {
+		t.Fatalf("recovered procedure parameters = %#v", doc.Procedures)
+	}
+	param := doc.Procedures[0].Symbol.Parameters[0]
+	if param.ArrayShape != ArrayShapeInvalid || !param.Recovered || !doc.Parse.HasError && !doc.Parse.HasMissing {
+		t.Fatalf("malformed array facts = %#v parse=%#v", param, doc.Parse)
+	}
+}
+
+func TestConditionalProcedureSignatureRetainsBranchMetadata(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`#If VBA7 Then
+Public Function ConditionalRun(ByVal value As Long) As Long
+End Function
+#Else
+Public Function ConditionalRun(Optional value As Long = 1) As Long
+End Function
+#End If
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 {
+		t.Fatalf("conditional procedures = %#v", doc.Procedures)
+	}
+	for i, procedure := range doc.Procedures {
+		symbol := procedure.Symbol
+		if symbol.Name != "ConditionalRun" || len(symbol.ConditionalBranches) != 1 {
+			t.Fatalf("conditional symbol %d = %#v", i, symbol)
+		}
+		if len(symbol.Parameters) != 1 || (i == 0 && symbol.Parameters[0].Optional) || (i == 1 && !symbol.Parameters[0].Optional) {
+			t.Fatalf("conditional parameter %d = %#v", i, symbol.Parameters)
+		}
+		if symbol.ConditionalBranches[0].Branch != i || symbol.ConditionalBranches[0].Condition == "" {
+			t.Fatalf("conditional branch %d = %#v", i, symbol.ConditionalBranches)
+		}
+	}
+}
+
 func TestBuildSourceClassifiesPropertiesAndEvents(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -886,6 +960,34 @@ func TestCloneIsDeep(t *testing.T) {
 	if source.Procedures[0].Symbol.Parameters[0].Name == "changed" ||
 		source.Procedures[0].Calls[0].Callee.Text == "changed" {
 		t.Fatal("Clone shares mutable storage")
+	}
+}
+
+func TestCloneAndRebasePreserveOwnedSignatureRanges(t *testing.T) {
+	t.Parallel()
+	source, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte("#If VBA7 Then\nPublic Sub Run(ByVal values(1 To 2) As Long, Optional label As String = \"x\")\nEnd Sub\n#End If\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Procedures) != 1 || len(source.Procedures[0].Symbol.Parameters[0].ArrayBounds) != 1 {
+		t.Fatalf("signature source = %#v", source.Procedures)
+	}
+	clone := Clone(source)
+	clone.Procedures[0].Symbol.Parameters[0].ArrayBounds[0].Lower = "changed"
+	clone.Procedures[0].Symbol.ConditionalBranches[0].Condition = "changed"
+	if source.Procedures[0].Symbol.Parameters[0].ArrayBounds[0].Lower == "changed" || source.Procedures[0].Symbol.ConditionalBranches[0].Condition == "changed" {
+		t.Fatal("Clone shares signature storage")
+	}
+	oldBase := clone.Procedures[0].Symbol.DeclarationRange
+	newBase := oldBase
+	newBase.StartLine++
+	newBase.EndLine++
+	newBase.StartByte += 10
+	newBase.EndByte += 10
+	rebased := RebaseProcedure(clone.Procedures[0], oldBase, newBase)
+	param := rebased.Symbol.Parameters[0]
+	if param.Range.StartByte <= clone.Procedures[0].Symbol.Parameters[0].Range.StartByte || param.ArrayBounds[0].Range.StartByte <= clone.Procedures[0].Symbol.Parameters[0].ArrayBounds[0].Range.StartByte {
+		t.Fatalf("signature ranges were not rebased: before=%#v after=%#v", clone.Procedures[0].Symbol.Parameters[0], param)
 	}
 }
 
