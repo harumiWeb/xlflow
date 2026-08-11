@@ -12,6 +12,11 @@ All notable changes to xlflow will be documented in this file.
   `detect_redim_preserve_in_loops` or disable it with
   `[analyze].disabled_rules = ["VBA241"]`.
 
+- Added default-enabled, compile-equivalent `VB046` duplicate-declaration and
+  `VB047` invalid-declaration-placement lint diagnostics. Both are high-precision
+  errors emitted by batch lint and the LSP, block source preflight, and cannot be
+  disabled or suppressed inline.
+
 - Added opt-in `VBA240` project-wide analysis for module-level mutable state.
   The analyzer builds per-procedure read/write sets, aggregates field readers
   and writers across uniquely resolved call paths, reports structural lifecycle
@@ -20,7 +25,6 @@ All notable changes to xlflow will be documented in this file.
   counts alone do not produce findings. Collection classification is independent
   of procedure order, built-in type matching avoids user-defined name substrings,
   and procedure metrics are emitted deterministically.
-
 - Updated `tree-sitter-vba` to v0.12.0. VBA declaration type characters
   (`$`, `%`, `&`, `!`, `#`, `@`, `^`) now count as explicit types for `VB005`
   and `VB019`; invalid `Dim`/`ReDim` keywords after a declaration comma are

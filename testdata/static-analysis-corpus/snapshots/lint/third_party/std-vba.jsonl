@@ -39,9 +39,16 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"lint","code":"VB020","severity":"warning","line":2010,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB020","severity":"warning","line":335,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB020","severity":"warning","line":336,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB046","severity":"error","line":608,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB046","severity":"error","line":609,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB046","severity":"error","line":610,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB046","severity":"error","line":611,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdCSV/stdCSV.cls","surface":"lint","code":"VB046","severity":"error","line":1013,"column":13}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallableScheduler.bas","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallableScheduler.bas","surface":"lint","code":"VB005","severity":"warning","line":19,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB046","severity":"error","line":112,"column":13}
+{"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB047","severity":"error","line":235,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB005","severity":"warning","line":327,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB005","severity":"warning","line":361,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB020","severity":"warning","line":384,"column":7}
@@ -110,6 +117,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdGithub.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"lint","code":"VB020","severity":"warning","line":220,"column":11}
+{"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"lint","code":"VB046","severity":"error","line":265,"column":13}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIResource.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIShellExtension.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
@@ -118,7 +126,10 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"lint","code":"VB006","severity":"warning","line":13,"column":1}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"lint","code":"VB006","severity":"warning","line":15,"column":1}
 {"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdMath.cls","surface":"lint","code":"VB046","severity":"error","line":56,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/IFauxInterface.cls","surface":"lint","code":"VB020","severity":"warning","line":207,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"lint","code":"VB046","severity":"error","line":139,"column":7}
+{"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"lint","code":"VB046","severity":"error","line":140,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"lint","code":"VB020","severity":"warning","line":211,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"lint","code":"VB029","severity":"error","line":616,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdOpenCL/stdOpenCL.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
@@ -156,6 +167,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdITable.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdITableRow.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"lint","code":"VB046","severity":"error","line":23,"column":17}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"lint","code":"VB005","severity":"warning","line":37,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"lint","code":"VB005","severity":"warning","line":38,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdTable/stdRow v0.0.1.cls","surface":"lint","code":"VB005","severity":"warning","line":56,"column":9}
@@ -178,6 +190,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdTimerServerWIP.bas","surface":"lint","code":"VB007","severity":"warning","line":128,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdUIAutomationElement.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdUIAutomationElement.cls","surface":"lint","code":"VB005","severity":"warning","line":252,"column":9}
+{"project":"third_party/std-vba","file":"src/WIP/stdUIAutomationElement.cls","surface":"lint","code":"VB047","severity":"error","line":252,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"lint","code":"VB020","severity":"warning","line":214,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdWebSocket/stdWebSocket.cls","surface":"lint","code":"VB020","severity":"warning","line":381,"column":7}
@@ -260,6 +273,7 @@
 {"project":"third_party/std-vba","file":"src/stdHTTPAuthenticators.bas","surface":"lint","code":"VB020","severity":"warning","line":22,"column":9}
 {"project":"third_party/std-vba","file":"src/stdICallable.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"lint","code":"VB046","severity":"error","line":282,"column":28}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"lint","code":"VB005","severity":"warning","line":544,"column":9}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"lint","code":"VB010","severity":"error","line":759,"column":0}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"lint","code":"VB010","severity":"error","line":828,"column":0}

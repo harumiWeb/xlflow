@@ -4,6 +4,8 @@
 {"project":"third_party/wasabi","file":"examples/Example_WebSocket_Binary.bas","surface":"lint","code":"VB007","severity":"warning","line":30,"column":0}
 {"project":"third_party/wasabi","file":"examples/Example_WebSocket_Broadcast.bas","surface":"lint","code":"VB007","severity":"warning","line":28,"column":0}
 {"project":"third_party/wasabi","file":"examples/Example_WebSocket_Sync.bas","surface":"lint","code":"VB007","severity":"warning","line":25,"column":0}
+{"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"lint","code":"VB046","severity":"error","line":264,"column":17}
+{"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"lint","code":"VB046","severity":"error","line":364,"column":17}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"lint","code":"VB006","severity":"warning","line":972,"column":1}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"lint","code":"VB010","severity":"error","line":1013,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"lint","code":"VB010","severity":"error","line":1039,"column":0}

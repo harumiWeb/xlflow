@@ -47,6 +47,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB043`](#vb043)   | lint    | warning  | file-local      | yes     | Orphan documentation comment                       |
 | [`VB044`](#vb044)   | lint    | warning  | procedure-local | no      | Procedure-name constant mismatch                   |
 | [`VB045`](#vb045)   | lint    | error    | procedure-local | yes     | Deterministic argument binding error               |
+| [`VB046`](#vb046)   | lint    | error    | file-local      | yes     | Duplicate declaration                              |
+| [`VB047`](#vb047)   | lint    | error    | file-local      | yes     | Invalid declaration placement                      |
 | [`VBA101`](#vba101) | analyze | warning  | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning  | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning  | procedure-local | yes     | Object function return missing Set                 |
@@ -989,6 +991,50 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Supported severities        | `error`              |
 | Surfaces                    | `lint`, `lsp`        |
 | Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB046
+
+**Duplicate declaration.** A VBA declaration repeats a name that is already declared in the same scope.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB047
+
+**Invalid declaration placement.** A VBA declaration appears in a source position where that declaration kind is not permitted.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
 | Precision                   | `high`               |
 | Enabled by default          | yes                  |
 | Configuration               | not configurable     |
