@@ -1157,6 +1157,30 @@ End Sub
 	}
 }
 
+func TestAnalyzerRejectsUnrelatedSameLineDeclarationRecovery(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		line string
+	}{
+		{name: "declaration keyword", line: "Dim x As Double, Dim i As Long: value ="},
+		{name: "type character", line: "Dim value!: other ="},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  "+test.line+"\nEnd Sub\n")
+
+			_, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+			var parseErr *ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("unrelated same-line recovery should remain a ParseError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
 func TestAnalyzerFindsWorksheetMemberAssignedOnVariable(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

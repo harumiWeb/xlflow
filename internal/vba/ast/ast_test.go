@@ -112,6 +112,15 @@ func TestIsDeclarationKeywordRecoveryIsNarrow(t *testing.T) {
 		t.Fatalf("ordinary parser recovery was misclassified: %s", ordinary.Root.ToSexp())
 	}
 	ordinary.Close()
+
+	sameLineError := parser.Parse("Trailing.bas", []byte("Sub Test()\n  Dim x As Double, Dim i As Long: value =\nEnd Sub\n"))
+	if !sameLineError.HasError && !sameLineError.HasMissing {
+		t.Fatalf("expected trailing syntax to require parser recovery: %s", sameLineError.Root.ToSexp())
+	}
+	if IsDeclarationKeywordRecovery(sameLineError.Root, sameLineError.Source) {
+		t.Fatalf("unrelated same-line recovery was misclassified: %s", sameLineError.Root.ToSexp())
+	}
+	sameLineError.Close()
 }
 
 func TestIsIdentifierTypeCharacterRecoveryRecognizesOnlyDeclarationSuffixes(t *testing.T) {
@@ -132,6 +141,15 @@ func TestIsIdentifierTypeCharacterRecoveryRecognizesOnlyDeclarationSuffixes(t *t
 		t.Fatalf("ordinary bang recovery was misclassified: %s", ordinary.Root.ToSexp())
 	}
 	ordinary.Close()
+
+	sameLineError := parser.Parse("Trailing.bas", []byte("Sub Test()\n  Dim value!: other =\nEnd Sub\n"))
+	if !sameLineError.HasError && !sameLineError.HasMissing {
+		t.Fatalf("expected trailing syntax to require parser recovery: %s", sameLineError.Root.ToSexp())
+	}
+	if IsIdentifierTypeCharacterRecovery(sameLineError.Root, sameLineError.Source) {
+		t.Fatalf("unrelated same-line recovery was misclassified: %s", sameLineError.Root.ToSexp())
+	}
+	sameLineError.Close()
 }
 
 func TestParserParsesNestedInlineLoopsWithSharedNextVariables(t *testing.T) {
