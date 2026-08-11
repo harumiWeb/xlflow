@@ -14,9 +14,12 @@
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":91,"column":36}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":101,"column":29}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":107,"column":29}
+{"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA244","severity":"information","line":107,"column":30}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":243,"column":28}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":247,"column":28}
+{"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA244","severity":"information","line":247,"column":29}
 {"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA206","severity":"warning","line":251,"column":28}
+{"project":"third_party/webxcel","file":"src/Classes/JsonParser.cls","surface":"analyze","code":"VBA244","severity":"information","line":251,"column":29}
 {"project":"third_party/webxcel","file":"src/Classes/TcpClient.cls","surface":"analyze","code":"VBA206","severity":"warning","line":44,"column":18}
 {"project":"third_party/webxcel","file":"src/Classes/TcpServer.cls","surface":"analyze","code":"VBA206","severity":"warning","line":83,"column":14}
 {"project":"third_party/webxcel","file":"src/Classes/WorkbookWebController.cls","surface":"analyze","code":"VBA206","severity":"warning","line":54,"column":21}
@@ -24,7 +27,9 @@
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":36,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":53,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":76,"column":0}
+{"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA244","severity":"information","line":84,"column":46}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":149,"column":0}
+{"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA244","severity":"information","line":196,"column":22}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetRelationshipMapper.cls","surface":"analyze","code":"VBA225","severity":"warning","line":235,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTable.cls","surface":"analyze","code":"VBA217","severity":"warning","line":77,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTableCollection.cls","surface":"analyze","code":"VBA225","severity":"warning","line":17,"column":0}
