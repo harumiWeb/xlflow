@@ -602,6 +602,51 @@ func TestConfusingParenthesizedCallIgnoresFunctionArguments(t *testing.T) {
 	}
 }
 
+func TestConfusingParenthesizedCallIgnoresControlConditionParentheses(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Sub Main()
+  If ready Then
+    Run (value)
+  ElseIf (value > 0) Then
+    Debug.Print value
+  End If
+#If (Win64) Or Mac Then
+  Debug.Print value
+#End If
+  Call Run(value)
+  Run(value)
+End Sub
+`)
+	issues, err := (Linter{Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb022 := issuesByCode(issues, "VB022")
+	if len(vb022) != 1 || vb022[0].Line != 4 || vb022[0].Symbol != "Run" {
+		t.Fatalf("VB022 issues = %+v, want only the ambiguous call on line 4", vb022)
+	}
+}
+
+func TestConfusingParenthesizedCallPreservesStringArgumentsContainingEquals(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Sub Main()
+  MsgBox ("Unknown setting: " & settingName & " = " & settingValue)
+End Sub
+`)
+	issues, err := (Linter{Config: config.Default()}).LintSource(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb022 := issuesByCode(issues, "VB022")
+	if len(vb022) != 1 || vb022[0].Line != 3 || vb022[0].Symbol != "MsgBox" {
+		t.Fatalf("VB022 issues = %+v, want the ambiguous MsgBox call on line 3", vb022)
+	}
+}
+
 func TestLinterReportsParserRecovery(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

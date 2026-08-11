@@ -814,6 +814,7 @@
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2154,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2158,"column":29}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2161,"column":0}
+{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA244","severity":"warning","line":2161,"column":43}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2166,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2182,"column":21}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2186,"column":0}
@@ -831,7 +832,9 @@
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2309,"column":13}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA237","severity":"warning","line":2319,"column":0}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2336,"column":43}
+{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA244","severity":"information","line":2353,"column":56}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2366,"column":43}
+{"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA244","severity":"information","line":2380,"column":34}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2407,"column":47}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2458,"column":17}
 {"project":"third_party/vba-web","file":"src/WebHelpers.bas","surface":"analyze","code":"VBA206","severity":"warning","line":2521,"column":43}

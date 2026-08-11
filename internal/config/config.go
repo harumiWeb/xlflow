@@ -166,6 +166,7 @@ type AnalyzeConfig struct {
 	DetectRedimPreserveInLoops               bool     `toml:"detect_redim_preserve_in_loops"`
 	DetectExpensiveFullRangeOperations       bool     `toml:"detect_expensive_full_range_operations"`
 	DetectValue2PerformanceOpportunities     bool     `toml:"detect_value2_performance_opportunities"`
+	DetectProcedureCallCycles                bool     `toml:"detect_procedure_call_cycles"`
 }
 
 type lintRuleAdapter struct {
@@ -256,6 +257,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA241": {Get: func(c AnalyzeConfig) bool { return c.DetectRedimPreserveInLoops }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedimPreserveInLoops = v }},
 	"VBA242": {Get: func(c AnalyzeConfig) bool { return c.DetectExpensiveFullRangeOperations }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExpensiveFullRangeOperations = v }},
 	"VBA243": {Get: func(c AnalyzeConfig) bool { return c.DetectValue2PerformanceOpportunities }, Set: func(c *AnalyzeConfig, v bool) { c.DetectValue2PerformanceOpportunities = v }},
+	"VBA244": {Get: func(c AnalyzeConfig) bool { return c.DetectProcedureCallCycles }, Set: func(c *AnalyzeConfig, v bool) { c.DetectProcedureCallCycles = v }},
 }
 
 var (

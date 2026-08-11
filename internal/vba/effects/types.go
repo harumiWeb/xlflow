@@ -18,6 +18,7 @@ const (
 	WritesCells        EffectKind = "writes_cells"
 	ChangesWorkbook    EffectKind = "changes_workbook"
 	OpensWorkbook      EffectKind = "opens_workbook"
+	OpensFile          EffectKind = "opens_file"
 	ClosesWorkbook     EffectKind = "closes_workbook"
 	DisablesEvents     EffectKind = "disables_events"
 	RestoresEvents     EffectKind = "restores_events"

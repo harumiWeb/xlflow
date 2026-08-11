@@ -449,6 +449,7 @@
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA237","severity":"warning","line":279,"column":0}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA204","severity":"warning","line":284,"column":0}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA202","severity":"warning","line":315,"column":0}
+{"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA244","severity":"warning","line":333,"column":14}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA237","severity":"warning","line":338,"column":0}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA204","severity":"warning","line":340,"column":0}
 {"project":"third_party/access-examples","file":"modFileFunctions.bas","surface":"analyze","code":"VBA237","severity":"warning","line":369,"column":0}
@@ -479,6 +480,7 @@
 {"project":"third_party/access-examples","file":"modMathCumulative.bas","surface":"analyze","code":"VBA214","severity":"warning","line":181,"column":0}
 {"project":"third_party/access-examples","file":"modMathStatistics.bas","surface":"analyze","code":"VBA206","severity":"warning","line":19,"column":42}
 {"project":"third_party/access-examples","file":"modMathStatistics.bas","surface":"analyze","code":"VBA206","severity":"warning","line":47,"column":22}
+{"project":"third_party/access-examples","file":"modMathStatistics.bas","surface":"analyze","code":"VBA244","severity":"information","line":47,"column":23}
 {"project":"third_party/access-examples","file":"modMathStatistics.bas","surface":"analyze","code":"VBA206","severity":"warning","line":61,"column":27}
 {"project":"third_party/access-examples","file":"modMathStatistics.bas","surface":"analyze","code":"VBA206","severity":"warning","line":107,"column":3}
 {"project":"third_party/access-examples","file":"modMathStatistics.bas","surface":"analyze","code":"VBA206","severity":"warning","line":107,"column":3}

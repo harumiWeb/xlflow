@@ -27,21 +27,22 @@ import (
 )
 
 type Finding struct {
-	Code         string           `json:"code"`
-	Severity     string           `json:"severity"`
-	File         string           `json:"file"`
-	Module       string           `json:"module,omitempty"`
-	Procedure    string           `json:"procedure,omitempty"`
-	Line         int              `json:"line"`
-	Column       int              `json:"column,omitempty"`
-	EndLine      int              `json:"-"`
-	EndColumn    int              `json:"-"`
-	ScopeEndLine int              `json:"scope_end_line,omitempty"`
-	Message      string           `json:"message"`
-	Reason       string           `json:"reason"`
-	Suggestion   string           `json:"suggestion"`
-	NearbyCode   []string         `json:"nearby_code,omitempty"`
-	DataFlow     *DataFlowContext `json:"data_flow,omitempty"`
+	Code         string            `json:"code"`
+	Severity     string            `json:"severity"`
+	File         string            `json:"file"`
+	Module       string            `json:"module,omitempty"`
+	Procedure    string            `json:"procedure,omitempty"`
+	Line         int               `json:"line"`
+	Column       int               `json:"column,omitempty"`
+	EndLine      int               `json:"-"`
+	EndColumn    int               `json:"-"`
+	ScopeEndLine int               `json:"scope_end_line,omitempty"`
+	Message      string            `json:"message"`
+	Reason       string            `json:"reason"`
+	Suggestion   string            `json:"suggestion"`
+	NearbyCode   []string          `json:"nearby_code,omitempty"`
+	CallCycle    *CallCycleContext `json:"call_cycle,omitempty"`
+	DataFlow     *DataFlowContext  `json:"data_flow,omitempty"`
 	// CommandExecution is present on VBA236 findings and augments the generic
 	// data-flow context with process-launch role/risk metadata.
 	CommandExecution *CommandExecutionContext `json:"command_execution,omitempty"`
@@ -387,6 +388,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	var cycleFindings []Finding
+	if analysisEnabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA244"); known && analysisEnabled {
+		cycleFindings, err = a.procedureCallCycleFindings(ctx, parsedFiles, projectEffects)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	analysisCtx := a.buildContext(parsedFiles)
 	analysis := a
 	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
@@ -422,7 +430,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		}
 		analysis.byRefSymbols = byRefSymbols
 	}
-	var findings []Finding
+	findings := cycleFindings
 	var preflightFindings []Finding
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
@@ -3427,8 +3435,22 @@ func sortFindings(findings []Finding) {
 		if a.Column != b.Column {
 			return a.Column < b.Column
 		}
-		return a.Code < b.Code
+		if a.Code != b.Code {
+			return a.Code < b.Code
+		}
+		return findingCycleSortKey(a) < findingCycleSortKey(b)
 	})
+}
+
+func findingCycleSortKey(finding Finding) string {
+	if finding.CallCycle == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(finding.CallCycle.Path))
+	for _, node := range finding.CallCycle.Path {
+		parts = append(parts, strings.ToLower(node.QualifiedName)+"|"+strings.ToLower(node.Kind)+"|"+node.File+"|"+strconvItoa(node.Line))
+	}
+	return strings.Join(parts, "->")
 }
 
 func applyInlineSuppressions(findings []Finding, directives []suppression.Directive) ([]Finding, []map[string]any) {

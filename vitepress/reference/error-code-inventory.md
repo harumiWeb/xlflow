@@ -160,6 +160,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `created_at`
 - `created_parent_dirs`
 - `credential_exposure`
+- `cross_module`
 - `current_version`
 - `customer_name`
 - `data_flow`
@@ -217,6 +218,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_non_short_circuit_object_guard`
 - `detect_object_array_comparison`
 - `detect_object_use_before_set`
+- `detect_procedure_call_cycles`
 - `detect_public_api_type_safety`
 - `detect_range_find_nothing_check`
 - `detect_range_value_array_shape`
@@ -596,6 +598,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `open_workbook`
 - `opening_column`
 - `opening_line`
+- `opens_file`
 - `opens_workbook`
 - `operation_kind`
 - `operator_spacing`

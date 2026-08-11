@@ -12,6 +12,15 @@ All notable changes to xlflow will be documented in this file.
   oracle schema v1 with class, UserForm, and document module probes while
   retaining `.bas` fixture compatibility and cleanup-gated promotion.
 
+- Added default-enabled, batch-only `VBA244` analysis for recursive and cyclic
+  project-local procedure dependencies. Each unique directed simple cycle is
+  reported once with a deterministic closed path and additive structured JSON
+  context; ordinary cycles use `information`, while event handlers,
+  Application-state mutations, error suppression, workbook acquisition, or
+  VBA file acquisition elevate the cycle to `warning`. Configure or disable
+  it with `detect_procedure_call_cycles` or
+  `[analyze].disabled_rules = ["VBA244"]`.
+
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.
   Findings use `information` outside loops and `warning` in reachable loops,
@@ -48,6 +57,10 @@ All notable changes to xlflow will be documented in this file.
   ambiguous, and block source preflight without allowing inline suppression.
   Optional-default validation recognizes VBA decimal, hexadecimal, octal, and
   numeric type-suffix literals while leaving String-suffix references unknown.
+
+- Fixed `VB022` false positives on parenthesized `ElseIf` and conditional-
+  compilation `#If` expressions by recognizing only whitespace-separated
+  parenthesized procedure calls.
 
 - Added opt-in `VBA240` project-wide analysis for module-level mutable state.
   The analyzer builds per-procedure read/write sets, aggregates field readers

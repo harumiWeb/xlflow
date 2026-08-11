@@ -32,7 +32,7 @@ Use JSON when deciding what code to inspect or test after a change:
 xlflow impact InvoiceService.Recalculate --depth 3 --json
 ```
 
-The `impact` payload separates confirmed `nodes` and `edges` from `uncertainty`. Do not treat `ambiguous`, `unresolved`, `external`, `builtin_like`, or `member_call` counts as confirmed dependencies. Each returned node and edge has a source location, while `cycles` makes recursion explicit.
+The `impact` payload separates confirmed `nodes` and `edges` from `uncertainty`. Do not treat `ambiguous`, `unresolved`, `external`, `builtin_like`, or `member_call` counts as confirmed dependencies. Each returned node and edge has a source location, while `cycles` makes recursion explicit. Cycle entries are additive: `nodes` are in canonical directed path order, `edges` align each caller with its next callee (wrapping at the end), and each unique directed cycle is emitted once after rotations are canonicalized. Consumers should preserve the ordered path rather than treating it as an unordered set.
 
 If the selector matches no procedure, xlflow returns `impact_target_not_found`. If it matches multiple stable declarations, it returns `impact_target_ambiguous` with the candidate identities instead of merging their blast radii.
 

@@ -2112,6 +2112,28 @@
       "configuration_key": "detect_value2_performance_opportunities",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA244",
+      "title": "Recursive and cyclic procedure dependency",
+      "description": "Procedures form a recursive call cycle; the complete deterministic cycle path and any dangerous reachable effects are reported.",
+      "family": "analyze",
+      "category": "reliability",
+      "evidence_class": "maintainability",
+      "compile_equivalent": false,
+      "default_severity": "information",
+      "supported_severities": ["information", "warning"],
+      "surfaces": ["analyze"],
+      "default_enabled": true,
+      "scope": "project-wide",
+      "realtime": false,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba244",
+      "configurable": true,
+      "configuration_key": "detect_procedure_call_cycles",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }
