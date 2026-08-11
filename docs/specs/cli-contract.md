@@ -878,7 +878,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 - `VB047`: declaration appears in a source position rejected by the VBE. An
   `Option` statement after another declaration (an `Implements` clause is
   permitted before options in class modules), a module declaration after the
-  first procedure body declaration, or a module-only declaration nested inside a
+  first procedure declaration, or a module-only declaration nested inside a
   procedure is reported. Procedure-local `Dim`, `Static`, and local `Const`
   declarations remain valid. The declaration header is the primary issue range;
   uncertain parser-recovery or conditional-branch ordering is fail-open, and the

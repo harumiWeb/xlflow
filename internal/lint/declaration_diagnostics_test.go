@@ -149,6 +149,21 @@ func TestDeclarationDiagnosticsCompareRepeatedConditionalBranch(t *testing.T) {
 	}
 }
 
+func TestDeclarationDiagnosticsConditionalProcedureRange(t *testing.T) {
+	source := "Option Explicit\n#If DEBUG Then\nSub Foo()\nEnd Sub\nSub foo()\nEnd Sub\n#End If\n"
+	issues, err := (Linter{}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicates := issuesByCode(issues, "VB046")
+	if len(duplicates) != 1 {
+		t.Fatalf("expected one conditional procedure duplicate: %+v", duplicates)
+	}
+	if duplicates[0].Line != 5 || duplicates[0].Column != 5 {
+		t.Fatalf("duplicate should point at the later procedure name, got %+v", duplicates[0])
+	}
+}
+
 func TestDeclarationDiagnosticsIgnoreStaticallyFalseBranch(t *testing.T) {
 	source := "Option Explicit\nEnum API\n    S_OK = 0\n#If False Then\n    Dim S_OK\n#End If\nEnd Enum\n"
 	issues, err := (Linter{}).LintSource("Main.bas", []byte(source))
@@ -159,5 +174,16 @@ func TestDeclarationDiagnosticsIgnoreStaticallyFalseBranch(t *testing.T) {
 		if issue.Code == "VB046" || issue.Code == "VB047" {
 			t.Fatalf("statically false branch produced declaration diagnostic: %+v", issue)
 		}
+	}
+}
+
+func TestDeclarationDiagnosticsPreserveFalseConditionalAlternatives(t *testing.T) {
+	source := "Option Explicit\n#If False Then\nDim value As Long\n#ElseIf DEBUG Then\nDim VALUE As String\n#Else\nDim Value As Double\n#End If\n"
+	issues, err := (Linter{}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB046"); len(got) != 0 {
+		t.Fatalf("surviving conditional alternatives must remain mutually exclusive: %+v", got)
 	}
 }

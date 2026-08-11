@@ -255,7 +255,7 @@ func (c *declarationCollector) walk(node *tree_sitter.Node, state declarationWal
 	kind := node.Kind()
 	switch {
 	case kind == "option_statement":
-		c.add(node, state, "option", optionKey(node.Utf8Text(c.source)), "", false, false)
+		c.add(node, state, "option", optionDisplayName(node.Utf8Text(c.source)), "", false, false)
 	case isProcedureDeclarationKind(kind):
 		name := declarationProcedureName(node, c.source)
 		if name != "" {
@@ -374,15 +374,21 @@ func (c *declarationCollector) walkConditional(node *tree_sitter.Node, state dec
 		}
 		// A statically false #If consequence is absent from every compiled
 		// configuration.  Its #Else branch, when present, is unconditional
-		// for the purpose of declaration coexistence.
+		// only relative to the discarded consequence; surviving alternatives
+		// remain mutually exclusive with one another.
+		branch := 1
 		for i := uint(0); i < node.NamedChildCount(); i++ {
 			child := node.NamedChild(i)
 			if child == nil || (!strings.Contains(child.Kind(), "else") && !strings.Contains(child.Kind(), "elseif")) {
 				continue
 			}
 			if body := child.ChildByFieldName("body"); body != nil {
-				c.walk(body, state)
+				c.walk(body, declarationWalkState{
+					scope: state.scope, parent: state.parent, module: state.module,
+					procedure: state.procedure, path: appendBranch(state.path, group, condition, branch),
+				})
 			}
+			branch++
 		}
 		return
 	}
@@ -429,11 +435,15 @@ func (c *declarationCollector) add(node *tree_sitter.Node, state declarationWalk
 		return
 	}
 	rng := vbaast.NodeRange(node)
-	if nameNode := declarationNameNode(node, kind); nameNode != nil {
+	if nameNode := declarationNameNode(node); nameNode != nil {
 		rng = vbaast.NodeRange(nameNode)
 	}
+	key := canonicalDeclarationKey(name)
+	if kind == "option" {
+		key = optionKey(node.Utf8Text(c.source))
+	}
 	c.records = append(c.records, declarationRecord{
-		name: name, key: canonicalDeclarationKey(name), kind: kind, scope: state.scope, parent: state.parent,
+		name: name, key: key, kind: kind, scope: state.scope, parent: state.parent,
 		accessor: accessor, rng: rng, startByte: node.StartByte(), module: module, procedure: procedure, path: append([]declarationBranch(nil), state.path...),
 	})
 }
@@ -456,19 +466,39 @@ func procedureAccessorForNode(kind string, node *tree_sitter.Node, source []byte
 	return procedureAccessor(kind, node.Utf8Text(source))
 }
 
-func declarationNameNode(node *tree_sitter.Node, kind string) *tree_sitter.Node {
+func declarationNameNode(node *tree_sitter.Node) *tree_sitter.Node {
 	if node == nil {
 		return nil
 	}
-	if strings.HasPrefix(kind, "conditional_") {
+	if strings.HasPrefix(node.Kind(), "conditional_") {
 		if header := node.ChildByFieldName("consequence"); header != nil {
-			if name := header.ChildByFieldName("name"); name != nil {
-				return name
-			}
+			return declarationNameNode(header)
 		}
 	}
 	if name := node.ChildByFieldName("name"); name != nil {
 		return name
+	}
+	switch node.Kind() {
+	case "declare_statement", "declare_sub_statement", "declare_function_statement", "event_statement", "event_declaration", "enum_member", "type_member", "variable_declarator", "const_declarator":
+		// These declaration forms have a single leading bare identifier when
+		// the grammar does not expose a named field. Do not guess from later
+		// identifiers such as library names, types, or bounds.
+		if child := node.NamedChild(0); child != nil && child.Kind() == "identifier" {
+			return child
+		}
+	case "implements_statement":
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			child := node.NamedChild(i)
+			if child == nil || child.Kind() != "type_expression" {
+				continue
+			}
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				name := child.NamedChild(j)
+				if name != nil && name.Kind() == "identifier" {
+					return name
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -517,6 +547,9 @@ func procedureAccessor(kind, text string) string {
 		return "set"
 	}
 	lower := strings.ToLower(strings.TrimSpace(text))
+	if idx := strings.IndexByte(lower, '\n'); idx >= 0 {
+		lower = strings.TrimSpace(lower[:idx])
+	}
 	for _, accessor := range []string{"get", "let", "set"} {
 		if strings.HasPrefix(lower, "property "+accessor+" ") {
 			return accessor
@@ -529,29 +562,8 @@ func declarationNodeName(node *tree_sitter.Node, source []byte) string {
 	if node == nil {
 		return ""
 	}
-	if strings.HasPrefix(node.Kind(), "conditional_") {
-		if header := node.ChildByFieldName("consequence"); header != nil {
-			if name := declarationNodeName(header, source); name != "" {
-				return name
-			}
-		}
-	}
-	if name := node.ChildByFieldName("name"); name != nil {
+	if name := declarationNameNode(node); name != nil {
 		return cleanIdentifier(name.Utf8Text(source))
-	}
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		child := node.NamedChild(i)
-		if child == nil {
-			continue
-		}
-		if child.Kind() == "identifier" || child.Kind() == "const_declarator" || child.Kind() == "variable_declarator" {
-			return cleanIdentifier(child.Utf8Text(source))
-		}
-	}
-	text := strings.TrimSpace(node.Utf8Text(source))
-	fields := strings.Fields(text)
-	if len(fields) >= 2 {
-		return cleanIdentifier(strings.Trim(fields[1], "()"))
 	}
 	return ""
 }
@@ -562,4 +574,12 @@ func optionKey(text string) string {
 		return canonicalDeclarationKey(text)
 	}
 	return canonicalDeclarationKey(fields[1])
+}
+
+func optionDisplayName(text string) string {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) >= 2 {
+		return strings.Join(fields[:2], " ")
+	}
+	return strings.TrimSpace(text)
 }

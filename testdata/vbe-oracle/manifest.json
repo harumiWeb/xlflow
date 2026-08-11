@@ -75,6 +75,14 @@
     {
       "id": "invalid-declaration-placement-valid-controls",
       "path": "cases/invalid-declaration-placement-valid-controls/case.json"
+    },
+    {
+      "id": "option-in-procedure",
+      "path": "cases/option-in-procedure/case.json"
+    },
+    {
+      "id": "option-in-procedure-valid-controls",
+      "path": "cases/option-in-procedure-valid-controls/case.json"
     }
   ]
 }
