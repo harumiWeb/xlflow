@@ -124,8 +124,12 @@ func (a Analyzer) redimPreserveLoopFindings(file parsedFile, proc sourceProcedur
 func redimLoopVariables(owner excelLoopRegion, proc sourceProcedure) map[string]bool {
 	variables := loopInvariantLoopVariables(owner, proc)
 	header := procedureStatementByID(proc, owner.StatementID)
-	if header.Control == nil {
+	if header.Kind != procedureir.StatementDo && header.Kind != procedureir.StatementWhile {
 		return variables
+	}
+	conditionVariables := make(map[string]bool, len(variables))
+	for name := range variables {
+		conditionVariables[name] = true
 	}
 	for _, statement := range proc.Statements {
 		if statement.ParentID != owner.StatementID || statement.SyntaxKind != "do_condition" {
@@ -133,11 +137,30 @@ func redimLoopVariables(owner excelLoopRegion, proc sourceProcedure) map[string]
 		}
 		for _, access := range proc.Accesses {
 			if access.StatementID == statement.ID && access.Mode != procedureir.AccessWrite {
-				variables[strings.ToLower(access.Name)] = true
+				conditionVariables[strings.ToLower(access.Name)] = true
 			}
 		}
 	}
+	for name := range conditionVariables {
+		if redimLoopVariableModified(owner, proc, name) {
+			variables[name] = true
+		} else {
+			delete(variables, name)
+		}
+	}
 	return variables
+}
+
+func redimLoopVariableModified(owner excelLoopRegion, proc sourceProcedure, name string) bool {
+	for _, access := range proc.Accesses {
+		if !owner.Body[access.StatementID] || !strings.EqualFold(access.Name, name) {
+			continue
+		}
+		if access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite {
+			return true
+		}
+	}
+	return false
 }
 
 func procedureStatementByID(proc sourceProcedure, id int) procedureir.Statement {

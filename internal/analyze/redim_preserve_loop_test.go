@@ -41,7 +41,7 @@ Public Sub Run(items As Variant)
     Loop While i < 7
     Do
         ReDim Preserve values(1 To i)
-        Exit Do
+        i = i + 1
     Loop Until i > 5
 End Sub
 
@@ -99,6 +99,42 @@ End Function
 	}
 	if !postUntilDependent {
 		t.Fatalf("post-test Do Until dependency was not classified: %+v", got)
+	}
+}
+
+func TestVBA241KeepsUnchangedDoConditionInvariant(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+    Dim values() As Long
+    Dim limit As Long
+    Dim ticks As Long
+    limit = 3
+    Do While limit > ticks
+        ReDim Preserve values(1 To limit)
+        ticks = ticks + 1
+    Loop
+    Do
+        ReDim Preserve values(1 To limit)
+        ticks = ticks + 1
+    Loop Until limit <= ticks
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA241")
+	if len(got) != 2 {
+		t.Fatalf("unchanged Do condition findings = %+v, want two", got)
+	}
+	for _, finding := range got {
+		if finding.Severity != "information" || !strings.Contains(finding.Message, "loop-invariant") {
+			t.Fatalf("unchanged Do condition finding = %+v, want information loop-invariant classification", finding)
+		}
 	}
 }
 

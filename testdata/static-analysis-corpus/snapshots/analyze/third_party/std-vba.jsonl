@@ -1652,7 +1652,7 @@
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":627,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":629,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":634,"column":0}
-{"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA241","severity":"warning","line":722,"column":0}
+{"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA241","severity":"information","line":722,"column":0}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":727,"column":22}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA206","severity":"warning","line":781,"column":22}
 {"project":"third_party/std-vba","file":"src/stdEnumerator.cls","surface":"analyze","code":"VBA227","severity":"warning","line":797,"column":0}
