@@ -12,7 +12,7 @@ var (
 	bareVBAIdentifierRE  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 	formControlTargetRE  = regexp.MustCompile(`^(?:me\.)?([a-z_][a-z0-9_]*)\.(?:value|text|listindex|list)$`)
 	formControlsTargetRE = regexp.MustCompile(`^(?:me\.)?controls\((?:"[^"]+"|'[^']+')\)\.(?:value|text|listindex|list)$`)
-	fileOpenEffectRE     = regexp.MustCompile(`(?is)^\s*open\b.*\bfor\s+(?:append|binary|input|output|random)\b.*\bas\s*#\s*(?:\d+|\[[^\]]+\]|[a-z_][a-z0-9_]*(?:[$%&!#@^])?)\b`)
+	fileOpenEffectRE     = regexp.MustCompile(`(?i)^\s*open\b.*\bfor\s+(?:append|binary|input|output|random)\b.*\bas\s+#?\s*(?:\d+|\[[^\]]+\]|[a-z_][a-z0-9_]*(?:[$%&!#@^])?)\b`)
 )
 
 func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, reachable map[int]bool) {

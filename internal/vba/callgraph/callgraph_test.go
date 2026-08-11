@@ -1,9 +1,11 @@
 package callgraph
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -282,6 +284,36 @@ func TestFindCyclesRetainsDistinctDirectedPathsWithSameNodes(t *testing.T) {
 	}
 	if threeNode != 2 || len(paths) != 2 {
 		t.Fatalf("cycles = %#v, want clockwise and reverse three-node paths", cycles)
+	}
+}
+
+type cancelAfterChecksContext struct{ remaining int }
+
+func (c *cancelAfterChecksContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *cancelAfterChecksContext) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterChecksContext) Value(any) any               { return nil }
+func (c *cancelAfterChecksContext) Err() error {
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
+
+func TestFindCyclesContextDiscardsPartialResultsOnCancellation(t *testing.T) {
+	input := SnapshotFromResult(&calls.Result{
+		Symbols: []symbols.Symbol{
+			symbol("M", "M.bas", "A", 1),
+			symbol("M", "M.bas", "B", 2),
+		},
+		Calls: []calls.Call{
+			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 1),
+			matched("M", "M.bas", "B", "M", "M.bas", "A", 1, 1),
+		},
+	})
+	cycles, err := FindCyclesContext(&cancelAfterChecksContext{remaining: 3}, input)
+	if !errors.Is(err, context.Canceled) || cycles != nil {
+		t.Fatalf("canceled cycle result = (%#v, %v), want nil and context.Canceled", cycles, err)
 	}
 }
 

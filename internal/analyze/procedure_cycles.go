@@ -93,9 +93,6 @@ func buildProcedureCallGraphSnapshot(files []parsedFile) callgraph.Snapshot {
 }
 
 func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsedFile, project effects.ProjectSummary) ([]Finding, error) {
-	if !a.Config.Analyze.DetectProcedureCallCycles {
-		return nil, nil
-	}
 	cycles, err := callgraph.FindCyclesContext(ctx, buildProcedureCallGraphSnapshot(files))
 	if err != nil {
 		return nil, err
@@ -109,20 +106,28 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 	}
 	bySummary := make(map[string]effects.ProcedureSummary)
 	for _, summary := range project.All() {
-		bySummary[summary.Identity.Key()] = summary
+		identity := summary.Identity
+		bySummary[cycleSummaryKey(identity.File, identity.QualifiedName, string(identity.Kind), identity.DeclarationLine)] = summary
 	}
 	out := make([]Finding, 0, len(cycles))
 	for _, cycle := range cycles {
 		if len(cycle.Nodes) == 0 || len(cycle.Edges) != len(cycle.Nodes) {
 			continue
 		}
-		context, severity := buildCallCycleContext(cycle, bySummary)
+		cycleContext, severity := buildCallCycleContext(cycle, bySummary)
 		anchor := cycle.Edges[0].Location
 		file, ok := byFile[canonicalCyclePath(anchor.File)]
 		if !ok {
-			for path, candidate := range byFile {
-				if strings.EqualFold(filepath.ToSlash(path), filepath.ToSlash(anchor.File)) || strings.HasSuffix(strings.ToLower(filepath.ToSlash(path)), "/"+strings.ToLower(filepath.ToSlash(anchor.File))) {
-					file, ok = candidate, true
+			paths := make([]string, 0, len(byFile))
+			for path := range byFile {
+				paths = append(paths, path)
+			}
+			sort.Strings(paths)
+			target := strings.ToLower(filepath.ToSlash(anchor.File))
+			for _, path := range paths {
+				normalized := strings.ToLower(filepath.ToSlash(path))
+				if normalized == target || strings.HasSuffix(normalized, "/"+target) {
+					file, ok = byFile[path], true
 					break
 				}
 			}
@@ -138,8 +143,8 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 				break
 			}
 		}
-		pathText := make([]string, 0, len(context.Path))
-		for _, node := range context.Path {
+		pathText := make([]string, 0, len(cycleContext.Path))
+		for _, node := range cycleContext.Path {
 			pathText = append(pathText, node.QualifiedName)
 		}
 		message := fmt.Sprintf("Procedure call cycle detected: %s.", strings.Join(pathText, " -> "))
@@ -147,15 +152,15 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 		if severity == "warning" {
 			reason += " The cycle contains a dangerous reachable effect."
 		}
-		if len(context.Uncertainty) > 0 {
-			reason += fmt.Sprintf(" %d unresolved or dynamically bound call(s) remain uncertain.", len(context.Uncertainty))
+		if len(cycleContext.Uncertainty) > 0 {
+			reason += fmt.Sprintf(" %d unresolved or dynamically bound call(s) remain uncertain.", len(cycleContext.Uncertainty))
 		}
 		finding := a.simpleFinding(file, proc, anchor.StartLine, "VBA244", severity, message, reason, "Break the cycle, add an explicit termination guard, or isolate the dangerous effect behind a non-recursive boundary.")
 		finding.Column = anchor.StartColumn + 1
 		finding.EndLine = anchor.EndLine
 		finding.EndColumn = anchor.EndColumn + 1
 		finding.ScopeEndLine = proc.EndLine
-		finding.CallCycle = &context
+		finding.CallCycle = &cycleContext
 		out = append(out, finding)
 	}
 	return out, nil
@@ -192,26 +197,34 @@ func buildCallCycleContext(cycle callgraph.Cycle, summaries map[string]effects.P
 		if !ok {
 			continue
 		}
-		for _, evidence := range append(append([]effects.Evidence{}, summary.Direct...), summary.Propagated...) {
-			if !dangerousEffect(evidence.Effect) {
-				continue
+		processEvidence := func(evidenceItems []effects.Evidence) {
+			for _, evidence := range evidenceItems {
+				if !dangerousEffect(evidence.Effect) {
+					continue
+				}
+				key := fmt.Sprintf("%s|%s|%d|%d|%s", evidence.Effect, evidence.Origin.Key(), evidence.Range.StartByte, evidence.Range.EndByte, evidence.Target)
+				if dangerousSeen[key] {
+					continue
+				}
+				dangerousSeen[key] = true
+				ctx.DangerousEffects = append(ctx.DangerousEffects, CallCycleEffect{Kind: string(evidence.Effect), Origin: evidence.Origin.QualifiedName, File: evidence.Origin.File, Line: evidence.Range.StartLine, Target: evidence.Target})
+				dangerous = true
 			}
-			key := fmt.Sprintf("%s|%s|%d|%d|%s", evidence.Effect, evidence.Origin.Key(), evidence.Range.StartByte, evidence.Range.EndByte, evidence.Target)
-			if dangerousSeen[key] {
-				continue
-			}
-			dangerousSeen[key] = true
-			ctx.DangerousEffects = append(ctx.DangerousEffects, CallCycleEffect{Kind: string(evidence.Effect), Origin: evidence.Origin.QualifiedName, File: evidence.Origin.File, Line: evidence.Range.StartLine, Target: evidence.Target})
-			dangerous = true
 		}
-		for _, uncertainty := range append(append([]effects.CallUncertainty{}, summary.DirectUncertainty...), summary.PropagatedUncertainty...) {
-			key := fmt.Sprintf("%s|%s|%d|%d|%s", uncertainty.Kind, uncertainty.Origin.Key(), uncertainty.Range.StartByte, uncertainty.Range.EndByte, uncertainty.Callee)
-			if uncertaintySeen[key] {
-				continue
+		processEvidence(summary.Direct)
+		processEvidence(summary.Propagated)
+		processUncertainty := func(uncertaintyItems []effects.CallUncertainty) {
+			for _, uncertainty := range uncertaintyItems {
+				key := fmt.Sprintf("%s|%s|%d|%d|%s", uncertainty.Kind, uncertainty.Origin.Key(), uncertainty.Range.StartByte, uncertainty.Range.EndByte, uncertainty.Callee)
+				if uncertaintySeen[key] {
+					continue
+				}
+				uncertaintySeen[key] = true
+				ctx.Uncertainty = append(ctx.Uncertainty, CallCycleUncertainty{Kind: string(uncertainty.Kind), Origin: uncertainty.Origin.QualifiedName, Callee: uncertainty.Callee, File: uncertainty.Origin.File, Line: uncertainty.Range.StartLine, Column: uncertainty.Range.StartColumn + 1})
 			}
-			uncertaintySeen[key] = true
-			ctx.Uncertainty = append(ctx.Uncertainty, CallCycleUncertainty{Kind: string(uncertainty.Kind), Origin: uncertainty.Origin.QualifiedName, Callee: uncertainty.Callee, File: uncertainty.Origin.File, Line: uncertainty.Range.StartLine, Column: uncertainty.Range.StartColumn + 1})
 		}
+		processUncertainty(summary.DirectUncertainty)
+		processUncertainty(summary.PropagatedUncertainty)
 	}
 	ctx.CrossModule = len(modules) > 1
 	if len(ctx.Path) > 0 {
@@ -229,17 +242,19 @@ func buildCallCycleContext(cycle callgraph.Cycle, summaries map[string]effects.P
 	sort.Slice(ctx.Uncertainty, func(i, j int) bool {
 		return callCycleUncertaintyKey(ctx.Uncertainty[i]) < callCycleUncertaintyKey(ctx.Uncertainty[j])
 	})
-	return ctx, map[bool]string{true: "warning", false: "information"}[dangerous]
+	if dangerous {
+		return ctx, "warning"
+	}
+	return ctx, "information"
 }
 
 func summaryForCycleNode(node callgraph.ID, summaries map[string]effects.ProcedureSummary) (effects.ProcedureSummary, bool) {
-	for _, summary := range summaries {
-		id := summary.Identity
-		if strings.EqualFold(canonicalCyclePath(id.File), canonicalCyclePath(node.File)) && strings.EqualFold(id.QualifiedName, node.QualifiedName) && strings.EqualFold(string(id.Kind), node.Kind) && id.DeclarationLine == node.Line {
-			return summary, true
-		}
-	}
-	return effects.ProcedureSummary{}, false
+	summary, ok := summaries[cycleSummaryKey(node.File, node.QualifiedName, node.Kind, node.Line)]
+	return summary, ok
+}
+
+func cycleSummaryKey(file, qualifiedName, kind string, line int) string {
+	return fmt.Sprintf("%s|%s|%s|%d", strings.ToLower(canonicalCyclePath(file)), strings.ToLower(qualifiedName), strings.ToLower(kind), line)
 }
 
 func dangerousEffect(kind effects.EffectKind) bool {

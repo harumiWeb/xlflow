@@ -21,6 +21,7 @@ func TestDirectEffectsUseReachableHighConfidenceIR(t *testing.T) {
     Shell "calc.exe"
     Workbooks.Open "book.xlsx"
     Open "output.txt" For Output As #1
+    Open "other.txt" For Append As fileNum
     ThisWorkbook.Close
     On Error Resume Next
     Err.Raise 5

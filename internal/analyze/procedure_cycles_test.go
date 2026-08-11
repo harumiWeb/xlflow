@@ -33,6 +33,7 @@ End Sub
 	if len(got) != 2 {
 		t.Fatalf("VBA244 findings = %+v, want two independent cycles", got)
 	}
+	paths := map[string]bool{}
 	for _, finding := range got {
 		if finding.Severity != "information" || finding.CallCycle == nil || len(finding.CallCycle.Path) != 3 {
 			t.Fatalf("ordinary cycle finding = %+v", finding)
@@ -43,12 +44,22 @@ End Sub
 		if len(finding.CallCycle.Edges) != 2 || finding.CallCycle.CrossModule {
 			t.Fatalf("cycle edges/context = %+v", finding.CallCycle)
 		}
+		names := make([]string, 0, len(finding.CallCycle.Path))
+		for _, node := range finding.CallCycle.Path {
+			names = append(names, node.QualifiedName)
+		}
+		paths[strings.Join(names, "->")] = true
+	}
+	for _, want := range []string{"Main.Alpha->Main.Beta->Main.Alpha", "Main.Delta->Main.Gamma->Main.Delta"} {
+		if !paths[want] {
+			t.Fatalf("missing canonical cycle %q in %v", want, paths)
+		}
 	}
 	again, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstCycles, secondCycles := findingsByCode(got, "VBA244"), findingsByCode(again, "VBA244")
+	firstCycles, secondCycles := got, findingsByCode(again, "VBA244")
 	if len(firstCycles) != len(secondCycles) {
 		t.Fatalf("repeat cycle count = %d/%d", len(firstCycles), len(secondCycles))
 	}
@@ -135,8 +146,14 @@ End Sub
 	if finding.Severity != "warning" || finding.CallCycle == nil {
 		t.Fatalf("dangerous cycle finding = %+v", finding)
 	}
-	if len(finding.CallCycle.DangerousEffects) < 3 {
-		t.Fatalf("dangerous effects = %+v", finding.CallCycle.DangerousEffects)
+	effectKinds := map[string]bool{}
+	for _, effect := range finding.CallCycle.DangerousEffects {
+		effectKinds[effect.Kind] = true
+	}
+	for _, want := range []string{"suppresses_errors", "changes_application_state", "opens_file"} {
+		if !effectKinds[want] {
+			t.Fatalf("missing dangerous effect %q in %+v", want, finding.CallCycle.DangerousEffects)
+		}
 	}
 	var propagated bool
 	for _, effect := range finding.CallCycle.DangerousEffects {

@@ -1021,7 +1021,7 @@ func componentContainsCycle(component []string, adjacency map[string][]cycleArc)
 }
 
 func canonicalCycle(keys []string, edges []Edge, nodes map[string]ID) Cycle {
-	if len(keys) == 0 {
+	if len(keys) == 0 || len(edges) != len(keys) {
 		return Cycle{Nodes: []ID{}, Edges: []Edge{}}
 	}
 	start := 0
