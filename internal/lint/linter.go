@@ -924,8 +924,6 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		!cfg.DetectDangerousResume {
 		return nil, nil
 	}
-	lines := normalizedSourceLines(source)
-	procedures := sourceProceduresFromAST(root, []byte(source))
 	var issues []Issue
 	if cfg.DetectDangerousResume {
 		dangerousResumeIssues, err := l.dangerousResumeIssuesFromAST(ctx, path, source, root)
@@ -941,16 +939,12 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		}
 		issues = append(issues, confusingCallIssues...)
 	}
-	for i, proc := range procedures {
-		if i&0x1f == 0 {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
+	if cfg.DetectForEachControlType {
+		forEachIssues, err := l.forEachIssuesFromProcedureIR(ctx, path, []byte(source))
+		if err != nil {
+			return nil, err
 		}
-		decls := procedureDeclarations(lines, proc)
-		if cfg.DetectForEachControlType {
-			issues = append(issues, l.forEachIssues(path, lines, proc, decls)...)
-		}
+		issues = append(issues, forEachIssues...)
 	}
 	return issues, ctx.Err()
 }
@@ -1389,34 +1383,59 @@ func confusingParenthesizedCall(stmt string) (string, bool) {
 	return name, true
 }
 
-func (l Linter) forEachIssues(path string, lines []string, proc sourceProcedure, decls map[string]sourceDeclaration) []Issue {
+func (l Linter) forEachIssuesFromProcedureIR(ctx context.Context, path string, source []byte) ([]Issue, error) {
+	ir, err := procedureir.BuildSourceContext(ctx, procedureir.BuildOptions{Path: path}, source)
+	if err != nil {
+		return nil, err
+	}
 	var issues []Issue
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		lower := strings.ToLower(stmt)
-		if !strings.HasPrefix(lower, "for each ") {
-			continue
-		}
-		rest := strings.TrimSpace(stmt[len("for each "):])
-		parts := strings.Fields(rest)
-		if len(parts) == 0 {
-			continue
-		}
-		name := cleanIdentifier(parts[0])
-		decl, ok := decls[strings.ToLower(name)]
-		if !ok {
-			issue := l.issue(path, i+1, "VB023", "warning", "Declare the For Each control variable explicitly as Variant or an object type.")
-			issue.Symbol = name
-			issues = append(issues, issue)
-			continue
-		}
-		if isObviouslyScalarType(decl.Type) {
-			issue := l.issue(path, i+1, "VB023", "warning", "For Each control variables should be Variant or object-compatible, not "+decl.Type+".")
-			issue.Symbol = name
-			issues = append(issues, issue)
+	for _, proc := range ir.Procedures {
+		for _, statement := range proc.Statements {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if statement.Kind != procedureir.StatementForEach || statement.Recovered || statement.Target == nil || statement.Target.Recovered {
+				continue
+			}
+			// VBA permits an array element or member expression as the For Each
+			// control variable. Only a bare identifier can be checked against a
+			// declaration here; unresolved composite targets must remain fail-open.
+			if statement.Target.Kind != procedureir.ExpressionIdentifier {
+				continue
+			}
+			name := cleanIdentifier(statement.Target.Text)
+			if name == "" {
+				continue
+			}
+			decl, ok := forEachDeclaration(ir, proc, name)
+			if !ok {
+				issue := l.issue(path, statement.Range.StartLine, "VB023", "warning", "Declare the For Each control variable explicitly as Variant or an object type.")
+				issue.Symbol = name
+				issues = append(issues, issue)
+				continue
+			}
+			if isObviouslyScalarType(decl.Type) {
+				issue := l.issue(path, statement.Range.StartLine, "VB023", "warning", "For Each control variables should be Variant or object-compatible, not "+decl.Type+".")
+				issue.Symbol = name
+				issues = append(issues, issue)
+			}
 		}
 	}
-	return issues
+	return issues, nil
+}
+
+func forEachDeclaration(ir procedureir.DocumentIR, proc procedureir.ProcedureIR, name string) (procedureir.Declaration, bool) {
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+			return declaration, true
+		}
+	}
+	for _, declaration := range ir.Declarations {
+		if strings.EqualFold(cleanIdentifier(declaration.Name), name) {
+			return declaration, true
+		}
+	}
+	return procedureir.Declaration{}, false
 }
 
 type dangerousResumeEvent struct {

@@ -2151,6 +2151,57 @@ End Sub
 	}
 }
 
+func TestLinterVB023IgnoresCompositeControlTargets(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Sub Run(ByVal values As Collection)
+  Dim slots(0) As Variant
+  For Each slots(0) In values
+  Next slots(0)
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB023"); len(got) != 0 {
+		t.Fatalf("composite For Each targets should not be treated as undeclared identifiers: %+v", got)
+	}
+}
+
+func TestLinterVB023ResolvesProcedureAndModuleDeclarations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private moduleObject As Object
+Sub Run(ByVal objectItem As Object, ByVal variantItem As Variant, ByVal values As Collection)
+  Dim scalarItem As Long
+  For Each objectItem In values
+  Next
+  For Each scalarItem In values
+  Next
+  For Each missingItem In values
+  Next
+  For Each variantItem In values
+  Next
+  For Each moduleObject In values
+  Next
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB023"); len(got) != 2 {
+		t.Fatalf("expected only the scalar and undeclared For Each controls to trigger VB023, got %+v", got)
+	}
+	assertIssue(t, issues, "VB023", 7)
+	assertIssue(t, issues, "VB023", 9)
+}
+
 func TestLinterVB026UsesParsedErrorHandlerStatements(t *testing.T) {
 	t.Parallel()
 	source := `Option Explicit
