@@ -51,6 +51,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB047`](#vb047)   | lint    | error       | file-local      | yes     | Invalid declaration placement                      |
 | [`VB048`](#vb048)   | lint    | error       | procedure-local | yes     | Invalid procedure parameter declaration            |
 | [`VB049`](#vb049)   | lint    | error       | file-local      | yes     | Inconsistent Property accessor contract            |
+| [`VB050`](#vb050)   | lint    | error       | file-local      | yes     | Invalid module declaration context                 |
+| [`VB051`](#vb051)   | lint    | error       | procedure-local | yes     | Invalid Me context                                 |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -1083,6 +1085,50 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Supported severities        | `error`              |
 | Surfaces                    | `lint`, `lsp`        |
 | Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB050
+
+**Invalid module declaration context.** A VBA declaration or member uses a form that is not permitted by the containing module kind.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB051
+
+**Invalid Me context.** The VBA Me keyword is used outside an object module.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
 | Precision                   | `high`               |
 | Enabled by default          | yes                  |
 | Configuration               | not configurable     |

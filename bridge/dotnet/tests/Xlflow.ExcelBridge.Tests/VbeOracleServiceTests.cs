@@ -1,0 +1,99 @@
+using System.Text;
+using System.Text.Json;
+using Xlflow.ExcelBridge.Contract;
+using Xlflow.ExcelBridge.Services;
+
+namespace Xlflow.ExcelBridge.Tests;
+
+public sealed class VbeOracleServiceTests
+{
+    [Fact]
+    public void SchemaV1AcceptsClassFormAndDocumentBasBodies()
+    {
+        var plan = new
+        {
+            schema_version = 1,
+            case_id = "module-kinds",
+            probe_mode = "compile",
+            modules = new object[]
+            {
+                new { name = "AClass", kind = "class", source = "Attribute VB_Name = \"AClass\"\nPublic Sub Run()\nEnd Sub\n" },
+                new { name = "AForm", kind = "form", source = "Attribute VB_Name = \"AForm\"\nPublic Sub Run()\nEnd Sub\n" },
+                new { name = "ThisWorkbook", kind = "document", document_target = "workbook", source = "Attribute VB_Name = \"ThisWorkbook\"\nPrivate Sub Workbook_Open()\nEnd Sub\n" },
+                new { name = "Sheet1", kind = "document", document_target = "worksheet", source = "Attribute VB_Name = \"Sheet1\"\nPrivate Sub Worksheet_Change(ByVal Target As Range)\nEnd Sub\n" },
+            },
+        };
+        AssertPlanAccepted(plan);
+    }
+
+    [Fact]
+    public void SchemaV1RejectsDesignerArtifacts()
+    {
+        var plan = new
+        {
+            schema_version = 1,
+            case_id = "designer-artifact",
+            probe_mode = "compile",
+            modules = new[] { new { name = "Form1", kind = "form", source_path = "Form1.frm" } },
+        };
+        var response = Execute(plan);
+
+        Assert.Equal("vbe_oracle_plan_invalid", response.Error?.Code);
+    }
+
+    [Fact]
+    public void SchemaV1RejectsNonBasPathEvenForInlineSource()
+    {
+        var plan = new
+        {
+            schema_version = 1,
+            case_id = "non-bas-inline",
+            probe_mode = "compile",
+            modules = new[]
+            {
+                new { name = "Class1", kind = "class", source_path = "Class1.cls", source = "Attribute VB_Name = \"Class1\"\n" },
+            },
+        };
+        var response = Execute(plan);
+
+        Assert.Equal("vbe_oracle_plan_invalid", response.Error?.Code);
+    }
+
+    [Fact]
+    public void OracleSanitizerRemovesExportHeadersBeforeInjection()
+    {
+        var sanitizer = typeof(VbeOracleService).GetMethod("SanitizeOracleSource", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var result = (string)sanitizer.Invoke(null, ["Attribute VB_Name = \"Class1\"\nVERSION 1.0 CLASS\nBEGIN\nEND\nOption Explicit\n"])!;
+
+        Assert.DoesNotContain("Attribute VB_Name", result);
+        Assert.DoesNotContain("VERSION 1.0 CLASS", result);
+        Assert.Contains("Option Explicit", result);
+    }
+
+    private static BridgeResponse Execute(object plan)
+    {
+        var json = JsonSerializer.Serialize(plan);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        return new VbeOracleService().Execute(
+            new BridgeRequest
+            {
+                ProtocolVersion = ProtocolVersion.Current,
+                RequestId = "req-oracle-service",
+                Command = "vbe-oracle",
+            },
+            new VbeOracleCommandArguments(encoded, TimeSpan.FromSeconds(1)),
+            CancellationToken.None);
+    }
+
+    private static void AssertPlanAccepted(object plan)
+    {
+        var json = JsonSerializer.Serialize(plan);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        var serviceType = typeof(VbeOracleService);
+        var decode = serviceType.GetMethod("DecodePlan", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var validate = serviceType.GetMethod("ValidatePlan", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var decoded = decode.Invoke(null, [encoded]);
+        var exception = Record.Exception(() => validate.Invoke(null, [decoded]));
+        Assert.Null(exception);
+    }
+}

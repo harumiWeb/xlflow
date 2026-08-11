@@ -277,6 +277,7 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 	issues, err := lint.Linter{
 		RootDir:                a.RootDir,
 		Config:                 a.Config,
+		ModuleKind:             doc.ModuleKind,
 		VisibleDeclarations:    a.visibleDeclarations,
 		TypeDeclarations:       a.typeDeclarations,
 		ObjectTypeDeclarations: a.objectTypeDeclarations,

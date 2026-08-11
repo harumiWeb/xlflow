@@ -55,6 +55,30 @@ func TestFixtureRequestUsesBridgePlanContract(t *testing.T) {
 	}
 }
 
+func TestFixtureRequestCarriesDocumentTarget(t *testing.T) {
+	payload, err := json.Marshal(fixtureRequest{
+		SchemaVersion: SchemaVersion,
+		CaseID:        "document",
+		ProbeMode:     ProbeCompile,
+		Modules: []fixtureModule{{
+			Name:           "Sheet1",
+			Kind:           "document",
+			SourcePath:     "C:/x/Sheet1.bas",
+			DocumentTarget: "worksheet",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan fixtureRequest
+	if err := json.Unmarshal(payload, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Modules) != 1 || plan.Modules[0].DocumentTarget != "worksheet" {
+		t.Fatalf("plan=%+v, want worksheet document target", plan)
+	}
+}
+
 type oracleFakeBridge struct{ calls []string }
 
 func (f *oracleFakeBridge) Execute(_ context.Context, req excelbridge.Request) (excelbridge.Response, error) {

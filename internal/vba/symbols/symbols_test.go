@@ -376,6 +376,35 @@ func TestInspectSidecarFormCodeAvoidsDuplicateFrmSymbols(t *testing.T) {
 	assertNoSymbol(t, file.Symbols, "StaleFrm")
 }
 
+func TestDiscoverSidecarFormCodeWithoutDesignerArtifact(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "sidecar"
+	formsCode := filepath.Join(dir, "src", "forms", "code")
+	if err := os.MkdirAll(formsCode, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(formsCode, "Settings.bas")
+	if err := os.WriteFile(path, []byte("Option Explicit\nPrivate Sub UserForm_Initialize()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := DiscoverSourceFiles(Options{RootDir: dir, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].ModuleKind != "form" || files[0].Path != filepath.Clean(path) {
+		t.Fatalf("unexpected sidecar classification: %+v", files)
+	}
+	file, included, err := SourceFileForPath(dir, cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !included || file.ModuleKind != "form" {
+		t.Fatalf("unexpected direct sidecar classification: included=%v file=%+v", included, file)
+	}
+}
+
 func TestInspectModuleFilter(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "valid-module-form",
+  "description": "Pending accepted control for UserForm code-behind declarations.",
+  "modules": [
+    {
+      "name": "UserForm1",
+      "kind": "form",
+      "path": "UserForm1.bas"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB050", "VB051"],
+    "forbidden_diagnostics": [
+      { "code": "VB050", "severity": "error", "surfaces": ["lint", "lsp"] },
+      { "code": "VB051", "severity": "error", "surfaces": ["lint", "lsp"] }
+    ]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-11T14:51:46Z"
+      }
+    ]
+  }
+}

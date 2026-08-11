@@ -258,10 +258,10 @@ func SourceFileForPath(rootDir string, cfg config.Config, path string) (SourceFi
 		path string
 		kind string
 	}{
-		{cfg.Src.Modules, "standard"},
-		{cfg.Src.Classes, "class"},
-		{cfg.Src.Forms, "form"},
 		{cfg.Src.Workbook, "document"},
+		{cfg.Src.Forms, "form"},
+		{cfg.Src.Classes, "class"},
+		{cfg.Src.Modules, "standard"},
 	}
 	for _, dir := range dirs {
 		if strings.TrimSpace(dir.path) == "" {
@@ -424,10 +424,10 @@ func discoverFiles(opts Options) ([]fileCandidate, error) {
 		path string
 		kind string
 	}{
-		{cfg.Src.Modules, "standard"},
-		{cfg.Src.Classes, "class"},
-		{cfg.Src.Forms, "form"},
 		{cfg.Src.Workbook, "document"},
+		{cfg.Src.Forms, "form"},
+		{cfg.Src.Classes, "class"},
+		{cfg.Src.Modules, "standard"},
 	}
 	seen := make(map[string]bool)
 	files := make([]fileCandidate, 0)
@@ -532,8 +532,13 @@ func kindForPath(root string, cfg config.Config, path string) string {
 	case ".cls":
 		return "class"
 	}
-	if isPathInsideRoot(path, filepath.Join(formsRoot, "code")) && matchingFormArtifact(formsRoot, path) {
-		return "form"
+	if isPathInsideRoot(path, filepath.Join(formsRoot, "code")) {
+		// In sidecar mode the configured forms/code root is authoritative even
+		// when the exported .frm designer artifact is not checked in (for
+		// example, source-only projects that keep form metadata elsewhere).
+		if strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") || matchingFormArtifact(formsRoot, path) {
+			return "form"
+		}
 	}
 	if isPathInsideRoot(path, classesRoot) {
 		return "class"
@@ -542,8 +547,10 @@ func kindForPath(root string, cfg config.Config, path string) string {
 }
 
 func formFileKind(root string, cfg config.Config, path string) string {
-	if strings.EqualFold(filepath.Ext(path), ".bas") && matchingFormArtifact(filepath.Join(root, cfg.Src.Forms), path) {
-		return "form"
+	if strings.EqualFold(filepath.Ext(path), ".bas") && isPathInsideRoot(path, filepath.Join(root, cfg.Src.Forms, "code")) {
+		if strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") || matchingFormArtifact(filepath.Join(root, cfg.Src.Forms), path) {
+			return "form"
+		}
 	}
 	return kindForPath(root, cfg, path)
 }

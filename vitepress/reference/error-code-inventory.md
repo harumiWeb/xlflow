@@ -26,6 +26,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `attach_active_deprecated`
 - `attach_args_invalid`
 - `attempted_operation`
+- `attribute_declaration`
 - `attribute_statement`
 - `auto_close`
 - `auto_open`
@@ -254,6 +255,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `doctor_workbook_skipped`
 - `document_changed_concurrently`
 - `document_not_open`
+- `document_target`
 - `documentation_diagnostics`
 - `dotnet_missing`
 - `dotnet_runtime`
@@ -447,9 +449,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_conversion`
 - `invalid_created_at`
 - `invalid_entry`
+- `invalid_event_module`
 - `invalid_formula`
+- `invalid_friend_module`
+- `invalid_implements_module`
+- `invalid_me_context`
 - `invalid_metadata_json`
 - `invalid_project_config`
+- `invalid_public_object_member`
 - `invalid_range`
 - `invalid_reference`
 - `invalid_row_selector`
@@ -458,6 +465,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_test_case`
 - `invalid_test_metadata`
 - `invalid_version`
+- `invalid_withevents_module`
+- `invalid_withevents_shape`
 - `invoke_macro`
 - `is_wsl`
 - `keyword_casing`

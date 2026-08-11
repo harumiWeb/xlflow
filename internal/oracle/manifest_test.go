@@ -97,6 +97,36 @@ func TestValidateCaseRequiresAssertedProvenance(t *testing.T) {
 	}
 }
 
+func TestValidateCaseSupportsSchemaV1ModuleKindsAndDocumentTargets(t *testing.T) {
+	caseDir := t.TempDir()
+	for _, name := range []string{"ClassBody", "FormBody", "ThisWorkbook", "Sheet1"} {
+		source := "Attribute VB_Name = \"" + name + "\"\nOption Explicit\n"
+		if err := os.WriteFile(filepath.Join(caseDir, name+".bas"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := validAssertedCase(ExpectedRejected)
+	c.ID = "module-kinds"
+	c.Modules = []Module{
+		{Name: "ClassBody", Kind: "class", Path: "ClassBody.bas"},
+		{Name: "FormBody", Kind: "form", Path: "FormBody.bas"},
+		{Name: "ThisWorkbook", Kind: "document", DocumentTarget: "workbook", Path: "ThisWorkbook.bas"},
+		{Name: "Sheet1", Kind: "document", DocumentTarget: "worksheet", Path: "Sheet1.bas"},
+	}
+	if err := ValidateCase(c, c.ID, caseDir); err != nil {
+		t.Fatalf("ValidateCase() error = %v", err)
+	}
+}
+
+func TestValidateCaseRequiresDocumentTarget(t *testing.T) {
+	c := validAssertedCase(ExpectedRejected)
+	c.ID = "document-target"
+	c.Modules = []Module{{Name: "ThisWorkbook", Kind: "document", Path: "ThisWorkbook.bas"}}
+	if err := ValidateCase(c, c.ID, t.TempDir()); err == nil || !strings.Contains(err.Error(), "document_target") {
+		t.Fatalf("ValidateCase() error = %v, want document_target validation", err)
+	}
+}
+
 func analysisNote(value string) *string {
 	return &value
 }

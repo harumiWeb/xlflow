@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "invalid-public-object-member",
+  "description": "Pending VBE observation for a prohibited public object-module member.",
+  "modules": [
+    {
+      "name": "InvalidPublicMember",
+      "kind": "class",
+      "path": "InvalidPublicMember.bas"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB050"],
+    "negative_controls": [
+      "valid-module-class",
+      "valid-module-document-workbook",
+      "valid-module-document-worksheet",
+      "valid-module-form",
+      "valid-module-standard"
+    ],
+    "expected_diagnostics": [{ "code": "VB050", "severity": "error", "surfaces": ["lint", "lsp"] }]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-11T14:51:46Z"
+      }
+    ]
+  }
+}

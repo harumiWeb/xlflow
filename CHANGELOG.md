@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled, compile-equivalent `VB050` module declaration-context
+  diagnostics and `VB051` invalid-`Me` diagnostics. Checks use canonical
+  standard/class/document/UserForm metadata across lint, LSP, and source
+  preflight, keep unknown type-dependent `WithEvents` cases fail-open, and
+  remain separate from style rule `VB006`. Extended the developer-only VBE
+  oracle schema v1 with class, UserForm, and document module probes while
+  retaining `.bas` fixture compatibility and cleanup-gated promotion.
+
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.
   Findings use `information` outside loops and `warning` in reachable loops,

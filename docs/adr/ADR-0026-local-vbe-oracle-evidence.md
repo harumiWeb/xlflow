@@ -20,8 +20,9 @@ remain a developer-operated local validation tool.
 ## Decision
 
 Add a Windows-only, developer-only oracle command backed by the existing .NET
-Excel bridge and dialog infrastructure. The first schema supports only
-standard-module compile probes. Go owns fixture loading and validation,
+Excel bridge and dialog infrastructure. Schema v1 supports standard, class,
+UserForm, and document-module compile probes. Document fixtures declare
+`document_target` (`workbook` or `worksheet`). Go owns fixture loading and validation,
 deterministic sequential selection, strict expectation checking, analyzer
 contracts, and explicit promotion. The bridge owns one disposable workbook and
 one real VBE Compile observation at a time.
@@ -39,7 +40,10 @@ failures, malformed output, and unconfirmed cleanup are infrastructure
 failures. They stop a batch and cannot be promoted. Known accept/reject control
 fixtures run first to detect a broken watcher or command invocation.
 
-The oracle is never called by production xlflow commands, deterministic tests,
+The bridge provisions standard/class/form components and injects sanitized
+`.bas` bodies; document probes use the disposable workbook's ThisWorkbook or a
+worksheet. Designer and `.frx` artifacts are intentionally out of scope. The
+oracle is never called by production xlflow commands, deterministic tests,
 or GitHub Actions. Contributors changing static-analysis semantics must run
 the relevant focused cases locally and record their IDs in the PR.
 

@@ -173,6 +173,8 @@ func New(opts Options) (*Server, func(), error) {
 	for _, warning := range typeDB.Warnings {
 		logger.Printf("type database warning: %s", warning)
 	}
+	docs := newDocuments(opts.RootDir, opts.Config.Src.Forms, opts.Config.Src.Workbook)
+	docs.cfg = opts.Config
 	s := &Server{
 		opts: opts,
 		db:   typeDB.DB,
@@ -193,7 +195,7 @@ func New(opts Options) (*Server, func(), error) {
 				return out, nil
 			},
 		},
-		docs:            newDocuments(opts.RootDir, opts.Config.Src.Forms, opts.Config.Src.Workbook),
+		docs:            docs,
 		logger:          logger,
 		semanticTokens:  newSemanticTokenCache(),
 		codeLensConfig:  intel.DefaultCodeLensConfig(),
@@ -2223,6 +2225,7 @@ func symbolFileKey(path string) string {
 
 type documents struct {
 	root          string
+	cfg           config.Config
 	formsRoot     string
 	workbookRoot  string
 	readFile      func(string) ([]byte, error)
@@ -2841,6 +2844,9 @@ func moduleKindForPath(path string) string {
 }
 
 func (d *documents) moduleKindForPath(path string) string {
+	if file, included, err := symbols.SourceFileForPath(d.root, d.cfg, path); err == nil && included && file.ModuleKind != "" {
+		return string(file.ModuleKind)
+	}
 	if isWorkbookModulePath(d.root, d.workbookRoot, path) {
 		return "document"
 	}
