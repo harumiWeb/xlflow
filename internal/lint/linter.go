@@ -911,6 +911,13 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		}
 		issues = append(issues, dangerousResumeIssues...)
 	}
+	if cfg.DetectConfusingCallSyntax {
+		confusingCallIssues, err := l.confusingCallIssuesFromAST(ctx, path, source, root)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, confusingCallIssues...)
+	}
 	for i, proc := range procedures {
 		if i&0x1f == 0 {
 			if err := ctx.Err(); err != nil {
@@ -918,9 +925,6 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 			}
 		}
 		decls := procedureDeclarations(lines, proc)
-		if cfg.DetectConfusingCallSyntax {
-			issues = append(issues, l.confusingCallIssues(path, lines, proc)...)
-		}
 		if cfg.DetectForEachControlType {
 			issues = append(issues, l.forEachIssues(path, lines, proc, decls)...)
 		}
@@ -1310,19 +1314,38 @@ func declarationNameAndType(text string) (string, string) {
 	return cleanIdentifier(nameFields[0]), typ
 }
 
-func (l Linter) confusingCallIssues(path string, lines []string, proc sourceProcedure) []Issue {
+func (l Linter) confusingCallIssuesFromAST(ctx context.Context, path, source string, root *tree_sitter.Node) ([]Issue, error) {
 	var issues []Issue
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		name, ok := confusingParenthesizedCall(stmt)
-		if !ok {
-			continue
+	sourceBytes := []byte(source)
+	var visit func(*tree_sitter.Node, bool) error
+	visit = func(node *tree_sitter.Node, inProcedure bool) error {
+		if node == nil {
+			return nil
 		}
-		issue := l.issue(path, i+1, "VB022", "warning", "Avoid ambiguous parenthesized call syntax; use Call "+name+"(...) or pass arguments without parentheses.")
-		issue.Symbol = name
-		issues = append(issues, issue)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		inProcedure = inProcedure || isProcedureDeclarationKind(node.Kind())
+		if inProcedure && node.Kind() == "call_statement" && !node.IsError() && !node.IsMissing() {
+			name, ok := confusingParenthesizedCall(normalizedCodeLine(node.Utf8Text(sourceBytes)))
+			if ok {
+				rng := vbaast.NodeRange(node)
+				issue := l.issue(path, rng.StartLine, "VB022", "warning", "Avoid ambiguous parenthesized call syntax; use Call "+name+"(...) or pass arguments without parentheses.")
+				issue.Symbol = name
+				issues = append(issues, issue)
+			}
+		}
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			if err := visit(node.NamedChild(i), inProcedure); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return issues
+	if err := visit(root, false); err != nil {
+		return nil, err
+	}
+	return issues, nil
 }
 
 func confusingParenthesizedCall(stmt string) (string, bool) {
