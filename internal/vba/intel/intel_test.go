@@ -189,6 +189,61 @@ End Sub
 	}
 }
 
+func TestDiagnosticsVB026MatchesParsedHandlerContext(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub TrailingColon()
+  On Error GoTo Handler:
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+
+Sub SingleLineIf()
+  If True Then On Error GoTo Handler
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+
+Sub ResetHandler()
+  On Error GoTo Handler
+  On Error GoTo 0
+Handler:
+  Resume Next
+End Sub
+
+Sub RetargetHandler()
+  On Error GoTo FirstHandler
+  On Error GoTo SecondHandler
+FirstHandler:
+  Resume Next
+SecondHandler:
+  Resume Next
+End Sub
+
+Sub BareResume()
+  Resume Next
+End Sub
+`,
+	}
+
+	vb026 := diagnosticsByCode(analyzer.Diagnostics(doc), "VB026")
+	if len(vb026) != 3 {
+		t.Fatalf("VB026 diagnostics = %+v, want only resumes without an active On Error GoTo handler", vb026)
+	}
+	for _, line := range []int{19, 26, 32} {
+		if !hasDiagnosticAtLine(vb026, line) {
+			t.Fatalf("VB026 diagnostics = %+v, missing zero-based line %d", vb026, line)
+		}
+	}
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB014"); len(got) != 0 {
+		t.Fatalf("valid handler syntax should not trigger parser recovery: %+v", got)
+	}
+}
+
 func TestDiagnosticsPreserveLintResultsWhenProcedureIRBuildFails(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	snapshot := NewAnalysisSnapshot(Document{
@@ -4707,6 +4762,15 @@ func runnableProcedureNames(procedures []RunnableProcedure) []string {
 func hasDiagnostic(diagnostics []Diagnostic, code string) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnosticAtLine(diagnostics []Diagnostic, line int) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Range.Start.Line == line {
 			return true
 		}
 	}

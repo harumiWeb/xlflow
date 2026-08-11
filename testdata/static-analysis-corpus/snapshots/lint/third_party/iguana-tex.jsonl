@@ -32,7 +32,6 @@
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB007","severity":"warning","line":1270,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB007","severity":"warning","line":1298,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB007","severity":"warning","line":1491,"column":0}
-{"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB026","severity":"warning","line":1610,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB004","severity":"warning","line":1721,"column":5}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB007","severity":"warning","line":1821,"column":0}
 {"project":"third_party/iguana-tex","file":"LatexForm.frm","surface":"lint","code":"VB007","severity":"warning","line":1828,"column":0}

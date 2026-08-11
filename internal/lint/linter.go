@@ -17,6 +17,8 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/reachability"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -822,6 +824,13 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 	lines := normalizedSourceLines(source)
 	procedures := sourceProceduresFromAST(root, []byte(source))
 	var issues []Issue
+	if cfg.DetectDangerousResume {
+		dangerousResumeIssues, err := l.dangerousResumeIssuesFromAST(ctx, path, source, root)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, dangerousResumeIssues...)
+	}
 	for i, proc := range procedures {
 		if i&0x1f == 0 {
 			if err := ctx.Err(); err != nil {
@@ -829,15 +838,11 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 			}
 		}
 		decls := procedureDeclarations(lines, proc)
-		handlerLabels := onErrorHandlerLabels(lines, proc)
 		if cfg.DetectConfusingCallSyntax {
 			issues = append(issues, l.confusingCallIssues(path, lines, proc)...)
 		}
 		if cfg.DetectForEachControlType {
 			issues = append(issues, l.forEachIssues(path, lines, proc, decls)...)
-		}
-		if cfg.DetectDangerousResume {
-			issues = append(issues, l.dangerousResumeIssues(path, lines, proc, handlerLabels)...)
 		}
 	}
 	return issues, ctx.Err()
@@ -1225,21 +1230,6 @@ func declarationNameAndType(text string) (string, string) {
 	return cleanIdentifier(nameFields[0]), typ
 }
 
-func onErrorHandlerLabels(lines []string, proc sourceProcedure) map[string]bool {
-	labels := map[string]bool{}
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		lower := strings.ToLower(stmt)
-		if strings.HasPrefix(lower, "on error goto ") && lower != "on error goto 0" {
-			label := cleanIdentifier(strings.TrimSpace(stmt[len("on error goto "):]))
-			if label != "" {
-				labels[strings.ToLower(label)] = true
-			}
-		}
-	}
-	return labels
-}
-
 func (l Linter) confusingCallIssues(path string, lines []string, proc sourceProcedure) []Issue {
 	var issues []Issue
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
@@ -1303,32 +1293,270 @@ func (l Linter) forEachIssues(path string, lines []string, proc sourceProcedure,
 	return issues
 }
 
-func (l Linter) dangerousResumeIssues(path string, lines []string, proc sourceProcedure, handlerLabels map[string]bool) []Issue {
-	var issues []Issue
-	inHandler := false
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		if label, ok := labelName(stmt); ok && handlerLabels[strings.ToLower(label)] {
-			inHandler = true
-			continue
+type dangerousResumeEvent struct {
+	kind   string
+	target string
+	rng    vbaast.Range
+}
+
+func (l Linter) dangerousResumeIssuesFromAST(ctx context.Context, path, source string, root *tree_sitter.Node) ([]Issue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sourceBytes := []byte(source)
+	handlerResumeRanges, err := dangerousResumeHandlerResumeRanges(ctx, path, sourceBytes)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
-		lower := strings.ToLower(stmt)
-		if lower == "resume" || strings.HasPrefix(lower, "resume ") {
-			if !inHandler {
-				issues = append(issues, l.issue(path, i+1, "VB026", "warning", "Use Resume only inside a clear error-handler block."))
+		handlerResumeRanges = nil
+	}
+	var issues []Issue
+	err = collectDangerousResumeProcedures(ctx, root, func(proc *tree_sitter.Node) error {
+		procedureIssues, err := l.dangerousResumeProcedureIssues(ctx, path, sourceBytes, proc, handlerResumeRanges)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, procedureIssues...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return issues, nil
+}
+
+func collectDangerousResumeProcedures(ctx context.Context, node *tree_sitter.Node, visit func(*tree_sitter.Node) error) error {
+	var visited uint
+	var walk func(*tree_sitter.Node) error
+	walk = func(node *tree_sitter.Node) error {
+		if node == nil {
+			return nil
+		}
+		visited++
+		if visited&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		if isDangerousResumeProcedure(node.Kind()) {
+			return visit(node)
+		}
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			if err := walk(node.NamedChild(i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(node)
+}
+
+func isDangerousResumeProcedure(kind string) bool {
+	switch kind {
+	case "sub_declaration", "function_declaration", "property_declaration",
+		"property_get_declaration", "property_let_declaration", "property_set_declaration",
+		"conditional_sub_declaration", "conditional_function_declaration", "conditional_property_declaration":
+		return true
+	default:
+		return false
+	}
+}
+
+func (l Linter) dangerousResumeProcedureIssues(ctx context.Context, path string, source []byte, proc *tree_sitter.Node, handlerResumeRanges map[int]bool) ([]Issue, error) {
+	events := make([]dangerousResumeEvent, 0)
+	var visited uint
+	var walkErr error
+	vbaast.Walk(proc, func(node *tree_sitter.Node) bool {
+		visited++
+		if visited&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				walkErr = err
+				return false
+			}
+		}
+		if node == nil || node.IsError() || node.IsMissing() {
+			return false
+		}
+		var event dangerousResumeEvent
+		switch node.Kind() {
+		case "on_error_statement":
+			event = dangerousResumeEvent{kind: "on_error", target: controlTarget(node, source), rng: vbaast.NodeRange(node)}
+		case "label_statement":
+			event = dangerousResumeEvent{kind: "label", target: labelTarget(node, source), rng: vbaast.NodeRange(node)}
+		case "resume_statement":
+			event = dangerousResumeEvent{kind: "resume", rng: vbaast.NodeRange(node)}
+		case "exit_statement":
+			if !isProcedureExitStatement(node, source) {
+				return true
+			}
+			event = dangerousResumeEvent{kind: "exit", rng: vbaast.NodeRange(node)}
+		default:
+			return true
+		}
+		events = append(events, event)
+		return true
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].rng.StartByte < events[j].rng.StartByte
+	})
+	activeHandlerTarget := ""
+	deferredHandlerTarget := ""
+	deferredHandlerEligible := false
+	seenLabel := false
+	inHandler := false
+	var issues []Issue
+	for i, event := range events {
+		if i&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		switch event.kind {
+		case "on_error":
+			if event.target == "" || event.target == "0" {
+				// Keep the prior target available for an exceptional path that
+				// jumps past this reset to a later handler label. A procedure exit
+				// or an earlier label marks the cleanup boundary; a direct reset
+				// before the first label remains effective.
+				if activeHandlerTarget != "" {
+					deferredHandlerTarget = activeHandlerTarget
+					deferredHandlerEligible = seenLabel
+				}
+				activeHandlerTarget = ""
+			} else {
+				activeHandlerTarget = event.target
+				deferredHandlerTarget = ""
+			}
+		case "exit":
+			if activeHandlerTarget == "" && deferredHandlerTarget != "" {
+				activeHandlerTarget = deferredHandlerTarget
+				deferredHandlerTarget = ""
+				deferredHandlerEligible = false
+			}
+		case "label":
+			if activeHandlerTarget == "" && deferredHandlerEligible {
+				activeHandlerTarget = deferredHandlerTarget
+				deferredHandlerTarget = ""
+				deferredHandlerEligible = false
+			}
+			if activeHandlerTarget != "" && strings.EqualFold(event.target, activeHandlerTarget) {
+				inHandler = true
+			}
+			seenLabel = true
+		case "resume":
+			if !inHandler && !handlerResumeRanges[event.rng.StartByte] {
+				issues = append(issues, l.issue(path, event.rng.StartLine, "VB026", "warning", "Use Resume only inside a clear error-handler block."))
 			}
 		}
 	}
-	return issues
+	return issues, nil
 }
 
-func labelName(stmt string) (string, bool) {
-	stmt = strings.TrimSpace(stmt)
-	if !strings.HasSuffix(stmt, ":") || strings.Contains(stmt, " ") {
-		return "", false
+func controlTarget(node *tree_sitter.Node, source []byte) string {
+	target := node.ChildByFieldName("target")
+	if target == nil {
+		return ""
 	}
-	name := cleanIdentifier(strings.TrimSuffix(stmt, ":"))
-	return name, name != ""
+	return cleanIdentifier(strings.TrimSuffix(strings.TrimSpace(target.Utf8Text(source)), ":"))
+}
+
+func isProcedureExitStatement(node *tree_sitter.Node, source []byte) bool {
+	fields := strings.Fields(node.Utf8Text(source))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Exit") {
+		return false
+	}
+	switch strings.ToLower(fields[1]) {
+	case "sub", "function", "property":
+		return true
+	default:
+		return false
+	}
+}
+
+func dangerousResumeHandlerResumeRanges(ctx context.Context, path string, source []byte) (map[int]bool, error) {
+	ir, err := procedureir.BuildSourceContext(ctx, procedureir.BuildOptions{Path: path}, source)
+	if err != nil {
+		return nil, err
+	}
+	graphs, err := vbacfg.BuildDocumentContext(ctx, ir)
+	if err != nil {
+		return nil, err
+	}
+	handlerResumes := make(map[int]bool)
+	for _, graph := range graphs.Graphs {
+		normalSuccessors := make(map[vbacfg.BlockID][]vbacfg.BlockID)
+		for _, edge := range graph.Edges {
+			if edge.Class == vbacfg.EdgeNormal {
+				normalSuccessors[edge.From] = append(normalSuccessors[edge.From], edge.To)
+			}
+		}
+		for _, edge := range graph.Edges {
+			if edge.Kind != vbacfg.EdgeError {
+				continue
+			}
+			var addErr error
+			handlerResumes, addErr = addHandlerResumeRanges(ctx, graph, edge.To, normalSuccessors, handlerResumes)
+			if addErr != nil {
+				return nil, addErr
+			}
+		}
+	}
+	return handlerResumes, nil
+}
+
+func addHandlerResumeRanges(ctx context.Context, graph vbacfg.Graph, handler vbacfg.BlockID, normalSuccessors map[vbacfg.BlockID][]vbacfg.BlockID, out map[int]bool) (map[int]bool, error) {
+	seen := map[vbacfg.BlockID]bool{handler: true}
+	queue := []vbacfg.BlockID{handler}
+	visited := 0
+	for len(queue) > 0 {
+		visited++
+		if visited&0x1f == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		current := queue[0]
+		queue = queue[1:]
+		block, ok := graphBlockByID(graph, current)
+		if ok && block.Statement != nil && block.Statement.Kind == procedureir.StatementResume {
+			out[block.Range.StartByte] = true
+		}
+		for _, next := range normalSuccessors[current] {
+			if seen[next] {
+				continue
+			}
+			seen[next] = true
+			queue = append(queue, next)
+		}
+	}
+	return out, nil
+}
+
+func graphBlockByID(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
+	for _, block := range graph.Blocks {
+		if block.ID == id {
+			return block, true
+		}
+	}
+	return vbacfg.Block{}, false
+}
+
+func labelTarget(node *tree_sitter.Node, source []byte) string {
+	label := node.ChildByFieldName("name")
+	text := ""
+	if label != nil {
+		text = label.Utf8Text(source)
+	} else {
+		text = node.Utf8Text(source)
+	}
+	return cleanIdentifier(strings.TrimSuffix(strings.TrimSpace(text), ":"))
 }
 
 func normalizedSourceLines(source string) []string {
