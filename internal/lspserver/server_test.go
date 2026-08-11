@@ -914,6 +914,32 @@ func TestProtocolDiagnosticPreservesVBA241Severities(t *testing.T) {
 	}
 }
 
+func TestProtocolDiagnosticPreservesVBA242Severities(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		severity string
+		want     protocol.DiagnosticSeverity
+	}{
+		{name: "information", severity: "information", want: protocol.DiagnosticSeverityInformation},
+		{name: "warning", severity: "warning", want: protocol.DiagnosticSeverityWarning},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			diagnostic := toProtocolDiagnostic(intel.Diagnostic{
+				Code:     "VBA242",
+				Severity: test.severity,
+				Source:   "xlflow",
+				Message:  "An expensive operation targets an unbounded Excel range.",
+			})
+			if diagnostic.Severity == nil || *diagnostic.Severity != test.want {
+				t.Fatalf("VBA242 %s severity = %#v, want %v", test.severity, diagnostic.Severity, test.want)
+			}
+			if diagnostic.CodeDescription == nil || string(diagnostic.CodeDescription.HRef) != "https://harumiweb.github.io/xlflow/reference/diagnostics#vba242" {
+				t.Fatalf("VBA242 %s code description = %#v", test.severity, diagnostic.CodeDescription)
+			}
+		})
+	}
+}
+
 func TestLSPDiagnosticsReportUnsafeProjectLocalByRefArgument(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})

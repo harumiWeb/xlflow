@@ -1,12 +1,16 @@
 # Excel Loop Performance Analysis
 
-This specification defines the `VBA225`, `VBA238`, and `VBA241` analyzer rules
-for the Excel loop-performance issues #452, #453, and #454. `VBA225`
+This specification defines the `VBA225`, `VBA238`, `VBA241`, and `VBA242`
+analyzer rules for the Excel loop-performance issues #452, #453, #454, and
+#455. `VBA225`
 identifies conservative, repeated Excel object-model work inside VBA loops and
 recommends bulk range or array operations. `VBA238` identifies loop-invariant
 Excel object expressions that are repeatedly resolved and recommends hoisting
 them into cached locals. `VBA241` identifies repeated `ReDim Preserve` array
-copies inside loops and recommends preallocation or geometric growth. ADR-0025
+copies inside loops and recommends preallocation or geometric growth. `VBA242`
+identifies costly operations over entire rows, columns, worksheets, or
+unbounded `UsedRange` expressions and recommends deriving bounded limits.
+ADR-0025
 records the design rationale and boundaries.
 
 ## Scope and public contract
@@ -226,6 +230,42 @@ The compatibility key `detect_redim_preserve_in_loops = false` remains accepted
 with the normal deprecation warning. The generated diagnostic catalog is
 regenerated from the static-analysis registry and is not edited by hand.
 
+## Expensive full-range operations (`VBA242`)
+
+<!-- xlflow-rule-contract: {"id":"VBA242","family":"analyze","category":"performance","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_expensive_full_range_operations","inline_suppressible":true,"preflight_blocking":false} -->
+
+`VBA242` is an opt-in, procedure-local performance diagnostic in batch
+analysis and the shared real-time editor path. It recognizes Excel range
+expressions whose shape covers an entire row, column, or worksheet, including
+`Rows`, `Columns`, `EntireRow`, `EntireColumn`, a bare `Cells`, and direct or
+unbounded `UsedRange` receivers. It reports only when one of the expressions
+feeds a costly operation such as a `Value`/`Formula` assignment, calculation,
+formatting, `Find`, `Replace`, or sorting. A range expression by itself is not
+reported.
+
+The rule supports `information` outside loops and escalates to `warning` when
+the operation is reachable from a `For`, `For Each`, `While`, or `Do` loop.
+The finding remains advisory, non-blocking, and inline suppressible. Explicit
+bounded A1 ranges, `Range(Cells(...), Cells(...))`, a bounded `Resize`, and an
+`Intersect` with a bounded range are accepted. The v1 implementation does not
+infer effective bounds from a guard in another statement, a named range, or a
+range alias whose shape is unknown.
+
+The rule is disabled by default because one-time whole-sheet formatting is a
+legitimate Excel operation. Enable it for an Excel project with:
+
+```toml
+[analyze]
+detect_expensive_full_range_operations = true
+```
+
+Prefer `[analyze].disabled_rules = ["VBA242"]` for explicit policy and use
+`xlflow:disable-line VBA242` or `xlflow:disable-next-line VBA242` for a local,
+intentional whole-range operation. The compatibility Boolean emits the normal
+deprecation warning. `VBA242` owns only oversized operation targets; `VBA201`
+continues to own unsafe `Find` result use, `VBA217` owns last-row guidance, and
+`VBA225` owns repeated per-cell Excel work.
+
 ## Related
 
 - `docs/adr/ADR-0025-excel-loop-performance-analysis.md`
@@ -237,3 +277,4 @@ regenerated from the static-analysis registry and is not edited by hand.
 - xlflow issue #452
 - xlflow issue #453
 - xlflow issue #454
+- xlflow issue #455

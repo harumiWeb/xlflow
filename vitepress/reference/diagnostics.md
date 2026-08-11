@@ -4,98 +4,99 @@ Generated from the canonical rule registry at `internal/staticanalysis/rules/reg
 
 Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an installed xlflow binary. `VBA000` is a synthetic analysis-failure diagnostic and is intentionally outside the registry; UserForm `FRM...` and `UFY...` diagnostics are outside this catalog.
 
-| ID                  | Family  | Severity | Scope           | Default | Title                                              |
-| ------------------- | ------- | -------- | --------------- | ------- | -------------------------------------------------- |
-| [`VB001`](#vb001)   | lint    | warning  | file-local      | yes     | Missing Option Explicit                            |
-| [`VB002`](#vb002)   | lint    | warning  | procedure-local | yes     | Select usage                                       |
-| [`VB003`](#vb003)   | lint    | warning  | procedure-local | yes     | Activate usage                                     |
-| [`VB004`](#vb004)   | lint    | warning  | procedure-local | yes     | Broad On Error Resume Next                         |
-| [`VB005`](#vb005)   | lint    | warning  | file-local      | yes     | Implicit Variant                                   |
-| [`VB006`](#vb006)   | lint    | warning  | file-local      | yes     | Public module field                                |
-| [`VB007`](#vb007)   | lint    | warning  | file-local      | yes     | Automation-hostile GUI boundary                    |
-| [`VB008`](#vb008)   | lint    | error    | file-local      | yes     | Typographic quote                                  |
-| [`VB009`](#vb009)   | lint    | error    | file-local      | yes     | C-style quote escape                               |
-| [`VB010`](#vb010)   | lint    | error    | file-local      | yes     | Unterminated procedure                             |
-| [`VB011`](#vb011)   | lint    | error    | file-local      | yes     | Unexpected procedure terminator                    |
-| [`VB012`](#vb012)   | lint    | error    | file-local      | yes     | Mismatched procedure terminator                    |
-| [`VB013`](#vb013)   | lint    | error    | file-local      | yes     | Invalid line continuation                          |
-| [`VB014`](#vb014)   | lint    | error    | file-local      | yes     | Parser recovery                                    |
-| [`VB015`](#vb015)   | lint    | error    | file-local      | yes     | Continuation limit exceeded                        |
-| [`VB018`](#vb018)   | lint    | warning  | project-wide    | no      | Scope shadowing                                    |
-| [`VB019`](#vb019)   | lint    | warning  | file-local      | yes     | Mixed declarator typing                            |
-| [`VB020`](#vb020)   | lint    | warning  | procedure-local | yes     | Unused local variable                              |
-| [`VB021`](#vb021)   | lint    | warning  | project-wide    | no      | Unused private procedure                           |
-| [`VB022`](#vb022)   | lint    | warning  | procedure-local | yes     | Confusing call syntax                              |
-| [`VB023`](#vb023)   | lint    | warning  | procedure-local | yes     | Invalid For Each control type                      |
-| [`VB026`](#vb026)   | lint    | warning  | procedure-local | yes     | Dangerous Resume                                   |
-| [`VB027`](#vb027)   | lint    | warning  | procedure-local | no      | Ambiguous nested With member                       |
-| [`VB028`](#vb028)   | lint    | error    | project-wide    | yes     | Bare dialog call with XlflowUI                     |
-| [`VB029`](#vb029)   | lint    | error    | project-wide    | yes     | Undeclared variable                                |
-| [`VB030`](#vb030)   | lint    | warning  | procedure-local | yes     | Argument mismatch                                  |
-| [`VB031`](#vb031)   | lint    | error    | file-local      | yes     | Missing module name attribute                      |
-| [`VB032`](#vb032)   | lint    | error    | file-local      | yes     | Repeated Debug.Print shorthand                     |
-| [`VB033`](#vb033)   | lint    | warning  | procedure-local | yes     | Unknown member                                     |
-| [`VB034`](#vb034)   | lint    | warning  | procedure-local | yes     | Read-only property assignment                      |
-| [`VB035`](#vb035)   | lint    | warning  | procedure-local | yes     | Write-only property read                           |
-| [`VB036`](#vb036)   | lint    | warning  | procedure-local | yes     | Set required                                       |
-| [`VB037`](#vb037)   | lint    | error    | procedure-local | yes     | Set not allowed                                    |
-| [`VB038`](#vb038)   | lint    | warning  | procedure-local | yes     | Incompatible assignment                            |
-| [`VB039`](#vb039)   | lint    | warning  | procedure-local | yes     | Method has no return value                         |
-| [`VB040`](#vb040)   | lint    | warning  | file-local      | yes     | Unknown documented parameter                       |
-| [`VB041`](#vb041)   | lint    | warning  | file-local      | yes     | Duplicate documented parameter                     |
-| [`VB042`](#vb042)   | lint    | warning  | file-local      | yes     | Returns documentation on Sub                       |
-| [`VB043`](#vb043)   | lint    | warning  | file-local      | yes     | Orphan documentation comment                       |
-| [`VB044`](#vb044)   | lint    | warning  | procedure-local | no      | Procedure-name constant mismatch                   |
-| [`VB045`](#vb045)   | lint    | error    | procedure-local | yes     | Deterministic argument binding error               |
-| [`VB046`](#vb046)   | lint    | error    | file-local      | yes     | Duplicate declaration                              |
-| [`VB047`](#vb047)   | lint    | error    | file-local      | yes     | Invalid declaration placement                      |
-| [`VBA101`](#vba101) | analyze | warning  | procedure-local | yes     | Object assignment missing Set                      |
-| [`VBA102`](#vba102) | analyze | warning  | procedure-local | yes     | Object-returning call assignment missing Set       |
-| [`VBA103`](#vba103) | analyze | warning  | procedure-local | yes     | Object function return missing Set                 |
-| [`VBA104`](#vba104) | analyze | error    | procedure-local | yes     | Excel object member mismatch                       |
-| [`VBA105`](#vba105) | analyze | error    | project-wide    | yes     | Removed XlflowLog helper                           |
-| [`VBA106`](#vba106) | analyze | error    | project-wide    | yes     | Removed XlflowSetTraceFile helper                  |
-| [`VBA201`](#vba201) | analyze | warning  | procedure-local | yes     | Unchecked Range.Find result                        |
-| [`VBA202`](#vba202) | analyze | warning  | interprocedural | yes     | Object use before Set                              |
-| [`VBA203`](#vba203) | analyze | warning  | interprocedural | yes     | Application state not restored                     |
-| [`VBA204`](#vba204) | analyze | warning  | procedure-local | yes     | Error-handler fallthrough                          |
-| [`VBA205`](#vba205) | analyze | warning  | procedure-local | yes     | Ambiguous Excel object scope                       |
-| [`VBA206`](#vba206) | analyze | warning  | interprocedural | yes     | Unsafe ByRef argument                              |
-| [`VBA207`](#vba207) | analyze | warning  | procedure-local | no      | Unguarded keyed access                             |
-| [`VBA208`](#vba208) | analyze | warning  | procedure-local | yes     | Invalid ReDim Preserve dimension                   |
-| [`VBA209`](#vba209) | analyze | warning  | procedure-local | yes     | Object or array comparison mistake                 |
-| [`VBA210`](#vba210) | analyze | warning  | procedure-local | no      | Missing Function or Property Get return assignment |
-| [`VBA211`](#vba211) | analyze | error    | procedure-local | yes     | Expanded Excel member mismatch                     |
-| [`VBA212`](#vba212) | analyze | warning  | procedure-local | yes     | Non-short-circuit object guard                     |
-| [`VBA213`](#vba213) | analyze | warning  | procedure-local | no      | Dictionary iteration value misuse                  |
-| [`VBA214`](#vba214) | analyze | warning  | procedure-local | yes     | Leaked On Error Resume Next scope                  |
-| [`VBA215`](#vba215) | analyze | warning  | procedure-local | yes     | Omitted stateful Excel call arguments              |
-| [`VBA216`](#vba216) | analyze | error    | procedure-local | yes     | Worksheet root mismatch                            |
-| [`VBA217`](#vba217) | analyze | warning  | procedure-local | yes     | Unstable last-row boundary                         |
-| [`VBA218`](#vba218) | analyze | warning  | interprocedural | yes     | Unhandled Excel API failure contract               |
-| [`VBA219`](#vba219) | analyze | warning  | procedure-local | yes     | Unreleased workbook or VBA file handle             |
-| [`VBA220`](#vba220) | analyze | warning  | interprocedural | yes     | Event handler re-entry hazard                      |
-| [`VBA221`](#vba221) | analyze | warning  | interprocedural | yes     | Application state changed by local helper          |
-| [`VBA222`](#vba222) | analyze | warning  | project-wide    | yes     | Public API type safety                             |
-| [`VBA223`](#vba223) | analyze | warning  | file-local      | yes     | Likely hardcoded secret                            |
-| [`VBA224`](#vba224) | analyze | warning  | procedure-local | yes     | Untrusted data reaches a sensitive API             |
-| [`VBA225`](#vba225) | analyze | warning  | interprocedural | yes     | Excel cell access inside loop                      |
-| [`VBA226`](#vba226) | analyze | warning  | procedure-local | yes     | Unsafe Range.Value array shape assumption          |
-| [`VBA227`](#vba227) | analyze | warning  | interprocedural | yes     | Array lifecycle and dimension safety               |
-| [`VBA228`](#vba228) | analyze | error    | interprocedural | yes     | ByRef type mismatch                                |
-| [`VBA229`](#vba229) | analyze | error    | procedure-local | yes     | Unresolved local As type name                      |
-| [`VBA230`](#vba230) | analyze | warning  | interprocedural | yes     | Dictionary CompareMode changed after insertion     |
-| [`VBA231`](#vba231) | analyze | warning  | interprocedural | yes     | Repeated Dictionary loop materialization           |
-| [`VBA232`](#vba232) | analyze | warning  | procedure-local | yes     | Inconsistent Dictionary key normalization          |
-| [`VBA233`](#vba233) | analyze | warning  | project-wide    | yes     | Undefined late-bound Dictionary constant           |
-| [`VBA234`](#vba234) | analyze | warning  | interprocedural | yes     | Collection mutation during iteration               |
-| [`VBA235`](#vba235) | analyze | warning  | procedure-local | yes     | Collection index origin confusion                  |
-| [`VBA236`](#vba236) | analyze | warning  | procedure-local | yes     | Unsafe command construction                        |
-| [`VBA237`](#vba237) | analyze | warning  | interprocedural | yes     | Suppressed error propagation                       |
-| [`VBA238`](#vba238) | analyze | warning  | procedure-local | yes     | Loop-invariant Excel object resolution             |
-| [`VBA239`](#vba239) | analyze | warning  | procedure-local | yes     | Unsafe SQL construction                            |
-| [`VBA240`](#vba240) | analyze | warning  | project-wide    | no      | Risky module-level mutable state                   |
-| [`VBA241`](#vba241) | analyze | warning  | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
+| ID                  | Family  | Severity    | Scope           | Default | Title                                              |
+| ------------------- | ------- | ----------- | --------------- | ------- | -------------------------------------------------- |
+| [`VB001`](#vb001)   | lint    | warning     | file-local      | yes     | Missing Option Explicit                            |
+| [`VB002`](#vb002)   | lint    | warning     | procedure-local | yes     | Select usage                                       |
+| [`VB003`](#vb003)   | lint    | warning     | procedure-local | yes     | Activate usage                                     |
+| [`VB004`](#vb004)   | lint    | warning     | procedure-local | yes     | Broad On Error Resume Next                         |
+| [`VB005`](#vb005)   | lint    | warning     | file-local      | yes     | Implicit Variant                                   |
+| [`VB006`](#vb006)   | lint    | warning     | file-local      | yes     | Public module field                                |
+| [`VB007`](#vb007)   | lint    | warning     | file-local      | yes     | Automation-hostile GUI boundary                    |
+| [`VB008`](#vb008)   | lint    | error       | file-local      | yes     | Typographic quote                                  |
+| [`VB009`](#vb009)   | lint    | error       | file-local      | yes     | C-style quote escape                               |
+| [`VB010`](#vb010)   | lint    | error       | file-local      | yes     | Unterminated procedure                             |
+| [`VB011`](#vb011)   | lint    | error       | file-local      | yes     | Unexpected procedure terminator                    |
+| [`VB012`](#vb012)   | lint    | error       | file-local      | yes     | Mismatched procedure terminator                    |
+| [`VB013`](#vb013)   | lint    | error       | file-local      | yes     | Invalid line continuation                          |
+| [`VB014`](#vb014)   | lint    | error       | file-local      | yes     | Parser recovery                                    |
+| [`VB015`](#vb015)   | lint    | error       | file-local      | yes     | Continuation limit exceeded                        |
+| [`VB018`](#vb018)   | lint    | warning     | project-wide    | no      | Scope shadowing                                    |
+| [`VB019`](#vb019)   | lint    | warning     | file-local      | yes     | Mixed declarator typing                            |
+| [`VB020`](#vb020)   | lint    | warning     | procedure-local | yes     | Unused local variable                              |
+| [`VB021`](#vb021)   | lint    | warning     | project-wide    | no      | Unused private procedure                           |
+| [`VB022`](#vb022)   | lint    | warning     | procedure-local | yes     | Confusing call syntax                              |
+| [`VB023`](#vb023)   | lint    | warning     | procedure-local | yes     | Invalid For Each control type                      |
+| [`VB026`](#vb026)   | lint    | warning     | procedure-local | yes     | Dangerous Resume                                   |
+| [`VB027`](#vb027)   | lint    | warning     | procedure-local | no      | Ambiguous nested With member                       |
+| [`VB028`](#vb028)   | lint    | error       | project-wide    | yes     | Bare dialog call with XlflowUI                     |
+| [`VB029`](#vb029)   | lint    | error       | project-wide    | yes     | Undeclared variable                                |
+| [`VB030`](#vb030)   | lint    | warning     | procedure-local | yes     | Argument mismatch                                  |
+| [`VB031`](#vb031)   | lint    | error       | file-local      | yes     | Missing module name attribute                      |
+| [`VB032`](#vb032)   | lint    | error       | file-local      | yes     | Repeated Debug.Print shorthand                     |
+| [`VB033`](#vb033)   | lint    | warning     | procedure-local | yes     | Unknown member                                     |
+| [`VB034`](#vb034)   | lint    | warning     | procedure-local | yes     | Read-only property assignment                      |
+| [`VB035`](#vb035)   | lint    | warning     | procedure-local | yes     | Write-only property read                           |
+| [`VB036`](#vb036)   | lint    | warning     | procedure-local | yes     | Set required                                       |
+| [`VB037`](#vb037)   | lint    | error       | procedure-local | yes     | Set not allowed                                    |
+| [`VB038`](#vb038)   | lint    | warning     | procedure-local | yes     | Incompatible assignment                            |
+| [`VB039`](#vb039)   | lint    | warning     | procedure-local | yes     | Method has no return value                         |
+| [`VB040`](#vb040)   | lint    | warning     | file-local      | yes     | Unknown documented parameter                       |
+| [`VB041`](#vb041)   | lint    | warning     | file-local      | yes     | Duplicate documented parameter                     |
+| [`VB042`](#vb042)   | lint    | warning     | file-local      | yes     | Returns documentation on Sub                       |
+| [`VB043`](#vb043)   | lint    | warning     | file-local      | yes     | Orphan documentation comment                       |
+| [`VB044`](#vb044)   | lint    | warning     | procedure-local | no      | Procedure-name constant mismatch                   |
+| [`VB045`](#vb045)   | lint    | error       | procedure-local | yes     | Deterministic argument binding error               |
+| [`VB046`](#vb046)   | lint    | error       | file-local      | yes     | Duplicate declaration                              |
+| [`VB047`](#vb047)   | lint    | error       | file-local      | yes     | Invalid declaration placement                      |
+| [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
+| [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
+| [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
+| [`VBA104`](#vba104) | analyze | error       | procedure-local | yes     | Excel object member mismatch                       |
+| [`VBA105`](#vba105) | analyze | error       | project-wide    | yes     | Removed XlflowLog helper                           |
+| [`VBA106`](#vba106) | analyze | error       | project-wide    | yes     | Removed XlflowSetTraceFile helper                  |
+| [`VBA201`](#vba201) | analyze | warning     | procedure-local | yes     | Unchecked Range.Find result                        |
+| [`VBA202`](#vba202) | analyze | warning     | interprocedural | yes     | Object use before Set                              |
+| [`VBA203`](#vba203) | analyze | warning     | interprocedural | yes     | Application state not restored                     |
+| [`VBA204`](#vba204) | analyze | warning     | procedure-local | yes     | Error-handler fallthrough                          |
+| [`VBA205`](#vba205) | analyze | warning     | procedure-local | yes     | Ambiguous Excel object scope                       |
+| [`VBA206`](#vba206) | analyze | warning     | interprocedural | yes     | Unsafe ByRef argument                              |
+| [`VBA207`](#vba207) | analyze | warning     | procedure-local | no      | Unguarded keyed access                             |
+| [`VBA208`](#vba208) | analyze | warning     | procedure-local | yes     | Invalid ReDim Preserve dimension                   |
+| [`VBA209`](#vba209) | analyze | warning     | procedure-local | yes     | Object or array comparison mistake                 |
+| [`VBA210`](#vba210) | analyze | warning     | procedure-local | no      | Missing Function or Property Get return assignment |
+| [`VBA211`](#vba211) | analyze | error       | procedure-local | yes     | Expanded Excel member mismatch                     |
+| [`VBA212`](#vba212) | analyze | warning     | procedure-local | yes     | Non-short-circuit object guard                     |
+| [`VBA213`](#vba213) | analyze | warning     | procedure-local | no      | Dictionary iteration value misuse                  |
+| [`VBA214`](#vba214) | analyze | warning     | procedure-local | yes     | Leaked On Error Resume Next scope                  |
+| [`VBA215`](#vba215) | analyze | warning     | procedure-local | yes     | Omitted stateful Excel call arguments              |
+| [`VBA216`](#vba216) | analyze | error       | procedure-local | yes     | Worksheet root mismatch                            |
+| [`VBA217`](#vba217) | analyze | warning     | procedure-local | yes     | Unstable last-row boundary                         |
+| [`VBA218`](#vba218) | analyze | warning     | interprocedural | yes     | Unhandled Excel API failure contract               |
+| [`VBA219`](#vba219) | analyze | warning     | procedure-local | yes     | Unreleased workbook or VBA file handle             |
+| [`VBA220`](#vba220) | analyze | warning     | interprocedural | yes     | Event handler re-entry hazard                      |
+| [`VBA221`](#vba221) | analyze | warning     | interprocedural | yes     | Application state changed by local helper          |
+| [`VBA222`](#vba222) | analyze | warning     | project-wide    | yes     | Public API type safety                             |
+| [`VBA223`](#vba223) | analyze | warning     | file-local      | yes     | Likely hardcoded secret                            |
+| [`VBA224`](#vba224) | analyze | warning     | procedure-local | yes     | Untrusted data reaches a sensitive API             |
+| [`VBA225`](#vba225) | analyze | warning     | interprocedural | yes     | Excel cell access inside loop                      |
+| [`VBA226`](#vba226) | analyze | warning     | procedure-local | yes     | Unsafe Range.Value array shape assumption          |
+| [`VBA227`](#vba227) | analyze | warning     | interprocedural | yes     | Array lifecycle and dimension safety               |
+| [`VBA228`](#vba228) | analyze | error       | interprocedural | yes     | ByRef type mismatch                                |
+| [`VBA229`](#vba229) | analyze | error       | procedure-local | yes     | Unresolved local As type name                      |
+| [`VBA230`](#vba230) | analyze | warning     | interprocedural | yes     | Dictionary CompareMode changed after insertion     |
+| [`VBA231`](#vba231) | analyze | warning     | interprocedural | yes     | Repeated Dictionary loop materialization           |
+| [`VBA232`](#vba232) | analyze | warning     | procedure-local | yes     | Inconsistent Dictionary key normalization          |
+| [`VBA233`](#vba233) | analyze | warning     | project-wide    | yes     | Undefined late-bound Dictionary constant           |
+| [`VBA234`](#vba234) | analyze | warning     | interprocedural | yes     | Collection mutation during iteration               |
+| [`VBA235`](#vba235) | analyze | warning     | procedure-local | yes     | Collection index origin confusion                  |
+| [`VBA236`](#vba236) | analyze | warning     | procedure-local | yes     | Unsafe command construction                        |
+| [`VBA237`](#vba237) | analyze | warning     | interprocedural | yes     | Suppressed error propagation                       |
+| [`VBA238`](#vba238) | analyze | warning     | procedure-local | yes     | Loop-invariant Excel object resolution             |
+| [`VBA239`](#vba239) | analyze | warning     | procedure-local | yes     | Unsafe SQL construction                            |
+| [`VBA240`](#vba240) | analyze | warning     | project-wide    | no      | Risky module-level mutable state                   |
+| [`VBA241`](#vba241) | analyze | warning     | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
+| [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-row or full-column operation        |
 
 ## VB001
 
@@ -2076,3 +2077,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                               |
 | Real-time editor diagnostic | yes                              |
 | Fix available               | no                               |
+
+## VBA242
+
+**Expensive full-row or full-column operation.** A costly Excel operation targets an entire row, column, worksheet, or an unbounded UsedRange where a bounded range is likely intended.
+
+| Property                    | Value                                    |
+| --------------------------- | ---------------------------------------- |
+| Family                      | `analyze`                                |
+| Category                    | `performance`                            |
+| Evidence class              | `maintainability`                        |
+| Compile-equivalent          | no                                       |
+| Default severity            | `information`                            |
+| Supported severities        | `information`, `warning`                 |
+| Surfaces                    | `analyze`, `lsp`                         |
+| Scope                       | `procedure-local`                        |
+| Precision                   | `medium`                                 |
+| Enabled by default          | no                                       |
+| Configuration               | `detect_expensive_full_range_operations` |
+| Inline suppression          | yes                                      |
+| Blocks source preflight     | no                                       |
+| Real-time editor diagnostic | yes                                      |
+| Fix available               | no                                       |

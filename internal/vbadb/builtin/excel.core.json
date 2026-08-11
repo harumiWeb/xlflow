@@ -299,6 +299,8 @@
         },
         { "name": "Rows", "return_type": "Excel.Range" },
         { "name": "Columns", "return_type": "Excel.Range" },
+        { "name": "EntireRow", "return_type": "Excel.Range" },
+        { "name": "EntireColumn", "return_type": "Excel.Range" },
         { "name": "Worksheet", "return_type": "Excel.Worksheet", "read_only": true },
         { "name": "Font", "return_type": "Excel.Font" },
         { "name": "Interior", "return_type": "Excel.Interior" },

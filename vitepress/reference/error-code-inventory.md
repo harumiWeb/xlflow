@@ -202,6 +202,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_excel_api_failure_contracts`
 - `detect_excel_cell_access_in_loops`
 - `detect_excel_object_member_mismatch`
+- `detect_expensive_full_range_operations`
 - `detect_for_each_control_type`
 - `detect_function_return_path`
 - `detect_hardcoded_secrets`
