@@ -96,7 +96,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA239`](#vba239) | analyze | warning     | procedure-local | yes     | Unsafe SQL construction                            |
 | [`VBA240`](#vba240) | analyze | warning     | project-wide    | no      | Risky module-level mutable state                   |
 | [`VBA241`](#vba241) | analyze | warning     | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
-| [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-row or full-column operation        |
+| [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-range operation                     |
 
 ## VB001
 
@@ -2080,7 +2080,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA242
 
-**Expensive full-row or full-column operation.** A costly Excel operation targets an entire row, column, worksheet, or an unbounded UsedRange where a bounded range is likely intended.
+**Expensive full-range operation.** A costly Excel operation targets an entire row, column, worksheet, or an unbounded UsedRange where a bounded range is likely intended.
 
 | Property                    | Value                                    |
 | --------------------------- | ---------------------------------------- |

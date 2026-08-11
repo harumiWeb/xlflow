@@ -289,6 +289,7 @@ Public Sub Run(ws As Worksheet)
     Rows.Calculate
     ws.Columns("A:A") _
         .Find("x")
+    ws.cells(1, 1).Formula = "=bounded"
     Columns("A:A").Select: Rem Rows("1:1").Formula = "=ignored"
 End Sub
 `

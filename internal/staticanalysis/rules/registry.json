@@ -1983,7 +1983,7 @@
     },
     {
       "id": "VBA242",
-      "title": "Expensive full-row or full-column operation",
+      "title": "Expensive full-range operation",
       "description": "A costly Excel operation targets an entire row, column, worksheet, or an unbounded UsedRange where a bounded range is likely intended.",
       "family": "analyze",
       "category": "performance",

@@ -1,8 +1,8 @@
 # Excel Loop Performance Analysis
 
 This specification defines the `VBA225`, `VBA238`, `VBA241`, and `VBA242`
-analyzer rules for the Excel loop-performance issues #452, #453, #454, and
-#455. `VBA225`
+analyzer rules for Excel loop-performance issues #452, #453, #454, and #455.
+`VBA225`
 identifies conservative, repeated Excel object-model work inside VBA loops and
 recommends bulk range or array operations. `VBA238` identifies loop-invariant
 Excel object expressions that are repeatedly resolved and recommends hoisting

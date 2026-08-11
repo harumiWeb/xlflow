@@ -68,6 +68,7 @@ func (a Analyzer) expensiveFullRangeOperationFindings(file parsedFile, proc sour
 		return nil
 	}
 	regions := excelLoopRegions(proc)
+	shadowed := vba242ShadowedRoots(file, proc)
 	var findings []Finding
 	seen := map[int]int{}
 	for _, statement := range proc.Statements {
@@ -99,7 +100,7 @@ func (a Analyzer) expensiveFullRangeOperationFindings(file parsedFile, proc sour
 		if strings.TrimSpace(code) == "" {
 			continue
 		}
-		shapes := a.vba242Shapes(file, proc, code, statement.Range.StartLine-1)
+		shapes := a.vba242Shapes(file, shadowed, code, statement.Range.StartLine-1)
 		shapes = vba242EffectiveShapes(code, shapes)
 		if len(shapes) == 0 || !vba242HasExpensiveSink(code, shapes) {
 			continue
@@ -169,9 +170,8 @@ func vba242LooksLikeRangeOperation(code string) bool {
 	return false
 }
 
-func (a Analyzer) vba242Shapes(file parsedFile, proc sourceProcedure, code string, line int) []vba242Shape {
+func (a Analyzer) vba242Shapes(file parsedFile, shadowed map[string]bool, code string, line int) []vba242Shape {
 	var out []vba242Shape
-	shadowed := vba242ShadowedRoots(file, proc)
 	calls := vba242ScanCalls(code, map[string]bool{"columns": true, "rows": true, "range": true, "cells": true})
 	for _, call := range calls {
 		receiver := vba242Receiver(code, call.start)
@@ -213,7 +213,7 @@ func (a Analyzer) vba242Shapes(file parsedFile, proc sourceProcedure, code strin
 		if lower != "rows" && lower != "columns" && lower != "cells" && lower != "usedrange" && lower != "entirerow" && lower != "entirecolumn" {
 			continue
 		}
-		if (token.name == "Cells" || token.name == "Rows" || token.name == "Columns") && token.nextNonSpace == '(' {
+		if (lower == "cells" || lower == "rows" || lower == "columns") && token.nextNonSpace == '(' {
 			continue
 		}
 		receiver := vba242Receiver(code, token.start)
@@ -291,7 +291,10 @@ func (a Analyzer) vba242ReceiverAllowed(file parsedFile, receiver, member, kind 
 		// These names are Excel's unqualified built-ins. EntireRow and
 		// EntireColumn require a proven Range receiver below, but UsedRange is
 		// a well-known active-sheet property just like Rows/Columns.
-		return kind != "row" && kind != "column" || strings.EqualFold(member, "Rows") || strings.EqualFold(member, "Columns") || strings.EqualFold(member, "Range") || strings.EqualFold(member, "UsedRange")
+		if kind != "row" && kind != "column" {
+			return true
+		}
+		return strings.EqualFold(member, "Rows") || strings.EqualFold(member, "Columns") || strings.EqualFold(member, "Range") || strings.EqualFold(member, "UsedRange")
 	}
 	typ, resolved := resolveExcelExpressionType(file, a.typeDB, receiver, line, a.RootDir, a.Config)
 	if !resolved {
@@ -451,9 +454,6 @@ func vba242HasExpensiveSink(code string, shapes []vba242Shape) bool {
 	}
 	calls := vba242ScanCalls(code, vba242SinkMethods)
 	for _, shape := range shapes {
-		if vba242ShapeBounded(code, shape) {
-			continue
-		}
 		for _, call := range calls {
 			if vba242SinkCallAssociated(code, shape, call) {
 				return true
@@ -463,9 +463,6 @@ func vba242HasExpensiveSink(code string, shapes []vba242Shape) bool {
 	for _, token := range vba242Identifiers(code) {
 		if vba242SinkMethods[strings.ToLower(token.name)] && token.previousNonSpace == '.' && token.nextNonSpace != '(' {
 			for _, shape := range shapes {
-				if vba242ShapeBounded(code, shape) {
-					continue
-				}
 				if vba242SinkTokenAssociated(code, shape, token) {
 					return true
 				}
