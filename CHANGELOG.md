@@ -9,7 +9,9 @@ All notable changes to xlflow will be documented in this file.
   and writers across uniquely resolved call paths, reports structural lifecycle
   coupling, and exposes informational `analysis_metrics.module_state` output.
   Constants and read-only configuration are classified separately, and fan-in
-  counts alone do not produce findings.
+  counts alone do not produce findings. Collection classification is independent
+  of procedure order, built-in type matching avoids user-defined name substrings,
+  and procedure metrics are emitted deterministically.
 
 - Updated `tree-sitter-vba` to v0.12.0. VBA declaration type characters
   (`$`, `%`, `&`, `!`, `#`, `@`, `^`) now count as explicit types for `VB005`

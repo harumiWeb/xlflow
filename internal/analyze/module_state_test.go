@@ -245,6 +245,55 @@ func TestVBA240MetricsSortDeclarationLinesNumerically(t *testing.T) {
 	}
 }
 
+func TestModuleStateBuiltInTypeMatchingUsesQualifiedExactNames(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		typ       string
+		wantExcel bool
+		wantStore bool
+	}{
+		{name: "qualified Excel type", typ: " Excel.Application ", wantExcel: true},
+		{name: "qualified VBA type", typ: "VBA.Range", wantExcel: true},
+		{name: "qualified scripting type", typ: "Scripting.Dictionary", wantStore: true},
+		{name: "qualified collection type", typ: "VBA.Collection", wantStore: true},
+		{name: "Excel substring", typ: "RangeHelper"},
+		{name: "application substring", typ: "ApplicationConfig"},
+		{name: "collection substring", typ: "MyCollection"},
+		{name: "unrecognized qualifier", typ: "Custom.Range"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := moduleStateExcelType(tt.typ); got != tt.wantExcel {
+				t.Fatalf("moduleStateExcelType(%q) = %t, want %t", tt.typ, got, tt.wantExcel)
+			}
+			if got := moduleStateCollectionType(tt.typ); got != tt.wantStore {
+				t.Fatalf("moduleStateCollectionType(%q) = %t, want %t", tt.typ, got, tt.wantStore)
+			}
+		})
+	}
+}
+
+func TestModuleStateProcedureMetricsSortsSameNamedProceduresByKey(t *testing.T) {
+	t.Parallel()
+	accesses := map[string]*moduleStateProcedureAccess{
+		"z": {
+			Procedure: moduleStateProcedure{Key: "z", File: "Main.bas", DisplayFile: "Main.bas", Module: "Main", Name: "Value"},
+			Writes:    map[string]string{"z": "Main.z"},
+		},
+		"a": {
+			Procedure: moduleStateProcedure{Key: "a", File: "Main.bas", DisplayFile: "Main.bas", Module: "Main", Name: "Value"},
+			Writes:    map[string]string{"a": "Main.a"},
+		},
+	}
+	for attempt := 0; attempt < 20; attempt++ {
+		items := moduleStateProcedureMetrics(accesses)
+		if got := items[0]["writes"].([]string)[0]; got != "Main.a" {
+			t.Fatalf("same-named procedure metrics = %#v, want key-sorted order", items)
+		}
+	}
+}
+
 func TestVBA240RecognizesLateBoundDictionaryInitialization(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -275,6 +324,39 @@ End Sub
 	field := state["fields"].([]map[string]any)[0]
 	if field["collection_or_dictionary"] != true {
 		t.Fatalf("late-bound dictionary metrics = %#v", field)
+	}
+}
+
+func TestVBA240RecognizesLateBoundDictionaryWhenMutatorPrecedesInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedItems As Object
+
+Public Sub Other()
+  sharedItems.Add "other", 2
+End Sub
+
+Public Sub Run()
+  Set sharedItems = CreateObject("Scripting.Dictionary")
+  sharedItems.Add "run", 1
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectRiskyModuleState = true
+	result, err := (Analyzer{RootDir: dir, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := findingsByCode(result.Findings, "VBA240")
+	if len(findings) != 1 || !strings.Contains(findings[0].Reason, "Collection or Dictionary") {
+		t.Fatalf("late-bound dictionary findings with mutator first = %+v", findings)
+	}
+	state := result.AnalysisMetrics.(map[string]any)["module_state"].(map[string]any)
+	field := state["fields"].([]map[string]any)[0]
+	if field["collection_or_dictionary"] != true || field["mutator_count"] != 2 {
+		t.Fatalf("late-bound dictionary metrics with mutator first = %#v", field)
 	}
 }
 

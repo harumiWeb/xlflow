@@ -102,6 +102,27 @@ func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedF
 	eventRoots := moduleStateEventRoots(procedures)
 	rootSets := moduleStateRootReachability(edges, roots)
 
+	// Classify collection fields before attributing mutator calls. Otherwise a
+	// mutator in a procedure that appears before the initializer is skipped
+	// while the field still has its declaration-time type classification.
+	for _, file := range files {
+		for _, proc := range file.IR.Procedures {
+			procedure, ok := byKey[moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)]
+			if !ok {
+				continue
+			}
+			for _, access := range proc.Accesses {
+				field := moduleStateResolveField(rootDir, access, procedure, fieldsByFileName, fieldsByName)
+				if field == nil || field.IsCollection {
+					continue
+				}
+				if moduleStateCollectionInitializer(proc, access, field.Name) {
+					field.IsCollection = true
+				}
+			}
+		}
+	}
+
 	for _, file := range files {
 		for _, proc := range file.IR.Procedures {
 			procedure, ok := byKey[moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)]
@@ -112,9 +133,6 @@ func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedF
 				field := moduleStateResolveField(rootDir, access, procedure, fieldsByFileName, fieldsByName)
 				if field == nil {
 					continue
-				}
-				if !field.IsCollection && moduleStateCollectionInitializer(proc, access, field.Name) {
-					field.IsCollection = true
 				}
 				if access.Mode == procedureir.AccessRead || access.Mode == procedureir.AccessReadWrite {
 					field.Readers[procedure.Key] = procedure
@@ -176,9 +194,6 @@ func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedF
 				field := moduleStateResolveName(name, procedure, fieldsByFileName, fieldsByName)
 				if field == nil {
 					continue
-				}
-				if !field.IsCollection && moduleStateCollectionInitializer(proc, procedureir.VariableAccess{Name: field.Name}, field.Name) {
-					field.IsCollection = true
 				}
 				if !field.IsCollection {
 					continue
@@ -410,8 +425,22 @@ func moduleStateExpressionContains(expressions []procedureir.Expression, rootID,
 }
 
 func moduleStateCollectionType(typ string) bool {
+	switch moduleStateUnqualifiedType(typ) {
+	case "collection", "dictionary":
+		return true
+	default:
+		return false
+	}
+}
+
+func moduleStateUnqualifiedType(typ string) string {
 	lower := strings.ToLower(strings.TrimSpace(typ))
-	return strings.Contains(lower, "collection") || strings.Contains(lower, "dictionary") || strings.Contains(lower, "scripting.")
+	for _, qualifier := range []string{"excel.", "vba.", "scripting."} {
+		if strings.HasPrefix(lower, qualifier) {
+			return strings.TrimSpace(strings.TrimPrefix(lower, qualifier))
+		}
+	}
+	return lower
 }
 
 func moduleStateCollectionInitializer(proc procedureir.ProcedureIR, access procedureir.VariableAccess, fieldName string) bool {
@@ -455,13 +484,12 @@ func moduleStateProcedureDeclaresName(proc procedureir.ProcedureIR, name string)
 }
 
 func moduleStateExcelType(typ string) bool {
-	lower := strings.ToLower(strings.TrimSpace(typ))
-	for _, name := range []string{"application", "workbook", "worksheet", "range", "chart", "pivottable", "listobject", "window"} {
-		if strings.Contains(lower, name) {
-			return true
-		}
+	switch moduleStateUnqualifiedType(typ) {
+	case "application", "workbook", "worksheet", "range", "chart", "pivottable", "listobject", "window":
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func moduleStateRoots(cfg config.Config, procedures []moduleStateProcedure) map[string]bool {
@@ -590,8 +618,14 @@ func moduleStateMetricsProjection(fields []*moduleStateField, accesses map[strin
 }
 
 func moduleStateProcedureMetrics(accesses map[string]*moduleStateProcedureAccess) []map[string]any {
+	keys := make([]string, 0, len(accesses))
+	for key := range accesses {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	items := make([]map[string]any, 0, len(accesses))
-	for _, access := range accesses {
+	for _, key := range keys {
+		access := accesses[key]
 		if access == nil {
 			continue
 		}
