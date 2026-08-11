@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA241` performance analysis for reachable
+  `ReDim Preserve` statements inside VBA loops. The rule covers all supported
+  loop forms, distinguishes loop-variable-dependent growth from repeated
+  constant-size reallocation, raises nested-loop findings to `warning`, and
+  recommends preallocation or geometric capacity growth. Configure it with
+  `detect_redim_preserve_in_loops` or disable it with
+  `[analyze].disabled_rules = ["VBA241"]`.
+
 - Added opt-in `VBA240` project-wide analysis for module-level mutable state.
   The analyzer builds per-procedure read/write sets, aggregates field readers
   and writers across uniquely resolved call paths, reports structural lifecycle

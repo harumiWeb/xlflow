@@ -84,6 +84,37 @@ func TestUnsafeSQLConstructionDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestRedimPreserveLoopDefaultsEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA241"); !ok || !enabled || !cfg.Analyze.DetectRedimPreserveInLoops {
+		t.Fatalf("VBA241 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectRedimPreserveInLoops)
+	}
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_redim_preserve_in_loops = false
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA241"); !ok || enabled || loaded.Analyze.DetectRedimPreserveInLoops {
+		t.Fatalf("loaded VBA241 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, loaded.Analyze.DetectRedimPreserveInLoops)
+	}
+	if !hasConfigWarning(loaded.Warnings, "deprecated_analyze_rule_config", "VBA241") {
+		t.Fatalf("expected legacy compatibility-key warning for VBA241: %+v", loaded.Warnings)
+	}
+}
+
 func TestRiskyModuleStateDefaultsDisabledAndIsConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

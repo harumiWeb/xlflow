@@ -334,6 +334,8 @@
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA227","severity":"warning","line":16787,"column":0}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA227","severity":"warning","line":16789,"column":0}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA227","severity":"warning","line":16794,"column":0}
+{"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA241","severity":"information","line":16822,"column":0}
+{"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA241","severity":"information","line":16823,"column":0}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA202","severity":"warning","line":16853,"column":0}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA202","severity":"warning","line":16854,"column":0}
 {"project":"third_party/ronecone","file":"ROneCOne.cls","surface":"analyze","code":"VBA214","severity":"warning","line":17040,"column":0}

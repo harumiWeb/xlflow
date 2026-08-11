@@ -93,6 +93,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA238`](#vba238) | analyze | warning  | procedure-local | yes     | Loop-invariant Excel object resolution             |
 | [`VBA239`](#vba239) | analyze | warning  | procedure-local | yes     | Unsafe SQL construction                            |
 | [`VBA240`](#vba240) | analyze | warning  | project-wide    | no      | Risky module-level mutable state                   |
+| [`VBA241`](#vba241) | analyze | warning  | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
 
 ## VB001
 
@@ -2007,3 +2008,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                          |
 | Real-time editor diagnostic | no                          |
 | Fix available               | no                          |
+
+## VBA241
+
+**Repeated ReDim Preserve inside loop.** A dynamic array is repeatedly resized with ReDim Preserve inside a loop, potentially copying the existing array on every iteration.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `performance`                    |
+| Evidence class              | `maintainability`                |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`, `information`         |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `medium`                         |
+| Enabled by default          | yes                              |
+| Configuration               | `detect_redim_preserve_in_loops` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |

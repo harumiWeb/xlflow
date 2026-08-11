@@ -1914,6 +1914,28 @@
       "configuration_key": "detect_risky_module_state",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA241",
+      "title": "Repeated ReDim Preserve inside loop",
+      "description": "A dynamic array is repeatedly resized with ReDim Preserve inside a loop, potentially copying the existing array on every iteration.",
+      "family": "analyze",
+      "category": "performance",
+      "evidence_class": "maintainability",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning", "information"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba241",
+      "configurable": true,
+      "configuration_key": "detect_redim_preserve_in_loops",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

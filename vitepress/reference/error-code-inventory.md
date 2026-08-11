@@ -216,6 +216,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_range_find_nothing_check`
 - `detect_range_value_array_shape`
 - `detect_redim_preserve_dimension`
+- `detect_redim_preserve_in_loops`
 - `detect_resource_leaks`
 - `detect_risky_module_state`
 - `detect_scope_shadowing`

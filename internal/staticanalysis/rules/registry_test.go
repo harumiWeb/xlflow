@@ -14,7 +14,7 @@ VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
-VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240`)
+VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -158,6 +158,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	moduleState, ok := Lookup("VBA240")
 	if !ok || moduleState.Family != FamilyAnalyze || moduleState.Category != CategoryReliability || moduleState.EvidenceClass != EvidenceMaintainability || moduleState.DefaultSeverity != SeverityWarning || moduleState.DefaultEnabled || !moduleState.Configurable || moduleState.ConfigurationKey != "detect_risky_module_state" || moduleState.PreflightBlocking || !moduleState.InlineSuppressible || moduleState.Realtime || moduleState.Scope != ScopeProjectWide || moduleState.Precision != PrecisionMedium {
 		t.Fatalf("unexpected VBA240 metadata: %+v, %v", moduleState, ok)
+	}
+	redimLoop, ok := Lookup("VBA241")
+	if !ok || redimLoop.Family != FamilyAnalyze || redimLoop.Category != CategoryPerformance || redimLoop.EvidenceClass != EvidenceMaintainability || redimLoop.DefaultSeverity != SeverityWarning || !reflect.DeepEqual(redimLoop.SupportedSeverities, []RuleSeverity{SeverityWarning, SeverityInformation}) || !redimLoop.DefaultEnabled || !redimLoop.Configurable || redimLoop.ConfigurationKey != "detect_redim_preserve_in_loops" || redimLoop.PreflightBlocking || !redimLoop.InlineSuppressible || !redimLoop.Realtime || redimLoop.Scope != ScopeProcedureLocal || redimLoop.Precision != PrecisionMedium {
+		t.Fatalf("unexpected VBA241 metadata: %+v, %v", redimLoop, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {
