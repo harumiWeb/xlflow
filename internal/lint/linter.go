@@ -822,6 +822,9 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 	lines := normalizedSourceLines(source)
 	procedures := sourceProceduresFromAST(root, []byte(source))
 	var issues []Issue
+	if cfg.DetectDangerousResume {
+		issues = append(issues, l.dangerousResumeIssuesFromAST(path, source, root)...)
+	}
 	for i, proc := range procedures {
 		if i&0x1f == 0 {
 			if err := ctx.Err(); err != nil {
@@ -829,15 +832,11 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 			}
 		}
 		decls := procedureDeclarations(lines, proc)
-		handlerLabels := onErrorHandlerLabels(lines, proc)
 		if cfg.DetectConfusingCallSyntax {
 			issues = append(issues, l.confusingCallIssues(path, lines, proc)...)
 		}
 		if cfg.DetectForEachControlType {
 			issues = append(issues, l.forEachIssues(path, lines, proc, decls)...)
-		}
-		if cfg.DetectDangerousResume {
-			issues = append(issues, l.dangerousResumeIssues(path, lines, proc, handlerLabels)...)
 		}
 	}
 	return issues, ctx.Err()
@@ -1225,21 +1224,6 @@ func declarationNameAndType(text string) (string, string) {
 	return cleanIdentifier(nameFields[0]), typ
 }
 
-func onErrorHandlerLabels(lines []string, proc sourceProcedure) map[string]bool {
-	labels := map[string]bool{}
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		lower := strings.ToLower(stmt)
-		if strings.HasPrefix(lower, "on error goto ") && lower != "on error goto 0" {
-			label := cleanIdentifier(strings.TrimSpace(stmt[len("on error goto "):]))
-			if label != "" {
-				labels[strings.ToLower(label)] = true
-			}
-		}
-	}
-	return labels
-}
-
 func (l Linter) confusingCallIssues(path string, lines []string, proc sourceProcedure) []Issue {
 	var issues []Issue
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
@@ -1303,32 +1287,114 @@ func (l Linter) forEachIssues(path string, lines []string, proc sourceProcedure,
 	return issues
 }
 
-func (l Linter) dangerousResumeIssues(path string, lines []string, proc sourceProcedure, handlerLabels map[string]bool) []Issue {
+type dangerousResumeEvent struct {
+	kind   string
+	target string
+	rng    vbaast.Range
+}
+
+func (l Linter) dangerousResumeIssuesFromAST(path, source string, root *tree_sitter.Node) []Issue {
+	sourceBytes := []byte(source)
 	var issues []Issue
-	inHandler := false
-	for i := proc.StartLine - 1; i < proc.EndLine && i < len(lines); i++ {
-		stmt := normalizedCodeLine(lines[i])
-		if label, ok := labelName(stmt); ok && handlerLabels[strings.ToLower(label)] {
-			inHandler = true
-			continue
+	collectDangerousResumeProcedures(root, func(proc *tree_sitter.Node) {
+		issues = append(issues, l.dangerousResumeProcedureIssues(path, sourceBytes, proc)...)
+	})
+	return issues
+}
+
+func collectDangerousResumeProcedures(node *tree_sitter.Node, visit func(*tree_sitter.Node)) {
+	if node == nil {
+		return
+	}
+	if isDangerousResumeProcedure(node.Kind()) {
+		visit(node)
+		return
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		collectDangerousResumeProcedures(node.NamedChild(i), visit)
+	}
+}
+
+func isDangerousResumeProcedure(kind string) bool {
+	switch kind {
+	case "sub_declaration", "function_declaration", "property_declaration",
+		"property_get_declaration", "property_let_declaration", "property_set_declaration",
+		"conditional_sub_declaration", "conditional_function_declaration", "conditional_property_declaration":
+		return true
+	default:
+		return false
+	}
+}
+
+func (l Linter) dangerousResumeProcedureIssues(path string, source []byte, proc *tree_sitter.Node) []Issue {
+	events := make([]dangerousResumeEvent, 0)
+	vbaast.Walk(proc, func(node *tree_sitter.Node) bool {
+		if node == nil || node.IsError() || node.IsMissing() {
+			return false
 		}
-		lower := strings.ToLower(stmt)
-		if lower == "resume" || strings.HasPrefix(lower, "resume ") {
+		var event dangerousResumeEvent
+		switch node.Kind() {
+		case "on_error_statement":
+			event = dangerousResumeEvent{kind: "on_error", target: controlTarget(node, source), rng: vbaast.NodeRange(node)}
+		case "label_statement":
+			event = dangerousResumeEvent{kind: "label", target: labelTarget(node, source), rng: vbaast.NodeRange(node)}
+		case "resume_statement":
+			event = dangerousResumeEvent{kind: "resume", rng: vbaast.NodeRange(node)}
+		default:
+			return true
+		}
+		events = append(events, event)
+		return true
+	})
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].rng.StartByte < events[j].rng.StartByte
+	})
+	handlerLabels := make(map[string]bool)
+	for _, event := range events {
+		if event.kind == "on_error" && event.target != "" && event.target != "0" {
+			handlerLabels[strings.ToLower(event.target)] = true
+		}
+	}
+	inHandler := false
+	var issues []Issue
+	for _, event := range events {
+		switch event.kind {
+		case "label":
+			if handlerLabels[strings.ToLower(event.target)] {
+				inHandler = true
+			}
+		case "resume":
 			if !inHandler {
-				issues = append(issues, l.issue(path, i+1, "VB026", "warning", "Use Resume only inside a clear error-handler block."))
+				issues = append(issues, l.issue(path, event.rng.StartLine, "VB026", "warning", "Use Resume only inside a clear error-handler block."))
 			}
 		}
 	}
 	return issues
 }
 
-func labelName(stmt string) (string, bool) {
-	stmt = strings.TrimSpace(stmt)
-	if !strings.HasSuffix(stmt, ":") || strings.Contains(stmt, " ") {
-		return "", false
+func controlTarget(node *tree_sitter.Node, source []byte) string {
+	target := node.ChildByFieldName("target")
+	text := ""
+	if target != nil {
+		text = target.Utf8Text(source)
+	} else {
+		fields := strings.Fields(node.Utf8Text(source))
+		if len(fields) > 0 {
+			text = fields[len(fields)-1]
+		}
 	}
-	name := cleanIdentifier(strings.TrimSuffix(stmt, ":"))
-	return name, name != ""
+	return cleanIdentifier(strings.TrimSuffix(strings.TrimSpace(text), ":"))
+}
+
+func labelTarget(node *tree_sitter.Node, source []byte) string {
+	label := node.ChildByFieldName("name")
+	text := ""
+	if label != nil {
+		text = label.Utf8Text(source)
+	} else {
+		text = node.Utf8Text(source)
+	}
+	return cleanIdentifier(strings.TrimSuffix(strings.TrimSpace(text), ":"))
 }
 
 func normalizedSourceLines(source string) []string {

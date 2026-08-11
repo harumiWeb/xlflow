@@ -1,5 +1,4 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"lint","code":"VB007","severity":"warning","line":464,"column":0}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"lint","code":"VB026","severity":"warning","line":1009,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"lint","code":"VB007","severity":"warning","line":1590,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"lint","code":"VB020","severity":"warning","line":1892,"column":9}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebDriver.cls","surface":"lint","code":"VB020","severity":"warning","line":2367,"column":9}

@@ -2087,6 +2087,54 @@ End Sub
 	}
 }
 
+func TestLinterVB026UsesParsedErrorHandlerStatements(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Sub TrailingColon()
+  On Error GoTo Handler:
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+
+Sub SingleLineIf()
+  If True Then On Error GoTo Handler
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+
+Sub BareResume()
+  Resume Next
+End Sub
+
+Sub PlainGoTo()
+  GoTo Handler
+Handler:
+  Resume Next
+End Sub
+
+Sub RaiseWithoutHandler()
+  Err.Raise 5
+  Resume Next
+End Sub
+`
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb026 := issuesByCode(issues, "VB026")
+	if len(vb026) != 3 {
+		t.Fatalf("VB026 issues = %+v, want only the three resumes without On Error GoTo handlers", vb026)
+	}
+	for _, line := range []int{17, 23, 28} {
+		assertIssue(t, vb026, "VB026", line)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+		t.Fatalf("valid handler syntax should not trigger parser recovery: %+v", got)
+	}
+}
+
 func TestLinterVB021UsesRootedReachabilityAndClusters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

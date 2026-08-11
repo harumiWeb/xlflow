@@ -189,6 +189,40 @@ End Sub
 	}
 }
 
+func TestDiagnosticsVB026MatchesParsedHandlerContext(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Sub TrailingColon()
+  On Error GoTo Handler:
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+
+Sub SingleLineIf()
+  If True Then On Error GoTo Handler
+  Exit Sub
+Handler:
+  Resume Next
+End Sub
+
+Sub BareResume()
+  Resume Next
+End Sub
+`,
+	}
+
+	vb026 := diagnosticsByCode(analyzer.Diagnostics(doc), "VB026")
+	if len(vb026) != 1 || vb026[0].Range.Start.Line != 16 {
+		t.Fatalf("VB026 diagnostics = %+v, want only the bare Resume at zero-based line 16", vb026)
+	}
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB014"); len(got) != 0 {
+		t.Fatalf("valid handler syntax should not trigger parser recovery: %+v", got)
+	}
+}
+
 func TestDiagnosticsPreserveLintResultsWhenProcedureIRBuildFails(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	snapshot := NewAnalysisSnapshot(Document{
