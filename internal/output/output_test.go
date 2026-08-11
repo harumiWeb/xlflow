@@ -207,6 +207,36 @@ func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
 	}
 }
 
+func TestWriteAnalysisMetricsJSONAndHumanOutput(t *testing.T) {
+	env := New("analyze")
+	env.AnalysisMetrics = map[string]any{
+		"module_state": map[string]any{
+			"fields": []map[string]any{{
+				"module": "Main", "name": "shared", "classification": "mutable",
+				"reader_count": 3, "writer_count": 2, "root_count": 2,
+			}},
+		},
+	}
+	var jsonBuf bytes.Buffer
+	if err := WriteWithOptions(&jsonBuf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(jsonBuf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(listOfObjects(objectMap(decoded["analysis_metrics"])["module_state"].(map[string]any)["fields"])) != 1 {
+		t.Fatalf("analysis metrics JSON = %#v", decoded["analysis_metrics"])
+	}
+	var human bytes.Buffer
+	if err := WriteWithOptions(&human, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(human.String(), "Module state metrics:") || !strings.Contains(human.String(), "Main.shared") {
+		t.Fatalf("human analysis metrics = %s", human.String())
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesPushDiagnostic(t *testing.T) {
 	env := New("push")
 	env.PushDiagnostic = map[string]any{

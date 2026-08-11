@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA240` project-wide analysis for module-level mutable state.
+  The analyzer builds per-procedure read/write sets, aggregates field readers
+  and writers across uniquely resolved call paths, reports structural lifecycle
+  coupling, and exposes informational `analysis_metrics.module_state` output.
+  Constants and read-only configuration are classified separately, and fan-in
+  counts alone do not produce findings.
+
 - Updated `tree-sitter-vba` to v0.12.0. VBA declaration type characters
   (`$`, `%`, `&`, `!`, `#`, `@`, `^`) now count as explicit types for `VB005`
   and `VB019`; invalid `Dim`/`ReDim` keywords after a declaration comma are

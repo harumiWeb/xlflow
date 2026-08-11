@@ -7,6 +7,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `active_workbook_mismatch`
 - `affected_modules`
 - `ambiguous_test_name`
+- `analysis_metrics`
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
 - `args_invalid`
@@ -74,6 +75,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `byref_diagnostics`
 - `byref_modifier`
 - `byval_modifier`
+- `cached_excel_reference`
 - `call_expression`
 - `call_statement`
 - `capability_version`
@@ -109,6 +111,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `code_source`
 - `code_source_after`
 - `code_source_before`
+- `collection_or_dictionary`
 - `column_count`
 - `column_range`
 - `column_width`
@@ -214,6 +217,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_range_value_array_shape`
 - `detect_redim_preserve_dimension`
 - `detect_resource_leaks`
+- `detect_risky_module_state`
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
 - `detect_unsafe_command_construction`
@@ -277,7 +281,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_group`
 - `environment_variable`
 - `event_declaration`
+- `event_reader_count`
 - `event_statement`
+- `event_writer_count`
 - `evidence_class`
 - `evidence_phase`
 - `evidence_role`
@@ -320,6 +326,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `external_value_concatenation`
 - `fail_fast_with_max_failures`
 - `failed_entries`
+- `field_count`
 - `file_input`
 - `file_picker`
 - `files_changed`
@@ -410,6 +417,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `implements_statement`
 - `implicit_intersection`
 - `implicit_member_expression`
+- `in_call_cycle`
 - `included_components`
 - `incompressible_short_over_limit_errors`
 - `incompressible_short_under_limit_roundtrips`
@@ -530,8 +538,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_new_failed`
 - `module_not_found`
 - `module_path`
+- `module_state`
 - `module_variable`
 - `modules_dir`
+- `mutator_count`
 - `named_argument`
 - `nearby_code`
 - `needs_save`
@@ -669,7 +679,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `quoted_name`
 - `raises_error`
 - `read_only`
+- `read_only_configuration`
 - `read_write`
+- `reader_count`
 - `reason_not_runnable`
 - `receiver_diagnostics`
 - `recorded_at`
@@ -716,6 +728,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `rollback_backup_failed`
 - `rollback_failed`
 - `rollback_session_check_failed`
+- `root_count`
 - `row_count`
 - `row_height`
 - `row_range`
@@ -975,6 +988,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `workspace_failure`
 - `workspace_resolution_views`
 - `write_only`
+- `writer_count`
 - `writes_cells`
 - `wscript_shell_exec`
 - `wscript_shell_run`

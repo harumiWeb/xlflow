@@ -84,6 +84,38 @@ func TestUnsafeSQLConstructionDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestRiskyModuleStateDefaultsDisabledAndIsConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA240"); !ok || enabled || cfg.Analyze.DetectRiskyModuleState {
+		t.Fatalf("VBA240 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectRiskyModuleState)
+	}
+
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_risky_module_state = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA240"); !ok || !enabled || !loaded.Analyze.DetectRiskyModuleState {
+		t.Fatalf("loaded VBA240 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectRiskyModuleState)
+	}
+	if !hasConfigWarning(loaded.Warnings, "deprecated_analyze_rule_config", "VBA240") {
+		t.Fatal("expected legacy compatibility-key warning for VBA240")
+	}
+}
+
 func TestLoadUnsafeSQLConstructionCompatibilityKeyAndDisabledRule(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]

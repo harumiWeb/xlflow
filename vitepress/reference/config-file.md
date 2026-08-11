@@ -229,11 +229,12 @@ inline. This includes every preflight-blocking lint diagnostic.
 
 ### `[analyze]`
 
-| Key              | Type     | Required | Default | Description                                           |
-| ---------------- | -------- | -------- | ------- | ----------------------------------------------------- |
-| `disabled_rules` | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID. |
+| Key                         | Type     | Required | Default | Description                                                                            |
+| --------------------------- | -------- | -------- | ------- | -------------------------------------------------------------------------------------- |
+| `disabled_rules`            | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID.                                  |
+| `detect_risky_module_state` | bool     | no       | `false` | Opt in to `VBA240` project-wide module-state coupling analysis and read/write metrics. |
 
-Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`.
+Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`. `detect_risky_module_state = true` is the opt-in compatibility key for `VBA240`; disable it with `disabled_rules = ["VBA240"]`.
 
 The generated [diagnostic catalog](./diagnostics) is the authoritative list of
 analyzer configuration keys, defaults, and always-enabled diagnostics.

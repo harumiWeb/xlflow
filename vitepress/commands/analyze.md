@@ -95,6 +95,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA237` | warning               | Error handling or an ignored success result loses failure information across a resolved local call chain.                                     |
 | `VBA238` | warning               | A loop repeatedly resolves an invariant Excel object-model member chain that can be cached outside the loop.                                  |
 | `VBA239` | warning               | A SQL statement may combine external input, dynamic identifiers, locale-sensitive values, manual quoting, or wildcard input before execution. |
+| `VBA240` | warning               | Opt-in project-wide analysis of module-level mutable state, lifecycle coupling, and read/write metrics.                                       |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -147,6 +148,15 @@ It keeps `VBA224` as the generic fallback when disabled and does not claim
 complete SQL-injection proof. Use `xlflow:disable-line VBA239`,
 `xlflow:disable-next-line VBA239`, or `[analyze].disabled_rules = ["VBA239"]`
 for intentional exceptions.
+
+`VBA240` is disabled by default and runs only in batch `analyze`/`check` when
+`[analyze].detect_risky_module_state = true`. It indexes module-level fields
+across standard, class, document, and UserForm modules, follows uniquely
+resolved project-local calls from configured and host-event entry points, and
+reports structural lifecycle coupling at the declaration. The JSON envelope
+also includes informational `analysis_metrics.module_state.fields` and
+`analysis_metrics.module_state.procedures` read/write sets. Reader/writer
+counts alone do not trigger a finding; use `VBA202` for object use-before-`Set`.
 
 `VBA226` is enabled in batch and real-time analysis and tracks procedure-local `Range.Value` / `Value2` shapes. It reports one-dimensional or scalar assumptions for definite multi-cell ranges, dimensionless bounds, statically provable dimension/order/bounds mistakes, and incompatible known destination ranges. Multi-cell values are modeled as two-dimensional arrays; single-cell values are modeled as scalars. Dynamic, reassigned, and branch-merged shapes remain uncertain, so only unsafe consumption or a statically proven shape mismatch is reported. Use `values(row, column)`, dimension-specific bounds, and a dominating `IsArray` guard for dynamic values when appropriate.
 
