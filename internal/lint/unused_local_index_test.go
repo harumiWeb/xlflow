@@ -107,11 +107,13 @@ func TestProcedureLocalReferenceIndexSupportsUnicodeNames(t *testing.T) {
 func TestProcedureLocalReferenceIndexMatchesIdentifierTypeCharacters(t *testing.T) {
 	source := `Public Sub Run()
   Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+  Const textConstant$ = "constant"
   Debug.Print text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+  Debug.Print textConstant
 End Sub
 `
 	allSymbols := []symbols.Symbol{
-		{Name: "Run", Kind: "sub", StartLine: 1, EndLine: 4},
+		{Name: "Run", Kind: "sub", StartLine: 1, EndLine: 5},
 		{Name: "text$", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
 		{Name: "whole%", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
 		{Name: "longValue&", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
@@ -119,6 +121,7 @@ End Sub
 		{Name: "doubleValue#", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
 		{Name: "money@", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
 		{Name: "longLong^", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "textConstant$", Kind: "const", Parent: "Run", StartLine: 3, EndLine: 3},
 	}
 
 	referenced, err := buildProcedureLocalReferenceIndexContext(context.Background(), source, allSymbols, nil)

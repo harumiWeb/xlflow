@@ -849,7 +849,7 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`;
   identifier type characters are explicit types and do not count as implicit
   `Variant` declarators
-- `VB020`: unused procedure-local variable; VBA type-declaration characters
+- `VB020`: unused procedure-local variable or constant; VBA type-declaration characters
   (`$`, `%`, `&`, `!`, `#`, `@`, `^`) are normalized as part of the identifier
   identity when matching declarations to references
 - `VB021`: private procedure unreachable from known project roots; confirmed call edges, host events, tests, externally callable public standard-module APIs as possible roots, and conservative dynamic callback possibilities are considered
