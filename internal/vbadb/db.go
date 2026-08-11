@@ -255,10 +255,10 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 	if overlay.Collection {
 		out.Collection = true
 	}
-	if overlay.Confidence != "" && !preserveGeneratedProvenance(base, overlay) {
+	if overlay.Confidence != "" && !preserveGenerated {
 		out.Confidence = overlay.Confidence
 	}
-	if overlay.Source != "" && !preserveGeneratedProvenance(base, overlay) {
+	if overlay.Source != "" && !preserveGenerated {
 		out.Source = overlay.Source
 	}
 	out.Aliases = mergeStrings(out.Aliases, overlay.Aliases)

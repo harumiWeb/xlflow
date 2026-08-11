@@ -4237,6 +4237,25 @@ End Sub
 	}
 }
 
+func TestAnalyzerDoesNotProjectLintOnlyCompileEquivalentFindings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim value As Long
+  Set value = 1
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VB037"); len(got) != 0 {
+		t.Fatalf("VB037 is lint/LSP-only and must not be projected by analyze: %+v", got)
+	}
+}
+
 func TestAnalyzerByRefUsesProjectLocalNamedSignatures(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

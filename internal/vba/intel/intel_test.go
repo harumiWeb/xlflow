@@ -1090,17 +1090,24 @@ End Sub
 func TestProjectMemberSignatureCompletenessRejectsTruncatedSymbol(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	path := filepath.Join(t.TempDir(), "Widget.cls")
-	source := "Public Sub Execute(ByVal first As String, ByVal second As String, ByVal third As String)\nEnd Sub\n"
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if analyzer.projectMemberSignatureComplete(Symbol{
 		Name:       "Execute",
 		File:       path,
-		Range:      Range{Start: Position{Line: 0}, End: Position{Line: 0}},
+		Detail:     "Public Sub Execute(ByVal first As String, ByVal second As String, ByVal third As String)",
 		Parameters: []Parameter{{Name: "first"}},
 	}) {
 		t.Fatal("truncated project member symbol was accepted")
+	}
+	if !analyzer.projectMemberSignatureComplete(Symbol{
+		Name:       "Execute",
+		File:       filepath.Join(t.TempDir(), "unsaved.cls"),
+		Detail:     "Public Sub Execute(ByVal first As String)",
+		Parameters: []Parameter{{Name: "first"}},
+	}) {
+		t.Fatal("complete parsed project member symbol should not require a filesystem read")
+	}
+	if declarationContainsCallableName("Public Sub ExecuteAll(ByVal first As String)", "Execute") {
+		t.Fatal("Execute must not match the bounded ExecuteAll declaration")
 	}
 }
 
@@ -1194,7 +1201,7 @@ End Sub
 `,
 	}
 
-	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 0 {
 		t.Fatalf("ParamArray call should not produce argument diagnostics: %+v", diagnostics)
 	}
 

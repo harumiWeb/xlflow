@@ -1628,50 +1628,72 @@ func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memb
 }
 
 func (a Analyzer) projectMemberSignatureComplete(sym Symbol) bool {
-	if strings.TrimSpace(sym.File) == "" {
-		return true
+	declaration := strings.TrimSpace(sym.Detail)
+	if declaration == "" {
+		// Symbols produced from a parsed document carry the complete declaration
+		// header in Detail. A missing header is not safe to validate from the
+		// filesystem: it could be stale relative to an open document.
+		return strings.TrimSpace(sym.File) == ""
 	}
-	path := sym.File
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(a.RootDir, filepath.FromSlash(path))
-	}
-	source, err := os.ReadFile(path)
-	if err != nil {
+	if !declarationContainsCallableName(declaration, sym.Name) {
 		return false
 	}
-	lines := strings.Split(string(source), "\n")
-	start := max(0, sym.Range.Start.Line)
-	end := min(len(lines)-1, sym.Range.End.Line)
-	if start > end || start >= len(lines) {
-		return false
-	}
-	name := strings.ToLower(strings.TrimSpace(sym.Name))
-	declarationStart := -1
-	for lineNo := start; lineNo <= end; lineNo++ {
-		lower := strings.ToLower(lines[lineNo])
-		if strings.Contains(lower, "sub "+name) || strings.Contains(lower, "function "+name) || strings.Contains(lower, "property "+name) {
-			declarationStart = lineNo
-			break
-		}
-	}
-	if declarationStart < 0 {
-		return false
-	}
-	declaration := strings.Join(lines[declarationStart:end+1], " ")
 	open := strings.Index(declaration, "(")
 	if open < 0 {
 		return len(sym.Parameters) == 0
 	}
-	close := matchingParen(declaration, open)
-	if close < 0 {
+	closeIdx := matchingParen(declaration, open)
+	if closeIdx < 0 {
 		return false
 	}
-	parameters := strings.TrimSpace(declaration[open+1 : close])
+	parameters := strings.TrimSpace(declaration[open+1 : closeIdx])
 	want := 0
 	if parameters != "" {
 		want = len(splitTopLevel(parameters, ','))
 	}
 	return want == len(sym.Parameters)
+}
+
+func declarationContainsCallableName(declaration, name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	for _, keyword := range []string{"sub", "function", "property get", "property let", "property set"} {
+		for searchFrom := 0; searchFrom < len(declaration); {
+			lower := strings.ToLower(declaration[searchFrom:])
+			index := strings.Index(lower, keyword)
+			if index < 0 {
+				break
+			}
+			index += searchFrom
+			if index > 0 {
+				previous, _ := lastRune(declaration[:index])
+				if isIdentRune(previous) {
+					searchFrom = index + len(keyword)
+					continue
+				}
+			}
+			afterKeyword := declaration[index+len(keyword):]
+			if afterKeyword == "" || (afterKeyword[0] != ' ' && afterKeyword[0] != '\t') {
+				searchFrom = index + len(keyword)
+				continue
+			}
+			afterKeyword = strings.TrimLeft(afterKeyword, " \t")
+			if len(afterKeyword) >= len(name) && strings.EqualFold(afterKeyword[:len(name)], name) {
+				afterName := afterKeyword[len(name):]
+				if afterName == "" {
+					return true
+				}
+				next, _ := firstRune(afterName)
+				if !isIdentRune(next) {
+					return true
+				}
+			}
+			searchFrom = index + len(keyword)
+		}
+	}
+	return false
 }
 
 func (a Analyzer) localReceiverTypeAtContext(doc Document, receiver string, pos Position, ctx *documentTypeContext) (string, bool) {
@@ -1840,40 +1862,27 @@ func (a Analyzer) resolveArgumentProjectLocalCallSignature(doc Document, localSy
 	if target == "" || strings.HasPrefix(target, ".") {
 		return Signature{}, false, nil
 	}
-	receiver, member, qualified := splitCallTarget(target)
-	query := target
-	if qualified {
-		query = member
-	}
 	currentProcedure := currentProcedureNameForDocument(doc, pos)
 	module := moduleNameForDocument(doc)
-	localCandidates := localSymbolsByName[strings.ToLower(strings.TrimSpace(query))]
-	if !qualified && nonCallableLocalShadowsProjectCall(a, doc, currentProcedure, localCandidates, target) {
-		return Signature{}, false, nil
-	}
-	localMatches := argumentProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, receiver, member, qualified)
-	if !qualified {
-		localMatches = symbolsInModule(localMatches, module)
-	}
+	localCandidates := localSymbolsByName[strings.ToLower(target)]
+	localMatches := symbolsInModule(argumentProjectCallSymbols(a, doc, currentProcedure, localCandidates, target, "", "", false), module)
 	if len(localMatches) == 1 {
 		return signatureFromSymbol(localMatches[0]), true, nil
 	}
 	if len(localMatches) > 1 {
 		return Signature{}, false, nil
 	}
-	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryExact})
+	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false, err
 	}
-	matches := argumentProjectCallSymbols(a, doc, currentProcedure, syms, target, receiver, member, qualified)
-	if !qualified {
-		local := symbolsInModule(matches, module)
-		if len(local) == 1 {
-			return signatureFromSymbol(local[0]), true, nil
-		}
-		if len(local) > 1 {
-			return Signature{}, false, nil
-		}
+	matches := argumentProjectCallSymbols(a, doc, currentProcedure, syms, target, "", "", false)
+	local := symbolsInModule(matches, module)
+	if len(local) == 1 {
+		return signatureFromSymbol(local[0]), true, nil
+	}
+	if len(local) > 1 {
+		return Signature{}, false, nil
 	}
 	if len(matches) != 1 {
 		return Signature{}, false, nil

@@ -278,7 +278,7 @@ func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
 		if rule.Realtime {
 			wantSurface = append(wantSurface, SurfaceLSP)
 		}
-		if len(rule.Surfaces) > len(wantSurface) {
+		if rule.Family == FamilyLint && rule.CompileEquivalent && len(rule.Surfaces) == len(wantSurface)+1 && rule.Surfaces[len(wantSurface)] == SurfaceAnalyze {
 			wantSurface = append(wantSurface, SurfaceAnalyze)
 		}
 		if !reflect.DeepEqual(rule.Surfaces, wantSurface) {

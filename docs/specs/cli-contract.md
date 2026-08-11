@@ -865,7 +865,6 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
   built-in signatures and fails closed for ambiguous conditional overloads;
   the batch analyzer may project the same compile-equivalent diagnostic on its
   `analyze` surface.
-  source preflight
 - `VB046`: duplicate declaration rejected by the VBE. Declaration names are
   compared case-insensitively within one module, procedure, Enum, or user-defined
   Type scope. Procedure parameters, local/Static variables, and local constants
