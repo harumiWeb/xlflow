@@ -187,6 +187,7 @@ type analysisContext struct {
 	procedures         map[string]procedureSignature
 	procedureResolver  procedureir.SymbolResolver
 	objectSummaries    map[string]objectProcedureSummary
+	objectEntryStates  map[string]map[string]bool
 	worksheetCodenames map[string]string
 	projectEffects     effects.ProjectSummary
 }
@@ -1113,6 +1114,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 		objectSummaries:    buildObjectProcedureSummaries(files),
 		worksheetCodenames: map[string]string{},
 	}
+	ctx.objectEntryStates = buildObjectProcedureEntryStates(files, ctx.objectSummaries)
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
 	workbookRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Workbook))
 	for _, file := range files {
@@ -1304,7 +1306,8 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		_ = lower
 	}
 	if a.Config.Analyze.DetectObjectUseBeforeSet {
-		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries)...)
+		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
+		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries, ctx.objectEntryStates[key])...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	if a.Config.Analyze.DetectApplicationStateRestore {

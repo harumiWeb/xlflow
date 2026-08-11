@@ -1002,7 +1002,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":33,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorkbook.cls","surface":"analyze","code":"VBA224","severity":"warning","line":39,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdExcelWorksheet.cls","surface":"analyze","code":"VBA202","severity":"warning","line":32,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":96,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":149,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":161,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdShapeEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":173,"column":0}
@@ -1035,6 +1034,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA227","severity":"warning","line":9,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA227","severity":"warning","line":14,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA237","severity":"warning","line":16,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA202","severity":"warning","line":27,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA237","severity":"warning","line":36,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA202","severity":"warning","line":46,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdIni.cls","surface":"analyze","code":"VBA202","severity":"warning","line":61,"column":0}
@@ -1159,7 +1159,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":559,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":563,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA206","severity":"warning","line":565,"column":5}
-{"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":613,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdObject/stdObject.cls","surface":"analyze","code":"VBA202","severity":"warning","line":619,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdOpenCL/stdOpenCL.cls","surface":"analyze","code":"VBA227","severity":"warning","line":128,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdPowerPointLibraries/ShapeHook.cls","surface":"analyze","code":"VB045","severity":"error","line":27,"column":3}

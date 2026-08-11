@@ -43,6 +43,21 @@ Public Sub ReturnUse()
   Set maybeTarget = MaybeSheet(False)
   Debug.Print maybeTarget.Name
 End Sub
+
+Public Sub EarlyExitUse(ByVal skip As Boolean)
+  Dim earlyTarget As Worksheet
+  If skip Then Exit Sub
+  Debug.Print earlyTarget.Name
+End Sub
+
+Public Sub ErrorPathUse(ByVal fail As Boolean)
+  Dim errorTarget As Worksheet
+  On Error GoTo Handler
+  If fail Then Err.Raise 5
+  Set errorTarget = ThisWorkbook.Worksheets(1)
+Handler:
+  Debug.Print errorTarget.Name
+End Sub
 `)
 
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
@@ -50,7 +65,7 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA202")
-	wantLines := []int{19, 20, 27, 33}
+	wantLines := []int{19, 20, 27, 33, 39, 48}
 	if len(got) != len(wantLines) {
 		t.Fatalf("VBA202 findings = %+v, want lines %v", got, wantLines)
 	}
@@ -58,6 +73,27 @@ End Sub
 		if got[index].Line != line {
 			t.Fatalf("VBA202 finding %d = %+v, want line %d", index, got[index], line)
 		}
+	}
+}
+
+func TestVBA202Issue448PreservesIndexedDictionaryWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub IndexedWrite()
+  Dim dict As Object
+  Set dict = CreateObject("Scripting.Dictionary")
+  dict("key") = "value"
+  Debug.Print dict("key")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("dominating construction must survive indexed assignment: %+v", got)
 	}
 }
 
@@ -185,6 +221,36 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448DoesNotLiftUnrelatedModuleAssignmentsIntoEntryState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private mGuard As Worksheet
+Private mTarget As Worksheet
+
+Private Sub GuardOnly()
+  If mGuard Is Nothing Then Exit Sub
+End Sub
+
+Private Sub UncalledAssignment()
+  Set mTarget = ThisWorkbook.Worksheets(1)
+End Sub
+
+Public Sub UseTargetWithoutInitialization()
+  Debug.Print mTarget.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "UseTargetWithoutInitialization" {
+		t.Fatalf("unrelated guard and assignment must not initialize module state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksModuleResetAfterLifecycleInitialization(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -216,6 +282,11 @@ Public Sub Guard(ByVal candidate As Worksheet)
   If Not candidate Is Nothing Then
     Debug.Print candidate.Name
   End If
+End Sub
+
+Public Sub InlineGuard(ByVal candidate As Worksheet)
+  If candidate Is Nothing Then Set candidate = ThisWorkbook.Worksheets(1)
+  Debug.Print candidate.Name
 End Sub
 `)
 

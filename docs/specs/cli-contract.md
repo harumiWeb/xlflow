@@ -973,7 +973,8 @@ Nothing` resets, and `ByRef` mutations. Locals, parameters, module-level
 objects, and persistent `Static` locals are included; each scope starts in its
 appropriate `Nothing`/maybe-`Nothing` state rather than being assumed
 initialized. `As New` declarations, constructor expressions, intrinsic object
-factories rooted at `ThisWorkbook` or `Application`, and unique project-local
+factories rooted at `ThisWorkbook` or `Application`, `Controls.Add` factories
+reached through a proven non-`Nothing` receiver, and unique project-local
 function/property summaries that guarantee a non-`Nothing` return establish
 initialized state. `Range.Find` remains nullable even when rooted at an
 intrinsic receiver. A callee or function with any path that can return

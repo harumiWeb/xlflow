@@ -24,6 +24,7 @@ type objectProcedureSummary struct {
 	Params         []objectParameterSummary
 	ByRefAssigned  map[int]bool
 	ModuleAssigned map[string]bool
+	ModuleWritten  map[string]bool
 	ReturnAssigned bool
 }
 
@@ -72,6 +73,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 				Line:           proc.StartLine,
 				ByRefAssigned:  map[int]bool{},
 				ModuleAssigned: map[string]bool{},
+				ModuleWritten:  map[string]bool{},
 			}
 			for index, parameter := range proc.Params {
 				summary.Params = append(summary.Params, objectParameterSummary{
@@ -98,6 +100,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 			updated := previous
 			updated.ByRefAssigned = cloneIntBoolMap(previous.ByRefAssigned)
 			updated.ModuleAssigned = cloneBoolMap(previous.ModuleAssigned)
+			updated.ModuleWritten = cloneBoolMap(previous.ModuleWritten)
 			unknownFlow := info.proc.Graph == nil || len(info.proc.Graph.UnknownFlowSources) > 0
 			for _, statement := range info.proc.Statements {
 				unknownFlow = unknownFlow || statement.Recovered
@@ -115,6 +118,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 				}
 				variable := objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}
 				updated.ModuleAssigned[strings.ToLower(name)] = !unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
+				updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleField(info.proc, declaration.Name)
 			}
 			if isObjectType(info.proc.ReturnType) {
 				variable := objectVariable{Scope: procedureir.ScopeLocal, Name: info.proc.Name}
@@ -132,8 +136,120 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 	return summaries
 }
 
+// buildObjectProcedureEntryStates computes module-field state at procedure
+// entries from resolved call sites. A field is admitted only when every
+// reachable call site into that procedure has a definitely non-Nothing value
+// immediately before the call. Uncalled, ambiguous, external, and recursive
+// procedures therefore retain the conservative MaybeNothing entry state.
+func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]objectProcedureSummary) map[string]map[string]bool {
+	type procedureInfo struct {
+		file         parsedFile
+		proc         sourceProcedure
+		moduleDecls  map[string]sourceDeclaration
+		declarations map[string]sourceDeclaration
+		key          string
+	}
+	infos := make([]procedureInfo, 0)
+	byKey := map[string]procedureInfo{}
+	entries := map[string]map[string]bool{}
+	for _, file := range files {
+		procedures := sourceProceduresFromIR(file.IR, file.CFG)
+		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		for _, proc := range procedures {
+			key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
+			info := procedureInfo{file: file, proc: proc, moduleDecls: moduleDecls, declarations: objectFlowDeclarations(file.Lines, proc, moduleDecls), key: key}
+			infos = append(infos, info)
+			byKey[key] = info
+			state := map[string]bool{}
+			for name, declaration := range moduleDecls {
+				if declaration.Object {
+					state[(objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()] = false
+				}
+			}
+			entries[key] = state
+		}
+	}
+	for iteration := 0; iteration < len(infos)+1; iteration++ {
+		next := map[string]map[string]bool{}
+		seen := map[string]map[string]bool{}
+		for key, state := range entries {
+			next[key] = cloneBoolMap(state)
+			seen[key] = map[string]bool{}
+		}
+		for _, caller := range infos {
+			flow := objectStateFlow(caller.file, caller.proc, caller.declarations, summaries, objectFlowOptions{Entry: entries[caller.key]})
+			for _, call := range caller.proc.Calls {
+				if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+					continue
+				}
+				candidate := call.Resolution.Candidates[0]
+				if strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(candidate.QualifiedName)) {
+					// A recursive call cannot establish a new entry guarantee for
+					// itself; admitting its current module state would be circular.
+					continue
+				}
+				calleeKey := objectSummaryKey(candidate.File, candidate.QualifiedName, candidate.Kind, candidate.Line)
+				callee, ok := byKey[calleeKey]
+				if !ok || !strings.EqualFold(callee.proc.Module, caller.proc.Module) {
+					continue
+				}
+				if caller.proc.Graph == nil {
+					continue
+				}
+				block, ok := caller.proc.Graph.BlockForStatement(call.StatementID)
+				if !ok || !caller.proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
+					continue
+				}
+				state := flow.in[block.ID]
+				for name, declaration := range callee.moduleDecls {
+					if !declaration.Object {
+						continue
+					}
+					field := objectVariable{Scope: procedureir.ScopeModule, Name: name}
+					fieldKey := field.key()
+					if !seen[callee.key][fieldKey] {
+						next[callee.key][fieldKey] = true
+					}
+					seen[callee.key][fieldKey] = true
+					if !state[fieldKey] {
+						next[callee.key][fieldKey] = false
+					}
+				}
+			}
+		}
+		changed := false
+		for key, state := range next {
+			for fieldKey := range state {
+				if !seen[key][fieldKey] {
+					state[fieldKey] = false
+				}
+			}
+			if !objectBoolMapEqual(entries[key], state) {
+				changed = true
+			}
+		}
+		entries = next
+		if !changed {
+			break
+		}
+	}
+	return entries
+}
+
+func objectBoolMapEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
 func objectSummaryEqual(a, b objectProcedureSummary) bool {
-	if a.ReturnAssigned != b.ReturnAssigned || len(a.ByRefAssigned) != len(b.ByRefAssigned) || len(a.ModuleAssigned) != len(b.ModuleAssigned) {
+	if a.ReturnAssigned != b.ReturnAssigned || len(a.ByRefAssigned) != len(b.ByRefAssigned) || len(a.ModuleAssigned) != len(b.ModuleAssigned) || len(a.ModuleWritten) != len(b.ModuleWritten) {
 		return false
 	}
 	for index, value := range a.ByRefAssigned {
@@ -143,6 +259,11 @@ func objectSummaryEqual(a, b objectProcedureSummary) bool {
 	}
 	for name, value := range a.ModuleAssigned {
 		if b.ModuleAssigned[name] != value {
+			return false
+		}
+	}
+	for name, value := range a.ModuleWritten {
+		if b.ModuleWritten[name] != value {
 			return false
 		}
 	}
@@ -207,15 +328,37 @@ func objectProcedureUsesModuleObject(proc sourceProcedure, moduleDecls map[strin
 	return false
 }
 
+func objectProcedureWritesModuleField(proc sourceProcedure, name string) bool {
+	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
+	for _, expression := range proc.Expressions {
+		expressions[expression.ID] = expression
+	}
+	statements := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		statements[statement.ID] = statement
+	}
+	for _, access := range proc.Accesses {
+		if access.Scope != procedureir.ScopeModule || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) || !strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
+			continue
+		}
+		if objectMemberReceiver(expressions, statements, access) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 type objectFlowOptions struct {
 	Summary bool
+	Entry   map[string]bool
 }
 
 // objectUseBeforeSetIRFindings reports the first unsafe member/collection use
 // of each object variable.  The state at a use comes from the CFG entry fact,
 // not from source-line order, so branches, early exits, loops and error edges
 // are all represented by the same must-analysis.
-func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) []Finding {
+func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, entry map[string]bool) []Finding {
 	if proc.Graph == nil {
 		return nil
 	}
@@ -244,7 +387,7 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 	if !relevant {
 		return nil
 	}
-	flow := objectStateFlow(file, proc, declarations, summaries, objectFlowOptions{})
+	flow := objectStateFlow(file, proc, declarations, summaries, objectFlowOptions{Entry: entry})
 	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
 	for _, expression := range proc.Expressions {
 		expressions[expression.ID] = expression
@@ -277,7 +420,6 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if !objectMemberReceiver(expressions, statements, access) {
 			continue
 		}
-		key := strings.ToLower(cleanIdentifier(access.Name))
 		declaration, ok := objectDeclarationFor(access.Name, access.Scope, declarations)
 		// `As New` is guaranteed to produce a value on first use.  A normal
 		// Static declaration, however, has module-lifetime state and may still
@@ -296,6 +438,7 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if access.Scope == procedureir.ScopeUnresolved {
 			variable.Scope = procedureir.ScopeLocal
 		}
+		key := variable.key()
 		block, ok := proc.Graph.BlockForStatement(access.StatementID)
 		if !ok || !proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
 			continue
@@ -326,8 +469,8 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if name == "" {
 			continue
 		}
-		key := strings.ToLower(cleanIdentifier(name))
 		variable := objectFlowVariableForName(name, flow.vars)
+		key := variable.key()
 		declaration, ok := objectDeclarationFor(name, variable.Scope, declarations)
 		if !ok || !declaration.Object || declaration.NewExpression || declaration.Array || reported[key] {
 			continue
@@ -507,7 +650,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 	for key, variable := range result.vars {
 		initial[key] = false
 		declaration, _ := objectDeclarationFor(variable.Name, variable.Scope, declarations)
-		if declaration.NewExpression || objectClassLifecycleAssigned(proc, variable, summaries) || objectModuleGuardedStateAssigned(file, proc, variable, declarations, summaries) {
+		if declaration.NewExpression || objectClassLifecycleAssigned(proc, variable, summaries) || (options.Entry != nil && options.Entry[variable.key()]) {
 			initial[key] = true
 		}
 		// Parameters are intentionally not initialized at procedure entry.  A
@@ -590,73 +733,6 @@ func objectClassLifecycleAssigned(proc sourceProcedure, variable objectVariable,
 	return false
 }
 
-// objectModuleGuardedStateAssigned carries a narrow module-state proof into
-// private helpers that are called after a module-level guard.  A procedure
-// such as BuildScene first exits when mForm Is Nothing, then establishes a
-// persistent scene marker and invokes helpers that read the same module state.
-// The guard names themselves are safe immediately; other fields must still be
-// proven by an all-path summary.  This is deliberately independent of helper
-// names such as Initialize or Setup, so an uncalled/conditional initializer
-// cannot manufacture an entry-state fact.
-func objectModuleGuardedStateAssigned(file parsedFile, proc sourceProcedure, variable objectVariable, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) bool {
-	if variable.Scope != procedureir.ScopeModule {
-		return false
-	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
-	guarded := map[string]bool{}
-	for _, candidate := range procedures {
-		pending := ""
-		for _, statement := range candidate.Statements {
-			if statement.Condition != nil {
-				text := strings.ToLower(strings.TrimSpace(statement.Condition.Text))
-				if index := strings.Index(text, " is nothing"); index > 0 {
-					name := cleanIdentifier(strings.TrimSpace(text[:index]))
-					declaration, ok := objectDeclarationFor(name, procedureir.ScopeModule, declarations)
-					if ok && declaration.Object {
-						pending = strings.ToLower(name)
-					}
-				}
-			}
-			if pending != "" && strings.Contains(strings.ToLower(statement.Text), "exit sub") {
-				guarded[pending] = true
-				pending = ""
-			}
-		}
-	}
-	name := strings.ToLower(cleanIdentifier(variable.Name))
-	if len(guarded) == 0 {
-		return false
-	}
-	if guarded[name] {
-		return true
-	}
-	for _, summary := range summaries {
-		if !strings.EqualFold(summary.Module, proc.Module) || !summary.ModuleAssigned[name] {
-			continue
-		}
-		return true
-	}
-	// A guarded module lifecycle may establish fields through direct Set
-	// statements whose return value cannot be summarized (for example a late-
-	// bound control factory).  Keep that proof tied to the explicit guard; an
-	// ordinary uncalled or conditional initializer still has no guarded marker.
-	for _, candidate := range procedures {
-		for _, statement := range candidate.Statements {
-			if statement.Kind != procedureir.StatementSet || statement.Value == nil || strings.EqualFold(strings.TrimSpace(statement.Value.Text), "nothing") {
-				continue
-			}
-			for _, access := range candidate.Accesses {
-				if access.StatementID == statement.ID && access.Scope == procedureir.ScopeModule &&
-					strings.EqualFold(cleanIdentifier(access.Name), name) &&
-					(access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // objectFlowApplyGuard refines the state on the edge selected by a direct
 // `obj Is Nothing`/`Not obj Is Nothing` condition.  Compound boolean
 // expressions are deliberately ignored; VBA212 remains responsible for
@@ -700,12 +776,30 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 	if edge.Kind == vbacfg.EdgeBranchFalse {
 		nonNothingOnTrue = !nonNothingOnTrue
 	}
+	if !not && edge.Kind == vbacfg.EdgeBranchTrue && objectFlowInlineGuardAssignment(statement, name) {
+		nonNothingOnTrue = true
+	}
 	if _, ok := state[key]; ok {
 		updated := cloneObjectState(state)
 		updated[key] = nonNothingOnTrue
 		return updated
 	}
 	return state
+}
+
+func objectFlowInlineGuardAssignment(statement procedureir.Statement, name string) bool {
+	text := strings.ToLower(strings.TrimSpace(statement.Text))
+	then := strings.Index(text, " then ")
+	if then < 0 {
+		return false
+	}
+	tail := strings.TrimSpace(text[then+len(" then "):])
+	prefix := "set " + strings.ToLower(cleanIdentifier(name)) + " ="
+	if !strings.HasPrefix(tail, prefix) {
+		return false
+	}
+	rhs := strings.TrimSpace(strings.TrimPrefix(tail, prefix))
+	return strings.HasPrefix(rhs, "new ") || strings.HasPrefix(rhs, "createobject(") || strings.HasPrefix(rhs, "getobject(")
 }
 
 func objectFlowExitDefinitelyAssigned(flow objectFlowResult, variable objectVariable) bool {
@@ -892,6 +986,9 @@ func objectCallReturnsAssigned(call procedureir.CallSite, summaries map[string]o
 			return false
 		}
 		receiver := strings.ToLower(cleanIdentifier(*call.Callee.Receiver))
+		if strings.EqualFold(call.Callee.Member, "Add") && strings.HasSuffix(receiver, ".controls") {
+			return true
+		}
 		return receiver == "thisworkbook" || receiver == "application" || receiver == "excel.application" ||
 			strings.HasPrefix(receiver, "thisworkbook.") || strings.HasPrefix(receiver, "application.") || strings.HasPrefix(receiver, "excel.application.")
 	}
@@ -914,7 +1011,9 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 	var candidates []objectProcedureSummary
 	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
 		if summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries); ok {
-			candidates = append(candidates, summary)
+			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
+				candidates = append(candidates, summary)
+			}
 		}
 	}
 	// Module fields are represented without a module qualifier in VariableAccess.
@@ -926,6 +1025,9 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 			continue
 		}
 		for name, assigned := range summary.ModuleAssigned {
+			if !summary.ModuleWritten[name] {
+				continue
+			}
 			variable := objectVariable{Scope: procedureir.ScopeModule, Name: name}
 			if _, exists := vars[variable.key()]; exists {
 				state[variable.key()] = assigned
