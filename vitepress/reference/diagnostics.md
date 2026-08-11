@@ -92,6 +92,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA237`](#vba237) | analyze | warning  | interprocedural | yes     | Suppressed error propagation                       |
 | [`VBA238`](#vba238) | analyze | warning  | procedure-local | yes     | Loop-invariant Excel object resolution             |
 | [`VBA239`](#vba239) | analyze | warning  | procedure-local | yes     | Unsafe SQL construction                            |
+| [`VBA240`](#vba240) | analyze | warning  | project-wide    | no      | Risky module-level mutable state                   |
 
 ## VB001
 
@@ -1984,3 +1985,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                               |
 | Real-time editor diagnostic | yes                              |
 | Fix available               | no                               |
+
+## VBA240
+
+**Risky module-level mutable state.** Module-level mutable state has project-wide readers and writers that create hidden lifecycle coupling.
+
+| Property                    | Value                       |
+| --------------------------- | --------------------------- |
+| Family                      | `analyze`                   |
+| Category                    | `reliability`               |
+| Evidence class              | `maintainability`           |
+| Compile-equivalent          | no                          |
+| Default severity            | `warning`                   |
+| Supported severities        | `warning`                   |
+| Surfaces                    | `analyze`                   |
+| Scope                       | `project-wide`              |
+| Precision                   | `medium`                    |
+| Enabled by default          | no                          |
+| Configuration               | `detect_risky_module_state` |
+| Inline suppression          | yes                         |
+| Blocks source preflight     | no                          |
+| Real-time editor diagnostic | no                          |
+| Fix available               | no                          |

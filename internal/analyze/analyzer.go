@@ -67,8 +67,9 @@ func (e *ParseError) Error() string {
 }
 
 type Result struct {
-	Findings []Finding
-	Warnings []map[string]any
+	Findings        []Finding
+	Warnings        []map[string]any
+	AnalysisMetrics any `json:"analysis_metrics,omitempty"`
 }
 
 type Analyzer struct {
@@ -428,6 +429,12 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	if analysis.Config.Analyze.DetectPublicAPITypeSafety {
 		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB)
 	}
+	var analysisMetrics any
+	if analysis.Config.Analyze.DetectRiskyModuleState {
+		moduleState := buildModuleStateAnalysis(a.RootDir, a.Config, parsedFiles)
+		findings = append(findings, moduleState.Findings...)
+		analysisMetrics = moduleState.Metrics
+	}
 	for _, file := range parsedFiles {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
@@ -469,7 +476,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
-	return Result{Findings: findings, Warnings: warnings}, nil
+	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics}, nil
 }
 
 func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {

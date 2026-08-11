@@ -1892,6 +1892,28 @@
       "configuration_key": "detect_unsafe_sql_construction",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA240",
+      "title": "Risky module-level mutable state",
+      "description": "Module-level mutable state has project-wide readers and writers that create hidden lifecycle coupling.",
+      "family": "analyze",
+      "category": "reliability",
+      "evidence_class": "maintainability",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze"],
+      "default_enabled": false,
+      "scope": "project-wide",
+      "realtime": false,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba240",
+      "configurable": true,
+      "configuration_key": "detect_risky_module_state",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

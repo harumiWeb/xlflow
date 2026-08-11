@@ -41,55 +41,56 @@ type Envelope struct {
 	Error   *Error   `json:"error"`
 	Logs    []string `json:"logs"`
 
-	Diagnostics    any `json:"diagnostics,omitempty"`
-	Workbook       any `json:"workbook,omitempty"`
-	Backup         any `json:"backup,omitempty"`
-	Source         any `json:"source,omitempty"`
-	Bridge         any `json:"bridge,omitempty"`
-	Macro          any `json:"macro,omitempty"`
-	Macros         any `json:"macros,omitempty"`
-	Forms          any `json:"forms,omitempty"`
-	Issues         any `json:"issues,omitempty"`
-	Tests          any `json:"tests,omitempty"`
-	TestRun        any `json:"test_run,omitempty"`
-	Diff           any `json:"diff,omitempty"`
-	Inspect        any `json:"inspect,omitempty"`
-	Impact         any `json:"impact,omitempty"`
-	Graph          any `json:"graph,omitempty"`
-	Runtime        any `json:"runtime,omitempty"`
-	GUIBoundaries  any `json:"gui_boundaries,omitempty"`
-	Debug          any `json:"debug,omitempty"`
-	UI             any `json:"ui,omitempty"`
-	Session        any `json:"session,omitempty"`
-	Coordination   any `json:"coordination,omitempty"`
-	Runner         any `json:"runner,omitempty"`
-	Analysis       any `json:"analysis,omitempty"`
-	Check          any `json:"check,omitempty"`
-	Version        any `json:"version,omitempty"`
-	Update         any `json:"update,omitempty"`
-	RunDiagnostic  any `json:"run_diagnostic,omitempty"`
-	PushDiagnostic any `json:"push_diagnostic,omitempty"`
-	Backups        any `json:"backups,omitempty"`
-	BackupPrune    any `json:"backup_prune,omitempty"`
-	BackupDelete   any `json:"backup_delete,omitempty"`
-	Rollback       any `json:"rollback,omitempty"`
-	Target         any `json:"target,omitempty"`
-	Output         any `json:"output,omitempty"`
-	Build          any `json:"build,omitempty"`
-	Pack           any `json:"pack,omitempty"`
-	Spec           any `json:"spec,omitempty"`
-	Edit           any `json:"edit,omitempty"`
-	Project        any `json:"project,omitempty"`
-	State          any `json:"state,omitempty"`
-	TypeDB         any `json:"type_db,omitempty"`
-	Warnings       any `json:"warnings,omitempty"`
-	Hints          any `json:"hints,omitempty"`
-	DefaultEntry   any `json:"default_entry,omitempty"`
-	Suggestions    any `json:"suggestions,omitempty"`
-	Process        any `json:"process,omitempty"`
-	Recovery       any `json:"recovery,omitempty"`
-	Capabilities   any `json:"capabilities,omitempty"`
-	Rules          any `json:"rules,omitempty"`
+	Diagnostics     any `json:"diagnostics,omitempty"`
+	Workbook        any `json:"workbook,omitempty"`
+	Backup          any `json:"backup,omitempty"`
+	Source          any `json:"source,omitempty"`
+	Bridge          any `json:"bridge,omitempty"`
+	Macro           any `json:"macro,omitempty"`
+	Macros          any `json:"macros,omitempty"`
+	Forms           any `json:"forms,omitempty"`
+	Issues          any `json:"issues,omitempty"`
+	Tests           any `json:"tests,omitempty"`
+	TestRun         any `json:"test_run,omitempty"`
+	Diff            any `json:"diff,omitempty"`
+	Inspect         any `json:"inspect,omitempty"`
+	Impact          any `json:"impact,omitempty"`
+	Graph           any `json:"graph,omitempty"`
+	Runtime         any `json:"runtime,omitempty"`
+	GUIBoundaries   any `json:"gui_boundaries,omitempty"`
+	Debug           any `json:"debug,omitempty"`
+	UI              any `json:"ui,omitempty"`
+	Session         any `json:"session,omitempty"`
+	Coordination    any `json:"coordination,omitempty"`
+	Runner          any `json:"runner,omitempty"`
+	Analysis        any `json:"analysis,omitempty"`
+	AnalysisMetrics any `json:"analysis_metrics,omitempty"`
+	Check           any `json:"check,omitempty"`
+	Version         any `json:"version,omitempty"`
+	Update          any `json:"update,omitempty"`
+	RunDiagnostic   any `json:"run_diagnostic,omitempty"`
+	PushDiagnostic  any `json:"push_diagnostic,omitempty"`
+	Backups         any `json:"backups,omitempty"`
+	BackupPrune     any `json:"backup_prune,omitempty"`
+	BackupDelete    any `json:"backup_delete,omitempty"`
+	Rollback        any `json:"rollback,omitempty"`
+	Target          any `json:"target,omitempty"`
+	Output          any `json:"output,omitempty"`
+	Build           any `json:"build,omitempty"`
+	Pack            any `json:"pack,omitempty"`
+	Spec            any `json:"spec,omitempty"`
+	Edit            any `json:"edit,omitempty"`
+	Project         any `json:"project,omitempty"`
+	State           any `json:"state,omitempty"`
+	TypeDB          any `json:"type_db,omitempty"`
+	Warnings        any `json:"warnings,omitempty"`
+	Hints           any `json:"hints,omitempty"`
+	DefaultEntry    any `json:"default_entry,omitempty"`
+	Suggestions     any `json:"suggestions,omitempty"`
+	Process         any `json:"process,omitempty"`
+	Recovery        any `json:"recovery,omitempty"`
+	Capabilities    any `json:"capabilities,omitempty"`
+	Rules           any `json:"rules,omitempty"`
 }
 
 type Options struct {
@@ -405,7 +406,7 @@ func renderHuman(env Envelope, opts Options) string {
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
 		}
-		if env.Analysis != nil {
+		if env.Analysis != nil || env.AnalysisMetrics != nil {
 			b.WriteString(r.renderAnalysis(env))
 		}
 		b.WriteString(r.renderRun(env))
@@ -420,7 +421,7 @@ func renderHuman(env Envelope, opts Options) string {
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
 		}
-		if env.Analysis != nil {
+		if env.Analysis != nil || env.AnalysisMetrics != nil {
 			b.WriteString(r.renderAnalysis(env))
 		}
 	case "inspect-gui":
@@ -466,10 +467,10 @@ func renderHuman(env Envelope, opts Options) string {
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
 		}
-		if env.Analysis != nil {
+		if env.Analysis != nil || env.AnalysisMetrics != nil {
 			b.WriteString(r.renderAnalysis(env))
 		}
-		if env.Issues != nil || env.Analysis != nil {
+		if env.Issues != nil || env.Analysis != nil || env.AnalysisMetrics != nil {
 			b.WriteString(r.renderLogs(env))
 		} else {
 			b.WriteString(r.renderWorkbookSource(env))
@@ -1693,6 +1694,7 @@ func (r renderer) renderAnalysis(env Envelope) string {
 	b.WriteString(r.section("Analysis"))
 	if len(findings) == 0 {
 		b.WriteString("No analysis findings found.\n")
+		b.WriteString(r.renderAnalysisMetrics(env.AnalysisMetrics))
 		b.WriteString(r.renderWarningsAndHints(env))
 		return b.String()
 	}
@@ -1715,7 +1717,39 @@ func (r renderer) renderAnalysis(env Envelope) string {
 		})
 	}
 	b.WriteString(r.table([]string{"Severity", "Code", "Location", "Message"}, rows))
+	b.WriteString(r.renderAnalysisMetrics(env.AnalysisMetrics))
 	b.WriteString(r.renderWarningsAndHints(env))
+	return b.String()
+}
+
+func (r renderer) renderAnalysisMetrics(value any) string {
+	metrics := objectMap(value)
+	state := objectMap(metrics["module_state"])
+	fields := listOfObjects(state["fields"])
+	if len(fields) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Module state metrics:\n")
+	b.WriteString(r.kvRows(kvRow{"Fields", fmt.Sprintf("%d", len(fields))}))
+	limit := len(fields)
+	if limit > 10 {
+		limit = 10
+	}
+	rows := make([][]string, 0, limit)
+	for _, field := range fields[:limit] {
+		rows = append(rows, []string{
+			stringValue(field, "module") + "." + stringValue(field, "name"),
+			fmt.Sprintf("%d", intNumber(field, "reader_count")),
+			fmt.Sprintf("%d", intNumber(field, "writer_count")),
+			fmt.Sprintf("%d", intNumber(field, "root_count")),
+			stringValue(field, "classification"),
+		})
+	}
+	b.WriteString(r.table([]string{"Field", "Readers", "Writers", "Roots", "Class"}, rows))
+	if len(fields) > limit {
+		fmt.Fprintf(&b, "%d more field(s); use --json for the complete metrics.\n", len(fields)-limit)
+	}
 	return b.String()
 }
 
