@@ -220,7 +220,7 @@ func (l Linter) filesContext(ctx context.Context) ([]string, error) {
 	// root even though discovery itself is delegated to the canonical symbols
 	// index. This also keeps cancellation timing stable for callers that use a
 	// checkpointing context during project finalization.
-	for range []string{l.Config.Src.Modules, l.Config.Src.Classes, l.Config.Src.Forms, l.Config.Src.Workbook} {
+	for range 4 { // one cancellation checkpoint per configured source root
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "valid-module-form",
-  "description": "Pending accepted control for UserForm code-behind declarations.",
+  "description": "Asserted accepted control for UserForm code-behind declarations.",
   "modules": [
     {
       "name": "UserForm1",

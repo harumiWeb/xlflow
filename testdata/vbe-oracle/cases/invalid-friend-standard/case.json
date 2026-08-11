@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "invalid-friend-standard",
-  "description": "Pending VBE observation for Friend procedure in a standard module.",
+  "description": "Asserted VBE rejection for Friend procedure in a standard module.",
   "modules": [
     {
       "name": "InvalidFriend",

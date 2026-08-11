@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "invalid-withevents-shape",
-  "description": "Pending VBE observation for an invalid WithEvents shape.",
+  "description": "Asserted VBE rejection for an invalid WithEvents shape.",
   "modules": [
     {
       "name": "InvalidWithEventsShape",

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "invalid-me-standard",
-  "description": "Pending VBE observation for Me in a standard module.",
+  "description": "Asserted VBE rejection for Me in a standard module.",
   "modules": [
     {
       "name": "InvalidMe",

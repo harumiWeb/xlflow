@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "valid-module-class",
-  "description": "Pending accepted control for class-module declarations.",
+  "description": "Asserted accepted control for class-module declarations.",
   "modules": [
     {
       "name": "ValidClass",

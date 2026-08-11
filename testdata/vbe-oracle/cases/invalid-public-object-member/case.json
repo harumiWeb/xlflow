@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "invalid-public-object-member",
-  "description": "Pending VBE observation for a prohibited public object-module member.",
+  "description": "Asserted VBE rejection for a prohibited public object-module member.",
   "modules": [
     {
       "name": "InvalidPublicMember",

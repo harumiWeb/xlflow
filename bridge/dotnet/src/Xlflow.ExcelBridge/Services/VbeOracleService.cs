@@ -476,6 +476,20 @@ public sealed class VbeOracleService : IVbeOracleService
         return VbaSourceHelper.NormalizeDocumentModuleContent(source.TrimStart('\uFEFF'));
     }
 
+    private static bool MatchesDocumentTarget(int componentType, string candidateName, string moduleName, string documentTarget)
+    {
+        if (componentType != 100 || !string.Equals(candidateName, moduleName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (string.Equals(documentTarget, "workbook", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(candidateName, "ThisWorkbook", StringComparison.OrdinalIgnoreCase);
+        }
+        return string.Equals(documentTarget, "worksheet", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(candidateName, "ThisWorkbook", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void InjectDocumentModule(object components, OracleModule module)
     {
         object? component = null;
@@ -492,11 +506,7 @@ public sealed class VbeOracleService : IVbeOracleService
                 }
                 var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(candidate, "Type"));
                 var name = ExcelBridgeSupport.GetString(candidate, "Name") ?? "";
-                var isWorkbookTarget = string.Equals(module.DocumentTarget, "workbook", StringComparison.OrdinalIgnoreCase);
-                var isWorksheetTarget = string.Equals(module.DocumentTarget, "worksheet", StringComparison.OrdinalIgnoreCase);
-                var matchesTarget = type == 100 && (isWorkbookTarget
-                    ? string.Equals(name, "ThisWorkbook", StringComparison.OrdinalIgnoreCase)
-                    : isWorksheetTarget && !string.Equals(name, "ThisWorkbook", StringComparison.OrdinalIgnoreCase));
+                var matchesTarget = MatchesDocumentTarget(type, name, module.Name, module.DocumentTarget);
                 if (matchesTarget)
                 {
                     component = candidate;

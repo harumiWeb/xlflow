@@ -70,6 +70,21 @@ public sealed class VbeOracleServiceTests
         Assert.Contains("Option Explicit", result);
     }
 
+    [Theory]
+    [InlineData(100, "ThisWorkbook", "ThisWorkbook", "workbook", true)]
+    [InlineData(100, "THISWORKBOOK", "ThisWorkbook", "workbook", true)]
+    [InlineData(100, "Sheet2", "Sheet2", "worksheet", true)]
+    [InlineData(100, "Sheet1", "Sheet2", "worksheet", false)]
+    [InlineData(100, "ThisWorkbook", "Sheet2", "worksheet", false)]
+    [InlineData(2, "Sheet2", "Sheet2", "worksheet", false)]
+    public void DocumentTargetResolutionRequiresMatchingModuleName(int componentType, string candidateName, string moduleName, string target, bool expected)
+    {
+        var resolver = typeof(VbeOracleService).GetMethod("MatchesDocumentTarget", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var result = (bool)resolver.Invoke(null, [componentType, candidateName, moduleName, target])!;
+
+        Assert.Equal(expected, result);
+    }
+
     private static BridgeResponse Execute(object plan)
     {
         var json = JsonSerializer.Serialize(plan);

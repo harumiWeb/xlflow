@@ -1,12 +1,17 @@
 {
   "schema_version": 1,
   "id": "invalid-implements-standard",
-  "description": "Pending VBE observation for Implements in a standard module.",
+  "description": "Asserted VBE rejection for Implements in a standard module.",
   "modules": [
     {
       "name": "InvalidImplements",
       "kind": "standard",
       "path": "InvalidImplements.bas"
+    },
+    {
+      "name": "IFoo",
+      "kind": "class",
+      "path": "IFoo.bas"
     }
   ],
   "probe": {

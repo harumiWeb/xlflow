@@ -75,7 +75,7 @@ func (w *moduleKindDiagnosticWalker) walk(node *tree_sitter.Node, state moduleWa
 		}
 		if state.module && header != nil && strings.EqualFold(visibilityText(header, w.source), "Friend") &&
 			(w.moduleKind == "standard" || w.moduleKind == "document") {
-			w.add(header, declarationNameNode(header), "invalid_friend_module", declarationNodeName(header, w.source), "Friend procedures are not valid in standard or document modules.")
+			w.add(header, declarationNameNode(header), "VB050", "invalid_friend_module", declarationNodeName(header, w.source), "Friend procedures are not valid in standard or document modules.")
 		}
 		if strings.HasPrefix(kind, "conditional_") {
 			// The conditional procedure helper owns branch traversal. Its body
@@ -89,11 +89,11 @@ func (w *moduleKindDiagnosticWalker) walk(node *tree_sitter.Node, state moduleWa
 	switch kind {
 	case "event_declaration", "event_statement":
 		if state.module && w.moduleKind == "standard" {
-			w.add(node, declarationNameNode(node), "invalid_event_module", declarationNodeName(node, w.source), "Event declarations are not valid in standard modules.")
+			w.add(node, declarationNameNode(node), "VB050", "invalid_event_module", declarationNodeName(node, w.source), "Event declarations are not valid in standard modules.")
 		}
 	case "implements_statement":
 		if state.module && w.moduleKind == "standard" {
-			w.add(node, declarationNameNode(node), "invalid_implements_module", declarationNodeName(node, w.source), "Implements statements are not valid in standard modules.")
+			w.add(node, declarationNameNode(node), "VB050", "invalid_implements_module", declarationNodeName(node, w.source), "Implements statements are not valid in standard modules.")
 		}
 	case "variable_declaration":
 		w.variableIssues(node, state)
@@ -102,17 +102,17 @@ func (w *moduleKindDiagnosticWalker) walk(node *tree_sitter.Node, state moduleWa
 			for i := uint(0); i < node.NamedChildCount(); i++ {
 				child := node.NamedChild(i)
 				if child != nil && child.Kind() == "const_declarator" {
-					w.add(node, declarationNameNode(child), "invalid_public_object_member", declarationNodeName(child, w.source), "Public Const declarations are not valid in object modules.")
+					w.add(node, declarationNameNode(child), "VB050", "invalid_public_object_member", declarationNodeName(child, w.source), "Public Const declarations are not valid in object modules.")
 				}
 			}
 		}
 	case "type_declaration":
 		if state.module && isObjectModuleKind(w.moduleKind) && strings.EqualFold(visibilityText(node, w.source), "Public") {
-			w.add(node, declarationNameNode(node), "invalid_public_object_member", declarationNodeName(node, w.source), "Public Type declarations are not valid in object modules.")
+			w.add(node, declarationNameNode(node), "VB050", "invalid_public_object_member", declarationNodeName(node, w.source), "Public Type declarations are not valid in object modules.")
 		}
 	case "declare_statement", "declare_sub_statement", "declare_function_statement":
 		if state.module && isObjectModuleKind(w.moduleKind) && !strings.EqualFold(visibilityText(node, w.source), "Private") {
-			w.add(node, declarationNameNode(node), "invalid_public_object_member", declarationNodeName(node, w.source), "Declare members in object modules must be Private.")
+			w.add(node, declarationNameNode(node), "VB050", "invalid_public_object_member", declarationNodeName(node, w.source), "Declare members in object modules must be Private.")
 		}
 	case "attribute_statement", "attribute_declaration":
 		// Attributes are metadata, not VBA declarations. In particular, an
@@ -121,7 +121,7 @@ func (w *moduleKindDiagnosticWalker) walk(node *tree_sitter.Node, state moduleWa
 	}
 
 	if w.moduleKind == "standard" && kind == "identifier" && isMeKeywordNode(node, w.source) {
-		w.add(node, node, "invalid_me_context", "Me", "The Me keyword is only valid in object modules.")
+		w.add(node, node, "VB051", "invalid_me_context", "Me", "The Me keyword is only valid in object modules.")
 	}
 	if kind == "type_declaration" || kind == "enum_declaration" {
 		state = moduleWalkState{}
@@ -139,23 +139,27 @@ func (w *moduleKindDiagnosticWalker) walkConditional(node *tree_sitter.Node, sta
 			}
 			return
 		}
-		for i := uint(0); i < node.NamedChildCount(); i++ {
-			child := node.NamedChild(i)
-			if child == nil || (!strings.Contains(child.Kind(), "else") && !strings.Contains(child.Kind(), "elseif")) {
-				continue
-			}
-			if body := child.ChildByFieldName("body"); body != nil {
-				w.walk(body, state)
-			}
-		}
+		w.walkConditionalAlternatives(node, state)
 		return
 	}
 	if body := node.ChildByFieldName("body"); body != nil {
 		w.walk(body, state)
 	}
+	w.walkConditionalAlternatives(node, state)
+}
+
+func (w *moduleKindDiagnosticWalker) walkConditionalAlternatives(node *tree_sitter.Node, state moduleWalkState) {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child == nil || (!strings.Contains(child.Kind(), "else") && !strings.Contains(child.Kind(), "elseif")) {
+		if child == nil {
+			continue
+		}
+		kind := child.Kind()
+		if strings.Contains(kind, "elseif") {
+			if known, value := conditionalConstant(child, w.source); known && !value {
+				continue
+			}
+		} else if !strings.Contains(kind, "else") {
 			continue
 		}
 		if body := child.ChildByFieldName("body"); body != nil {
@@ -182,11 +186,11 @@ func (w *moduleKindDiagnosticWalker) variableIssues(node *tree_sitter.Node, stat
 			}
 			name := declarationNodeName(child, w.source)
 			if !state.module || w.moduleKind == "standard" {
-				w.add(node, declarationNameNode(child), "invalid_withevents_module", name, "WithEvents declarations are only valid as module-level members of class, document, or UserForm modules.")
+				w.add(node, declarationNameNode(child), "VB050", "invalid_withevents_module", name, "WithEvents declarations are only valid as module-level members of class, document, or UserForm modules.")
 				continue
 			}
 			if !w.validWithEventsShape(child) {
-				w.add(node, declarationNameNode(child), "invalid_withevents_shape", name, "WithEvents declarations require a scalar event-capable object type and cannot use As New.")
+				w.add(node, declarationNameNode(child), "VB050", "invalid_withevents_shape", name, "WithEvents declarations require a scalar event-capable object type and cannot use As New.")
 			}
 		}
 	}
@@ -206,18 +210,18 @@ func (w *moduleKindDiagnosticWalker) variableIssues(node *tree_sitter.Node, stat
 		name := declarationNodeName(child, w.source)
 		text := strings.ToLower(child.Utf8Text(w.source))
 		if variableIsArray(child, w.source) {
-			w.add(node, declarationNameNode(child), "invalid_public_object_member", name, "Public array fields are not valid in object modules.")
+			w.add(node, declarationNameNode(child), "VB050", "invalid_public_object_member", name, "Public array fields are not valid in object modules.")
 			continue
 		}
 		if variableIsFixedString(text) {
-			w.add(node, declarationNameNode(child), "invalid_public_object_member", name, "Public fixed-length String fields are not valid in object modules.")
+			w.add(node, declarationNameNode(child), "VB050", "invalid_public_object_member", name, "Public fixed-length String fields are not valid in object modules.")
 		}
 	}
 }
 
 func (w *moduleKindDiagnosticWalker) validWithEventsShape(node *tree_sitter.Node) bool {
 	text := strings.ToLower(node.Utf8Text(w.source))
-	if variableIsArray(node, w.source) || strings.Contains(text, "as new ") {
+	if variableIsArray(node, w.source) || hasAsNew(text) {
 		return false
 	}
 	typ := strings.ToLower(strings.TrimSpace(typeText(node, w.source)))
@@ -241,7 +245,7 @@ func (w *moduleKindDiagnosticWalker) validWithEventsShape(node *tree_sitter.Node
 	return true
 }
 
-func (w *moduleKindDiagnosticWalker) add(node, nameNode *tree_sitter.Node, kind, symbol, message string) {
+func (w *moduleKindDiagnosticWalker) add(node, nameNode *tree_sitter.Node, code, kind, symbol, message string) {
 	if w.ctx.Err() != nil {
 		return
 	}
@@ -249,13 +253,20 @@ func (w *moduleKindDiagnosticWalker) add(node, nameNode *tree_sitter.Node, kind,
 	if nameNode != nil {
 		rng = vbaast.NodeRange(nameNode)
 	}
-	issue := w.linter.issueAt(w.path, rng, "VB050", "error", message)
-	if kind == "invalid_me_context" {
-		issue.Code = "VB051"
-	}
+	issue := w.linter.issueAt(w.path, rng, code, "error", message)
 	issue.Kind = kind
 	issue.Symbol = symbol
 	w.issues = append(w.issues, issue)
+}
+
+func hasAsNew(text string) bool {
+	fields := strings.FieldsFunc(text, func(r rune) bool { return !isVBAIdentifierRune(r) })
+	for i := 0; i+1 < len(fields); i++ {
+		if strings.EqualFold(fields[i], "As") && strings.EqualFold(fields[i+1], "New") {
+			return true
+		}
+	}
+	return false
 }
 
 func isObjectModuleKind(kind string) bool {

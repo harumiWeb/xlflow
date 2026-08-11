@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "valid-module-standard",
-  "description": "Pending accepted control for standard-module declarations.",
+  "description": "Asserted accepted control for standard-module declarations.",
   "modules": [
     {
       "name": "ValidStandard",
