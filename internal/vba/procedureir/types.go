@@ -92,18 +92,21 @@ const (
 // only Expression set is the shorthand form (for example, `(10)`); Lower and
 // Upper are populated for an explicit `lower To upper` form.
 type ArrayBound struct {
-	Expression string       `json:"expression,omitempty"`
-	Lower      string       `json:"lower,omitempty"`
-	Upper      string       `json:"upper,omitempty"`
-	Range      vbaast.Range `json:"range"`
-	LowerRange vbaast.Range `json:"lowerRange,omitempty"`
-	UpperRange vbaast.Range `json:"upperRange,omitempty"`
-	Recovered  bool         `json:"recovered,omitempty"`
+	Expression string        `json:"expression,omitempty"`
+	Lower      string        `json:"lower,omitempty"`
+	Upper      string        `json:"upper,omitempty"`
+	Range      vbaast.Range  `json:"range"`
+	LowerRange *vbaast.Range `json:"lowerRange,omitempty"`
+	UpperRange *vbaast.Range `json:"upperRange,omitempty"`
+	Recovered  bool          `json:"recovered,omitempty"`
 }
 
 // ConditionalBranch identifies one possible #If/#ElseIf/#Else declaration
 // branch. Group is stable within a document build (the source offset of the
 // conditional node); Branch is zero-based with the consequence as branch 0.
+// Condition contains the source expression for #If and #ElseIf branches. It is
+// empty for #Else because that branch has no standalone expression; consumers
+// should use Group and Branch to determine mutual exclusivity.
 type ConditionalBranch struct {
 	Group     string       `json:"group"`
 	Condition string       `json:"condition,omitempty"`
@@ -112,21 +115,21 @@ type ConditionalBranch struct {
 }
 
 type Parameter struct {
-	Name            string       `json:"name"`
-	Type            string       `json:"type,omitempty"`
-	Passing         string       `json:"passing,omitempty"`
-	PassingExplicit bool         `json:"passingExplicit,omitempty"`
-	Optional        bool         `json:"optional,omitempty"`
-	ParamArray      bool         `json:"paramArray,omitempty"`
-	Default         string       `json:"default,omitempty"`
-	HasDefault      bool         `json:"hasDefault,omitempty"`
-	DefaultRange    vbaast.Range `json:"defaultRange,omitempty"`
-	Range           vbaast.Range `json:"range"`
-	IsArray         bool         `json:"isArray,omitempty"`
-	ArrayShape      ArrayShape   `json:"arrayShape,omitempty"`
-	BoundsRange     vbaast.Range `json:"boundsRange,omitempty"`
-	ArrayBounds     []ArrayBound `json:"arrayBounds,omitempty"`
-	Recovered       bool         `json:"recovered,omitempty"`
+	Name            string        `json:"name"`
+	Type            string        `json:"type,omitempty"`
+	Passing         string        `json:"passing,omitempty"`
+	PassingExplicit bool          `json:"passingExplicit,omitempty"`
+	Optional        bool          `json:"optional,omitempty"`
+	ParamArray      bool          `json:"paramArray,omitempty"`
+	Default         string        `json:"default,omitempty"`
+	HasDefault      bool          `json:"hasDefault,omitempty"`
+	DefaultRange    *vbaast.Range `json:"defaultRange,omitempty"`
+	Range           vbaast.Range  `json:"range"`
+	IsArray         bool          `json:"isArray,omitempty"`
+	ArrayShape      ArrayShape    `json:"arrayShape,omitempty"`
+	BoundsRange     *vbaast.Range `json:"boundsRange,omitempty"`
+	ArrayBounds     []ArrayBound  `json:"arrayBounds,omitempty"`
+	Recovered       bool          `json:"recovered,omitempty"`
 }
 
 type Declaration struct {

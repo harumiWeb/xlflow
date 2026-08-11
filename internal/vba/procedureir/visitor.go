@@ -592,14 +592,14 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 	if parent.Kind() == "preprocessor_if" {
 		if body := parent.ChildByFieldName("body"); sameNode(child, body) {
 			childCtx.conditional = appendConditionalBranch(ctx.conditional, parent, child, 0, v.builder.source)
-		} else if strings.HasPrefix(child.Kind(), "preprocessor_else") || child.Kind() == "preprocessor_elseif" {
+		} else if strings.HasPrefix(child.Kind(), "preprocessor_else") {
 			branch := 0
 			for i := uint(0); i < parent.NamedChildCount(); i++ {
 				sibling := parent.NamedChild(i)
 				if sibling == nil {
 					continue
 				}
-				if strings.HasPrefix(sibling.Kind(), "preprocessor_else") || sibling.Kind() == "preprocessor_elseif" {
+				if strings.HasPrefix(sibling.Kind(), "preprocessor_else") {
 					branch++
 				}
 				if sameNode(sibling, child) {
@@ -736,8 +736,10 @@ func appendConditionalBranch(path []ConditionalBranch, parent, branch *tree_sitt
 	if parent == nil || branch == nil {
 		return path
 	}
-	condition := nodeText(parent.ChildByFieldName("condition"), source)
-	if branch.Kind() == "preprocessor_elseif" {
+	condition := ""
+	if branchNumber == 0 {
+		condition = nodeText(parent.ChildByFieldName("condition"), source)
+	} else if branch.Kind() == "preprocessor_elseif" {
 		condition = nodeText(branch.ChildByFieldName("condition"), source)
 	}
 	return append(append([]ConditionalBranch(nil), path...), ConditionalBranch{

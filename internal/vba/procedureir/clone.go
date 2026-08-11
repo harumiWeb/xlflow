@@ -1,14 +1,13 @@
 package procedureir
 
+import vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+
 func Clone(in DocumentIR) DocumentIR {
 	out := in
 	out.ModuleAttributes = append([]ModuleAttribute(nil), in.ModuleAttributes...)
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
 	for i := range out.Declarations {
-		out.Declarations[i].Parameters = append([]Parameter(nil), in.Declarations[i].Parameters...)
-		for j := range out.Declarations[i].Parameters {
-			out.Declarations[i].Parameters[j].ArrayBounds = append([]ArrayBound(nil), in.Declarations[i].Parameters[j].ArrayBounds...)
-		}
+		out.Declarations[i].Parameters = cloneParameters(in.Declarations[i].Parameters)
 	}
 	out.TypeReferences = make([]TypeReference, len(in.TypeReferences))
 	for i := range in.TypeReferences {
@@ -42,17 +41,11 @@ func CloneCallSite(in CallSite) CallSite {
 
 func cloneProcedure(in ProcedureIR) ProcedureIR {
 	out := in
-	out.Symbol.Parameters = append([]Parameter(nil), in.Symbol.Parameters...)
+	out.Symbol.Parameters = cloneParameters(in.Symbol.Parameters)
 	out.Symbol.ConditionalBranches = append([]ConditionalBranch(nil), in.Symbol.ConditionalBranches...)
-	for i := range out.Symbol.Parameters {
-		out.Symbol.Parameters[i].ArrayBounds = append([]ArrayBound(nil), in.Symbol.Parameters[i].ArrayBounds...)
-	}
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
 	for i := range out.Declarations {
-		out.Declarations[i].Parameters = append([]Parameter(nil), in.Declarations[i].Parameters...)
-		for j := range out.Declarations[i].Parameters {
-			out.Declarations[i].Parameters[j].ArrayBounds = append([]ArrayBound(nil), in.Declarations[i].Parameters[j].ArrayBounds...)
-		}
+		out.Declarations[i].Parameters = cloneParameters(in.Declarations[i].Parameters)
 	}
 	out.Statements = make([]Statement, len(in.Statements))
 	for i := range in.Statements {
@@ -81,6 +74,28 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 		out.Accesses[i].Resolution.Candidates = append([]Candidate(nil), in.Accesses[i].Resolution.Candidates...)
 	}
 	return out
+}
+
+func cloneParameters(in []Parameter) []Parameter {
+	out := append([]Parameter(nil), in...)
+	for i := range out {
+		out[i].DefaultRange = cloneRangePointer(in[i].DefaultRange)
+		out[i].BoundsRange = cloneRangePointer(in[i].BoundsRange)
+		out[i].ArrayBounds = append([]ArrayBound(nil), in[i].ArrayBounds...)
+		for j := range out[i].ArrayBounds {
+			out[i].ArrayBounds[j].LowerRange = cloneRangePointer(in[i].ArrayBounds[j].LowerRange)
+			out[i].ArrayBounds[j].UpperRange = cloneRangePointer(in[i].ArrayBounds[j].UpperRange)
+		}
+	}
+	return out
+}
+
+func cloneRangePointer(in *vbaast.Range) *vbaast.Range {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func cloneExpressionPointer(in *Expression) *Expression {

@@ -56,7 +56,9 @@ Optional/ParamArray modifiers, default-expression text and range, array shape
 (`none`, `dynamic`, `bounded`, or `invalid`), parsed array bounds, and recovery
 state. Conditional procedure headers carry mutually-exclusive branch identity
 so cross-accessor and type compatibility checks compare only declarations that
-can be active together.
+can be active together. A branch records its source condition for `#If` and
+`#ElseIf`; the `#Else` branch has an empty condition and is identified by its
+branch number within the shared group.
 For a procedure with no body block, the body range is a zero-width range at
 the start of its `End Sub`, `End Function`, or `End Property` statement.
 

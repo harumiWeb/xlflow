@@ -2,6 +2,7 @@ package procedureir
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strconv"
@@ -12,6 +13,19 @@ import (
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
+
+func TestParameterJSONOmitsUnsetOptionalRanges(t *testing.T) {
+	data, err := json.Marshal(Parameter{Name: "value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(data)
+	for _, field := range []string{"defaultRange", "boundsRange"} {
+		if strings.Contains(encoded, field) {
+			t.Fatalf("unset %s should be omitted: %s", field, encoded)
+		}
+	}
+}
 
 type cancelAfterChecksContext struct{ remaining int }
 
@@ -120,20 +134,23 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(doc.Procedures) == 0 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
 	params := doc.Procedures[0].Symbol.Parameters
 	if len(params) != 4 {
 		t.Fatalf("parameters = %#v", params)
 	}
-	if !params[0].IsArray || params[0].ArrayShape != ArrayShapeDynamic || params[0].BoundsRange.StartByte >= params[0].BoundsRange.EndByte {
+	if !params[0].IsArray || params[0].ArrayShape != ArrayShapeDynamic || params[0].BoundsRange == nil || params[0].BoundsRange.StartByte >= params[0].BoundsRange.EndByte {
 		t.Fatalf("dynamic array facts = %#v", params[0])
 	}
 	if !params[1].IsArray || params[1].ArrayShape != ArrayShapeBounded || len(params[1].ArrayBounds) != 2 {
 		t.Fatalf("bounded array facts = %#v", params[1])
 	}
-	if got := params[1].ArrayBounds[0]; got.Lower != "1" || got.Upper != "2" || got.LowerRange.StartByte >= got.UpperRange.EndByte {
+	if got := params[1].ArrayBounds[0]; got.Lower != "1" || got.Upper != "2" || got.LowerRange == nil || got.UpperRange == nil || got.LowerRange.StartByte >= got.UpperRange.EndByte {
 		t.Fatalf("first bound = %#v", got)
 	}
-	if !params[2].Optional || !params[2].HasDefault || params[2].Default != `"x"` || params[2].DefaultRange.StartByte >= params[2].DefaultRange.EndByte {
+	if !params[2].Optional || !params[2].HasDefault || params[2].Default != `"x"` || params[2].DefaultRange == nil || params[2].DefaultRange.StartByte >= params[2].DefaultRange.EndByte {
 		t.Fatalf("optional default facts = %#v", params[2])
 	}
 	if !params[3].ParamArray || !params[3].IsArray || params[3].ArrayShape != ArrayShapeDynamic || params[3].Passing != "ByRef" || params[3].PassingExplicit {
@@ -151,7 +168,7 @@ func TestProcedureSignatureMarksMalformedArrayBoundsAsInvalid(t *testing.T) {
 		t.Fatalf("recovered procedure parameters = %#v", doc.Procedures)
 	}
 	param := doc.Procedures[0].Symbol.Parameters[0]
-	if param.ArrayShape != ArrayShapeInvalid || !param.Recovered || !doc.Parse.HasError && !doc.Parse.HasMissing {
+	if param.ArrayShape != ArrayShapeInvalid || !param.Recovered || (!doc.Parse.HasError && !doc.Parse.HasMissing) {
 		t.Fatalf("malformed array facts = %#v parse=%#v", param, doc.Parse)
 	}
 }
@@ -161,6 +178,9 @@ func TestConditionalProcedureSignatureRetainsBranchMetadata(t *testing.T) {
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`#If VBA7 Then
 Public Function ConditionalRun(ByVal value As Long) As Long
 End Function
+#ElseIf Win64 Then
+Public Function ConditionalRun(ByVal value As Integer) As Integer
+End Function
 #Else
 Public Function ConditionalRun(Optional value As Long = 1) As Long
 End Function
@@ -169,7 +189,7 @@ End Function
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Procedures) != 2 {
+	if len(doc.Procedures) != 3 {
 		t.Fatalf("conditional procedures = %#v", doc.Procedures)
 	}
 	for i, procedure := range doc.Procedures {
@@ -177,10 +197,10 @@ End Function
 		if symbol.Name != "ConditionalRun" || len(symbol.ConditionalBranches) != 1 {
 			t.Fatalf("conditional symbol %d = %#v", i, symbol)
 		}
-		if len(symbol.Parameters) != 1 || (i == 0 && symbol.Parameters[0].Optional) || (i == 1 && !symbol.Parameters[0].Optional) {
+		if len(symbol.Parameters) != 1 || (i == 0 && symbol.Parameters[0].Optional) || (i == 1 && symbol.Parameters[0].Optional) || (i == 2 && !symbol.Parameters[0].Optional) {
 			t.Fatalf("conditional parameter %d = %#v", i, symbol.Parameters)
 		}
-		if symbol.ConditionalBranches[0].Branch != i || symbol.ConditionalBranches[0].Condition == "" {
+		if symbol.ConditionalBranches[0].Branch != i || ((i == 0 || i == 1) && symbol.ConditionalBranches[0].Condition == "") || (i == 2 && symbol.ConditionalBranches[0].Condition != "") {
 			t.Fatalf("conditional branch %d = %#v", i, symbol.ConditionalBranches)
 		}
 	}

@@ -154,9 +154,9 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 			param.HasDefault = true
 			param.Default = initializerText(value, b.source)
 			if expression := value.ChildByFieldName("value"); expression != nil {
-				param.DefaultRange = vbaast.NodeRange(expression)
+				param.DefaultRange = rangePointer(expression)
 			} else {
-				param.DefaultRange = vbaast.NodeRange(value)
+				param.DefaultRange = rangePointer(value)
 			}
 			param.Recovered = param.Recovered || recovered(value)
 		}
@@ -195,9 +195,9 @@ func (b *documentBuilder) parameterArrayFacts(param *Parameter, node *tree_sitte
 		return
 	}
 	param.IsArray = true
-	param.BoundsRange = vbaast.NodeRange(bounds)
+	param.BoundsRange = rangePointer(bounds)
 	param.Recovered = param.Recovered || recovered(bounds)
-	invalidTypeBounds := typeBounds != nil && typeBounds != bounds
+	invalidTypeBounds := typeBounds != nil && !sameNode(typeBounds, bounds)
 	if bounds.NamedChildCount() == 0 && !recovered(bounds) {
 		param.ArrayShape = ArrayShapeDynamic
 		return
@@ -218,15 +218,15 @@ func (b *documentBuilder) parameterArrayFacts(param *Parameter, node *tree_sitte
 		upper := bound.ChildByFieldName("upper")
 		if lower != nil && upper != nil {
 			fact.Lower, fact.Upper = nodeText(lower, b.source), nodeText(upper, b.source)
-			fact.LowerRange, fact.UpperRange = vbaast.NodeRange(lower), vbaast.NodeRange(upper)
+			fact.LowerRange, fact.UpperRange = rangePointer(lower), rangePointer(upper)
 		} else if lower != nil || upper != nil {
 			param.ArrayShape = ArrayShapeInvalid
 			param.Recovered = true
 			if lower != nil {
-				fact.Lower, fact.LowerRange = nodeText(lower, b.source), vbaast.NodeRange(lower)
+				fact.Lower, fact.LowerRange = nodeText(lower, b.source), rangePointer(lower)
 			}
 			if upper != nil {
-				fact.Upper, fact.UpperRange = nodeText(upper, b.source), vbaast.NodeRange(upper)
+				fact.Upper, fact.UpperRange = nodeText(upper, b.source), rangePointer(upper)
 			}
 		} else {
 			fact.Expression = nodeText(bound, b.source)
@@ -346,7 +346,11 @@ func conditionalBranches(node *tree_sitter.Node, source []byte) []ConditionalBra
 		if child.ChildByFieldName("name") == nil || !isProcedureHeaderText(nodeText(child, source)) {
 			continue
 		}
-		branches = append(branches, ConditionalBranch{Group: group, Branch: branch, Range: vbaast.NodeRange(child)})
+		branchCondition := ""
+		if child.Kind() == "preprocessor_elseif" {
+			branchCondition = nodeText(child.ChildByFieldName("condition"), source)
+		}
+		branches = append(branches, ConditionalBranch{Group: group, Condition: branchCondition, Branch: branch, Range: vbaast.NodeRange(child)})
 		branch++
 	}
 	return branches
@@ -757,6 +761,14 @@ func firstNamedChild(node *tree_sitter.Node) *tree_sitter.Node {
 
 func sameNode(a, b *tree_sitter.Node) bool {
 	return a != nil && b != nil && a.Kind() == b.Kind() && a.StartByte() == b.StartByte() && a.EndByte() == b.EndByte()
+}
+
+func rangePointer(node *tree_sitter.Node) *vbaast.Range {
+	if node == nil {
+		return nil
+	}
+	rng := vbaast.NodeRange(node)
+	return &rng
 }
 
 func nodeText(node *tree_sitter.Node, source []byte) string {

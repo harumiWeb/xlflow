@@ -27,8 +27,17 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := issuesByCode(issues, "VB048"); len(got) < 6 {
-		t.Fatalf("VB048 = %+v, want structural signature findings", got)
+	if got := issuesByCode(issues, "VB048"); len(got) != 6 {
+		t.Fatalf("VB048 = %+v, want six structural signature findings", got)
+	}
+	wantKinds := map[string]bool{
+		"required_after_optional": true, "udt_byval": true, "udt_optional": true,
+		"paramarray_shape": true, "paramarray_after_optional": true, "parameter_limit": true,
+	}
+	for _, issue := range issuesByCode(issues, "VB048") {
+		if !wantKinds[issue.Kind] {
+			t.Fatalf("unexpected VB048 kind %q: %+v", issue.Kind, issues)
+		}
 	}
 	if got := issuesByCode(issues, "VB049"); len(got) != 0 {
 		t.Fatalf("unexpected property findings: %+v", got)
@@ -92,8 +101,43 @@ End Property
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := issuesByCode(issues, "VB049"); len(got) < 3 {
-		t.Fatalf("VB049 = %+v, want property contract findings", got)
+	got := issuesByCode(issues, "VB049")
+	if len(got) != 3 {
+		t.Fatalf("VB049 = %+v, want three property contract findings", got)
+	}
+	wantKinds := map[string]bool{"property_index_shape": true, "property_value_type": true, "set_value_type": true}
+	for _, issue := range got {
+		if !wantKinds[issue.Kind] {
+			t.Fatalf("unexpected VB049 kind %q: %+v", issue.Kind, got)
+		}
+	}
+}
+
+func TestPropertyIndexAllowsImplicitVariantAgainstExplicitVariant(t *testing.T) {
+	source := `Property Get Item(index) As String
+End Property
+Property Let Item(ByRef index As Variant, ByVal value As String)
+End Property
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Thing.cls", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB049"); len(got) != 0 {
+		t.Fatalf("implicit Variant index must match an explicit Variant index: %+v", got)
+	}
+}
+
+func TestOptionalDefaultIdentifierInfIsUnknown(t *testing.T) {
+	source := `Sub Defaults(Optional value As String = Inf, Optional nanValue As String = NaN)
+End Sub
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB048"); len(got) != 0 {
+		t.Fatalf("Inf/NaN references should remain unknown: %+v", got)
 	}
 }
 

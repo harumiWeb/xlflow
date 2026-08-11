@@ -248,4 +248,22 @@ func TestFastDiagnosticsRecomputesPropertyAccessorContracts(t *testing.T) {
 	if result.Cache == nil {
 		t.Fatal("property fallback did not publish a refreshed diagnostic cache")
 	}
+	if result.Cache == cache {
+		t.Fatal("property fallback reused the stale diagnostic cache")
+	}
+	if len(result.Cache.Catalog.Entries) != len(cache.Catalog.Entries) || result.Cache.Catalog.Entries[1].SignatureHash == cache.Catalog.Entries[1].SignatureHash {
+		t.Fatalf("property fallback cache catalog was not refreshed: old=%#v new=%#v", cache.Catalog, result.Cache.Catalog)
+	}
+
+	validDoc := Document{Path: oldDoc.Path, Source: oldSource, ModuleKind: oldDoc.ModuleKind, Version: 3}
+	validResult := Analyzer{DB: vbadb.New()}.DiagnosticsRequestContext(context.Background(), DiagnosticRequest{
+		Document: validDoc, Mode: DiagnosticModeFast, PreviousCache: result.Cache,
+		Changes: ProcedureChangeSet{Ranges: []Range{{Start: Position{Line: 2}, End: Position{Line: 2}}}},
+	})
+	if got := diagnosticsByCode(validResult.Diagnostics, "VB049"); len(got) != 0 {
+		t.Fatalf("stale VB049 diagnostics survived invalid-to-valid edit: %+v", got)
+	}
+	if validResult.Cache == nil || validResult.Cache == result.Cache {
+		t.Fatal("invalid-to-valid property edit did not publish a fresh cache")
+	}
 }

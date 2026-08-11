@@ -14,13 +14,13 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	}
 	for i := range out.Symbol.Parameters {
 		out.Symbol.Parameters[i].Range = rebase(out.Symbol.Parameters[i].Range)
-		out.Symbol.Parameters[i].DefaultRange = rebase(out.Symbol.Parameters[i].DefaultRange)
-		out.Symbol.Parameters[i].BoundsRange = rebase(out.Symbol.Parameters[i].BoundsRange)
+		out.Symbol.Parameters[i].DefaultRange = rebasePointer(out.Symbol.Parameters[i].DefaultRange, rebase)
+		out.Symbol.Parameters[i].BoundsRange = rebasePointer(out.Symbol.Parameters[i].BoundsRange, rebase)
 		for j := range out.Symbol.Parameters[i].ArrayBounds {
 			bound := &out.Symbol.Parameters[i].ArrayBounds[j]
 			bound.Range = rebase(bound.Range)
-			bound.LowerRange = rebase(bound.LowerRange)
-			bound.UpperRange = rebase(bound.UpperRange)
+			bound.LowerRange = rebasePointer(bound.LowerRange, rebase)
+			bound.UpperRange = rebasePointer(bound.UpperRange, rebase)
 		}
 	}
 	for i := range out.Declarations {
@@ -28,13 +28,13 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 		for j := range out.Declarations[i].Parameters {
 			parameter := &out.Declarations[i].Parameters[j]
 			parameter.Range = rebase(parameter.Range)
-			parameter.DefaultRange = rebase(parameter.DefaultRange)
-			parameter.BoundsRange = rebase(parameter.BoundsRange)
+			parameter.DefaultRange = rebasePointer(parameter.DefaultRange, rebase)
+			parameter.BoundsRange = rebasePointer(parameter.BoundsRange, rebase)
 			for k := range parameter.ArrayBounds {
 				bound := &parameter.ArrayBounds[k]
 				bound.Range = rebase(bound.Range)
-				bound.LowerRange = rebase(bound.LowerRange)
-				bound.UpperRange = rebase(bound.UpperRange)
+				bound.LowerRange = rebasePointer(bound.LowerRange, rebase)
+				bound.UpperRange = rebasePointer(bound.UpperRange, rebase)
 			}
 		}
 	}
@@ -62,6 +62,14 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 		out.Accesses[i].Range = rebase(out.Accesses[i].Range)
 	}
 	return out
+}
+
+func rebasePointer(pointer *vbaast.Range, rebase func(vbaast.Range) vbaast.Range) *vbaast.Range {
+	if pointer == nil {
+		return nil
+	}
+	rng := rebase(*pointer)
+	return &rng
 }
 
 func RebaseRange(r, oldBase, newBase vbaast.Range) vbaast.Range {

@@ -150,18 +150,16 @@ func (l Linter) validateProcedureSignature(path string, sig procedureSignature, 
 }
 
 func (l Linter) validatePropertySignatures(path string, sigs []procedureSignature, udts, objects map[string]int) []Issue {
-	type propertyGroup struct {
-		name string
-	}
-	groups := make(map[propertyGroup][]procedureSignature)
+	groups := make(map[string][]procedureSignature)
 	for _, sig := range sigs {
 		if sig.accessor == "" {
 			continue
 		}
-		// Signatures collected from one parsed file necessarily share a module.
-		// Grouping by name and conditional path preserves mutually-exclusive
-		// accessor declarations without requiring project-wide state.
-		key := propertyGroup{name: canonicalDeclarationKey(sig.name)}
+		// Signatures collected from one parsed file necessarily share a module,
+		// so grouping by canonical name needs no project-wide state. Mutually
+		// exclusive conditional branches are separated later by
+		// declarationBranchesOverlap when accessor pairs are compared.
+		key := canonicalDeclarationKey(sig.name)
 		groups[key] = append(groups[key], sig)
 	}
 	issues := make([]Issue, 0)
@@ -238,7 +236,7 @@ func comparePropertyAccessorPair(l Linter, path string, getter, setter procedure
 		}
 		leftKind := classifySignatureType(left.typ, udts, objects)
 		rightKind := classifySignatureType(right.typ, udts, objects)
-		if leftKind != signatureTypeUnknown && rightKind != signatureTypeUnknown && !strings.EqualFold(cleanIdentifier(left.typ), cleanIdentifier(right.typ)) {
+		if leftKind != signatureTypeUnknown && rightKind != signatureTypeUnknown && !signatureTypesEqual(left.typ, right.typ) {
 			target := right
 			if !laterIsSetter {
 				target = left
@@ -257,6 +255,18 @@ func comparePropertyAccessorPair(l Linter, path string, getter, setter procedure
 		issues = append(issues, signatureIssue(l, path, target, laterSymbol, "property_value_type", "Property accessor value type must match the Property Get return type."))
 	}
 	return issues
+}
+
+func signatureTypesEqual(left, right string) bool {
+	leftName := cleanIdentifier(strings.TrimSpace(left))
+	rightName := cleanIdentifier(strings.TrimSpace(right))
+	if leftName == "" {
+		leftName = "variant"
+	}
+	if rightName == "" {
+		rightName = "variant"
+	}
+	return strings.EqualFold(leftName, rightName)
 }
 
 func propertyValueTypesCompatible(getter, setter procedureSignature, getterKind, valueKind signatureType) bool {
@@ -443,10 +453,11 @@ func buildProcedureSignature(node *tree_sitter.Node, source []byte) procedureSig
 				boundsText := strings.TrimSpace(named.Utf8Text(source))
 				if open := strings.IndexByte(boundsText, '('); open >= 0 {
 					close := strings.LastIndexByte(boundsText, ')')
-					if close < 0 {
-						close = len(boundsText)
+					if close < open+1 {
+						param.hasBounds = false
+					} else {
+						param.hasBounds = strings.TrimSpace(boundsText[open+1:close]) != ""
 					}
-					param.hasBounds = strings.TrimSpace(boundsText[open+1:close]) != ""
 				} else {
 					param.hasBounds = boundsText != ""
 				}
@@ -536,7 +547,7 @@ func classifyOptionalDefault(value string) (constant, definitelyNonconstant bool
 	if strings.HasPrefix(value, "#") && strings.HasSuffix(value, "#") {
 		return true, false
 	}
-	if _, err := strconv.ParseFloat(strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-"), 64); err == nil {
+	if isNumericLiteral(value) {
 		return true, false
 	}
 	if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
@@ -562,11 +573,23 @@ func optionalDefaultTypeMismatch(value, typ string, kind signatureType) bool {
 	if strings.HasPrefix(value, "#") && strings.HasSuffix(value, "#") {
 		return !strings.EqualFold(cleanIdentifier(typ), "date")
 	}
-	if _, err := strconv.ParseFloat(strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-"), 64); err == nil {
+	if isNumericLiteral(value) {
 		target := strings.ToLower(cleanIdentifier(typ))
 		return target == "string" || target == "boolean"
 	}
 	return false
+}
+
+var numericLiteralPattern = regexp.MustCompile(`^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$`)
+
+func isNumericLiteral(value string) bool {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-")
+	if !numericLiteralPattern.MatchString(value) {
+		return false
+	}
+	_, err := strconv.ParseFloat(value, 64)
+	return err == nil
 }
 
 func balancedParens(value string) bool {
