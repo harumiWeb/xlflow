@@ -279,6 +279,45 @@ func TestOptionalDefaultLiteralTypeMismatch(t *testing.T) {
 	}
 }
 
+func TestOptionalDefaultNumericLiteralForms(t *testing.T) {
+	for _, value := range []string{"1&", "&H10", "&O10", "1%", "1!", "1#", "1@", "1^", "- &H10"} {
+		if !isNumericLiteral(value) {
+			t.Fatalf("%q should be recognized as a VBA numeric literal", value)
+		}
+		if !optionalDefaultTypeMismatch(value, "String", signatureTypeIntrinsic) {
+			t.Fatalf("%q should mismatch a String Optional parameter", value)
+		}
+		if !optionalDefaultTypeMismatch(value, "Boolean", signatureTypeIntrinsic) {
+			t.Fatalf("%q should mismatch a Boolean Optional parameter", value)
+		}
+	}
+
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte("Sub Defaults(Optional text As String = 1&)\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB048")
+	if len(got) != 1 || got[0].Kind != "optional_default_type" {
+		t.Fatalf("numeric Optional default should produce VB048 optional_default_type: %+v", issues)
+	}
+}
+
+func TestOptionalDefaultStringSuffixIsUnknown(t *testing.T) {
+	if isNumericLiteral("1$") {
+		t.Fatal("String suffix must not be treated as numeric")
+	}
+}
+
+func TestOptionalDefaultDateLiteralHandling(t *testing.T) {
+	const value = "#1/1/2024#"
+	if optionalDefaultTypeMismatch(value, "Date", signatureTypeIntrinsic) {
+		t.Fatal("date literal should match a Date Optional parameter")
+	}
+	if !optionalDefaultTypeMismatch(value, "Long", signatureTypeIntrinsic) {
+		t.Fatal("date literal should mismatch a non-Date Optional parameter")
+	}
+}
+
 func manyParameters(n int) string {
 	params := ""
 	for i := 1; i <= n; i++ {

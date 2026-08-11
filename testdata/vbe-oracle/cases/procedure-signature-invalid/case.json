@@ -14,7 +14,7 @@
     "evidence_role": "compile-equivalent",
     "rule_codes": ["VB048"],
     "expected_diagnostics": [{ "code": "VB048", "severity": "error", "surfaces": ["lint", "lsp"] }],
-    "negative_controls": ["procedure-signature-valid"]
+    "negative_controls": ["procedure-optional-numeric-literals-valid", "procedure-signature-valid"]
   },
   "provenance": {
     "status": "asserted",

@@ -93,6 +93,10 @@
       "path": "cases/procedure-signature-valid/case.json"
     },
     {
+      "id": "procedure-optional-numeric-literals-valid",
+      "path": "cases/procedure-optional-numeric-literals-valid/case.json"
+    },
+    {
       "id": "procedure-parameter-limit-60",
       "path": "cases/procedure-parameter-limit-60/case.json"
     },

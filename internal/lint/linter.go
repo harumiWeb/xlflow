@@ -362,6 +362,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		return nil, err
 	}
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
+		numericLiteralRecovery := vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 		lintCtx := astLintContext{
 			ctx:                        ctx,
 			linter:                     l,
@@ -385,8 +386,15 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 				return declarationErr
 			}
 			issues = append(issues, declarationIssues...)
+		} else if numericLiteralRecovery {
+			index := collectDeclarationIndex(ctx, source, view.Root)
+			signatureIssues, signatureErr := l.procedureSignatureIssuesContext(ctx, path, source, view.Root, index)
+			if signatureErr != nil {
+				return signatureErr
+			}
+			issues = append(issues, signatureIssues...)
 		}
-		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source)) ||
+		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) && !numericLiteralRecovery) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, lintCtx.parseIssues(view.Root)...)
 		}

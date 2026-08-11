@@ -580,15 +580,32 @@ func optionalDefaultTypeMismatch(value, typ string, kind signatureType) bool {
 	return false
 }
 
-var numericLiteralPattern = regexp.MustCompile(`^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$`)
+// VBA accepts decimal, hexadecimal, and octal numeric literals. The trailing
+// type-declaration character is part of the literal for the numeric forms;
+// `$` is deliberately excluded because it denotes String, not a numeric type.
+var numericLiteralPattern = regexp.MustCompile(`^(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|&[Hh][0-9A-Fa-f]+|&[Oo][0-7]+)[%&!#@^]?$`)
 
 func isNumericLiteral(value string) bool {
 	value = strings.TrimSpace(value)
-	value = strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-")
+	if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
+		value = strings.TrimSpace(value[1:])
+	}
 	if !numericLiteralPattern.MatchString(value) {
 		return false
 	}
-	_, err := strconv.ParseFloat(value, 64)
+	core := value
+	if strings.ContainsRune("%&!#@^", rune(core[len(core)-1])) {
+		core = core[:len(core)-1]
+	}
+	if strings.HasPrefix(core, "&H") || strings.HasPrefix(core, "&h") {
+		_, err := strconv.ParseUint(core[2:], 16, 64)
+		return err == nil
+	}
+	if strings.HasPrefix(core, "&O") || strings.HasPrefix(core, "&o") {
+		_, err := strconv.ParseUint(core[2:], 8, 64)
+		return err == nil
+	}
+	_, err := strconv.ParseFloat(core, 64)
 	return err == nil
 }
 

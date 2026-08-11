@@ -152,6 +152,37 @@ func TestIsIdentifierTypeCharacterRecoveryRecognizesOnlyDeclarationSuffixes(t *t
 	sameLineError.Close()
 }
 
+func TestIsNumericLiteralRecoveryRecognizesOptionalDefaults(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+	recovered := 0
+	for _, value := range []string{"1&", "&H10", "&O10", "1%", "1!", "1#", "1@", "1^"} {
+		parsed := parser.Parse("Main.bas", []byte("Sub S(Optional value As Long = "+value+")\nEnd Sub\n"))
+		if !parsed.HasError && !parsed.HasMissing {
+			parsed.Close()
+			continue
+		}
+		sexp := parsed.Root.ToSexp()
+		got := IsNumericLiteralRecovery(parsed.Root, parsed.Source)
+		parsed.Close()
+		if !got {
+			t.Fatalf("%q should be recognized as numeric-literal recovery: %s", value, sexp)
+		}
+		recovered++
+	}
+	if recovered == 0 {
+		t.Fatal("expected at least one parser-recovered numeric literal form")
+	}
+	ordinary := parser.Parse("Main.bas", []byte("Sub S(Optional value As Long = Foo())\nEnd Sub\n"))
+	if IsNumericLiteralRecovery(ordinary.Root, ordinary.Source) {
+		t.Fatal("callable default must not be numeric-literal recovery")
+	}
+	ordinary.Close()
+}
+
 func TestParserParsesNestedInlineLoopsWithSharedNextVariables(t *testing.T) {
 	parser, err := NewParser()
 	if err != nil {
