@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -208,13 +209,17 @@ func TestWriteJSONEnvelopeIncludesAnalysisCheckAndRunDiagnostic(t *testing.T) {
 }
 
 func TestWriteAnalysisMetricsJSONAndHumanOutput(t *testing.T) {
+	fields := make([]map[string]any, 0, 11)
+	for i := 0; i < 11; i++ {
+		fields = append(fields, map[string]any{
+			"module": "Main", "name": fmt.Sprintf("shared%d", i), "classification": "mutable",
+			"reader_count": 3, "writer_count": 2, "root_count": 2,
+		})
+	}
 	env := New("analyze")
 	env.AnalysisMetrics = map[string]any{
 		"module_state": map[string]any{
-			"fields": []map[string]any{{
-				"module": "Main", "name": "shared", "classification": "mutable",
-				"reader_count": 3, "writer_count": 2, "root_count": 2,
-			}},
+			"fields": fields,
 		},
 	}
 	var jsonBuf bytes.Buffer
@@ -225,15 +230,35 @@ func TestWriteAnalysisMetricsJSONAndHumanOutput(t *testing.T) {
 	if err := json.Unmarshal(jsonBuf.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if len(listOfObjects(objectMap(decoded["analysis_metrics"])["module_state"].(map[string]any)["fields"])) != 1 {
+	if len(listOfObjects(objectMap(decoded["analysis_metrics"])["module_state"].(map[string]any)["fields"])) != 11 {
 		t.Fatalf("analysis metrics JSON = %#v", decoded["analysis_metrics"])
 	}
 	var human bytes.Buffer
 	if err := WriteWithOptions(&human, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(human.String(), "Module state metrics:") || !strings.Contains(human.String(), "Main.shared") {
+	if !strings.Contains(human.String(), "Module state metrics:") || !strings.Contains(human.String(), "Main.shared0") || !strings.Contains(human.String(), "1 more field(s); use --json for the complete metrics.") {
 		t.Fatalf("human analysis metrics = %s", human.String())
+	}
+}
+
+func TestWriteAnalysisMetricsHumanOutputForWorkbookCommands(t *testing.T) {
+	for _, command := range []string{"pull", "push", "attach"} {
+		t.Run(command, func(t *testing.T) {
+			env := New(command)
+			env.AnalysisMetrics = map[string]any{
+				"module_state": map[string]any{
+					"fields": []map[string]any{{"module": "Main", "name": "shared"}},
+				},
+			}
+			var human bytes.Buffer
+			if err := WriteWithOptions(&human, env, Options{}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(human.String(), "Module state metrics:") {
+				t.Fatalf("%s metrics omitted from human output: %s", command, human.String())
+			}
+		})
 	}
 }
 

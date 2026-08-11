@@ -54,14 +54,19 @@ End Sub
 	if !ok || len(procedures) == 0 {
 		t.Fatalf("procedure access metrics = %#v", state["procedures"])
 	}
+	seenRun := false
 	for _, procedure := range procedures {
 		if procedure["qualified"] == "Main.Run" {
+			seenRun = true
 			reads, _ := procedure["reads"].([]string)
 			writes, _ := procedure["writes"].([]string)
 			if !containsString(reads, "Main.sharedItems") || !containsString(writes, "Main.sharedItems") {
 				t.Fatalf("Run access metrics = %#v", procedure)
 			}
 		}
+	}
+	if !seenRun {
+		t.Fatalf("procedure metrics missing Main.Run: %#v", procedures)
 	}
 }
 
@@ -190,6 +195,53 @@ End Sub
 	field := state["fields"].([]map[string]any)[0]
 	if field["writer_count"] != 1 || field["mutator_count"] != 1 || field["root_count"] != 1 {
 		t.Fatalf("shadowed local was attributed to module field: %#v", field)
+	}
+}
+
+func TestVBA240DoesNotResolvePrivateFieldFromAnotherModule(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Other.bas", `Option Explicit
+Private sharedItems As Collection
+
+Public Sub Initialize()
+  Set sharedItems = New Collection
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  sharedItems.Add "run"
+End Sub
+
+Public Sub Other()
+  sharedItems.Add "other"
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectRiskyModuleState = true
+	result, err := (Analyzer{RootDir: dir, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA240"); len(findings) != 0 {
+		t.Fatalf("private field from another module should not be attributed: %+v", findings)
+	}
+	state := result.AnalysisMetrics.(map[string]any)["module_state"].(map[string]any)
+	field := state["fields"].([]map[string]any)[0]
+	if field["writer_count"] != 1 || field["mutator_count"] != 0 {
+		t.Fatalf("unexpected private field metrics: %#v", field)
+	}
+}
+
+func TestVBA240MetricsSortDeclarationLinesNumerically(t *testing.T) {
+	metrics := moduleStateMetricsProjection([]*moduleStateField{
+		{DisplayFile: "Main.bas", Name: "lineTen", Line: 10},
+		{DisplayFile: "Main.bas", Name: "lineTwo", Line: 2},
+	}, map[string]*moduleStateProcedureAccess{})
+	fields := metrics["module_state"].(map[string]any)["fields"].([]map[string]any)
+	if got := fields[0]["name"]; got != "lineTwo" {
+		t.Fatalf("numeric field ordering = %#v, want lineTwo first", fields)
 	}
 }
 

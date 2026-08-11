@@ -467,10 +467,10 @@ func renderHuman(env Envelope, opts Options) string {
 		if env.Issues != nil {
 			b.WriteString(r.renderLint(env))
 		}
-		if env.Analysis != nil {
+		if env.Analysis != nil || env.AnalysisMetrics != nil {
 			b.WriteString(r.renderAnalysis(env))
 		}
-		if env.Issues != nil || env.Analysis != nil {
+		if env.Issues != nil || env.Analysis != nil || env.AnalysisMetrics != nil {
 			b.WriteString(r.renderLogs(env))
 		} else {
 			b.WriteString(r.renderWorkbookSource(env))

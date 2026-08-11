@@ -67,7 +67,7 @@ type moduleStateField struct {
 	CycleWrite   bool
 }
 
-func buildModuleStateAnalysis(rootDir string, cfg Config, files []parsedFile) moduleStateAnalysis {
+func buildModuleStateAnalysis(rootDir string, cfg config.Config, files []parsedFile) moduleStateAnalysis {
 	procedures, byKey, byCandidate := moduleStateProcedures(files)
 	fields, fieldsByFileName, fieldsByName := moduleStateFields(files)
 	procedureAccesses := moduleStateProcedureAccesses(procedures)
@@ -104,7 +104,10 @@ func buildModuleStateAnalysis(rootDir string, cfg Config, files []parsedFile) mo
 
 	for _, file := range files {
 		for _, proc := range file.IR.Procedures {
-			procedure := byKey[moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)]
+			procedure, ok := byKey[moduleStateProcedureKey(file.IR.Path, file.IR.ModuleName, proc.Symbol)]
+			if !ok || procedureAccesses[procedure.Key] == nil {
+				continue
+			}
 			for _, access := range proc.Accesses {
 				field := moduleStateResolveField(rootDir, access, procedure, fieldsByFileName, fieldsByName)
 				if field == nil {
@@ -210,10 +213,6 @@ func buildModuleStateAnalysis(rootDir string, cfg Config, files []parsedFile) mo
 	findings := moduleStateFindings(rootDir, cfg, files, fields)
 	return moduleStateAnalysis{Findings: findings, Metrics: metrics}
 }
-
-// Config is an alias kept local to this file so the implementation remains
-// easy to test without exposing an analyzer-specific configuration type.
-type Config = config.Config
 
 func moduleStateProcedures(files []parsedFile) ([]moduleStateProcedure, map[string]moduleStateProcedure, map[string]string) {
 	all := []moduleStateProcedure{}
@@ -337,9 +336,6 @@ func moduleStateResolveName(name string, procedure moduleStateProcedure, byFileN
 		if strings.EqualFold(moduleStatePathKey(field.File), moduleStatePathKey(procedure.File)) && strings.EqualFold(field.Module, procedure.Module) {
 			return field
 		}
-	}
-	if len(candidates) == 1 {
-		return candidates[0]
 	}
 	for _, field := range candidates {
 		if field.Scope == procedureir.ScopeProject && strings.EqualFold(field.ModuleKind, "standard") {
@@ -468,7 +464,7 @@ func moduleStateExcelType(typ string) bool {
 	return false
 }
 
-func moduleStateRoots(cfg Config, procedures []moduleStateProcedure) map[string]bool {
+func moduleStateRoots(cfg config.Config, procedures []moduleStateProcedure) map[string]bool {
 	roots := map[string]bool{}
 	entry := strings.ToLower(strings.TrimSpace(cfg.Project.Entry))
 	for _, procedure := range procedures {
@@ -553,7 +549,7 @@ func moduleStateCycleNodes(edges map[string]map[string]bool) map[string]bool {
 	return cycles
 }
 
-func moduleStateMetricsProjection(fields []*moduleStateField, accessSets ...map[string]*moduleStateProcedureAccess) map[string]any {
+func moduleStateMetricsProjection(fields []*moduleStateField, accesses map[string]*moduleStateProcedureAccess) map[string]any {
 	items := make([]map[string]any, 0, len(fields))
 	for _, field := range fields {
 		classification := "mutable"
@@ -578,14 +574,18 @@ func moduleStateMetricsProjection(fields []*moduleStateField, accessSets ...map[
 		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		left := fmt.Sprintf("%s\x00%d\x00%s", items[i]["file"], items[i]["line"], items[i]["name"])
-		right := fmt.Sprintf("%s\x00%d\x00%s", items[j]["file"], items[j]["line"], items[j]["name"])
-		return left < right
+		leftFile, rightFile := fmt.Sprint(items[i]["file"]), fmt.Sprint(items[j]["file"])
+		if leftFile != rightFile {
+			return leftFile < rightFile
+		}
+		leftLine, rightLine := items[i]["line"].(int), items[j]["line"].(int)
+		if leftLine != rightLine {
+			return leftLine < rightLine
+		}
+		return fmt.Sprint(items[i]["name"]) < fmt.Sprint(items[j]["name"])
 	})
 	state := map[string]any{"fields": items, "field_count": len(items)}
-	if len(accessSets) > 0 {
-		state["procedures"] = moduleStateProcedureMetrics(accessSets[0])
-	}
+	state["procedures"] = moduleStateProcedureMetrics(accesses)
 	return map[string]any{"module_state": state}
 }
 
@@ -658,7 +658,7 @@ func moduleStateUnion(left, right map[string]bool) map[string]bool {
 	return out
 }
 
-func moduleStateFindings(rootDir string, cfg Config, files []parsedFile, fields []*moduleStateField) []Finding {
+func moduleStateFindings(rootDir string, cfg config.Config, files []parsedFile, fields []*moduleStateField) []Finding {
 	if !cfg.Analyze.DetectRiskyModuleState {
 		return nil
 	}
