@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -18,6 +19,17 @@ var value2DateCurrencyBuiltinRe = regexp.MustCompile(`(?i)\b(?:date|now|time)\b`
 var value2DateCurrencySubtypeCheckRe = regexp.MustCompile(`(?i)\b(?:vartype|typename)\s*\([^)]*\)\s*(?:=|<>|<=|>=)\s*\"?(?:vbdate|vbcurrency|date|currency)\"?\b`)
 var value2DateCurrencyFormatRe = regexp.MustCompile(`(?i)\bformat\$?\s*\([^)]*(?:date|currency)`)
 var value2DateCurrencyNamedCallRe = regexp.MustCompile(`(?i)\b[A-Za-z_][A-Za-z0-9_]*(?:date|currency)\s*(?:\(|\s)`)
+var value2IdentifierPatterns sync.Map
+
+func value2IdentifierPattern(name string) *regexp.Regexp {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if cached, ok := value2IdentifierPatterns.Load(key); ok {
+		return cached.(*regexp.Regexp)
+	}
+	pattern := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(key) + `\b`)
+	actual, _ := value2IdentifierPatterns.LoadOrStore(key, pattern)
+	return actual.(*regexp.Regexp)
+}
 
 type value2PerformanceCandidate struct {
 	Statement        procedureir.Statement
@@ -150,7 +162,7 @@ func value2ScalarProcessing(proc sourceProcedure, statementID int, statementText
 		return false
 	}
 	seen := false
-	nameRe := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `\b`)
+	nameRe := value2IdentifierPattern(name)
 	for _, statement := range proc.Statements {
 		if statement.ID == statementID {
 			seen = true
@@ -281,7 +293,7 @@ func value2DynamicRangeAliasAt(proc sourceProcedure, statementID int, name strin
 	for index := limit - 1; index >= 0; index-- {
 		statement := proc.Statements[index]
 		left, right, ok := rangeValueAssignment(statement.Text)
-		left = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(left, "Set "), "set "))
+		left = value2TrimSetPrefix(left)
 		if !ok || !strings.EqualFold(left, name) {
 			continue
 		}
@@ -294,6 +306,15 @@ func value2DynamicRangeAliasAt(proc sourceProcedure, statementID int, name strin
 		return false
 	}
 	return false
+}
+
+func value2TrimSetPrefix(text string) string {
+	text = strings.TrimSpace(text)
+	const prefix = "Set "
+	if len(text) >= len(prefix) && strings.EqualFold(text[:len(prefix)], prefix) {
+		return strings.TrimSpace(text[len(prefix):])
+	}
+	return text
 }
 
 func value2DynamicRangeText(text string) bool {
@@ -402,7 +423,7 @@ func value2DateCurrencyExpression(text string, declarations map[string]string) b
 		return true
 	}
 	for name, typ := range declarations {
-		if value2DateCurrencyType(typ) && regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(name)+`\b`).MatchString(masked) {
+		if value2DateCurrencyType(typ) && value2IdentifierPattern(name).MatchString(masked) {
 			return true
 		}
 	}
@@ -411,6 +432,7 @@ func value2DateCurrencyExpression(text string, declarations map[string]string) b
 
 func value2LaterDateCurrencyUse(proc sourceProcedure, statementID int, name string, declarations map[string]string) bool {
 	seen := false
+	nameRe := value2IdentifierPattern(name)
 	for _, statement := range proc.Statements {
 		if statement.ID == statementID {
 			seen = true
@@ -418,7 +440,7 @@ func value2LaterDateCurrencyUse(proc sourceProcedure, statementID int, name stri
 		}
 		code := value2CodeWithoutComment(statement.Text)
 		masked := value2MaskStrings(code)
-		if !seen || !regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(name)+`\b`).MatchString(masked) {
+		if !seen || !nameRe.MatchString(masked) {
 			continue
 		}
 		text := strings.ToLower(masked)

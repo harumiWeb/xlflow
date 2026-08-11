@@ -91,7 +91,7 @@ Public Sub Run(ws As Worksheet)
     AcceptDate ws.Range("L1:L100").Value
     weak = ws.Range("E1:E99").Value
     ' ws.Range("F1:F100").Value
-    Debug.Print "ws.Range(\"G1:G100\").Value"
+    Debug.Print "ws.Range(""G1:G100"").Value"
     values = Range("H1:H100").Value
 End Sub
 
@@ -189,8 +189,8 @@ Public Sub Run(ws As Worksheet, lastRow As Long, address As String)
 
 	values = ws.Range(address).Value
 	values = ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, 10)).Value
-	Set dynamicRange = ws.Range("A1:A" & lastRow)
-	Set dynamicRangeAlias = dynamicRange
+	SET dynamicRange = ws.Range("A1:A" & lastRow)
+	sEt dynamicRangeAlias = dynamicRange
 	values = dynamicRangeAlias.Value
 End Sub
 `
@@ -200,9 +200,7 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA243")
-	if len(got) != 2 {
-		t.Fatalf("VBA243 findings = %+v, want Cells-pair and traceable alias only", got)
-	}
+	assertVBA243FindingLines(t, got, 10, 13)
 }
 
 func TestVBA243RecognizesDynamicRangeProperties(t *testing.T) {
@@ -213,7 +211,7 @@ Option Explicit
 
 Public Sub Run(ws As Worksheet)
     Dim values As Variant
-    values = ws.CurrentRegion.Value
+	values = ws.Range("A1").CurrentRegion.Value
     values = ws.UsedRange.Value
 End Sub
 `
@@ -222,9 +220,7 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA243"); len(got) != 2 {
-		t.Fatalf("VBA243 findings = %+v, want CurrentRegion and UsedRange", got)
-	}
+	assertVBA243FindingLines(t, findingsByCode(findings, "VBA243"), 6, 7)
 }
 
 func TestVBA243DoesNotTreatDateWordsInLabelsOrCommentsAsIntentional(t *testing.T) {
@@ -244,8 +240,18 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA243"); len(got) != 3 {
-		t.Fatalf("VBA243 findings = %+v, want three non-intentional accesses", got)
+	assertVBA243FindingLines(t, findingsByCode(findings, "VBA243"), 5, 6, 7)
+}
+
+func assertVBA243FindingLines(t *testing.T, findings []Finding, want ...int) {
+	t.Helper()
+	if len(findings) != len(want) {
+		t.Fatalf("VBA243 findings = %+v, want lines %v", findings, want)
+	}
+	for index, finding := range findings {
+		if finding.Line != want[index] {
+			t.Fatalf("VBA243 finding lines = %+v, want %v", findings, want)
+		}
 	}
 }
 
