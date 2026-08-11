@@ -15,13 +15,14 @@ var nonExcelRuleIDs = map[string]struct{}{
 	"VBA211": {}, "VBA215": {}, "VBA216": {}, "VBA217": {},
 	"VBA218": {}, "VBA221": {}, "VBA225": {}, "VBA226": {}, "VBA238": {},
 	"VBA242": {},
+	"VBA243": {},
 }
 
 var configurableNonExcelLintRuleIDs = []string{"VB002", "VB003", "VB027"}
 
 var configurableNonExcelAnalyzeRuleIDs = []string{
 	"VBA201", "VBA203", "VBA205", "VBA215", "VBA216", "VBA217",
-	"VBA218", "VBA221", "VBA225", "VBA226", "VBA238", "VBA242",
+	"VBA218", "VBA221", "VBA225", "VBA226", "VBA238", "VBA242", "VBA243",
 }
 
 func applyProfilePolicy(cfg *config.Config, profile string) {
@@ -29,6 +30,7 @@ func applyProfilePolicy(cfg *config.Config, profile string) {
 		// The Excel corpus explicitly opts into Excel-specific advisory rules;
 		// production defaults remain unchanged.
 		cfg.Analyze.DetectExpensiveFullRangeOperations = true
+		cfg.Analyze.DetectValue2PerformanceOpportunities = true
 		return
 	}
 	cfg.Lint.DisabledRules = append([]string(nil), configurableNonExcelLintRuleIDs...)

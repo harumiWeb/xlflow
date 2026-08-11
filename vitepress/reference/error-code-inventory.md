@@ -231,6 +231,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_untrusted_data_flow`
 - `detect_unused_local_variables`
 - `detect_unused_private_procedures`
+- `detect_value2_performance_opportunities`
 - `detect_worksheet_root_mismatch`
 - `diagnostic_meaning`
 - `diagnostic_runs`
