@@ -113,9 +113,9 @@ reported separately in `last_stage`.
 The manifest has `schema_version: 1`, a `controls` object with `accept` and
 `reject` case IDs, and an ordered `cases` list. The two control entries also
 carry `control_role` metadata for reviewers. Each case directory contains a
-`case.json` and ordinary `.bas` sources. V1 accepts standard modules only and
-requires `probe.mode: "compile"`; runtime probes and class/UserForm modules are
-future extensions.
+`case.json` and ordinary `.bas` sources. V1 requires `probe.mode: "compile"`
+and supports standard, class, UserForm, and document modules; runtime probes
+remain a future extension.
 
 Case expectations start as observational fixtures:
 
@@ -131,7 +131,13 @@ Case expectations start as observational fixtures:
 ```
 
 Source is kept in normal module files so the same fixture can be consumed by
-parser, lint, analyze, type-analysis, LSP, and oracle tests. The analyzer
+parser, lint, analyze, type-analysis, LSP, and oracle tests. Schema v1 accepts
+`modules[].kind` values `standard`, `class`, `form`, and `document`; document
+modules must also set `document_target` to `workbook` or `worksheet`. Existing
+standard fixtures omit these fields and remain valid. The bridge injects the
+sanitized `.bas` body into the corresponding component (document probes use
+the disposable workbook's ThisWorkbook or a worksheet); UserForm designer and
+`.frx` artifacts are not part of the oracle contract. The analyzer
 contract uses `analysis.expected_diagnostics` and
 `analysis.forbidden_diagnostics`; entries may specify `code`, `severity`, an
 optional source range, and (when needed) `surfaces` from `lint`, `analyze`, and
@@ -248,8 +254,8 @@ rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 The test reports fixture state counts, complete and incomplete rule counts,
 sorted fixture IDs for every state (`bound`, `partially-bound`, `unbound`, and
 `not-applicable`), and sorted rule-to-case and surface coverage. The committed
-corpus currently reports 41 asserted fixtures: 31 `bound`, 0
-`partially-bound`, 8 `unbound`, and 2 `not-applicable`; the nine bound rules
+corpus currently reports 53 asserted fixtures: 43 `bound`, 0
+`partially-bound`, 8 `unbound`, and 2 `not-applicable`; the eleven bound rules
 have complete positive/negative coverage. The report is emitted before a
 validation failure so missing positive/negative evidence and state changes
 remain visible in CI logs.

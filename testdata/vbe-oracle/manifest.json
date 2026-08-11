@@ -111,6 +111,27 @@
     {
       "id": "property-signature-valid",
       "path": "cases/property-signature-valid/case.json"
-    }
+    },
+    { "id": "invalid-event-standard", "path": "cases/invalid-event-standard/case.json" },
+    { "id": "invalid-friend-standard", "path": "cases/invalid-friend-standard/case.json" },
+    { "id": "invalid-implements-standard", "path": "cases/invalid-implements-standard/case.json" },
+    { "id": "invalid-me-standard", "path": "cases/invalid-me-standard/case.json" },
+    {
+      "id": "invalid-public-object-member",
+      "path": "cases/invalid-public-object-member/case.json"
+    },
+    { "id": "invalid-withevents-shape", "path": "cases/invalid-withevents-shape/case.json" },
+    { "id": "invalid-withevents-standard", "path": "cases/invalid-withevents-standard/case.json" },
+    { "id": "valid-module-class", "path": "cases/valid-module-class/case.json" },
+    {
+      "id": "valid-module-document-workbook",
+      "path": "cases/valid-module-document-workbook/case.json"
+    },
+    {
+      "id": "valid-module-document-worksheet",
+      "path": "cases/valid-module-document-worksheet/case.json"
+    },
+    { "id": "valid-module-form", "path": "cases/valid-module-form/case.json" },
+    { "id": "valid-module-standard", "path": "cases/valid-module-standard/case.json" }
   ]
 }

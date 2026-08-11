@@ -66,13 +66,24 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				}
 			}
 			projectRoot := t.TempDir()
-			modulesRoot := filepath.Join(projectRoot, "src", "modules")
-			if err := os.MkdirAll(modulesRoot, 0o755); err != nil {
-				t.Fatal(err)
+			modulePath := func(module Module) string {
+				root := cfg.Src.Modules
+				switch module.Kind {
+				case "class":
+					root = cfg.Src.Classes
+				case "form":
+					root = filepath.Join(cfg.Src.Forms, "code")
+				case "document":
+					root = cfg.Src.Workbook
+				}
+				return filepath.Join(projectRoot, root, module.Name+".bas")
 			}
 			projections := map[string][]Diagnostic{}
 			for _, module := range c.Modules {
-				path := filepath.Join(modulesRoot, module.Name+".bas")
+				path := modulePath(module)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(path, sources[module.Name], 0o644); err != nil {
 					t.Fatal(err)
 				}
@@ -106,9 +117,9 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 
 			lspAnalyzer := intel.Analyzer{RootDir: projectRoot, Config: cfg, DB: db}
 			for _, module := range c.Modules {
-				path := filepath.Join(modulesRoot, module.Name+".bas")
+				path := modulePath(module)
 				for _, diagnostic := range lspAnalyzer.DiagnosticsContext(context.Background(), intel.Document{
-					URI: path, Path: path, Source: string(sources[module.Name]), ModuleKind: "standard",
+					URI: path, Path: path, Source: string(sources[module.Name]), ModuleKind: module.Kind,
 				}) {
 					projections["lsp"] = append(projections["lsp"], Diagnostic{
 						Code: diagnostic.Code, Severity: diagnostic.Severity,
@@ -145,7 +156,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 41 || report.BoundFixtures != 31 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 53 || report.BoundFixtures != 43 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -167,6 +178,13 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"duplicate-named-argument",
 		"invalid-declaration-placement",
 		"invalid-declaration-placement-valid-controls",
+		"invalid-event-standard",
+		"invalid-friend-standard",
+		"invalid-implements-standard",
+		"invalid-me-standard",
+		"invalid-public-object-member",
+		"invalid-withevents-shape",
+		"invalid-withevents-standard",
 		"known-as-type",
 		"known-enum-as-type",
 		"known-named-argument",
@@ -186,6 +204,11 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"set-scalar-target",
 		"unknown-as-type",
 		"unknown-named-argument",
+		"valid-module-class",
+		"valid-module-document-workbook",
+		"valid-module-document-worksheet",
+		"valid-module-form",
+		"valid-module-standard",
 	})
 	assertIDs("partially-bound", report.PartialIDs, nil)
 	assertIDs("unbound", report.UnboundIDs, []string{

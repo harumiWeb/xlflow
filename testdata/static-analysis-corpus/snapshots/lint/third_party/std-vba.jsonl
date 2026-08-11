@@ -144,6 +144,8 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"lint","code":"VB049","severity":"error","line":370,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"lint","code":"VB049","severity":"error","line":370,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/stdResource.cls","surface":"lint","code":"VB049","severity":"error","line":370,"column":93}
+{"project":"third_party/std-vba","file":"src/WIP/stdRibbon.cls","surface":"lint","code":"VB050","severity":"error","line":13,"column":25}
+{"project":"third_party/std-vba","file":"src/WIP/stdRibbon.cls","surface":"lint","code":"VB050","severity":"error","line":15,"column":17}
 {"project":"third_party/std-vba","file":"src/WIP/stdRuntimeJS.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdRuntimeJS.cls","surface":"lint","code":"VB020","severity":"warning","line":146,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/stdSettings.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}

@@ -83,6 +83,13 @@ Property signature edit recomputes the whole same-name accessor group so stale
 cross-accessor diagnostics are not retained. Both rules are unsuppressible,
 preflight-blocking errors shared with batch `lint`.
 
+The LSP also publishes `VB050` for declarations that are invalid in the
+canonical standard/class/document/UserForm context, including invalid
+`WithEvents` shapes and object-module public members. `VB051` is published for
+an AST `Me` token in a standard module. Both are unsuppressible,
+preflight-blocking errors shared with batch `lint`; unresolved type metadata
+keeps type-dependent `WithEvents` checks fail-open.
+
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 Semantic tokens are provided by the Go language server with full-document `textDocument/semanticTokens/full` responses and `textDocument/semanticTokens/full/delta` updates. They classify VBA declarations, parameters, variables, built-in types, globals, constants, member expressions, comments, strings, numbers, operators, and keywords. Full responses carry opaque result IDs; the server retains the four most recent results for each open document and returns a delta only when its JSON payload is smaller than a full response. Unknown, expired, cross-document, or closed-document IDs fall back to a full response. Range semantic token requests are not advertised.

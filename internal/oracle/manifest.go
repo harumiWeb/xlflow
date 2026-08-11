@@ -143,6 +143,10 @@ type Module struct {
 	Kind  string `json:"kind"`
 	Path  string `json:"path"`
 	Entry bool   `json:"entry,omitempty"`
+	// DocumentTarget identifies the host for a document module.  It is an
+	// additive v1 field: standard-module fixtures can omit it, while document
+	// modules use "workbook" or "worksheet" to make the VBIDE host explicit.
+	DocumentTarget string `json:"document_target,omitempty"`
 }
 
 type Probe struct {
@@ -327,11 +331,28 @@ func ValidateCase(c Case, manifestID, caseDir string) error {
 	}
 	seenNames := map[string]struct{}{}
 	for _, module := range c.Modules {
-		if strings.ToLower(strings.TrimSpace(module.Kind)) != "standard" {
-			return fmt.Errorf("oracle case %q module %q: only standard modules are supported", c.ID, module.Name)
+		kind := strings.ToLower(strings.TrimSpace(module.Kind))
+		if kind != "standard" && kind != "class" && kind != "form" && kind != "document" {
+			return fmt.Errorf("oracle case %q module %q: unsupported module kind %q", c.ID, module.Name, module.Kind)
 		}
-		if module.Name == "" || module.Path == "" || strings.ToLower(filepath.Ext(module.Path)) != ".bas" {
+		if module.Name == "" || module.Path == "" {
 			return fmt.Errorf("oracle case %q module has invalid name/path", c.ID)
+		}
+		ext := strings.ToLower(filepath.Ext(module.Path))
+		// Oracle fixtures deliberately keep every module kind in ordinary .bas
+		// files. The bridge provisions a component and injects its sanitized
+		// body, so designer .frm/.frx artifacts are outside this contract.
+		validExt := ext == ".bas"
+		if !validExt {
+			return fmt.Errorf("oracle case %q module %q: kind %q requires a compatible source extension", c.ID, module.Name, kind)
+		}
+		target := strings.ToLower(strings.TrimSpace(module.DocumentTarget))
+		if kind == "document" {
+			if target != "workbook" && target != "worksheet" {
+				return fmt.Errorf("oracle case %q document module %q: document_target must be workbook or worksheet", c.ID, module.Name)
+			}
+		} else if target != "" {
+			return fmt.Errorf("oracle case %q module %q: document_target is only valid for document modules", c.ID, module.Name)
 		}
 		key := strings.ToLower(module.Name)
 		if _, ok := seenNames[key]; ok {

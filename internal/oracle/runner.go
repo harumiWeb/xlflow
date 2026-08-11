@@ -101,9 +101,10 @@ type fixtureRequest struct {
 }
 
 type fixtureModule struct {
-	Name       string `json:"name"`
-	Kind       string `json:"kind"`
-	SourcePath string `json:"source_path"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	SourcePath     string `json:"source_path"`
+	DocumentTarget string `json:"document_target,omitempty"`
 }
 
 type bridgeObservation struct {
@@ -284,7 +285,7 @@ func runEntry(parent context.Context, root string, entry ManifestEntry, timeout 
 		if err != nil {
 			return CaseResult{ID: c.ID, Outcome: OutcomeInfrastructureFailure, Error: err.Error()}, &ExitError{Code: 2, Message: err.Error()}
 		}
-		modules = append(modules, fixtureModule{Name: module.Name, Kind: module.Kind, SourcePath: modulePath})
+		modules = append(modules, fixtureModule{Name: module.Name, Kind: module.Kind, SourcePath: modulePath, DocumentTarget: module.DocumentTarget})
 	}
 	payload, err := json.Marshal(fixtureRequest{SchemaVersion: SchemaVersion, CaseID: c.ID, ProbeMode: c.Probe.Mode, TimeoutMS: timeout.Milliseconds(), Modules: modules})
 	if err != nil {

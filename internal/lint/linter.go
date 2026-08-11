@@ -50,8 +50,13 @@ type Result struct {
 }
 
 type Linter struct {
-	RootDir                string
-	Config                 config.Config
+	RootDir string
+	Config  config.Config
+	// ModuleKind overrides path-based classification for a caller-owned
+	// document (for example, an editor buffer whose project metadata already
+	// identified it as a document module). Batch lint leaves this empty and
+	// uses the canonical source-root classification from symbols instead.
+	ModuleKind             string
 	PathFilter             func(string) bool
 	VisibleDeclarations    map[string]bool
 	TypeDeclarations       map[string]int
@@ -208,46 +213,48 @@ func (l Linter) filesContext(ctx context.Context) ([]string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	dirs := []string{
-		l.Config.Src.Modules,
-		l.Config.Src.Classes,
-		l.Config.Src.Forms,
-		l.Config.Src.Workbook,
-		"tests",
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	var files []string
-	for _, dir := range dirs {
+	// Preserve cooperative cancellation checkpoints for each configured source
+	// root even though discovery itself is delegated to the canonical symbols
+	// index. This also keeps cancellation timing stable for callers that use a
+	// checkpointing context during project finalization.
+	for range 4 { // one cancellation checkpoint per configured source root
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		root := filepath.Join(l.RootDir, dir)
-		if _, err := os.Stat(root); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
+	}
+	// Keep lint discovery aligned with inspect, the LSP workspace index, and
+	// source preflight. In particular this preserves UserForm sidecar
+	// eligibility and configured workbook/document roots instead of inferring
+	// them from extensions or a second directory walk.
+	discovered, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: l.RootDir, Config: l.Config})
+	if err != nil {
+		return nil, err
+	}
+	// Test modules are intentionally linted as part of the project even when
+	// they are outside the configured production source roots. Use the same
+	// canonical collector for that explicit tree so extension and sidecar
+	// handling do not diverge from normal discovery.
+	testFiles, testErr := symbols.DiscoverSourceFiles(symbols.Options{RootDir: l.RootDir, Config: l.Config, Path: "tests"})
+	if testErr != nil {
+		return nil, testErr
+	}
+	discovered = append(discovered, testFiles...)
+	files := make([]string, 0, len(discovered))
+	seen := make(map[string]bool, len(discovered))
+	for _, file := range discovered {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if contextErr := ctx.Err(); contextErr != nil {
-				return contextErr
+		if l.shouldIncludeFile(file.Path) {
+			key := strings.ToLower(filepath.Clean(file.Path))
+			if seen[key] {
+				continue
 			}
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			switch strings.ToLower(filepath.Ext(path)) {
-			case ".bas", ".cls", ".frm":
-				if !l.shouldIncludeFile(path) {
-					return nil
-				}
-				files = append(files, path)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
+			seen[key] = true
+			files = append(files, file.Path)
 		}
 	}
 	return files, nil
@@ -375,6 +382,16 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			return lintCtx.err
 		}
 		issues = append(issues, lintCtx.issues...)
+		// Module-kind findings are compile-equivalent, so parser recovery is
+		// insufficient evidence for them. The generic recovery diagnostic (or
+		// a more specific syntax rule) remains the safe fallback in that state.
+		if !view.HasError && !view.HasMissing {
+			moduleIssues, moduleErr := l.moduleKindIssuesContext(ctx, path, source, view.Root)
+			if moduleErr != nil {
+				return moduleErr
+			}
+			issues = append(issues, moduleIssues...)
+		}
 		// Declaration placement/duplicate findings are compile-equivalent and
 		// therefore must fail open when the parser has recovered from an
 		// incomplete or malformed source buffer.  In that state declaration
@@ -504,6 +521,12 @@ func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) 
 }
 
 func (l Linter) moduleKindForPath(path string) string {
+	if kind := strings.ToLower(strings.TrimSpace(l.ModuleKind)); kind != "" {
+		return kind
+	}
+	if file, included, err := symbols.SourceFileForPath(l.RootDir, l.Config, path); err == nil && included && strings.TrimSpace(file.ModuleKind) != "" {
+		return file.ModuleKind
+	}
 	cleanPath := filepath.Clean(path)
 	if pathInside(cleanPath, filepath.Join(l.RootDir, l.Config.Src.Workbook)) {
 		return "document"

@@ -147,8 +147,8 @@ public sealed class VbeOracleService : IVbeOracleService
             }
 
             excelMetadata = ReadExcelMetadata(excel, excelProcessId);
-            stage = "import_modules";
-            ImportModules(workbook, plan.Modules ?? [], tempDirectory, cancellationToken);
+            stage = "provision_components";
+            ProvisionComponents(workbook, plan.Modules ?? [], cancellationToken);
 
             stage = "vbe_compile";
             var selectionLocator = new VbeSelectionLocator(
@@ -314,6 +314,10 @@ public sealed class VbeOracleService : IVbeOracleService
         plan.Modules ??= [];
         foreach (var module in plan.Modules)
         {
+            if (module is null)
+            {
+                throw new VbeOracleValidationException("oracle plan contains a null module entry");
+            }
             if (string.IsNullOrWhiteSpace(module.SourcePath))
             {
                 module.SourcePath = module.Path;
@@ -347,31 +351,46 @@ public sealed class VbeOracleService : IVbeOracleService
             {
                 throw new VbeOracleValidationException("oracle plan contains a null module entry");
             }
-            if (!string.Equals(module.Kind, "standard", StringComparison.OrdinalIgnoreCase))
+            var kind = (module.Kind ?? "").Trim().ToLowerInvariant();
+            module.DocumentTarget = (module.DocumentTarget ?? "").Trim().ToLowerInvariant();
+            if (kind is not ("standard" or "class" or "form" or "document"))
             {
-                throw new VbeOracleValidationException($"module '{module.Name}' must have kind=standard");
+                throw new VbeOracleValidationException($"module '{module.Name}' has unsupported kind '{module.Kind}'");
             }
             if (string.IsNullOrWhiteSpace(module.Name) || !names.Add(module.Name))
             {
                 throw new VbeOracleValidationException($"module name '{module.Name}' is missing or duplicated");
             }
-            if (string.IsNullOrWhiteSpace(module.Source) &&
-                (string.IsNullOrWhiteSpace(module.SourcePath) ||
-                 !string.Equals(Path.GetExtension(module.SourcePath), ".bas", StringComparison.OrdinalIgnoreCase)))
+            var extension = Path.GetExtension(module.SourcePath ?? "");
+            var validExtension = string.Equals(extension, ".bas", StringComparison.OrdinalIgnoreCase);
+            if (kind == "document" && module.DocumentTarget is not ("workbook" or "worksheet"))
             {
-                throw new VbeOracleValidationException($"module '{module.Name}' must provide a .bas source path or inline source");
+                throw new VbeOracleValidationException($"document module '{module.Name}' must have document_target=workbook or worksheet");
+            }
+            if (kind != "document" && !string.IsNullOrWhiteSpace(module.DocumentTarget))
+            {
+                throw new VbeOracleValidationException($"module '{module.Name}' cannot specify document_target");
+            }
+            if (!string.IsNullOrWhiteSpace(module.SourcePath) && !validExtension)
+            {
+                throw new VbeOracleValidationException($"module '{module.Name}' source path must use the .bas extension");
+            }
+            if (string.IsNullOrWhiteSpace(module.Source) && string.IsNullOrWhiteSpace(module.SourcePath))
+            {
+                throw new VbeOracleValidationException($"module '{module.Name}' must provide a compatible source path or inline source");
             }
 
             var source = module.Source;
             if (string.IsNullOrWhiteSpace(source))
             {
-                var sourcePath = Path.GetFullPath(module.SourcePath);
+                var sourcePath = Path.GetFullPath(module.SourcePath!);
                 if (!File.Exists(sourcePath))
                 {
                     throw new VbeOracleValidationException($"module '{module.Name}' source does not exist: {module.SourcePath}");
                 }
                 source = File.ReadAllText(sourcePath, Encoding.UTF8);
             }
+            source = source.TrimStart('\uFEFF');
             var match = AttributeNamePattern.Match(source);
             if (!match.Success || !string.Equals(match.Groups[1].Value.Trim(), module.Name, StringComparison.OrdinalIgnoreCase))
             {
@@ -380,7 +399,7 @@ public sealed class VbeOracleService : IVbeOracleService
         }
     }
 
-    private static void ImportModules(object workbook, IReadOnlyList<OracleModule> modules, string tempDirectory, CancellationToken cancellationToken)
+    private static void ProvisionComponents(object workbook, IReadOnlyList<OracleModule> modules, CancellationToken cancellationToken)
     {
         object? project = null;
         object? components = null;
@@ -391,36 +410,42 @@ public sealed class VbeOracleService : IVbeOracleService
             components = ExcelBridgeSupport.Get(project, "VBComponents")
                 ?? throw new InvalidOperationException("VBComponents are unavailable");
 
-            foreach (var module in modules)
+            foreach (var module in modules.OrderBy(module => ComponentOrder(module.Kind)))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var importPath = Path.Combine(tempDirectory, "imports", module.Name + ".bas");
-                var sourcePath = module.SourcePath;
-                if (!string.IsNullOrWhiteSpace(module.Source))
+                if (string.Equals(module.Kind, "document", StringComparison.OrdinalIgnoreCase))
                 {
-                    sourcePath = Path.Combine(tempDirectory, "sources", module.Name + ".bas");
-                    var sourceParent = Path.GetDirectoryName(sourcePath);
-                    if (!string.IsNullOrWhiteSpace(sourceParent))
-                    {
-                        Directory.CreateDirectory(sourceParent);
-                    }
-                    File.WriteAllText(sourcePath, module.Source, new UTF8Encoding(false));
+                    InjectDocumentModule(components, module);
+                    continue;
                 }
-                VbaSourceHelper.PrepareSourceForImport(sourcePath, importPath, null, "off");
-                object? imported = null;
+
+                var componentType = module.Kind.Trim().ToLowerInvariant() switch
+                {
+                    "standard" => 1,
+                    "class" => 2,
+                    "form" => 3,
+                    _ => throw new InvalidOperationException($"unsupported oracle component kind '{module.Kind}'"),
+                };
+                object? component = null;
+                object? codeModule = null;
                 try
                 {
-                    imported = ExcelBridgeSupport.InvokeViaDynamic(components, "Import", importPath)
-                        ?? throw new InvalidOperationException($"failed to import VBA module '{module.Name}'");
-                    var importedName = ExcelBridgeSupport.GetString(imported, "Name") ?? "";
-                    if (!string.Equals(importedName, module.Name, StringComparison.OrdinalIgnoreCase))
+                    component = ExcelBridgeSupport.InvokeMethod(components, "Add", componentType)
+                        ?? throw new InvalidOperationException($"failed to provision VBA component '{module.Name}'");
+                    ExcelBridgeSupport.Set(component, "Name", module.Name);
+                    codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
+                        ?? throw new InvalidOperationException($"VBA component '{module.Name}' has no code module");
+                    var source = module.Source;
+                    if (string.IsNullOrWhiteSpace(source))
                     {
-                        throw new InvalidOperationException($"imported VBA module name '{importedName}' did not match expected name '{module.Name}'");
+                        source = File.ReadAllText(module.SourcePath, Encoding.UTF8);
                     }
+                    VbaSourceHelper.SetCodeModuleText(codeModule, SanitizeOracleSource(source));
                 }
                 finally
                 {
-                    ExcelBridgeSupport.ReleaseComObject(imported);
+                    ExcelBridgeSupport.ReleaseComObject(codeModule);
+                    ExcelBridgeSupport.ReleaseComObject(component);
                 }
             }
         }
@@ -428,6 +453,86 @@ public sealed class VbeOracleService : IVbeOracleService
         {
             ExcelBridgeSupport.ReleaseComObject(components);
             ExcelBridgeSupport.ReleaseComObject(project);
+        }
+    }
+
+    private static int ComponentOrder(string kind)
+    {
+        return kind.Trim().ToLowerInvariant() switch
+        {
+            "standard" => 0,
+            "class" => 1,
+            "form" => 2,
+            "document" => 3,
+            _ => 4,
+        };
+    }
+
+    private static string SanitizeOracleSource(string source)
+    {
+        // Sources are ordinary .bas fixture files even for class/form
+        // components. NormalizeDocumentModuleContent removes VBIDE export
+        // headers and the class metadata block before CodeModule injection.
+        return VbaSourceHelper.NormalizeDocumentModuleContent(source.TrimStart('\uFEFF'));
+    }
+
+    private static bool MatchesDocumentTarget(int componentType, string candidateName, string moduleName, string documentTarget)
+    {
+        if (componentType != 100 || !string.Equals(candidateName, moduleName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (string.Equals(documentTarget, "workbook", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(candidateName, "ThisWorkbook", StringComparison.OrdinalIgnoreCase);
+        }
+        return string.Equals(documentTarget, "worksheet", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(candidateName, "ThisWorkbook", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void InjectDocumentModule(object components, OracleModule module)
+    {
+        object? component = null;
+        object? codeModule = null;
+        try
+        {
+            var count = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(components, "Count"));
+            for (var index = 1; index <= count; index++)
+            {
+                var candidate = ExcelBridgeSupport.Get(components, "Item", index);
+                if (candidate is null)
+                {
+                    continue;
+                }
+                var type = ExcelBridgeSupport.ToInt(ExcelBridgeSupport.Get(candidate, "Type"));
+                var name = ExcelBridgeSupport.GetString(candidate, "Name") ?? "";
+                var matchesTarget = MatchesDocumentTarget(type, name, module.Name, module.DocumentTarget);
+                if (matchesTarget)
+                {
+                    component = candidate;
+                    break;
+                }
+                ExcelBridgeSupport.ReleaseComObject(candidate);
+            }
+
+            if (component is null)
+            {
+                throw new InvalidOperationException($"document module '{module.Name}' could not be resolved for document_target={module.DocumentTarget}");
+            }
+
+            codeModule = ExcelBridgeSupport.Get(component, "CodeModule")
+                ?? throw new InvalidOperationException($"document module '{module.Name}' has no code module");
+            var source = module.Source;
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                source = File.ReadAllText(module.SourcePath, Encoding.UTF8);
+            }
+            VbaSourceHelper.SetCodeModuleText(codeModule, SanitizeOracleSource(source));
+        }
+        finally
+        {
+            ExcelBridgeSupport.ReleaseComObject(codeModule);
+            ExcelBridgeSupport.ReleaseComObject(component);
         }
     }
 
@@ -641,7 +746,7 @@ public sealed class VbeOracleService : IVbeOracleService
         {
             return "oracle_excel_startup_failed";
         }
-        if (stage == "import_modules")
+        if (stage == "provision_components")
         {
             return "oracle_import_failed";
         }
@@ -717,6 +822,9 @@ public sealed class VbeOracleService : IVbeOracleService
 
         [JsonPropertyName("kind")]
         public string Kind { get; init; } = "";
+
+        [JsonPropertyName("document_target")]
+        public string DocumentTarget { get; set; } = "";
 
         [JsonPropertyName("source_path")]
         public string SourcePath { get; set; } = "";
