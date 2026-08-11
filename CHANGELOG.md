@@ -41,6 +41,10 @@ All notable changes to xlflow will be documented in this file.
   Optional-default validation recognizes VBA decimal, hexadecimal, octal, and
   numeric type-suffix literals while leaving String-suffix references unknown.
 
+- Fixed `VB022` false positives on parenthesized `ElseIf` and conditional-
+  compilation `#If` expressions by recognizing only whitespace-separated
+  parenthesized procedure calls.
+
 - Added opt-in `VBA240` project-wide analysis for module-level mutable state.
   The analyzer builds per-procedure read/write sets, aggregates field readers
   and writers across uniquely resolved call paths, reports structural lifecycle
