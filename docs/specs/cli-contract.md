@@ -905,7 +905,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA105`: removed `XlflowLog` trace helper call
 - `VBA106`: removed `XlflowSetTraceFile` trace helper call
 - `VBA201`: `Range.Find` result is dereferenced before a `Nothing` check
-- `VBA202`: object variable may be used before an obvious `Set` assignment
+- `VBA202`: object variable may be dereferenced before a definitely non-`Nothing` value is proven on every reachable path
 - `VBA203`: a change to `Application.ScreenUpdating`, `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.Calculation`, `Application.StatusBar`, `Application.Cursor`, `Application.Interactive`, `Application.AskToUpdateLinks`, `Application.AutomationSecurity`, or `Application.CutCopyMode` can reach an exit without restoring its previous value
 - `VBA204`: normal execution can fall through into an error-handler label
 - `VBA205`: ambiguous Excel workbook or worksheet scope: active UI objects, unqualified worksheet members (`Range`, `Cells`, `Rows`, and `Columns`), unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open`, or `ThisWorkbook` in an add-in standard module
@@ -965,16 +965,26 @@ Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239` are enabled by default. `VBA230` through `VBA239` are warning-level, non-blocking, and inline-suppressible. `VBA237` is interprocedural and Full-only in LSP; `VBA238` and `VBA239` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types, ambiguous names, and unresolved external types are conservative warnings that include the type name; host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`.
 
-`VBA202` is a batch-only, procedure-local warning for a local object variable
-whose member is read before an obvious `Set` assignment. Parameters and `As
-New` locals begin initialized. `For Each` assigns its object iterator only on
-the loop-body edge, so member use in the body is accepted while use after a
-possibly empty loop is not proven initialized. Module variables and persistent
-`Static` locals have unknown entry state and are not treated as freshly
-uninitialized on every procedure invocation. Type references and member names
-are not object-variable reads. A preceding explicit `Set` or supported ByRef
-initializer retains the rule's compatibility exemption without attempting
-arbitrary branch-condition correlation.
+`VBA202` is a batch-only, interprocedural warning for an object variable that
+may be dereferenced before a definitely non-`Nothing` value is proven on every
+reachable path. The CFG tracks object state through normal and exceptional
+edges, branch joins, early exits, error-handler paths, explicit `Set obj =
+Nothing` resets, and `ByRef` mutations. Locals, parameters, module-level
+objects, and persistent `Static` locals are included; each scope starts in its
+appropriate `Nothing`/maybe-`Nothing` state rather than being assumed
+initialized. `As New` declarations, constructor expressions, intrinsic object
+factories rooted at `ThisWorkbook` or `Application`, `Controls.Add` factories
+reached through a proven non-`Nothing` receiver, and unique project-local
+function/property summaries that guarantee a non-`Nothing` return establish
+initialized state. `Range.Find` remains nullable even when rooted at an
+intrinsic receiver. A callee or function with any path that can return
+`Nothing`, fail before assignment, or leave a `ByRef` object
+uninitialized does not establish that fact. Unresolved or ambiguous calls do
+not initialize arguments. Member, default-member, and index receivers are
+checked, while type references and member names alone are not object-variable
+reads. Safe use requires a dominating proof across all reachable paths; an
+explicit reset or a possibly empty loop therefore invalidates later use until
+another definite initialization.
 
 `VBA212` is warning-only, non-blocking, inline-suppressible, and available in
 batch and realtime analysis. It pairs guards and unsafe operands by their AST

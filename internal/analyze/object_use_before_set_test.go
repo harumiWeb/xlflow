@@ -68,10 +68,10 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA202")
-	if len(got) != 3 {
-		t.Fatalf("VBA202 findings = %+v, want after-loop, Set-RHS, and With-receiver findings", got)
+	if len(got) != 8 {
+		t.Fatalf("VBA202 findings = %+v, want branch/parameter/module/static/receiver findings", got)
 	}
-	wantLines := []int{16, 30, 49}
+	wantLines := []int{6, 13, 16, 24, 30, 34, 39, 49}
 	for index, line := range wantLines {
 		if got[index].Line != line {
 			t.Fatalf("VBA202 finding %d = %+v, want line %d", index, got[index], line)

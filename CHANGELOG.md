@@ -8,6 +8,11 @@ All notable changes to xlflow will be documented in this file.
   DAO execution boundaries. Findings track SQL value/identifier/LIKE roles,
   locale-sensitive formatting, manual quoting, and parameterized
   `ADODB.Command` usage without claiming complete SQL-injection proof.
+- Strengthened `VBA202` object use-before-`Set` analysis with CFG-based,
+  branch- and interprocedural tracking across locals, parameters, module and
+  `Static` state, explicit `Nothing` resets, `ByRef` mutations,
+  `As New`/constructor initialization, exceptional paths, and nullable
+  function/callee returns. Unresolved calls no longer imply initialization.
 
 - Fixed `VB014` false positives for valid date-literal and named-argument colons,
   UDT fields named `Next`, and repeated conditional-compilation guards.
@@ -59,9 +64,10 @@ All notable changes to xlflow will be documented in this file.
 - Fixed `VBA219` false positives for `Workbooks.Open` assignments to
   non-Workbook locals or return slots and for direct ownership transfer through
   a Workbook-valued Function return.
-- Fixed `VBA202` false positives for `For Each` object iterators, module and
-  persistent `Static` object state, and type qualifiers that share a name with
-  a local object variable.
+- Fixed `VBA202` false positives for `For Each` object iterators and type
+  qualifiers that share a name with a local object variable. Module fields and
+  persistent `Static` objects are now tracked conservatively and are accepted
+  only after a dominating or proven callee initialization.
 - Fixed `VBA224` false positives where built-in, module, and local constant
   identifiers were treated as separate unknown inputs flowing to sensitive
   APIs.

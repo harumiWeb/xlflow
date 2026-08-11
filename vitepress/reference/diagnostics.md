@@ -54,7 +54,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA105`](#vba105) | analyze | error    | project-wide    | yes     | Removed XlflowLog helper                           |
 | [`VBA106`](#vba106) | analyze | error    | project-wide    | yes     | Removed XlflowSetTraceFile helper                  |
 | [`VBA201`](#vba201) | analyze | warning  | procedure-local | yes     | Unchecked Range.Find result                        |
-| [`VBA202`](#vba202) | analyze | warning  | procedure-local | yes     | Object use before Set                              |
+| [`VBA202`](#vba202) | analyze | warning  | interprocedural | yes     | Object use before Set                              |
 | [`VBA203`](#vba203) | analyze | warning  | interprocedural | yes     | Application state not restored                     |
 | [`VBA204`](#vba204) | analyze | warning  | procedure-local | yes     | Error-handler fallthrough                          |
 | [`VBA205`](#vba205) | analyze | warning  | procedure-local | yes     | Ambiguous Excel object scope                       |
@@ -1151,7 +1151,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA202
 
-**Object use before Set.** An object variable may be used before an obvious Set assignment.
+**Object use before Set.** An object variable may be dereferenced before a definitely non-Nothing value is proven on every reachable path.
 
 | Property                    | Value                          |
 | --------------------------- | ------------------------------ |
@@ -1162,7 +1162,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Default severity            | `warning`                      |
 | Supported severities        | `warning`                      |
 | Surfaces                    | `analyze`                      |
-| Scope                       | `procedure-local`              |
+| Scope                       | `interprocedural`              |
 | Precision                   | `medium`                       |
 | Enabled by default          | yes                            |
 | Configuration               | `detect_object_use_before_set` |

@@ -69,6 +69,7 @@
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":245,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":248,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":264,"column":0}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA202","severity":"warning","line":281,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":297,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":297,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":308,"column":0}
@@ -93,6 +94,7 @@
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA206","severity":"warning","line":510,"column":5}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA206","severity":"warning","line":511,"column":5}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA206","severity":"warning","line":511,"column":5}
+{"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA202","severity":"warning","line":526,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":572,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":572,"column":0}
 {"project":"third_party/vba-dictionary","file":"specs/Specs.bas","surface":"analyze","code":"VBA227","severity":"warning","line":572,"column":0}

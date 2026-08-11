@@ -9,10 +9,16 @@
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":63,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":65,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":67,"column":0}
+{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":206,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":262,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":262,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":262,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":263,"column":0}
+{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":266,"column":0}
+{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":303,"column":0}
+{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":313,"column":0}
+{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":315,"column":0}
+{"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA202","severity":"warning","line":324,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":330,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":331,"column":0}
 {"project":"self/maze-chase","file":"src/modules/MazeChaseRenderer.bas","surface":"analyze","code":"VBA227","severity":"warning","line":334,"column":0}

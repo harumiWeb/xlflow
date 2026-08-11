@@ -163,6 +163,7 @@
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA224","severity":"warning","line":605,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA224","severity":"warning","line":605,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA214","severity":"warning","line":671,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA202","severity":"warning","line":677,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":190,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":403,"column":13}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":431,"column":13}
@@ -283,4 +284,6 @@
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1226,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1229,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1232,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA202","severity":"warning","line":1261,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA202","severity":"warning","line":1277,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA214","severity":"warning","line":1297,"column":0}

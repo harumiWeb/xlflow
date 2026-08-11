@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -185,6 +186,8 @@ type analysisContext struct {
 	arrayReturns       map[string]arrayValue
 	procedures         map[string]procedureSignature
 	procedureResolver  procedureir.SymbolResolver
+	objectSummaries    map[string]objectProcedureSummary
+	objectEntryStates  map[string]map[string]bool
 	worksheetCodenames map[string]string
 	projectEffects     effects.ProjectSummary
 }
@@ -1108,8 +1111,10 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 		functionReturns:    map[string]string{},
 		arrayReturns:       map[string]arrayValue{},
 		procedures:         map[string]procedureSignature{},
+		objectSummaries:    buildObjectProcedureSummaries(files),
 		worksheetCodenames: map[string]string{},
 	}
+	ctx.objectEntryStates = buildObjectProcedureEntryStates(files, ctx.objectSummaries)
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
 	workbookRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Workbook))
 	for _, file := range files {
@@ -1199,7 +1204,6 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	shadowedVBA205 := vba205ShadowedIdentifiers(proc, decls, ctx)
 	withStack := make([]withInfo, 0)
-	maybeInitializedByCall := map[string]int{}
 	findAssignments := map[string]int{}
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
@@ -1299,11 +1303,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		if a.Config.Analyze.DetectObjectArrayComparison {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
-		markCallInitialized(stmt, lineNo, decls, ctx, maybeInitializedByCall)
 		_ = lower
 	}
 	if a.Config.Analyze.DetectObjectUseBeforeSet {
-		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, maybeInitializedByCall)...)
+		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
+		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries, ctx.objectEntryStates[key])...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	if a.Config.Analyze.DetectApplicationStateRestore {
@@ -1342,7 +1346,60 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
 	findings = append(findings, a.functionReturnPathFindings(file, proc)...)
+	findings = suppressDictionaryGuardsForUninitializedObjects(findings)
 	return findings, cancelCtx.Err()
+}
+
+// VBA202 is the root-cause diagnostic when a Dictionary/Collection receiver
+// itself may still be Nothing.  Do not pair that finding with VBA207's key
+// existence warning for the same source access; once construction is proven,
+// VBA207 remains unchanged.
+func suppressDictionaryGuardsForUninitializedObjects(findings []Finding) []Finding {
+	unsafe := map[string]map[string]bool{}
+	for _, finding := range findings {
+		if finding.Code != "VBA202" {
+			continue
+		}
+		key := finding.File + "|" + finding.Procedure + "|" + strconv.Itoa(finding.Line)
+		receiver := findingReceiver(finding)
+		if receiver != "" {
+			if unsafe[key] == nil {
+				unsafe[key] = map[string]bool{}
+			}
+			unsafe[key][receiver] = true
+		}
+	}
+	if len(unsafe) == 0 {
+		return findings
+	}
+	out := findings[:0]
+	for _, finding := range findings {
+		key := finding.File + "|" + finding.Procedure + "|" + strconv.Itoa(finding.Line)
+		if finding.Code == "VBA207" && unsafe[key][findingReceiver(finding)] {
+			continue
+		}
+		out = append(out, finding)
+	}
+	return out
+}
+
+func findingReceiver(finding Finding) string {
+	message := strings.ToLower(strings.TrimSpace(finding.Message))
+	var receiver string
+	switch finding.Code {
+	case "VBA202":
+		if index := strings.Index(message, " may be "); index > 0 {
+			receiver = message[:index]
+		}
+	case "VBA207":
+		for _, marker := range []string{" accesses", " is ", " uses", " item/key"} {
+			if index := strings.Index(message, marker); index > 0 {
+				receiver = message[:index]
+				break
+			}
+		}
+	}
+	return cleanIdentifier(strings.TrimSpace(receiver))
 }
 
 func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {
@@ -1580,35 +1637,6 @@ func (a Analyzer) rangeFindFindings(file parsedFile, proc sourceProcedure, lineN
 		}
 	}
 	return findings
-}
-
-func markCallInitialized(stmt string, line int, decls map[string]sourceDeclaration, ctx analysisContext, maybeInitialized map[string]int) {
-	if strings.Contains(stmt, "=") {
-		return
-	}
-	name, args, ok := parseSimpleCall(stmt)
-	if !ok {
-		return
-	}
-	sig, ok := ctx.procedures[strings.ToLower(name)]
-	if !ok {
-		return
-	}
-	for i, arg := range args {
-		if i >= len(sig.Params) {
-			break
-		}
-		param := sig.Params[i]
-		if strings.EqualFold(param.Passing, "ByVal") || !isObjectType(param.Type) {
-			continue
-		}
-		key := strings.ToLower(cleanIdentifier(arg))
-		if decl, ok := decls[key]; ok && decl.Object {
-			if previous := maybeInitialized[key]; previous == 0 || line < previous {
-				maybeInitialized[key] = line
-			}
-		}
-	}
 }
 
 func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, shadowed map[string]bool) []Finding {

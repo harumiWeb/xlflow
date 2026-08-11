@@ -1038,7 +1038,7 @@
     {
       "id": "VBA202",
       "title": "Object use before Set",
-      "description": "An object variable may be used before an obvious Set assignment.",
+      "description": "An object variable may be dereferenced before a definitely non-Nothing value is proven on every reachable path.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",
@@ -1047,7 +1047,7 @@
       "supported_severities": ["warning"],
       "surfaces": ["analyze"],
       "default_enabled": true,
-      "scope": "procedure-local",
+      "scope": "interprocedural",
       "realtime": false,
       "precision": "medium",
       "fix_available": false,

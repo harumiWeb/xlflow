@@ -62,6 +62,7 @@
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1687,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1702,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1704,"column":0}
+{"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1707,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1713,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1714,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":1715,"column":0}
@@ -120,6 +121,8 @@
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2592,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2592,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2604,"column":0}
+{"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA202","severity":"warning","line":2648,"column":0}
+{"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA202","severity":"warning","line":2709,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2717,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2717,"column":0}
 {"project":"third_party/json","file":"package/JSON.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2717,"column":0}
