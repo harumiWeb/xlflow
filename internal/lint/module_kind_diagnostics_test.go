@@ -40,9 +40,18 @@ func TestModuleKindDiagnosticsMatrix(t *testing.T) {
 		{"me standard", "standard", "Sub Run()\n Me\nEnd Sub\n", "VB051", 1},
 		{"me class", "class", "Sub Run()\n Me\nEnd Sub\n", "VB051", 0},
 	}
+	objectTypesByCase := map[string]map[string]int{
+		// Keep the qualified accepted case on the resolved-object path rather
+		// than letting it pass only because unknown types are fail-open.
+		"withevents qualified": {"excel.application": 1},
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			issues, err := (Linter{Config: config.Default(), ModuleKind: tc.kind}).LintSource("Module.cls", []byte(tc.src))
+			issues, err := (Linter{
+				Config:                 config.Default(),
+				ModuleKind:             tc.kind,
+				ObjectTypeDeclarations: objectTypesByCase[tc.name],
+			}).LintSource("Module.cls", []byte(tc.src))
 			if err != nil {
 				t.Fatal(err)
 			}
