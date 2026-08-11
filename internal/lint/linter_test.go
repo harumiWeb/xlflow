@@ -2104,6 +2104,22 @@ Handler:
   Resume Next
 End Sub
 
+Sub ResetHandler()
+  On Error GoTo Handler
+  On Error GoTo 0
+Handler:
+  Resume Next
+End Sub
+
+Sub RetargetHandler()
+  On Error GoTo FirstHandler
+  On Error GoTo SecondHandler
+FirstHandler:
+  Resume Next
+SecondHandler:
+  Resume Next
+End Sub
+
 Sub BareResume()
   Resume Next
 End Sub
@@ -2124,10 +2140,10 @@ End Sub
 		t.Fatal(err)
 	}
 	vb026 := issuesByCode(issues, "VB026")
-	if len(vb026) != 3 {
-		t.Fatalf("VB026 issues = %+v, want only the three resumes without On Error GoTo handlers", vb026)
+	if len(vb026) != 5 {
+		t.Fatalf("VB026 issues = %+v, want resumes without an active On Error GoTo handler", vb026)
 	}
-	for _, line := range []int{17, 23, 28} {
+	for _, line := range []int{20, 27, 33, 39, 44} {
 		assertIssue(t, vb026, "VB026", line)
 	}
 	if got := issuesByCode(issues, "VB014"); len(got) != 0 {
