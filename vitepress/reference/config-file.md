@@ -229,13 +229,14 @@ inline. This includes every preflight-blocking lint diagnostic.
 
 ### `[analyze]`
 
-| Key                              | Type     | Required | Default | Description                                                                                        |
-| -------------------------------- | -------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `disabled_rules`                 | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID.                                              |
-| `detect_risky_module_state`      | bool     | no       | `false` | Opt in to `VBA240` project-wide module-state coupling analysis and read/write metrics.             |
-| `detect_redim_preserve_in_loops` | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA241` repeated `ReDim Preserve` analysis inside loops. |
+| Key                                      | Type     | Required | Default | Description                                                                                         |
+| ---------------------------------------- | -------- | -------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `disabled_rules`                         | string[] | no       | `[]`    | Disable configurable analyzer rules by diagnostic ID.                                               |
+| `detect_risky_module_state`              | bool     | no       | `false` | Opt in to `VBA240` project-wide module-state coupling analysis and read/write metrics.              |
+| `detect_redim_preserve_in_loops`         | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA241` repeated `ReDim Preserve` analysis inside loops.  |
+| `detect_expensive_full_range_operations` | bool     | no       | `false` | Opt in to `VBA242` full-row, full-column, full-sheet, and unbounded `UsedRange` operation analysis. |
 
-Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`. `detect_risky_module_state = true` is the opt-in compatibility key for `VBA240`; disable it with `disabled_rules = ["VBA240"]`. `detect_redim_preserve_in_loops = false` is the compatibility key for disabling `VBA241`; prefer `disabled_rules = ["VBA241"]`.
+Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`. `detect_risky_module_state = true` is the opt-in compatibility key for `VBA240`; disable it with `disabled_rules = ["VBA240"]`. `detect_redim_preserve_in_loops = false` is the compatibility key for disabling `VBA241`; prefer `disabled_rules = ["VBA241"]`. `detect_expensive_full_range_operations = true` is the opt-in compatibility key for `VBA242`; prefer enabling it explicitly only for Excel projects and use `disabled_rules = ["VBA242"]` to suppress it under a project policy.
 
 The generated [diagnostic catalog](./diagnostics) is the authoritative list of
 analyzer configuration keys, defaults, and always-enabled diagnostics.

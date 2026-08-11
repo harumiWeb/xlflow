@@ -164,6 +164,7 @@ type AnalyzeConfig struct {
 	DetectUnsafeSQLConstruction              bool     `toml:"detect_unsafe_sql_construction"`
 	DetectRiskyModuleState                   bool     `toml:"detect_risky_module_state"`
 	DetectRedimPreserveInLoops               bool     `toml:"detect_redim_preserve_in_loops"`
+	DetectExpensiveFullRangeOperations       bool     `toml:"detect_expensive_full_range_operations"`
 }
 
 type lintRuleAdapter struct {
@@ -252,6 +253,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA239": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeSQLConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeSQLConstruction = v }},
 	"VBA240": {Get: func(c AnalyzeConfig) bool { return c.DetectRiskyModuleState }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRiskyModuleState = v }},
 	"VBA241": {Get: func(c AnalyzeConfig) bool { return c.DetectRedimPreserveInLoops }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedimPreserveInLoops = v }},
+	"VBA242": {Get: func(c AnalyzeConfig) bool { return c.DetectExpensiveFullRangeOperations }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExpensiveFullRangeOperations = v }},
 }
 
 var (

@@ -33,6 +33,12 @@ supported VBA loop form, distinguish loop-variable growth from repeated
 constant-size reallocations, account for nested-loop cost, and preserve the
 existing `ReDim Preserve` and dimension-safety ownership boundaries.
 
+Issue #455 adds a fourth cost shape: a costly operation may target an entire
+row, column, worksheet, or an unbounded `UsedRange` when a bounded range was
+intended. One-time whole-sheet formatting remains legitimate, so this rule
+must be opt-in and must distinguish loop-contained processing from a one-time
+operation.
+
 ## Decision
 
 Add `VBA225`, a default-enabled `analyze` rule in the performance category. It
@@ -103,6 +109,19 @@ inline suppressible, and is configured with
 `VBA227` continues to own allocation/lifecycle safety; neither rule is merged
 with this performance diagnostic.
 
+Add `VBA242` for issue #455. It is an opt-in, information-level by default,
+procedure-local performance rule in batch analysis and the shared real-time
+path. The detector recognizes full-row, full-column, full-sheet, and direct or
+unbounded `UsedRange` shapes only when they feed an expensive operation such as
+formula/value assignment, calculation, formatting, find/replace, or sorting.
+Explicitly bounded ranges, bounded `Resize`, and bounded `Intersect` forms are
+accepted. A reachable loop escalates the finding from `information` to
+`warning`; the rule remains non-blocking and inline suppressible. Configure it
+with `detect_expensive_full_range_operations = true` during the compatibility
+window, while `[analyze].disabled_rules = ["VBA242"]` is the stable policy.
+`VBA201`, `VBA217`, and `VBA225` retain ownership of find-result safety,
+last-row calculation guidance, and repeated per-cell work respectively.
+
 ## Consequences
 
 - Positive: common cell-by-cell loop patterns receive actionable guidance before
@@ -127,6 +146,12 @@ with this performance diagnostic.
   the rule cannot prove helper-procedure internals without violating its
   procedure-local scope. Projects may still need a local suppression for
   intentionally bounded reallocations.
+- Positive: `VBA242` makes accidental worksheet-scale processing visible while
+  preserving legitimate one-time formatting through opt-in configuration and
+  explicit bounded-range exemptions.
+- Negative: shape inference is intentionally conservative; dynamic addresses,
+  named ranges, and aliases whose effective bounds are unknown remain
+  unreported.
 
 ## Alternatives Considered
 
@@ -156,6 +181,8 @@ with this performance diagnostic.
   resolution and cache-hoisting guidance).
 - Related requirements: xlflow issue #454 (loop-contained `ReDim Preserve`
   performance analysis).
+- Related requirements: xlflow issue #455 (expensive full-row, full-column, and
+  full-sheet operations).
 - Analyzer ownership and public diagnostic policy:
   `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`.
 - Procedure syntax and resolution: `docs/specs/vba-analysis-ir.md` and
@@ -180,3 +207,4 @@ with this performance diagnostic.
 - xlflow issue #452
 - xlflow issue #453
 - xlflow issue #454
+- xlflow issue #455

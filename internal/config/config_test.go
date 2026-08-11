@@ -115,6 +115,66 @@ detect_redim_preserve_in_loops = false
 	}
 }
 
+func TestExpensiveFullRangeOperationsDefaultsDisabledAndIsConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA242"); !ok || enabled || cfg.Analyze.DetectExpensiveFullRangeOperations {
+		t.Fatalf("VBA242 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectExpensiveFullRangeOperations)
+	}
+
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_expensive_full_range_operations = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA242"); !ok || !enabled || !loaded.Analyze.DetectExpensiveFullRangeOperations {
+		t.Fatalf("loaded VBA242 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectExpensiveFullRangeOperations)
+	}
+	if !hasConfigWarning(loaded.Warnings, "deprecated_analyze_rule_config", "VBA242") {
+		t.Fatalf("expected legacy compatibility-key warning for VBA242: %+v", loaded.Warnings)
+	}
+}
+
+func TestExpensiveFullRangeOperationsDisabledRulesTakePrecedence(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_expensive_full_range_operations = true
+disabled_rules = ["VBA242"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA242"); !ok || enabled || cfg.Analyze.DetectExpensiveFullRangeOperations {
+		t.Fatalf("VBA242 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectExpensiveFullRangeOperations)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA242") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA242") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA242, got %+v", cfg.Warnings)
+	}
+}
+
 func TestRiskyModuleStateDefaultsDisabledAndIsConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

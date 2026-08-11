@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `VBA242` performance analysis for expensive operations over
+  entire rows, columns, worksheets, or unbounded `UsedRange` expressions.
+  Findings use `information` outside loops and `warning` in reachable loops,
+  accept explicit bounded ranges, and recommend deriving bounded last-row or
+  last-column limits. Configure it with
+  `detect_expensive_full_range_operations` or disable it with
+  `[analyze].disabled_rules = ["VBA242"]`.
+
 - Added default-enabled `VBA241` performance analysis for reachable
   `ReDim Preserve` statements inside VBA loops. The rule covers all supported
   loop forms, distinguishes loop-variable-dependent growth from repeated

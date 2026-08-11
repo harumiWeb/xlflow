@@ -97,6 +97,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA239` | warning               | A SQL statement may combine external input, dynamic identifiers, locale-sensitive values, manual quoting, or wildcard input before execution. |
 | `VBA240` | warning               | Opt-in project-wide analysis of module-level mutable state, lifecycle coupling, and read/write metrics.                                       |
 | `VBA241` | warning / information | `ReDim Preserve` repeatedly resizes an array inside a reachable loop.                                                                         |
+| `VBA242` | information / warning | An expensive operation targets an entire row, column, worksheet, or unbounded `UsedRange`.                                                    |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -157,6 +158,16 @@ dimension correctness. Use `xlflow:disable-line VBA241`,
 `[analyze].disabled_rules = ["VBA241"]`; the legacy
 `detect_redim_preserve_in_loops` key remains accepted with a deprecation
 warning.
+
+`VBA242` is disabled by default. Enable it with
+`[analyze].detect_expensive_full_range_operations = true` to report expensive
+formula/value assignments, calculation, formatting, find/replace, and sorting
+over entire rows, columns, worksheets, or unbounded `UsedRange` expressions.
+Outside loops it uses `information`; a reachable loop escalates to `warning`.
+Explicit bounded ranges, bounded `Resize`, and bounded `Intersect` forms are
+accepted. The rule is non-blocking and inline-suppressible; use
+`xlflow:disable-line VBA242`, `xlflow:disable-next-line VBA242`, or
+`[analyze].disabled_rules = ["VBA242"]` for intentional whole-range use.
 
 `VBA239` is enabled in batch and real-time analysis and reports procedure-local
 SQL construction that combines external input, dynamic identifiers,
