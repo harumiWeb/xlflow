@@ -1124,6 +1124,63 @@ End Function
 	}
 }
 
+func TestAnalyzerContinuesAfterDeclarationKeywordRecovery(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+	  Dim b() As Byte, ReDim b(10)
+	  Debug.Print b(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatalf("declaration keyword recovery should not abort analyzer: %v", err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("declaration recovery should retain only the actual array access finding, got %+v", got)
+	}
+}
+
+func TestAnalyzerContinuesAfterIdentifierTypeCharacterRecovery(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+End Sub
+`)
+
+	if _, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run(); err != nil {
+		t.Fatalf("legal identifier type-character recovery should not abort analyzer: %v", err)
+	}
+}
+
+func TestAnalyzerRejectsUnrelatedSameLineDeclarationRecovery(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		line string
+	}{
+		{name: "declaration keyword", line: "Dim x As Double, Dim i As Long: value ="},
+		{name: "type character", line: "Dim value!: other ="},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  "+test.line+"\nEnd Sub\n")
+
+			_, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+			var parseErr *ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("unrelated same-line recovery should remain a ParseError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
 func TestAnalyzerFindsWorksheetMemberAssignedOnVariable(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -332,7 +332,19 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
+		declarationRecovery := false
 		if ir.Parse.HasError || ir.Parse.HasMissing {
+			if readErr := parsed.Read(func(view vbaast.ParsedView) error {
+				declarationRecovery = vbaast.IsDeclarationKeywordRecovery(view.Root, view.Source) ||
+					vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source)
+				return nil
+			}); readErr != nil {
+				parsed.Close()
+				closeParsedFiles(parsedFiles)
+				return Result{}, readErr
+			}
+		}
+		if (ir.Parse.HasError || ir.Parse.HasMissing) && !declarationRecovery {
 			parsed.Close()
 			closeParsedFiles(parsedFiles)
 			return Result{}, &ParseError{Path: file, HasError: ir.Parse.HasError, HasMissing: ir.Parse.HasMissing}

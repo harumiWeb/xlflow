@@ -833,7 +833,9 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB002`: `Select` usage
 - `VB003`: `Activate` usage
 - `VB004`: `On Error Resume Next` usage
-- `VB005`: possible implicit `Variant`
+- `VB005`: possible implicit `Variant`; VBA identifier type characters `$`, `%`,
+  `&`, `!`, `#`, `@`, and `^` count as explicit `String`, `Integer`, `Long`,
+  `Single`, `Double`, `Currency`, and `LongLong` types respectively
 - `VB006`: module-level `Public` variable usage
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. Direct `MsgBox` and `InputBox` usage remains in scope for this rule; `XlflowUI.MsgBox` and `XlflowUI.InputBox` are the approved dialog wrappers for runtime-aware automation. JSON findings may include `kind`, `symbol`, and `suggestion`.
 - `VB008`: typographic quote characters that can trigger VBE compile dialogs
@@ -843,10 +845,12 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB012`: mismatched procedure end statement
 - `VB028`: bare `MsgBox` or `InputBox` calls are present while `XlflowUI.bas` is in the source tree. These calls can bind to `XlflowUI.MsgBox` / `XlflowUI.InputBox` instead of the VBA built-ins and fail at compile time. Use `XlflowUI` wrappers for xlflow-managed dialogs, or explicitly call `VBA.Interaction.MsgBox` / `VBA.Interaction.InputBox` for intentional native dialogs.
 - `VB013`: missing whitespace before a line-continuation underscore
-- `VB014`: `tree-sitter-vba` parser recovery found an `ERROR` or `MISSING` node, or xlflow's conservative source-structure gate found an unmatched block that the accepting CST intentionally represents as fragments. It is a fail-closed parser-compatibility diagnostic for `push` and `run`, not by itself a claim that Excel/VBA rejects the source. When the block matcher can identify an unmatched multiline `If`, `For`, `Do`, `While`, `With`, or `Select Case` opener, it reports the expected closer and opening location. If a parent closer is exactly aligned with its outer opener and every skipped nested opener is indented further, that parent closer is the primary location for the nested missing closer. Conditional-compilation-split multiline `If` headers are balanced across every possible branch so the flat `if_statement`, `elseif_fragment`, `else_fragment`, and `end_if_fragment` CST remains lint-compatible; other ambiguous structures retain generic recovery guidance. Consumers should use available recovery and block metadata to investigate and should not rewrite otherwise-valid VBA solely to satisfy parser compatibility.
+- `VB014`: `tree-sitter-vba` parser recovery found an `ERROR` or `MISSING` node, or xlflow's conservative source-structure gate found an unmatched block that the accepting CST intentionally represents as fragments. It is a fail-closed parser-compatibility diagnostic for `push` and `run`, not by itself a claim that Excel/VBA rejects the source. A second `Dim` or `ReDim` keyword after a declaration comma is reported here, and its recovered fragments do not create `VB005`, `VB019`, or `VB020` declaration findings. When the block matcher can identify an unmatched multiline `If`, `For`, `Do`, `While`, `With`, or `Select Case` opener, it reports the expected closer and opening location. If a parent closer is exactly aligned with its outer opener and every skipped nested opener is indented further, that parent closer is the primary location for the nested missing closer. Conditional-compilation-split multiline `If` headers are balanced across every possible branch so the flat `if_statement`, `elseif_fragment`, `else_fragment`, and `end_if_fragment` CST remains lint-compatible; other ambiguous structures retain generic recovery guidance. Consumers should use available recovery and block metadata to investigate and should not rewrite otherwise-valid VBA solely to satisfy parser compatibility.
 - `VB015`: a VBA logical line uses more than 24 line-continuation characters; the diagnostic identifies procedure declarations and calls when that source shape is unambiguous
 - `VB018`: local declarations or parameters shadow module-level names, procedure names, or same-scope declarations
-- `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`
+- `VB019`: mixed multiple declarators where only some names have explicit `As <Type>`;
+  identifier type characters are explicit types and do not count as implicit
+  `Variant` declarators
 - `VB020`: unused procedure-local variable
 - `VB021`: private procedure unreachable from known project roots; confirmed call edges, host events, tests, externally callable public standard-module APIs as possible roots, and conservative dynamic callback possibilities are considered
 - `VB022`: confusing parenthesized call syntax such as `Foo (bar)`

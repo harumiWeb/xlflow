@@ -324,13 +324,19 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		return nil, err
 	}
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
-		lintCtx := astLintContext{ctx: ctx, linter: l, path: path, source: source}
+		lintCtx := astLintContext{
+			ctx:                        ctx,
+			linter:                     l,
+			path:                       path,
+			source:                     source,
+			allowTypeCharacterRecovery: vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source),
+		}
 		lintCtx.lint(view.Root)
 		if lintCtx.err != nil {
 			return lintCtx.err
 		}
 		issues = append(issues, lintCtx.issues...)
-		if shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) ||
+		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source)) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, lintCtx.parseIssues(view.Root)...)
 		}
@@ -616,15 +622,16 @@ func (l Linter) lineContinuationOverflowIssue(path string, lineNo int, logicalLi
 }
 
 type astLintContext struct {
-	ctx               context.Context
-	err               error
-	visited           uint64
-	linter            Linter
-	path              string
-	source            []byte
-	issues            []Issue
-	hasOptionExplicit bool
-	withDepth         int
+	ctx                        context.Context
+	err                        error
+	visited                    uint64
+	linter                     Linter
+	path                       string
+	source                     []byte
+	issues                     []Issue
+	hasOptionExplicit          bool
+	withDepth                  int
+	allowTypeCharacterRecovery bool
 }
 
 func (c *astLintContext) lint(root *tree_sitter.Node) {
@@ -735,6 +742,9 @@ func (c *astLintContext) hasNarrowOnErrorReset(startLine int) bool {
 }
 
 func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inProcedure bool, inType bool) {
+	if (node.HasError() && !c.allowTypeCharacterRecovery) || node.IsError() || node.IsMissing() {
+		return
+	}
 	if c.linter.Config.Lint.ForbidPublicModuleFields && !inProcedure && !inType && strings.EqualFold(visibilityText(node, c.source), "Public") {
 		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(node), "VB006", "warning", "Avoid Public module variables; pass state explicitly."))
 	}
@@ -2162,21 +2172,64 @@ func visibilityText(node *tree_sitter.Node, source []byte) string {
 }
 
 func typeText(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
 	asType := node.ChildByFieldName("type")
 	if asType == nil {
 		asType = firstNamedChildKind(node, "as_type_clause")
 	}
-	if asType == nil {
+	if asType != nil {
+		if typeExpr := asType.ChildByFieldName("type"); typeExpr != nil {
+			return strings.TrimSpace(typeExpr.Utf8Text(source))
+		}
+		text := strings.TrimSpace(asType.Utf8Text(source))
+		if strings.HasPrefix(strings.ToLower(text), "as ") {
+			return strings.TrimSpace(text[3:])
+		}
+		return text
+	}
+	name := node.ChildByFieldName("name")
+	if name == nil {
+		name = firstNamedChildKind(node, "identifier")
+	}
+	return identifierTypeCharacter(name, source)
+}
+
+func identifierTypeCharacter(name *tree_sitter.Node, source []byte) string {
+	if name == nil {
 		return ""
 	}
-	if typeExpr := asType.ChildByFieldName("type"); typeExpr != nil {
-		return strings.TrimSpace(typeExpr.Utf8Text(source))
+	text := strings.TrimSpace(name.Utf8Text(source))
+	if text == "" {
+		return ""
 	}
-	text := strings.TrimSpace(asType.Utf8Text(source))
-	if strings.HasPrefix(strings.ToLower(text), "as ") {
-		return strings.TrimSpace(text[3:])
+	runes := []rune(text)
+	last := runes[len(runes)-1]
+	if last != '!' {
+		end := int(name.EndByte())
+		if end >= 0 && end < len(source) && source[end] == '!' {
+			last = '!'
+		}
 	}
-	return text
+	switch last {
+	case '$':
+		return "String"
+	case '%':
+		return "Integer"
+	case '&':
+		return "Long"
+	case '!':
+		return "Single"
+	case '#':
+		return "Double"
+	case '@':
+		return "Currency"
+	case '^':
+		return "LongLong"
+	default:
+		return ""
+	}
 }
 
 func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node {
