@@ -163,6 +163,7 @@ type AnalyzeConfig struct {
 	DetectLoopInvariantExcelObjectResolution bool     `toml:"detect_loop_invariant_excel_object_resolution"`
 	DetectUnsafeSQLConstruction              bool     `toml:"detect_unsafe_sql_construction"`
 	DetectRiskyModuleState                   bool     `toml:"detect_risky_module_state"`
+	DetectRedimPreserveInLoops               bool     `toml:"detect_redim_preserve_in_loops"`
 }
 
 type lintRuleAdapter struct {
@@ -250,6 +251,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA238": {Get: func(c AnalyzeConfig) bool { return c.DetectLoopInvariantExcelObjectResolution }, Set: func(c *AnalyzeConfig, v bool) { c.DetectLoopInvariantExcelObjectResolution = v }},
 	"VBA239": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeSQLConstruction }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeSQLConstruction = v }},
 	"VBA240": {Get: func(c AnalyzeConfig) bool { return c.DetectRiskyModuleState }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRiskyModuleState = v }},
+	"VBA241": {Get: func(c AnalyzeConfig) bool { return c.DetectRedimPreserveInLoops }, Set: func(c *AnalyzeConfig, v bool) { c.DetectRedimPreserveInLoops = v }},
 }
 
 var (

@@ -125,6 +125,8 @@
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":349,"column":18}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":349,"column":18}
 {"project":"third_party/access-examples","file":"Form_700_Create_Filelist_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":370,"column":0}
+{"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA241","severity":"information","line":59,"column":0}
+{"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA241","severity":"information","line":71,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":81,"column":10}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":84,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":97,"column":18}
@@ -151,6 +153,7 @@
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":171,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":179,"column":18}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":179,"column":18}
+{"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA241","severity":"information","line":197,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA214","severity":"warning","line":202,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":208,"column":18}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"analyze","code":"VBA206","severity":"warning","line":208,"column":18}

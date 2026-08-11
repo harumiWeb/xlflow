@@ -7,6 +7,8 @@
 {"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"analyze","code":"VBA240","severity":"warning","line":188,"column":0}
 {"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"analyze","code":"VBA240","severity":"warning","line":189,"column":0}
 {"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"analyze","code":"VBA240","severity":"warning","line":190,"column":0}
+{"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"analyze","code":"VBA241","severity":"information","line":329,"column":0}
+{"project":"third_party/wasabi","file":"extensions/zlib/ExtWasabiZlib.cls","surface":"analyze","code":"VBA241","severity":"information","line":437,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA240","severity":"warning","line":941,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA240","severity":"warning","line":942,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA240","severity":"warning","line":943,"column":0}
@@ -114,6 +116,7 @@
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":2907,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA219","severity":"warning","line":2956,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":3021,"column":0}
+{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA241","severity":"information","line":3157,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":3267,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":3306,"column":25}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA206","severity":"warning","line":3350,"column":21}
