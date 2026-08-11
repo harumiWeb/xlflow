@@ -100,6 +100,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA241`](#vba241) | analyze | warning     | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
 | [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-range operation                     |
 | [`VBA243`](#vba243) | analyze | information | procedure-local | no      | Value2 performance opportunity                     |
+| [`VBA244`](#vba244) | analyze | information | project-wide    | yes     | Recursive and cyclic procedure dependency          |
 
 ## VB001
 
@@ -2168,3 +2169,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                        |
 | Real-time editor diagnostic | yes                                       |
 | Fix available               | no                                        |
+
+## VBA244
+
+**Recursive and cyclic procedure dependency.** Procedures form a recursive call cycle; the complete deterministic cycle path and any dangerous reachable effects are reported.
+
+| Property                    | Value                          |
+| --------------------------- | ------------------------------ |
+| Family                      | `analyze`                      |
+| Category                    | `reliability`                  |
+| Evidence class              | `maintainability`              |
+| Compile-equivalent          | no                             |
+| Default severity            | `information`                  |
+| Supported severities        | `information`, `warning`       |
+| Surfaces                    | `analyze`                      |
+| Scope                       | `project-wide`                 |
+| Precision                   | `medium`                       |
+| Enabled by default          | yes                            |
+| Configuration               | `detect_procedure_call_cycles` |
+| Inline suppression          | yes                            |
+| Blocks source preflight     | no                             |
+| Real-time editor diagnostic | no                             |
+| Fix available               | no                             |

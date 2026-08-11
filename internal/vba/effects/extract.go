@@ -12,6 +12,7 @@ var (
 	bareVBAIdentifierRE  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 	formControlTargetRE  = regexp.MustCompile(`^(?:me\.)?([a-z_][a-z0-9_]*)\.(?:value|text|listindex|list)$`)
 	formControlsTargetRE = regexp.MustCompile(`^(?:me\.)?controls\((?:"[^"]+"|'[^']+')\)\.(?:value|text|listindex|list)$`)
+	fileOpenEffectRE     = regexp.MustCompile(`(?i)^\s*open\b.*\bfor\s+(?:append|binary|input|output|random)\b.*\bas\s+#?\s*(?:\d+|\[[^\]]+\]|[a-z_][a-z0-9_]*(?:[$%&!#@^])?)\b`)
 )
 
 func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, reachable map[int]bool) {
@@ -37,6 +38,9 @@ func extractStatements(summary *ProcedureSummary, proc procedureir.ProcedureIR, 
 		}
 		if statement.Kind == procedureir.StatementOnError && statement.Control != nil && statement.Control.Transfer == procedureir.TransferOnErrorResumeNext {
 			addStatementEffect(summary, statement, SuppressesErrors, "On Error", "Resume Next")
+		}
+		if fileOpenEffectRE.MatchString(statement.Text) {
+			addStatementEffect(summary, statement, OpensFile, "VBA file handle", "")
 		}
 		if statement.Kind != procedureir.StatementAssignment || statement.Target == nil {
 			continue
