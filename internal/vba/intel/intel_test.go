@@ -2246,6 +2246,23 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIgnoreUsedIdentifierTypeCharacters(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+    Debug.Print text, whole, longValue, singleValue, doubleValue, money, longLong
+End Sub
+`,
+	}
+
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB020"); len(got) != 0 {
+		t.Fatalf("used identifier type characters should not produce VB020, got %+v", got)
+	}
+}
+
 func TestDiagnosticsApplyInlineSuppressionsForUnsavedContent(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

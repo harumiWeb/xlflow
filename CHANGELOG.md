@@ -39,6 +39,11 @@ All notable changes to xlflow will be documented in this file.
   reported as `VB014` without synthesizing declarator diagnostics. Formatter
   recovery leaves these invalid declarations unchanged.
 
+- Fixed `VB020` false positives for procedure-local variables and constants
+  declared with VBA type-declaration characters. The declaration and reference
+  sides now use the same identifier identity while write-only locals remain
+  reportable.
+
 - Added default-enabled `VBA239` SQL-construction safety analysis for ADO and
   DAO execution boundaries. Findings track SQL value/identifier/LIKE roles,
   locale-sensitive formatting, manual quoting, and parameterized
