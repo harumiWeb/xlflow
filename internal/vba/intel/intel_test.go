@@ -979,6 +979,154 @@ End Sub
 	}
 }
 
+func TestArgumentDiagnosticsRespectLocalShadowingAndDeclarationSyntax(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Private Type RECT
+    Left As Long
+    Right As Long
+End Type
+
+Private Function List(ByVal first As String, ByVal second As String) As String
+End Function
+
+Private Function chunk(ByVal first As String, ByVal second As String) As Byte
+End Function
+
+Private Sub RequiresTwo(ByVal first As String, ByVal second As String)
+End Sub
+
+Public Sub Run()
+    Dim rect As RECT
+    Dim List() As RECT
+    Dim match As Object
+    Dim chunk() As Byte
+    Debug.Print List(0)
+    Debug.Print match("Y2")
+    RequiresTwo "only-one"
+End Sub
+`,
+	}
+
+	vb045 := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045")
+	if len(vb045) != 1 || !hasDiagnosticMessage(vb045, "RequiresTwo expects at least 2 argument") {
+		t.Fatalf("local shadowing and declaration syntax produced incorrect VB045 diagnostics: %+v", vb045)
+	}
+}
+
+func TestArgumentDiagnosticsFailClosedForConditionalProjectOverloads(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+#If Win64 Then
+Private Function PlatformCall(ByVal point As LongLong) As Long
+End Function
+#Else
+Private Function PlatformCall(ByVal x As Long, ByVal y As Long) As Long
+End Function
+#End If
+
+Public Sub Run()
+    Dim value As Long
+    value = PlatformCall(1)
+End Sub
+`,
+	}
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("conditional project overload produced VB045: %+v", got)
+	}
+}
+
+func TestResolveDocumentExpressionTypeLocalShadowsBuiltinGlobal(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	source := `Option Explicit
+Public Sub Run()
+    Dim lines As String
+    Debug.Print lines
+End Sub
+`
+	doc := Document{Path: filepath.Join(t.TempDir(), "Main.bas"), Source: source, ModuleKind: "standard"}
+	offset := strings.Index(source, "Debug.Print lines") + len("Debug.Print ")
+	if got, ok := analyzer.resolveDocumentExpressionTypeAt(doc, "lines", offset); !ok || !strings.EqualFold(got, "String") {
+		t.Fatalf("local lines type = %q, %v; want String, true", got, ok)
+	}
+}
+
+func TestArgumentDiagnosticsResolveProjectClassMembersByReceiverType(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.WorkspaceSymbolQueryFunc = func(_ []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+		if query.Mode != WorkspaceSymbolQueryExact || !strings.EqualFold(query.Text, "Add") {
+			return nil, nil
+		}
+		return []Symbol{{
+			Name:       "Add",
+			Kind:       "function",
+			Module:     "ROneCOne",
+			ModuleKind: "class",
+			Visibility: "Public",
+			Parameters: []Parameter{
+				{Name: "operand", Optional: true},
+				{Name: "value", Optional: true},
+			},
+		}}, nil
+	}
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim lines As ROneCOne
+    lines.Add vbNullString
+End Sub
+`,
+	}
+	if got := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(got) != 0 {
+		t.Fatalf("project class member with optional arguments produced VB045: %+v", got)
+	}
+}
+
+func TestProjectMemberSignatureCompletenessRejectsTruncatedSymbol(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	path := filepath.Join(t.TempDir(), "Widget.cls")
+	if analyzer.projectMemberSignatureComplete(Symbol{
+		Name:       "Execute",
+		File:       path,
+		Detail:     "Public Sub Execute(ByVal first As String, ByVal second As String, ByVal third As String)",
+		Parameters: []Parameter{{Name: "first"}},
+	}) {
+		t.Fatal("truncated project member symbol was accepted")
+	}
+	if !analyzer.projectMemberSignatureComplete(Symbol{
+		Name:       "Execute",
+		File:       filepath.Join(t.TempDir(), "unsaved.cls"),
+		Detail:     "Public Sub Execute(ByVal first As String)",
+		Parameters: []Parameter{{Name: "first"}},
+	}) {
+		t.Fatal("complete parsed project member symbol should not require a filesystem read")
+	}
+	if declarationContainsCallableName("Public Sub ExecuteAll(ByVal first As String)", "Execute") {
+		t.Fatal("Execute must not match the bounded ExecuteAll declaration")
+	}
+}
+
+func TestDeclarationContainsCallableNameAcceptsPropertyWhitespace(t *testing.T) {
+	tests := []string{
+		"Public Property  Get Value()",
+		"Public Property\tGet Value()",
+		"Public Property  Let Value(ByVal value As String)",
+		"Public Property\tLet Value(ByVal value As String)",
+		"Public Property  Set Value(ByVal value As Object)",
+		"Public Property\tSet Value(ByVal value As Object)",
+	}
+	for _, declaration := range tests {
+		if !declarationContainsCallableName(declaration, "Value") {
+			t.Errorf("declarationContainsCallableName(%q, Value) = false", declaration)
+		}
+	}
+}
+
 func TestDiagnosticsDoNotApplyInlineSuppressionToCompileEquivalentRules(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	dir := t.TempDir()
@@ -1064,11 +1212,12 @@ func TestArgumentDiagnosticsAllowParamArray(t *testing.T) {
 		Source: `Option Explicit
 Sub Test()
     Logger.Log "info", "a", "b", "c"
+    Logger.Log "info"
 End Sub
 `,
 	}
 
-	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB030"); len(diagnostics) != 0 {
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB045"); len(diagnostics) != 0 {
 		t.Fatalf("ParamArray call should not produce argument diagnostics: %+v", diagnostics)
 	}
 

@@ -74,7 +74,7 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		t.Fatalf("unexpected VB037 metadata: %+v, %v", setScalar, ok)
 	}
 	argumentBinding, ok := Lookup("VB045")
-	if !ok || argumentBinding.EvidenceClass != EvidenceCompileEquivalent || !argumentBinding.CompileEquivalent || argumentBinding.DefaultSeverity != SeverityError || !argumentBinding.PreflightBlocking || argumentBinding.InlineSuppressible {
+	if !ok || argumentBinding.EvidenceClass != EvidenceCompileEquivalent || !argumentBinding.CompileEquivalent || argumentBinding.DefaultSeverity != SeverityError || !argumentBinding.PreflightBlocking || argumentBinding.InlineSuppressible || !reflect.DeepEqual(argumentBinding.Surfaces, []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}) {
 		t.Fatalf("unexpected VB045 metadata: %+v, %v", argumentBinding, ok)
 	}
 	for _, id := range []string{"VB046", "VB047"} {
@@ -277,6 +277,9 @@ func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
 		wantSurface := []RuleSurface{RuleSurface(rule.Family)}
 		if rule.Realtime {
 			wantSurface = append(wantSurface, SurfaceLSP)
+		}
+		if rule.Family == FamilyLint && rule.CompileEquivalent && len(rule.Surfaces) == len(wantSurface)+1 && rule.Surfaces[len(wantSurface)] == SurfaceAnalyze {
+			wantSurface = append(wantSurface, SurfaceAnalyze)
 		}
 		if !reflect.DeepEqual(rule.Surfaces, wantSurface) {
 			t.Errorf("%s surfaces = %v, want %v", rule.ID, rule.Surfaces, wantSurface)

@@ -46,6 +46,11 @@ All notable changes to xlflow will be documented in this file.
 - Fixed `VB029` false positives for project-visible public assignments, intrinsic
   `Err` assignments, bang-member targets, and function names with VBA type
   declaration suffixes.
+- Fixed `VB045` false positives caused by UDT fields, local shadowing,
+  conditional project overloads, and incomplete `Application.Run` signatures.
+  Argument binding now fails closed unless the call target and signature are
+  unambiguous; batch analysis also records the rule's projected `analyze`
+  surface for corpus and preflight consistency.
 
 - Added default-enabled `VBA236` command-execution safety analysis for VBA
   `Shell`, `WScript.Shell.Run`/`Exec`, `ShellExecute`, `cmd.exe`, PowerShell,

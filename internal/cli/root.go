@@ -7602,7 +7602,7 @@ func (a *app) runSourcePreflight(ctx context.Context, command string, cfg config
 		return a.writeFailure(command, exitCode, "analyze_failed", err)
 	}
 	findings := analyzeResult.Findings
-	issues = append(issues, projectCompileEquivalentLintIssues(findings)...)
+	issues = append(issues, projectCompileEquivalentLintIssues(analyzeResult.PreflightFindings)...)
 	blockingIssues := lint.PushBlockingIssues(issues)
 	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
 	blockingFindings = filterProjectedLintFindings(blockingFindings)

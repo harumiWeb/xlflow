@@ -981,23 +981,23 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 **Deterministic argument binding error.** A resolved procedure call has a deterministic argument-count or named-argument compile error.
 
-| Property                    | Value                |
-| --------------------------- | -------------------- |
-| Family                      | `lint`               |
-| Category                    | `correctness`        |
-| Evidence class              | `compile-equivalent` |
-| Compile-equivalent          | yes                  |
-| Default severity            | `error`              |
-| Supported severities        | `error`              |
-| Surfaces                    | `lint`, `lsp`        |
-| Scope                       | `procedure-local`    |
-| Precision                   | `high`               |
-| Enabled by default          | yes                  |
-| Configuration               | not configurable     |
-| Inline suppression          | no                   |
-| Blocks source preflight     | yes                  |
-| Real-time editor diagnostic | yes                  |
-| Fix available               | no                   |
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
 
 ## VB046
 

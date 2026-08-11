@@ -67,9 +67,10 @@ func (e *ParseError) Error() string {
 }
 
 type Result struct {
-	Findings        []Finding
-	Warnings        []map[string]any
-	AnalysisMetrics any `json:"analysis_metrics,omitempty"`
+	Findings          []Finding
+	Warnings          []map[string]any
+	AnalysisMetrics   any       `json:"analysis_metrics,omitempty"`
+	PreflightFindings []Finding `json:"-"`
 }
 
 type Analyzer struct {
@@ -421,6 +422,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		analysis.byRefSymbols = byRefSymbols
 	}
 	var findings []Finding
+	var preflightFindings []Finding
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
 		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
@@ -466,7 +468,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
 		findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
 		findings = append(findings, analysis.byRefArgumentFindings(file)...)
-		findings = append(findings, analysis.compileEquivalentFindings(file)...)
+		compileFindings, filePreflightFindings := analysis.compileEquivalentFindings(file)
+		findings = append(findings, compileFindings...)
+		preflightFindings = append(preflightFindings, filePreflightFindings...)
 	}
 	sortFindings(findings)
 	directives, directiveWarnings, err := suppression.DirectivesForFiles(a.RootDir, files)
@@ -476,7 +480,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
-	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics}, nil
+	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics, PreflightFindings: preflightFindings}, nil
 }
 
 func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
@@ -525,9 +529,9 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 	return out
 }
 
-func (a Analyzer) compileEquivalentFindings(file parsedFile) []Finding {
+func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Finding) {
 	if a.typeDB == nil {
-		return nil
+		return nil, nil
 	}
 	diagnostics := (intel.Analyzer{
 		RootDir:                    a.RootDir,
@@ -537,11 +541,16 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) []Finding {
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
 	if len(diagnostics) == 0 {
-		return nil
+		return nil, nil
 	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	out := make([]Finding, 0, len(diagnostics))
+	preflight := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
+		metadata, ok := staticrules.Lookup(diagnostic.Code)
+		if !ok {
+			continue
+		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		for _, candidate := range procedures {
@@ -551,17 +560,28 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) []Finding {
 			}
 		}
 		reason, suggestion := compileEquivalentFindingGuidance(diagnostic.Code)
-		severity := diagnostic.Severity
-		if metadata, ok := staticrules.Lookup(diagnostic.Code); ok {
-			severity = string(metadata.DefaultSeverity)
-		}
+		severity := string(metadata.DefaultSeverity)
 		finding := a.simpleFinding(file, proc, line, diagnostic.Code, severity, diagnostic.Message, reason, suggestion)
 		finding.Column = diagnostic.Range.Start.Character + 1
 		finding.EndLine = diagnostic.Range.End.Line + 1
 		finding.EndColumn = diagnostic.Range.End.Character + 1
-		out = append(out, finding)
+		if hasRuleSurface(metadata, staticrules.SurfaceAnalyze) {
+			out = append(out, finding)
+		}
+		if metadata.Family == staticrules.FamilyLint && metadata.CompileEquivalent && metadata.PreflightBlocking {
+			preflight = append(preflight, finding)
+		}
 	}
-	return out
+	return out, preflight
+}
+
+func hasRuleSurface(metadata staticrules.RuleMetadata, wanted staticrules.RuleSurface) bool {
+	for _, surface := range metadata.Surfaces {
+		if surface == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func compileEquivalentFindingGuidance(code string) (string, string) {

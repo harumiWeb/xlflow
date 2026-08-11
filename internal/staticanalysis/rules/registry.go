@@ -281,7 +281,12 @@ func validateSurfaces(rule RuleMetadata) error {
 	if rule.Realtime {
 		wantLen = 2
 	}
-	if len(rule.Surfaces) != wantLen {
+	// Compile-equivalent lint diagnostics are also projected by batch
+	// analysis so source preflight can report them alongside analyzer
+	// findings. Keep the public lint/LSP order first while allowing that
+	// additional internal batch surface.
+	batchAnalysisProjection := rule.Family == FamilyLint && rule.CompileEquivalent && len(rule.Surfaces) == wantLen+1 && rule.Surfaces[wantLen] == SurfaceAnalyze
+	if len(rule.Surfaces) != wantLen && !batchAnalysisProjection {
 		return fmt.Errorf("%s surfaces do not match realtime=%t", rule.ID, rule.Realtime)
 	}
 	for i, surface := range rule.Surfaces {

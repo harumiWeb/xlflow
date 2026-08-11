@@ -1,8 +1,10 @@
 package vbadb
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -134,6 +136,71 @@ func TestCuratedOverlayPreservesGeneratedTypeLibProvenance(t *testing.T) {
 	for _, name := range []string{"GeneratedMember", "CuratedMember"} {
 		if _, ok := db.ResolveMember("Excel.Worksheet", name); !ok {
 			t.Fatalf("merged member %s missing", name)
+		}
+	}
+}
+
+func TestCuratedOverlayPreservesGeneratedMemberSignature(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Excel.Application",
+    "confidence": "generated",
+    "source": "typelib",
+    "methods": [{
+      "name": "Run",
+      "parameters": [
+        { "name": "Macro", "type": "Variant" },
+        { "name": "Arg1", "type": "Variant", "optional": true },
+        { "name": "Arg2", "type": "Variant", "optional": true },
+        { "name": "Arg3", "type": "Variant", "optional": true },
+        { "name": "Arg4", "type": "Variant", "optional": true },
+        { "name": "Arg5", "type": "Variant", "optional": true },
+        { "name": "Arg6", "type": "Variant", "optional": true },
+        { "name": "Arg7", "type": "Variant", "optional": true }
+      ]
+    }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MergeJSON([]byte(`{
+  "types": [{
+    "name": "Excel.Application",
+    "confidence": "curated",
+    "source": "xlflow",
+    "methods": [{
+      "name": "Run",
+      "parameters": [
+        { "name": "Macro", "type": "Variant" },
+        { "name": "Arg1", "type": "Variant", "optional": true }
+      ]
+    }]
+  }]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	member, ok := db.ResolveMember("Excel.Application", "Run")
+	if !ok || len(member.Parameters) != 8 || member.Parameters[7].Name != "Arg7" {
+		t.Fatalf("generated Application.Run signature was shortened by curated overlay: %+v, %v", member, ok)
+	}
+}
+
+func TestBuiltinApplicationRunSupportsThirtyArguments(t *testing.T) {
+	db, err := LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, ok := db.ResolveMember("Excel.Application", "Run")
+	if !ok || len(member.Parameters) != 31 {
+		t.Fatalf("Application.Run parameters = %+v, %v; want Macro plus Arg1..Arg30", member.Parameters, ok)
+	}
+	if !strings.EqualFold(member.Parameters[0].Name, "Macro") || member.Parameters[0].Optional {
+		t.Fatalf("Application.Run Macro parameter = %+v; want required Macro", member.Parameters[0])
+	}
+	for i, parameter := range member.Parameters[1:] {
+		if parameter.Name != fmt.Sprintf("Arg%d", i+1) || !parameter.Optional {
+			t.Fatalf("Application.Run parameter %d = %+v; want optional Arg%d", i+1, parameter, i+1)
 		}
 	}
 }
