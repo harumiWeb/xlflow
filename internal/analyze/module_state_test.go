@@ -70,6 +70,38 @@ End Sub
 	}
 }
 
+func TestVBA240ReportsMutationOnlyCollectionAcrossRoots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedItems As Collection
+
+Public Sub AddFirst()
+  sharedItems.Add "first"
+End Sub
+
+Public Sub AddSecond()
+  sharedItems.Add "second"
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectRiskyModuleState = true
+	result, err := (Analyzer{RootDir: dir, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := findingsByCode(result.Findings, "VBA240")
+	if len(findings) != 1 || !strings.Contains(findings[0].Reason, "Collection or Dictionary") {
+		t.Fatalf("mutation-only collection findings = %+v", findings)
+	}
+	state := result.AnalysisMetrics.(map[string]any)["module_state"].(map[string]any)
+	field := state["fields"].([]map[string]any)[0]
+	if field["mutator_count"] != 2 || field["writer_count"] != 2 {
+		t.Fatalf("mutation-only collection metrics = %#v", field)
+	}
+}
+
 func containsString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {
@@ -389,6 +421,36 @@ End Sub
 	field := state["fields"].([]map[string]any)[0]
 	if field["cached_excel_reference"] != true {
 		t.Fatalf("cached Excel metrics = %#v", field)
+	}
+}
+
+func TestVBA240IgnoresMultipleReadersWithUnreachableWriter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedState As Long
+
+Private Sub InitializeState()
+  sharedState = 1
+End Sub
+
+Public Sub ReadFirst()
+  Debug.Print sharedState
+End Sub
+
+Public Sub ReadSecond()
+  Debug.Print sharedState
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectRiskyModuleState = true
+	result, err := (Analyzer{RootDir: dir, Config: cfg}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := findingsByCode(result.Findings, "VBA240"); len(findings) != 0 {
+		t.Fatalf("unreachable writer should not create a module-state finding: %+v", findings)
 	}
 }
 

@@ -36,7 +36,8 @@ counts.
 One `VBA240` finding is emitted at a mutable field declaration when the field
 has one or more of these structural hazards:
 
-- writes or mutations reachable from multiple confirmed entry roots;
+- a write or mutation is reachable from at least one confirmed entry root and
+  the field is accessed from multiple confirmed entry roots;
 - state written by one event handler and read or retained by another event
   invocation;
 - both reads and writes inside a call-graph cycle;

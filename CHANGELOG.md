@@ -41,6 +41,10 @@ All notable changes to xlflow will be documented in this file.
   counts alone do not produce findings. Collection classification is independent
   of procedure order, built-in type matching avoids user-defined name substrings,
   and procedure metrics are emitted deterministically.
+- Fixed `VBA240` false positives where multiple confirmed roots only read a
+  field while its writer was unreachable from every confirmed root. Findings
+  now require an observed reachable write or mutation before reporting
+  cross-root lifecycle coupling.
 - Updated `tree-sitter-vba` to v0.12.0. VBA declaration type characters
   (`$`, `%`, `&`, `!`, `#`, `@`, `^`) now count as explicit types for `VB005`
   and `VB019`; invalid `Dim`/`ReDim` keywords after a declaration comma are

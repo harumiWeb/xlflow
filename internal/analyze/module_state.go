@@ -707,7 +707,7 @@ func moduleStateFindings(rootDir string, cfg config.Config, files []parsedFile, 
 		}
 		reasons := []string{}
 		roots := moduleStateUnion(field.ReadRoots, field.WriteRoots)
-		if len(roots) > 1 && (len(field.Writers) > 0 || len(field.Mutators) > 0) {
+		if len(field.WriteRoots) > 0 && len(roots) > 1 {
 			reasons = append(reasons, "multiple entry points share mutable state")
 		}
 		if len(field.EventReads) > 0 && len(field.EventWrites) > 0 {
@@ -719,7 +719,7 @@ func moduleStateFindings(rootDir string, cfg config.Config, files []parsedFile, 
 		if field.IsExcel && len(reasons) > 0 {
 			reasons = append(reasons, "cached Excel object reference may outlive its workbook context")
 		}
-		if field.IsCollection && len(roots) > 1 && (len(field.Writers) > 0 || len(field.Mutators) > 0) {
+		if field.IsCollection && len(field.WriteRoots) > 0 && len(roots) > 1 {
 			reasons = append(reasons, "Collection or Dictionary mutation crosses entry points")
 		}
 		if len(reasons) == 0 {
