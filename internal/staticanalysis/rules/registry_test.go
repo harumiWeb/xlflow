@@ -14,7 +14,7 @@ VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
-VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242`)
+VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -184,6 +184,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	fullRange, ok := Lookup("VBA242")
 	if !ok || fullRange.Family != FamilyAnalyze || fullRange.Category != CategoryPerformance || fullRange.EvidenceClass != EvidenceMaintainability || fullRange.DefaultSeverity != SeverityInformation || !reflect.DeepEqual(fullRange.SupportedSeverities, []RuleSeverity{SeverityInformation, SeverityWarning}) || fullRange.DefaultEnabled || !fullRange.Configurable || fullRange.ConfigurationKey != "detect_expensive_full_range_operations" || fullRange.PreflightBlocking || !fullRange.InlineSuppressible || !fullRange.Realtime || fullRange.Scope != ScopeProcedureLocal || fullRange.Precision != PrecisionMedium {
 		t.Fatalf("unexpected VBA242 metadata: %+v, %v", fullRange, ok)
+	}
+	value2, ok := Lookup("VBA243")
+	if !ok || value2.Family != FamilyAnalyze || value2.Category != CategoryPerformance || value2.EvidenceClass != EvidenceMaintainability || value2.DefaultSeverity != SeverityInformation || !reflect.DeepEqual(value2.SupportedSeverities, []RuleSeverity{SeverityInformation, SeverityWarning}) || value2.DefaultEnabled || !value2.Configurable || value2.ConfigurationKey != "detect_value2_performance_opportunities" || value2.PreflightBlocking || !value2.InlineSuppressible || !value2.Realtime || value2.Scope != ScopeProcedureLocal || value2.Precision != PrecisionMedium {
+		t.Fatalf("unexpected VBA243 metadata: %+v, %v", value2, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {

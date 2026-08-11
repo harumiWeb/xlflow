@@ -45,8 +45,14 @@ func TestMaterializeThirdPartyProjectsPreservesSourcesAndClassifications(t *test
 		if project.Profile == ProfileExcel && !loaded.Analyze.DetectExpensiveFullRangeOperations {
 			t.Fatalf("generated config did not opt in VBA242 for %s", project.ID)
 		}
+		if project.Profile == ProfileExcel && !loaded.Analyze.DetectValue2PerformanceOpportunities {
+			t.Fatalf("generated config did not opt in VBA243 for %s", project.ID)
+		}
 		if project.Profile != ProfileExcel && loaded.Analyze.DetectExpensiveFullRangeOperations {
 			t.Fatalf("generated config unexpectedly enabled VBA242 for non-Excel profile %s", project.ID)
+		}
+		if project.Profile != ProfileExcel && loaded.Analyze.DetectValue2PerformanceOpportunities {
+			t.Fatalf("generated config unexpectedly enabled VBA243 for non-Excel profile %s", project.ID)
 		}
 		if project.Profile == ProfileExcel && len(loaded.Analyze.DisabledRules) != 0 {
 			t.Fatalf("excel profile unexpectedly disabled rules: %v", loaded.Analyze.DisabledRules)

@@ -1,7 +1,8 @@
 # Excel Loop Performance Analysis
 
-This specification defines the `VBA225`, `VBA238`, `VBA241`, and `VBA242`
-analyzer rules for Excel loop-performance issues #452, #453, #454, and #455.
+This specification defines the `VBA225`, `VBA238`, `VBA241`, `VBA242`, and
+`VBA243` analyzer rules for Excel loop-performance issues #452, #453, #454,
+#455, and #456.
 `VBA225`
 identifies conservative, repeated Excel object-model work inside VBA loops and
 recommends bulk range or array operations. `VBA238` identifies loop-invariant
@@ -10,6 +11,8 @@ them into cached locals. `VBA241` identifies repeated `ReDim Preserve` array
 copies inside loops and recommends preallocation or geometric growth. `VBA242`
 identifies costly operations over entire rows, columns, worksheets, or
 unbounded `UsedRange` expressions and recommends deriving bounded limits.
+`VBA243` identifies bulk or repeated `Range.Value` transfers where `Value2`
+may avoid unnecessary Currency or Date coercion while preserving semantics.
 ADR-0025
 records the design rationale and boundaries.
 
@@ -266,6 +269,42 @@ deprecation warning. `VBA242` owns only oversized operation targets; `VBA201`
 continues to own unsafe `Find` result use, `VBA217` owns last-row guidance, and
 `VBA225` owns repeated per-cell Excel work.
 
+## Value2 performance opportunities (`VBA243`)
+
+<!-- xlflow-rule-contract: {"id":"VBA243","family":"analyze","category":"performance","default_severity":"information","scope":"procedure-local","realtime":true,"configuration_key":"detect_value2_performance_opportunities","inline_suppressible":true,"preflight_blocking":false} -->
+
+`VBA243` is an opt-in, procedure-local performance diagnostic in batch
+analysis and the shared real-time editor path. It identifies a bulk or
+repeated `Range.Value` transfer with a strong performance signal, such as a
+large or dynamic range, repeated access inside a loop, or immediate transfer to
+a `Variant` array. Numeric/text processing can strengthen the explanation
+after one of those signals exists, but is not a standalone trigger. It
+suggests using `Range.Value2` when the raw-value semantics are acceptable; it
+does not globally prefer `Value2`
+or report an intentional `Value` use when date or currency handling is clear.
+Literal ranges are considered large at 100 or more cells. Dynamic evidence
+requires a proven runtime construction such as concatenated bounds, a
+`Range(Cells(...), Cells(...))` pair, `Resize`, `CurrentRegion`, `UsedRange`,
+or a traceable alias; an otherwise unknown `Range` argument or variable does
+not qualify by itself. Typed `Date`/`Currency` values, date literals, conversion
+or formatting calls, subtype inspection, and mixed or unknown Variant uses are
+conservatively excluded.
+
+The rule supports `information` outside loops and may use `warning` when a
+transfer is repeated from a reachable loop. It remains advisory,
+non-blocking, and inline suppressible. Disable it with:
+
+```toml
+[analyze]
+disabled_rules = ["VBA243"]
+```
+
+The compatibility key `detect_value2_performance_opportunities = true`
+remains accepted with the normal deprecation warning. Use
+`xlflow:disable-line VBA243` or `xlflow:disable-next-line VBA243` for a local
+exception. `VBA243` owns only the `Value` versus `Value2` performance
+opportunity; `VBA226` continues to own unsafe value-array shape assumptions.
+
 ## Related
 
 - `docs/adr/ADR-0025-excel-loop-performance-analysis.md`
@@ -278,3 +317,4 @@ continues to own unsafe `Find` result use, `VBA217` owns last-row guidance, and
 - xlflow issue #453
 - xlflow issue #454
 - xlflow issue #455
+- xlflow issue #456

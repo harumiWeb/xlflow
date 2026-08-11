@@ -22,7 +22,12 @@ calculation, formatting, find/replace, or sorting operations over entire rows,
 columns, worksheets, or unbounded `UsedRange` expressions. It uses
 `information` outside loops and `warning` for reachable loop operations, and
 is likewise non-blocking, inline-suppressible, and available in batch and
-real-time analysis.
+real-time analysis. Opt-in `VBA243`
+(`detect_value2_performance_opportunities`) reports bulk or repeated
+`Range.Value` transfers with a strong performance signal when automatic
+Date/Currency coercion is not required. It uses `information` outside loops
+and `warning` for reachable repeated transfers, and is non-blocking,
+inline-suppressible, and available in batch and real-time analysis.
 
 ## Recommended Workflow
 

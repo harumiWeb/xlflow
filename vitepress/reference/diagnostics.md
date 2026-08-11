@@ -99,6 +99,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA240`](#vba240) | analyze | warning     | project-wide    | no      | Risky module-level mutable state                   |
 | [`VBA241`](#vba241) | analyze | warning     | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
 | [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-range operation                     |
+| [`VBA243`](#vba243) | analyze | information | procedure-local | no      | Value2 performance opportunity                     |
 
 ## VB001
 
@@ -2145,3 +2146,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                       |
 | Real-time editor diagnostic | yes                                      |
 | Fix available               | no                                       |
+
+## VBA243
+
+**Value2 performance opportunity.** A bulk or repeated Range.Value read or write may benefit from Range.Value2 when automatic Currency or Date coercion is not required.
+
+| Property                    | Value                                     |
+| --------------------------- | ----------------------------------------- |
+| Family                      | `analyze`                                 |
+| Category                    | `performance`                             |
+| Evidence class              | `maintainability`                         |
+| Compile-equivalent          | no                                        |
+| Default severity            | `information`                             |
+| Supported severities        | `information`, `warning`                  |
+| Surfaces                    | `analyze`, `lsp`                          |
+| Scope                       | `procedure-local`                         |
+| Precision                   | `medium`                                  |
+| Enabled by default          | no                                        |
+| Configuration               | `detect_value2_performance_opportunities` |
+| Inline suppression          | yes                                       |
+| Blocks source preflight     | no                                        |
+| Real-time editor diagnostic | yes                                       |
+| Fix available               | no                                        |

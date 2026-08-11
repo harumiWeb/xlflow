@@ -98,6 +98,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA240` | warning               | Opt-in project-wide analysis of module-level mutable state, lifecycle coupling, and read/write metrics.                                       |
 | `VBA241` | warning / information | `ReDim Preserve` repeatedly resizes an array inside a reachable loop.                                                                         |
 | `VBA242` | information / warning | An expensive operation targets an entire row, column, worksheet, or unbounded `UsedRange`.                                                    |
+| `VBA243` | information / warning | A bulk or repeated `Range.Value` transfer may benefit from `Range.Value2` when Date/Currency coercion is not required.                        |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -168,6 +169,15 @@ Explicit bounded ranges, bounded `Resize`, and bounded `Intersect` forms are
 accepted. The rule is non-blocking and inline-suppressible; use
 `xlflow:disable-line VBA242`, `xlflow:disable-next-line VBA242`, or
 `[analyze].disabled_rules = ["VBA242"]` for intentional whole-range use.
+
+`VBA243` is disabled by default. Enable it with
+`[analyze].detect_value2_performance_opportunities = true` to suggest
+`Range.Value2` for bulk or repeated `Range.Value` transfers when automatic
+Date/Currency coercion is not required. Outside loops it uses `information`;
+reachable repeated transfers use `warning`. The rule remains non-blocking and
+inline-suppressible; use `xlflow:disable-line VBA243`,
+`xlflow:disable-next-line VBA243`, or
+`[analyze].disabled_rules = ["VBA243"]` for intentional `Value` semantics.
 
 `VBA239` is enabled in batch and real-time analysis and reports procedure-local
 SQL construction that combines external input, dynamic identifiers,
