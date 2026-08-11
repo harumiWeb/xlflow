@@ -20,6 +20,7 @@ func TestDirectEffectsUseReachableHighConfidenceIR(t *testing.T) {
     MsgBox "done"
     Shell "calc.exe"
     Workbooks.Open "book.xlsx"
+    Open "output.txt" For Output As #1
     ThisWorkbook.Close
     On Error Resume Next
     Err.Raise 5
@@ -32,7 +33,7 @@ End Sub
 	want := map[EffectKind]bool{
 		DisablesEvents: true, ChangesCalculation: true, WritesCells: true,
 		ShowsDialog: true, LaunchesProcess: true,
-		OpensWorkbook: true, ClosesWorkbook: true, SuppressesErrors: true,
+		OpensWorkbook: true, OpensFile: true, ClosesWorkbook: true, SuppressesErrors: true,
 		RaisesError: true,
 	}
 	for kind := range want {

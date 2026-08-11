@@ -3,9 +3,11 @@
 This specification defines xlflow's deterministic, protocol-neutral procedure
 effect summaries. ADR-0023 records the rationale. The summaries are an internal
 analysis contract built from resolved procedure IR and conservative CFG facts.
-They add no public CLI option, JSON field, or LSP capability; `VBA221` is the
-sole consumer that adds the `detect_application_state_call_effects`
-configuration key and a diagnostic ID.
+They add no public CLI option or LSP capability by themselves. `VBA221` and
+`VBA244` consume the summaries through their own diagnostic contracts;
+`VBA221` owns the `detect_application_state_call_effects` compatibility key,
+while `VBA244` owns `detect_procedure_call_cycles` and its additive
+`call_cycle` finding context.
 
 ## Construction and Ownership
 
@@ -29,6 +31,7 @@ and do not depend on file input or Go map iteration order.
 - `writes_cells`
 - `changes_workbook`
 - `opens_workbook`
+- `opens_file`
 - `closes_workbook`
 - `disables_events`
 - `restores_events`
@@ -85,6 +88,10 @@ The initial detectors cover:
 - confidently recognized workbook or worksheet structural mutation and save:
   `changes_workbook`;
 - `Workbooks.Open`: `opens_workbook`;
+- a conservatively reachable, non-recovered VBA `Open ... For ... As #handle`
+  acquisition: `opens_file`. This is effect evidence for interprocedural
+  consumers; `VBA219` continues to own the separate local ownership and leak
+  analysis for the handle and its cleanup paths.
 - a confidently recognized `Workbook.Close`: `closes_workbook`;
 - every recognized assignment to the ten `Application` properties above:
   `changes_application_state`; known property-reset values and resolved

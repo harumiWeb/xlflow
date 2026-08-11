@@ -235,6 +235,18 @@ disabled_rules = ["VBA243"]
 	}
 }
 
+func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA244"); !ok || !enabled || !cfg.Analyze.DetectProcedureCallCycles {
+		t.Fatalf("VBA244 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectProcedureCallCycles)
+	}
+	cfg.Analyze.DetectProcedureCallCycles = false
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA244"); !ok || enabled {
+		t.Fatalf("disabled VBA244 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
 func TestRiskyModuleStateDefaultsDisabledAndIsConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

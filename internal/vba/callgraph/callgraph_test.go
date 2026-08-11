@@ -146,6 +146,145 @@ func TestAnalyzeUsesConfiguredModuleKindsAndStableCycles(t *testing.T) {
 	}
 }
 
+func TestFindCyclesEnumeratesElementaryGraphWideCyclesDeterministically(t *testing.T) {
+	names := []string{"Self", "MutualA", "MutualB", "OuterA", "OuterB", "OuterC", "IndependentA", "IndependentB"}
+	symbolsList := make([]symbols.Symbol, 0, len(names))
+	for i, name := range names {
+		symbolsList = append(symbolsList, symbol("M", "M.bas", name, i+1))
+	}
+	input := SnapshotFromResult(&calls.Result{
+		Symbols: symbolsList,
+		Calls: []calls.Call{
+			// Direct recursion.
+			matched("M", "M.bas", "Self", "M", "M.bas", "Self", 1, 1),
+			// Mutual recursion.
+			matched("M", "M.bas", "MutualA", "M", "M.bas", "MutualB", 3, 2),
+			matched("M", "M.bas", "MutualB", "M", "M.bas", "MutualA", 2, 3),
+			// A three-procedure cycle and a nested two-procedure cycle sharing
+			// the same entry point.
+			matched("M", "M.bas", "OuterA", "M", "M.bas", "OuterB", 5, 4),
+			matched("M", "M.bas", "OuterB", "M", "M.bas", "OuterA", 4, 5),
+			matched("M", "M.bas", "OuterB", "M", "M.bas", "OuterC", 6, 6),
+			matched("M", "M.bas", "OuterC", "M", "M.bas", "OuterA", 4, 7),
+			// Independent cycle.
+			matched("M", "M.bas", "IndependentA", "M", "M.bas", "IndependentB", 8, 8),
+			matched("M", "M.bas", "IndependentB", "M", "M.bas", "IndependentA", 7, 9),
+			// Parallel endpoint evidence: the earliest source call is retained
+			// in the cycle while Analyze continues to expose both call sites.
+			matched("M", "M.bas", "MutualA", "M", "M.bas", "MutualB", 2, 20),
+			// Unresolved calls are uncertainty, not confirmed graph edges.
+			unresolved("M", "M.bas", "Self", 21),
+		},
+	})
+
+	cycles := FindCycles(input)
+	if len(cycles) != 5 {
+		t.Fatalf("cycles = %#v", cycles)
+	}
+	// cycleKey ordering is stable; compare the emitted qualified names and
+	// verify no rotation duplicates are present.
+	seen := map[string]bool{}
+	for _, cycle := range cycles {
+		if len(cycle.Nodes) != len(cycle.Edges) {
+			t.Fatalf("cycle nodes/edges mismatch: %#v", cycle)
+		}
+		if len(cycle.Nodes) == 0 {
+			t.Fatalf("empty cycle: %#v", cycle)
+		}
+		key := cycleKey(cycle.Nodes)
+		if seen[key] {
+			t.Fatalf("rotation duplicate: %#v", cycle)
+		}
+		seen[key] = true
+		for i, edge := range cycle.Edges {
+			if edge.Caller != cycle.Nodes[i] || edge.Callee != cycle.Nodes[(i+1)%len(cycle.Nodes)] {
+				t.Fatalf("cycle edge %d not ordered with nodes: %#v", i, cycle)
+			}
+		}
+		if cycle.Nodes[0].String() != minimumCycleNodeForTest(cycle.Nodes) {
+			t.Fatalf("cycle is not canonically rotated: %#v", cycle)
+		}
+	}
+	for _, expected := range []string{
+		"m|m.independenta|sub|M.bas|7|1,m|m.independentb|sub|M.bas|8|1",
+		"m|m.mutuala|sub|M.bas|2|1,m|m.mutualb|sub|M.bas|3|1",
+		"m|m.outera|sub|M.bas|4|1,m|m.outerb|sub|M.bas|5|1",
+		"m|m.outera|sub|M.bas|4|1,m|m.outerb|sub|M.bas|5|1,m|m.outerc|sub|M.bas|6|1",
+		"m|m.self|sub|M.bas|1|1",
+	} {
+		if !seen[expected] {
+			t.Fatalf("missing cycle %q in %#v", expected, seen)
+		}
+	}
+	for _, cycle := range cycles {
+		for _, edge := range cycle.Edges {
+			if edge.Caller.QualifiedName == "M.MutualA" && edge.Callee.QualifiedName == "M.MutualB" && edge.Location.StartLine != 2 {
+				t.Fatalf("parallel endpoint did not retain earliest edge: %#v", edge)
+			}
+		}
+	}
+	impact, err := AnalyzeSnapshot(input, Request{Target: "M.Self", Direction: DirectionBoth, Depth: 1})
+	if err != nil || impact.Uncertainty.Unresolved != 1 {
+		t.Fatalf("unresolved call uncertainty = %#v, err=%v", impact.Uncertainty, err)
+	}
+	again := FindCycles(input)
+	if !reflect.DeepEqual(cycles, again) {
+		t.Fatalf("cycle output changed: first=%#v again=%#v", cycles, again)
+	}
+	permuted := input
+	permuted.Symbols = append([]Symbol(nil), input.Symbols...)
+	permuted.Calls = append([]calls.Call(nil), input.Calls...)
+	for left, right := 0, len(permuted.Symbols)-1; left < right; left, right = left+1, right-1 {
+		permuted.Symbols[left], permuted.Symbols[right] = permuted.Symbols[right], permuted.Symbols[left]
+	}
+	for left, right := 0, len(permuted.Calls)-1; left < right; left, right = left+1, right-1 {
+		permuted.Calls[left], permuted.Calls[right] = permuted.Calls[right], permuted.Calls[left]
+	}
+	if got := FindCycles(permuted); !reflect.DeepEqual(cycles, got) {
+		t.Fatalf("cycle output changed after input permutation: first=%#v permuted=%#v", cycles, got)
+	}
+}
+
+func minimumCycleNodeForTest(nodes []ID) string {
+	minimum := nodes[0].String()
+	for _, node := range nodes[1:] {
+		if key := node.String(); key < minimum {
+			minimum = key
+		}
+	}
+	return minimum
+}
+
+func TestFindCyclesRetainsDistinctDirectedPathsWithSameNodes(t *testing.T) {
+	input := SnapshotFromResult(&calls.Result{
+		Symbols: []symbols.Symbol{
+			symbol("M", "M.bas", "A", 1),
+			symbol("M", "M.bas", "B", 2),
+			symbol("M", "M.bas", "C", 3),
+		},
+		Calls: []calls.Call{
+			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 1),
+			matched("M", "M.bas", "B", "M", "M.bas", "C", 3, 1),
+			matched("M", "M.bas", "C", "M", "M.bas", "A", 1, 1),
+			matched("M", "M.bas", "A", "M", "M.bas", "C", 3, 2),
+			matched("M", "M.bas", "C", "M", "M.bas", "B", 2, 2),
+			matched("M", "M.bas", "B", "M", "M.bas", "A", 1, 2),
+		},
+	})
+	cycles := FindCycles(input)
+	var threeNode int
+	paths := map[string]bool{}
+	for _, cycle := range cycles {
+		if len(cycle.Nodes) == 3 {
+			threeNode++
+			paths[cycleKey(cycle.Nodes)] = true
+		}
+	}
+	if threeNode != 2 || len(paths) != 2 {
+		t.Fatalf("cycles = %#v, want clockwise and reverse three-node paths", cycles)
+	}
+}
+
 func TestAnalyzeReachabilitySeparatesConfirmedPossibleAndUnreachableClusters(t *testing.T) {
 	input := &calls.Result{
 		Symbols: []symbols.Symbol{

@@ -3,6 +3,7 @@
 package callgraph
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -60,6 +61,10 @@ type Edge struct {
 
 type Cycle struct {
 	Nodes []ID `json:"nodes"`
+	// Edges follows Nodes in traversal order. The i-th edge leaves Nodes[i]
+	// and enters Nodes[(i+1)%len(Nodes)]. Parallel call sites between the same
+	// endpoints are represented by their earliest source edge.
+	Edges []Edge `json:"edges"`
 }
 
 type Traversal struct {
@@ -627,7 +632,7 @@ func (g graph) uncertaintyFor(nodes map[string]bool) Uncertainty {
 }
 func procedureKind(kind string) bool {
 	switch kind {
-	case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function":
+	case "sub", "function", "property", "property_get", "property_let", "property_set", "declare", "declare_sub", "declare_function", "event":
 		return true
 	}
 	return false
@@ -687,79 +692,388 @@ func modulesFor(nodes []Node) []Module {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name+"|"+out[i].File < out[j].Name+"|"+out[j].File })
 	return out
 }
+
+// FindCycles returns every elementary directed cycle in the confirmed,
+// project-local call graph represented by input. Cycles are graph-wide (they
+// are not restricted to a traversal target), deterministic, and represented
+// in canonical rotation order. Unresolved, ambiguous, external, built-in-like,
+// and member calls are intentionally absent because build only adds uniquely
+// matched project-local edges.
+func FindCycles(input Snapshot) []Cycle {
+	cycles, err := FindCyclesContext(context.Background(), input)
+	if err != nil {
+		// A background context cannot be canceled. Keep the non-context API
+		// convenient while retaining cancellation for large workspaces.
+		return []Cycle{}
+	}
+	return cycles
+}
+
+// FindCyclesContext is the cancellation-aware form of FindCycles. It returns
+// context.Canceled/context.DeadlineExceeded when cancellation is observed and
+// never returns a partial cycle set.
+func FindCyclesContext(ctx context.Context, input Snapshot) ([]Cycle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	g := build(input)
+	nodes := make(map[string]ID, len(g.nodes))
+	for key, node := range g.nodes {
+		nodes[key] = node.ID
+	}
+	allEdges := make([]Edge, 0)
+	for _, edges := range g.out {
+		allEdges = append(allEdges, edges...)
+	}
+	cycles, err := enumerateCycles(ctx, nodes, allEdges, nil)
+	if err != nil {
+		return nil, err
+	}
+	return cycles, nil
+}
+
 func cyclesFor(visited map[string]bool, edges []Edge) []Cycle {
-	adjacency := map[string][]string{}
-	sortedEdges := append([]Edge(nil), edges...)
-	sort.Slice(sortedEdges, func(i, j int) bool { return edgeKey(sortedEdges[i]) < edgeKey(sortedEdges[j]) })
-	for _, edge := range sortedEdges {
-		a, b := edge.Caller.String(), edge.Callee.String()
-		if visited[a] && visited[b] {
-			adjacency[a] = append(adjacency[a], b)
+	if len(visited) == 0 || len(edges) == 0 {
+		return []Cycle{}
+	}
+	nodes := make(map[string]ID, len(edges)*2)
+	for _, edge := range edges {
+		caller, callee := edge.Caller.String(), edge.Callee.String()
+		if visited[caller] {
+			nodes[caller] = edge.Caller
+		}
+		if visited[callee] {
+			nodes[callee] = edge.Callee
 		}
 	}
-	for node := range adjacency {
-		sort.Strings(adjacency[node])
+	cycles, err := enumerateCycles(context.Background(), nodes, edges, visited)
+	if err != nil {
+		return []Cycle{}
 	}
-	seen, stack, onStack := map[string]bool{}, []string{}, map[string]int{}
-	unique := map[string]Cycle{}
-	var visit func(string)
-	visit = func(node string) {
-		seen[node] = true
-		onStack[node] = len(stack)
-		stack = append(stack, node)
-		for _, next := range adjacency[node] {
-			if index, ok := onStack[next]; ok {
-				ids := make([]ID, 0, len(stack)-index)
-				for _, key := range stack[index:] {
-					parts := strings.Split(key, "|")
-					_ = parts
-					ids = append(ids, idForKey(key, visited, edges))
-				}
-				key := cycleKey(ids)
-				unique[key] = Cycle{Nodes: ids}
+	return cycles
+}
+
+type cycleArc struct {
+	to   string
+	edge Edge
+}
+
+// enumerateCycles uses Johnson's elementary-cycle traversal. Each iteration
+// finds the least strongly connected component in the remaining ordered
+// subgraph, runs the blocked/unblocked circuit search from that component's
+// least node, and then removes that root. This preserves every directed simple
+// path while avoiding the target-scoped back-edge omissions of the old DFS.
+func enumerateCycles(ctx context.Context, nodes map[string]ID, edges []Edge, allowed map[string]bool) ([]Cycle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Keep one deterministic source edge per endpoint pair. Analyze retains
+	// every distinct call site, but a cycle path has one edge per transition;
+	// choosing the earliest location avoids duplicate edge variants.
+	byEndpoint := map[string]map[string]Edge{}
+	for _, edge := range edges {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		from, to := edge.Caller.String(), edge.Callee.String()
+		if allowed != nil && (!allowed[from] || !allowed[to]) {
+			continue
+		}
+		if nodes != nil {
+			if _, ok := nodes[from]; !ok {
 				continue
 			}
-			if !seen[next] {
-				visit(next)
+			if _, ok := nodes[to]; !ok {
+				continue
 			}
 		}
-		delete(onStack, node)
-		stack = stack[:len(stack)-1]
+		if byEndpoint[from] == nil {
+			byEndpoint[from] = map[string]Edge{}
+		}
+		prior, exists := byEndpoint[from][to]
+		if !exists || edgeLess(edge, prior) {
+			byEndpoint[from][to] = edge
+		}
 	}
-	keys := make([]string, 0, len(visited))
-	for key := range visited {
+
+	adjacency := make(map[string][]cycleArc, len(byEndpoint))
+	for from, endpointEdges := range byEndpoint {
+		for to, edge := range endpointEdges {
+			adjacency[from] = append(adjacency[from], cycleArc{to: to, edge: edge})
+		}
+		sort.Slice(adjacency[from], func(i, j int) bool {
+			if adjacency[from][i].to != adjacency[from][j].to {
+				return adjacency[from][i].to < adjacency[from][j].to
+			}
+			return edgeLess(adjacency[from][i].edge, adjacency[from][j].edge)
+		})
+	}
+
+	keysSet := map[string]bool{}
+	for key := range nodes {
+		if allowed == nil || allowed[key] {
+			keysSet[key] = true
+		}
+	}
+	for from, endpointEdges := range byEndpoint {
+		keysSet[from] = true
+		for to := range endpointEdges {
+			keysSet[to] = true
+		}
+	}
+	keys := make([]string, 0, len(keysSet))
+	for key := range keysSet {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, key := range keys {
-		if !seen[key] {
-			visit(key)
-		}
+
+	unique := map[string]Cycle{}
+	indexByKey := make(map[string]int, len(keys))
+	for index, key := range keys {
+		indexByKey[key] = index
 	}
-	out := make([]Cycle, 0, len(unique))
+	for first := 0; first < len(keys); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		active := keys[first:]
+		components, err := stronglyConnectedComponents(ctx, active, adjacency)
+		if err != nil {
+			return nil, err
+		}
+		var component []string
+		for _, candidate := range components {
+			if !componentContainsCycle(candidate, adjacency) {
+				continue
+			}
+			if component == nil || candidate[0] < component[0] {
+				component = candidate
+			}
+		}
+		if component == nil {
+			break
+		}
+		root := component[0]
+		componentSet := make(map[string]bool, len(component))
+		for _, key := range component {
+			componentSet[key] = true
+		}
+		blocked := make(map[string]bool, len(component))
+		blockedBy := make(map[string]map[string]bool, len(component))
+		stack := make([]string, 0, len(component))
+		stackEdges := make([]Edge, 0, len(component))
+		var unblock func(string)
+		unblock = func(key string) {
+			if !blocked[key] {
+				return
+			}
+			blocked[key] = false
+			for predecessor := range blockedBy[key] {
+				delete(blockedBy[key], predecessor)
+				unblock(predecessor)
+			}
+		}
+		var circuit func(string) (bool, error)
+		circuit = func(current string) (bool, error) {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			found := false
+			stack = append(stack, current)
+			blocked[current] = true
+			for _, arc := range adjacency[current] {
+				if !componentSet[arc.to] {
+					continue
+				}
+				if arc.to == root {
+					nodesInCycle := append([]string(nil), stack...)
+					edgesInCycle := append(append([]Edge(nil), stackEdges...), arc.edge)
+					cycle := canonicalCycle(nodesInCycle, edgesInCycle, nodes)
+					unique[cycleKey(cycle.Nodes)] = cycle
+					found = true
+					continue
+				}
+				if blocked[arc.to] {
+					continue
+				}
+				stackEdges = append(stackEdges, arc.edge)
+				childFound, err := circuit(arc.to)
+				stackEdges = stackEdges[:len(stackEdges)-1]
+				if err != nil {
+					return false, err
+				}
+				found = found || childFound
+			}
+			if found {
+				unblock(current)
+			} else {
+				for _, arc := range adjacency[current] {
+					if componentSet[arc.to] && arc.to != root {
+						if blockedBy[arc.to] == nil {
+							blockedBy[arc.to] = map[string]bool{}
+						}
+						blockedBy[arc.to][current] = true
+					}
+				}
+			}
+			stack = stack[:len(stack)-1]
+			return found, nil
+		}
+		if _, err := circuit(root); err != nil {
+			return nil, err
+		}
+		first = indexByKey[root] + 1
+	}
+
+	result := make([]Cycle, 0, len(unique))
 	for _, cycle := range unique {
-		out = append(out, cycle)
+		result = append(result, cycle)
 	}
-	sort.Slice(out, func(i, j int) bool { return cycleKey(out[i].Nodes) < cycleKey(out[j].Nodes) })
-	return out
+	sort.Slice(result, func(i, j int) bool {
+		return cycleKey(result[i].Nodes) < cycleKey(result[j].Nodes)
+	})
+	return result, nil
 }
-func idForKey(key string, _ map[string]bool, edges []Edge) ID {
-	for _, edge := range edges {
-		if edge.Caller.String() == key {
-			return edge.Caller
+
+func stronglyConnectedComponents(ctx context.Context, keys []string, adjacency map[string][]cycleArc) ([][]string, error) {
+	allowed := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		allowed[key] = true
+	}
+	index := 0
+	indices := map[string]int{}
+	lowlink := map[string]int{}
+	onStack := map[string]bool{}
+	stack := []string{}
+	components := [][]string{}
+	var visit func(string) error
+	visit = func(current string) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if edge.Callee.String() == key {
-			return edge.Callee
+		indices[current] = index
+		lowlink[current] = index
+		index++
+		stack = append(stack, current)
+		onStack[current] = true
+		for _, arc := range adjacency[current] {
+			if !allowed[arc.to] {
+				continue
+			}
+			if _, seen := indices[arc.to]; !seen {
+				if err := visit(arc.to); err != nil {
+					return err
+				}
+				if lowlink[arc.to] < lowlink[current] {
+					lowlink[current] = lowlink[arc.to]
+				}
+			} else if onStack[arc.to] && indices[arc.to] < lowlink[current] {
+				lowlink[current] = indices[arc.to]
+			}
+		}
+		if lowlink[current] == indices[current] {
+			component := []string{}
+			for {
+				last := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				onStack[last] = false
+				component = append(component, last)
+				if last == current {
+					break
+				}
+			}
+			sort.Strings(component)
+			components = append(components, component)
+		}
+		return nil
+	}
+	for _, key := range keys {
+		if _, seen := indices[key]; !seen {
+			if err := visit(key); err != nil {
+				return nil, err
+			}
 		}
 	}
-	parts := strings.Split(key, "|")
-	return ID{Module: parts[0], QualifiedName: parts[1], Kind: parts[2], File: parts[3]}
+	sort.Slice(components, func(i, j int) bool { return components[i][0] < components[j][0] })
+	return components, nil
 }
+
+func componentContainsCycle(component []string, adjacency map[string][]cycleArc) bool {
+	if len(component) > 1 {
+		return true
+	}
+	if len(component) == 0 {
+		return false
+	}
+	for _, arc := range adjacency[component[0]] {
+		if arc.to == component[0] {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalCycle(keys []string, edges []Edge, nodes map[string]ID) Cycle {
+	if len(keys) == 0 {
+		return Cycle{Nodes: []ID{}, Edges: []Edge{}}
+	}
+	start := 0
+	for index := 1; index < len(keys); index++ {
+		if keys[index] < keys[start] {
+			start = index
+		}
+	}
+	rotatedKeys := make([]string, len(keys))
+	rotatedEdges := make([]Edge, len(edges))
+	for index := range keys {
+		rotated := (start + index) % len(keys)
+		rotatedKeys[index] = keys[rotated]
+		rotatedEdges[index] = edges[rotated]
+	}
+	ids := make([]ID, len(rotatedKeys))
+	for index, key := range rotatedKeys {
+		if id, ok := nodes[key]; ok {
+			ids[index] = id
+			continue
+		}
+		// enumerateCycles always has endpoint IDs available; retain a safe
+		// fallback for direct internal callers with an incomplete node map.
+		ids[index] = ID{QualifiedName: key}
+	}
+	return Cycle{Nodes: ids, Edges: rotatedEdges}
+}
+
+func edgeLess(a, b Edge) bool {
+	la, lb := a.Location, b.Location
+	if la.File != lb.File {
+		return la.File < lb.File
+	}
+	if la.StartLine != lb.StartLine {
+		return la.StartLine < lb.StartLine
+	}
+	if la.StartColumn != lb.StartColumn {
+		return la.StartColumn < lb.StartColumn
+	}
+	if la.EndLine != lb.EndLine {
+		return la.EndLine < lb.EndLine
+	}
+	if la.EndColumn != lb.EndColumn {
+		return la.EndColumn < lb.EndColumn
+	}
+	return edgeKey(a) < edgeKey(b)
+}
+
 func cycleKey(ids []ID) string {
 	values := make([]string, len(ids))
 	for i, id := range ids {
 		values[i] = id.String()
 	}
-	sort.Strings(values)
 	return strings.Join(values, ",")
 }
