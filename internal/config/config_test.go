@@ -175,6 +175,66 @@ disabled_rules = ["VBA242"]
 	}
 }
 
+func TestValue2PerformanceOpportunitiesDefaultsDisabledAndIsConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA243"); !ok || enabled || cfg.Analyze.DetectValue2PerformanceOpportunities {
+		t.Fatalf("VBA243 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectValue2PerformanceOpportunities)
+	}
+
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_value2_performance_opportunities = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA243"); !ok || !enabled || !loaded.Analyze.DetectValue2PerformanceOpportunities {
+		t.Fatalf("loaded VBA243 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectValue2PerformanceOpportunities)
+	}
+	if !hasConfigWarning(loaded.Warnings, "deprecated_analyze_rule_config", "VBA243") {
+		t.Fatalf("expected legacy compatibility-key warning for VBA243: %+v", loaded.Warnings)
+	}
+}
+
+func TestValue2PerformanceOpportunitiesDisabledRulesTakePrecedence(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_value2_performance_opportunities = true
+disabled_rules = ["VBA243"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA243"); !ok || enabled || cfg.Analyze.DetectValue2PerformanceOpportunities {
+		t.Fatalf("VBA243 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectValue2PerformanceOpportunities)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA243") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA243") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA243, got %+v", cfg.Warnings)
+	}
+}
+
 func TestRiskyModuleStateDefaultsDisabledAndIsConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
@@ -1245,6 +1305,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.Analyze.DetectStatefulExcelCallArguments = false
 	cfg.Analyze.DetectExcelAPIFailureContracts = false
 	cfg.Analyze.DetectLoopInvariantExcelObjectResolution = false
+	cfg.Analyze.DetectValue2PerformanceOpportunities = true
 
 	p := filepath.Join(dir, FileName)
 	if err := Write(p, cfg); err != nil {
@@ -1281,6 +1342,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, "detect_dictionary_iteration_value_usage = true") {
 		t.Fatalf("generated config should include the enabled VBA213 opt-in:\n%s", text)
+	}
+	if !strings.Contains(text, "detect_value2_performance_opportunities = true") {
+		t.Fatalf("generated config should include the enabled VBA243 opt-in:\n%s", text)
 	}
 	if !strings.Contains(text, "[fmt]") ||
 		!strings.Contains(text, "operator_spacing = true") ||

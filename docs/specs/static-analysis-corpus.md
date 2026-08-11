@@ -198,7 +198,7 @@ Profiles are selected in the corpus adapter, not in the shared static-analysis
 registry. `excel` keeps the normal rule set. `generic-vba` and `access` omit
 the Excel object-model rules `VB002`, `VB003`, `VB027`, `VBA104`, `VBA201`,
 `VBA203`, `VBA205`, `VBA211`, `VBA215`, `VBA216`, `VBA217`, `VBA218`, `VBA221`,
-`VBA225`, `VBA226`, `VBA238`, and `VBA242` from corpus evidence. For these
+`VBA225`, `VBA226`, `VBA238`, `VBA242`, and `VBA243` from corpus evidence. For these
 generic/access profiles, configurable rules are disabled in the generated
 project config; always-on `VBA104` and `VBA211` are
 filtered
@@ -206,9 +206,11 @@ at normalization. This policy affects corpus evidence only and does not alter
 production analyzer semantics.
 
 Excel-profile workspaces explicitly opt in to `VBA242`
-(`detect_expensive_full_range_operations`) so full-range operation evidence is
-captured in the Excel corpus. Generic VBA and Access profiles disable and
-exclude `VBA242` because they do not establish Excel object-model identity.
+(`detect_expensive_full_range_operations`) and `VBA243`
+(`detect_value2_performance_opportunities`) so full-range and Value2
+performance evidence is captured in the Excel corpus. Generic VBA and Access
+profiles disable and exclude `VBA242` and `VBA243` because they do not
+establish Excel object-model identity.
 
 ### Deterministic diagnostic snapshots
 

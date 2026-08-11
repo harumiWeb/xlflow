@@ -39,6 +39,12 @@ intended. One-time whole-sheet formatting remains legitimate, so this rule
 must be opt-in and must distinguish loop-contained processing from a one-time
 operation.
 
+Issue #456 adds a fifth cost shape: bulk or repeated `Range.Value` transfers
+may pay Excel's automatic `Currency` or `Date` coercion even when the VBA code
+only needs raw numeric or text values. The rule must identify a meaningful
+performance signal, avoid globally preferring `Value2`, and remain silent when
+date or currency semantics appear intentional.
+
 ## Decision
 
 Add `VBA225`, a default-enabled `analyze` rule in the performance category. It
@@ -122,6 +128,23 @@ window, while `[analyze].disabled_rules = ["VBA242"]` is the stable policy.
 `VBA201`, `VBA217`, and `VBA225` retain ownership of find-result safety,
 last-row calculation guidance, and repeated per-cell work respectively.
 
+Add `VBA243` for issue #456. It is an opt-in, information-level by default,
+procedure-local performance rule in batch analysis and the shared real-time
+path. The detector reports bulk or repeated `Range.Value` transfers only when
+it has a strong performance signal, such as a large or dynamic range, repeated
+loop access, or immediate transfer to a `Variant` array. Numeric/text
+processing can strengthen the explanation after one of those signals exists,
+but is not a standalone trigger. It may escalate a reachable repeated transfer
+to `warning`, remains non-blocking and inline suppressible, and uses
+`[analyze].disabled_rules = ["VBA243"]` as its stable policy. The compatibility
+key `detect_value2_performance_opportunities` remains accepted during the
+compatibility window. `VBA226` retains ownership of unsafe `Range.Value` /
+`Value2` array-shape assumptions. A literal range is large at 100 or more
+cells; dynamic evidence requires proven runtime construction (`Cells` pairs,
+`Resize`, `CurrentRegion`, `UsedRange`, concatenated bounds, or a traceable
+alias), not an unknown `Range` argument. Typed or explicitly inspected
+`Date`/`Currency` values and mixed or unknown Variant uses are excluded.
+
 ## Consequences
 
 - Positive: common cell-by-cell loop patterns receive actionable guidance before
@@ -152,6 +175,12 @@ last-row calculation guidance, and repeated per-cell work respectively.
 - Negative: shape inference is intentionally conservative; dynamic addresses,
   named ranges, and aliases whose effective bounds are unknown remain
   unreported.
+- Positive: `VBA243` makes expensive `Value` coercion visible for meaningful
+  bulk or repeated transfers while preserving intentional Date/Currency use
+  cases and keeping the recommendation opt-in.
+- Negative: the analyzer cannot prove every downstream semantic dependency on
+  Date or Currency values, so some safe opportunities remain unreported and
+  projects may need local suppressions for intentional `Value` usage.
 
 ## Alternatives Considered
 
@@ -183,6 +212,8 @@ last-row calculation guidance, and repeated per-cell work respectively.
   performance analysis).
 - Related requirements: xlflow issue #455 (expensive full-row, full-column, and
   full-sheet operations).
+- Related requirements: xlflow issue #456 (opt-in `Value` versus `Value2`
+  performance guidance).
 - Analyzer ownership and public diagnostic policy:
   `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`.
 - Procedure syntax and resolution: `docs/specs/vba-analysis-ir.md` and
@@ -208,3 +239,4 @@ last-row calculation guidance, and repeated per-cell work respectively.
 - xlflow issue #453
 - xlflow issue #454
 - xlflow issue #455
+- xlflow issue #456
