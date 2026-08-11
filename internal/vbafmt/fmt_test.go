@@ -1559,6 +1559,22 @@ func TestFormatFileSkipsParserErrors(t *testing.T) {
 	}
 }
 
+func TestFormatFileSkipsDeclarationKeywordRecovery(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Malformed.bas")
+	original := "Public Sub Broken()\n  Dim x As Double, Dim i As Long\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fr, err := formatFile(path, FormatConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fr.Skipped || !strings.Contains(fr.SkipReason, "parse error") || fr.Changed {
+		t.Fatalf("malformed declaration should be skipped without changes: %+v", fr)
+	}
+}
+
 func TestFormatFileFormatsVBA07RecoveredSyntax(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Legacy.bas")

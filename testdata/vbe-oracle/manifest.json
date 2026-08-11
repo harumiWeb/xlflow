@@ -47,6 +47,18 @@
     { "id": "sub-parenthesized-call", "path": "cases/sub-parenthesized-call/case.json" },
     { "id": "sub-bare-call", "path": "cases/sub-bare-call/case.json" },
     { "id": "function-parenthesized-call", "path": "cases/function-parenthesized-call/case.json" },
-    { "id": "function-bare-call", "path": "cases/function-bare-call/case.json" }
+    { "id": "function-bare-call", "path": "cases/function-bare-call/case.json" },
+    {
+      "id": "declaration-keyword-valid-controls",
+      "path": "cases/declaration-keyword-valid-controls/case.json"
+    },
+    {
+      "id": "declaration-repeated-dim-after-comma",
+      "path": "cases/declaration-repeated-dim-after-comma/case.json"
+    },
+    {
+      "id": "declaration-redim-after-comma",
+      "path": "cases/declaration-redim-after-comma/case.json"
+    }
   ]
 }

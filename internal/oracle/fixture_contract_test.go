@@ -83,9 +83,13 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, issue := range lintResult.Issues {
+				startColumn := issue.Column
+				if startColumn < 1 {
+					startColumn = 1
+				}
 				projections["lint"] = append(projections["lint"], Diagnostic{
 					Code: issue.Code, Severity: issue.Severity,
-					Range: &Range{StartLine: issue.Line, StartColumn: issue.Column, EndLine: issue.Line, EndColumn: issue.Column},
+					Range: &Range{StartLine: issue.Line, StartColumn: startColumn, EndLine: issue.Line, EndColumn: startColumn + 1},
 				})
 			}
 
@@ -141,7 +145,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 25 || report.BoundFixtures != 15 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 28 || report.BoundFixtures != 18 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -155,6 +159,9 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"byref-compatible",
 		"byref-incompatible",
 		"byref-literal-temporaries",
+		"declaration-keyword-valid-controls",
+		"declaration-redim-after-comma",
+		"declaration-repeated-dim-after-comma",
 		"duplicate-named-argument",
 		"known-as-type",
 		"known-enum-as-type",

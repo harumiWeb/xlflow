@@ -318,12 +318,8 @@
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"lint","code":"VB005","severity":"warning","line":157,"column":9}
 {"project":"third_party/access-examples","file":"modOutlook.bas","surface":"lint","code":"VB005","severity":"warning","line":158,"column":9}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB020","severity":"warning","line":70,"column":35}
-{"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB019","severity":"warning","line":130,"column":1}
-{"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB005","severity":"warning","line":130,"column":5}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB020","severity":"warning","line":130,"column":5}
-{"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB005","severity":"warning","line":130,"column":12}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB020","severity":"warning","line":130,"column":12}
-{"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB005","severity":"warning","line":130,"column":16}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB020","severity":"warning","line":130,"column":16}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB004","severity":"warning","line":245,"column":5}
 {"project":"third_party/access-examples","file":"modString.bas","surface":"lint","code":"VB004","severity":"warning","line":286,"column":5}

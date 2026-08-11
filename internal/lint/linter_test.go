@@ -1937,6 +1937,80 @@ End Sub
 	assertIssue(t, issues, "VB019", 3)
 }
 
+func TestLinterReportsParserRecoveryForDeclarationKeywordsAfterComma(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{
+		"Attribute VB_Name = \"Main\"\nOption Explicit\nSub Main()\n  Dim x As Double, Dim i As Long\n  x = 1: i = 1\nEnd Sub\n",
+		"Attribute VB_Name = \"Main\"\nOption Explicit\nSub Main()\n  Dim b() As Byte, ReDim b(10)\n  Debug.Print b(0)\nEnd Sub\n",
+	} {
+		issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issuesByCode(issues, "VB014"); len(got) != 1 {
+			t.Fatalf("expected one VB014 recovery issue for %q, got %+v", source, issues)
+		}
+		for _, code := range []string{"VB005", "VB019", "VB020", "VB029"} {
+			if got := issuesByCode(issues, code); len(got) != 0 {
+				t.Fatalf("%s should not be synthesized from a declaration keyword for %q: %+v", code, source, got)
+			}
+		}
+	}
+}
+
+func TestLinterTreatsIdentifierTypeCharactersAsExplicitTypes(t *testing.T) {
+	t.Parallel()
+	typedSource := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+  Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+End Sub
+`
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(typedSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VB005", "VB014", "VB019"} {
+		if got := issuesByCode(issues, code); len(got) != 0 {
+			t.Fatalf("identifier type characters should suppress %s, got %+v", code, got)
+		}
+	}
+
+	mixedSource := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+  Dim implicitValue, explicitValue As Long
+End Sub
+`
+	issues, err = (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(mixedSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB019"); len(got) != 1 {
+		t.Fatalf("expected the genuinely implicit declarator to trigger VB019, got %+v", got)
+	}
+	if got := issuesByCode(issues, "VB005"); len(got) != 1 {
+		t.Fatalf("expected the genuinely implicit declarator to trigger VB005, got %+v", got)
+	}
+
+	mixedTypeCharacterSource := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+  Dim implicitValue, singleValue!
+End Sub
+`
+	issues, err = (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(mixedTypeCharacterSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB019"); len(got) != 1 {
+		t.Fatalf("expected a type-character declarator to count as explicit beside an implicit Variant, got %+v", got)
+	}
+	if got := issuesByCode(issues, "VB005"); len(got) != 1 {
+		t.Fatalf("expected only the implicit Variant declarator to trigger VB005, got %+v", got)
+	}
+}
+
 func TestLinterAllowsQualifiedExcelAccessAndNarrowResumeNext(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

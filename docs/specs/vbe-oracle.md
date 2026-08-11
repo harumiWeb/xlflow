@@ -248,8 +248,8 @@ rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 The test reports fixture state counts, complete and incomplete rule counts,
 sorted fixture IDs for every state (`bound`, `partially-bound`, `unbound`, and
 `not-applicable`), and sorted rule-to-case and surface coverage. The committed
-corpus currently reports 24 asserted fixtures: 14 `bound`, 0
-`partially-bound`, 8 `unbound`, and 2 `not-applicable`; the three bound rules
+corpus currently reports 28 asserted fixtures: 18 `bound`, 0
+`partially-bound`, 8 `unbound`, and 2 `not-applicable`; the five bound rules
 have complete positive/negative coverage. The report is emitted before a
 validation failure so missing positive/negative evidence and state changes
 remain visible in CI logs.

@@ -89,6 +89,34 @@ End Sub
 	}
 }
 
+func TestDiagnosticsKeepDeclarationRecoveryAndTypeCharacterSemantics(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	malformed := Document{
+		Path:   filepath.Join(t.TempDir(), "Malformed.bas"),
+		Source: "Attribute VB_Name = \"Malformed\"\nOption Explicit\nSub Main()\n    Dim x As Double, Dim i As Long\n    x = 1: i = 1\nEnd Sub\n",
+	}
+	malformedDiagnostics := analyzer.Diagnostics(malformed)
+	if got := diagnosticsByCode(malformedDiagnostics, "VB014"); len(got) != 1 {
+		t.Fatalf("malformed declaration diagnostics = %+v, want one VB014", malformedDiagnostics)
+	}
+	for _, code := range []string{"VB005", "VB019", "VB020"} {
+		if got := diagnosticsByCode(malformedDiagnostics, code); len(got) != 0 {
+			t.Fatalf("malformed declaration should not synthesize %s: %+v", code, got)
+		}
+	}
+
+	typed := Document{
+		Path:   filepath.Join(t.TempDir(), "Typed.bas"),
+		Source: "Attribute VB_Name = \"Typed\"\nOption Explicit\nSub Main()\n    Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^\nEnd Sub\n",
+	}
+	typedDiagnostics := analyzer.Diagnostics(typed)
+	for _, code := range []string{"VB005", "VB014", "VB019"} {
+		if got := diagnosticsByCode(typedDiagnostics, code); len(got) != 0 {
+			t.Fatalf("identifier type character should suppress %s: %+v", code, got)
+		}
+	}
+}
+
 func TestLintDiagnosticMessagePreservesRecoveryMetadataWithoutContext(t *testing.T) {
 	message := lintDiagnosticMessage(lint.Issue{
 		Code:        "VB014",

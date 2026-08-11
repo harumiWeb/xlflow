@@ -3,6 +3,7 @@ package ast
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -47,6 +48,90 @@ func TestParserReportsErrorAndMissingRecovery(t *testing.T) {
 	if !result.HasMissing {
 		t.Fatal("expected missing-node recovery")
 	}
+}
+
+func TestParserRejectsDeclarationKeywordsAfterComma(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	for _, source := range []string{
+		"Sub Test()\n  Dim x As Double, Dim i As Long\nEnd Sub\n",
+		"Sub Test()\n  Dim b() As Byte, rEdIm b(10)\nEnd Sub\n",
+	} {
+		result := parser.Parse("Malformed.bas", []byte(source))
+		reservedDeclarator := false
+		Walk(result.Root, func(node *tree_sitter.Node) bool {
+			if node.Kind() != "variable_declarator" {
+				return true
+			}
+			name := node.ChildByFieldName("name")
+			if name != nil && (strings.EqualFold(name.Utf8Text(result.Source), "dim") || strings.EqualFold(name.Utf8Text(result.Source), "redim")) {
+				reservedDeclarator = true
+			}
+			return true
+		})
+		result.Close()
+		if !result.HasError {
+			t.Fatalf("expected parser recovery for %q", source)
+		}
+		if reservedDeclarator {
+			t.Fatalf("reserved declaration keyword became a variable declarator for %q", source)
+		}
+	}
+
+	for _, source := range []string{
+		"Sub Test()\n  Dim x As Double, i As Long\nEnd Sub\n",
+		"Sub Test()\n  Dim b() As Byte: ReDim b(10)\nEnd Sub\n",
+	} {
+		result := parser.Parse("Valid.bas", []byte(source))
+		if result.HasError || result.HasMissing {
+			t.Fatalf("valid declaration/control sequence recovered: error=%t missing=%t tree=%s", result.HasError, result.HasMissing, result.Root.ToSexp())
+		}
+		result.Close()
+	}
+}
+
+func TestIsDeclarationKeywordRecoveryIsNarrow(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	malformed := parser.Parse("Malformed.bas", []byte("Sub Test()\n  Dim x As Double, Dim i As Long\nEnd Sub\n"))
+	if !IsDeclarationKeywordRecovery(malformed.Root, malformed.Source) {
+		t.Fatalf("expected declaration-keyword recovery: %s", malformed.Root.ToSexp())
+	}
+	malformed.Close()
+
+	ordinary := parser.Parse("Broken.bas", []byte("Public Function Foo(ByVal x As String\nEnd Function\n"))
+	if IsDeclarationKeywordRecovery(ordinary.Root, ordinary.Source) {
+		t.Fatalf("ordinary parser recovery was misclassified: %s", ordinary.Root.ToSexp())
+	}
+	ordinary.Close()
+}
+
+func TestIsIdentifierTypeCharacterRecoveryRecognizesOnlyDeclarationSuffixes(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	typed := parser.Parse("Typed.bas", []byte("Sub Test()\n  Dim value!\nEnd Sub\n"))
+	if !IsIdentifierTypeCharacterRecovery(typed.Root, typed.Source) {
+		t.Fatalf("expected legal Single suffix recovery: %s", typed.Root.ToSexp())
+	}
+	typed.Close()
+
+	ordinary := parser.Parse("Broken.bas", []byte("Sub Test()\n  value!\nEnd Sub\n"))
+	if IsIdentifierTypeCharacterRecovery(ordinary.Root, ordinary.Source) {
+		t.Fatalf("ordinary bang recovery was misclassified: %s", ordinary.Root.ToSexp())
+	}
+	ordinary.Close()
 }
 
 func TestParserParsesNestedInlineLoopsWithSharedNextVariables(t *testing.T) {
