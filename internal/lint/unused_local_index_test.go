@@ -103,3 +103,34 @@ func TestProcedureLocalReferenceIndexSupportsUnicodeNames(t *testing.T) {
 		t.Fatal("Unicode local read was not indexed")
 	}
 }
+
+func TestProcedureLocalReferenceIndexMatchesIdentifierTypeCharacters(t *testing.T) {
+	source := `Public Sub Run()
+  Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+  Const textConstant$ = "constant"
+  Debug.Print text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+  Debug.Print textConstant
+End Sub
+`
+	allSymbols := []symbols.Symbol{
+		{Name: "Run", Kind: "sub", StartLine: 1, EndLine: 5},
+		{Name: "text$", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "whole%", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "longValue&", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "singleValue!", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "doubleValue#", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "money@", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "longLong^", Kind: "local_variable", Parent: "Run", StartLine: 2, EndLine: 2},
+		{Name: "textConstant$", Kind: "const", Parent: "Run", StartLine: 3, EndLine: 3},
+	}
+
+	referenced, err := buildProcedureLocalReferenceIndexContext(context.Background(), source, allSymbols, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(referenced); i++ {
+		if !referenced[i] {
+			t.Fatalf("type-character local %s was not indexed", allSymbols[i].Name)
+		}
+	}
+}

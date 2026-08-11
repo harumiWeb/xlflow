@@ -78,7 +78,7 @@ func buildProcedureLocalReferenceIndexContext(ctx context.Context, source string
 			})
 			procedureIndex = len(procedures) - 1
 		}
-		name := strings.ToLower(sym.Name)
+		name := strings.ToLower(cleanIdentifier(sym.Name))
 		procedures[procedureIndex].locals[name] = append(procedures[procedureIndex].locals[name], symbolIndex)
 	}
 

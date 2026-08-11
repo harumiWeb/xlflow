@@ -1964,6 +1964,7 @@ func TestLinterTreatsIdentifierTypeCharactersAsExplicitTypes(t *testing.T) {
 Option Explicit
 Sub Main()
   Dim text$, whole%, longValue&, singleValue!, doubleValue#, money@, longLong^
+  Debug.Print text, whole, longValue, singleValue, doubleValue, money, longLong
 End Sub
 `
 	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(typedSource))
@@ -1974,6 +1975,24 @@ End Sub
 		if got := issuesByCode(issues, code); len(got) != 0 {
 			t.Fatalf("identifier type characters should suppress %s, got %+v", code, got)
 		}
+	}
+	if got := issuesByCode(issues, "VB020"); len(got) != 0 {
+		t.Fatalf("used identifier type characters should suppress VB020, got %+v", got)
+	}
+
+	writeOnlyTypeCharacterSource := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+  Dim writeOnly&
+  writeOnly = 1
+End Sub
+`
+	issues, err = (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(writeOnlyTypeCharacterSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB020"); len(got) != 1 || got[0].Symbol != "writeOnly&" {
+		t.Fatalf("write-only type-character local should still trigger VB020, got %+v", got)
 	}
 
 	mixedSource := `Attribute VB_Name = "Main"
