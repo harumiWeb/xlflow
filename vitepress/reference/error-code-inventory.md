@@ -15,6 +15,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `argument_count`
 - `argument_diagnostics`
 - `argument_list`
+- `array_bound`
 - `array_bounds`
 - `as_type_clause`
 - `assignable_to`
@@ -337,6 +338,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `file_picker`
 - `files_changed`
 - `files_to_change`
+- `fixed_array_parameter`
 - `fixture_invalid`
 - `fmt_args_invalid`
 - `fmt_check_failed`
@@ -469,6 +471,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `legacy_backup_entry`
 - `legacy_entry`
 - `let_statement`
+- `let_value_type`
 - `like_pattern`
 - `likely_cause`
 - `line_number_label`
@@ -588,6 +591,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `operator_spacing`
 - `option_after_declaration`
 - `option_statement`
+- `optional_default_nonconstant`
+- `optional_default_type`
 - `optional_modifier`
 - `oracle_already_running`
 - `oracle_failure`
@@ -619,7 +624,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `pack_write_failed`
 - `parallel_safe`
 - `param_array`
+- `paramarray_after_optional`
 - `paramarray_modifier`
+- `paramarray_not_last`
+- `paramarray_optional`
+- `paramarray_shape`
+- `parameter_limit`
 - `parameter_list`
 - `parenthesized_condition_expression`
 - `parenthesized_expression`
@@ -672,10 +682,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `property_diagnostics`
 - `property_get`
 - `property_get_declaration`
+- `property_index_count`
+- `property_index_shape`
+- `property_index_type`
 - `property_let`
 - `property_let_declaration`
 - `property_set`
 - `property_set_declaration`
+- `property_value_type`
 - `protected_module`
 - `protocol_version`
 - `published_runs`
@@ -712,6 +726,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `request_id`
 - `requested_bridge`
 - `require_option_explicit`
+- `required_after_optional`
 - `requires_excel`
 - `requires_push`
 - `reset_excel_session`
@@ -779,6 +794,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `session_rerun_failed`
 - `set_assignment`
 - `set_statement`
+- `set_value_type`
+- `setter_return_type`
+- `setter_value_missing`
+- `setter_value_optional`
+- `setter_value_paramarray`
 - `shared_formula_malformed_ref`
 - `shared_formula_missing_anchor`
 - `sheet_add`
@@ -886,6 +906,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_preprocessor_else`
 - `type_preprocessor_elseif`
 - `type_preprocessor_if`
+- `udt_byval`
+- `udt_optional`
 - `ui_button_args_invalid`
 - `ui_dialog`
 - `ui_stream_init_failed`

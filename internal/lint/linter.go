@@ -50,10 +50,12 @@ type Result struct {
 }
 
 type Linter struct {
-	RootDir             string
-	Config              config.Config
-	PathFilter          func(string) bool
-	VisibleDeclarations map[string]bool
+	RootDir                string
+	Config                 config.Config
+	PathFilter             func(string) bool
+	VisibleDeclarations    map[string]bool
+	TypeDeclarations       map[string]int
+	ObjectTypeDeclarations map[string]int
 }
 
 type procedureFrame struct {
@@ -120,8 +122,40 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	visibleDeclarations := l.VisibleDeclarations
+	typeDeclarations := l.TypeDeclarations
+	objectTypeDeclarations := l.ObjectTypeDeclarations
+	missing := 0
 	if visibleDeclarations == nil {
-		visibleDeclarations = l.projectVisibleDeclarationsContext(ctx, files)
+		missing++
+	}
+	if typeDeclarations == nil {
+		missing++
+	}
+	if objectTypeDeclarations == nil {
+		missing++
+	}
+	switch missing {
+	case 1:
+		if visibleDeclarations == nil {
+			visibleDeclarations = l.projectVisibleDeclarationsContext(ctx, files)
+		}
+		if typeDeclarations == nil {
+			typeDeclarations = l.projectTypeDeclarationsContext(ctx, files)
+		}
+		if objectTypeDeclarations == nil {
+			objectTypeDeclarations = l.projectObjectTypeDeclarationsContext(ctx, files)
+		}
+	case 2, 3:
+		projectVisible, projectTypes, projectObjects := l.projectDeclarationsContext(ctx, files)
+		if visibleDeclarations == nil {
+			visibleDeclarations = projectVisible
+		}
+		if typeDeclarations == nil {
+			typeDeclarations = projectTypes
+		}
+		if objectTypeDeclarations == nil {
+			objectTypeDeclarations = projectObjects
+		}
 	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
@@ -130,6 +164,8 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		}
 		fileLinter := l
 		fileLinter.VisibleDeclarations = visibleDeclarations
+		fileLinter.TypeDeclarations = typeDeclarations
+		fileLinter.ObjectTypeDeclarations = objectTypeDeclarations
 		fileIssues, err := fileLinter.lintFileContext(ctx, file)
 		if err != nil {
 			return Result{}, err
@@ -326,6 +362,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		return nil, err
 	}
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
+		numericLiteralRecovery := vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 		lintCtx := astLintContext{
 			ctx:                        ctx,
 			linter:                     l,
@@ -349,8 +386,15 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 				return declarationErr
 			}
 			issues = append(issues, declarationIssues...)
+		} else if numericLiteralRecovery {
+			index := collectDeclarationIndex(ctx, source, view.Root)
+			signatureIssues, signatureErr := l.procedureSignatureIssuesContext(ctx, path, source, view.Root, index)
+			if signatureErr != nil {
+				return signatureErr
+			}
+			issues = append(issues, signatureIssues...)
 		}
-		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source)) ||
+		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) && !numericLiteralRecovery) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, lintCtx.parseIssues(view.Root)...)
 		}
@@ -407,32 +451,56 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 }
 
 func (l Linter) projectVisibleDeclarationsContext(ctx context.Context, files []string) map[string]bool {
+	visible, _, _ := l.projectDeclarationsContext(ctx, files)
+	return visible
+}
+
+func (l Linter) projectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
+	_, types, _ := l.projectDeclarationsContext(ctx, files)
+	return types
+}
+
+func (l Linter) projectObjectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
+	_, _, objects := l.projectDeclarationsContext(ctx, files)
+	return objects
+}
+
+// projectDeclarationsContext parses each project file once and collects all
+// declaration maps needed by project-aware lint rules. Keeping these scans
+// together avoids reparsing the same tree three times during a normal lint run.
+func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) (map[string]bool, map[string]int, map[string]int) {
 	visible := make(map[string]bool)
+	types := make(map[string]int)
+	objects := make(map[string]int)
 	for _, path := range files {
 		if err := ctx.Err(); err != nil {
-			return visible
+			return visible, types, objects
 		}
 		source, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
 		file, err := symbols.InspectSourceContext(ctx, symbols.SourceOptions{
-			RootDir:        l.RootDir,
-			Path:           path,
-			ModuleKind:     l.moduleKindForPath(path),
-			IncludePrivate: true,
+			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path), IncludePrivate: true,
 		}, source)
 		if err != nil {
 			continue
 		}
 		for _, sym := range file.Symbols {
-			if !projectVisibleDeclaration(sym, file.ModuleKind) {
-				continue
+			if projectVisibleDeclaration(sym, file.ModuleKind) {
+				visible[canonicalDeclarationKey(sym.Name)] = true
 			}
-			visible[canonicalDeclarationKey(sym.Name)] = true
+			if sym.Parent == "" && strings.EqualFold(sym.Kind, "type") {
+				types[canonicalDeclarationKey(sym.Name)]++
+			}
+		}
+		if strings.EqualFold(file.ModuleKind, "class") {
+			if name := canonicalDeclarationKey(file.ModuleName); name != "" {
+				objects[name]++
+			}
 		}
 	}
-	return visible
+	return visible, types, objects
 }
 
 func (l Linter) moduleKindForPath(path string) string {

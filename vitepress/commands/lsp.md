@@ -72,6 +72,17 @@ unsuppressible, preflight-blocking contract as batch `lint`, and
 conditional-compilation branches are compared only when their coexistence is
 provable.
 
+The LSP publishes `VB048` for compile-equivalent procedure parameter
+declaration errors, including invalid array or `ParamArray` forms, optional
+parameter ordering/defaults, unsupported resolved UDT passing, and excessive
+parameter counts. Structural violations remain visible when type resolution is
+unknown or ambiguous, while type-dependent checks fail open. `VB049` validates
+Property Get/Let/Set accessor contracts, including setter value parameters,
+indexed-parameter alignment, and compatible Get return/setter value types. A
+Property signature edit recomputes the whole same-name accessor group so stale
+cross-accessor diagnostics are not retained. Both rules are unsuppressible,
+preflight-blocking errors shared with batch `lint`.
+
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 Semantic tokens are provided by the Go language server with full-document `textDocument/semanticTokens/full` responses and `textDocument/semanticTokens/full/delta` updates. They classify VBA declarations, parameters, variables, built-in types, globals, constants, member expressions, comments, strings, numbers, operators, and keywords. Full responses carry opaque result IDs; the server retains the four most recent results for each open document and returns a delta only when its JSON payload is smaller than a full response. Unknown, expired, cross-document, or closed-document IDs fall back to a full response. Range semantic token requests are not advertised.

@@ -230,3 +230,40 @@ func TestFastDiagnosticsFallsBackForBroadInvalidation(t *testing.T) {
 		})
 	}
 }
+
+func TestFastDiagnosticsRecomputesPropertyAccessorContracts(t *testing.T) {
+	oldSource := "Property Get Name() As String\nEnd Property\nProperty Let Name(ByVal value As String)\nEnd Property\n"
+	newSource := "Property Get Name() As String\nEnd Property\nProperty Let Name(ByVal value As Long)\nEnd Property\n"
+	oldDoc := Document{Path: "Module1.bas", Source: oldSource, ModuleKind: "standard", Version: 1}
+	oldCatalog := procedureCatalogForDocument(oldDoc)
+	cache := buildDiagnosticCache(oldCatalog, nil)
+	newDoc := Document{Path: oldDoc.Path, Source: newSource, ModuleKind: oldDoc.ModuleKind, Version: 2}
+	result := Analyzer{DB: vbadb.New()}.DiagnosticsRequestContext(context.Background(), DiagnosticRequest{
+		Document: newDoc, Mode: DiagnosticModeFast, PreviousCache: cache,
+		Changes: ProcedureChangeSet{Ranges: []Range{{Start: Position{Line: 2}, End: Position{Line: 2}}}},
+	})
+	if len(diagnosticsByCode(result.Diagnostics, "VB049")) == 0 {
+		t.Fatalf("property contract change was not recomputed in fast mode: %+v", result.Diagnostics)
+	}
+	if result.Cache == nil {
+		t.Fatal("property fallback did not publish a refreshed diagnostic cache")
+	}
+	if result.Cache == cache {
+		t.Fatal("property fallback reused the stale diagnostic cache")
+	}
+	if len(result.Cache.Catalog.Entries) != len(cache.Catalog.Entries) || result.Cache.Catalog.Entries[1].SignatureHash == cache.Catalog.Entries[1].SignatureHash {
+		t.Fatalf("property fallback cache catalog was not refreshed: old=%#v new=%#v", cache.Catalog, result.Cache.Catalog)
+	}
+
+	validDoc := Document{Path: oldDoc.Path, Source: oldSource, ModuleKind: oldDoc.ModuleKind, Version: 3}
+	validResult := Analyzer{DB: vbadb.New()}.DiagnosticsRequestContext(context.Background(), DiagnosticRequest{
+		Document: validDoc, Mode: DiagnosticModeFast, PreviousCache: result.Cache,
+		Changes: ProcedureChangeSet{Ranges: []Range{{Start: Position{Line: 2}, End: Position{Line: 2}}}},
+	})
+	if got := diagnosticsByCode(validResult.Diagnostics, "VB049"); len(got) != 0 {
+		t.Fatalf("stale VB049 diagnostics survived invalid-to-valid edit: %+v", got)
+	}
+	if validResult.Cache == nil || validResult.Cache == result.Cache {
+		t.Fatal("invalid-to-valid property edit did not publish a fresh cache")
+	}
+}

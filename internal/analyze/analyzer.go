@@ -338,7 +338,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		if ir.Parse.HasError || ir.Parse.HasMissing {
 			if readErr := parsed.Read(func(view vbaast.ParsedView) error {
 				declarationRecovery = vbaast.IsDeclarationKeywordRecovery(view.Root, view.Source) ||
-					vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source)
+					vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) ||
+					vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 				return nil
 			}); readErr != nil {
 				parsed.Close()

@@ -49,6 +49,16 @@ information is syntactic parent/child nesting only.
 `Property Let`, and `Property Set`. It records visibility, parameters, return
 type where applicable, declaration and body ranges, and event-handler metadata.
 Property accessor kinds stay distinct even when they share the same VBA name.
+Parameters are the canonical declaration-signature facts consumed by
+declaration validation and projected by symbol/call tooling. Each parameter
+retains its effective passing mode and whether it was written explicitly,
+Optional/ParamArray modifiers, default-expression text and range, array shape
+(`none`, `dynamic`, `bounded`, or `invalid`), parsed array bounds, and recovery
+state. Conditional procedure headers carry mutually-exclusive branch identity
+so cross-accessor and type compatibility checks compare only declarations that
+can be active together. A branch records its source condition for `#If` and
+`#ElseIf`; the `#Else` branch has an empty condition and is identified by its
+branch number within the shared group.
 For a procedure with no body block, the body range is a zero-width range at
 the start of its `End Sub`, `End Function`, or `End Property` statement.
 

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "procedure-signature-invalid",
+  "description": "Reject a required parameter after an Optional parameter.",
+  "modules": [{ "name": "Main", "kind": "standard", "path": "Main.bas", "entry": true }],
+  "probe": { "mode": "compile" },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB048"],
+    "expected_diagnostics": [{ "code": "VB048", "severity": "error", "surfaces": ["lint", "lsp"] }],
+    "negative_controls": ["procedure-optional-numeric-literals-valid", "procedure-signature-valid"]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-11T08:00:00Z"
+      }
+    ]
+  }
+}

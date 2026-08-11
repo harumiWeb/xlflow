@@ -49,6 +49,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB045`](#vb045)   | lint    | error       | procedure-local | yes     | Deterministic argument binding error               |
 | [`VB046`](#vb046)   | lint    | error       | file-local      | yes     | Duplicate declaration                              |
 | [`VB047`](#vb047)   | lint    | error       | file-local      | yes     | Invalid declaration placement                      |
+| [`VB048`](#vb048)   | lint    | error       | procedure-local | yes     | Invalid procedure parameter declaration            |
+| [`VB049`](#vb049)   | lint    | error       | file-local      | yes     | Inconsistent Property accessor contract            |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -1025,6 +1027,50 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 ## VB047
 
 **Invalid declaration placement.** A VBA declaration appears in a source position where that declaration kind is not permitted.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB048
+
+**Invalid procedure parameter declaration.** A procedure parameter declaration violates a VBA compile-time parameter contract.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB049
+
+**Inconsistent Property accessor contract.** Property Get, Let, and Set accessors in the same module do not form a compatible VBA accessor contract.
 
 | Property                    | Value                |
 | --------------------------- | -------------------- |

@@ -3,6 +3,7 @@ package procedureir
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -88,7 +89,11 @@ func (b *documentBuilder) build(root *tree_sitter.Node) DocumentIR {
 }
 
 func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbol {
+	header := procedureHeader(node)
 	name := nodeText(childByFieldOrKind(node, "name", "identifier"), b.source)
+	if name == "" && header != node {
+		name = nodeText(childByFieldOrKind(header, "name", "identifier"), b.source)
+	}
 	kind := procedureKind(node, b.source)
 	qualified := name
 	if b.moduleName != "" && name != "" {
@@ -103,10 +108,11 @@ func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbo
 	event, eventKind := ClassifyEvent(b.moduleKind, name)
 	return ProcedureSymbol{
 		Name: name, QualifiedName: qualified, Kind: kind,
-		Visibility: visibilityOfNode(node, b.source),
-		Parameters: b.parameters(node), ReturnType: typeText(node, b.source),
+		Visibility: visibilityOfNode(header, b.source),
+		Parameters: b.parameters(header), ReturnType: typeText(header, b.source),
 		DeclarationRange: vbaast.NodeRange(node), BodyRange: bodyRange,
 		IsEventHandler: event, EventKind: eventKind, Recovered: recovered(node),
+		ConditionalBranches: conditionalBranches(node, b.source),
 	}
 }
 
@@ -125,21 +131,119 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 			continue
 		}
 		passing := "ByRef"
-		if mode := child.ChildByFieldName("passing_mode"); mode != nil && mode.Kind() == "byval_modifier" {
-			passing = "ByVal"
+		passingExplicit := false
+		if mode := child.ChildByFieldName("passing_mode"); mode != nil {
+			passingExplicit = true
+			switch mode.Kind() {
+			case "byval_modifier":
+				passing = "ByVal"
+			case "byref_modifier":
+				passing = "ByRef"
+			default:
+				passing = normalizedPassing(nodeText(mode, b.source))
+			}
 		}
 		param := Parameter{
 			Name: nodeText(childByFieldOrKind(child, "name", "identifier"), b.source),
-			Type: typeText(child, b.source), Passing: passing, Range: vbaast.NodeRange(child),
-			Optional:   child.ChildByFieldName("optional_modifier") != nil,
+			Type: typeText(child, b.source), Passing: passing, PassingExplicit: passingExplicit,
+			Range: vbaast.NodeRange(child), Optional: child.ChildByFieldName("optional_modifier") != nil,
 			ParamArray: child.ChildByFieldName("paramarray_modifier") != nil,
+			Recovered:  recovered(child), ArrayShape: ArrayShapeNone,
 		}
 		if value := child.ChildByFieldName("default_value"); value != nil {
-			param.Default = nodeText(value, b.source)
+			param.HasDefault = true
+			param.Default = initializerText(value, b.source)
+			if expression := value.ChildByFieldName("value"); expression != nil {
+				param.DefaultRange = rangePointer(expression)
+			} else {
+				param.DefaultRange = rangePointer(value)
+			}
+			param.Recovered = param.Recovered || recovered(value)
 		}
+		b.parameterArrayFacts(&param, child)
 		out = append(out, param)
 	}
 	return out
+}
+
+// ParametersFromNode exposes the canonical declaration-parameter projection
+// for symbol and editor consumers that already own a parsed CST node. The
+// returned values contain no tree-sitter nodes or source slices.
+func ParametersFromNode(node *tree_sitter.Node, source []byte) []Parameter {
+	if node == nil {
+		return nil
+	}
+	return (&documentBuilder{source: source}).parameters(node)
+}
+
+func (b *documentBuilder) parameterArrayFacts(param *Parameter, node *tree_sitter.Node) {
+	if param == nil || node == nil {
+		return
+	}
+	bounds := node.ChildByFieldName("bounds")
+	var typeBounds *tree_sitter.Node
+	if clause := childByKind(node, "as_type_clause"); clause != nil {
+		// A type clause may carry array bounds for recovered/legacy grammar
+		// forms. Keep those facts instead of dropping the array marker. A
+		// second bounds clause alongside the parameter clause is malformed.
+		typeBounds = childByKind(clause, "array_bounds")
+		if bounds == nil {
+			bounds = typeBounds
+		}
+	}
+	if bounds == nil {
+		return
+	}
+	param.IsArray = true
+	param.BoundsRange = rangePointer(bounds)
+	param.Recovered = param.Recovered || recovered(bounds)
+	invalidTypeBounds := typeBounds != nil && !sameNode(typeBounds, bounds)
+	if bounds.NamedChildCount() == 0 && !recovered(bounds) {
+		param.ArrayShape = ArrayShapeDynamic
+		return
+	}
+	param.ArrayShape = ArrayShapeBounded
+	for i := uint(0); i < bounds.NamedChildCount(); i++ {
+		bound := bounds.NamedChild(i)
+		if bound == nil {
+			continue
+		}
+		if bound.Kind() != "array_bound" {
+			param.ArrayShape = ArrayShapeInvalid
+			param.Recovered = true
+			continue
+		}
+		fact := ArrayBound{Range: vbaast.NodeRange(bound), Recovered: recovered(bound)}
+		lower := bound.ChildByFieldName("lower")
+		upper := bound.ChildByFieldName("upper")
+		if lower != nil && upper != nil {
+			fact.Lower, fact.Upper = nodeText(lower, b.source), nodeText(upper, b.source)
+			fact.LowerRange, fact.UpperRange = rangePointer(lower), rangePointer(upper)
+		} else if lower != nil || upper != nil {
+			param.ArrayShape = ArrayShapeInvalid
+			param.Recovered = true
+			if lower != nil {
+				fact.Lower, fact.LowerRange = nodeText(lower, b.source), rangePointer(lower)
+			}
+			if upper != nil {
+				fact.Upper, fact.UpperRange = nodeText(upper, b.source), rangePointer(upper)
+			}
+		} else {
+			fact.Expression = nodeText(bound, b.source)
+		}
+		fact.Recovered = fact.Recovered || recovered(lower) || recovered(upper)
+		if fact.Recovered {
+			param.ArrayShape = ArrayShapeInvalid
+			param.Recovered = true
+		}
+		param.ArrayBounds = append(param.ArrayBounds, fact)
+	}
+	if len(param.ArrayBounds) == 0 && param.ArrayShape != ArrayShapeDynamic {
+		param.ArrayShape = ArrayShapeInvalid
+	}
+	if invalidTypeBounds {
+		param.ArrayShape = ArrayShapeInvalid
+	}
 }
 
 func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope) []Declaration {
@@ -182,6 +286,91 @@ func (b *documentBuilder) simpleDeclaration(node *tree_sitter.Node, scope Symbol
 		Kind: strings.TrimSuffix(node.Kind(), "_statement"), Range: vbaast.NodeRange(node),
 		Recovered: recovered(node),
 	}, true
+}
+
+// procedureHeader returns the canonical consequence header for a conditional
+// procedure declaration.  A conditional declaration has one ProcedureIR entry
+// keyed by that header; ConditionalBranches retains the surrounding branch
+// metadata so semantic consumers can fail open when alternatives diverge.
+func procedureHeader(node *tree_sitter.Node) *tree_sitter.Node {
+	if node == nil {
+		return nil
+	}
+	if strings.HasPrefix(node.Kind(), "conditional_") {
+		if header := node.ChildByFieldName("consequence"); header != nil {
+			if declaration := firstConcreteProcedureHeader(header); declaration != nil {
+				return declaration
+			}
+		}
+	}
+	return node
+}
+
+func firstConcreteProcedureHeader(node *tree_sitter.Node) *tree_sitter.Node {
+	if node == nil {
+		return nil
+	}
+	switch node.Kind() {
+	case "sub_declaration", "function_declaration", "property_declaration",
+		"property_get_declaration", "property_let_declaration", "property_set_declaration":
+		return node
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if header := firstConcreteProcedureHeader(node.NamedChild(i)); header != nil {
+			return header
+		}
+	}
+	return nil
+}
+
+func conditionalBranches(node *tree_sitter.Node, source []byte) []ConditionalBranch {
+	if node == nil || !strings.HasPrefix(node.Kind(), "conditional_") {
+		return nil
+	}
+	group := strconv.Itoa(int(node.StartByte()))
+	condition := nodeText(node.ChildByFieldName("condition"), source)
+	header := procedureHeader(node)
+	branches := make([]ConditionalBranch, 0, 2)
+	if header != nil {
+		branches = append(branches, ConditionalBranch{Group: group, Condition: condition, Branch: 0, Range: vbaast.NodeRange(header)})
+	}
+	branch := 1
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child == nil || sameNode(child, header) {
+			continue
+		}
+		// Alternative headers are anonymous grammar aliases, but expose a
+		// `name` field just like the consequence header. Bodies and condition
+		// expressions do not, so this remains stable across #ElseIf branches.
+		if child.ChildByFieldName("name") == nil || !isProcedureHeaderText(nodeText(child, source)) {
+			continue
+		}
+		branchCondition := ""
+		if child.Kind() == "preprocessor_elseif" {
+			branchCondition = nodeText(child.ChildByFieldName("condition"), source)
+		}
+		branches = append(branches, ConditionalBranch{Group: group, Condition: branchCondition, Branch: branch, Range: vbaast.NodeRange(child)})
+		branch++
+	}
+	return branches
+}
+
+func isProcedureHeaderText(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(lower, " sub ") || strings.HasPrefix(lower, "sub ") ||
+		strings.Contains(lower, " function ") || strings.HasPrefix(lower, "function ") ||
+		strings.Contains(lower, "property ") || strings.HasPrefix(lower, "property ")
+}
+
+func normalizedPassing(text string) string {
+	if strings.EqualFold(strings.TrimSpace(text), "ByVal") {
+		return "ByVal"
+	}
+	if strings.EqualFold(strings.TrimSpace(text), "ByRef") {
+		return "ByRef"
+	}
+	return strings.TrimSpace(text)
 }
 
 func parseModuleAttributes(source []byte) []ModuleAttribute {
@@ -385,6 +574,16 @@ func typeText(node *tree_sitter.Node, source []byte) string {
 	return text
 }
 
+func initializerText(node *tree_sitter.Node, source []byte) string {
+	if node == nil {
+		return ""
+	}
+	if value := node.ChildByFieldName("value"); value != nil {
+		return nodeText(value, source)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(nodeText(node, source), "="))
+}
+
 var documentEventSuffixes = map[string]map[string]struct{}{
 	"workbook": {
 		"activate": {}, "addininstall": {}, "addinuninstall": {}, "aftersave": {},
@@ -562,6 +761,14 @@ func firstNamedChild(node *tree_sitter.Node) *tree_sitter.Node {
 
 func sameNode(a, b *tree_sitter.Node) bool {
 	return a != nil && b != nil && a.Kind() == b.Kind() && a.StartByte() == b.StartByte() && a.EndByte() == b.EndByte()
+}
+
+func rangePointer(node *tree_sitter.Node) *vbaast.Range {
+	if node == nil {
+		return nil
+	}
+	rng := vbaast.NodeRange(node)
+	return &rng
 }
 
 func nodeText(node *tree_sitter.Node, source []byte) string {
