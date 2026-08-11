@@ -74,7 +74,7 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		t.Fatalf("unexpected VB037 metadata: %+v, %v", setScalar, ok)
 	}
 	argumentBinding, ok := Lookup("VB045")
-	if !ok || argumentBinding.EvidenceClass != EvidenceCompileEquivalent || !argumentBinding.CompileEquivalent || argumentBinding.DefaultSeverity != SeverityError || !argumentBinding.PreflightBlocking || argumentBinding.InlineSuppressible {
+	if !ok || argumentBinding.EvidenceClass != EvidenceCompileEquivalent || !argumentBinding.CompileEquivalent || argumentBinding.DefaultSeverity != SeverityError || !argumentBinding.PreflightBlocking || argumentBinding.InlineSuppressible || !reflect.DeepEqual(argumentBinding.Surfaces, []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}) {
 		t.Fatalf("unexpected VB045 metadata: %+v, %v", argumentBinding, ok)
 	}
 	byRefMismatch, ok := Lookup("VBA228")
@@ -263,6 +263,9 @@ func TestRegistrySurfaceAndSeverityMetadata(t *testing.T) {
 		wantSurface := []RuleSurface{RuleSurface(rule.Family)}
 		if rule.Realtime {
 			wantSurface = append(wantSurface, SurfaceLSP)
+		}
+		if len(rule.Surfaces) > len(wantSurface) {
+			wantSurface = append(wantSurface, SurfaceAnalyze)
 		}
 		if !reflect.DeepEqual(rule.Surfaces, wantSurface) {
 			t.Errorf("%s surfaces = %v, want %v", rule.ID, rule.Surfaces, wantSurface)

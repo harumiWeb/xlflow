@@ -606,8 +606,6 @@
 {"project":"self/legal-viewer","file":"src/modules/modUiState.bas","surface":"analyze","code":"VBA202","severity":"warning","line":22,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modUiState.bas","surface":"analyze","code":"VBA202","severity":"warning","line":31,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modUiState.bas","surface":"analyze","code":"VBA202","severity":"warning","line":49,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VB045","severity":"error","line":10,"column":5}
-{"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VB045","severity":"error","line":12,"column":5}
 {"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VBA202","severity":"warning","line":62,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VBA205","severity":"warning","line":142,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/modWindowPlacement.bas","surface":"analyze","code":"VBA205","severity":"warning","line":143,"column":0}

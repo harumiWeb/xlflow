@@ -230,6 +230,7 @@ func (db *DB) addType(typ TypeInfo) {
 
 func mergeType(base, overlay TypeInfo) TypeInfo {
 	out := base
+	preserveGenerated := preserveGeneratedProvenance(base, overlay)
 	if overlay.Name != "" {
 		out.Name = overlay.Name
 	}
@@ -262,9 +263,9 @@ func mergeType(base, overlay TypeInfo) TypeInfo {
 	}
 	out.Aliases = mergeStrings(out.Aliases, overlay.Aliases)
 	out.AssignableTo = mergeStrings(out.AssignableTo, overlay.AssignableTo)
-	out.Properties = mergeMembers(out.Properties, overlay.Properties)
-	out.Methods = mergeMembers(out.Methods, overlay.Methods)
-	out.Events = mergeMembers(out.Events, overlay.Events)
+	out.Properties = mergeMembers(out.Properties, overlay.Properties, preserveGenerated)
+	out.Methods = mergeMembers(out.Methods, overlay.Methods, preserveGenerated)
+	out.Events = mergeMembers(out.Events, overlay.Events, preserveGenerated)
 	return out
 }
 
@@ -298,7 +299,7 @@ func mergeStrings(base, overlay []string) []string {
 	return out
 }
 
-func mergeMembers(base, overlay []MemberInfo) []MemberInfo {
+func mergeMembers(base, overlay []MemberInfo, preserveGenerated bool) []MemberInfo {
 	if len(base) == 0 {
 		return append([]MemberInfo{}, overlay...)
 	}
@@ -313,6 +314,9 @@ func mergeMembers(base, overlay []MemberInfo) []MemberInfo {
 			continue
 		}
 		if i, ok := index[key]; ok {
+			if preserveGenerated && memberSignatureIsLessComplete(out[i], member) {
+				continue
+			}
 			out[i] = member
 			continue
 		}
@@ -320,6 +324,26 @@ func mergeMembers(base, overlay []MemberInfo) []MemberInfo {
 		out = append(out, member)
 	}
 	return out
+}
+
+// memberSignatureIsLessComplete prevents a curated convenience entry from
+// replacing a generated TypeLib signature with fewer parameters or without a
+// ParamArray contract. Generated metadata is the authority when it contains
+// a strictly more expressive call contract, while curated entries may still
+// fill gaps or correct equally-sized signatures.
+func memberSignatureIsLessComplete(base, overlay MemberInfo) bool {
+	if len(overlay.Parameters) < len(base.Parameters) {
+		return true
+	}
+	for i, parameter := range base.Parameters {
+		if i >= len(overlay.Parameters) {
+			break
+		}
+		if parameter.ParamArray && !overlay.Parameters[i].ParamArray {
+			return true
+		}
+	}
+	return false
 }
 
 func (db *DB) ResolveType(name string) (TypeInfo, bool) {

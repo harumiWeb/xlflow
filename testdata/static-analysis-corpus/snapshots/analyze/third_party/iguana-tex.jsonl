@@ -595,9 +595,7 @@
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA206","severity":"warning","line":716,"column":51}
 {"project":"third_party/iguana-tex","file":"Macros.bas","surface":"analyze","code":"VBA206","severity":"warning","line":717,"column":38}
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VBA206","severity":"warning","line":30,"column":1}
-{"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VB045","severity":"error","line":129,"column":27}
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VBA202","severity":"warning","line":131,"column":0}
-{"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VB045","severity":"error","line":220,"column":16}
 {"project":"third_party/iguana-tex","file":"MouseWheel.bas","surface":"analyze","code":"VBA237","severity":"warning","line":256,"column":0}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":24,"column":0}
 {"project":"third_party/iguana-tex","file":"SetTempForm.frm","surface":"analyze","code":"VBA220","severity":"warning","line":24,"column":0}

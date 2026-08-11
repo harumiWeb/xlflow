@@ -357,8 +357,6 @@
 {"project":"third_party/access-examples","file":"Report_980_Data_Dictionary_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":129,"column":18}
 {"project":"third_party/access-examples","file":"Report_980_Data_Dictionary_rpt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":129,"column":18}
 {"project":"third_party/access-examples","file":"Report_980_Data_Dictionary_rpt.cls","surface":"analyze","code":"VBA214","severity":"warning","line":150,"column":0}
-{"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VB045","severity":"error","line":75,"column":3}
-{"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VB045","severity":"error","line":77,"column":3}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":528,"column":13}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":579,"column":6}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":600,"column":21}
@@ -373,8 +371,6 @@
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1191,"column":19}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1212,"column":10}
 {"project":"third_party/access-examples","file":"clsMonthCal.cls","surface":"analyze","code":"VBA214","severity":"warning","line":1563,"column":0}
-{"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VB045","severity":"error","line":77,"column":9}
-{"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VB045","severity":"error","line":79,"column":9}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VBA222","severity":"warning","line":711,"column":0}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VBA214","severity":"warning","line":753,"column":0}
 {"project":"third_party/access-examples","file":"modCalendar.bas","surface":"analyze","code":"VBA214","severity":"warning","line":753,"column":0}

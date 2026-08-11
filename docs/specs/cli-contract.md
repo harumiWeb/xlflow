@@ -863,7 +863,10 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
   uncertain mismatch with the resolved signature; it remains a warning
 - `VB045`: deterministic argument-count, duplicate-name, unknown-name, or
   named/positional binding error rejected by the VBE; it is an error and blocks
-  source preflight
+  source preflight. Binding uses visible local/project declarations before
+  built-in signatures and fails closed for ambiguous conditional overloads;
+  the batch analyzer may project the same compile-equivalent diagnostic on its
+  `analyze` surface.
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
 - `VB033`: member is not present on the resolved receiver type
