@@ -6,6 +6,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `active_sheet`
 - `active_workbook_mismatch`
 - `affected_modules`
+- `alternative_body`
 - `ambiguous_test_name`
 - `analysis_metrics`
 - `analyze_disabled_rules_precedence`
@@ -138,6 +139,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `confirm_save`
 - `conflicting_analyze_rule_config`
 - `conflicting_lint_rule_config`
+- `consequence_body`
 - `const_declaration`
 - `const_declarator`
 - `constant_name`
@@ -256,6 +258,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `downstream_callees`
 - `dry_run`
 - `duplicate_case_id`
+- `duplicate_declaration`
 - `duplicate_module_name`
 - `duplicate_skip`
 - `duplicate_test_name`
@@ -280,6 +283,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `end_statement`
 - `enum_declaration`
 - `enum_group`
+- `enum_member`
 - `environment_variable`
 - `event_declaration`
 - `event_reader_count`
@@ -531,6 +535,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `mode_name`
 - `module_already_exists`
 - `module_ambiguous`
+- `module_declaration_after_procedure`
 - `module_install_failed`
 - `module_kind`
 - `module_mutation_failed`
@@ -538,6 +543,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_new_args_invalid`
 - `module_new_failed`
 - `module_not_found`
+- `module_only_declaration_in_procedure`
 - `module_path`
 - `module_state`
 - `module_variable`
@@ -547,6 +553,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `nearby_code`
 - `needs_save`
 - `negative_rerun_failed`
+- `nested_procedure_declaration`
 - `new_expression`
 - `new_failed`
 - `new_name`
@@ -578,6 +585,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `opens_workbook`
 - `operation_kind`
 - `operator_spacing`
+- `option_after_declaration`
 - `option_statement`
 - `optional_modifier`
 - `oracle_already_running`
@@ -628,6 +636,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `post_while`
 - `pre_until`
 - `pre_while`
+- `preprocessor_else`
+- `preprocessor_elseif`
+- `preprocessor_if`
 - `probe_mode`
 - `procedure_call`
 - `procedure_declaration`
@@ -870,6 +881,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_db_status_failed`
 - `type_declaration`
 - `type_expression`
+- `type_member`
+- `type_preprocessor_else`
+- `type_preprocessor_elseif`
+- `type_preprocessor_if`
 - `ui_button_args_invalid`
 - `ui_dialog`
 - `ui_stream_init_failed`

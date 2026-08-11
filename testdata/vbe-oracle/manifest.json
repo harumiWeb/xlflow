@@ -59,6 +59,30 @@
     {
       "id": "declaration-redim-after-comma",
       "path": "cases/declaration-redim-after-comma/case.json"
+    },
+    {
+      "id": "duplicate-declaration",
+      "path": "cases/duplicate-declaration/case.json"
+    },
+    {
+      "id": "duplicate-declaration-valid-controls",
+      "path": "cases/duplicate-declaration-valid-controls/case.json"
+    },
+    {
+      "id": "invalid-declaration-placement",
+      "path": "cases/invalid-declaration-placement/case.json"
+    },
+    {
+      "id": "invalid-declaration-placement-valid-controls",
+      "path": "cases/invalid-declaration-placement-valid-controls/case.json"
+    },
+    {
+      "id": "option-in-procedure",
+      "path": "cases/option-in-procedure/case.json"
+    },
+    {
+      "id": "option-in-procedure-valid-controls",
+      "path": "cases/option-in-procedure-valid-controls/case.json"
     }
   ]
 }

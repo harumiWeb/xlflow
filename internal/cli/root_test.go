@@ -7219,6 +7219,29 @@ End Sub
 			projectToLint: true,
 		},
 		{
+			name: "duplicate-declaration",
+			body: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+  Dim value As Long
+  Dim VALUE As String
+End Sub
+`,
+			code:          "VB046",
+			projectToLint: true,
+		},
+		{
+			name: "invalid-declaration-placement",
+			body: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+End Sub
+Private lateValue As Long
+`,
+			code:          "VB047",
+			projectToLint: true,
+		},
+		{
 			name: "byref-type-mismatch",
 			body: `Attribute VB_Name = "Main"
 Option Explicit

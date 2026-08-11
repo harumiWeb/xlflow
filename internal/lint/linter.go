@@ -338,6 +338,18 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			return lintCtx.err
 		}
 		issues = append(issues, lintCtx.issues...)
+		// Declaration placement/duplicate findings are compile-equivalent and
+		// therefore must fail open when the parser has recovered from an
+		// incomplete or malformed source buffer.  In that state declaration
+		// identity and ordering are not reliable enough for a high-precision
+		// diagnostic; the parser recovery issue remains available below.
+		if !view.HasError && !view.HasMissing {
+			declarationIssues, declarationErr := l.declarationIssuesContext(ctx, path, source, view.Root)
+			if declarationErr != nil {
+				return declarationErr
+			}
+			issues = append(issues, declarationIssues...)
+		}
 		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source)) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, lintCtx.parseIssues(view.Root)...)
