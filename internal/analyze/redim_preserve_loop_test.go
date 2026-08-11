@@ -18,12 +18,13 @@ Public Sub Run(items As Variant)
     Dim values() As Long
     Dim fixed(1 To 3) As Long
     Dim i As Long
+    Dim item As Variant
     For i = 1 To 3
         ReDim Preserve values(1 To 10)
     Next i
-    For Each i In items
-        ReDim Preserve values(1 To Grow(i))
-    Next i
+    For Each item In items
+        ReDim Preserve values(1 To Grow(item))
+    Next item
     While i < 4
         ReDim Preserve values(1 To 10)
         i = i + 1
@@ -34,6 +35,10 @@ Public Sub Run(items As Variant)
             i = i + 1
         Loop
         Exit Do
+    Loop
+    Do Until i > 6
+        ReDim Preserve values(1 To i)
+        i = i + 1
     Loop
     Do
         ReDim Preserve values(1 To i)
@@ -55,50 +60,41 @@ End Function
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA241")
-	if len(got) != 6 {
-		t.Fatalf("VBA241 findings = %+v, want six loop-body findings", got)
+	expected := map[int]struct {
+		severity string
+		markers  []string
+	}{
+		10: {severity: "information", markers: []string{"loop-invariant"}},
+		13: {severity: "warning", markers: []string{"loop-variable-dependent"}},
+		16: {severity: "information", markers: []string{"loop-invariant"}},
+		21: {severity: "warning", markers: []string{"loop-variable-dependent", "Nested loop depth"}},
+		27: {severity: "warning", markers: []string{"loop-variable-dependent"}},
+		31: {severity: "warning", markers: []string{"loop-variable-dependent"}},
+		35: {severity: "warning", markers: []string{"loop-variable-dependent"}},
 	}
-	if got[0].Severity != "information" {
-		t.Fatalf("constant single-loop finding severity = %q, want information: %+v", got[0].Severity, got[0])
+	if len(got) != len(expected) {
+		t.Fatalf("VBA241 findings = %+v, want one finding at each expected source line", got)
 	}
-	var dependent, nested bool
+	byLine := make(map[int]Finding, len(got))
 	for _, finding := range got {
-		if strings.Contains(finding.Message, "loop-variable-dependent") {
-			dependent = finding.Severity == "warning"
+		if _, duplicate := byLine[finding.Line]; duplicate {
+			t.Fatalf("duplicate VBA241 finding at source line %d: %+v", finding.Line, got)
 		}
-		if strings.Contains(finding.Message, "Nested loop depth") {
-			nested = finding.Severity == "warning"
+		byLine[finding.Line] = finding
+	}
+	for line, want := range expected {
+		finding, ok := byLine[line]
+		if !ok {
+			t.Fatalf("missing VBA241 finding at source line %d: %+v", line, got)
 		}
-	}
-	if !dependent || !nested {
-		t.Fatalf("missing dependent/nested classifications: %+v", got)
-	}
-	postTestDependent := false
-	for _, finding := range got {
-		if finding.Line == 26 && finding.Severity == "warning" && strings.Contains(finding.Message, "loop-variable-dependent") {
-			postTestDependent = true
+		if finding.Severity != want.severity {
+			t.Fatalf("VBA241 finding at line %d = %+v, want severity %q", line, finding, want.severity)
 		}
-	}
-	if !postTestDependent {
-		t.Fatalf("post-test Do Loop While dependency was not classified: %+v", got)
-	}
-	preTestDependent := false
-	for _, finding := range got {
-		if finding.Line == 20 && finding.Severity == "warning" && strings.Contains(finding.Message, "loop-variable-dependent") {
-			preTestDependent = true
+		for _, marker := range want.markers {
+			if !strings.Contains(finding.Message, marker) {
+				t.Fatalf("VBA241 finding at line %d = %+v, want %q classification", line, finding, marker)
+			}
 		}
-	}
-	if !preTestDependent {
-		t.Fatalf("pre-test Do While dependency was not classified: %+v", got)
-	}
-	postUntilDependent := false
-	for _, finding := range got {
-		if finding.Line == 30 && finding.Severity == "warning" && strings.Contains(finding.Message, "loop-variable-dependent") {
-			postUntilDependent = true
-		}
-	}
-	if !postUntilDependent {
-		t.Fatalf("post-test Do Until dependency was not classified: %+v", got)
 	}
 }
 
@@ -128,13 +124,18 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA241")
-	if len(got) != 2 {
-		t.Fatalf("unchanged Do condition findings = %+v, want two", got)
+	expectedLines := map[int]bool{10: true, 14: true}
+	if len(got) != len(expectedLines) {
+		t.Fatalf("unchanged Do condition findings = %+v, want one finding at each expected source line", got)
 	}
 	for _, finding := range got {
-		if finding.Severity != "information" || !strings.Contains(finding.Message, "loop-invariant") {
-			t.Fatalf("unchanged Do condition finding = %+v, want information loop-invariant classification", finding)
+		if !expectedLines[finding.Line] || finding.Severity != "information" || !strings.Contains(finding.Message, "loop-invariant") {
+			t.Fatalf("unchanged Do condition finding = %+v, want information loop-invariant classification at lines 10 and 14", finding)
 		}
+		delete(expectedLines, finding.Line)
+	}
+	if len(expectedLines) != 0 {
+		t.Fatalf("missing unchanged Do condition findings at lines: %+v", expectedLines)
 	}
 }
 
