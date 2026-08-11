@@ -1111,6 +1111,22 @@ func TestProjectMemberSignatureCompletenessRejectsTruncatedSymbol(t *testing.T) 
 	}
 }
 
+func TestDeclarationContainsCallableNameAcceptsPropertyWhitespace(t *testing.T) {
+	tests := []string{
+		"Public Property  Get Value()",
+		"Public Property\tGet Value()",
+		"Public Property  Let Value(ByVal value As String)",
+		"Public Property\tLet Value(ByVal value As String)",
+		"Public Property  Set Value(ByVal value As Object)",
+		"Public Property\tSet Value(ByVal value As Object)",
+	}
+	for _, declaration := range tests {
+		if !declarationContainsCallableName(declaration, "Value") {
+			t.Errorf("declarationContainsCallableName(%q, Value) = false", declaration)
+		}
+	}
+}
+
 func TestDiagnosticsDoNotApplyInlineSuppressionToCompileEquivalentRules(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	dir := t.TempDir()

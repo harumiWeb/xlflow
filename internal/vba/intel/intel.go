@@ -1655,14 +1655,14 @@ func (a Analyzer) projectMemberSignatureComplete(sym Symbol) bool {
 }
 
 func declarationContainsCallableName(declaration, name string) bool {
+	declaration = strings.ToLower(strings.Join(strings.Fields(declaration), " "))
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
 		return false
 	}
 	for _, keyword := range []string{"sub", "function", "property get", "property let", "property set"} {
 		for searchFrom := 0; searchFrom < len(declaration); {
-			lower := strings.ToLower(declaration[searchFrom:])
-			index := strings.Index(lower, keyword)
+			index := strings.Index(declaration[searchFrom:], keyword)
 			if index < 0 {
 				break
 			}
@@ -1675,7 +1675,7 @@ func declarationContainsCallableName(declaration, name string) bool {
 				}
 			}
 			afterKeyword := declaration[index+len(keyword):]
-			if afterKeyword == "" || (afterKeyword[0] != ' ' && afterKeyword[0] != '\t') {
+			if afterKeyword == "" || afterKeyword[0] != ' ' {
 				searchFrom = index + len(keyword)
 				continue
 			}
