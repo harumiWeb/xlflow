@@ -7353,6 +7353,7 @@ func (a *app) analyzeCommand() *cobra.Command {
 			findings := analyzeResult.Findings
 			env := output.New("analyze")
 			env.Analysis = findings
+			env.AnalysisMetrics = analyzeResult.AnalysisMetrics
 			env.Warnings = analyzeResult.Warnings
 			if len(findings) > 0 {
 				env.Status = output.StatusFailed
@@ -7405,6 +7406,7 @@ func (a *app) checkCommand() *cobra.Command {
 			env.Check = check
 			env.Issues = issues
 			env.Analysis = findings
+			env.AnalysisMetrics = analyzeResult.AnalysisMetrics
 			env.Diagnostics = doctor.Diagnostics
 			env.Workbook = doctor.Workbook
 			if doctor.Status == output.StatusFailed {

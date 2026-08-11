@@ -181,6 +181,11 @@ func MaterializeThirdPartyProject(corpusRoot string, project Project, opts Mater
 	cfg.Project.Entry = "Corpus.Run"
 	cfg.UserForm.CodeSource = "frm"
 	applyProfilePolicy(&cfg, project.Profile)
+	// Corpus snapshots intentionally include the opt-in module-state rule so
+	// that real-world lifecycle coupling remains observable without changing
+	// production defaults. Profile-specific exclusions still take precedence
+	// when a profile deliberately omits a rule.
+	cfg.Analyze.DetectRiskyModuleState = true
 	if err := config.Write(filepath.Join(workspace.Root, config.FileName), cfg); err != nil {
 		return workspace, fmt.Errorf("write materialized project config: %w", err)
 	}

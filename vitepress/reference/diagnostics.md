@@ -47,6 +47,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB043`](#vb043)   | lint    | warning  | file-local      | yes     | Orphan documentation comment                       |
 | [`VB044`](#vb044)   | lint    | warning  | procedure-local | no      | Procedure-name constant mismatch                   |
 | [`VB045`](#vb045)   | lint    | error    | procedure-local | yes     | Deterministic argument binding error               |
+| [`VB046`](#vb046)   | lint    | error    | file-local      | yes     | Duplicate declaration                              |
+| [`VB047`](#vb047)   | lint    | error    | file-local      | yes     | Invalid declaration placement                      |
 | [`VBA101`](#vba101) | analyze | warning  | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning  | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning  | procedure-local | yes     | Object function return missing Set                 |
@@ -92,6 +94,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA237`](#vba237) | analyze | warning  | interprocedural | yes     | Suppressed error propagation                       |
 | [`VBA238`](#vba238) | analyze | warning  | procedure-local | yes     | Loop-invariant Excel object resolution             |
 | [`VBA239`](#vba239) | analyze | warning  | procedure-local | yes     | Unsafe SQL construction                            |
+| [`VBA240`](#vba240) | analyze | warning  | project-wide    | no      | Risky module-level mutable state                   |
+| [`VBA241`](#vba241) | analyze | warning  | procedure-local | yes     | Repeated ReDim Preserve inside loop                |
 
 ## VB001
 
@@ -994,6 +998,50 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                      |
 | Real-time editor diagnostic | yes                      |
 | Fix available               | no                       |
+
+## VB046
+
+**Duplicate declaration.** A VBA declaration repeats a name that is already declared in the same scope.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
+## VB047
+
+**Invalid declaration placement.** A VBA declaration appears in a source position where that declaration kind is not permitted.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `file-local`         |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VBA101
 
@@ -1980,6 +2028,50 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Precision                   | `medium`                         |
 | Enabled by default          | yes                              |
 | Configuration               | `detect_unsafe_sql_construction` |
+| Inline suppression          | yes                              |
+| Blocks source preflight     | no                               |
+| Real-time editor diagnostic | yes                              |
+| Fix available               | no                               |
+
+## VBA240
+
+**Risky module-level mutable state.** Module-level mutable state has project-wide readers and writers that create hidden lifecycle coupling.
+
+| Property                    | Value                       |
+| --------------------------- | --------------------------- |
+| Family                      | `analyze`                   |
+| Category                    | `reliability`               |
+| Evidence class              | `maintainability`           |
+| Compile-equivalent          | no                          |
+| Default severity            | `warning`                   |
+| Supported severities        | `warning`                   |
+| Surfaces                    | `analyze`                   |
+| Scope                       | `project-wide`              |
+| Precision                   | `medium`                    |
+| Enabled by default          | no                          |
+| Configuration               | `detect_risky_module_state` |
+| Inline suppression          | yes                         |
+| Blocks source preflight     | no                          |
+| Real-time editor diagnostic | no                          |
+| Fix available               | no                          |
+
+## VBA241
+
+**Repeated ReDim Preserve inside loop.** A dynamic array is repeatedly resized with ReDim Preserve inside a loop, potentially copying the existing array on every iteration.
+
+| Property                    | Value                            |
+| --------------------------- | -------------------------------- |
+| Family                      | `analyze`                        |
+| Category                    | `performance`                    |
+| Evidence class              | `maintainability`                |
+| Compile-equivalent          | no                               |
+| Default severity            | `warning`                        |
+| Supported severities        | `warning`, `information`         |
+| Surfaces                    | `analyze`, `lsp`                 |
+| Scope                       | `procedure-local`                |
+| Precision                   | `medium`                         |
+| Enabled by default          | yes                              |
+| Configuration               | `detect_redim_preserve_in_loops` |
 | Inline suppression          | yes                              |
 | Blocks source preflight     | no                               |
 | Real-time editor diagnostic | yes                              |

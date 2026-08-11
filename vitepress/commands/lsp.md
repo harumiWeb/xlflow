@@ -61,6 +61,17 @@ For an enabled `VB044` procedure-name constant mismatch, diagnostics are publish
 
 The LSP publishes `VB045` for deterministic missing, excessive, duplicate, unknown, or misordered arguments when the target signature is known from project symbols or the built-in VBA/COM database. `VB030` remains the warning-level projection for inferred or uncertain argument compatibility. For project-local procedures, `VBA228` reports definite ByRef type or array-shape mismatches rejected by the VBE; temporary, parenthesized, property/member, and indirect forms remain `VBA206` warnings. `VBA229` reports unresolved procedure-local `As <Type>` identifiers using the same production resolver configuration as batch analysis. `VB045`, `VBA228`, and `VBA229` are unsuppressible compile-equivalent diagnostics and are also part of batch analysis/source preflight.
 
+The LSP also publishes `VB046` for case-insensitive duplicate declarations in a
+module, procedure, Enum, or user-defined Type scope, and `VB047` for declarations
+in invalid module/procedure positions. Valid Property accessor groups and
+procedure-local `Dim`, `Static`, and `Const` declarations remain accepted, and
+class-module `Implements` clauses may precede `Option` directives.
+Repeated `Option Explicit`, `Option Base`, `Option Compare`, and `Option Private
+Module` directives are duplicate declarations. Both diagnostics use the same
+unsuppressible, preflight-blocking contract as batch `lint`, and
+conditional-compilation branches are compared only when their coexistence is
+provable.
+
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 Semantic tokens are provided by the Go language server with full-document `textDocument/semanticTokens/full` responses and `textDocument/semanticTokens/full/delta` updates. They classify VBA declarations, parameters, variables, built-in types, globals, constants, member expressions, comments, strings, numbers, operators, and keywords. Full responses carry opaque result IDs; the server retains the four most recent results for each open document and returns a delta only when its JSON payload is smaller than a full response. Unknown, expired, cross-document, or closed-document IDs fall back to a full response. Range semantic token requests are not advertised.

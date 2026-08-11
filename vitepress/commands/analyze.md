@@ -95,6 +95,8 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA237` | warning               | Error handling or an ignored success result loses failure information across a resolved local call chain.                                     |
 | `VBA238` | warning               | A loop repeatedly resolves an invariant Excel object-model member chain that can be cached outside the loop.                                  |
 | `VBA239` | warning               | A SQL statement may combine external input, dynamic identifiers, locale-sensitive values, manual quoting, or wildcard input before execution. |
+| `VBA240` | warning               | Opt-in project-wide analysis of module-level mutable state, lifecycle coupling, and read/write metrics.                                       |
+| `VBA241` | warning / information | `ReDim Preserve` repeatedly resizes an array inside a reachable loop.                                                                         |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -120,7 +122,7 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 
 `VBA210` checks every reachable path to a `Function` or `Property Get` normal exit, including `Exit Function`, `Exit Property`, error-handler paths that return normally, and shared cleanup labels. A dominating return assignment satisfies all paths; VBA's default-initialized return value does not. Known non-returning `Err.Raise` statements are treated as exceptional exits rather than normal fallthrough. Object returns require `Set`, known value returns require ordinary assignment or `Let`, and the diagnostic reason identifies a representative uncovered exit when practical. The rule is opt-in through `detect_function_return_path` and remains batch-only.
 
-Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, and `VBA230` through `VBA239` are enabled by default. `VBA230` through `VBA239` are warning-level, non-blocking, and inline-suppressible. `VBA237` is interprocedural and Full-only in LSP; `VBA238` and `VBA239` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`.
+Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, and `VBA241` are enabled by default. `VBA230` through `VBA239` are warning-level, non-blocking, and inline-suppressible. `VBA241` is non-blocking and inline-suppressible; it may use `information` for a single non-nested loop with loop-invariant dimensions and `warning` for loop-variable growth or nested loops. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, and `VBA241` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`.
 `VBA223` is a default-enabled, non-blocking, file-local, realtime warning. It uses structural credential patterns, ignores obvious placeholders where possible, and redacts source snippets with `[REDACTED]`.
 
 `VBA224` is a conservative, procedure-local warning: it reports source, sink, and propagation path context, treats unsupported transformations as unknown, does not propagate taint across procedures, and does not block preflight. Literals and explicit constant/allowlist branches are accepted; `EncodeURL` is accepted only for HTTP URLs, while generic `Trim`, `CStr`, `Replace`, `IsNumeric`, and `Len` do not remove taint. Use `xlflow:disable-line VBA224`, `xlflow:disable-next-line VBA224`, or `[analyze].disabled_rules = ["VBA224"]` for an intentional flow. `VBA206` remains a configurable warning for literal temporaries, parenthesized, property/member, array-element, indirect, and otherwise uncertain ByRef forms. Literal arguments do not produce blocking `VBA228` errors because the VBE evaluates them as temporary values. `VBA228` owns only explicit statically incompatible bare value/object/array variables and `Long`/`LongPtr`/`LongLong` mismatches, including named arguments; it is always enabled, cannot be suppressed by `VBA206` settings or inline comments, and blocks source preflight. Array-valued Function return slots retain their array shape, local values shadow same-named procedures, and callee-module-qualified project types match the callee's unqualified type declaration; a different module qualification remains incompatible. `Object`, `Variant`, `Any`, unresolved, and late-bound types remain uncertain and do not produce `VBA228`. The legacy `detect_byref_argument_mismatch` key remains supported for `VBA206`. Rules `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA207` uses `warning` when absence is definite and `information` when existence is unknown. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration remains valid. `VBA214` is warning-only and allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported without severity escalation or preflight blocking. `VBA215` requires explicit `Find` `LookIn`, `LookAt`, `SearchOrder`, and `MatchByte`, or `Replace` `LookAt`, `SearchOrder`, `MatchCase`, and `MatchByte`, because Excel can reuse saved Find/Replace dialog or macro settings when they are omitted. `VBA216` blocks preflight only when xlflow can prove that explicit range roots refer to different worksheets. `VBA217` guides last-row calculations that rely on the active sheet, `End(xlDown)`, unadjusted `UsedRange.Rows.Count`, or `CurrentRegion`; it does not block preflight. `VBA218` accepts `On Error GoTo <label>` for exception-raising APIs, or only a narrow `On Error Resume Next` probe that checks `Err` and immediately restores `On Error GoTo 0`; an unbounded `Resume Next` scope is not sufficient. `Variant/Error` APIs require `IsError` before consumption. `VBA219` tracks only captured local `Workbooks.Open` results and VBA `Open ... As #handle` calls. It accepts direct local aliases, error-handler cleanup labels, pre-Open file-number aliases, and ownership transfer only at an object-returning Function's normal exit; it intentionally does not assume that parameters, helper calls, or other COM resources are owned. Diagnostics `VBA101` through `VBA106` are always enabled.
@@ -140,6 +142,22 @@ chart lookups are eligible. Use `xlflow:disable-line VBA238`,
 `detect_loop_invariant_excel_object_resolution` key remains accepted with a
 deprecation warning.
 
+`VBA241` is enabled in batch and real-time analysis and reports reachable
+`ReDim Preserve` statements in every supported `For`, `For Each`, `While`/`Wend`,
+and `Do`/`Loop` form. It reuses the existing dimension parser and compares
+dimension-expression variable accesses with all containing loop variables,
+including helper expressions such as `Grow(i)`. A single non-nested loop with
+loop-invariant dimensions is classified as repeated constant-size reallocation
+and may use `information`; loop-variable-dependent growth or nesting depth two
+or greater uses `warning`. Suggestions prefer preallocation and otherwise
+geometric capacity growth. Fixed arrays and scalar targets remain with the
+existing allocation/correctness rules, while `VBA208` retains non-final-
+dimension correctness. Use `xlflow:disable-line VBA241`,
+`xlflow:disable-next-line VBA241`, or
+`[analyze].disabled_rules = ["VBA241"]`; the legacy
+`detect_redim_preserve_in_loops` key remains accepted with a deprecation
+warning.
+
 `VBA239` is enabled in batch and real-time analysis and reports procedure-local
 SQL construction that combines external input, dynamic identifiers,
 locale-sensitive values, manual quoting, or wildcard input before execution.
@@ -147,6 +165,15 @@ It keeps `VBA224` as the generic fallback when disabled and does not claim
 complete SQL-injection proof. Use `xlflow:disable-line VBA239`,
 `xlflow:disable-next-line VBA239`, or `[analyze].disabled_rules = ["VBA239"]`
 for intentional exceptions.
+
+`VBA240` is disabled by default and runs only in batch `analyze`/`check` when
+`[analyze].detect_risky_module_state = true`. It indexes module-level fields
+across standard, class, document, and UserForm modules, follows uniquely
+resolved project-local calls from configured and host-event entry points, and
+reports structural lifecycle coupling at the declaration. The JSON envelope
+also includes informational `analysis_metrics.module_state.fields` and
+`analysis_metrics.module_state.procedures` read/write sets. Reader/writer
+counts alone do not trigger a finding; use `VBA202` for object use-before-`Set`.
 
 `VBA226` is enabled in batch and real-time analysis and tracks procedure-local `Range.Value` / `Value2` shapes. It reports one-dimensional or scalar assumptions for definite multi-cell ranges, dimensionless bounds, statically provable dimension/order/bounds mistakes, and incompatible known destination ranges. Multi-cell values are modeled as two-dimensional arrays; single-cell values are modeled as scalars. Dynamic, reassigned, and branch-merged shapes remain uncertain, so only unsafe consumption or a statically proven shape mismatch is reported. Use `values(row, column)`, dimension-specific bounds, and a dominating `IsArray` guard for dynamic values when appropriate.
 

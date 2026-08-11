@@ -1,11 +1,13 @@
 # Excel Loop Performance Analysis
 
-This specification defines the `VBA225` and `VBA238` analyzer rules for the
-Excel loop-performance issues #452 and #453. `VBA225` identifies conservative,
-repeated Excel object-model work inside VBA loops and recommends bulk range or
-array operations. `VBA238` identifies loop-invariant Excel object expressions
-that are repeatedly resolved and recommends hoisting them into cached locals.
-ADR-0025 records the design rationale and boundaries.
+This specification defines the `VBA225`, `VBA238`, and `VBA241` analyzer rules
+for the Excel loop-performance issues #452, #453, and #454. `VBA225`
+identifies conservative, repeated Excel object-model work inside VBA loops and
+recommends bulk range or array operations. `VBA238` identifies loop-invariant
+Excel object expressions that are repeatedly resolved and recommends hoisting
+them into cached locals. `VBA241` identifies repeated `ReDim Preserve` array
+copies inside loops and recommends preallocation or geometric growth. ADR-0025
+records the design rationale and boundaries.
 
 ## Scope and public contract
 
@@ -178,6 +180,52 @@ An intentional local exception can use `xlflow:disable-line VBA238` or
 `VBA225` reports the repeated per-cell or per-item Excel work itself, whereas
 `VBA238` reports the avoidable repeated lookup of an invariant object chain.
 
+## Repeated `ReDim Preserve` in loops (`VBA241`)
+
+<!-- xlflow-rule-contract: {"id":"VBA241","family":"analyze","category":"performance","default_severity":"warning","scope":"procedure-local","realtime":true,"configuration_key":"detect_redim_preserve_in_loops","inline_suppressible":true,"preflight_blocking":false} -->
+
+`VBA241` is a default-enabled, procedure-local performance diagnostic in batch
+analysis and the shared real-time editor path. It reports reachable
+`ReDim Preserve` statements in `For`, `For Each`, `While`/`Wend`, and all
+supported `Do`/`Loop` forms, including pre-test and post-test `While`/`Until`
+conditions. Synthetic condition nodes are not treated as loop bodies. Fixed
+arrays and scalar targets remain owned by the existing allocation and
+correctness rules rather than producing a `VBA241` finding.
+
+The rule reuses the existing `ReDim Preserve` parser, target splitting, and
+dimension-expression analysis. It compares variable accesses within each
+dimension-bound expression with the control variables of all containing loops,
+so direct references and helper expressions such as `Grow(i)`, `i + Offset()`,
+and parenthesized forms are classified consistently. Helper procedure bodies
+are not analyzed transitively; only accesses visible in the dimension
+expression establish loop-variable dependence. All dimensions are considered
+for multidimensional arrays, while non-final-dimension correctness remains
+owned by `VBA208`.
+
+One finding is emitted at the `ReDim Preserve` statement even when a statement
+contains multiple targets. A single loop with dimensions independent of every
+containing loop variable is classified as repeated constant-size reallocation
+and uses `information` severity. A dimension that depends on the current or an
+outer loop variable is classified as growth based on a loop variable and uses
+`warning` severity. Any finding at nesting depth two or greater also uses
+`warning`, with the depth included in the message and reason. Severity never
+exceeds `warning`.
+
+Suggestions distinguish the remediation: preallocate the final array size when
+the bound is known or can be computed before the loop; otherwise maintain a
+capacity variable and grow geometrically before copying or assigning new
+items. The rule is advisory, non-blocking for source preflight, and supports
+normal inline suppression. Disable it with:
+
+```toml
+[analyze]
+disabled_rules = ["VBA241"]
+```
+
+The compatibility key `detect_redim_preserve_in_loops = false` remains accepted
+with the normal deprecation warning. The generated diagnostic catalog is
+regenerated from the static-analysis registry and is not edited by hand.
+
 ## Related
 
 - `docs/adr/ADR-0025-excel-loop-performance-analysis.md`
@@ -187,3 +235,5 @@ An intentional local exception can use `xlflow:disable-line VBA238` or
 - `docs/adr/ADR-0023-procedure-effect-summaries.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - xlflow issue #452
+- xlflow issue #453
+- xlflow issue #454

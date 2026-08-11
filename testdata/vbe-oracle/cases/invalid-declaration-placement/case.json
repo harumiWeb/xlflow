@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "invalid-declaration-placement",
+  "description": "Observe VBE behavior for a module declaration placed after the first procedure.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB047"],
+    "expected_diagnostics": [
+      {
+        "code": "VB047",
+        "severity": "error",
+        "surfaces": ["lint", "lsp"]
+      }
+    ],
+    "negative_controls": ["invalid-declaration-placement-valid-controls"]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-11T04:28:36Z"
+      }
+    ]
+  }
+}

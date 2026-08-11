@@ -67,8 +67,9 @@ func (e *ParseError) Error() string {
 }
 
 type Result struct {
-	Findings []Finding
-	Warnings []map[string]any
+	Findings        []Finding
+	Warnings        []map[string]any
+	AnalysisMetrics any `json:"analysis_metrics,omitempty"`
 }
 
 type Analyzer struct {
@@ -428,6 +429,12 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	if analysis.Config.Analyze.DetectPublicAPITypeSafety {
 		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB)
 	}
+	var analysisMetrics any
+	if analysis.Config.Analyze.DetectRiskyModuleState {
+		moduleState := buildModuleStateAnalysis(a.RootDir, a.Config, parsedFiles)
+		findings = append(findings, moduleState.Findings...)
+		analysisMetrics = moduleState.Metrics
+	}
 	for _, file := range parsedFiles {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
@@ -469,7 +476,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
-	return Result{Findings: findings, Warnings: warnings}, nil
+	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics}, nil
 }
 
 func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
@@ -937,7 +944,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -1038,6 +1045,9 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
+	if a.Config.Analyze.DetectRedimPreserveInLoops {
+		findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
+	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
@@ -1322,6 +1332,9 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries, ctx.objectEntryStates[key])...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
+	if a.Config.Analyze.DetectRedimPreserveInLoops {
+		findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
+	}
 	if a.Config.Analyze.DetectApplicationStateRestore {
 		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
 	}

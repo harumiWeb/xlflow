@@ -1123,6 +1123,48 @@ End Sub
 	}
 }
 
+func TestDiagnosticsIncludeDeclarationCompileEquivalentFindings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Sub Test()
+    Dim value As Long
+    Dim VALUE As String
+End Sub
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB046")
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected one duplicate declaration diagnostic, got %+v", diagnostics)
+	}
+	if diagnostics[0].Severity != "error" || diagnostics[0].Range.Start.Line != 4 || diagnostics[0].Range.Start.Character != 8 {
+		t.Fatalf("unexpected declaration diagnostic projection: %+v", diagnostics[0])
+	}
+}
+
+func TestDiagnosticsIncludeInvalidDeclarationPlacementFindings(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Attribute VB_Name = "Main"
+Sub Run()
+End Sub
+Option Explicit
+`,
+	}
+
+	diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB047")
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected one invalid declaration placement diagnostic, got %+v", diagnostics)
+	}
+	if diagnostics[0].Severity != "error" || diagnostics[0].Range.Start.Line != 3 || diagnostics[0].Range.Start.Character != 0 {
+		t.Fatalf("unexpected declaration placement diagnostic projection: %+v", diagnostics[0])
+	}
+}
+
 func TestArgumentDiagnosticsAllowParamArray(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	if err := analyzer.DB.MergeJSON([]byte(`{

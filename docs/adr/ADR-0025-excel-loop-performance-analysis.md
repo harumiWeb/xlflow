@@ -26,6 +26,13 @@ even when the chain does not depend on the loop iterator. Those invariant
 lookups should be hoisted into a cached local while iterator-dependent cell
 access remains inside the loop.
 
+Issue #454 adds the array-allocation counterpart: `ReDim Preserve` copies the
+existing contents on every resize, so placing it in a reachable loop can turn
+an otherwise linear fill into quadratic work. The diagnostic must cover every
+supported VBA loop form, distinguish loop-variable growth from repeated
+constant-size reallocations, account for nested-loop cost, and preserve the
+existing `ReDim Preserve` and dimension-safety ownership boundaries.
+
 ## Decision
 
 Add `VBA225`, a default-enabled `analyze` rule in the performance category. It
@@ -79,6 +86,23 @@ Nested loops are handled by requiring invariance at the selected loop boundary.
 compatibility window). `VBA238` owns lookup-hoisting guidance; `VBA225` retains
 ownership of repeated per-cell or per-item object-model work.
 
+Add `VBA241`, a default-enabled, procedure-local, warning-level performance
+rule in batch analysis and the shared real-time path. It reuses the normalized
+procedure IR, conservative CFG loop regions, and existing `ReDim Preserve`
+dimension analysis to report reachable loop-contained resizes. A dimension
+expression is loop-variable dependent when its IR variable accesses match the
+current or any outer loop control variable, including accesses inside helper
+expressions; helper procedure bodies are not followed transitively. A single
+non-nested loop with loop-invariant bounds is reported at `information`, while
+loop-variable growth or nesting depth two or greater is reported at `warning`.
+The rule emits one finding at the resize statement, remains non-blocking and
+inline suppressible, and is configured with
+`[analyze].disabled_rules = ["VBA241"]` (with the compatibility key
+`detect_redim_preserve_in_loops` retained during the compatibility window).
+`VBA208` continues to own non-final-dimension correctness findings, and
+`VBA227` continues to own allocation/lifecycle safety; neither rule is merged
+with this performance diagnostic.
+
 ## Consequences
 
 - Positive: common cell-by-cell loop patterns receive actionable guidance before
@@ -86,7 +110,7 @@ ownership of repeated per-cell or per-item object-model work.
 - Positive: CFG reachability, receiver resolution, and helper summaries reduce
   false positives from dead code, bulk range transfers, and unrelated VBA calls.
 - Positive: nested-loop context makes the most expensive shapes visible while
-  keeping the rule advisory and warning-only.
+  keeping the rule advisory and capped at warning severity.
 - Negative: dynamic dispatch, late binding, unresolved aliases, and helpers that
   cannot be uniquely resolved remain unreported even when they are slow.
 - Negative: interprocedural summaries add analysis work and must retain stable
@@ -96,6 +120,13 @@ ownership of repeated per-cell or per-item object-model work.
 - Negative: invariant-chain normalization is conservative around dynamic
   dispatch and ambiguous `With` receivers, so some cacheable lookups remain
   unreported.
+- Positive: `VBA241` makes the quadratic-copy shape visible while reusing the
+  established parser and CFG facts, and its separate severity classification
+  distinguishes a loop-invariant resize from growth tied to an iterator.
+- Negative: unknown or dynamically computed bounds can remain unclassified, and
+  the rule cannot prove helper-procedure internals without violating its
+  procedure-local scope. Projects may still need a local suppression for
+  intentionally bounded reallocations.
 
 ## Alternatives Considered
 
@@ -114,12 +145,17 @@ ownership of repeated per-cell or per-item object-model work.
 5. **Analyze only direct statements and ignore helpers.** Rejected because a
    common refactoring moves the per-cell Excel call into a project-local helper,
    while the caller still pays for it on every iteration.
+6. **Treat every `ReDim Preserve` as a correctness error.** Rejected because
+   the operation is valid VBA; only a reachable loop establishes the repeated
+   copy cost, and dimension correctness remains owned by `VBA208`.
 
 ## Evidence
 
 - Requirements: xlflow issue #452.
 - Related requirements: xlflow issue #453 (loop-invariant Excel object
   resolution and cache-hoisting guidance).
+- Related requirements: xlflow issue #454 (loop-contained `ReDim Preserve`
+  performance analysis).
 - Analyzer ownership and public diagnostic policy:
   `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`.
 - Procedure syntax and resolution: `docs/specs/vba-analysis-ir.md` and
@@ -143,3 +179,4 @@ ownership of repeated per-cell or per-item object-model work.
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - xlflow issue #452
 - xlflow issue #453
+- xlflow issue #454
