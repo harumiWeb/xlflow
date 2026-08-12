@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "vb010-conditional-procedure-valid",
+  "description": "Accepted conditional procedure declarations share one terminator across mutually exclusive branches.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "observe",
+    "evidence_phase": "unknown",
+    "diagnostic_meaning": "observation"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "compile-equivalent",
+    "binding_note": "Pending local VBE confirmation before binding VB010."
+  },
+  "provenance": {
+    "status": "pending",
+    "verified_on": []
+  }
+}

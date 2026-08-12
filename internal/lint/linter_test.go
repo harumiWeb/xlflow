@@ -1827,6 +1827,86 @@ Public Function MissingClose() As String
 	assertIssue(t, PushBlockingIssues(issues), "VB010", 2)
 }
 
+func TestLinterProcedureBoundariesRespectConditionalCompilation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "shared function terminator",
+			source: `Option Explicit
+#If VBA7 Then
+Public Function PtrValue(ByVal value As LongPtr) As LongPtr
+#Else
+Public Function PtrValue(ByVal value As Long) As Long
+#End If
+    PtrValue = value
+End Function
+`,
+		},
+		{
+			name: "shared property terminator",
+			source: `Option Explicit
+#If VBA7 Then
+Property Let UserData(ByVal value As LongPtr)
+#Else
+Property Let UserData(ByVal value As Long)
+#End If
+End Property
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(tt.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, code := range []string{"VB010", "VB011", "VB012"} {
+				if got := issuesByCode(issues, code); len(got) != 0 {
+					t.Fatalf("valid conditional/type declaration should not trigger %s: %+v", code, got)
+				}
+			}
+		})
+	}
+}
+
+func TestLinterKeepsReservedEnumMemberDiagnostic(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Private Enum CallbackKind
+    Unknown
+    Function
+End Enum
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB010", 4)
+}
+
+func TestLinterReportsReservedEnumMemberAndUnmatchedProcedureEnd(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Private Enum CallbackKind
+    Unknown
+    Function
+End Enum
+End Function
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB010", 4)
+	assertIssue(t, issues, "VB011", 6)
+	if got := issuesByCode(issues, "VB012"); len(got) != 0 {
+		t.Fatalf("unexpected VB012 diagnostic: %+v", got)
+	}
+}
+
 func TestLinterProcedureScannerIgnoresCommentsStringsAndDesignerEnd(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

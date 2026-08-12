@@ -641,7 +641,7 @@ func hasVBNameAttribute(source string) bool {
 
 func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source string) ([]Issue, error) {
 	var issues []Issue
-	procedures := make([]procedureFrame, 0)
+	procedureBoundaries := newProcedureBoundaryTracker(l, path)
 	inTypeBlock := false
 	var logicalLine strings.Builder
 	logicalStartLine := 0
@@ -658,6 +658,10 @@ func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source
 		detectionCode := maskStringLiterals(code)
 		trimmed := strings.TrimSpace(code)
 		lower := strings.ToLower(trimmed)
+		if logicalLine.Len() == 0 && isConditionalCompilationDirective(lower) {
+			procedureBoundaries.processDirective(lineNo, lower)
+			continue
+		}
 		if isTypeEndLine(lower) {
 			inTypeBlock = false
 		}
@@ -701,7 +705,7 @@ func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source
 			issues = append(issues, l.lineContinuationOverflowIssue(path, logicalStartLine, lineForProcedure, continuationCount))
 		}
 		for _, statement := range splitStatements(lineForProcedure) {
-			issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, statement, &procedures)...)
+			procedureBoundaries.processStatement(logicalStartLine, statement)
 		}
 		logicalLine.Reset()
 		logicalStartLine = 0
@@ -712,14 +716,10 @@ func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source
 			issues = append(issues, l.lineContinuationOverflowIssue(path, logicalStartLine, logicalLine.String(), continuationCount))
 		}
 		for _, statement := range splitStatements(logicalLine.String()) {
-			issues = append(issues, l.procedureBoundaryIssues(path, logicalStartLine, statement, &procedures)...)
+			procedureBoundaries.processStatement(logicalStartLine, statement)
 		}
 	}
-	for _, procedure := range procedures {
-		issue := l.issue(path, procedure.LineNo, "VB010", "error", "Unterminated "+procedure.Kind+" procedure.")
-		issue.Symbol = procedure.Name
-		issues = append(issues, issue)
-	}
+	issues = append(issues, procedureBoundaries.finish()...)
 	return issues, nil
 }
 
@@ -2868,28 +2868,6 @@ func isVBAIdentifierRune(r rune) bool {
 		return true
 	}
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
-}
-
-func (l Linter) procedureBoundaryIssues(path string, lineNo int, line string, procedures *[]procedureFrame) []Issue {
-	var issues []Issue
-	if endKind, ok := procedureEndKind(line); ok {
-		if len(*procedures) == 0 {
-			issues = append(issues, l.issue(path, lineNo, "VB011", "error", "Unexpected End "+endKind+" without a matching procedure."))
-			return issues
-		}
-		top := (*procedures)[len(*procedures)-1]
-		*procedures = (*procedures)[:len(*procedures)-1]
-		if top.Kind != endKind {
-			issue := l.issue(path, lineNo, "VB012", "error", "Mismatched End "+endKind+" for "+top.Kind+" procedure.")
-			issue.Symbol = top.Name
-			issues = append(issues, issue)
-		}
-		return issues
-	}
-	if start, ok := procedureStart(line, lineNo); ok {
-		*procedures = append(*procedures, start)
-	}
-	return issues
 }
 
 func procedureEndKind(line string) (string, bool) {
