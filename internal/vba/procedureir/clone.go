@@ -8,6 +8,7 @@ func Clone(in DocumentIR) DocumentIR {
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
 	for i := range out.Declarations {
 		out.Declarations[i].Parameters = cloneParameters(in.Declarations[i].Parameters)
+		out.Declarations[i].ConditionalBranches = append([]ConditionalBranch(nil), in.Declarations[i].ConditionalBranches...)
 	}
 	out.TypeReferences = make([]TypeReference, len(in.TypeReferences))
 	for i := range in.TypeReferences {
@@ -46,6 +47,7 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
 	for i := range out.Declarations {
 		out.Declarations[i].Parameters = cloneParameters(in.Declarations[i].Parameters)
+		out.Declarations[i].ConditionalBranches = append([]ConditionalBranch(nil), in.Declarations[i].ConditionalBranches...)
 	}
 	out.Statements = make([]Statement, len(in.Statements))
 	for i := range in.Statements {
@@ -67,6 +69,13 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 	out.Calls = make([]CallSite, len(in.Calls))
 	for i := range in.Calls {
 		out.Calls[i] = cloneCall(in.Calls[i])
+	}
+	out.RaiseEvents = append([]RaiseEventReference(nil), in.RaiseEvents...)
+	for i := range out.RaiseEvents {
+		out.RaiseEvents[i].Arguments.Named = append([]NamedArgument(nil), in.RaiseEvents[i].Arguments.Named...)
+		out.RaiseEvents[i].Arguments.ExpressionIDs = append([]int(nil), in.RaiseEvents[i].Arguments.ExpressionIDs...)
+		out.RaiseEvents[i].ConditionalBranches = append([]ConditionalBranch(nil), in.RaiseEvents[i].ConditionalBranches...)
+		out.RaiseEvents[i].Resolution.Candidates = append([]Candidate(nil), in.RaiseEvents[i].Resolution.Candidates...)
 	}
 	out.Accesses = make([]VariableAccess, len(in.Accesses))
 	for i := range in.Accesses {
@@ -115,6 +124,7 @@ func cloneCall(in CallSite) CallSite {
 	}
 	out.Arguments.Named = append([]NamedArgument(nil), in.Arguments.Named...)
 	out.Arguments.ExpressionIDs = append([]int(nil), in.Arguments.ExpressionIDs...)
+	out.NonCallableNames = append([]string(nil), in.NonCallableNames...)
 	out.Resolution.Candidates = append([]Candidate(nil), in.Resolution.Candidates...)
 	return out
 }

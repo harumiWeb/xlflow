@@ -53,6 +53,9 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB049`](#vb049)   | lint    | error       | file-local      | yes     | Inconsistent Property accessor contract            |
 | [`VB050`](#vb050)   | lint    | error       | file-local      | yes     | Invalid module declaration context                 |
 | [`VB051`](#vb051)   | lint    | error       | procedure-local | yes     | Invalid Me context                                 |
+| [`VB052`](#vb052)   | lint    | error       | interprocedural | yes     | Invalid procedure call target                      |
+| [`VB053`](#vb053)   | lint    | error       | interprocedural | yes     | Ambiguous Enum member                              |
+| [`VB054`](#vb054)   | lint    | error       | interprocedural | yes     | Undeclared RaiseEvent target                       |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -1140,6 +1143,72 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                  |
 | Real-time editor diagnostic | yes                  |
 | Fix available               | no                   |
+
+## VB052
+
+**Invalid procedure call target.** A call targets a project-local symbol that is missing or known not to be callable.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB053
+
+**Ambiguous Enum member.** A bare Enum member reference has multiple visible project or type-library candidates and no unique lexical winner.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB054
+
+**Undeclared RaiseEvent target.** A RaiseEvent statement names an event that is not declared in the same object module.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
 
 ## VBA101
 

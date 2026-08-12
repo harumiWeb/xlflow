@@ -429,6 +429,16 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			})
 		}
 	}
+	// Resolution completeness must include the generated TypeLib view. Load it
+	// before constructing the resolver so incomplete external symbols fail open
+	// consistently across every source file.
+	resolutionComplete := analysis.PathFilter == nil && !analysis.typeDBResolutionIncomplete
+	for _, file := range parsedFiles {
+		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
+			resolutionComplete = false
+			break
+		}
+	}
 	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
 		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
 	}
@@ -440,7 +450,18 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		analysis.byRefSymbols = byRefSymbols
 	}
 	findings := cycleFindings
+	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, analysis.typeDB)
+	var resolutionPreflight []Finding
+	for i := range parsedFiles {
+		resolvedForDiagnostics := procedureir.Resolve(parsedFiles[i].IR, resolutionResolver)
+		for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, resolutionComplete) {
+			finding := analysis.resolutionFinding(parsedFiles[i], diagnostic)
+			findings = append(findings, finding)
+			resolutionPreflight = append(resolutionPreflight, finding)
+		}
+	}
 	var preflightFindings []Finding
+	preflightFindings = append(preflightFindings, resolutionPreflight...)
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
 		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
@@ -615,6 +636,36 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 	default:
 		return "The VBE rejects this deterministic compile-time contract.", "Correct the source so the call or assignment satisfies the VBA compile-time contract."
 	}
+}
+
+func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
+	line := diagnostic.Range.StartLine
+	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
+	for _, candidate := range sourceProceduresFromIR(file.IR, file.CFG) {
+		if line >= candidate.StartLine && line <= candidate.EndLine {
+			proc = candidate
+			break
+		}
+	}
+	reason, suggestion := compileEquivalentFindingGuidance(diagnostic.Code)
+	switch diagnostic.Code {
+	case "VB052":
+		reason = "The VBE requires a project-local call target to resolve to a callable declaration."
+	case "VB053":
+		reason = "The VBE cannot choose between multiple visible Enum members without a lexical winner."
+	case "VB054":
+		reason = "The VBE requires RaiseEvent to name an Event declared in the same object module."
+	}
+	if shared := procedureir.ResolutionSuggestion(diagnostic.Code); shared != "" {
+		suggestion = shared
+	}
+	finding := a.simpleFinding(file, proc, line, diagnostic.Code, "error", diagnostic.Message, reason, suggestion)
+	// procedureir ranges use the same one-based coordinates as vbaast.NodeRange;
+	// do not apply the LSP zero-based conversion used by intel diagnostics.
+	finding.Column = diagnostic.Range.StartColumn
+	finding.EndLine = diagnostic.Range.EndLine
+	finding.EndColumn = diagnostic.Range.EndColumn
+	return finding
 }
 
 // projectByRefSymbols builds the batch project's procedure index once. ByRef
@@ -1173,6 +1224,46 @@ func (a Analyzer) shouldIncludeFile(path string) bool {
 		return false
 	}
 	return true
+}
+
+func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB) procedureir.Resolver {
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, file := range files {
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = file.Module
+		}
+		for _, declaration := range file.IR.Declarations {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: file.IR.ModuleKind,
+				Kind: declaration.Kind, Visibility: declaration.Visibility, File: file.IR.Path,
+				Line: declaration.Range.StartLine, Parent: declaration.Parent, Recovered: declaration.Recovered,
+				IsArray:             declaration.IsArray,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
+			})
+		}
+		for _, procedure := range file.IR.Procedures {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: file.IR.ModuleKind,
+				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: file.IR.Path,
+				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
+			})
+		}
+	}
+	if typeDB != nil {
+		for _, constant := range typeDB.AllConstantsList() {
+			if strings.TrimSpace(constant.EnumGroup) == "" {
+				continue
+			}
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
+				File: "<typelib>" + constant.Library, Line: 0,
+			})
+		}
+	}
+	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
 }
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
@@ -2970,7 +3061,8 @@ func resumeNextScopeCallRisk(calls []procedureir.CallSite, statementID int) (cal
 			if len(candidate.Resolution.Candidates) == 1 {
 				return true, true
 			}
-		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted:
+		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted,
+			procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete, procedureir.ResolutionNonCallable:
 			call = true
 		}
 	}

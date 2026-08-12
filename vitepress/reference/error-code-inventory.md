@@ -305,6 +305,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `end_if_fragment`
 - `end_line`
 - `end_statement`
+- `enum_constant`
 - `enum_declaration`
 - `enum_group`
 - `enum_member`
@@ -609,6 +610,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `no_libraries`
 - `no_previous_tree`
 - `no_tests_found`
+- `non_callable`
 - `non_numeric`
 - `non_test`
 - `normal_exit`
@@ -753,6 +755,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `qualified_member_expression`
 - `qualified_name`
 - `quoted_name`
+- `raise_event`
+- `raise_event_statement`
 - `raises_error`
 - `read_only`
 - `read_only_configuration`

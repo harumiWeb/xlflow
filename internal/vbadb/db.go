@@ -17,13 +17,17 @@ const SchemaVersion = 1
 var builtinFS embed.FS
 
 type DB struct {
-	Types        map[string]TypeInfo
-	Aliases      map[string]string
-	Constants    map[string]ConstantInfo
-	ProgIDs      map[string]string
-	ProgIDNames  map[string]string
-	GlobalValues map[string]string
-	GlobalNames  map[string]string
+	Types     map[string]TypeInfo
+	Aliases   map[string]string
+	Constants map[string]ConstantInfo
+	// ConstantCandidates preserves all TypeLib constants that share a folded
+	// name. Constants remains the compatibility single-winner map used by the
+	// existing completion/signature APIs.
+	ConstantCandidates map[string][]ConstantInfo `json:"-"`
+	ProgIDs            map[string]string
+	ProgIDNames        map[string]string
+	GlobalValues       map[string]string
+	GlobalNames        map[string]string
 }
 
 type TypeInfo struct {
@@ -111,13 +115,14 @@ func LoadBuiltinInto(db *DB) error {
 
 func New() *DB {
 	return &DB{
-		Types:        map[string]TypeInfo{},
-		Aliases:      map[string]string{},
-		Constants:    map[string]ConstantInfo{},
-		ProgIDs:      map[string]string{},
-		ProgIDNames:  map[string]string{},
-		GlobalValues: map[string]string{},
-		GlobalNames:  map[string]string{},
+		Types:              map[string]TypeInfo{},
+		Aliases:            map[string]string{},
+		Constants:          map[string]ConstantInfo{},
+		ConstantCandidates: map[string][]ConstantInfo{},
+		ProgIDs:            map[string]string{},
+		ProgIDNames:        map[string]string{},
+		GlobalValues:       map[string]string{},
+		GlobalNames:        map[string]string{},
 	}
 }
 
@@ -192,7 +197,19 @@ func (db *DB) MergeData(data fileData) {
 				Source:     "xlflow",
 			})
 		}
-		db.Constants[fold(c.Name)] = c
+		key := fold(c.Name)
+		db.Constants[key] = c
+		candidates := db.ConstantCandidates[key]
+		duplicate := false
+		for _, existing := range candidates {
+			if constantIdentity(existing) == constantIdentity(c) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			db.ConstantCandidates[key] = append(candidates, c)
+		}
 	}
 	for progID, typ := range data.ProgIDs {
 		key := fold(progID)
@@ -366,6 +383,32 @@ func (db *DB) ResolveConstant(name string) (ConstantInfo, bool) {
 	return c, ok
 }
 
+// ResolveConstants returns every known TypeLib constant with this folded name
+// in deterministic order. ResolveConstant remains the compatibility API for
+// callers that intentionally need one historical winner.
+func (db *DB) ResolveConstants(name string) []ConstantInfo {
+	if db == nil {
+		return nil
+	}
+	key := fold(name)
+	items := append([]ConstantInfo(nil), db.ConstantCandidates[key]...)
+	if len(items) == 0 {
+		if item, ok := db.Constants[key]; ok {
+			items = []ConstantInfo{item}
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Library != items[j].Library {
+			return items[i].Library < items[j].Library
+		}
+		if items[i].EnumGroup != items[j].EnumGroup {
+			return items[i].EnumGroup < items[j].EnumGroup
+		}
+		return items[i].Name < items[j].Name
+	})
+	return items
+}
+
 func (db *DB) ResolveProgID(progID string) (TypeInfo, bool) {
 	if db == nil {
 		return TypeInfo{}, false
@@ -509,6 +552,40 @@ func (db *DB) ConstantsList() []ConstantInfo {
 	return out
 }
 
+// AllConstantsList returns all distinct TypeLib constants, including folded
+// names that intentionally collapse to one compatibility winner in Constants.
+func (db *DB) AllConstantsList() []ConstantInfo {
+	if db == nil {
+		return nil
+	}
+	allCandidates := make([]ConstantInfo, 0)
+	for _, bucket := range db.ConstantCandidates {
+		allCandidates = append(allCandidates, bucket...)
+	}
+	if len(allCandidates) == 0 {
+		for _, candidate := range db.Constants {
+			allCandidates = append(allCandidates, candidate)
+		}
+	}
+	// Map iteration order is intentionally unspecified. Sort all candidates
+	// before folding duplicate library/enum/name identities so the retained
+	// winner is stable even when legacy DB values were populated directly.
+	sort.SliceStable(allCandidates, func(i, j int) bool {
+		return constantLess(allCandidates[i], allCandidates[j])
+	})
+	out := make([]ConstantInfo, 0, len(allCandidates))
+	seen := make(map[string]struct{}, len(allCandidates))
+	for _, candidate := range allCandidates {
+		key := constantIdentity(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
 func (db *DB) ProgIDsList() []string {
 	if db == nil {
 		return nil
@@ -543,4 +620,20 @@ func (db *DB) GlobalsList() []MemberInfo {
 
 func fold(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func constantIdentity(c ConstantInfo) string {
+	return fold(c.Library) + "\x00" + fold(c.EnumGroup) + "\x00" + fold(c.Name)
+}
+
+func constantLess(a, b ConstantInfo) bool {
+	left := []string{constantIdentity(a), a.Library, a.EnumGroup, a.Name, a.Kind, a.Type, a.Value, a.Summary}
+	right := []string{constantIdentity(b), b.Library, b.EnumGroup, b.Name, b.Kind, b.Type, b.Value, b.Summary}
+	for i := range left {
+		if left[i] == right[i] {
+			continue
+		}
+		return left[i] < right[i]
+	}
+	return false
 }
