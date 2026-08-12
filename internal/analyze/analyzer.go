@@ -52,6 +52,12 @@ type Finding struct {
 	// FileOperation is present on VBA245 findings and carries the operation-
 	// specific path safety classification.
 	FileOperation *FileOperationContext `json:"file_operation,omitempty"`
+	// HTTPSecurity and HTTPReliability are redacted HTTP-specific contexts for
+	// VBA246 and VBA247. They never contain header values or complete URLs.
+	HTTPSecurity          *HTTPSecurityContext    `json:"http_security,omitempty"`
+	HTTPReliability       *HTTPReliabilityContext `json:"http_reliability,omitempty"`
+	httpOwnedSinks        map[int]bool
+	dataFlowSinkStartByte int
 }
 
 // ParseError reports that tree-sitter could not produce a complete VBA
@@ -1027,7 +1033,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -1137,12 +1143,13 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if a.Config.Analyze.DetectErrorSuppressionPropagation {
 		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
 	}
-	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
+	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(ctx, file, proc)
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, dataFlowFindings...)
+	findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
 	findings = append(findings, a.filePathSafetyFindings(file, proc)...)
+	findings = append(findings, httpFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -1474,12 +1481,13 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	if a.Config.Analyze.DetectEventHandlerReentry {
 		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
 	}
-	dataFlowFindings, err := a.dataFlowFindingsContext(cancelCtx, file, proc)
+	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, dataFlowFindings...)
+	findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
 	findings = append(findings, a.filePathSafetyFindings(file, proc)...)
+	findings = append(findings, httpFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}

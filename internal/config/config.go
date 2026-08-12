@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -204,6 +206,9 @@ type AnalyzeConfig struct {
 	DetectValue2PerformanceOpportunities     bool     `toml:"detect_value2_performance_opportunities"`
 	DetectProcedureCallCycles                bool     `toml:"detect_procedure_call_cycles"`
 	DetectUnsafeFilePath                     bool     `toml:"detect_unsafe_file_path"`
+	DetectUnsafeHTTPConfiguration            bool     `toml:"detect_unsafe_http_configuration"`
+	DetectMissingHTTPTimeout                 bool     `toml:"detect_missing_http_timeout"`
+	DevelopmentHTTPOrigins                   []string `toml:"development_http_origins"`
 }
 
 type lintRuleAdapter struct {
@@ -296,6 +301,8 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA243": {Get: func(c AnalyzeConfig) bool { return c.DetectValue2PerformanceOpportunities }, Set: func(c *AnalyzeConfig, v bool) { c.DetectValue2PerformanceOpportunities = v }},
 	"VBA244": {Get: func(c AnalyzeConfig) bool { return c.DetectProcedureCallCycles }, Set: func(c *AnalyzeConfig, v bool) { c.DetectProcedureCallCycles = v }},
 	"VBA245": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeFilePath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeFilePath = v }},
+	"VBA246": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeHTTPConfiguration }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeHTTPConfiguration = v }},
+	"VBA247": {Get: func(c AnalyzeConfig) bool { return c.DetectMissingHTTPTimeout }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMissingHTTPTimeout = v }},
 }
 
 var (
@@ -424,6 +431,9 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 		return cfg, err
 	}
 	if err := normalizeMetricsExclude(&cfg.Metrics); err != nil {
+		return cfg, err
+	}
+	if err := normalizeDevelopmentHTTPOrigins(&cfg.Analyze); err != nil {
 		return cfg, err
 	}
 	return cfg, validate(cfg)
@@ -559,6 +569,80 @@ func normalizeMetricsExclude(cfg *MetricsConfig) error {
 	sort.Strings(patterns)
 	cfg.Exclude = patterns
 	return nil
+}
+
+func normalizeDevelopmentHTTPOrigins(cfg *AnalyzeConfig) error {
+	seen := make(map[string]bool, len(cfg.DevelopmentHTTPOrigins))
+	origins := make([]string, 0, len(cfg.DevelopmentHTTPOrigins))
+	for _, value := range cfg.DevelopmentHTTPOrigins {
+		origin, err := NormalizeDevelopmentHTTPOrigin(value)
+		if err != nil {
+			return fmt.Errorf("invalid analyze.development_http_origins entry %q: %w", value, err)
+		}
+		if !seen[origin] {
+			seen[origin] = true
+			origins = append(origins, origin)
+		}
+	}
+	sort.Strings(origins)
+	cfg.DevelopmentHTTPOrigins = origins
+	return nil
+}
+
+// NormalizeDevelopmentHTTPOrigin validates and canonicalizes an explicitly
+// trusted development HTTP origin. It intentionally accepts origins only: URL
+// credentials, paths, queries, fragments, wildcards, and HTTPS are rejected.
+func NormalizeDevelopmentHTTPOrigin(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" || raw != value {
+		return "", errors.New("must be a non-empty absolute HTTP origin without surrounding whitespace")
+	}
+	if strings.Contains(raw, "*") {
+		return "", errors.New("wildcards are not allowed")
+	}
+	if strings.Contains(raw, "#") {
+		return "", errors.New("fragments are not allowed")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("must be a valid absolute HTTP origin: %w", err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") || parsed.Host == "" || parsed.Opaque != "" {
+		return "", errors.New("must use http:// with an absolute host")
+	}
+	if parsed.User != nil {
+		return "", errors.New("userinfo is not allowed")
+	}
+	if parsed.Path != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", errors.New("paths, queries, and fragments are not allowed")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", errors.New("host is required")
+	}
+	port := parsed.Port()
+	if port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return "", errors.New("port must be between 1 and 65535")
+		}
+		if portNumber == 80 {
+			port = ""
+		} else {
+			port = strconv.Itoa(portNumber)
+		}
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	} else {
+		host = strings.ToLower(host)
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return "http://" + host, nil
 }
 
 func isDriveAbsolute(path string) bool {
@@ -937,6 +1021,15 @@ func renderAnalyzeConfig(cfg AnalyzeConfig) string {
 		}
 		b.WriteString("]\n")
 	}
+	b.WriteString("\n# Plain HTTP origins explicitly allowed for development use.\n")
+	b.WriteString("development_http_origins = [")
+	for i, origin := range cfg.DevelopmentHTTPOrigins {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconv.Quote(origin))
+	}
+	b.WriteString("]\n")
 	optIn := legacyOptInAnalyzeRulesForWrite(cfg)
 	optInSet := map[string]bool{}
 	for _, rule := range optIn {
@@ -1035,6 +1128,10 @@ func Write(path string, cfg Config) (err error) {
 	if err := validateMetricsThresholds(metricsConfig.Thresholds); err != nil {
 		return err
 	}
+	analyzeConfig := cfg.Analyze
+	if err := normalizeDevelopmentHTTPOrigins(&analyzeConfig); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
@@ -1046,7 +1143,7 @@ func Write(path string, cfg Config) (err error) {
 	}()
 
 	lintConfigText := renderLintConfig(cfg.Lint)
-	analyzeConfigText := renderAnalyzeConfig(cfg.Analyze)
+	analyzeConfigText := renderAnalyzeConfig(analyzeConfig)
 	metricsConfigText := renderMetricsConfig(metricsConfig)
 
 	const tmpl = `# Project identity and entry point.

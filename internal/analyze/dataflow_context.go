@@ -68,3 +68,20 @@ type FileOperationContext struct {
 	Anchor      string `json:"anchor,omitempty"`
 	Overwrite   *bool  `json:"overwrite,omitempty"`
 }
+
+// HTTPSecurityContext describes an HTTP transport or secret-exposure policy
+// observation without retaining credential values or URL path/query data.
+type HTTPSecurityContext struct {
+	API      string `json:"api,omitempty"`
+	RiskKind string `json:"risk_kind"`
+	Header   string `json:"header,omitempty"`
+	Origin   string `json:"origin,omitempty"`
+}
+
+// HTTPReliabilityContext describes the timeout state observed at an HTTP Send
+// operation. TimeoutState is either "missing" or "unbounded".
+type HTTPReliabilityContext struct {
+	API          string `json:"api,omitempty"`
+	RiskKind     string `json:"risk_kind"`
+	TimeoutState string `json:"timeout_state"`
+}

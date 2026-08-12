@@ -107,6 +107,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA243`](#vba243) | analyze | information | procedure-local | no      | Value2 performance opportunity                     |
 | [`VBA244`](#vba244) | analyze | information | project-wide    | yes     | Recursive and cyclic procedure dependency          |
 | [`VBA245`](#vba245) | analyze | warning     | procedure-local | yes     | Unsafe destructive file and path operation         |
+| [`VBA246`](#vba246) | analyze | warning     | procedure-local | yes     | Unsafe HTTP or TLS configuration                   |
+| [`VBA247`](#vba247) | analyze | warning     | procedure-local | yes     | Missing or unlimited HTTP timeout                  |
 
 ## VB001
 
@@ -2329,3 +2331,47 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                        |
 | Real-time editor diagnostic | yes                       |
 | Fix available               | no                        |
+
+## VBA246
+
+**Unsafe HTTP or TLS configuration.** An HTTP client configuration may expose credentials, weaken TLS validation, log authorization data, or immediately execute downloaded content.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `security`                         |
+| Evidence class              | `policy`                           |
+| Compile-equivalent          | no                                 |
+| Default severity            | `warning`                          |
+| Supported severities        | `warning`                          |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `medium`                           |
+| Enabled by default          | yes                                |
+| Configuration               | `detect_unsafe_http_configuration` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |
+
+## VBA247
+
+**Missing or unlimited HTTP timeout.** A long-running HTTP operation may wait indefinitely because supported client timeouts are missing or explicitly unlimited.
+
+| Property                    | Value                         |
+| --------------------------- | ----------------------------- |
+| Family                      | `analyze`                     |
+| Category                    | `reliability`                 |
+| Evidence class              | `policy`                      |
+| Compile-equivalent          | no                            |
+| Default severity            | `warning`                     |
+| Supported severities        | `warning`                     |
+| Surfaces                    | `analyze`, `lsp`              |
+| Scope                       | `procedure-local`             |
+| Precision                   | `medium`                      |
+| Enabled by default          | yes                           |
+| Configuration               | `detect_missing_http_timeout` |
+| Inline suppression          | yes                           |
+| Blocks source preflight     | no                            |
+| Real-time editor diagnostic | yes                           |
+| Fix available               | no                            |
