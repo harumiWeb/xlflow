@@ -15,7 +15,7 @@ func TestResolutionDiagnosticsProjectNegativeContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := `Public Event Changed(ByVal value As Long)
-Public Const Scalar = 1
+Private Const Scalar = 1
 Sub Run()
     Scalar()
     RaiseEvent Missing(1)
