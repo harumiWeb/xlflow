@@ -108,6 +108,9 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA242` | information / warning | An expensive operation targets an entire row, column, worksheet, or unbounded `UsedRange`.                                                    |
 | `VBA243` | information / warning | A bulk or repeated `Range.Value` transfer may benefit from `Range.Value2` when Date/Currency coercion is not required.                        |
 | `VBA244` | information / warning | A confirmed recursive or cyclic procedure dependency was found; cycles with dangerous effects are elevated to `warning`.                      |
+| `VB052`  | error                 | Project-local call target is provably missing or known non-callable; blocks source preflight.                                                 |
+| `VB053`  | error                 | Bare Enum member has multiple visible candidates with no lexical winner; blocks source preflight.                                             |
+| `VB054`  | error                 | `RaiseEvent` target is undeclared in the same object module; blocks source preflight.                                                         |
 | `VBA245` | warning               | A destructive or state-dependent file operation may receive an unsafe, relative, wildcard, overwritten, traversing, or external-input path.   |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
@@ -266,6 +269,12 @@ Use `xlflow:disable-line VBA237`, `xlflow:disable-next-line VBA237`, or
 `[analyze].disabled_rules = ["VBA237"]` for intentional exceptions.
 
 `VBA229` is a realtime and batch compile-equivalent error for unresolved type identifiers in procedure-local `Dim` and `Static ... As <Type>` declarations. It uses the production built-in/host/TypeLib and project-symbol resolver, including enum, class, UserForm, and document-module types, points at the type identifier, cannot be suppressed, and blocks source preflight. When the generated TypeLib manifest is missing, malformed, empty, or otherwise incomplete, lookup misses are left unreported because none of those metadata states proves that a referenced type is absent. Parameters, return types, and module-level declarations are outside the v1 rule scope.
+
+The compile-equivalent `VB052`–`VB054` projections use the same complete
+canonical resolver snapshot as batch `lint` and LSP Full diagnostics. They are
+quiet for external, built-in, late-bound, dynamic, conditional, partial, or
+otherwise incomplete resolution and therefore never turn uncertainty into an
+analyzer error.
 
 ## JSON Output Example
 

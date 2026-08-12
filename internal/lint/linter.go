@@ -14,6 +14,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/gui"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -30,6 +31,8 @@ type Issue struct {
 	File             string `json:"file"`
 	Line             int    `json:"line"`
 	Column           int    `json:"column,omitempty"`
+	EndLine          int    `json:"end_line,omitempty"`
+	EndColumn        int    `json:"end_column,omitempty"`
 	Message          string `json:"message"`
 	Kind             string `json:"kind,omitempty"`
 	Symbol           string `json:"symbol,omitempty"`
@@ -189,7 +192,7 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	issues = append(issues, uiIssues...)
-	projectIssues, err := l.projectIssuesContext(ctx)
+	projectIssues, err := l.projectIssuesContext(ctx, files)
 	if err != nil {
 		return Result{}, err
 	}
@@ -2046,27 +2049,51 @@ afterVisibility:
 	}
 }
 
-func (l Linter) projectIssuesContext(ctx context.Context) ([]Issue, error) {
+func (l Linter) projectIssuesContext(ctx context.Context, files []string) ([]Issue, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	var (
+		issues []Issue
+		result *symbols.Result
+		err    error
+	)
+	if l.PathFilter == nil {
+		// Resolution and scope rules consume the same canonical symbol index.
+		// Keep one extraction per project run so module identity and parse
+		// completeness cannot diverge between the two surfaces.
+		result, err = symbols.Inspect(symbols.Options{RootDir: l.RootDir, Config: l.Config, IncludePrivate: true, IncludeLabels: false})
+		if err != nil {
+			return nil, err
+		}
+		issues, err = l.resolutionIssuesContextWithResult(ctx, files, result)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		issues, err = l.resolutionIssuesContext(ctx, files)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cfg := l.Config.Lint
 	if !cfg.DetectScopeShadowing && !cfg.DetectUnusedPrivateProcedures {
-		return nil, nil
+		return issues, nil
 	}
-	result, err := symbols.Inspect(symbols.Options{
-		RootDir:        l.RootDir,
-		Config:         l.Config,
-		IncludePrivate: true,
-		IncludeLabels:  false,
-	})
-	if err != nil {
-		return nil, err
+	if result == nil {
+		result, err = symbols.Inspect(symbols.Options{
+			RootDir:        l.RootDir,
+			Config:         l.Config,
+			IncludePrivate: true,
+			IncludeLabels:  false,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var issues []Issue
 	if cfg.DetectScopeShadowing {
 		issues = append(issues, l.symbolScopeIssues(result)...)
 	}
@@ -2085,6 +2112,160 @@ func (l Linter) projectIssuesContext(ctx context.Context) ([]Issue, error) {
 		issues = append(issues, unusedIssues...)
 	}
 	return issues, ctx.Err()
+}
+
+// resolutionIssuesContext projects the canonical procedureir resolution
+// policy into lint issues.  A filtered lint run cannot prove project-wide
+// negatives, so PathFilter deliberately makes this phase fail open.
+func (l Linter) resolutionIssuesContext(ctx context.Context, files []string) ([]Issue, error) {
+	if l.PathFilter != nil {
+		return nil, nil
+	}
+	result, err := symbols.Inspect(symbols.Options{RootDir: l.RootDir, Config: l.Config, IncludePrivate: true, IncludeLabels: false})
+	if err != nil {
+		return nil, err
+	}
+	return l.resolutionIssuesContextWithResult(ctx, files, result)
+}
+
+func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []string, result *symbols.Result) ([]Issue, error) {
+	if result == nil {
+		return nil, nil
+	}
+	// Project-local procedure/event proofs do not require the optional TypeLib
+	// database. Keep the project snapshot completeness separate, while marking
+	// Enum candidates uncertain when TypeLib coverage is incomplete so VB053 and
+	// Enum non-callable claims still fail open.
+	complete := result.Summary.ParseErrors == 0 && result.Summary.MissingNodes == 0
+	typeDBResult, typeDBErr := typedb.LoadForRuntime("")
+	typeDBComplete := typeDBErr == nil && typeDBResult.Complete
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, file := range result.Files {
+		for _, sym := range file.Symbols {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
+				Visibility: sym.Visibility, File: sym.File, Line: sym.StartLine, Parent: sym.Parent, IsArray: sym.IsArray,
+				Recovered: strings.EqualFold(sym.Kind, "enum_member") && !typeDBComplete,
+			})
+		}
+	}
+	if typeDBErr == nil && typeDBResult.DB != nil {
+		for _, constant := range typeDBResult.DB.AllConstantsList() {
+			if strings.TrimSpace(constant.EnumGroup) == "" {
+				continue
+			}
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
+				File: "<typelib>" + constant.Library, Recovered: !typeDBComplete,
+			})
+		}
+	}
+	type resolutionDocument struct {
+		path string
+		ir   procedureir.DocumentIR
+	}
+	documents := make([]resolutionDocument, 0, len(files))
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		module, kind := moduleForSymbols(result, l.RootDir, path)
+		ir, err := procedureir.BuildSource(procedureir.BuildOptions{RootDir: l.RootDir, Path: path, ModuleName: module, ModuleKind: kind}, source)
+		if err != nil {
+			// Any source that cannot be represented in procedure IR makes the
+			// project snapshot incomplete. Fail open for every file rather than
+			// emitting a partial set of cross-file resolution negatives.
+			complete = false
+			continue
+		}
+		if ir.Parse.HasError || ir.Parse.HasMissing {
+			complete = false
+		}
+		documents = append(documents, resolutionDocument{path: path, ir: ir})
+	}
+	resolver := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+	issues := make([]Issue, 0)
+	for _, document := range documents {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resolved := procedureir.Resolve(document.ir, resolver)
+		for _, diagnostic := range procedureir.Diagnostics(resolved, complete) {
+			// procedureir ranges are already one-based (unlike LSP positions).
+			issues = append(issues, Issue{Code: diagnostic.Code, Severity: "error", File: displayResolutionPath(l.RootDir, document.path),
+				Line: diagnostic.Range.StartLine, Column: diagnostic.Range.StartColumn,
+				EndLine: diagnostic.Range.EndLine, EndColumn: diagnostic.Range.EndColumn,
+				Message: diagnostic.Message, Suggestion: resolutionSuggestion(diagnostic.Code)})
+		}
+	}
+	return issues, nil
+}
+
+// displayResolutionPath keeps project-resolution diagnostics consistent with
+// the file-relative paths emitted by the rest of the linter and by corpus
+// source mappings. The resolver itself still consumes absolute paths so that
+// symbol identity and source loading remain unambiguous.
+func displayResolutionPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+func moduleForSymbols(result *symbols.Result, root, path string) (string, string) {
+	if result == nil {
+		return "", ""
+	}
+	rootAbs, _ := filepath.Abs(root)
+	pathAbs := path
+	if !filepath.IsAbs(pathAbs) {
+		pathAbs = filepath.Join(rootAbs, pathAbs)
+	}
+	pathAbs, _ = filepath.Abs(pathAbs)
+	pathAbs = filepath.Clean(pathAbs)
+	rel, _ := filepath.Rel(rootAbs, pathAbs)
+	rel = filepath.ToSlash(rel)
+	base := strings.ToLower(filepath.Base(pathAbs))
+	var baseMatch *symbols.FileResult
+	baseAmbiguous := false
+	for _, file := range result.Files {
+		filePath := file.Path
+		if !filepath.IsAbs(filePath) {
+			filePath = filepath.Join(rootAbs, filePath)
+		}
+		filePath, _ = filepath.Abs(filePath)
+		filePath = filepath.Clean(filePath)
+		fileRel, _ := filepath.Rel(rootAbs, filePath)
+		if strings.EqualFold(filepath.ToSlash(fileRel), rel) || strings.EqualFold(filePath, pathAbs) {
+			return file.ModuleName, file.ModuleKind
+		}
+		if strings.ToLower(filepath.Base(filePath)) == base {
+			if baseMatch != nil || baseAmbiguous {
+				baseMatch = nil // Ambiguous basename; do not guess a module.
+				baseAmbiguous = true
+			} else {
+				candidate := file
+				baseMatch = &candidate
+			}
+		}
+	}
+	if baseMatch != nil {
+		return baseMatch.ModuleName, baseMatch.ModuleKind
+	}
+	return "", ""
+}
+
+func resolutionSuggestion(code string) string {
+	if suggestion := procedureir.ResolutionSuggestion(code); suggestion != "" {
+		return suggestion
+	}
+	return "Correct the deterministic compile-time resolution error."
 }
 
 func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {

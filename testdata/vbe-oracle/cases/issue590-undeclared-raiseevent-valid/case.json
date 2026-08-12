@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "issue590-undeclared-raiseevent-valid",
+  "description": "Focused VBE accepted control for RaiseEvent targeting a declared event.",
+  "modules": [
+    {
+      "name": "Widget",
+      "kind": "class",
+      "path": "Widget.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB054"],
+    "forbidden_diagnostics": [
+      { "code": "VB054", "severity": "error", "surfaces": ["lint", "lsp", "analyze"] }
+    ]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-12T02:56:07Z"
+      }
+    ]
+  }
+}
