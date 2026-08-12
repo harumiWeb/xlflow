@@ -274,7 +274,7 @@ The compile-equivalent `VB052`–`VB054` projections use the same complete
 canonical resolver snapshot as batch `lint` and LSP Full diagnostics. They are
 quiet for external, built-in, late-bound, dynamic, conditional, partial, or
 otherwise incomplete resolution and therefore never turn uncertainty into an
-analyze error.
+analyzer error.
 
 ## JSON Output Example
 

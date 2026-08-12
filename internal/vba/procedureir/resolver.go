@@ -16,45 +16,45 @@ func Resolve(in DocumentIR, resolver Resolver) DocumentIR {
 	for procedureIndex := range out.Procedures {
 		procedure := &out.Procedures[procedureIndex]
 		lexicalNonCallable := declarationNames(out.Declarations, procedure.Declarations)
+		eventResolver, hasEventResolver := resolver.(interface {
+			ResolveEvent(SymbolReference) SymbolResolution
+		})
 		for callIndex := range procedure.Calls {
 			call := &procedure.Calls[callIndex]
+			if call.IsRaiseEvent {
+				// RaiseEvent is resolved from the syntax-local event facts below.
+				// A generic Resolver cannot prove same-object event visibility, so
+				// those calls remain incomplete rather than falling through to the
+				// ordinary procedure resolver.
+				continue
+			}
 			if !isAssignmentTargetCall(*call, *procedure) {
 				call.NonCallableNames = append([]string(nil), lexicalNonCallable...)
 			}
-			if call.IsRaiseEvent {
-				ref := SymbolReference{Name: call.Callee.BaseName, Module: out.ModuleName, Caller: call.Caller, Range: call.Range}
-				eventResolver, ok := resolver.(interface {
-					ResolveEvent(SymbolReference) SymbolResolution
-				})
-				if ok {
-					event := eventResolver.ResolveEvent(ref)
-					call.Resolution = CallResolution{Status: event.Status, Candidates: cloneCandidates(event.Candidates)}
-				} else {
-					call.Resolution = cloneCallResolution(resolver.ResolveCall(cloneCall(*call)))
-				}
-			} else {
-				call.Resolution = cloneCallResolution(resolver.ResolveCall(cloneCall(*call)))
-			}
-			if call.IsRaiseEvent {
-				for eventIndex := range procedure.RaiseEvents {
-					event := &procedure.RaiseEvents[eventIndex]
-					if strings.EqualFold(event.Name, call.Callee.BaseName) {
-						event.Resolution = SymbolResolution{Status: call.Resolution.Status, Scope: ScopeProject, Candidates: cloneCandidates(call.Resolution.Candidates)}
-						break
-					}
-				}
-			}
+			call.Resolution = cloneCallResolution(resolver.ResolveCall(cloneCall(*call)))
 		}
 		for eventIndex := range procedure.RaiseEvents {
 			event := &procedure.RaiseEvents[eventIndex]
-			if eventResolver, ok := resolver.(interface {
-				ResolveEvent(SymbolReference) SymbolResolution
-			}); ok {
+			if hasEventResolver {
 				event.Resolution = cloneSymbolResolution(eventResolver.ResolveEvent(SymbolReference{
 					Name: event.Name, Module: out.ModuleName, Caller: event.Caller, Range: event.Range,
 				}))
 			} else {
-				event.Resolution = SymbolResolution{Scope: ScopeUnresolved, Status: ResolutionUnresolved}
+				event.Resolution = SymbolResolution{Scope: ScopeUnresolved, Status: ResolutionIncomplete}
+			}
+		}
+		for callIndex := range procedure.Calls {
+			call := &procedure.Calls[callIndex]
+			if !call.IsRaiseEvent {
+				continue
+			}
+			call.Resolution = CallResolution{Status: ResolutionIncomplete}
+			for _, event := range procedure.RaiseEvents {
+				if !strings.EqualFold(event.Name, call.Callee.BaseName) {
+					continue
+				}
+				call.Resolution = CallResolution{Status: event.Resolution.Status, Candidates: cloneCandidates(event.Resolution.Candidates)}
+				break
 			}
 		}
 		for accessIndex := range procedure.Accesses {
@@ -133,7 +133,7 @@ func isAssignmentTargetCall(call CallSite, procedure ProcedureIR) bool {
 func declarationNames(module, procedure []Declaration) []string {
 	result := make([]string, 0, len(module)+len(procedure))
 	appendDeclaration := func(declaration Declaration) {
-		if strings.TrimSpace(declaration.Name) == "" || declaration.Kind == "return_slot" {
+		if strings.TrimSpace(declaration.Name) == "" || strings.EqualFold(declaration.Kind, "return_slot") {
 			return
 		}
 		if len(declaration.ConditionalBranches) > 0 || declaration.Recovered {

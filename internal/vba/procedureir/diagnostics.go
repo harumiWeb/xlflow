@@ -16,6 +16,23 @@ type ResolutionDiagnostic struct {
 	Candidates []Candidate
 }
 
+// ResolutionSuggestion returns the canonical remediation text for a
+// deterministic project-resolution diagnostic.  Batch analysis, lint, and
+// editor adapters share this lookup so the same VB052-VB054 finding does not
+// drift across surfaces.
+func ResolutionSuggestion(code string) string {
+	switch strings.TrimSpace(code) {
+	case "VB052":
+		return "Call a declared Sub, Function, or Property, or qualify the project-local target correctly."
+	case "VB053":
+		return "Qualify the Enum member with its Enum name."
+	case "VB054":
+		return "Declare the Event in this object module before raising it."
+	default:
+		return ""
+	}
+}
+
 // Diagnostics returns only negative outcomes that are provable from this
 // resolved document.  Incomplete snapshots, parser recovery, external/member
 // calls, and dynamic APIs deliberately fail open.
@@ -75,16 +92,24 @@ func Diagnostics(doc DocumentIR, complete bool) []ResolutionDiagnostic {
 
 func accessIsQualified(procedure ProcedureIR, access VariableAccess) bool {
 	if access.ExpressionID <= 0 {
-		return false
+		// A missing expression link means the qualifier cannot be established
+		// from syntax.  Suppress the negative diagnostic rather than treating
+		// incomplete IR as proof of a bare reference.
+		return true
 	}
 	for _, expression := range procedure.Expressions {
 		if expression.ID != access.ExpressionID {
 			continue
 		}
 		text := strings.TrimSpace(expression.Text)
+		if text == "" {
+			return true
+		}
 		return strings.ContainsAny(text, ".!")
 	}
-	return false
+	// The expression ID may refer to a node omitted by a recovered parse.
+	// Fail open when the link cannot be resolved.
+	return true
 }
 
 // syntacticInvocation filters parser call facts that are actually scalar
@@ -102,18 +127,55 @@ func syntacticInvocation(procedure ProcedureIR, call CallSite) bool {
 		return true
 	}
 	lowerText := strings.ToLower(text)
-	idx := strings.Index(lowerText, strings.ToLower(callee))
+	idx := indexTokenOccurrence(lowerText, strings.ToLower(callee))
 	if idx < 0 {
-		return true
+		// The parser supplied a call fact whose callee cannot be found in the
+		// statement.  There is no syntactic evidence to project as a negative
+		// diagnostic, so fail open.
+		return false
 	}
 	rest := strings.TrimSpace(text[idx+len(callee):])
 	if rest == "" {
+		if statement.Kind == StatementAssignment || statement.Kind == StatementSet {
+			// A bare identifier on the right-hand side is an expression read;
+			// without parentheses there is no syntactic evidence of invocation.
+			return false
+		}
 		// Nested identifier reads in a call statement have an expression ID
 		// but no argument list/parentheses (e.g. ADO_ASYNC_OPTION).
 		return call.ExpressionID == 0 || strings.Contains(text, "(")
 	}
 	first := rest[0]
 	return !strings.ContainsRune("+-*/=<>:&", rune(first))
+}
+
+// indexTokenOccurrence finds a case-insensitive callee occurrence without
+// matching it as a substring of a larger VBA identifier (for example the
+// `Helper` suffix in `MyHelperValue`).
+func indexTokenOccurrence(text, token string) int {
+	if token == "" {
+		return -1
+	}
+	for start := 0; start <= len(text)-len(token); {
+		relative := strings.Index(text[start:], token)
+		if relative < 0 {
+			return -1
+		}
+		idx := start + relative
+		beforeOK := idx == 0 || !vbaIdentifierByte(text[idx-1])
+		after := idx + len(token)
+		afterOK := after >= len(text) || !vbaIdentifierByte(text[after])
+		if beforeOK && afterOK {
+			return idx
+		}
+		start = idx + 1
+	}
+	return -1
+}
+
+func vbaIdentifierByte(value byte) bool {
+	return value == '_' || value == '$' || value == '%' || value == '&' || value == '@' || value == '^' || value == '!' ||
+		(value >= '0' && value <= '9') || (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z')
 }
 
 func documentResolutionIncomplete(doc DocumentIR) bool {
@@ -128,6 +190,16 @@ func documentResolutionIncomplete(doc DocumentIR) bool {
 	for _, procedure := range doc.Procedures {
 		if procedure.Symbol.Recovered || len(procedure.Symbol.ConditionalBranches) > 0 {
 			return true
+		}
+		for _, declaration := range procedure.Declarations {
+			if declaration.Recovered || len(declaration.ConditionalBranches) > 0 {
+				return true
+			}
+		}
+		for _, statement := range procedure.Statements {
+			if statement.Recovered {
+				return true
+			}
 		}
 		for _, event := range procedure.RaiseEvents {
 			if event.Recovered || len(event.ConditionalBranches) > 0 {

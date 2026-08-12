@@ -2053,22 +2053,43 @@ func (l Linter) projectIssuesContext(ctx context.Context, files []string) ([]Iss
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	issues, err := l.resolutionIssuesContext(ctx, files)
-	if err != nil {
-		return nil, err
+	var (
+		issues []Issue
+		result *symbols.Result
+		err    error
+	)
+	if l.PathFilter == nil {
+		// Resolution and scope rules consume the same canonical symbol index.
+		// Keep one extraction per project run so module identity and parse
+		// completeness cannot diverge between the two surfaces.
+		result, err = symbols.Inspect(symbols.Options{RootDir: l.RootDir, Config: l.Config, IncludePrivate: true, IncludeLabels: false})
+		if err != nil {
+			return nil, err
+		}
+		issues, err = l.resolutionIssuesContextWithResult(ctx, files, result)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		issues, err = l.resolutionIssuesContext(ctx, files)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cfg := l.Config.Lint
 	if !cfg.DetectScopeShadowing && !cfg.DetectUnusedPrivateProcedures {
 		return issues, nil
 	}
-	result, err := symbols.Inspect(symbols.Options{
-		RootDir:        l.RootDir,
-		Config:         l.Config,
-		IncludePrivate: true,
-		IncludeLabels:  false,
-	})
-	if err != nil {
-		return nil, err
+	if result == nil {
+		result, err = symbols.Inspect(symbols.Options{
+			RootDir:        l.RootDir,
+			Config:         l.Config,
+			IncludePrivate: true,
+			IncludeLabels:  false,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -2104,6 +2125,13 @@ func (l Linter) resolutionIssuesContext(ctx context.Context, files []string) ([]
 	if err != nil {
 		return nil, err
 	}
+	return l.resolutionIssuesContextWithResult(ctx, files, result)
+}
+
+func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []string, result *symbols.Result) ([]Issue, error) {
+	if result == nil {
+		return nil, nil
+	}
 	complete := result.Summary.ParseErrors == 0 && result.Summary.MissingNodes == 0
 	typeDBResult, typeDBErr := typedb.LoadForRuntime("")
 	if typeDBErr != nil || !typeDBResult.Complete {
@@ -2130,8 +2158,11 @@ func (l Linter) resolutionIssuesContext(ctx context.Context, files []string) ([]
 			})
 		}
 	}
-	resolver := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
-	issues := make([]Issue, 0)
+	type resolutionDocument struct {
+		path string
+		ir   procedureir.DocumentIR
+	}
+	documents := make([]resolutionDocument, 0, len(files))
 	for _, path := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -2143,13 +2174,29 @@ func (l Linter) resolutionIssuesContext(ctx context.Context, files []string) ([]
 		module, kind := moduleForSymbols(result, l.RootDir, path)
 		ir, err := procedureir.BuildSource(procedureir.BuildOptions{RootDir: l.RootDir, Path: path, ModuleName: module, ModuleKind: kind}, source)
 		if err != nil {
+			// Any source that cannot be represented in procedure IR makes the
+			// project snapshot incomplete. Fail open for every file rather than
+			// emitting a partial set of cross-file resolution negatives.
+			complete = false
 			continue
 		}
-		resolved := procedureir.Resolve(ir, resolver)
+		if ir.Parse.HasError || ir.Parse.HasMissing {
+			complete = false
+		}
+		documents = append(documents, resolutionDocument{path: path, ir: ir})
+	}
+	resolver := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+	issues := make([]Issue, 0)
+	for _, document := range documents {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resolved := procedureir.Resolve(document.ir, resolver)
 		for _, diagnostic := range procedureir.Diagnostics(resolved, complete) {
-			issues = append(issues, Issue{Code: diagnostic.Code, Severity: "error", File: displayResolutionPath(l.RootDir, path),
-				Line: diagnostic.Range.StartLine + 1, Column: diagnostic.Range.StartColumn + 1,
-				EndLine: diagnostic.Range.EndLine + 1, EndColumn: diagnostic.Range.EndColumn + 1,
+			// procedureir ranges are already one-based (unlike LSP positions).
+			issues = append(issues, Issue{Code: diagnostic.Code, Severity: "error", File: displayResolutionPath(l.RootDir, document.path),
+				Line: diagnostic.Range.StartLine, Column: diagnostic.Range.StartColumn,
+				EndLine: diagnostic.Range.EndLine, EndColumn: diagnostic.Range.EndColumn,
 				Message: diagnostic.Message, Suggestion: resolutionSuggestion(diagnostic.Code)})
 		}
 	}
@@ -2169,27 +2216,53 @@ func displayResolutionPath(root, path string) string {
 }
 
 func moduleForSymbols(result *symbols.Result, root, path string) (string, string) {
-	rel, _ := filepath.Rel(root, path)
+	if result == nil {
+		return "", ""
+	}
+	rootAbs, _ := filepath.Abs(root)
+	pathAbs := path
+	if !filepath.IsAbs(pathAbs) {
+		pathAbs = filepath.Join(rootAbs, pathAbs)
+	}
+	pathAbs, _ = filepath.Abs(pathAbs)
+	pathAbs = filepath.Clean(pathAbs)
+	rel, _ := filepath.Rel(rootAbs, pathAbs)
 	rel = filepath.ToSlash(rel)
+	base := strings.ToLower(filepath.Base(pathAbs))
+	var baseMatch *symbols.FileResult
+	baseAmbiguous := false
 	for _, file := range result.Files {
-		if strings.EqualFold(filepath.ToSlash(file.Path), rel) || strings.EqualFold(filepath.Clean(file.Path), filepath.Clean(path)) {
+		filePath := file.Path
+		if !filepath.IsAbs(filePath) {
+			filePath = filepath.Join(rootAbs, filePath)
+		}
+		filePath, _ = filepath.Abs(filePath)
+		filePath = filepath.Clean(filePath)
+		fileRel, _ := filepath.Rel(rootAbs, filePath)
+		if strings.EqualFold(filepath.ToSlash(fileRel), rel) || strings.EqualFold(filePath, pathAbs) {
 			return file.ModuleName, file.ModuleKind
 		}
+		if strings.ToLower(filepath.Base(filePath)) == base {
+			if baseMatch != nil || baseAmbiguous {
+				baseMatch = nil // Ambiguous basename; do not guess a module.
+				baseAmbiguous = true
+			} else {
+				candidate := file
+				baseMatch = &candidate
+			}
+		}
+	}
+	if baseMatch != nil {
+		return baseMatch.ModuleName, baseMatch.ModuleKind
 	}
 	return "", ""
 }
 
 func resolutionSuggestion(code string) string {
-	switch code {
-	case "VB052":
-		return "Call a declared Sub, Function, or Property, or qualify the project-local target correctly."
-	case "VB053":
-		return "Qualify the Enum member with its Enum name."
-	case "VB054":
-		return "Declare the Event in this object module before raising it."
-	default:
-		return "Correct the deterministic compile-time resolution error."
+	if suggestion := procedureir.ResolutionSuggestion(code); suggestion != "" {
+		return suggestion
 	}
+	return "Correct the deterministic compile-time resolution error."
 }
 
 func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {

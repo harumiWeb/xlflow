@@ -953,7 +953,7 @@ func (e *extractor) includeSymbol(sym Symbol) bool {
 	}
 	if sym.Visibility == "" {
 		switch sym.Kind {
-		case "sub", "function", "property_get", "property_let", "property_set", "property", "declare", "declare_sub", "declare_function", "type", "enum", "const":
+		case "sub", "function", "property_get", "property_let", "property_set", "property", "declare", "declare_sub", "declare_function", "type", "enum", "const", "event":
 			return true
 		default:
 			return false

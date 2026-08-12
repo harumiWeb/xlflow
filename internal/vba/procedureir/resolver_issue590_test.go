@@ -2,6 +2,26 @@ package procedureir
 
 import "testing"
 
+type genericProcedureResolver struct{}
+
+func (genericProcedureResolver) ResolveCall(CallSite) CallResolution {
+	return CallResolution{Status: ResolutionMatched}
+}
+
+func (genericProcedureResolver) ResolveSymbol(SymbolReference) SymbolResolution {
+	return SymbolResolution{Scope: ScopeProject, Status: ResolutionMatched}
+}
+
+type countingEventResolver struct {
+	SymbolResolver
+	eventCalls int
+}
+
+func (r *countingEventResolver) ResolveEvent(ref SymbolReference) SymbolResolution {
+	r.eventCalls++
+	return r.SymbolResolver.ResolveEvent(ref)
+}
+
 func TestIssue590ResolverNegativeOutcomes(t *testing.T) {
 	r := NewResolver([]ResolverSymbol{
 		{Name: "value", Module: "Main", ModuleKind: "standard", Kind: "const", Visibility: "Public", File: "Main.bas", Line: 1},
@@ -171,5 +191,74 @@ End Sub
 	}
 	if diagnostics[0].Range.StartByte >= diagnostics[0].Range.EndByte {
 		t.Fatalf("VB054 range = %#v, want event identifier range", diagnostics[0].Range)
+	}
+}
+
+func TestIssue590RaiseEventFallbackIsIncomplete(t *testing.T) {
+	doc, err := BuildSource(BuildOptions{Path: "Widget.cls", ModuleKind: "class"}, []byte(`Public Event Changed()
+Public Sub Run()
+    RaiseEvent Changed
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := Resolve(doc, genericProcedureResolver{})
+	if got := resolved.Procedures[0].RaiseEvents[0].Resolution.Status; got != ResolutionIncomplete {
+		t.Fatalf("RaiseEvent fallback status = %q, want incomplete", got)
+	}
+	if got := resolved.Procedures[0].Calls[0].Resolution.Status; got != ResolutionIncomplete {
+		t.Fatalf("RaiseEvent call fallback status = %q, want incomplete", got)
+	}
+	if diagnostics := Diagnostics(resolved, true); len(diagnostics) != 0 {
+		t.Fatalf("incomplete RaiseEvent diagnostics = %#v, want none", diagnostics)
+	}
+}
+
+func TestIssue590RaiseEventArgumentCountRetained(t *testing.T) {
+	doc, err := BuildSource(BuildOptions{Path: "Widget.cls", ModuleKind: "class"}, []byte(`Public Event Changed(ByVal first As Long, ByVal second As Long)
+Public Sub Run()
+    RaiseEvent Changed(1, 2)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Procedures[0].RaiseEvents[0].Arguments.Count; got != 2 {
+		t.Fatalf("RaiseEvent argument count = %d, want 2", got)
+	}
+}
+
+func TestIssue590RaiseEventResolutionIsNotDuplicated(t *testing.T) {
+	doc, err := BuildSource(BuildOptions{Path: "Widget.cls", ModuleKind: "class"}, []byte(`Public Event Changed()
+Public Sub Run()
+    RaiseEvent Changed
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &countingEventResolver{SymbolResolver: NewResolver([]ResolverSymbol{
+		{Name: "Changed", Module: "Widget", ModuleKind: "class", Kind: "event", Visibility: "Public"},
+	})}
+	resolved := Resolve(doc, resolver)
+	if resolver.eventCalls != 1 {
+		t.Fatalf("ResolveEvent calls = %d, want one", resolver.eventCalls)
+	}
+	if got := resolved.Procedures[0].RaiseEvents[0].Resolution.Status; got != ResolutionMatched {
+		t.Fatalf("RaiseEvent status = %q, want matched", got)
+	}
+	if got := resolved.Procedures[0].Calls[0].Resolution.Status; got != ResolutionMatched {
+		t.Fatalf("RaiseEvent call status = %q, want matched", got)
+	}
+}
+
+func TestIssue590DeclarationNamesIgnoreReturnSlotCase(t *testing.T) {
+	names := declarationNames(nil, []Declaration{
+		{Name: "Compute", Kind: "RETURN_SLOT", Type: "Long"},
+		{Name: "value", Kind: "variable", Type: "Long"},
+	})
+	if len(names) != 1 || names[0] != "value" {
+		t.Fatalf("declaration names = %#v, want only value", names)
 	}
 }

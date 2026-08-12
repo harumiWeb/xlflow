@@ -160,9 +160,9 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				findings := make([]intel.RealtimeFinding, 0)
 				for _, diagnostic := range procedureir.Diagnostics(resolved, true) {
 					findings = append(findings, intel.RealtimeFinding{
-						Code: diagnostic.Code, Severity: "error", Line: diagnostic.Range.StartLine + 1,
-						Column: diagnostic.Range.StartColumn + 1, EndLine: diagnostic.Range.EndLine + 1,
-						EndColumn: diagnostic.Range.EndColumn + 1, Message: diagnostic.Message,
+						Code: diagnostic.Code, Severity: "error", Line: diagnostic.Range.StartLine,
+						Column: diagnostic.Range.StartColumn, EndLine: diagnostic.Range.EndLine,
+						EndColumn: diagnostic.Range.EndColumn, Message: diagnostic.Message,
 					})
 				}
 				return findings, nil

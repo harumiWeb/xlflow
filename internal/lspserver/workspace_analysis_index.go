@@ -196,6 +196,24 @@ func (x *workspaceAnalysisIndex) queryReady() error {
 	}
 }
 
+// completeLocked reports whether the effective index is safe for
+// project-wide negative resolution. Callers must hold x.mu (for reading or
+// writing) while invoking this helper. In non-blocking query mode the initial
+// scan may still be publishing entries, so pending/incomplete state alone is
+// insufficient; readiness and its discovery error are part of the same
+// coherence check.
+func (x *workspaceAnalysisIndex) completeLocked() bool {
+	if len(x.pending) != 0 || len(x.incomplete) != 0 {
+		return false
+	}
+	select {
+	case <-x.ready:
+		return x.readyErr == nil
+	default:
+		return false
+	}
+}
+
 func (x *workspaceAnalysisIndex) buildInitial() {
 	started := time.Now()
 	files, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: x.root, Config: x.config})
@@ -288,10 +306,11 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 	x.mu.RLock()
 	current, exists := x.disk[key]
 	x.mu.RUnlock()
+	currentIncomplete := indexedAnalysisIncomplete(current)
 	if exists && current.version == version && current.moduleKind == file.ModuleKind {
 		x.mu.Lock()
 		if x.generation[key] == observed {
-			if indexedAnalysisIncomplete(current) {
+			if currentIncomplete {
 				x.incomplete[key] = true
 			} else {
 				delete(x.incomplete, key)
@@ -309,6 +328,7 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 		return err
 	}
 	entry.version = version
+	entryIncomplete := indexedAnalysisIncomplete(entry)
 
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -316,7 +336,7 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 		return nil
 	}
 	x.disk[key] = entry
-	if indexedAnalysisIncomplete(entry) {
+	if entryIncomplete {
 		x.incomplete[key] = true
 	} else {
 		delete(x.incomplete, key)
@@ -377,6 +397,7 @@ func (x *workspaceAnalysisIndex) setOverlay(doc intel.Document, analysis indexed
 	analysis.path = doc.Path
 	analysis.version = documentVersion(doc)
 	analysis.moduleKind = doc.ModuleKind
+	analysisIncomplete := indexedAnalysisIncomplete(analysis)
 	x.mu.Lock()
 	x.generation[key]++
 	if active := x.diskParses[key]; active != nil {
@@ -384,7 +405,7 @@ func (x *workspaceAnalysisIndex) setOverlay(doc intel.Document, analysis indexed
 		delete(x.diskParses, key)
 	}
 	delete(x.pending, key)
-	if indexedAnalysisIncomplete(analysis) {
+	if analysisIncomplete {
 		x.incomplete[key] = true
 	} else {
 		delete(x.incomplete, key)
@@ -430,13 +451,14 @@ func (x *workspaceAnalysisIndex) publishOverlay(doc intel.Document, generation u
 	analysis.path = doc.Path
 	analysis.version = documentVersion(doc)
 	analysis.moduleKind = doc.ModuleKind
+	analysisIncomplete := indexedAnalysisIncomplete(analysis)
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if x.pending[key] != generation {
 		return false
 	}
 	delete(x.pending, key)
-	if indexedAnalysisIncomplete(analysis) {
+	if analysisIncomplete {
 		x.incomplete[key] = true
 	} else {
 		delete(x.incomplete, key)
@@ -548,6 +570,7 @@ func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (index
 	entry.path = file.Path
 	entry.version = sourceVersion(source)
 	entry.moduleKind = file.ModuleKind
+	entryIncomplete := indexedAnalysisIncomplete(entry)
 
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -555,7 +578,7 @@ func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (index
 		return indexedFileAnalysis{}, false, nil
 	}
 	x.disk[refresh.key] = entry
-	if indexedAnalysisIncomplete(entry) {
+	if entryIncomplete {
 		x.incomplete[refresh.key] = true
 	} else {
 		delete(x.incomplete, refresh.key)
@@ -582,13 +605,7 @@ func (x *workspaceAnalysisIndex) completeClearWithoutEntry(refresh *diskRefresh)
 func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot {
 	x.start()
 	x.mu.RLock()
-	complete := len(x.pending) == 0 && len(x.incomplete) == 0
-	select {
-	case <-x.ready:
-		complete = complete && x.readyErr == nil
-	default:
-		complete = false
-	}
+	complete := x.completeLocked()
 	revision := x.revision
 	keys := make([]string, 0, len(x.effective))
 	for key := range x.effective {
@@ -617,7 +634,7 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 		for _, sym := range entry.symbols {
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
-				Visibility: sym.Visibility, File: entry.procedureIR.Path, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray,
+				Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray,
 			})
 			graphSymbols = append(graphSymbols, callgraph.Symbol{
 				Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
@@ -808,7 +825,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 	calleeText := normalizeCallText(query.CalleeText)
 
 	x.mu.RLock()
-	complete := len(x.pending) == 0 && len(x.incomplete) == 0
+	complete := x.completeLocked()
 	refs := x.callRefsForQueryLocked(caller, baseName, calleeText)
 	sites := make([]calls.CallSite, 0, len(refs))
 	for _, ref := range refs {
@@ -859,7 +876,7 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 		return callgraph.Snapshot{}, err
 	}
 	x.mu.RLock()
-	complete := len(x.pending) == 0 && len(x.incomplete) == 0
+	complete := x.completeLocked()
 	sites := make([]calls.CallSite, 0, len(x.allCalls))
 	typeReferences := make([]calls.TypeReference, 0)
 	for _, ref := range x.allCalls {

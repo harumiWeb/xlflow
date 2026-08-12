@@ -95,12 +95,18 @@ type Server struct {
 	overlayBuilds       atomic.Uint64
 	overlayPublications atomic.Uint64
 
-	docLifecycleMu         sync.Mutex
-	docLifecycles          map[string]*sync.Mutex
-	projectSummaryMu       sync.Mutex
-	projectSummaryRevision uint64
-	projectSummary         effects.ProjectSummary
-	projectSummaryValid    bool
+	docLifecycleMu           sync.Mutex
+	docLifecycles            map[string]*sync.Mutex
+	projectSummaryMu         sync.Mutex
+	projectSummaryRevision   uint64
+	projectSummary           effects.ProjectSummary
+	projectSummaryValid      bool
+	resolutionMu             sync.Mutex
+	resolutionRevision       uint64
+	resolutionComplete       bool
+	resolutionResolver       procedureir.Resolver
+	resolvedProjectIR        map[string]procedureir.DocumentIR
+	resolutionTypeLibSymbols []procedureir.ResolverSymbol
 }
 
 type diagnosticTimer interface {
@@ -176,8 +182,9 @@ func New(opts Options) (*Server, func(), error) {
 	docs := newDocuments(opts.RootDir, opts.Config.Src.Forms, opts.Config.Src.Workbook)
 	docs.cfg = opts.Config
 	s := &Server{
-		opts: opts,
-		db:   typeDB.DB,
+		opts:                     opts,
+		db:                       typeDB.DB,
+		resolutionTypeLibSymbols: workspaceTypeLibResolverSymbols(typeDB.DB),
 		analyzer: intel.Analyzer{
 			RootDir:                    opts.RootDir,
 			Config:                     opts.Config,
@@ -218,11 +225,16 @@ func New(opts Options) (*Server, func(), error) {
 		for _, projectDocument := range project.Documents {
 			projectByPath[symbolFileKey(projectDocument.IR.Path)] = projectDocument
 		}
-		resolutionResolver := workspaceResolutionResolver(project, typeDB.DB, project.Complete && typeDB.Complete)
+		resolutionResolver, resolvedProjectIR := s.projectResolution(project, project.Complete && typeDB.Complete)
 		analyzer := s.analyzer
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
-			if projectDocument, ok := projectByPath[symbolFileKey(ir.Path)]; ok {
-				ir = projectDocument.IR
+			projectKey := symbolFileKey(ir.Path)
+			if projectDocument, ok := projectByPath[projectKey]; ok {
+				if resolved, resolvedOK := resolvedProjectIR[projectKey]; resolvedOK {
+					ir = resolved
+				} else {
+					ir = projectDocument.IR
+				}
 				controlFlow = projectDocument.CFG
 			}
 			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects)
@@ -233,11 +245,14 @@ func New(opts Options) (*Server, func(), error) {
 			for _, finding := range findings {
 				out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
 			}
-			resolvedIR := procedureir.Resolve(ir, resolutionResolver)
+			resolvedIR := ir
+			if _, ok := resolvedProjectIR[projectKey]; !ok {
+				resolvedIR = procedureir.Resolve(ir, resolutionResolver)
+			}
 			for _, diagnostic := range procedureir.Diagnostics(resolvedIR, project.Complete && typeDB.Complete) {
 				out = append(out, intel.RealtimeFinding{Code: diagnostic.Code, Severity: "error",
-					Line: diagnostic.Range.StartLine + 1, Column: diagnostic.Range.StartColumn + 1,
-					EndLine: diagnostic.Range.EndLine + 1, EndColumn: diagnostic.Range.EndColumn + 1, Message: diagnostic.Message})
+					Line: diagnostic.Range.StartLine, Column: diagnostic.Range.StartColumn,
+					EndLine: diagnostic.Range.EndLine, EndColumn: diagnostic.Range.EndColumn, Message: diagnostic.Message})
 			}
 			return out, nil
 		}
@@ -1916,7 +1931,31 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	return index
 }
 
-func workspaceResolutionResolver(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB, complete bool) procedureir.Resolver {
+// projectResolution caches the canonical resolver and its resolved document
+// IR for one workspace revision. Full diagnostics can be requested several
+// times for the same coherent snapshot; rebuilding TypeLib enum candidates
+// and resolving every document on each request is unnecessary work.
+func (s *Server) projectResolution(project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.DocumentIR) {
+	s.resolutionMu.Lock()
+	defer s.resolutionMu.Unlock()
+	if s.resolutionResolver != nil && s.resolutionRevision == project.Revision && s.resolutionComplete == complete {
+		return s.resolutionResolver, s.resolvedProjectIR
+	}
+	resolver := workspaceResolutionResolverWithTypeLib(project, complete, s.resolutionTypeLibSymbols)
+	resolved := make(map[string]procedureir.DocumentIR, len(project.Documents))
+	for _, document := range project.Documents {
+		// The workspace index resolver intentionally has no TypeDB dependency;
+		// apply the cached TypeDB-aware resolver here once per project revision.
+		resolved[symbolFileKey(document.IR.Path)] = procedureir.Resolve(document.IR, resolver)
+	}
+	s.resolutionRevision = project.Revision
+	s.resolutionComplete = complete
+	s.resolutionResolver = resolver
+	s.resolvedProjectIR = resolved
+	return resolver, resolved
+}
+
+func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapshot, complete bool, typeLibSymbols []procedureir.ResolverSymbol) procedureir.Resolver {
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
 	for _, document := range project.Documents {
 		module := strings.TrimSpace(document.IR.ModuleName)
@@ -1940,18 +1979,26 @@ func workspaceResolutionResolver(project intel.ProjectAnalysisSnapshot, typeDB *
 			})
 		}
 	}
-	if typeDB != nil {
-		for _, constant := range typeDB.AllConstantsList() {
-			if strings.TrimSpace(constant.EnumGroup) == "" {
-				continue
-			}
-			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
-				ModuleKind: "external", Kind: "enum_member", Visibility: "Public", File: "<typelib>" + constant.Library,
-			})
-		}
-	}
+	resolverSymbols = append(resolverSymbols, typeLibSymbols...)
 	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+}
+
+func workspaceTypeLibResolverSymbols(typeDB *vbadb.DB) []procedureir.ResolverSymbol {
+	if typeDB == nil {
+		return nil
+	}
+	constants := typeDB.AllConstantsList()
+	out := make([]procedureir.ResolverSymbol, 0, len(constants))
+	for _, constant := range constants {
+		if strings.TrimSpace(constant.EnumGroup) == "" {
+			continue
+		}
+		out = append(out, procedureir.ResolverSymbol{
+			Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+			ModuleKind: "external", Kind: "enum_member", Visibility: "Public", File: "<typelib>" + constant.Library,
+		})
+	}
+	return out
 }
 
 func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {

@@ -391,15 +391,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	resolutionComplete := a.PathFilter == nil
-	for _, file := range parsedFiles {
-		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
-			resolutionComplete = false
-		}
-	}
-	if a.typeDBResolutionIncomplete {
-		resolutionComplete = false
-	}
 	var cycleFindings []Finding
 	if analysisEnabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA244"); known && analysisEnabled {
 		cycleFindings, err = a.procedureCallCycleFindings(ctx, parsedFiles, projectEffects)
@@ -432,6 +423,16 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			})
 		}
 	}
+	// Resolution completeness must include the generated TypeLib view. Load it
+	// before constructing the resolver so incomplete external symbols fail open
+	// consistently across every source file.
+	resolutionComplete := analysis.PathFilter == nil && !analysis.typeDBResolutionIncomplete
+	for _, file := range parsedFiles {
+		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
+			resolutionComplete = false
+			break
+		}
+	}
 	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
 		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
 	}
@@ -443,12 +444,12 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		analysis.byRefSymbols = byRefSymbols
 	}
 	findings := cycleFindings
-	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, a.typeDB)
+	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, analysis.typeDB)
 	var resolutionPreflight []Finding
 	for i := range parsedFiles {
 		resolvedForDiagnostics := procedureir.Resolve(parsedFiles[i].IR, resolutionResolver)
 		for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, resolutionComplete) {
-			finding := a.resolutionFinding(parsedFiles[i], diagnostic)
+			finding := analysis.resolutionFinding(parsedFiles[i], diagnostic)
 			findings = append(findings, finding)
 			resolutionPreflight = append(resolutionPreflight, finding)
 		}
@@ -632,7 +633,7 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 }
 
 func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
-	line := diagnostic.Range.StartLine + 1
+	line := diagnostic.Range.StartLine
 	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 	for _, candidate := range sourceProceduresFromIR(file.IR, file.CFG) {
 		if line >= candidate.StartLine && line <= candidate.EndLine {
@@ -641,23 +642,23 @@ func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.Reso
 		}
 	}
 	reason, suggestion := compileEquivalentFindingGuidance(diagnostic.Code)
-	if reason == "The VBE rejects this deterministic compile-time contract." {
-		switch diagnostic.Code {
-		case "VB052":
-			reason = "The VBE requires a project-local call target to resolve to a callable declaration."
-			suggestion = "Call a declared Sub, Function, or Property, or qualify the project-local target correctly."
-		case "VB053":
-			reason = "The VBE cannot choose between multiple visible Enum members without a lexical winner."
-			suggestion = "Qualify the Enum member with its Enum name."
-		case "VB054":
-			reason = "The VBE requires RaiseEvent to name an Event declared in the same object module."
-			suggestion = "Declare the Event in this object module before raising it."
-		}
+	switch diagnostic.Code {
+	case "VB052":
+		reason = "The VBE requires a project-local call target to resolve to a callable declaration."
+	case "VB053":
+		reason = "The VBE cannot choose between multiple visible Enum members without a lexical winner."
+	case "VB054":
+		reason = "The VBE requires RaiseEvent to name an Event declared in the same object module."
+	}
+	if shared := procedureir.ResolutionSuggestion(diagnostic.Code); shared != "" {
+		suggestion = shared
 	}
 	finding := a.simpleFinding(file, proc, line, diagnostic.Code, "error", diagnostic.Message, reason, suggestion)
-	finding.Column = diagnostic.Range.StartColumn + 1
-	finding.EndLine = diagnostic.Range.EndLine + 1
-	finding.EndColumn = diagnostic.Range.EndColumn + 1
+	// procedureir ranges use the same one-based coordinates as vbaast.NodeRange;
+	// do not apply the LSP zero-based conversion used by intel diagnostics.
+	finding.Column = diagnostic.Range.StartColumn
+	finding.EndLine = diagnostic.Range.EndLine
+	finding.EndColumn = diagnostic.Range.EndColumn
 	return finding
 }
 
@@ -1242,15 +1243,17 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 			})
 		}
 	}
-	for _, constant := range typeDB.AllConstantsList() {
-		if strings.TrimSpace(constant.EnumGroup) == "" {
-			continue
+	if typeDB != nil {
+		for _, constant := range typeDB.AllConstantsList() {
+			if strings.TrimSpace(constant.EnumGroup) == "" {
+				continue
+			}
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
+				File: "<typelib>" + constant.Library, Line: 0,
+			})
 		}
-		resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-			Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
-			ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
-			File: "<typelib>" + constant.Library, Line: 0,
-		})
 	}
 	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
 }

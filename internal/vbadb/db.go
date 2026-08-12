@@ -199,7 +199,17 @@ func (db *DB) MergeData(data fileData) {
 		}
 		key := fold(c.Name)
 		db.Constants[key] = c
-		db.ConstantCandidates[key] = append(db.ConstantCandidates[key], c)
+		candidates := db.ConstantCandidates[key]
+		duplicate := false
+		for _, existing := range candidates {
+			if constantIdentity(existing) == constantIdentity(c) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			db.ConstantCandidates[key] = append(candidates, c)
+		}
 	}
 	for progID, typ := range data.ProgIDs {
 		key := fold(progID)
@@ -548,36 +558,31 @@ func (db *DB) AllConstantsList() []ConstantInfo {
 	if db == nil {
 		return nil
 	}
-	byKey := make(map[string]ConstantInfo)
-	for _, candidates := range db.ConstantCandidates {
-		for _, candidate := range candidates {
-			key := strings.ToLower(strings.TrimSpace(candidate.Library)) + "\x00" +
-				strings.ToLower(strings.TrimSpace(candidate.EnumGroup)) + "\x00" +
-				strings.ToLower(strings.TrimSpace(candidate.Name))
-			byKey[key] = candidate
-		}
+	allCandidates := make([]ConstantInfo, 0)
+	for _, bucket := range db.ConstantCandidates {
+		allCandidates = append(allCandidates, bucket...)
 	}
-	if len(byKey) == 0 {
+	if len(allCandidates) == 0 {
 		for _, candidate := range db.Constants {
-			key := strings.ToLower(strings.TrimSpace(candidate.Library)) + "\x00" +
-				strings.ToLower(strings.TrimSpace(candidate.EnumGroup)) + "\x00" +
-				strings.ToLower(strings.TrimSpace(candidate.Name))
-			byKey[key] = candidate
+			allCandidates = append(allCandidates, candidate)
 		}
 	}
-	out := make([]ConstantInfo, 0, len(byKey))
-	for _, candidate := range byKey {
+	// Map iteration order is intentionally unspecified. Sort all candidates
+	// before folding duplicate library/enum/name identities so the retained
+	// winner is stable even when legacy DB values were populated directly.
+	sort.SliceStable(allCandidates, func(i, j int) bool {
+		return constantLess(allCandidates[i], allCandidates[j])
+	})
+	out := make([]ConstantInfo, 0, len(allCandidates))
+	seen := make(map[string]struct{}, len(allCandidates))
+	for _, candidate := range allCandidates {
+		key := constantIdentity(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
 		out = append(out, candidate)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Library != out[j].Library {
-			return out[i].Library < out[j].Library
-		}
-		if out[i].EnumGroup != out[j].EnumGroup {
-			return out[i].EnumGroup < out[j].EnumGroup
-		}
-		return out[i].Name < out[j].Name
-	})
 	return out
 }
 
@@ -615,4 +620,20 @@ func (db *DB) GlobalsList() []MemberInfo {
 
 func fold(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func constantIdentity(c ConstantInfo) string {
+	return fold(c.Library) + "\x00" + fold(c.EnumGroup) + "\x00" + fold(c.Name)
+}
+
+func constantLess(a, b ConstantInfo) bool {
+	left := []string{constantIdentity(a), a.Library, a.EnumGroup, a.Name, a.Kind, a.Type, a.Value, a.Summary}
+	right := []string{constantIdentity(b), b.Library, b.EnumGroup, b.Name, b.Kind, b.Type, b.Value, b.Summary}
+	for i := range left {
+		if left[i] == right[i] {
+			continue
+		}
+		return left[i] < right[i]
+	}
+	return false
 }

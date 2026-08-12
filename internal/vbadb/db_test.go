@@ -501,7 +501,8 @@ func TestResolveConstantsPreservesAmbiguousEnumCandidates(t *testing.T) {
 	db := New()
 	if err := db.MergeJSON([]byte(`{
   "constants": [
-    {"name":"Ready","library":"ZLib","enum_group":"StateZ"},
+    {"name":"Ready","library":"ZLib","enum_group":"StateZ","value":"1"},
+    {"name":"ready","library":"zlib","enum_group":"statez","value":"2"},
     {"name":"Ready","library":"ALib","enum_group":"StateA"}
   ]
 }`)); err != nil {
@@ -511,8 +512,17 @@ func TestResolveConstantsPreservesAmbiguousEnumCandidates(t *testing.T) {
 	if len(candidates) != 2 || candidates[0].Library != "ALib" || candidates[1].Library != "ZLib" {
 		t.Fatalf("ResolveConstants = %#v, want deterministic candidates", candidates)
 	}
-	if winner, ok := db.ResolveConstant("ready"); !ok || winner.Library != "ALib" && winner.Library != "ZLib" {
+	if winner, ok := db.ResolveConstant("ready"); !ok || (winner.Library != "ALib" && winner.Library != "ZLib") {
 		t.Fatalf("ResolveConstant compatibility winner = %#v, %v", winner, ok)
+	}
+	all := db.AllConstantsList()
+	if len(all) != 2 {
+		t.Fatalf("AllConstantsList = %#v, want duplicate identity folded", all)
+	}
+	for _, constant := range all {
+		if strings.EqualFold(constant.Library, "zlib") && strings.EqualFold(constant.EnumGroup, "statez") && constant.Value != "1" {
+			t.Fatalf("duplicate constant winner = %#v, want deterministic first candidate", constant)
+		}
 	}
 }
 

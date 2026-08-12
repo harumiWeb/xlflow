@@ -202,6 +202,31 @@ func TestWorkspaceAnalysisIndexRecoveredIRMarksSnapshotIncomplete(t *testing.T) 
 	}
 }
 
+func TestIndexedAnalysisIncompleteRecognizesConditionalAndRecoveredFacts(t *testing.T) {
+	branch := procedureir.ConditionalBranch{Group: "1", Branch: 0}
+	cases := []struct {
+		name  string
+		entry indexedFileAnalysis
+	}{
+		{name: "module declaration conditional", entry: indexedFileAnalysis{procedureIR: procedureir.DocumentIR{Declarations: []procedureir.Declaration{{ConditionalBranches: []procedureir.ConditionalBranch{branch}}}}}},
+		{name: "procedure symbol conditional", entry: indexedFileAnalysis{procedureIR: procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{Symbol: procedureir.ProcedureSymbol{ConditionalBranches: []procedureir.ConditionalBranch{branch}}}}}}},
+		{name: "procedure declaration conditional", entry: indexedFileAnalysis{procedureIR: procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{Declarations: []procedureir.Declaration{{ConditionalBranches: []procedureir.ConditionalBranch{branch}}}}}}}},
+		{name: "raise event conditional", entry: indexedFileAnalysis{procedureIR: procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{RaiseEvents: []procedureir.RaiseEventReference{{ConditionalBranches: []procedureir.ConditionalBranch{branch}}}}}}}},
+		{name: "recovered statement", entry: indexedFileAnalysis{procedureIR: procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{Statements: []procedureir.Statement{{Recovered: true}}}}}}},
+		{name: "recovered expression", entry: indexedFileAnalysis{procedureIR: procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{Expressions: []procedureir.Expression{{Recovered: true}}}}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !indexedAnalysisIncomplete(tc.entry) {
+				t.Fatalf("indexedAnalysisIncomplete(%s) = false, want true", tc.name)
+			}
+		})
+	}
+	if indexedAnalysisIncomplete(indexedFileAnalysis{procedureIR: procedureir.DocumentIR{}}) {
+		t.Fatal("clean IR was marked incomplete")
+	}
+}
+
 func TestWorkspaceAnalysisIndexInitialParseFailureCanRecoverToCompleteSnapshot(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "src", "modules", "Main.bas")
@@ -233,6 +258,78 @@ func TestWorkspaceAnalysisIndexInitialParseFailureCanRecoverToCompleteSnapshot(t
 	}
 	if snapshot := index.projectSnapshot(); !snapshot.Complete {
 		t.Fatalf("clean refresh left initial snapshot incomplete: %#v", snapshot)
+	}
+}
+
+func TestWorkspaceAnalysisIndexCallQueriesFailOpenDuringInitialBackgroundScan(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("blocked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+	parse := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		enteredOnce.Do(func() { close(entered) })
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return indexedFileAnalysis{}, ctx.Err()
+		}
+		return indexedFileAnalysis{
+			path: file.Path, moduleKind: file.ModuleKind,
+			symbols: []intel.Symbol{
+				{Name: "Target", Kind: "sub", Module: "Main", ModuleKind: "standard", File: file.Path},
+				{Name: "Target", Kind: "sub", Module: "Other", ModuleKind: "standard", File: file.Path},
+			},
+			callSites: []calls.CallSite{{
+				File: file.Path, Module: "Main",
+				Caller: &calls.Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+				Callee: calls.Callee{Text: "Target", BaseName: "Target"},
+			}},
+		}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	index.nonBlockingQueries = true
+	index.start()
+	<-entered
+
+	// An overlay gives the query a coherent call and target while the initial
+	// disk scan is still blocked. The resolver must remain incomplete until
+	// that scan publishes readiness, even though no path is pending.
+	doc := intel.Document{Path: path, Source: "overlay", ModuleKind: "standard", Version: 1}
+	index.setOverlay(doc, indexedFileAnalysis{
+		path: path, moduleKind: "standard",
+		symbols: []intel.Symbol{
+			{Name: "Target", Kind: "sub", Module: "Main", ModuleKind: "standard", File: path},
+			{Name: "Target", Kind: "sub", Module: "Other", ModuleKind: "standard", File: path},
+		},
+		callSites: []calls.CallSite{{
+			File: path, Module: "Main",
+			Caller: &calls.Caller{Name: "Run", Kind: "sub", QualifiedName: "Main.Run"},
+			Callee: calls.Callee{Text: "Target", BaseName: "Target"},
+		}},
+	})
+	got, err := index.queryResolvedCalls(workspaceCallQuery{})
+	if err != nil || len(got) != 1 || got[0].Resolution.Status != "unresolved" {
+		status := "<none>"
+		if len(got) == 1 {
+			status = got[0].Resolution.Status
+		}
+		t.Fatalf("initial background query = %+v, status=%s, %v; want unresolved until ready", got, status, err)
+	}
+
+	close(release)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	got, err = index.queryResolvedCalls(workspaceCallQuery{})
+	if err != nil || len(got) != 1 || got[0].Resolution.Status != "ambiguous" {
+		t.Fatalf("ready query = %+v, %v; want ambiguous", got, err)
 	}
 }
 

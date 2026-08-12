@@ -78,7 +78,7 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 		ctx = v.enterProcedure(node, ctx)
 	}
 	if node.Kind() == "enum_declaration" {
-		ctx.enumName = nodeText(childByFieldOrKind(node, "name", "identifier"), v.builder.source)
+		ctx.enumName = cleanIdentifier(nodeText(childByFieldOrKind(node, "name", "identifier"), v.builder.source))
 		ctx.enumVisibility = visibilityOfNode(node, v.builder.source)
 	}
 	procedure := v.procedure(ctx.procedure)
