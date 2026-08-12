@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA246` HTTP transport-security analysis and `VBA247`
+  timeout reliability analysis for common XMLHTTP, ServerXMLHTTP, WinHTTP, and
+  identifiable ADODB.Stream download-and-launch patterns. Findings are
+  procedure-local, realtime, warning-level, non-blocking, inline-suppressible,
+  and expose redacted `http_security` / `http_reliability` context. Added exact
+  `[analyze].development_http_origins` exceptions for plain-HTTP credential
+  development flows while retaining `VBA224` as the generic fallback.
+
 - Added default-enabled `VBA245` file/path safety analysis for destructive VBA
   statements, FileSystemObject write/delete operations, workbook SaveAs paths,
   wildcard and traversal hazards, unchecked overwrites, external-input-derived
