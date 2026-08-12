@@ -562,12 +562,22 @@ End Sub
 
 func TestLinterVB004RecognizesStatementLevelRecovery(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	writeLintModule(t, dir, "Main.bas", `Option Explicit
+	tests := []struct {
+		name      string
+		source    string
+		wantCount int
+	}{
+		{
+			name: "same-line-reset",
+			source: `Option Explicit
 Public Sub SameLineReset()
   On Error Resume Next: value = UBound(Array()): On Error GoTo 0
 End Sub
-
+`,
+		},
+		{
+			name: "colon-reset",
+			source: `Option Explicit
 Public Sub ColonReset()
   On Error Resume Next
   Debug.Print 1 / 0
@@ -575,7 +585,11 @@ Public Sub ColonReset()
     Err.Clear: On Error GoTo 0
   End If
 End Sub
-
+`,
+		},
+		{
+			name: "handler-replacement",
+			source: `Option Explicit
 Public Sub HandlerReplacement()
   On Error Resume Next
   Call Probe
@@ -583,7 +597,11 @@ Public Sub HandlerReplacement()
   Exit Sub
 Handler:
 End Sub
-
+`,
+		},
+		{
+			name: "broad-scope",
+			source: `Option Explicit
 Public Sub BroadScope()
   On Error Resume Next
   Debug.Print 1
@@ -593,7 +611,12 @@ Public Sub BroadScope()
   Debug.Print 5
   On Error GoTo 0
 End Sub
-
+`,
+			wantCount: 1,
+		},
+		{
+			name: "conditional-reset",
+			source: `Option Explicit
 Public Sub ConditionalReset()
   On Error Resume Next
   #If Mac Then
@@ -603,15 +626,24 @@ Public Sub ConditionalReset()
   #End If
   On Error GoTo 0
 End Sub
-`)
-
-	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
-	if err != nil {
-		t.Fatal(err)
+`,
+		},
 	}
-	got := issuesByCode(issues, "VB004")
-	if len(got) != 1 || got[0].Line != 23 {
-		t.Fatalf("VB004 findings = %+v, want only the broad scope at line 23", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeLintModule(t, dir, "Main.bas", tt.source)
+			issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := issuesByCode(issues, "VB004")
+			if len(got) != tt.wantCount {
+				t.Fatalf("VB004 findings = %+v, want %d", got, tt.wantCount)
+			}
+		})
 	}
 }
 

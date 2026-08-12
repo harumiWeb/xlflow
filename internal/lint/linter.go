@@ -95,6 +95,10 @@ const (
 	parserRecoverySuggestion           = "The source may be valid VBA that the parser could not fully understand. Review the reported context; do not rewrite valid VBA solely to satisfy parser recovery."
 	maxParserRecoveryTokenRunes        = 80
 	maxParserRecoveryContextRunes      = 160
+	// VB004 recovery limits bound the forward statement scan and the short
+	// reset scope that is accepted without an Err.Number probe.
+	resumeNextScanLimit  = 16
+	resumeNextShortScope = 5
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -1386,7 +1390,7 @@ func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) 
 	seen := 0
 	sawErrNumberCheck := false
 	sawLoop := false
-	for i := start + 1; i < len(statements) && seen < 16; i++ {
+	for i := start + 1; i < len(statements) && seen < resumeNextScanLimit; i++ {
 		statement := statements[i]
 		if statement.Recovered || strings.TrimSpace(statement.Text) == "" {
 			continue
@@ -1401,7 +1405,7 @@ func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) 
 			case procedureir.TransferOnErrorDisable, procedureir.TransferOnErrorGoto:
 				// Both forms replace Resume Next with an explicit error mode.
 				// Keep the existing short-scope and Err.Number probe allowances.
-				return sawErrNumberCheck || (!sawLoop && seen <= 5)
+				return sawErrNumberCheck || (!sawLoop && seen <= resumeNextShortScope)
 			}
 		}
 		if strings.Contains(strings.ToLower(normalizedCodeLine(statement.Text)), "err.number") {
