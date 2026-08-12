@@ -1,7 +1,8 @@
 # Conservative VBA Source-to-Sink Dataflow
 
 This specification defines the generic procedure-local dataflow contract for
-`VBA224`. Process-launch-specific classification and diagnostics belong to
+`VBA224`. Destructive/path-specific classification and diagnostics belong to
+`VBA245`; process-launch-specific classification and diagnostics belong to
 `VBA236`, and SQL-specific classification belongs to `VBA239`; both rules
 reuse these states and paths with sink-specific metadata.
 The implementation is protocol-neutral and consumes `procedureir.ProcedureIR`
@@ -52,9 +53,8 @@ the entries not owned by an enabled specialized rule.
 The sink catalog recognizes:
 
 - recognized ADO SQL execution arguments;
-- `Kill`, `RmDir`, `FileSystemObject.DeleteFile`/`DeleteFolder`, and similar
-  destructive file paths;
-- `Workbooks.Open` paths and `SaveAs` paths;
+- legacy destructive file and SaveAs paths as a compatibility fallback when
+  `VBA245` is disabled (workbook-open remains a generic non-destructive sink);
 - HTTP request URLs and `setRequestHeader` values for recognized HTTP clients.
 
 Generic `.Run`, `.Execute`, or `.Open` members do not become sinks without an
@@ -111,6 +111,11 @@ path.
 When the sink is a process launch, this generic context is projected by
 `VBA236` into its additive `command_execution` object; `VBA224` does not emit a
 second process-launch finding.
+
+When `VBA245` is enabled, its file-operation projection owns the destructive
+file and workbook-save sinks, including clean-but-dangerous constants; the
+generic `VBA224` projection is suppressed for those sinks. Disabling `VBA245`
+restores the legacy `VBA224` fallback.
 
 ## Non-goals
 
