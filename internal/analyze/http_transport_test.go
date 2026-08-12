@@ -67,7 +67,8 @@ Public Sub Run()
     Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
     request.SetTimeouts 1000, 1000, 1000, 1000
     request.Open "GET", "https://alice:secret@example.test/data", False
-    request.Option(4) = 13056
+    request.Option(4) = &H3300&
+    request.Option(18) = 0
     request.Option(9) = &H280
     request.Send
 End Sub
@@ -142,6 +143,21 @@ Public Sub Run()
 End Sub
 `)
 	cfg := config.Default()
+	invalidCfg := config.Default()
+	invalidCfg.Analyze.DevelopmentHTTPOrigins = []string{"dev.example.test:8080"}
+	invalidFindings, err := (Analyzer{RootDir: dir, Config: invalidCfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidAllowsHTTP := false
+	for _, finding := range findingsByCode(invalidFindings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "plain_http_credentials" {
+			invalidAllowsHTTP = true
+		}
+	}
+	if !invalidAllowsHTTP {
+		t.Fatalf("malformed development origin unexpectedly allowed HTTP credentials: %+v", invalidFindings)
+	}
 	cfg.Analyze.DevelopmentHTTPOrigins = []string{"http://dev.example.test:8080"}
 	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
@@ -159,7 +175,7 @@ func TestVBA246DetectsHTTPDownloadAndExecute(t *testing.T) {
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
 Public Sub Run()
-    Const target As String = "C:\\Temp\\payload.ps1"
+    Const target As String = "C:\Temp\payload.ps1"
     Dim request As Object
     Dim stream As ADODB.Stream
     Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
@@ -206,6 +222,69 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA246"); len(got) != 0 {
 		t.Fatalf("suppressed realtime findings = %+v", got)
+	}
+	positiveSource := []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    request.SetTimeouts 1000, 1000, 1000, 1000
+    request.Open "GET", "https://user:password@example.test", False
+    request.Send
+End Sub
+`)
+	positive, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), positiveSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(positive, "VBA246"); len(got) == 0 {
+		t.Fatalf("unsuppressed realtime VBA246 findings = %+v", positive)
+	}
+	timeoutSource := []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Set request = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    request.Open "GET", "https://example.test", False
+    request.Send
+End Sub
+`)
+	timeoutFindings, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), timeoutSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(timeoutFindings, "VBA247"); len(got) == 0 {
+		t.Fatalf("unsuppressed realtime VBA247 findings = %+v", timeoutFindings)
+	}
+}
+
+func TestVBA246SensitiveLoggingIgnoresFunctionNames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    request.SetTimeouts 1000, 1000, 1000, 1000
+    request.Open "GET", "https://example.test", False
+    request.SetRequestHeader "Authorization", Trim(token)
+    Debug.Print Trim(otherValue)
+    Debug.Print token
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authLogs := 0
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			authLogs++
+		}
+	}
+	if authLogs != 1 {
+		t.Fatalf("authorization logging findings = %d, findings = %+v", authLogs, findings)
 	}
 }
 
@@ -448,7 +527,20 @@ End Sub
 }
 
 func TestHTTPIntegerRejectsValuesOutsideNativeIntRange(t *testing.T) {
+	t.Parallel()
 	state := httpAnalysisState{strings: map[string]string{}, known: map[string]bool{}, sensitive: map[string]bool{}}
+	if n, ok := httpInteger("13056", state); !ok || n != 13056 {
+		t.Fatalf("in-range integer = %d, %v", n, ok)
+	}
+	if n, ok := httpInteger("&H280", state); !ok || n != 0x280 {
+		t.Fatalf("hexadecimal integer = %d, %v", n, ok)
+	}
+	if n, ok := httpInteger("&H2800&", state); !ok || n != 0x2800 {
+		t.Fatalf("typed hexadecimal integer = %d, %v", n, ok)
+	}
+	if n, ok := httpInteger("13056%", state); !ok || n != 13056 {
+		t.Fatalf("typed decimal integer = %d, %v", n, ok)
+	}
 	if strconv.IntSize == 64 {
 		if _, ok := httpInteger("9223372036854775808", state); ok {
 			t.Fatal("out-of-range 64-bit integer was accepted")

@@ -96,6 +96,15 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 	return findings, nil
 }
 
+func (a Analyzer) httpDataFlowFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure) ([]Finding, []Finding, error) {
+	httpFindings := a.httpTransportFindings(file, proc)
+	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings), httpFindings, nil
+}
+
 // isCommandExecutionSink is intentionally name-based rather than tied to a
 // particular version of the protocol-neutral data-flow catalog. The catalog
 // has historically exposed shell sinks as SinkShell and the adapter also

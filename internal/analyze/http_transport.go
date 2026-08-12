@@ -89,7 +89,7 @@ func (a Analyzer) httpTransportFindings(file parsedFile, proc sourceProcedure) [
 		return nil
 	}
 	initial := newHTTPAnalysisState(file, ir)
-	entryStates := solveHTTPStates(ir, *proc.Graph, initial)
+	entryStates := solveHTTPStates(a, file, proc, *proc.Graph, initial)
 	var specs []httpFindingSpec
 	for _, block := range proc.Graph.Blocks {
 		if block.Statement == nil || block.Statement.Recovered {
@@ -158,7 +158,7 @@ func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnaly
 	return state
 }
 
-func solveHTTPStates(ir procedureir.ProcedureIR, graph vbacfg.Graph, initial httpAnalysisState) map[vbacfg.BlockID]httpAnalysisState {
+func solveHTTPStates(a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) map[vbacfg.BlockID]httpAnalysisState {
 	states := map[vbacfg.BlockID]httpAnalysisState{graph.Entry: cloneHTTPState(initial)}
 	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
 	type httpEdge struct {
@@ -184,7 +184,7 @@ func solveHTTPStates(ir procedureir.ProcedureIR, graph vbacfg.Graph, initial htt
 		}
 		out := cloneHTTPState(states[id])
 		if block.Statement != nil && !block.Statement.Recovered {
-			out, _ = (Analyzer{}).transferHTTPStatement(parsedFile{}, sourceProcedure{}, *block.Statement, out, false)
+			out, _ = a.transferHTTPStatement(file, proc, *block.Statement, out, false)
 		}
 		for _, edge := range outgoing[id] {
 			edgeState := out
@@ -557,6 +557,7 @@ func httpInteger(expr string, state httpAnalysisState) (int, bool) {
 	}
 	text = strings.ReplaceAll(text, "&H", "0x")
 	text = strings.ReplaceAll(text, "&h", "0x")
+	text = strings.TrimRight(text, "%&@!#$")
 	n, err := strconv.ParseInt(text, 0, strconv.IntSize)
 	return int(n), err == nil
 }
@@ -573,8 +574,10 @@ func httpTLSOptionRisk(kind httpClientKind, option, value string, state httpAnal
 	if (lower == "4" || strings.Contains(lower, "sslerrorignoreflags")) && known && n != 0 {
 		return "certificate_validation_bypass"
 	}
-	if (lower == "18" || strings.Contains(lower, "enablecertificaterevocationcheck")) && strings.EqualFold(strings.TrimSpace(value), "false") {
-		return "certificate_validation_bypass"
+	if lower == "18" || strings.Contains(lower, "enablecertificaterevocationcheck") {
+		if (known && n == 0) || strings.EqualFold(strings.TrimSpace(value), "false") {
+			return "certificate_validation_bypass"
+		}
 	}
 	if lower == "9" || strings.Contains(lower, "secureprotocols") {
 		if known && n&(0x8|0x20|0x80|0x200) != 0 {
@@ -597,7 +600,12 @@ func httpExpressionSensitive(expr string, state httpAnalysisState) bool {
 }
 
 func markHTTPExpressionSensitive(expr string, state httpAnalysisState) {
-	for _, name := range httpIdentifierRe.FindAllString(expr, -1) {
+	for _, match := range httpIdentifierRe.FindAllStringIndex(expr, -1) {
+		name := expr[match[0]:match[1]]
+		rest := strings.TrimLeft(expr[match[1]:], " \t")
+		if strings.HasPrefix(rest, "(") {
+			continue
+		}
 		state.sensitive[strings.ToLower(name)] = true
 	}
 }

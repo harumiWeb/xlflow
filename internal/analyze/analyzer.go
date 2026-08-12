@@ -1143,8 +1143,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if a.Config.Analyze.DetectErrorSuppressionPropagation {
 		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
 	}
-	httpFindings := a.httpTransportFindings(file, proc)
-	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
+	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(ctx, file, proc)
 	if err != nil {
 		return nil, err
 	}
@@ -1482,8 +1481,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	if a.Config.Analyze.DetectEventHandlerReentry {
 		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
 	}
-	httpFindings := a.httpTransportFindings(file, proc)
-	dataFlowFindings, err := a.dataFlowFindingsContext(cancelCtx, file, proc)
+	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
 	if err != nil {
 		return nil, err
 	}
