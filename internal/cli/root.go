@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/output"
 	packpkg "github.com/harumiWeb/xlflow/internal/pack"
 	"github.com/harumiWeb/xlflow/internal/project"
+	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
@@ -54,21 +56,31 @@ import (
 )
 
 type app struct {
-	json           bool
-	bridge         string
-	wait           bool
-	waitTimeout    time.Duration
-	cwd            string
-	rawArgs        []string
-	stdout         io.Writer
-	stderr         io.Writer
-	stdoutTerminal func() bool
-	stderrTerminal func() bool
-	configWarnings []map[string]any
-	buildInfo      BuildInfo
-	updateChecker  releaseChecker
-	coordination   *coordination.Manager
-	activeLeases   *coordination.LeaseSet
+	json             bool
+	bridge           string
+	wait             bool
+	waitTimeout      time.Duration
+	cwd              string
+	rawArgs          []string
+	stdout           io.Writer
+	stderr           io.Writer
+	stdoutTerminal   func() bool
+	stderrTerminal   func() bool
+	configWarnings   []map[string]any
+	preflightWaivers map[string]preflightWaiver
+	buildInfo        BuildInfo
+	updateChecker    releaseChecker
+	coordination     *coordination.Manager
+	activeLeases     *coordination.LeaseSet
+}
+
+type preflightWaiver struct {
+	Rule    string
+	Family  string
+	File    string
+	Line    int
+	Column  int
+	Message string
 }
 
 var automaticBackupPrune = backup.Prune
@@ -7581,8 +7593,11 @@ func (a *app) runSourcePreflight(ctx context.Context, command string, cfg config
 	if err != nil {
 		return a.writeFailure(command, output.ExitEnvironment, "lint_failed", err)
 	}
+	policy := staticpreflight.NewPolicy(cfg.Preflight.AllowedDiagnostics)
 	issues := lintResult.Issues
-	if blockingIssues := lint.PushBlockingIssues(issues); len(blockingIssues) > 0 {
+	blockingIssues, allowedIssues := lint.PartitionPreflightIssues(issues, policy)
+	a.recordAllowedPreflightIssues(allowedIssues)
+	if len(blockingIssues) > 0 {
 		env := output.Failure(command, output.Error{
 			Code:    "lint_failed",
 			Message: fmt.Sprintf("%d source issue(s) must be fixed before %s to avoid a VBA editor dialog", len(blockingIssues), action),
@@ -7602,11 +7617,13 @@ func (a *app) runSourcePreflight(ctx context.Context, command string, cfg config
 		}
 		return a.writeFailure(command, exitCode, "analyze_failed", err)
 	}
-	findings := analyzeResult.Findings
-	issues = append(issues, projectCompileEquivalentLintIssues(analyzeResult.PreflightFindings)...)
-	blockingIssues := lint.PushBlockingIssues(issues)
-	blockingFindings := filterAnalysisFindings(analyze.BlockingFindings(findings), ignoredAnalysisCodes)
-	blockingFindings = filterProjectedLintFindings(blockingFindings)
+	findings := filterAnalysisFindings(analyzeResult.Findings, ignoredAnalysisCodes)
+	projectedIssues := projectCompileEquivalentLintIssues(analyzeResult.PreflightFindings)
+	blockingIssues, allowedIssues = lint.PartitionPreflightIssues(projectedIssues, policy)
+	a.recordAllowedPreflightIssues(allowedIssues)
+	findings = filterProjectedLintFindings(findings)
+	blockingFindings, allowedFindings := analyze.PartitionPreflightFindings(findings, policy)
+	a.recordAllowedPreflightFindings(allowedFindings)
 	if len(blockingIssues) == 0 && len(blockingFindings) == 0 {
 		return nil
 	}
@@ -7784,6 +7801,69 @@ func filterAnalysisFindings(findings []analyze.Finding, ignoredCodes map[string]
 		filtered = append(filtered, finding)
 	}
 	return filtered
+}
+
+func (a *app) recordAllowedPreflightIssues(issues []lint.Issue) {
+	for _, issue := range issues {
+		a.recordPreflightWaiver(preflightWaiver{
+			Rule: issue.Code, Family: "lint", File: issue.File,
+			Line: issue.Line, Column: issue.Column,
+			Message: issue.Message,
+		})
+	}
+}
+
+func (a *app) recordAllowedPreflightFindings(findings []analyze.Finding) {
+	for _, finding := range findings {
+		a.recordPreflightWaiver(preflightWaiver{
+			Rule: finding.Code, Family: "analyze", File: finding.File,
+			Line: finding.Line, Column: finding.Column,
+			Message: finding.Message,
+		})
+	}
+}
+
+func (a *app) recordPreflightWaiver(waiver preflightWaiver) {
+	waiver.Rule = strings.ToUpper(strings.TrimSpace(waiver.Rule))
+	if waiver.Rule == "" {
+		return
+	}
+	if a.preflightWaivers == nil {
+		a.preflightWaivers = make(map[string]preflightWaiver)
+	}
+	// Analyzer projections can omit an end range that the lint surface retains.
+	// The start location is the stable cross-surface occurrence identity.
+	key := strings.Join([]string{
+		waiver.Family, waiver.Rule, waiver.File,
+		strconv.Itoa(waiver.Line), strconv.Itoa(waiver.Column), waiver.Message,
+	}, "\x00")
+	a.preflightWaivers[key] = waiver
+}
+
+func (a *app) preflightWaiverWarnings() []map[string]any {
+	counts := make(map[string]int)
+	for _, waiver := range a.preflightWaivers {
+		counts[waiver.Rule]++
+	}
+	rules := make([]string, 0, len(counts))
+	for rule := range counts {
+		rules = append(rules, rule)
+	}
+	sort.Strings(rules)
+	warnings := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		count := counts[rule]
+		warnings = append(warnings, map[string]any{
+			"code":  "preflight_diagnostic_allowed",
+			"rule":  rule,
+			"count": count,
+			"message": fmt.Sprintf(
+				"Preflight allowed %d %s finding(s) because %s is listed in [preflight].allowed_diagnostics. Excel/VBE compilation may still fail.",
+				count, rule, rule,
+			),
+		})
+	}
+	return warnings
 }
 
 func (a *app) shouldRunSourcePreflight(cfg config.Config, opts excel.RunOptions) bool {
@@ -8043,6 +8123,7 @@ func (a *app) writeScaffoldWelcome(command string, skipUpdateCheck bool) error {
 func (a *app) writeFailure(command string, code int, errCode string, err error) error {
 	env := output.Failure(command, output.Error{Code: errCode, Message: err.Error()})
 	a.addConfigWarnings(&env)
+	a.addPreflightWaiverWarnings(&env)
 	if writeErr := output.WriteWithOptions(a.stdoutWriter(), env, a.outputOptions()); writeErr != nil {
 		return output.WithExitCode(code, writeErr)
 	}
@@ -8163,6 +8244,7 @@ func (a *app) write(env output.Envelope, code int) error {
 
 func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.Options) error {
 	a.addConfigWarnings(&env)
+	a.addPreflightWaiverWarnings(&env)
 	appendVBAObjectModelAccessMessages(&env)
 	if err := output.WriteWithOptions(a.stdoutWriter(), env, opts); err != nil {
 		return output.WithExitCode(code, err)
@@ -8171,6 +8253,13 @@ func (a *app) writeWithOutputOptions(env output.Envelope, code int, opts output.
 		return output.WithExitCode(code, fmt.Errorf("%s failed", env.Command))
 	}
 	return nil
+}
+
+func (a *app) addPreflightWaiverWarnings(env *output.Envelope) {
+	if env == nil || len(a.preflightWaivers) == 0 {
+		return
+	}
+	env.Warnings = mergeWarningsUnique(env.Warnings, a.preflightWaiverWarnings())
 }
 
 func (a *app) addConfigWarnings(env *output.Envelope) {

@@ -11,6 +11,14 @@ All notable changes to xlflow will be documented in this file.
   and expose redacted `http_security` / `http_reliability` context. Added exact
   `[analyze].development_http_origins` exceptions for plain-HTTP credential
   development flows while retaining `VBA224` as the generic fallback.
+
+- Added project-level `[preflight].allowed_diagnostics` waivers for every
+  registry-owned source-preflight blocker. On each supported lint, analyze, or
+  LSP surface, waived diagnostics retain their error severity and suppression
+  behavior, while workbook commands proceed with deterministic
+  occurrence-count warnings; parser, infrastructure, duplicate-component, and
+  UserForm integrity failures remain non-waivable.
+
 - Added default-enabled, compile-equivalent `VB052`–`VB054` diagnostics for
   provably invalid project-local call targets, ambiguous bare Enum members,
   and undeclared `RaiseEvent` targets. Batch lint/analyze and LSP Full share

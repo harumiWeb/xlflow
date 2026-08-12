@@ -12,7 +12,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
-	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
+	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -1879,14 +1879,12 @@ func truncateParserRecoveryText(text string, maxRunes int) string {
 }
 
 func PushBlockingIssues(issues []Issue) []Issue {
-	blocking := make([]Issue, 0)
-	for _, issue := range issues {
-		metadata, ok := staticrules.Lookup(issue.Code)
-		if ok && metadata.PreflightBlocking {
-			blocking = append(blocking, issue)
-		}
-	}
+	blocking, _ := PartitionPreflightIssues(issues, staticpreflight.NewPolicy(nil))
 	return blocking
+}
+
+func PartitionPreflightIssues(issues []Issue, policy staticpreflight.Policy) (blocking []Issue, allowed []Issue) {
+	return staticpreflight.Partition(issues, func(issue Issue) string { return issue.Code }, policy)
 }
 
 func (l Linter) xlflowUIBareDialogIssuesContext(ctx context.Context, files []string) ([]Issue, error) {

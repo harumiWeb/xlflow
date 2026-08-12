@@ -2174,7 +2174,7 @@ func (r renderer) renderWorkbookSource(env Envelope) string {
 	workbook := objectMap(env.Workbook)
 	backup := objectMap(env.Backup)
 	source := objectMap(env.Source)
-	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && env.PushDiagnostic == nil {
+	if len(workbook) == 0 && len(backup) == 0 && len(source) == 0 && env.PushDiagnostic == nil && env.Warnings == nil && env.Hints == nil {
 		return r.renderLogs(env)
 	}
 	var b strings.Builder

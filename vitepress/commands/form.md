@@ -33,6 +33,13 @@ xlflow [--wait] form export-image <name> --out <png>
 
 `form new` is source-only and requires `[userform].code_source = "sidecar"`. It creates `[src].forms/code/<Name>.bas` and an authoring-focused `[src].forms/specs/<Name>.yaml` (defaulting to `src/forms/...`); blank specs omit snapshot-only fields such as `warnings`. It does not create `.frm` or `.frx` artifacts.
 
+Workbook-writing sidecar form flows use the shared source-preflight policy.
+Registry blockers listed in `[preflight].allowed_diagnostics` can proceed with
+aggregated warnings, one per waived diagnostic ID with occurrence counts
+aggregated within each warning. Malformed specs, `FRM...` / `UFY...` artifact
+integrity failures, unreadable source, and other non-registry failures remain
+blocking.
+
 Edit Designer specifications directly under `src/forms/specs/` to receive real-time UserForm YAML diagnostics, context-aware completion, and Hover documentation from `xlflow lsp`. Hover distinguishes supported fields from best-effort geometry, observed-only list state, snapshot metadata, and custom/unchecked fields before `form build` opens Excel.
 
 All other workbook-backed form commands share the configured workbook lock with

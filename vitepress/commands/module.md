@@ -42,6 +42,11 @@ xlflow module install --push --json
 
 ::: tip
 `module install` writes `XlflowAssert.bas`, `XlflowRuntime.bas`, `XlflowUI.bas`, and `XlflowDebug.bas` into the configured `[src].modules/Xlflow/` directory. It refuses both target collisions and legacy root-level helper collisions.
+
+When installation reaches the shared source-preflight path (including
+`module install --push`), `[preflight].allowed_diagnostics` applies to registry
+blockers. File collisions and other non-registry integrity failures are not
+waivable.
 :::
 
 ::: warning

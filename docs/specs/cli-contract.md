@@ -1025,6 +1025,33 @@ Projects that intentionally use interactive GUI entrypoints may set `[lint].disa
 
 Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB054` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
 
+`[preflight].allowed_diagnostics` is an empty-by-default project policy for the
+shared source-preflight gate used by `push`, configured-workbook `run`,
+`run --push`, `init`, module installation, and sidecar form writes. Entries are
+trimmed, uppercased, deduplicated in first-occurrence order, and must be
+canonical registry IDs with `preflight_blocking = true`. Empty entries are
+ignored. Unknown IDs, non-blocking registry IDs, and non-registry codes are
+configuration errors; wildcards are unsupported. The registry field and
+`xlflow rules` continue to describe default behavior.
+
+A listed diagnostic remains enabled at its original severity on each supported
+`lint`, `analyze`, or LSP surface and remains subject to the existing
+inline-suppression contract. `lint` and `analyze` retain their normal CLI exit
+behavior; LSP publishes diagnostics and does not participate in the CLI
+exit-status contract. Only the workbook source-preflight decision changes.
+Applied waivers are deduplicated by diagnostic location within one CLI app,
+aggregated deterministically by code, and emitted through the existing
+`warnings` envelope as
+`preflight_diagnostic_allowed` with `rule`, `count`, and a warning that VBE
+compilation may still fail. Warnings remain attached when another diagnostic
+blocks preflight or a later Excel/VBE step fails. Caller-specific ignored
+analysis codes are removed before policy classification and do not produce a
+waiver warning.
+
+Parser or analyzer execution failures, unreadable source, duplicate VBA
+components, and UserForm artifact/integrity errors such as `FRM...` and
+`UFY...` are outside the registry policy and cannot be waived.
+
 Projects should disable configurable lint rules with `[lint].disabled_rules` using stable diagnostic IDs, for example `disabled_rules = ["VB002", "VB006"]`. Legacy per-rule booleans remain accepted for compatibility, but emit deprecation warnings. If a legacy boolean enables a rule that is also listed in `disabled_rules`, `disabled_rules` takes precedence and xlflow emits a conflict warning.
 
 `[lint].disabled_rules` lookup is case-insensitive, preserves deterministic

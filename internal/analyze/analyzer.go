@@ -13,6 +13,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/typedb"
@@ -3123,14 +3124,12 @@ func resumeNextScopeReason(flags resumeNextScopeFlag) string {
 }
 
 func BlockingFindings(findings []Finding) []Finding {
-	blocking := make([]Finding, 0)
-	for _, finding := range findings {
-		metadata, ok := staticrules.Lookup(finding.Code)
-		if ok && metadata.PreflightBlocking {
-			blocking = append(blocking, finding)
-		}
-	}
+	blocking, _ := PartitionPreflightFindings(findings, staticpreflight.NewPolicy(nil))
 	return blocking
+}
+
+func PartitionPreflightFindings(findings []Finding, policy staticpreflight.Policy) (blocking []Finding, allowed []Finding) {
+	return staticpreflight.Partition(findings, func(finding Finding) string { return finding.Code }, policy)
 }
 
 func (a Analyzer) objectSetFinding(file parsedFile, proc sourceProcedure, line int, code, target, typ string) Finding {

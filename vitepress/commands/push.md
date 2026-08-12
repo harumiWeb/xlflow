@@ -31,6 +31,14 @@ xlflow push --session --fast --no-save --json
 > [!IMPORTANT]
 > `push` runs source preflight before opening Excel so modal compile dialogs are caught as structured CLI errors whenever possible.
 
+Projects may list an explicitly reviewed registry blocker under
+`[preflight].allowed_diagnostics`. The diagnostic remains enabled and is
+reported as an error by static analysis; `push` proceeds with aggregated
+`preflight_diagnostic_allowed` warnings, one per waived diagnostic ID with
+occurrence counts aggregated within each warning, and the later VBE compile can
+still fail. Duplicate components, unreadable source, and UserForm artifact
+integrity failures cannot be waived this way.
+
 When `[vba.line_numbers].enabled = true`, `push` updates folder annotations and then adds temporary physical-line labels to its prepared import copies so VBA `Erl` reports useful locations. The tracked source is not changed. Labels use fixed-width space padding and no colon; no `push` flag is provided for this feature. xlflow stops safely instead of instrumenting code that contains existing or mismatched numeric labels, or numeric `GoTo`, `GoSub`, or `Resume` targets.
 
 ::: warning

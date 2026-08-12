@@ -26,18 +26,19 @@ var (
 )
 
 type Config struct {
-	Project  ProjectConfig    `toml:"project"`
-	Excel    ExcelConfig      `toml:"excel"`
-	Src      SourceConfig     `toml:"src"`
-	VBA      VBAConfig        `toml:"vba"`
-	UserForm UserFormConfig   `toml:"userform"`
-	Build    BuildConfig      `toml:"build"`
-	Metrics  MetricsConfig    `toml:"metrics"`
-	Backup   BackupConfig     `toml:"backup"`
-	Fmt      FmtConfig        `toml:"fmt"`
-	Lint     LintConfig       `toml:"lint"`
-	Analyze  AnalyzeConfig    `toml:"analyze"`
-	Warnings []map[string]any `toml:"-"`
+	Project   ProjectConfig    `toml:"project"`
+	Excel     ExcelConfig      `toml:"excel"`
+	Src       SourceConfig     `toml:"src"`
+	VBA       VBAConfig        `toml:"vba"`
+	UserForm  UserFormConfig   `toml:"userform"`
+	Build     BuildConfig      `toml:"build"`
+	Metrics   MetricsConfig    `toml:"metrics"`
+	Backup    BackupConfig     `toml:"backup"`
+	Fmt       FmtConfig        `toml:"fmt"`
+	Preflight PreflightConfig  `toml:"preflight"`
+	Lint      LintConfig       `toml:"lint"`
+	Analyze   AnalyzeConfig    `toml:"analyze"`
+	Warnings  []map[string]any `toml:"-"`
 }
 
 type ProjectConfig struct {
@@ -132,6 +133,10 @@ type FmtConfig struct {
 	DeclarationSpacing bool `toml:"declaration_spacing"`
 	KeywordCasing      bool `toml:"keyword_casing"`
 	BuiltinCasing      bool `toml:"builtin_casing"`
+}
+
+type PreflightConfig struct {
+	AllowedDiagnostics []string `toml:"allowed_diagnostics"`
 }
 
 type LintConfig struct {
@@ -419,12 +424,18 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 		if name == "metrics" || strings.HasPrefix(name, "metrics.") {
 			return cfg, fmt.Errorf("unknown metrics configuration key: %s", name)
 		}
+		if name == "preflight" || strings.HasPrefix(name, "preflight.") {
+			return cfg, fmt.Errorf("unknown preflight configuration key: %s", name)
+		}
 	}
 	applyDefaults(&cfg)
 	if err := applyLintRuleConfig(&cfg, meta); err != nil {
 		return cfg, err
 	}
 	if err := applyAnalyzeRuleConfig(&cfg, meta); err != nil {
+		return cfg, err
+	}
+	if err := normalizePreflightConfig(&cfg.Preflight); err != nil {
 		return cfg, err
 	}
 	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
@@ -437,6 +448,31 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 		return cfg, err
 	}
 	return cfg, validate(cfg)
+}
+
+func normalizePreflightConfig(cfg *PreflightConfig) error {
+	seen := make(map[string]struct{}, len(cfg.AllowedDiagnostics))
+	normalized := make([]string, 0, len(cfg.AllowedDiagnostics))
+	for _, raw := range cfg.AllowedDiagnostics {
+		id := strings.ToUpper(strings.TrimSpace(raw))
+		if id == "" {
+			continue
+		}
+		rule, ok := staticrules.Lookup(id)
+		if !ok {
+			return fmt.Errorf("unknown diagnostic ID in [preflight].allowed_diagnostics: %s", id)
+		}
+		if !rule.PreflightBlocking {
+			return fmt.Errorf("diagnostic ID is not preflight-blocking in [preflight].allowed_diagnostics: %s", id)
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	cfg.AllowedDiagnostics = normalized
+	return nil
 }
 
 func applyDefaults(cfg *Config) {
@@ -899,6 +935,24 @@ func normalizeExcelBridge(cfg *Config, allowInvalid bool) error {
 	return nil
 }
 
+func renderPreflightConfig(cfg PreflightConfig) string {
+	var b strings.Builder
+	b.WriteString("# Diagnostics remain enabled and visible when allowed here; only their\n")
+	b.WriteString("# source-preflight blocking effect is waived. Excel/VBE compilation may still fail.\n")
+	if len(cfg.AllowedDiagnostics) == 0 {
+		b.WriteString("allowed_diagnostics = []\n")
+		return b.String()
+	}
+	b.WriteString("allowed_diagnostics = [\n")
+	for _, id := range cfg.AllowedDiagnostics {
+		b.WriteString("  \"")
+		b.WriteString(id)
+		b.WriteString("\",\n")
+	}
+	b.WriteString("]\n")
+	return b.String()
+}
+
 func renderLintConfig(cfg LintConfig) string {
 	var b strings.Builder
 	b.WriteString("# Disable specific lint rules by diagnostic ID.\n")
@@ -1121,6 +1175,10 @@ func renderMetricsConfig(cfg MetricsConfig) string {
 }
 
 func Write(path string, cfg Config) (err error) {
+	preflightConfig := cfg.Preflight
+	if err := normalizePreflightConfig(&preflightConfig); err != nil {
+		return err
+	}
 	metricsConfig := cfg.Metrics
 	if err := normalizeMetricsExclude(&metricsConfig); err != nil {
 		return err
@@ -1145,6 +1203,7 @@ func Write(path string, cfg Config) (err error) {
 	lintConfigText := renderLintConfig(cfg.Lint)
 	analyzeConfigText := renderAnalyzeConfig(analyzeConfig)
 	metricsConfigText := renderMetricsConfig(metricsConfig)
+	preflightConfigText := renderPreflightConfig(preflightConfig)
 
 	const tmpl = `# Project identity and entry point.
 [project]
@@ -1223,6 +1282,10 @@ keyword_casing = %t
 # Normalize known VBA/Excel/Office built-in identifier casing in xlflow fmt.
 builtin_casing = %t
 
+# Source-preflight diagnostic waivers.
+[preflight]
+%s
+
 # Static analysis rules.
 [lint]
 %s
@@ -1239,6 +1302,7 @@ builtin_casing = %t
 		cfg.UserForm.CodeSource,
 		metricsConfigText,
 		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing, cfg.Fmt.KeywordCasing, cfg.Fmt.BuiltinCasing,
+		preflightConfigText,
 		lintConfigText,
 		analyzeConfigText,
 	)

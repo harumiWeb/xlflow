@@ -6,6 +6,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `active_sheet`
 - `active_workbook_mismatch`
 - `affected_modules`
+- `allowed_diagnostics`
 - `alternative_body`
 - `ambiguous_test_name`
 - `analysis_metrics`
@@ -697,6 +698,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `post_while`
 - `pre_until`
 - `pre_while`
+- `preflight_diagnostic_allowed`
 - `preprocessor_else`
 - `preprocessor_elseif`
 - `preprocessor_if`
