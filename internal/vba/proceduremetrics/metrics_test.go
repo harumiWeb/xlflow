@@ -75,6 +75,22 @@ func TestCollectComputesAllProcedureMetrics(t *testing.T) {
 	}
 }
 
+func TestExcelEffectCountUsesLeafStatementsAndIdentifierBoundaries(t *testing.T) {
+	procedure := procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{Kind: procedureir.ProcedureSub, DeclarationRange: testRange(1, 8)},
+		Statements: []procedureir.Statement{
+			{ID: 1, Kind: procedureir.StatementIf, Condition: &procedureir.Expression{Text: `Range("A1")`}, Range: testRange(2, 5)},
+			{ID: 2, ParentID: 1, Kind: procedureir.StatementUnknown, Text: `SetRange("A1")`, Range: testRange(3, 3)},
+			{ID: 3, Kind: procedureir.StatementUnknown, Text: `Set target = Range("B1")`, Range: testRange(6, 6)},
+			{ID: 4, Kind: procedureir.StatementUnknown, Text: `Application.Cells(1, 1) = 1`, Range: testRange(7, 7)},
+		},
+	}
+	got := Collect(Input{IR: procedure})
+	if got.ExcelEffectCount != 3 {
+		t.Fatalf("excel effects = %d, want 3", got.ExcelEffectCount)
+	}
+}
+
 func TestEvaluateThresholdsUsesStrictPositiveThresholdsAndStableOrder(t *testing.T) {
 	procedures := []ProcedureMetrics{
 		{Name: "Second", File: "b.bas", DeclarationRange: testRange(4, 4), Metrics: Metrics{LoopCount: 3, GotoCount: 2}},

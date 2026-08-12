@@ -375,8 +375,9 @@ Top-N and score-threshold selections are unioned. Top-N-only `MX002` entries
 are informational; threshold-selected entries are warning-level and return
 `error.code = "metrics_hotspot_threshold_exceeded"` with exit `1`, while
 retaining the complete metrics payload. Negative top-N values, non-finite
-numbers, unknown keys, malformed tables, and percentages outside `0..100` are
-configuration errors (exit `2`). The signal vocabulary and deterministic
+selector percentages, unknown keys, malformed tables, and percentages outside
+`0..100` are configuration errors (exit `2`); valid percentages are exactly
+`0` or values from `1` through `100`. The signal vocabulary and deterministic
 ranking contract are defined in
 `docs/specs/vba-procedure-and-module-hotspots.md`.
 

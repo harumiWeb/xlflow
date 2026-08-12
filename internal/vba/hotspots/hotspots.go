@@ -110,7 +110,7 @@ type Entity struct {
 	ActiveSignalCount int                `json:"active_signal_count"`
 	RawSignals        map[string]int     `json:"raw_signals"`
 	NormalizedSignals map[string]float64 `json:"normalized_signals"`
-	SelectedBy        Selection          `json:"selected_by,omitempty"`
+	SelectedBy        *Selection         `json:"selected_by,omitempty"`
 	DeclarationByte   int                `json:"-"`
 	Line              int                `json:"line,omitempty"`
 	Uncertainty       map[string]int     `json:"uncertainty,omitempty"`
@@ -188,7 +188,8 @@ func Select(entities []Entity, topN int, threshold float64) []Entity {
 		if !reason.TopN && !reason.Threshold {
 			continue
 		}
-		entity.SelectedBy = reason
+		selection := reason
+		entity.SelectedBy = &selection
 		selected = append(selected, entity)
 	}
 	return selected

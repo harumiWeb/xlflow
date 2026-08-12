@@ -34,7 +34,7 @@ func TestRankIsDeterministicAndUsesEqualWeightSignals(t *testing.T) {
 func TestSelectUsesUnionAndMarksThresholdPromotion(t *testing.T) {
 	entities := []Entity{{ID: "a", Rank: 1, Score: 90}, {ID: "b", Rank: 2, Score: 40}, {ID: "c", Rank: 3, Score: 10}}
 	got := Select(entities, 1, 40)
-	if len(got) != 2 || !got[0].SelectedBy.TopN || !got[0].SelectedBy.Threshold || !got[1].SelectedBy.Threshold {
+	if len(got) != 2 || got[0].SelectedBy == nil || !got[0].SelectedBy.TopN || !got[0].SelectedBy.Threshold || got[1].SelectedBy == nil || !got[1].SelectedBy.Threshold {
 		t.Fatalf("selection = %#v", got)
 	}
 }

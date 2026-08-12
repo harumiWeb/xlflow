@@ -298,6 +298,44 @@ func TestWriteProcedureMetricsJSONAndHumanOutput(t *testing.T) {
 	}
 }
 
+func TestWriteHotspotHumanOutputUsesLabelsAndLimitsRows(t *testing.T) {
+	procedures := make([]map[string]any, 0, 11)
+	modules := make([]map[string]any, 0, 11)
+	for i := 0; i < 11; i++ {
+		procedures = append(procedures, map[string]any{
+			"file": "src/modules/Main.bas", "module": "Main", "name": fmt.Sprintf("Run%d", i),
+			"line": i + 1, "rank": i + 1, "score": float64(100 - i), "active_signal_count": 2,
+		})
+		modules = append(modules, map[string]any{
+			"file": "src/modules/Main.bas", "module": fmt.Sprintf("Module%d", i), "name": fmt.Sprintf("Module%d", i),
+			"line": i + 1, "rank": i + 1, "score": float64(100 - i), "active_signal_count": 2,
+		})
+	}
+	env := New("metrics")
+	env.Metrics = map[string]any{
+		"schema_version": 1,
+		"procedures":     []map[string]any{},
+		"hotspots": map[string]any{
+			"schema_version": 1,
+			"procedures":     procedures,
+			"modules":        modules,
+		},
+	}
+	var human bytes.Buffer
+	if err := WriteWithOptions(&human, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	text := human.String()
+	for _, want := range []string{"Procedures:", "Modules:", "Rank", "1 more procedures hotspot(s); use --json", "1 more modules hotspot(s); use --json"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("hotspot human output missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Module0.Module0") {
+		t.Fatalf("module location duplicated module name:\n%s", text)
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesPushDiagnostic(t *testing.T) {
 	env := New("push")
 	env.PushDiagnostic = map[string]any{

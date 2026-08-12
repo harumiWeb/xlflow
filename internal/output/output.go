@@ -1835,11 +1835,29 @@ func (r renderer) renderMetrics(env Envelope) string {
 			if len(entities) == 0 {
 				continue
 			}
-			rows := make([][]string, 0, len(entities))
-			for _, entity := range entities {
-				rows = append(rows, []string{fmt.Sprintf("%d", intNumber(entity, "rank")), metricsProcedureLocation(entity), fmt.Sprintf("%.2f", func() float64 { n, _ := numberValue(entity, "score"); return n }()), fmt.Sprintf("%d", intNumber(entity, "active_signal_count"))})
+			limit := len(entities)
+			if limit > 10 {
+				limit = 10
 			}
-			b.WriteString(r.table([]string{titleCaseASCII(kind), "Entity", "Score", "Signals"}, rows))
+			rows := make([][]string, 0, limit)
+			for _, entity := range entities[:limit] {
+				score, _ := numberValue(entity, "score")
+				label := metricsProcedureLocation(entity)
+				if kind == "modules" {
+					label = metricsHotspotModuleLocation(entity)
+				}
+				rows = append(rows, []string{
+					fmt.Sprintf("%d", intNumber(entity, "rank")),
+					label,
+					fmt.Sprintf("%.2f", score),
+					fmt.Sprintf("%d", intNumber(entity, "active_signal_count")),
+				})
+			}
+			fmt.Fprintf(&b, "%s:\n", titleCaseASCII(kind))
+			b.WriteString(r.table([]string{"Rank", "Entity", "Score", "Signals"}, rows))
+			if len(entities) > limit {
+				fmt.Fprintf(&b, "%d more %s hotspot(s); use --json for the complete metrics.\n", len(entities)-limit, kind)
+			}
 		}
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
@@ -1883,6 +1901,22 @@ func metricsProcedureLocation(procedure map[string]any) string {
 	}
 	if file != "" && name != "" {
 		return file + " " + name
+	}
+	return name
+}
+
+func metricsHotspotModuleLocation(module map[string]any) string {
+	file := stringValue(module, "file")
+	name := stringValue(module, "module")
+	line := intNumber(module, "line")
+	if file != "" && line > 0 {
+		return fmt.Sprintf("%s:%d %s", file, line, name)
+	}
+	if file != "" && name != "" {
+		return file + " " + name
+	}
+	if file != "" {
+		return file
 	}
 	return name
 }

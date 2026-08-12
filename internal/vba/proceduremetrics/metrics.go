@@ -216,11 +216,29 @@ func Collect(input Input) ProcedureMetrics {
 			result.MutableStateMutations++
 		}
 	}
+	children := make(map[int]bool, len(statements))
 	for _, statement := range statements {
-		text := strings.ToLower(statement.Text)
-		if strings.Contains(text, "application.") || strings.Contains(text, "range(") || strings.Contains(text, "cells(") || strings.Contains(text, "worksheets(") || strings.Contains(text, "workbooks(") {
+		if statement.ParentID != 0 {
+			children[statement.ParentID] = true
+		}
+	}
+	for _, statement := range statements {
+		texts := make([]string, 0, 4)
+		// Statement.Text for a control node contains its complete nested body.
+		// Only leaf text is used for executable effects; control expressions are
+		// added separately so `If Range(...) Then` remains observable.
+		if !children[statement.ID] {
+			texts = append(texts, statement.Text)
+		}
+		for _, expression := range []*procedureir.Expression{statement.Target, statement.Value, statement.Condition} {
+			if expression != nil {
+				texts = append(texts, expression.Text)
+			}
+		}
+		if containsExcelEffect(texts) {
 			result.ExcelEffectCount++
 		}
+		text := strings.ToLower(statement.Text)
 		if statement.Kind == procedureir.StatementOnError || statement.Kind == procedureir.StatementResume || strings.Contains(text, "err.raise") {
 			result.ErrorHandlingCount++
 		}
@@ -229,6 +247,44 @@ func Collect(input Input) ProcedureMetrics {
 		}
 	}
 	return result
+}
+
+func containsExcelEffect(texts []string) bool {
+	for _, text := range texts {
+		lower := strings.ToLower(text)
+		for _, name := range []string{"application", "range", "cells", "worksheets", "workbooks"} {
+			if containsVBAReference(lower, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsVBAReference(text, name string) bool {
+	for offset := 0; offset < len(text); {
+		relative := strings.Index(text[offset:], name)
+		if relative < 0 {
+			return false
+		}
+		index := offset + relative
+		beforeOK := index == 0 || !isVBAIdentifierByte(text[index-1])
+		end := index + len(name)
+		after := end
+		for after < len(text) && (text[after] == ' ' || text[after] == '\t') {
+			after++
+		}
+		afterOK := after < len(text) && (text[after] == '(' || text[after] == '.')
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = index + len(name)
+	}
+	return false
+}
+
+func isVBAIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
 // CollectProcedure is a convenience for callers that have only a procedure

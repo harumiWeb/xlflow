@@ -74,16 +74,17 @@ func (a *app) metricsCommand() *cobra.Command {
 				} else {
 					env.Diagnostics = hotspotFindings
 				}
-				if cfg.Metrics.Hotspots.ProcedureScoreThreshold > 0 || cfg.Metrics.Hotspots.ModuleScoreThreshold > 0 {
+				thresholdFindings := hotspotThresholdFindingCount(hotspotFindings)
+				if thresholdFindings > 0 {
 					env.Status = output.StatusFailed
 					if len(violations) == 0 {
-						env.Error = &output.Error{Code: "metrics_hotspot_threshold_exceeded", Message: fmt.Sprintf("%d architectural hotspot threshold finding(s)", len(hotspotFindings))}
+						env.Error = &output.Error{Code: "metrics_hotspot_threshold_exceeded", Message: fmt.Sprintf("%d architectural hotspot threshold finding(s)", thresholdFindings)}
 					}
 				}
 			}
 			env.Warnings = warnings
 			env.Logs = []string{fmt.Sprintf("calculated metrics for %d procedure(s)", len(result))}
-			if len(violations) > 0 || (len(hotspotFindings) > 0 && (cfg.Metrics.Hotspots.ProcedureScoreThreshold > 0 || cfg.Metrics.Hotspots.ModuleScoreThreshold > 0)) {
+			if len(violations) > 0 || hotspotThresholdFindingCount(hotspotFindings) > 0 {
 				return a.write(env, output.ExitValidation)
 			}
 			return a.write(env, output.ExitSuccess)
@@ -207,6 +208,9 @@ func buildHotspotReport(procedures []proceduremetrics.ProcedureMetrics) hotspots
 	return hotspots.BuildReport(procedureInputs, modules)
 }
 
+// The traversal starts at each procedure intentionally. Reusing a module-level
+// closure would overstate affected modules when a module contains procedures
+// with different reachable callees.
 func reachableProcedureModules(start string, adjacency map[string]map[string]bool, moduleByProcedure map[string]string) map[string]bool {
 	modules := map[string]bool{}
 	if module := moduleByProcedure[start]; module != "" {
@@ -246,10 +250,14 @@ func reachableModules(start string, adjacency map[string]map[string]bool) map[st
 	return seen
 }
 
+const cycleEnumerationWorkBudget = 100_000
+
 // cycleParticipationCounts enumerates elementary cycles in the confirmed
 // procedure graph. Restricting traversal to nodes >= the cycle's start node
 // makes the lexicographically smallest node the canonical start, so each
-// directed cycle is counted once while keeping the result deterministic.
+// directed cycle is counted once while keeping the result deterministic. A
+// fixed work budget prevents dense graphs from making metrics unbounded; when
+// the budget is exhausted, counts are a conservative lower bound.
 func cycleParticipationCounts(adjacency map[string]map[string]bool) map[string]int {
 	result := map[string]int{}
 	nodesSet := map[string]bool{}
@@ -264,17 +272,35 @@ func cycleParticipationCounts(adjacency map[string]map[string]bool) map[string]i
 		nodes = append(nodes, node)
 	}
 	sort.Strings(nodes)
+	work := 0
+	exhausted := false
 	for _, start := range nodes {
+		if exhausted {
+			break
+		}
 		path := []string{start}
 		visited := map[string]bool{start: true}
 		var visit func(string)
 		visit = func(current string) {
+			if exhausted {
+				return
+			}
+			work++
+			if work > cycleEnumerationWorkBudget {
+				exhausted = true
+				return
+			}
 			nexts := make([]string, 0, len(adjacency[current]))
 			for next := range adjacency[current] {
 				nexts = append(nexts, next)
 			}
 			sort.Strings(nexts)
 			for _, next := range nexts {
+				work++
+				if work > cycleEnumerationWorkBudget {
+					exhausted = true
+					return
+				}
 				if next == start {
 					for _, member := range path {
 						result[member]++
@@ -301,7 +327,7 @@ func hotspotFindingsForConfig(report hotspots.Report, cfg config.HotspotsConfig)
 	appendFindings := func(entities []hotspots.Entity, topN int, threshold float64) {
 		for _, entity := range hotspots.Select(entities, topN, threshold) {
 			severity := "information"
-			if entity.SelectedBy.Threshold {
+			if entity.SelectedBy != nil && entity.SelectedBy.Threshold {
 				severity = "warning"
 			}
 			findings = append(findings, map[string]any{"code": "MX002", "severity": severity, "kind": entity.Kind, "file": entity.File, "line": entity.Line, "module": entity.Module, "procedure": entity.Name, "rank": entity.Rank, "score": entity.Score, "score_model": entity.ScoreModel, "raw_signals": entity.RawSignals, "normalized_signals": entity.NormalizedSignals, "uncertainty": entity.Uncertainty, "active_signal_count": entity.ActiveSignalCount, "selected_by": entity.SelectedBy, "message": fmt.Sprintf("%s is an architectural hotspot candidate (score %.2f)", entity.Name, entity.Score)})
@@ -310,6 +336,23 @@ func hotspotFindingsForConfig(report hotspots.Report, cfg config.HotspotsConfig)
 	appendFindings(report.Procedures, cfg.ProcedureTopN, cfg.ProcedureScoreThreshold)
 	appendFindings(report.Modules, cfg.ModuleTopN, cfg.ModuleScoreThreshold)
 	return findings
+}
+
+func hotspotThresholdFindingCount(findings []map[string]any) int {
+	count := 0
+	for _, finding := range findings {
+		switch selected := finding["selected_by"].(type) {
+		case *hotspots.Selection:
+			if selected != nil && selected.Threshold {
+				count++
+			}
+		case hotspots.Selection:
+			if selected.Threshold {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func metricsThresholdFailureMessage(count int) string {

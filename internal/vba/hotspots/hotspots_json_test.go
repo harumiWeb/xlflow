@@ -2,6 +2,7 @@ package hotspots
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -34,5 +35,26 @@ func TestReportJSONIncludesRawAndNormalizedSignals(t *testing.T) {
 	}
 	if entity.NormalizedSignals == nil {
 		t.Fatal("normalized signals were omitted")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	procedures := raw["procedures"].([]any)
+	if _, ok := procedures[0].(map[string]any)["selected_by"]; ok {
+		t.Fatalf("unselected entity included selected_by: %#v", procedures[0])
+	}
+	selected := Select(report.Procedures, 1, 0)
+	selectedReport := BuildReport([]Input{{
+		ID: "M.Run", Kind: "procedure", File: "m.bas", Module: "M", Name: "Run",
+		RawSignals: map[string]int{"complexity": 2},
+	}}, nil)
+	selectedReport.Procedures = selected
+	selectedData, err := json.Marshal(selectedReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(selectedData), `"selected_by":{"top_n":true}`) {
+		t.Fatalf("selected entity omitted selected_by: %s", selectedData)
 	}
 }

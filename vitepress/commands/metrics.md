@@ -99,8 +99,9 @@ warning `MX002` entries and set
 `error.code = "metrics_hotspot_threshold_exceeded"` (exit `1`). The complete
 metrics and hotspot arrays remain available in the failure envelope. Hotspot
 selectors are opt-in, are not analyzer rules, and cannot be inline-suppressed.
-Negative top-N values, non-finite scores, malformed tables, unknown keys, and
-percentages outside `0..100` are configuration errors (exit `2`). The complete
+Negative top-N values, non-finite or otherwise invalid selector input values,
+malformed tables, unknown keys, and percentages outside `0..100` are
+configuration errors (exit `2`). The complete
 signal and ordering contract is in
 `docs/specs/vba-procedure-and-module-hotspots.md`.
 

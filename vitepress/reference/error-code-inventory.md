@@ -971,6 +971,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `timeout_ms`
 - `timeout_state`
 - `too_long`
+- `top_n`
 - `total_diffs`
 - `tree_sitter_vba`
 - `trust_vba_access`

@@ -99,36 +99,44 @@ Signals are intentionally exposed so a score is auditable. A missing or
 uncertain fact contributes `0`; unresolved, ambiguous, external, and dynamic
 relationships do not become invented project-local dependencies.
 
-| Signal                      | Evidence represented                                                    |
-| --------------------------- | ----------------------------------------------------------------------- |
-| `complexity`                | Structural procedure complexity from the metrics IR/CFG.                |
-| `complexity_max`            | Maximum procedure complexity in a module (module cohort only).          |
-| `call_fan_in`               | Unique resolved project-local callers.                                  |
-| `call_fan_out`              | Unique resolved project-local callees.                                  |
-| `affected_module_count`     | Distinct project modules reached by resolved dependencies/effects.      |
-| `excel_effect_count`        | Confirmed Excel object-model effects.                                   |
-| `mutable_state_reads`       | Reads of indexed mutable module state.                                  |
-| `mutable_state_writes`      | Writes to indexed mutable module state.                                 |
-| `mutable_state_mutations`   | Confirmed mutable-state mutations.                                      |
-| `cycle_count`               | Distinct detected project-local call cycles containing the entity.      |
-| `external_dependency_count` | External or declared dependency references retained as scalar evidence. |
-| `error_handling_count`      | Error-handler and failure-handling structures.                          |
-| `resource_ownership_count`  | Resource-acquisition/ownership boundaries.                              |
-| `public_procedure_count`    | Public procedures in a module (module cohort).                          |
+| Signal                      | Evidence represented                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `complexity`                | Structural procedure complexity from the metrics IR/CFG.                                                                 |
+| `complexity_max`            | Maximum procedure complexity in a module (module cohort only).                                                           |
+| `call_fan_in`               | Unique resolved project-local callers.                                                                                   |
+| `call_fan_out`              | Unique resolved project-local callees.                                                                                   |
+| `affected_module_count`     | Distinct project modules reached through resolved project-local call dependencies, including the entity's origin module. |
+| `excel_effect_count`        | Confirmed Excel object-model effects.                                                                                    |
+| `mutable_state_reads`       | Reads of indexed mutable module state.                                                                                   |
+| `mutable_state_writes`      | Writes to indexed mutable module state.                                                                                  |
+| `mutable_state_mutations`   | Confirmed mutable-state mutations.                                                                                       |
+| `cycle_count`               | Distinct detected project-local call cycles containing the entity.                                                       |
+| `external_dependency_count` | External or declared dependency references retained as scalar evidence.                                                  |
+| `error_handling_count`      | Error-handler and failure-handling structures.                                                                           |
+| `resource_ownership_count`  | Resource-acquisition/ownership boundaries.                                                                               |
+| `public_procedure_count`    | Public procedures in a module (module cohort).                                                                           |
 
 Signal values are counts, not diagnostic severities. A high score is a
 maintainability-review lead, not proof of a bug, security issue, or required
-refactor. The collector remains conservative when evidence is incomplete.
+refactor. The collector remains conservative when evidence is incomplete. To
+keep source-only metrics bounded on dense graphs, elementary-cycle enumeration
+uses a deterministic fixed work budget; if it is exhausted, `cycle_count` is a
+conservative lower bound for that report.
 
 ## Score and ordering
 
-Procedure and module cohorts are normalized independently. For each signal,
-the collector computes an average-rank percentile from `0` (lowest) to `100`
-(highest), using the other entities in the same cohort. Ties receive the
-average rank. A signal whose values are constant (or whose cohort has one
-entity) is inactive and omitted from that entity's denominator. The score is
-the equal-weight arithmetic mean of active normalized signals, rounded to two
-decimal places; entities with no active signals score `0`.
+Procedure and module cohorts are normalized independently. For a cohort of
+`N >= 2` entities, each signal is sorted ascending and a value tied from the
+1-based ordinal `r_first` through `r_last` receives
+`average_rank = (r_first + r_last) / 2`, then
+`percentile = 100 * (average_rank - 1) / (N - 1)`. Thus the lowest and highest
+values are exactly `0` and `100`, and ties share their average-rank percentile.
+A signal whose values are constant (or whose cohort has one entity) is
+inactive, contributes percentile `0`, and is omitted from the score
+denominator. The score is the equal-weight arithmetic mean of active
+normalized signals, rounded to two decimal places; entities with no active
+signals score `0`. Score-threshold selection compares the emitted two-decimal
+score (`score >= threshold`), not an unrounded intermediate value.
 
 Entities sort by descending score. Equal scores use normalized file,
 declaration byte, module, name, procedure kind, and stable `id` as tie-breakers.
@@ -165,10 +173,12 @@ Diagnostics follow ranked procedure order, then ranked module order. Their
 structured fields mirror the selected entity (`kind`, `file`, `line`, `module`,
 `procedure`, `rank`, `score`, `score_model`, signal maps, and `selected_by`).
 
-Invalid hotspot values, unknown keys, malformed tables, negative top-N values,
-NaN scores, or thresholds outside `0..100` are configuration errors (exit
-`2`). Source read/parse failures fail closed without publishing partial
-metrics or hotspot rankings.
+Invalid selector values, unknown keys, malformed tables, negative top-N values,
+non-finite selector percentages, or thresholds outside `0..100` are
+configuration errors (exit `2`). A non-finite computed score is an internal
+failure and must not publish partial metrics or hotspot rankings. Source
+read/parse failures fail closed without publishing partial metrics or hotspot
+rankings.
 
 ## Determinism and consumers
 

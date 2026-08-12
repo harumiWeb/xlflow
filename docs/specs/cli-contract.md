@@ -300,6 +300,15 @@ top-N, non-finite or out-of-range percentages, unknown keys, and malformed
 tables) exit `2`. Hotspot scores are maintainability review signals, not
 definite analyzer findings, and `MX002` is not inline-suppressible.
 
+When both an `MX001` complexity threshold and a threshold-selected `MX002`
+occur, the envelope retains both diagnostic sets in deterministic order:
+`MX001` entries first (procedure order, then canonical metric order), followed
+by `MX002` procedure entries and then module entries in rank order. The
+compatibility error code `metrics_threshold_exceeded` wins whenever at least
+one `MX001` is present. `metrics_hotspot_threshold_exceeded` is used only when
+hotspot threshold findings are present without an `MX001`; Top-N-only findings
+never fail the command.
+
 `VBA229` is a default-enabled, realtime and batch compile-equivalent error for an unresolved type identifier in a procedure-local `Dim` or `Static ... As <Type>` declaration. It uses the production built-in/host/TypeLib and project symbol resolver, including embedded enum groups and class, UserForm, and document-module types, points at the type identifier, cannot be suppressed, and blocks source preflight. A missing, malformed, empty, or partially materialized generated TypeLib manifest leaves absence resolution incomplete: embedded types may still resolve positively, but a lookup miss does not emit `VBA229`. Parameters, return types, and module-level declarations remain outside this rule's v1 scope.
 
 `macros` opens the configured workbook and discovers VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. `macros --session` reads from the workbook opened by `session start`. Agents should use this command before guessing a `run` target.
@@ -473,9 +482,10 @@ integers; `0` disables the corresponding top-N selector. Positive
 percentages in `1..100`; `0` disables the corresponding selector. Top-N and
 threshold selection are independent and unioned. A threshold-selected entity
 emits warning `MX002` and sets `error.code = "metrics_hotspot_threshold_exceeded"`;
-top-N-only entities emit informational `MX002` entries. Invalid values,
-non-finite scores, unknown keys, and malformed tables are configuration errors
-and exit `2`. The score model, signal vocabulary, normalized percentile rules,
+top-N-only entities emit informational `MX002` entries. Invalid selector
+values, non-finite selector percentages, unknown keys, and malformed tables are
+configuration errors and exit `2`; a non-finite computed score is an internal
+failure without partial metrics output. The score model, signal vocabulary, normalized percentile rules,
 and deterministic ranking contract are defined by
 [VBA Procedure and Module Hotspots](vba-procedure-and-module-hotspots.md).
 
