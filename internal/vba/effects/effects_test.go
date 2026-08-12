@@ -778,6 +778,30 @@ func TestCallUncertaintyClassificationAndPropagation(t *testing.T) {
 	}
 }
 
+func TestResolutionDynamicMapsToDynamicUncertainty(t *testing.T) {
+	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
+		manualProcedure("Calls.Root", 1, []procedureir.CallSite{
+			manualCall(1, procedureir.ResolutionDynamic),
+			manualCall(2, procedureir.ResolutionIncomplete),
+			manualCall(3, procedureir.ResolutionNonCallable),
+		}),
+	}}
+	project := Build([]Document{{IR: doc, CFG: cfg.BuildDocument(doc)}})
+	summary := find(t, project, "Calls.Root")
+	if len(summary.DirectUncertainty) != 3 {
+		t.Fatalf("direct uncertainty = %#v, want three entries", summary.DirectUncertainty)
+	}
+	if got := summary.DirectUncertainty[0].Kind; got != UncertaintyDynamic {
+		t.Fatalf("dynamic resolution kind = %q, want %q", got, UncertaintyDynamic)
+	}
+	if got := summary.DirectUncertainty[1].Kind; got != UncertaintyUnresolved {
+		t.Fatalf("incomplete resolution kind = %q, want %q", got, UncertaintyUnresolved)
+	}
+	if got := summary.DirectUncertainty[2].Kind; got != UncertaintyUnresolved {
+		t.Fatalf("non-callable resolution kind = %q, want %q", got, UncertaintyUnresolved)
+	}
+}
+
 func TestBuildIsDeterministicAcrossDocumentOrder(t *testing.T) {
 	a := sourceFile{"A.bas", "A", "Public Sub AProc()\n BProc\nEnd Sub\n"}
 	b := sourceFile{"B.bas", "B", "Public Sub BProc()\n Application.EnableEvents = True\nEnd Sub\n"}

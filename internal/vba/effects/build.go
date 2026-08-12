@@ -202,6 +202,8 @@ func uncertainty(origin ProcedureIdentity, call procedureir.CallSite) CallUncert
 		kind = UncertaintyExternal
 	case procedureir.ResolutionMemberCall:
 		kind = UncertaintyDynamic
+	case procedureir.ResolutionDynamic:
+		kind = UncertaintyDynamic
 	}
 	return CallUncertainty{Kind: kind, Origin: origin, Range: call.Range, StatementID: call.StatementID, CallID: call.ID, Callee: call.Callee.Text}
 }
