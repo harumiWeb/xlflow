@@ -10,8 +10,10 @@ the same batch and realtime procedure loops but performs its own lexical,
 procedure-local path pass over source lines and parsed declarations. It does
 not project through the generic sink findings, which keeps its structured
 file-operation metadata and ownership separate.
-The implementation is protocol-neutral and consumes `procedureir.ProcedureIR`
-and one `cfg.Graph`; it does not parse source or depend on CLI/LSP types.
+The shared generic implementation is protocol-neutral and consumes
+`procedureir.ProcedureIR` and one `cfg.Graph`; it does not parse source or
+depend on CLI/LSP types. `VBA245`'s separate lexical pass is intentionally
+scoped to the file/path contract described in its dedicated specification.
 
 ## State and transfer
 
