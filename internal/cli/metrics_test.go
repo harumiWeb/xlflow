@@ -119,6 +119,9 @@ func TestDiscoverMetricsSourceFilesRespectsUserFormCodeSourceForTests(t *testing
 	if _, ok := got[filepath.Clean(sidecarPath)]; ok {
 		t.Fatalf("frm mode included sidecar form code: %+v", got)
 	}
+	if got[filepath.Clean(standardPath)] != "standard" || got[filepath.Clean(classPath)] != "class" {
+		t.Fatalf("frm mode changed ordinary test sources: %+v", got)
+	}
 }
 
 func metricsSourceKinds(files []symbols.SourceFile) map[string]string {
