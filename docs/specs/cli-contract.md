@@ -897,7 +897,14 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. Direct `MsgBox` and `InputBox` usage remains in scope for this rule; `XlflowUI.MsgBox` and `XlflowUI.InputBox` are the approved dialog wrappers for runtime-aware automation. JSON findings may include `kind`, `symbol`, and `suggestion`.
 - `VB008`: typographic quote characters that can trigger VBE compile dialogs
 - `VB009`: likely C-style quote escapes in VBA string literals
-- `VB010`: unterminated `Sub`, `Function`, or `Property` procedure
+- `VB010`: unterminated `Sub`, `Function`, or `Property` procedure. Procedure
+  boundary validation follows mutually exclusive `#If`/`#ElseIf`/`#Else`
+  compilation branches, so a declaration selected in one branch may share its
+  matching `End` statement after `#End If` without producing a false
+  unterminated-procedure finding. `Function`, `Sub`, or `Property` words inside
+  `Enum`/`Type` declarations are not procedure starts when they have a valid
+  member name; reserved-keyword members remain invalid VBA and are not silently
+  accepted by this rule.
 - `VB011`: unexpected `End Sub`, `End Function`, or `End Property`
 - `VB012`: mismatched procedure end statement
 - `VB028`: bare `MsgBox` or `InputBox` calls are present while `XlflowUI.bas` is in the source tree. These calls can bind to `XlflowUI.MsgBox` / `XlflowUI.InputBox` instead of the VBA built-ins and fail at compile time. Use `XlflowUI` wrappers for xlflow-managed dialogs, or explicitly call `VBA.Interaction.MsgBox` / `VBA.Interaction.InputBox` for intentional native dialogs.

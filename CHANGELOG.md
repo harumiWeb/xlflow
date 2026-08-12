@@ -36,6 +36,8 @@ All notable changes to xlflow will be documented in this file.
   restore handling on the same physical line, after a colon-separated
   statement, or by switching to an explicit error handler. Procedure exits
   without restoration remain covered by the rule.
+- Fixed `VB010` false positives for mutually exclusive conditional-compilation
+  procedure declarations that share a common terminator after `#End If`.
 
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.

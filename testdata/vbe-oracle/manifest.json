@@ -53,6 +53,10 @@
       "path": "cases/declaration-keyword-valid-controls/case.json"
     },
     {
+      "id": "vb010-conditional-procedure-valid",
+      "path": "cases/vb010-conditional-procedure-valid/case.json"
+    },
+    {
       "id": "declaration-repeated-dim-after-comma",
       "path": "cases/declaration-repeated-dim-after-comma/case.json"
     },
