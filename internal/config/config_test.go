@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -81,6 +82,141 @@ func TestUnsafeSQLConstructionDefaultsEnabled(t *testing.T) {
 	cfg := Default()
 	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA239"); !ok || !enabled || !cfg.Analyze.DetectUnsafeSQLConstruction {
 		t.Fatalf("VBA239 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectUnsafeSQLConstruction)
+	}
+}
+
+func TestHTTPAnalysisRulesDefaultEnabled(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	for _, tc := range []struct {
+		id      string
+		enabled bool
+	}{
+		{id: "VBA246", enabled: cfg.Analyze.DetectUnsafeHTTPConfiguration},
+		{id: "VBA247", enabled: cfg.Analyze.DetectMissingHTTPTimeout},
+	} {
+		got, ok := AnalyzeRuleEnabled(cfg.Analyze, tc.id)
+		if !ok || !got || !tc.enabled {
+			t.Errorf("%s enabled = %v, known = %v, config = %v; want enabled configurable rule", tc.id, got, ok, tc.enabled)
+		}
+	}
+}
+
+func TestLoadSupportsHTTPRuleCompatibilityKeysAndDisabledRules(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_unsafe_http_configuration = false
+detect_missing_http_timeout = true
+disabled_rules = ["vba247"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Analyze.DetectUnsafeHTTPConfiguration || cfg.Analyze.DetectMissingHTTPTimeout {
+		t.Fatalf("HTTP rule config = unsafe:%v timeout:%v, want both disabled", cfg.Analyze.DetectUnsafeHTTPConfiguration, cfg.Analyze.DetectMissingHTTPTimeout)
+	}
+	if got := strings.Join(cfg.Analyze.DisabledRules, ","); got != "VBA247" {
+		t.Fatalf("disabled rules = %q, want VBA247", got)
+	}
+	for _, id := range []string{"VBA246", "VBA247"} {
+		if !hasConfigWarning(cfg.Warnings, "deprecated_analyze_rule_config", id) {
+			t.Errorf("missing deprecated compatibility-key warning for %s: %+v", id, cfg.Warnings)
+		}
+	}
+	if !hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA247") {
+		t.Fatalf("missing disabled_rules precedence warning for VBA247: %+v", cfg.Warnings)
+	}
+}
+
+func TestLoadNormalizesDevelopmentHTTPOrigins(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+development_http_origins = ["http://EXAMPLE.test:80", "http://[2001:0DB8::1]:8080", "http://example.test"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"http://[2001:db8::1]:8080", "http://example.test"}
+	if !reflect.DeepEqual(cfg.Analyze.DevelopmentHTTPOrigins, want) {
+		t.Fatalf("development_http_origins = %#v, want %#v", cfg.Analyze.DevelopmentHTTPOrigins, want)
+	}
+}
+
+func TestNormalizeDevelopmentHTTPOrigin(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		input string
+		want  string
+	}{
+		{"http://LOCALHOST:80", "http://localhost"},
+		{"http://LOCALHOST:080", "http://localhost"},
+		{"HTTP://Dev.Example:8080", "http://dev.example:8080"},
+		{"http://127.0.0.1", "http://127.0.0.1"},
+		{"http://[::1]", "http://[::1]"},
+		{"http://[2001:0DB8:0:0:0:0:0:1]:80", "http://[2001:db8::1]"},
+	} {
+		got, err := NormalizeDevelopmentHTTPOrigin(tc.input)
+		if err != nil || got != tc.want {
+			t.Errorf("NormalizeDevelopmentHTTPOrigin(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidDevelopmentHTTPOrigins(t *testing.T) {
+	t.Parallel()
+	for _, origin := range []string{
+		"", " https://dev.example", "https://dev.example", "http://user:secret@dev.example",
+		"http://dev.example/", "http://dev.example/path", "http://dev.example?debug=1",
+		"http://dev.example#fragment", "http://dev.example#", "http://*.example", "http://dev.example:0",
+		"http://dev.example:65536", "http://",
+	} {
+		origin := origin
+		t.Run(origin, func(t *testing.T) {
+			dir := t.TempDir()
+			body := []byte("[project]\nentry = \"Main.Run\"\n\n[excel]\npath = \"build/Book.xlsm\"\n\n[analyze]\ndevelopment_http_origins = [" + strconv.Quote(origin) + "]\n")
+			if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "analyze.development_http_origins") {
+				t.Fatalf("Load() error = %v, want development_http_origins validation error", err)
+			}
+		})
+	}
+}
+
+func TestWriteRejectsInvalidDevelopmentHTTPOriginBeforeCreatingFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	cfg := Default()
+	cfg.Analyze.DevelopmentHTTPOrigins = []string{"https://dev.example"}
+	if err := Write(path, cfg); err == nil || !strings.Contains(err.Error(), "analyze.development_http_origins") {
+		t.Fatalf("Write() error = %v, want development_http_origins validation error", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid Write created %s: %v", path, err)
 	}
 }
 
@@ -1516,6 +1652,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.Analyze.DetectExcelAPIFailureContracts = false
 	cfg.Analyze.DetectLoopInvariantExcelObjectResolution = false
 	cfg.Analyze.DetectValue2PerformanceOpportunities = true
+	cfg.Analyze.DevelopmentHTTPOrigins = []string{"http://DEV.example:80", "http://[::1]:8080"}
 
 	p := filepath.Join(dir, FileName)
 	if err := Write(p, cfg); err != nil {
@@ -1555,6 +1692,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, "detect_value2_performance_opportunities = true") {
 		t.Fatalf("generated config should include the enabled VBA243 opt-in:\n%s", text)
+	}
+	if !strings.Contains(text, `development_http_origins = ["http://[::1]:8080", "http://dev.example"]`) {
+		t.Fatalf("generated config should include normalized development HTTP origins:\n%s", text)
 	}
 	if !strings.Contains(text, "[fmt]") ||
 		!strings.Contains(text, "operator_spacing = true") ||
@@ -1638,6 +1778,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if !loaded.Analyze.DetectNonShortCircuitObjectGuard {
 		t.Fatal("expected detect_non_short_circuit_object_guard=true after Write/Load")
+	}
+	if want := []string{"http://[::1]:8080", "http://dev.example"}; !reflect.DeepEqual(loaded.Analyze.DevelopmentHTTPOrigins, want) {
+		t.Fatalf("development_http_origins = %#v, want %#v", loaded.Analyze.DevelopmentHTTPOrigins, want)
 	}
 	if loaded.Analyze.ForbidUnqualifiedExcelObjects {
 		t.Fatal("expected forbid_unqualified_excel_objects=false")

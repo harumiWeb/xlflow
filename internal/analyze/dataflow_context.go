@@ -55,3 +55,33 @@ type SQLExecutionContext struct {
 	OriginState   string `json:"origin_state,omitempty"`
 	Parameterized bool   `json:"parameterized"`
 }
+
+// FileOperationContext describes the path and operation classification for
+// VBA245. It is additive so clients that only understand generic diagnostics
+// can continue to consume the finding.
+type FileOperationContext struct {
+	Operation   string `json:"operation"`
+	PathRole    string `json:"path_role,omitempty"`
+	RiskClass   string `json:"risk_class"`
+	RiskKind    string `json:"risk_kind"`
+	OriginState string `json:"origin_state,omitempty"`
+	Anchor      string `json:"anchor,omitempty"`
+	Overwrite   *bool  `json:"overwrite,omitempty"`
+}
+
+// HTTPSecurityContext describes an HTTP transport or secret-exposure policy
+// observation without retaining credential values or URL path/query data.
+type HTTPSecurityContext struct {
+	API      string `json:"api,omitempty"`
+	RiskKind string `json:"risk_kind"`
+	Header   string `json:"header,omitempty"`
+	Origin   string `json:"origin,omitempty"`
+}
+
+// HTTPReliabilityContext describes the timeout state observed at an HTTP Send
+// operation. TimeoutState is either "missing" or "unbounded".
+type HTTPReliabilityContext struct {
+	API          string `json:"api,omitempty"`
+	RiskKind     string `json:"risk_kind"`
+	TimeoutState string `json:"timeout_state"`
+}

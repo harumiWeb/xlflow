@@ -344,6 +344,35 @@ End Property
 	}
 }
 
+func TestInspectIncludesImplicitlyPublicEventDeclarations(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	classDir := filepath.Join(dir, "src", "classes")
+	if err := os.MkdirAll(classDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `VERSION 1.0 CLASS
+Attribute VB_Name = "Notifier"
+Option Explicit
+Event Changed(ByVal Value As Long)
+`
+	if err := os.WriteFile(filepath.Join(classDir, "Notifier.cls"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Inspect(Options{RootDir: dir, Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("files = %+v, want one class module", result.Files)
+	}
+	event := assertSymbol(t, result.Files[0].Symbols, "Changed", "event")
+	if event.Visibility != "" {
+		t.Fatalf("implicit event visibility = %q, want empty/default-public metadata", event.Visibility)
+	}
+}
+
 func TestInspectSidecarFormCodeAvoidsDuplicateFrmSymbols(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()

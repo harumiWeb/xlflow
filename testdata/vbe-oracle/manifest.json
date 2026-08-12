@@ -136,6 +136,29 @@
       "path": "cases/valid-module-document-worksheet/case.json"
     },
     { "id": "valid-module-form", "path": "cases/valid-module-form/case.json" },
-    { "id": "valid-module-standard", "path": "cases/valid-module-standard/case.json" }
+    { "id": "valid-module-standard", "path": "cases/valid-module-standard/case.json" },
+    {
+      "id": "issue590-missing-project-procedure",
+      "path": "cases/issue590-missing-project-procedure/case.json"
+    },
+    {
+      "id": "issue590-missing-project-procedure-valid",
+      "path": "cases/issue590-missing-project-procedure-valid/case.json"
+    },
+    { "id": "issue590-non-callable", "path": "cases/issue590-non-callable/case.json" },
+    { "id": "issue590-non-callable-valid", "path": "cases/issue590-non-callable-valid/case.json" },
+    { "id": "issue590-ambiguous-enum", "path": "cases/issue590-ambiguous-enum/case.json" },
+    {
+      "id": "issue590-ambiguous-enum-valid",
+      "path": "cases/issue590-ambiguous-enum-valid/case.json"
+    },
+    {
+      "id": "issue590-undeclared-raiseevent",
+      "path": "cases/issue590-undeclared-raiseevent/case.json"
+    },
+    {
+      "id": "issue590-undeclared-raiseevent-valid",
+      "path": "cases/issue590-undeclared-raiseevent-valid/case.json"
+    }
   ]
 }

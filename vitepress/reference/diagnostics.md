@@ -4,6 +4,8 @@ Generated from the canonical rule registry at `internal/staticanalysis/rules/reg
 
 Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an installed xlflow binary. `VBA000` is a synthetic analysis-failure diagnostic and is intentionally outside the registry; UserForm `FRM...` and `UFY...` diagnostics are outside this catalog.
 
+`Blocks source preflight` describes the registry default. A project may list a blocking diagnostic in `[preflight].allowed_diagnostics` to let workbook automation proceed without disabling the diagnostic or changing its severity; applied waivers are reported as command warnings.
+
 | ID                  | Family  | Severity    | Scope           | Default | Title                                              |
 | ------------------- | ------- | ----------- | --------------- | ------- | -------------------------------------------------- |
 | [`VB001`](#vb001)   | lint    | warning     | file-local      | yes     | Missing Option Explicit                            |
@@ -53,6 +55,9 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB049`](#vb049)   | lint    | error       | file-local      | yes     | Inconsistent Property accessor contract            |
 | [`VB050`](#vb050)   | lint    | error       | file-local      | yes     | Invalid module declaration context                 |
 | [`VB051`](#vb051)   | lint    | error       | procedure-local | yes     | Invalid Me context                                 |
+| [`VB052`](#vb052)   | lint    | error       | interprocedural | yes     | Invalid procedure call target                      |
+| [`VB053`](#vb053)   | lint    | error       | interprocedural | yes     | Ambiguous Enum member                              |
+| [`VB054`](#vb054)   | lint    | error       | interprocedural | yes     | Undeclared RaiseEvent target                       |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -103,6 +108,9 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-range operation                     |
 | [`VBA243`](#vba243) | analyze | information | procedure-local | no      | Value2 performance opportunity                     |
 | [`VBA244`](#vba244) | analyze | information | project-wide    | yes     | Recursive and cyclic procedure dependency          |
+| [`VBA245`](#vba245) | analyze | warning     | procedure-local | yes     | Unsafe destructive file and path operation         |
+| [`VBA246`](#vba246) | analyze | warning     | procedure-local | yes     | Unsafe HTTP or TLS configuration                   |
+| [`VBA247`](#vba247) | analyze | warning     | procedure-local | yes     | Missing or unlimited HTTP timeout                  |
 
 ## VB001
 
@@ -1137,6 +1145,72 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                  |
 | Real-time editor diagnostic | yes                  |
 | Fix available               | no                   |
+
+## VB052
+
+**Invalid procedure call target.** A call targets a project-local symbol that is missing or known not to be callable.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB053
+
+**Ambiguous Enum member.** A bare Enum member reference has multiple visible project or type-library candidates and no unique lexical winner.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB054
+
+**Undeclared RaiseEvent target.** A RaiseEvent statement names an event that is not declared in the same object module.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
 
 ## VBA101
 
@@ -2237,3 +2311,69 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                             |
 | Real-time editor diagnostic | no                             |
 | Fix available               | no                             |
+
+## VBA245
+
+**Unsafe destructive file and path operation.** A destructive or state-dependent file operation may use an empty, root, relative, wildcard, traversing, overwritten, or externally derived path.
+
+| Property                    | Value                     |
+| --------------------------- | ------------------------- |
+| Family                      | `analyze`                 |
+| Category                    | `security`                |
+| Evidence class              | `policy`                  |
+| Compile-equivalent          | no                        |
+| Default severity            | `warning`                 |
+| Supported severities        | `warning`                 |
+| Surfaces                    | `analyze`, `lsp`          |
+| Scope                       | `procedure-local`         |
+| Precision                   | `medium`                  |
+| Enabled by default          | yes                       |
+| Configuration               | `detect_unsafe_file_path` |
+| Inline suppression          | yes                       |
+| Blocks source preflight     | no                        |
+| Real-time editor diagnostic | yes                       |
+| Fix available               | no                        |
+
+## VBA246
+
+**Unsafe HTTP or TLS configuration.** An HTTP client configuration may expose credentials, weaken TLS validation, log authorization data, or immediately execute downloaded content.
+
+| Property                    | Value                              |
+| --------------------------- | ---------------------------------- |
+| Family                      | `analyze`                          |
+| Category                    | `security`                         |
+| Evidence class              | `policy`                           |
+| Compile-equivalent          | no                                 |
+| Default severity            | `warning`                          |
+| Supported severities        | `warning`                          |
+| Surfaces                    | `analyze`, `lsp`                   |
+| Scope                       | `procedure-local`                  |
+| Precision                   | `medium`                           |
+| Enabled by default          | yes                                |
+| Configuration               | `detect_unsafe_http_configuration` |
+| Inline suppression          | yes                                |
+| Blocks source preflight     | no                                 |
+| Real-time editor diagnostic | yes                                |
+| Fix available               | no                                 |
+
+## VBA247
+
+**Missing or unlimited HTTP timeout.** A long-running HTTP operation may wait indefinitely because supported client timeouts are missing or explicitly unlimited.
+
+| Property                    | Value                         |
+| --------------------------- | ----------------------------- |
+| Family                      | `analyze`                     |
+| Category                    | `reliability`                 |
+| Evidence class              | `policy`                      |
+| Compile-equivalent          | no                            |
+| Default severity            | `warning`                     |
+| Supported severities        | `warning`                     |
+| Surfaces                    | `analyze`, `lsp`              |
+| Scope                       | `procedure-local`             |
+| Precision                   | `medium`                      |
+| Enabled by default          | yes                           |
+| Configuration               | `detect_missing_http_timeout` |
+| Inline suppression          | yes                           |
+| Blocks source preflight     | no                            |
+| Real-time editor diagnostic | yes                           |
+| Fix available               | no                            |

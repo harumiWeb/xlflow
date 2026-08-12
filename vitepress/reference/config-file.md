@@ -87,6 +87,12 @@ code_source = "sidecar"
 # Exclude project-root-relative doublestar glob patterns from `xlflow build`.
 # exclude = ["src/modules/Tests/**"]
 
+# Source-preflight diagnostic waivers.
+[preflight]
+# Diagnostics remain enabled and visible when allowed here; only their
+# source-preflight blocking effect is waived. Excel/VBE compilation may still fail.
+allowed_diagnostics = []
+
 # Static analysis rules.
 [lint]
 # Disable specific lint rules by diagnostic ID.
@@ -206,6 +212,33 @@ Negative numeric values are configuration errors. `min_keep > max_count` is also
 
 Each pattern is normalized to `/`; Windows and WSL separators match identically. Absolute paths and patterns that traverse outside the project root are invalid. `xlflow build` reports unmatched patterns as `build_exclude_unmatched` warnings. A matching UserForm artifact excludes the whole form component, including its related `.frx`, sidecar code, and persisted spec files. This setting does not change source selection for `push` or `pack`.
 
+### `[preflight]`
+
+| Key                   | Type     | Required | Default | Description                                                                                  |
+| --------------------- | -------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `allowed_diagnostics` | string[] | no       | `[]`    | Let listed registry diagnostics pass source preflight while keeping the diagnostics enabled. |
+
+Entries are trimmed, uppercased, deduplicated in first-occurrence order, and
+must name rules whose diagnostic catalog metadata says
+`preflight_blocking: true`. Unknown IDs, non-blocking IDs, and non-registry
+integrity codes such as `FRM...` or `UFY...` are configuration errors. There is
+no wildcard.
+
+```toml
+[preflight]
+allowed_diagnostics = ["VB052"]
+```
+
+This setting changes only whether workbook automation proceeds. On each
+supported `lint`, `analyze`, or LSP surface, the diagnostic remains an `error`
+and cannot become inline-suppressible. `lint` and `analyze` retain their normal
+CLI exit behavior; LSP publishes diagnostics and does not participate in the
+CLI exit-status contract. When xlflow applies waivers, command output includes
+aggregated `preflight_diagnostic_allowed` warnings, one per distinct
+diagnostic ID with occurrence counts aggregated within each warning, because
+Excel/VBE compilation may still fail. Keep the list empty in CI unless the
+project has explicitly reviewed and accepted each waiver.
+
 ### `[lint]`
 
 | Key              | Type     | Required | Default | Description                                       |
@@ -255,8 +288,13 @@ inline. This includes every preflight-blocking lint diagnostic.
 | `detect_expensive_full_range_operations`  | bool     | no       | `false` | Opt in to `VBA242` full-row, full-column, full-sheet, and unbounded `UsedRange` operation analysis.                              |
 | `detect_value2_performance_opportunities` | bool     | no       | `false` | Opt in to `VBA243` suggestions to use `Range.Value2` for bulk or repeated transfers when Date/Currency coercion is not required. |
 | `detect_procedure_call_cycles`            | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA244` project-wide recursive and cyclic procedure dependency analysis.               |
+| `detect_unsafe_http_configuration`        | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA246` HTTP transport-security analysis.                                              |
+| `detect_missing_http_timeout`             | bool     | no       | `true`  | Compatibility switch for default-enabled `VBA247` HTTP timeout reliability analysis.                                             |
+| `development_http_origins`                | string[] | no       | `[]`    | Exact plain-HTTP origins exempted only from `VBA246` plain-HTTP credential findings.                                             |
 
-Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`. `detect_risky_module_state = true` is the opt-in compatibility key for `VBA240`; disable it with `disabled_rules = ["VBA240"]`. `detect_redim_preserve_in_loops = false` is the compatibility key for disabling `VBA241`; prefer `disabled_rules = ["VBA241"]`. `detect_expensive_full_range_operations = true` is the opt-in compatibility key for `VBA242`; prefer enabling it explicitly only for Excel projects and use `disabled_rules = ["VBA242"]` to suppress it under a project policy. `detect_value2_performance_opportunities = true` is the opt-in compatibility key for `VBA243`; prefer enabling it explicitly only for Excel projects and use `disabled_rules = ["VBA243"]` to suppress it under a project policy. `detect_procedure_call_cycles = false` is the compatibility key for disabling `VBA244`; prefer `disabled_rules = ["VBA244"]` so the policy is explicit.
+Legacy per-rule booleans such as `forbid_unqualified_excel_objects = false` remain accepted for compatibility, but xlflow emits a deprecation warning. Prefer `disabled_rules = ["VBA205"]`. `detect_risky_module_state = true` is the opt-in compatibility key for `VBA240`; disable it with `disabled_rules = ["VBA240"]`. `detect_redim_preserve_in_loops = false` is the compatibility key for disabling `VBA241`; prefer `disabled_rules = ["VBA241"]`. `detect_expensive_full_range_operations = true` is the opt-in compatibility key for `VBA242`; prefer enabling it explicitly only for Excel projects and use `disabled_rules = ["VBA242"]` to suppress it under a project policy. `detect_value2_performance_opportunities = true` is the opt-in compatibility key for `VBA243`; prefer enabling it explicitly only for Excel projects and use `disabled_rules = ["VBA243"]` to suppress it under a project policy. `detect_procedure_call_cycles = false` is the compatibility key for disabling `VBA244`; prefer `disabled_rules = ["VBA244"]` so the policy is explicit. `detect_unsafe_http_configuration` and `detect_missing_http_timeout` are compatibility switches for `VBA246` and `VBA247`; prefer `disabled_rules` for policy suppression.
+
+`development_http_origins` accepts only exact absolute origins of the form `http://host[:port]`. It rejects credentials, paths (including a trailing slash), queries, fragments, wildcards, and HTTPS values. Host names are case-normalized, IPv6 is canonicalized, and the default port `:80` is removed. The exemption applies only to `plain_http_credentials`; loopback origins are exempt without configuration.
 
 The generated [diagnostic catalog](./diagnostics) is the authoritative list of
 analyzer configuration keys, defaults, and always-enabled diagnostics.

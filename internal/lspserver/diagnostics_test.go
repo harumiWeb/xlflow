@@ -111,6 +111,9 @@ func TestFastDiagnosticsExcludeVBA237(t *testing.T) {
 	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
 		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{
 			{Code: "VBA237", Severity: "warning", Message: "project"},
+			{Code: "VB052", Severity: "error", Message: "missing project call"},
+			{Code: "VB053", Severity: "error", Message: "ambiguous enum"},
+			{Code: "VB054", Severity: "error", Message: "missing event"},
 			{Code: "LOCAL", Severity: "warning", Message: fmt.Sprintf("local %d", request.Document.Version)},
 		}}
 	}
@@ -825,6 +828,22 @@ func TestDiagnosticsWithoutCodeDoesNotMutateInput(t *testing.T) {
 		t.Fatalf("filtered diagnostics = %+v", got)
 	}
 	if input[0].Code != "VBA237" || input[1].Code != "VBA205" {
+		t.Fatalf("input diagnostics were mutated: %+v", input)
+	}
+}
+
+func TestDiagnosticsWithoutCodesFiltersProjectResolutionDiagnostics(t *testing.T) {
+	input := []intel.Diagnostic{
+		{Code: "VB052", Message: "missing"},
+		{Code: "vb053", Message: "ambiguous"},
+		{Code: "VB054", Message: "event"},
+		{Code: "VBA205", Message: "keep"},
+	}
+	got := diagnosticsWithoutCodes(input, "VB052", "VB053", "VB054")
+	if len(got) != 1 || got[0].Code != "VBA205" {
+		t.Fatalf("filtered diagnostics = %+v", got)
+	}
+	if len(input) != 4 {
 		t.Fatalf("input diagnostics were mutated: %+v", input)
 	}
 }

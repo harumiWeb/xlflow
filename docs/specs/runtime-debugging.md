@@ -4,7 +4,7 @@
 
 This spec defines the xlflow behavior that helps AI agents debug VBA runtime failures without relying on workbook-only state or implicit macro naming assumptions.
 
-Process-launch safety findings are owned by `VBA236` (`detect_unsafe_command_construction`), while SQL construction findings are owned by `VBA239` (`detect_unsafe_sql_construction`). `VBA224` remains the generic source-to-sink rule for non-SQL file, workbook, and HTTP sinks. `VBA236` and `VBA239` are policy diagnostics and do not require Excel/VBE runtime semantics.
+Process-launch safety findings are owned by `VBA236` (`detect_unsafe_command_construction`), SQL construction findings by `VBA239` (`detect_unsafe_sql_construction`), and destructive/path safety findings by `VBA245` (`detect_unsafe_file_path`). `VBA224` remains the generic source-to-sink fallback when those specialized rules are disabled. `VBA236`, `VBA239`, and `VBA245` are policy diagnostics and do not require Excel/VBE runtime semantics.
 
 Loop-performance diagnostics are split by ownership: `VBA225`
 (`detect_excel_cell_access_in_loops`) reports repeated per-cell or per-item
@@ -195,6 +195,14 @@ unsaved workbook. `session start` and `session attach` remove stale artifacts
 only after recovery state has been cleared and a new safe session can begin.
 
 New scaffolded projects also include `XlflowDebug.bas`. `XlflowDebug.Log` is the explicit workbook-side logging surface for terminal-visible debug lines. During xlflow `run` and `test`, the runtime injection layer writes a temporary `__XLFLOW_DEBUG_PIPE__` workbook defined name before user VBA starts and restores the prior state afterward. `XlflowDebug.Log` always writes to the native VBA Immediate Window, and when that debug pipe marker is present it also emits newline-delimited JSON events to xlflow's debug stream so stderr and final JSON output can include the same log lines without corrupting stdout.
+
+Do not pass Authorization, Proxy-Authorization, Bearer/Basic credentials,
+cookies, API keys, tokens, or their aliases to `XlflowDebug.Log`, `Debug.Print`,
+or `Print #`. Default-enabled `VBA246` reports recognized authorization logging
+as a transport-security finding. Its message, structured `http_security`
+context, and `nearby_code` redact sensitive values; diagnostic redaction does
+not make the runtime log safe because the workbook can still emit the original
+value. Log only a header name, credential class, or non-secret correlation id.
 
 For runtime debugging sessions that need more than one workbook-backed command, keep the workbook attached through `session start` or `session attach` and reuse that session for `push --fast --session --no-save`, `run --session`, `test --session`, inspect, and save steps. Reopening the workbook separately for each step is intentionally not the preferred path because it slows down debugging and makes the live workbook state harder to reason about. Use a fresh non-session open only when the reopen boundary itself is the thing you are investigating.
 

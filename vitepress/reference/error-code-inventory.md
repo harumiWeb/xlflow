@@ -6,6 +6,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `active_sheet`
 - `active_workbook_mismatch`
 - `affected_modules`
+- `allowed_diagnostics`
 - `alternative_body`
 - `ambiguous_test_name`
 - `analysis_metrics`
@@ -28,6 +29,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `attempted_operation`
 - `attribute_declaration`
 - `attribute_statement`
+- `authorization_logging`
 - `auto_close`
 - `auto_open`
 - `auto_session`
@@ -95,6 +97,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `case_selection_invalid`
 - `cell_diffs`
 - `cells_updated`
+- `certificate_validation_bypass`
 - `cfg_builds`
 - `cfg_reuses`
 - `cfg_singleflight`
@@ -164,7 +167,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `created_at`
 - `created_parent_dirs`
 - `credential_exposure`
+- `credentials_in_url`
 - `cross_module`
+- `current_directory_dependency`
 - `current_version`
 - `customer_name`
 - `cyclomatic_complexity`
@@ -219,6 +224,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_late_bound_dictionary_constants`
 - `detect_leaked_on_error_resume_next_scopes`
 - `detect_loop_invariant_excel_object_resolution`
+- `detect_missing_http_timeout`
 - `detect_multiple_declarator_clarity`
 - `detect_nested_with_ambiguity`
 - `detect_non_short_circuit_object_guard`
@@ -235,6 +241,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
 - `detect_unsafe_command_construction`
+- `detect_unsafe_file_path`
+- `detect_unsafe_http_configuration`
 - `detect_unsafe_sql_construction`
 - `detect_unstable_last_row_patterns`
 - `detect_untrusted_data_flow`
@@ -242,6 +250,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_unused_private_procedures`
 - `detect_value2_performance_opportunities`
 - `detect_worksheet_root_mismatch`
+- `development_http_origins`
 - `diagnostic_meaning`
 - `diagnostic_runs`
 - `dialog_id`
@@ -249,6 +258,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `diff_failed`
 - `direct_callees`
 - `direct_callers`
+- `directory_traversal`
 - `disabled_count`
 - `disabled_rules`
 - `disabled_rules_precedence`
@@ -268,6 +278,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dotnet_missing`
 - `dotnet_runtime`
 - `dotnet_runtime_missing`
+- `download_and_execute`
 - `downstream_callees`
 - `dry_run`
 - `duplicate_case_id`
@@ -286,6 +297,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `elseif_clause`
 - `elseif_fragment`
 - `empty_parentheses`
+- `empty_path`
 - `enable_events_after`
 - `enable_events_before`
 - `enable_vba_object_model_access`
@@ -294,6 +306,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `end_if_fragment`
 - `end_line`
 - `end_statement`
+- `enum_constant`
 - `enum_declaration`
 - `enum_group`
 - `enum_member`
@@ -348,6 +361,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `failed_entries`
 - `field_count`
 - `file_input`
+- `file_operation`
 - `file_picker`
 - `files_changed`
 - `files_to_change`
@@ -431,6 +445,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `horizontal_alignment`
 - `html_url`
 - `if_statement`
+- `ignore_server_ssl_cert`
 - `image_capture_failed`
 - `impact_args_invalid`
 - `impact_failed`
@@ -446,6 +461,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `incremental_parse_unavailable`
 - `infrastructure_failure`
 - `init_failed`
+- `input_dependent`
 - `inspect_args_invalid`
 - `inspect_failed`
 - `inspect_form_args_invalid`
@@ -561,6 +577,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `metrics_thresholds_invalid`
 - `min_keep`
 - `missing_backup_file`
+- `missing_http_timeout`
 - `missing_module_attribute`
 - `missing_required_field`
 - `missing_test_case`
@@ -594,6 +611,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `no_libraries`
 - `no_previous_tree`
 - `no_tests_found`
+- `non_callable`
 - `non_numeric`
 - `non_test`
 - `normal_exit`
@@ -604,6 +622,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `not_vba_document`
 - `nothing_literal`
 - `number_format`
+- `obsolete_tls_protocol`
 - `old_name`
 - `older_than`
 - `on_error`
@@ -672,12 +691,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `parser_token`
 - `passing_mode`
 - `path_translation`
+- `plain_http_credentials`
 - `plan_invalid`
 - `poison_reason`
 - `post_until`
 - `post_while`
 - `pre_until`
 - `pre_while`
+- `preflight_diagnostic_allowed`
 - `preprocessor_else`
 - `preprocessor_elseif`
 - `preprocessor_if`
@@ -736,6 +757,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `qualified_member_expression`
 - `qualified_name`
 - `quoted_name`
+- `raise_event`
+- `raise_event_statement`
 - `raises_error`
 - `read_only`
 - `read_only_configuration`
@@ -754,6 +777,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `redim_declarator`
 - `redim_statement`
 - `refers_to`
+- `relative_path`
 - `replaced_existing`
 - `request_id`
 - `requested_bridge`
@@ -789,6 +813,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `rollback_failed`
 - `rollback_session_check_failed`
 - `root_count`
+- `root_path`
 - `row_count`
 - `row_height`
 - `row_range`
@@ -802,6 +827,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `runtime_mode`
 - `runtime_unavailable`
 - `safety_backup`
+- `same_source_destination`
 - `save_as`
 - `save_before_push`
 - `save_required`
@@ -817,6 +843,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `select_statement`
 - `selected_bridge`
 - `selected_index`
+- `sensitive_module_constant`
 - `session_args_invalid`
 - `session_dirty`
 - `session_failed`
@@ -903,6 +930,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `target_line`
 - `target_state`
 - `temporary_cleanup`
+- `temporary_cleanup_missing`
 - `temporary_copy`
 - `temporary_object_cleanup_failed`
 - `temporary_workbook`
@@ -916,6 +944,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `timed_out`
 - `timeout_invalid`
 - `timeout_ms`
+- `timeout_state`
 - `too_long`
 - `total_diffs`
 - `tree_sitter_vba`
@@ -947,6 +976,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ui_stream_init_failed`
 - `unary_expression`
 - `uncertain_edges`
+- `unchecked_overwrite`
 - `undeclared_variable`
 - `unexpected_helper_mode`
 - `unhandled_fault`
@@ -954,6 +984,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unknown_exit`
 - `unknown_inline_suppression_rule`
 - `unknown_origin`
+- `unknown_path`
 - `unknown_transformation`
 - `unnamed_control_placeholder`
 - `unquoted_executable_path`
@@ -973,6 +1004,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unterminated_quoted_name`
 - `unterminated_string`
 - `unterminated_structured_reference`
+- `untrusted_filename`
 - `unused_inline_suppression`
 - `update_available`
 - `update_check`
@@ -1021,6 +1053,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `wait_will_resolve`
 - `while_statement`
 - `width_px`
+- `wildcard_delete`
 - `wildcard_like_input`
 - `window_not_found`
 - `window_style`

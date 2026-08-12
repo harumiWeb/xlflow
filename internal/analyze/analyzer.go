@@ -13,6 +13,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/typedb"
@@ -49,6 +50,15 @@ type Finding struct {
 	// SQLExecution is present on VBA239 findings and augments the generic
 	// data-flow context with SQL API/role/risk metadata.
 	SQLExecution *SQLExecutionContext `json:"sql_execution,omitempty"`
+	// FileOperation is present on VBA245 findings and carries the operation-
+	// specific path safety classification.
+	FileOperation *FileOperationContext `json:"file_operation,omitempty"`
+	// HTTPSecurity and HTTPReliability are redacted HTTP-specific contexts for
+	// VBA246 and VBA247. They never contain header values or complete URLs.
+	HTTPSecurity          *HTTPSecurityContext    `json:"http_security,omitempty"`
+	HTTPReliability       *HTTPReliabilityContext `json:"http_reliability,omitempty"`
+	httpOwnedSinks        map[int]bool
+	dataFlowSinkStartByte int
 }
 
 // ParseError reports that tree-sitter could not produce a complete VBA
@@ -420,6 +430,16 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			})
 		}
 	}
+	// Resolution completeness must include the generated TypeLib view. Load it
+	// before constructing the resolver so incomplete external symbols fail open
+	// consistently across every source file.
+	resolutionComplete := analysis.PathFilter == nil && !analysis.typeDBResolutionIncomplete
+	for _, file := range parsedFiles {
+		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
+			resolutionComplete = false
+			break
+		}
+	}
 	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
 		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
 	}
@@ -431,7 +451,18 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		analysis.byRefSymbols = byRefSymbols
 	}
 	findings := cycleFindings
+	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, analysis.typeDB)
+	var resolutionPreflight []Finding
+	for i := range parsedFiles {
+		resolvedForDiagnostics := procedureir.Resolve(parsedFiles[i].IR, resolutionResolver)
+		for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, resolutionComplete) {
+			finding := analysis.resolutionFinding(parsedFiles[i], diagnostic)
+			findings = append(findings, finding)
+			resolutionPreflight = append(resolutionPreflight, finding)
+		}
+	}
 	var preflightFindings []Finding
+	preflightFindings = append(preflightFindings, resolutionPreflight...)
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
 		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
@@ -606,6 +637,36 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 	default:
 		return "The VBE rejects this deterministic compile-time contract.", "Correct the source so the call or assignment satisfies the VBA compile-time contract."
 	}
+}
+
+func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
+	line := diagnostic.Range.StartLine
+	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
+	for _, candidate := range sourceProceduresFromIR(file.IR, file.CFG) {
+		if line >= candidate.StartLine && line <= candidate.EndLine {
+			proc = candidate
+			break
+		}
+	}
+	reason, suggestion := compileEquivalentFindingGuidance(diagnostic.Code)
+	switch diagnostic.Code {
+	case "VB052":
+		reason = "The VBE requires a project-local call target to resolve to a callable declaration."
+	case "VB053":
+		reason = "The VBE cannot choose between multiple visible Enum members without a lexical winner."
+	case "VB054":
+		reason = "The VBE requires RaiseEvent to name an Event declared in the same object module."
+	}
+	if shared := procedureir.ResolutionSuggestion(diagnostic.Code); shared != "" {
+		suggestion = shared
+	}
+	finding := a.simpleFinding(file, proc, line, diagnostic.Code, "error", diagnostic.Message, reason, suggestion)
+	// procedureir ranges use the same one-based coordinates as vbaast.NodeRange;
+	// do not apply the LSP zero-based conversion used by intel diagnostics.
+	finding.Column = diagnostic.Range.StartColumn
+	finding.EndLine = diagnostic.Range.EndLine
+	finding.EndColumn = diagnostic.Range.EndColumn
+	return finding
 }
 
 // projectByRefSymbols builds the batch project's procedure index once. ByRef
@@ -880,7 +941,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction) && typeDB == nil {
+	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -973,7 +1034,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -1083,11 +1144,13 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if a.Config.Analyze.DetectErrorSuppressionPropagation {
 		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
 	}
-	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
+	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(ctx, file, proc)
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, dataFlowFindings...)
+	findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
+	findings = append(findings, a.filePathSafetyFindings(file, proc)...)
+	findings = append(findings, httpFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -1161,6 +1224,46 @@ func (a Analyzer) shouldIncludeFile(path string) bool {
 		return false
 	}
 	return true
+}
+
+func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB) procedureir.Resolver {
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, file := range files {
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = file.Module
+		}
+		for _, declaration := range file.IR.Declarations {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: file.IR.ModuleKind,
+				Kind: declaration.Kind, Visibility: declaration.Visibility, File: file.IR.Path,
+				Line: declaration.Range.StartLine, Parent: declaration.Parent, Recovered: declaration.Recovered,
+				IsArray:             declaration.IsArray,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
+			})
+		}
+		for _, procedure := range file.IR.Procedures {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: file.IR.ModuleKind,
+				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: file.IR.Path,
+				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
+			})
+		}
+	}
+	if typeDB != nil {
+		for _, constant := range typeDB.AllConstantsList() {
+			if strings.TrimSpace(constant.EnumGroup) == "" {
+				continue
+			}
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
+				File: "<typelib>" + constant.Library, Line: 0,
+			})
+		}
+	}
+	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
 }
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
@@ -1379,11 +1482,13 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	if a.Config.Analyze.DetectEventHandlerReentry {
 		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
 	}
-	dataFlowFindings, err := a.dataFlowFindingsContext(cancelCtx, file, proc)
+	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
 	if err != nil {
 		return nil, err
 	}
-	findings = append(findings, dataFlowFindings...)
+	findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
+	findings = append(findings, a.filePathSafetyFindings(file, proc)...)
+	findings = append(findings, httpFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
@@ -2955,7 +3060,8 @@ func resumeNextScopeCallRisk(calls []procedureir.CallSite, statementID int) (cal
 			if len(candidate.Resolution.Candidates) == 1 {
 				return true, true
 			}
-		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted:
+		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted,
+			procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete, procedureir.ResolutionNonCallable:
 			call = true
 		}
 	}
@@ -3018,14 +3124,12 @@ func resumeNextScopeReason(flags resumeNextScopeFlag) string {
 }
 
 func BlockingFindings(findings []Finding) []Finding {
-	blocking := make([]Finding, 0)
-	for _, finding := range findings {
-		metadata, ok := staticrules.Lookup(finding.Code)
-		if ok && metadata.PreflightBlocking {
-			blocking = append(blocking, finding)
-		}
-	}
+	blocking, _ := PartitionPreflightFindings(findings, staticpreflight.NewPolicy(nil))
 	return blocking
+}
+
+func PartitionPreflightFindings(findings []Finding, policy staticpreflight.Policy) (blocking []Finding, allowed []Finding) {
+	return staticpreflight.Partition(findings, func(finding Finding) string { return finding.Code }, policy)
 }
 
 func (a Analyzer) objectSetFinding(file parsedFile, proc sourceProcedure, line int, code, target, typ string) Finding {

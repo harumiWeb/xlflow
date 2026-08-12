@@ -98,6 +98,44 @@ func TestWorkspaceProjectSnapshotHoldsResolvedIRAndDefensiveCFG(t *testing.T) {
 	}
 }
 
+func TestWorkspaceProjectSnapshotResolverCandidatesUseDisplayPaths(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	call := procedureir.CallSite{
+		File: path, Module: "Main",
+		Caller: procedureir.ProcedureRef{Name: "Run", Kind: procedureir.ProcedureSub, QualifiedName: "Main.Run"},
+		Callee: procedureir.Callee{Text: "Work", BaseName: "Work"},
+	}
+	ir := procedureir.DocumentIR{
+		Path: path, ModuleName: "Main", ModuleKind: "standard",
+		Procedures: []procedureir.ProcedureIR{
+			{Symbol: procedureir.ProcedureSymbol{Name: "Run", QualifiedName: "Main.Run", Kind: procedureir.ProcedureSub}, Calls: []procedureir.CallSite{call}},
+			{Symbol: procedureir.ProcedureSymbol{Name: "Work", QualifiedName: "Main.Work", Kind: procedureir.ProcedureSub}},
+		},
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{}, nil
+	}, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	index.setOverlay(intel.Document{Path: path, ModuleKind: "standard", Version: 1}, indexedFileAnalysis{
+		path: path, moduleKind: "standard", procedureIR: ir,
+		symbols: []intel.Symbol{
+			{Name: "Run", Kind: "sub", Module: "Main", ModuleKind: "standard", File: path},
+			{Name: "Work", Kind: "sub", Module: "Main", ModuleKind: "standard", File: path},
+		},
+	})
+	snapshot := index.projectSnapshot()
+	if !snapshot.Complete || len(snapshot.Documents) != 1 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	candidates := snapshot.Documents[0].IR.Procedures[0].Calls[0].Resolution.Candidates
+	if len(candidates) != 1 || candidates[0].File != filepath.ToSlash(filepath.Join("src", "modules", "Main.bas")) {
+		t.Fatalf("resolver candidates = %#v, want workspace display path", candidates)
+	}
+}
+
 func TestProjectChangeRejectsStaleSnapshotBaseline(t *testing.T) {
 	index := newWorkspaceAnalysisIndex(t.TempDir(), config.Default(), func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error) {
 		return indexedFileAnalysis{}, nil

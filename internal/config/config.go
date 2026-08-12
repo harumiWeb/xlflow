@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,18 +26,19 @@ var (
 )
 
 type Config struct {
-	Project  ProjectConfig    `toml:"project"`
-	Excel    ExcelConfig      `toml:"excel"`
-	Src      SourceConfig     `toml:"src"`
-	VBA      VBAConfig        `toml:"vba"`
-	UserForm UserFormConfig   `toml:"userform"`
-	Build    BuildConfig      `toml:"build"`
-	Metrics  MetricsConfig    `toml:"metrics"`
-	Backup   BackupConfig     `toml:"backup"`
-	Fmt      FmtConfig        `toml:"fmt"`
-	Lint     LintConfig       `toml:"lint"`
-	Analyze  AnalyzeConfig    `toml:"analyze"`
-	Warnings []map[string]any `toml:"-"`
+	Project   ProjectConfig    `toml:"project"`
+	Excel     ExcelConfig      `toml:"excel"`
+	Src       SourceConfig     `toml:"src"`
+	VBA       VBAConfig        `toml:"vba"`
+	UserForm  UserFormConfig   `toml:"userform"`
+	Build     BuildConfig      `toml:"build"`
+	Metrics   MetricsConfig    `toml:"metrics"`
+	Backup    BackupConfig     `toml:"backup"`
+	Fmt       FmtConfig        `toml:"fmt"`
+	Preflight PreflightConfig  `toml:"preflight"`
+	Lint      LintConfig       `toml:"lint"`
+	Analyze   AnalyzeConfig    `toml:"analyze"`
+	Warnings  []map[string]any `toml:"-"`
 }
 
 type ProjectConfig struct {
@@ -132,6 +135,10 @@ type FmtConfig struct {
 	BuiltinCasing      bool `toml:"builtin_casing"`
 }
 
+type PreflightConfig struct {
+	AllowedDiagnostics []string `toml:"allowed_diagnostics"`
+}
+
 type LintConfig struct {
 	DisabledRules                   []string                    `toml:"disabled_rules"`
 	RequireOptionExplicit           bool                        `toml:"require_option_explicit"`
@@ -203,6 +210,10 @@ type AnalyzeConfig struct {
 	DetectExpensiveFullRangeOperations       bool     `toml:"detect_expensive_full_range_operations"`
 	DetectValue2PerformanceOpportunities     bool     `toml:"detect_value2_performance_opportunities"`
 	DetectProcedureCallCycles                bool     `toml:"detect_procedure_call_cycles"`
+	DetectUnsafeFilePath                     bool     `toml:"detect_unsafe_file_path"`
+	DetectUnsafeHTTPConfiguration            bool     `toml:"detect_unsafe_http_configuration"`
+	DetectMissingHTTPTimeout                 bool     `toml:"detect_missing_http_timeout"`
+	DevelopmentHTTPOrigins                   []string `toml:"development_http_origins"`
 }
 
 type lintRuleAdapter struct {
@@ -294,6 +305,9 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA242": {Get: func(c AnalyzeConfig) bool { return c.DetectExpensiveFullRangeOperations }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExpensiveFullRangeOperations = v }},
 	"VBA243": {Get: func(c AnalyzeConfig) bool { return c.DetectValue2PerformanceOpportunities }, Set: func(c *AnalyzeConfig, v bool) { c.DetectValue2PerformanceOpportunities = v }},
 	"VBA244": {Get: func(c AnalyzeConfig) bool { return c.DetectProcedureCallCycles }, Set: func(c *AnalyzeConfig, v bool) { c.DetectProcedureCallCycles = v }},
+	"VBA245": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeFilePath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeFilePath = v }},
+	"VBA246": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeHTTPConfiguration }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeHTTPConfiguration = v }},
+	"VBA247": {Get: func(c AnalyzeConfig) bool { return c.DetectMissingHTTPTimeout }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMissingHTTPTimeout = v }},
 }
 
 var (
@@ -410,6 +424,9 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 		if name == "metrics" || strings.HasPrefix(name, "metrics.") {
 			return cfg, fmt.Errorf("unknown metrics configuration key: %s", name)
 		}
+		if name == "preflight" || strings.HasPrefix(name, "preflight.") {
+			return cfg, fmt.Errorf("unknown preflight configuration key: %s", name)
+		}
 	}
 	applyDefaults(&cfg)
 	if err := applyLintRuleConfig(&cfg, meta); err != nil {
@@ -418,13 +435,44 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	if err := applyAnalyzeRuleConfig(&cfg, meta); err != nil {
 		return cfg, err
 	}
+	if err := normalizePreflightConfig(&cfg.Preflight); err != nil {
+		return cfg, err
+	}
 	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
 		return cfg, err
 	}
 	if err := normalizeMetricsExclude(&cfg.Metrics); err != nil {
 		return cfg, err
 	}
+	if err := normalizeDevelopmentHTTPOrigins(&cfg.Analyze); err != nil {
+		return cfg, err
+	}
 	return cfg, validate(cfg)
+}
+
+func normalizePreflightConfig(cfg *PreflightConfig) error {
+	seen := make(map[string]struct{}, len(cfg.AllowedDiagnostics))
+	normalized := make([]string, 0, len(cfg.AllowedDiagnostics))
+	for _, raw := range cfg.AllowedDiagnostics {
+		id := strings.ToUpper(strings.TrimSpace(raw))
+		if id == "" {
+			continue
+		}
+		rule, ok := staticrules.Lookup(id)
+		if !ok {
+			return fmt.Errorf("unknown diagnostic ID in [preflight].allowed_diagnostics: %s", id)
+		}
+		if !rule.PreflightBlocking {
+			return fmt.Errorf("diagnostic ID is not preflight-blocking in [preflight].allowed_diagnostics: %s", id)
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	cfg.AllowedDiagnostics = normalized
+	return nil
 }
 
 func applyDefaults(cfg *Config) {
@@ -557,6 +605,80 @@ func normalizeMetricsExclude(cfg *MetricsConfig) error {
 	sort.Strings(patterns)
 	cfg.Exclude = patterns
 	return nil
+}
+
+func normalizeDevelopmentHTTPOrigins(cfg *AnalyzeConfig) error {
+	seen := make(map[string]bool, len(cfg.DevelopmentHTTPOrigins))
+	origins := make([]string, 0, len(cfg.DevelopmentHTTPOrigins))
+	for _, value := range cfg.DevelopmentHTTPOrigins {
+		origin, err := NormalizeDevelopmentHTTPOrigin(value)
+		if err != nil {
+			return fmt.Errorf("invalid analyze.development_http_origins entry %q: %w", value, err)
+		}
+		if !seen[origin] {
+			seen[origin] = true
+			origins = append(origins, origin)
+		}
+	}
+	sort.Strings(origins)
+	cfg.DevelopmentHTTPOrigins = origins
+	return nil
+}
+
+// NormalizeDevelopmentHTTPOrigin validates and canonicalizes an explicitly
+// trusted development HTTP origin. It intentionally accepts origins only: URL
+// credentials, paths, queries, fragments, wildcards, and HTTPS are rejected.
+func NormalizeDevelopmentHTTPOrigin(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" || raw != value {
+		return "", errors.New("must be a non-empty absolute HTTP origin without surrounding whitespace")
+	}
+	if strings.Contains(raw, "*") {
+		return "", errors.New("wildcards are not allowed")
+	}
+	if strings.Contains(raw, "#") {
+		return "", errors.New("fragments are not allowed")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("must be a valid absolute HTTP origin: %w", err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") || parsed.Host == "" || parsed.Opaque != "" {
+		return "", errors.New("must use http:// with an absolute host")
+	}
+	if parsed.User != nil {
+		return "", errors.New("userinfo is not allowed")
+	}
+	if parsed.Path != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", errors.New("paths, queries, and fragments are not allowed")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", errors.New("host is required")
+	}
+	port := parsed.Port()
+	if port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return "", errors.New("port must be between 1 and 65535")
+		}
+		if portNumber == 80 {
+			port = ""
+		} else {
+			port = strconv.Itoa(portNumber)
+		}
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	} else {
+		host = strings.ToLower(host)
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return "http://" + host, nil
 }
 
 func isDriveAbsolute(path string) bool {
@@ -813,6 +935,24 @@ func normalizeExcelBridge(cfg *Config, allowInvalid bool) error {
 	return nil
 }
 
+func renderPreflightConfig(cfg PreflightConfig) string {
+	var b strings.Builder
+	b.WriteString("# Diagnostics remain enabled and visible when allowed here; only their\n")
+	b.WriteString("# source-preflight blocking effect is waived. Excel/VBE compilation may still fail.\n")
+	if len(cfg.AllowedDiagnostics) == 0 {
+		b.WriteString("allowed_diagnostics = []\n")
+		return b.String()
+	}
+	b.WriteString("allowed_diagnostics = [\n")
+	for _, id := range cfg.AllowedDiagnostics {
+		b.WriteString("  \"")
+		b.WriteString(id)
+		b.WriteString("\",\n")
+	}
+	b.WriteString("]\n")
+	return b.String()
+}
+
 func renderLintConfig(cfg LintConfig) string {
 	var b strings.Builder
 	b.WriteString("# Disable specific lint rules by diagnostic ID.\n")
@@ -935,6 +1075,15 @@ func renderAnalyzeConfig(cfg AnalyzeConfig) string {
 		}
 		b.WriteString("]\n")
 	}
+	b.WriteString("\n# Plain HTTP origins explicitly allowed for development use.\n")
+	b.WriteString("development_http_origins = [")
+	for i, origin := range cfg.DevelopmentHTTPOrigins {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconv.Quote(origin))
+	}
+	b.WriteString("]\n")
 	optIn := legacyOptInAnalyzeRulesForWrite(cfg)
 	optInSet := map[string]bool{}
 	for _, rule := range optIn {
@@ -1026,11 +1175,19 @@ func renderMetricsConfig(cfg MetricsConfig) string {
 }
 
 func Write(path string, cfg Config) (err error) {
+	preflightConfig := cfg.Preflight
+	if err := normalizePreflightConfig(&preflightConfig); err != nil {
+		return err
+	}
 	metricsConfig := cfg.Metrics
 	if err := normalizeMetricsExclude(&metricsConfig); err != nil {
 		return err
 	}
 	if err := validateMetricsThresholds(metricsConfig.Thresholds); err != nil {
+		return err
+	}
+	analyzeConfig := cfg.Analyze
+	if err := normalizeDevelopmentHTTPOrigins(&analyzeConfig); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
@@ -1044,8 +1201,9 @@ func Write(path string, cfg Config) (err error) {
 	}()
 
 	lintConfigText := renderLintConfig(cfg.Lint)
-	analyzeConfigText := renderAnalyzeConfig(cfg.Analyze)
+	analyzeConfigText := renderAnalyzeConfig(analyzeConfig)
 	metricsConfigText := renderMetricsConfig(metricsConfig)
+	preflightConfigText := renderPreflightConfig(preflightConfig)
 
 	const tmpl = `# Project identity and entry point.
 [project]
@@ -1124,6 +1282,10 @@ keyword_casing = %t
 # Normalize known VBA/Excel/Office built-in identifier casing in xlflow fmt.
 builtin_casing = %t
 
+# Source-preflight diagnostic waivers.
+[preflight]
+%s
+
 # Static analysis rules.
 [lint]
 %s
@@ -1140,6 +1302,7 @@ builtin_casing = %t
 		cfg.UserForm.CodeSource,
 		metricsConfigText,
 		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing, cfg.Fmt.KeywordCasing, cfg.Fmt.BuiltinCasing,
+		preflightConfigText,
 		lintConfigText,
 		analyzeConfigText,
 	)

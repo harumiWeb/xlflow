@@ -10,16 +10,18 @@ import (
 )
 
 type visitContext struct {
-	procedure    int
-	statementID  int
-	parentExprID int
-	branch       BranchRole
-	metadata     bool
-	accessMode   AccessMode
-	callIndex    int
-	suppressCall bool
-	inBody       bool
-	conditional  []ConditionalBranch
+	procedure      int
+	statementID    int
+	parentExprID   int
+	branch         BranchRole
+	metadata       bool
+	accessMode     AccessMode
+	callIndex      int
+	suppressCall   bool
+	inBody         bool
+	conditional    []ConditionalBranch
+	enumName       string
+	enumVisibility string
 }
 
 type argumentFact struct {
@@ -75,6 +77,10 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 	if isProcedureNode(node.Kind()) {
 		ctx = v.enterProcedure(node, ctx)
 	}
+	if node.Kind() == "enum_declaration" {
+		ctx.enumName = cleanIdentifier(nodeText(childByFieldOrKind(node, "name", "identifier"), v.builder.source))
+		ctx.enumVisibility = visibilityOfNode(node, v.builder.source)
+	}
 	procedure := v.procedure(ctx.procedure)
 
 	if node.Kind() == "variable_declaration" || node.Kind() == "const_declaration" {
@@ -101,9 +107,12 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 				}
 				v.document.Declarations = append(v.document.Declarations, declaration)
 			}
+		case "enum_member":
+			if declaration, ok := v.builder.enumMemberDeclaration(node, ctx); ok {
+				v.document.Declarations = append(v.document.Declarations, declaration)
+			}
 		}
 	}
-
 	v.addTypeReference(node, ctx)
 	if procedure != nil && ctx.inBody {
 		if kind, ok := statementKind(node); ok {
@@ -116,6 +125,9 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 			ctx.parentExprID = v.addExpression(procedure, node, ctx)
 		}
 		ctx.callIndex = v.addCall(procedure, node, ctx)
+		if node.Kind() == "raise_event_statement" {
+			v.addRaiseEvent(procedure, node, ctx)
+		}
 		if node.Kind() == "identifier" && !ctx.metadata {
 			v.addAccess(procedure, node, ctx)
 		}
@@ -169,7 +181,8 @@ func (v *singleVisitor) enterProcedure(node *tree_sitter.Node, parent visitConte
 	for _, parameter := range symbol.Parameters {
 		procedure.Declarations = append(procedure.Declarations, Declaration{
 			ID: v.builder.takeDeclarationID(), Name: parameter.Name, Type: parameter.Type,
-			Scope: ScopeParameter, Kind: "parameter", Range: parameter.Range,
+			Scope: ScopeParameter, Kind: "parameter", IsArray: parameter.IsArray,
+			IsObject: looksObjectType(parameter.Type), Range: parameter.Range,
 		})
 	}
 	v.document.Procedures = append(v.document.Procedures, procedure)
@@ -378,6 +391,8 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 	switch node.Kind() {
 	case "call_statement":
 		field = "callee"
+	case "raise_event_statement":
+		field = "event"
 	case "call_expression":
 		field = "function"
 	case "new_expression":
@@ -410,6 +425,27 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 	return v.appendCall(procedure, node, callee, ctx)
 }
 
+func (v *singleVisitor) addRaiseEvent(procedure *ProcedureIR, node *tree_sitter.Node, ctx visitContext) {
+	if procedure == nil || node == nil {
+		return
+	}
+	event := node.ChildByFieldName("event")
+	if event == nil {
+		return
+	}
+	name := cleanIdentifier(nodeText(event, v.builder.source))
+	if name == "" {
+		return
+	}
+	arguments, _ := v.argumentsForCall(node)
+	procedure.RaiseEvents = append(procedure.RaiseEvents, RaiseEventReference{
+		Name: name, Module: v.builder.moduleName,
+		Caller: ProcedureRef{Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind, QualifiedName: procedure.Symbol.QualifiedName},
+		Range:  vbaast.NodeRange(event), Arguments: arguments, Recovered: recovered(node),
+		ConditionalBranches: append([]ConditionalBranch(nil), ctx.conditional...),
+	})
+}
+
 func (v *singleVisitor) appendCall(procedure *ProcedureIR, node *tree_sitter.Node, callee Callee, ctx visitContext) int {
 	expressionID := 0
 	if node.Kind() == "call_expression" || node.Kind() == "new_expression" {
@@ -421,7 +457,8 @@ func (v *singleVisitor) appendCall(procedure *ProcedureIR, node *tree_sitter.Nod
 		Caller: ProcedureRef{Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind, QualifiedName: procedure.Symbol.QualifiedName},
 		Callee: callee, Arguments: arguments,
 		Range: vbaast.NodeRange(node), StatementID: ctx.statementID, ExpressionID: expressionID,
-		Resolution: CallResolution{Status: ResolutionNotAttempted},
+		IsRaiseEvent: node.Kind() == "raise_event_statement",
+		Resolution:   CallResolution{Status: ResolutionNotAttempted},
 	})
 	procedureIndex := len(v.document.Procedures) - 1
 	v.callFacts[procedureIndex] = append(v.callFacts[procedureIndex], callFact{arguments: facts})
@@ -432,12 +469,29 @@ func (v *singleVisitor) argumentsForCall(node *tree_sitter.Node) (Arguments, []a
 	target := node.ChildByFieldName("function")
 	if node.Kind() == "call_statement" {
 		target = node.ChildByFieldName("callee")
+	} else if node.Kind() == "raise_event_statement" {
+		target = node.ChildByFieldName("event")
 	}
 	arguments := argumentsFromCallNode(node, target, v.builder.source)
 	arguments.ExpressionIDs = []int{}
 	list := node.ChildByFieldName("arguments")
 	if list == nil && target != nil && target.Kind() == "call_expression" {
 		list = target.ChildByFieldName("arguments")
+	}
+	if list == nil {
+		list = childByKind(node, "argument_list")
+	}
+	if list == nil {
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			child := node.NamedChild(i)
+			if child != nil && child.Kind() == "argument_list" {
+				list = child
+				break
+			}
+		}
+	}
+	if list != nil && arguments.Count == 0 {
+		arguments = argumentsFromArgumentList(list, v.builder.source)
 	}
 	if list == nil {
 		return arguments, nil
@@ -642,6 +696,10 @@ func (v *singleVisitor) childContext(parent, child *tree_sitter.Node, ctx visitC
 		}
 	case "named_argument":
 		if sameNode(child, parent.ChildByFieldName("name")) {
+			childCtx.metadata = true
+		}
+	case "raise_event_statement":
+		if sameNode(child, parent.ChildByFieldName("event")) {
 			childCtx.metadata = true
 		}
 	case "call_expression":

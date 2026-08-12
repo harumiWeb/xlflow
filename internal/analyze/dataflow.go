@@ -36,6 +36,13 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 	for _, flow := range result.Findings {
 		commandSink := isCommandExecutionSink(string(flow.Sink.Kind))
 		sqlSink := isSQLExecutionSink(string(flow.Sink.Kind))
+		fileSink := isFileOperationSink(string(flow.Sink.Kind))
+		if fileSink && a.Config.Analyze.DetectUnsafeFilePath {
+			// VBA245 owns file/path safety observations, including clean-but-
+			// dangerous constants. Preserve VBA224 as the compatibility fallback
+			// when the specialized rule is disabled.
+			continue
+		}
 		if commandSink {
 			if a.Config.Analyze.DetectUnsafeCommandConstruction {
 				if commandKeys[commandFlowKey(flow)] {
@@ -73,6 +80,7 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 			Sink:   DataFlowEndpoint{Kind: string(flow.Sink.Kind), Label: flow.Sink.Label, Line: sinkLine},
 			Path:   convertDataFlowPath(flow.Path, line),
 		}
+		finding.dataFlowSinkStartByte = flow.Sink.Range.StartByte
 		findings = append(findings, finding)
 	}
 	if a.Config.Analyze.DetectUnsafeCommandConstruction {
@@ -86,6 +94,15 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 		}
 	}
 	return findings, nil
+}
+
+func (a Analyzer) httpDataFlowFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure) ([]Finding, []Finding, error) {
+	httpFindings := a.httpTransportFindings(file, proc)
+	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings), httpFindings, nil
 }
 
 // isCommandExecutionSink is intentionally name-based rather than tied to a
@@ -103,6 +120,35 @@ func isCommandExecutionSink(kind string) bool {
 
 func isSQLExecutionSink(kind string) bool {
 	return strings.EqualFold(strings.TrimSpace(kind), string(vbadf.SinkSQLExecution))
+}
+
+func isFileOperationSink(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "destructive_file_operation", "save_as":
+		return true
+	default:
+		return false
+	}
+}
+
+func suppressHTTPDataFlowDuplicates(dataFlow, httpFindings []Finding) []Finding {
+	owned := map[int]bool{}
+	for _, finding := range httpFindings {
+		for sink := range finding.httpOwnedSinks {
+			owned[sink] = true
+		}
+	}
+	if len(owned) == 0 {
+		return dataFlow
+	}
+	out := make([]Finding, 0, len(dataFlow))
+	for _, finding := range dataFlow {
+		if finding.Code == "VBA224" && finding.DataFlow != nil && owned[finding.dataFlowSinkStartByte] && strings.EqualFold(finding.DataFlow.Sink.Kind, string(vbadf.SinkHTTPHeader)) {
+			continue
+		}
+		out = append(out, finding)
+	}
+	return out
 }
 
 func (a Analyzer) sqlFinding(file parsedFile, proc sourceProcedure, sql vbadf.SQLFinding) Finding {

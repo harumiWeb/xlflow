@@ -156,22 +156,22 @@ type Candidate struct {
 	Kind          string `json:"kind"`
 	File          string `json:"file"`
 	Line          int    `json:"line"`
-
-	module     string
-	moduleKind string
-	visibility string
 }
 
 // ResolverSymbol is the protocol-neutral symbol shape needed to resolve call
 // sites. Line is the 1-based declaration line reported in resolved candidates.
 type ResolverSymbol struct {
 	Name       string
+	Type       string
 	Module     string
 	ModuleKind string
 	Kind       string
 	Visibility string
 	File       string
 	Line       int
+	Parent     string
+	Recovered  bool
+	IsArray    bool
 }
 
 type extractor struct {
@@ -187,39 +187,7 @@ type extractor struct {
 // Resolver resolves raw call sites against a snapshot of project procedure
 // symbols. A Resolver can be replaced without re-extracting unchanged sites.
 type Resolver struct {
-	byName  map[string][]Candidate
 	symbols procedureir.SymbolResolver
-}
-
-var procedureKinds = map[string]bool{
-	"sub":              true,
-	"function":         true,
-	"property":         true,
-	"property_get":     true,
-	"property_let":     true,
-	"property_set":     true,
-	"declare":          true,
-	"declare_sub":      true,
-	"declare_function": true,
-	"event":            true,
-}
-
-var builtinLikeNames = map[string]bool{
-	"array": true, "asc": true, "cbool": true, "cbyte": true, "ccur": true,
-	"cdate": true, "cdbl": true, "cdec": true, "choose": true, "chr": true,
-	"cint": true, "clng": true, "clnglng": true, "clngptr": true, "cos": true,
-	"createobject": true, "cstr": true, "date": true, "dateadd": true,
-	"debug.print": true, "dir": true, "doevents": true, "environ": true, "error": true,
-	"format": true, "getobject": true, "inputbox": true, "instr": true,
-	"isarray": true, "isdate": true, "isempty": true, "iserror": true,
-	"isnull": true, "isnumeric": true, "join": true, "lbound": true,
-	"lcase": true, "left": true, "len": true, "mid": true, "msgbox": true,
-	"replace": true, "right": true, "rnd": true, "shell": true, "split": true, "str": true,
-	"trim": true, "typename": true, "ubound": true, "ucase": true, "val": true,
-}
-
-var externalLikeReceivers = map[string]bool{
-	"application": true, "debug": true, "excel": true, "worksheetfunction": true,
 }
 
 var moduleNameAttributeRe = regexp.MustCompile(`(?i)^\s*Attribute\s+VB_Name\s*=\s*(.*)\s*$`)
@@ -529,12 +497,15 @@ func NewResolver(projectSymbols []symbols.Symbol) Resolver {
 	for _, sym := range projectSymbols {
 		resolverSymbols = append(resolverSymbols, ResolverSymbol{
 			Name:       sym.Name,
+			Type:       sym.ReturnType,
 			Module:     sym.Module,
 			ModuleKind: sym.ModuleKind,
 			Kind:       sym.Kind,
 			Visibility: sym.Visibility,
 			File:       sym.File,
 			Line:       sym.StartLine,
+			Parent:     sym.Parent,
+			IsArray:    sym.IsArray,
 		})
 	}
 	return NewResolverFromSymbols(resolverSymbols)
@@ -547,55 +518,51 @@ func NewResolverFromSymbols(projectSymbols []ResolverSymbol) Resolver {
 	for _, sym := range projectSymbols {
 		irSymbols = append(irSymbols, procedureir.ResolverSymbol{
 			Name:       sym.Name,
+			Type:       sym.Type,
 			Module:     sym.Module,
 			ModuleKind: sym.ModuleKind,
 			Kind:       sym.Kind,
 			Visibility: sym.Visibility,
 			File:       sym.File,
 			Line:       sym.Line,
+			Parent:     sym.Parent,
+			Recovered:  sym.Recovered,
+			IsArray:    sym.IsArray,
 		})
 	}
-	res := Resolver{
-		byName:  map[string][]Candidate{},
-		symbols: procedureir.NewResolver(irSymbols),
-	}
-	for _, sym := range projectSymbols {
-		if !procedureKinds[sym.Kind] || sym.Name == "" {
-			continue
-		}
-		candidate := Candidate{
-			QualifiedName: sym.Module + "." + sym.Name,
-			Kind:          sym.Kind,
-			File:          normalizeCandidateFile(sym.File),
-			Line:          sym.Line,
-			module:        sym.Module,
-			moduleKind:    sym.ModuleKind,
-			visibility:    sym.Visibility,
-		}
-		key := strings.ToLower(sym.Name)
-		res.byName[key] = append(res.byName[key], candidate)
-	}
-	for key := range res.byName {
-		sort.Slice(res.byName[key], func(i, j int) bool {
-			return candidateLess(res.byName[key][i], res.byName[key][j])
-		})
-	}
-	return res
+	return Resolver{symbols: procedureir.NewResolver(irSymbols)}
+}
+
+// NewResolverFromProcedureIRResolver creates the compatibility projection over
+// an already-built canonical resolver. Workspace consumers use this to avoid
+// reimplementing candidate selection in the calls package.
+func NewResolverFromProcedureIRResolver(resolver procedureir.SymbolResolver) Resolver {
+	return Resolver{symbols: resolver}
 }
 
 // Resolve attaches the resolution derived from this Resolver without mutating
 // the raw call site.
 func (r Resolver) Resolve(site CallSite) Call {
+	irSite := procedureir.CallSite{
+		File: site.File, Module: site.Module,
+		Caller:    procedureir.ProcedureRef{},
+		Callee:    procedureir.Callee{Text: site.Callee.Text, BaseName: site.Callee.BaseName, Receiver: cloneStringPointer(site.Callee.Receiver), Member: site.Callee.Member},
+		Arguments: procedureir.Arguments{Count: site.Arguments.Count}, Range: site.Range,
+	}
+	if site.Caller != nil {
+		irSite.Caller = procedureir.ProcedureRef{Name: site.Caller.Name, Kind: procedureir.ProcedureKind(site.Caller.Kind), QualifiedName: site.Caller.QualifiedName}
+	}
+	resolved := r.symbols.ResolveCall(irSite)
 	return Call{
 		CallSite:   CloneCallSite(site),
-		Resolution: r.resolveCallee(site),
+		Resolution: legacyResolution(resolved),
 	}
 }
 
 // ResolveCall adapts the existing project call resolver to procedureir without
 // coupling the IR package to inspect-call result types.
 func (r Resolver) ResolveCall(site procedureir.CallSite) procedureir.CallResolution {
-	resolved := r.Resolve(callSiteFromIR(site, symbols.ParseSummary{})).Resolution
+	resolved := r.symbols.ResolveCall(site)
 	candidates := make([]procedureir.Candidate, len(resolved.Candidates))
 	for i, candidate := range resolved.Candidates {
 		candidates[i] = procedureir.Candidate{
@@ -606,15 +573,38 @@ func (r Resolver) ResolveCall(site procedureir.CallSite) procedureir.CallResolut
 		}
 	}
 	return procedureir.CallResolution{
-		Status:     procedureir.ResolutionStatus(resolved.Status),
-		Candidates: candidates,
+		Status:       resolved.Status,
+		Candidates:   candidates,
+		ProjectLocal: resolved.ProjectLocal,
 	}
+}
+
+func legacyResolution(resolved procedureir.CallResolution) Resolution {
+	status := string(resolved.Status)
+	switch resolved.Status {
+	case procedureir.ResolutionNonCallable, procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete:
+		// These statuses are intentionally projected to the legacy unresolved
+		// bucket; inspect calls JSON predates the richer canonical state model.
+		status = "unresolved"
+	}
+	out := Resolution{Status: status}
+	for _, candidate := range resolved.Candidates {
+		out.Candidates = append(out.Candidates, Candidate{QualifiedName: candidate.QualifiedName, Kind: candidate.Kind, File: candidate.File, Line: candidate.Line})
+	}
+	return out
 }
 
 // ResolveSymbol provides the symbol half of procedureir.Resolver using the
 // complete project symbol snapshot, including non-procedure declarations.
 func (r Resolver) ResolveSymbol(reference procedureir.SymbolReference) procedureir.SymbolResolution {
 	return r.symbols.ResolveSymbol(reference)
+}
+
+// ResolveEvent projects the canonical procedureir event resolver while
+// retaining the calls package as a compatibility adapter for existing
+// consumers.
+func (r Resolver) ResolveEvent(reference procedureir.SymbolReference) procedureir.SymbolResolution {
+	return r.symbols.ResolveEvent(reference)
 }
 
 func (e *extractor) visit(node *tree_sitter.Node) {
@@ -900,43 +890,6 @@ func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {
 	return NamedArgument{Name: name, ValueText: value}
 }
 
-func (r Resolver) resolveCallee(site CallSite) Resolution {
-	callee := site.Callee
-	base := strings.TrimPrefix(callee.BaseName, "New ")
-	base = cleanIdentifier(base)
-	candidates := visibleCandidates(r.byName[strings.ToLower(base)], site.Caller)
-	if callee.Receiver == nil {
-		candidates = receiverlessCandidates(candidates, callerModule(site.Caller))
-	}
-	if callee.Receiver != nil {
-		receiver := cleanQualifiedName(*callee.Receiver)
-		if isExternalLikeReceiver(receiver) {
-			return Resolution{Status: "external"}
-		}
-		matches := candidatesForReceiver(candidates, receiver, base)
-		if len(matches) == 1 {
-			return Resolution{Status: "matched", Candidates: cloneCandidates(matches)}
-		}
-		if len(matches) > 1 {
-			return Resolution{Status: "ambiguous", Candidates: cloneCandidates(matches)}
-		}
-		return Resolution{Status: "member_call"}
-	}
-	if base != "" {
-		if len(candidates) == 1 {
-			return Resolution{Status: "matched", Candidates: cloneCandidates(candidates)}
-		}
-		if len(candidates) > 1 {
-			return Resolution{Status: "ambiguous", Candidates: cloneCandidates(candidates)}
-		}
-	}
-	textKey := strings.ToLower(strings.TrimPrefix(callee.Text, "New "))
-	if builtinLikeNames[textKey] || builtinLikeNames[strings.ToLower(base)] {
-		return Resolution{Status: "builtin_like"}
-	}
-	return Resolution{Status: "unresolved"}
-}
-
 type dynamicArgumentSpec struct {
 	index int
 	name  string
@@ -1132,73 +1085,6 @@ func splitTopLevelConcatenation(value string) []string {
 	return parts
 }
 
-// visibleCandidates excludes private procedures outside the caller's module.
-// A module-level call has no procedure caller, so it cannot target a private
-// procedure either.
-func visibleCandidates(candidates []Candidate, caller *Caller) []Candidate {
-	if len(candidates) == 0 {
-		return nil
-	}
-	visible := make([]Candidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if strings.EqualFold(candidate.visibility, "private") &&
-			(caller == nil || !strings.EqualFold(candidate.module, callerModule(caller))) {
-			continue
-		}
-		visible = append(visible, candidate)
-	}
-	return visible
-}
-
-func receiverlessCandidates(candidates []Candidate, callerModule string) []Candidate {
-	visible := make([]Candidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if strings.EqualFold(candidate.module, callerModule) || candidate.moduleKind == "" ||
-			strings.EqualFold(candidate.moduleKind, "standard") {
-			visible = append(visible, candidate)
-		}
-	}
-	return visible
-}
-
-func callerModule(caller *Caller) string {
-	if caller == nil {
-		return ""
-	}
-	qualified := strings.TrimSpace(caller.QualifiedName)
-	if index := strings.LastIndex(qualified, "."); index > 0 {
-		return qualified[:index]
-	}
-	return ""
-}
-
-func candidatesForReceiver(candidates []Candidate, receiver, base string) []Candidate {
-	if receiver == "" || base == "" {
-		return nil
-	}
-	qualified := strings.ToLower(receiver + "." + base)
-	shortQualified := strings.ToLower(cleanIdentifier(lastNamePart(receiver)) + "." + base)
-	matches := make([]Candidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		name := strings.ToLower(candidate.QualifiedName)
-		if name == qualified || name == shortQualified {
-			matches = append(matches, candidate)
-		}
-	}
-	return matches
-}
-
-func isExternalLikeReceiver(receiver string) bool {
-	for _, part := range strings.FieldsFunc(receiver, func(r rune) bool {
-		return r == '.' || r == '!'
-	}) {
-		if externalLikeReceivers[strings.ToLower(cleanIdentifier(part))] {
-			return true
-		}
-	}
-	return false
-}
-
 func addResolutionSummary(summary *ResultSummary, status string) {
 	switch status {
 	case "matched":
@@ -1262,22 +1148,6 @@ func moduleKindFromPath(path string) string {
 	default:
 		return "standard"
 	}
-}
-
-func cloneCandidates(candidates []Candidate) []Candidate {
-	if len(candidates) == 0 {
-		return nil
-	}
-	cloned := make([]Candidate, len(candidates))
-	for i, candidate := range candidates {
-		cloned[i] = Candidate{
-			QualifiedName: candidate.QualifiedName,
-			Kind:          candidate.Kind,
-			File:          candidate.File,
-			Line:          candidate.Line,
-		}
-	}
-	return cloned
 }
 
 func displayPath(rootDir, path string) string {
@@ -1348,26 +1218,6 @@ func CloneFileResult(result FileResult) FileResult {
 	return clone
 }
 
-func normalizeCandidateFile(file string) string {
-	if strings.TrimSpace(file) == "" {
-		return ""
-	}
-	return filepath.ToSlash(filepath.Clean(file))
-}
-
-func candidateLess(a, b Candidate) bool {
-	if a.QualifiedName != b.QualifiedName {
-		return a.QualifiedName < b.QualifiedName
-	}
-	if a.Kind != b.Kind {
-		return a.Kind < b.Kind
-	}
-	if a.File != b.File {
-		return a.File < b.File
-	}
-	return a.Line < b.Line
-}
-
 func lastNamePart(text string) string {
 	text = strings.TrimSpace(text)
 	text = strings.TrimPrefix(text, "New ")
@@ -1384,19 +1234,6 @@ func cleanIdentifier(text string) string {
 	text = strings.Trim(text, "[]")
 	text = strings.TrimRight(text, "$%&#@^!")
 	return text
-}
-
-func cleanQualifiedName(text string) string {
-	parts := strings.FieldsFunc(strings.TrimSpace(text), func(r rune) bool {
-		return r == '.' || r == '!'
-	})
-	cleaned := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if clean := cleanIdentifier(part); clean != "" {
-			cleaned = append(cleaned, clean)
-		}
-	}
-	return strings.Join(cleaned, ".")
 }
 
 func (c Call) String() string {

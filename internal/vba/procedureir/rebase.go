@@ -25,6 +25,9 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	}
 	for i := range out.Declarations {
 		out.Declarations[i].Range = rebase(out.Declarations[i].Range)
+		for j := range out.Declarations[i].ConditionalBranches {
+			out.Declarations[i].ConditionalBranches[j].Range = rebase(out.Declarations[i].ConditionalBranches[j].Range)
+		}
 		for j := range out.Declarations[i].Parameters {
 			parameter := &out.Declarations[i].Parameters[j]
 			parameter.Range = rebase(parameter.Range)
@@ -57,6 +60,12 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	}
 	for i := range out.Calls {
 		out.Calls[i].Range = rebase(out.Calls[i].Range)
+	}
+	for i := range out.RaiseEvents {
+		out.RaiseEvents[i].Range = rebase(out.RaiseEvents[i].Range)
+		for j := range out.RaiseEvents[i].ConditionalBranches {
+			out.RaiseEvents[i].ConditionalBranches[j].Range = rebase(out.RaiseEvents[i].ConditionalBranches[j].Range)
+		}
 	}
 	for i := range out.Accesses {
 		out.Accesses[i].Range = rebase(out.Accesses[i].Range)

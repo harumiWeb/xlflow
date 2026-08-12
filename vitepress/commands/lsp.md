@@ -90,6 +90,17 @@ an AST `Me` token in a standard module. Both are unsuppressible,
 preflight-blocking errors shared with batch `lint`; unresolved type metadata
 keeps type-dependent `WithEvents` checks fail-open.
 
+The LSP publishes `VB052` for project-local calls whose canonical resolver
+proves a missing or known non-callable target, `VB053` for a bare Enum member
+with multiple complete visible candidates and no lexical winner, and `VB054`
+for an undeclared `RaiseEvent` target in the containing object module. These
+compile-equivalent errors share the resolver snapshot and exact candidate and
+visibility rules used by batch `lint`/`analyze`, Call Hierarchy, impact, and
+effect propagation. Full diagnostics withhold them while the workspace index,
+overlay, parser, TypeLib database, or conditional-compilation model is
+incomplete; Fast diagnostics and dynamic/external/late-bound calls remain
+quiet. They are unsuppressible and do not offer suppression Quick Fixes.
+
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 Semantic tokens are provided by the Go language server with full-document `textDocument/semanticTokens/full` responses and `textDocument/semanticTokens/full/delta` updates. They classify VBA declarations, parameters, variables, built-in types, globals, constants, member expressions, comments, strings, numbers, operators, and keywords. Full responses carry opaque result IDs; the server retains the four most recent results for each open document and returns a delta only when its JSON payload is smaller than a full response. Unknown, expired, cross-document, or closed-document IDs fall back to a full response. Range semantic token requests are not advertised.

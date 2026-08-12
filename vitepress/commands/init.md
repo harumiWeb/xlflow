@@ -37,6 +37,11 @@ xlflow init LegacyBook.xlsm --with-skill --agent codex --json
 
 `init` accepts `.xlsm`, `.xlam`, and `.xlsb` files. It copies the input workbook into `build/` without changing its filename, extension, or workbook format. For example, `xlflow init LegacyModel.xlsb` writes `build/LegacyModel.xlsb` and records that path in `xlflow.toml`.
 
+Any source-preflight step reached during initialization uses the generated
+project's `[preflight].allowed_diagnostics` policy. Registry diagnostics may be
+waived explicitly, but unreadable source, duplicate components, and UserForm
+artifact integrity failures remain blocking.
+
 `.xlsb` projects use the normal VBA source layout and Excel COM/VBIDE workflow. Direct OOXML worksheet features such as formula snapshots, workbook cell diff, and pure-Go `pack` are not supported for `.xlsb`.
 
 When `--userform-code-source sidecar` is selected, `init` writes `[userform].code_source = "sidecar"`, runs the bootstrap `pull`, and creates Designer specs under `src/forms/specs/*.yaml` for imported UserForms. Sidecar code lives under `src/forms/code/*.bas`; `.frm` and `.frx` remain generated artifacts used by pull, push, and build workflows.
