@@ -2132,17 +2132,20 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 	if result == nil {
 		return nil, nil
 	}
+	// Project-local procedure/event proofs do not require the optional TypeLib
+	// database. Keep the project snapshot completeness separate, while marking
+	// Enum candidates uncertain when TypeLib coverage is incomplete so VB053 and
+	// Enum non-callable claims still fail open.
 	complete := result.Summary.ParseErrors == 0 && result.Summary.MissingNodes == 0
 	typeDBResult, typeDBErr := typedb.LoadForRuntime("")
-	if typeDBErr != nil || !typeDBResult.Complete {
-		complete = false
-	}
+	typeDBComplete := typeDBErr == nil && typeDBResult.Complete
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
 	for _, file := range result.Files {
 		for _, sym := range file.Symbols {
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
 				Visibility: sym.Visibility, File: sym.File, Line: sym.StartLine, Parent: sym.Parent, IsArray: sym.IsArray,
+				Recovered: strings.EqualFold(sym.Kind, "enum_member") && !typeDBComplete,
 			})
 		}
 	}
@@ -2154,7 +2157,7 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
 				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
-				File: "<typelib>" + constant.Library,
+				File: "<typelib>" + constant.Library, Recovered: !typeDBComplete,
 			})
 		}
 	}
