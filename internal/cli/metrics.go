@@ -209,14 +209,11 @@ func discoverMetricsSourceFiles(root string, projectCfg config.Config) ([]symbol
 		if seen[key] {
 			return nil
 		}
-		seen[key] = true
-		moduleKind := "standard"
-		switch ext {
-		case ".cls":
-			moduleKind = "class"
-		case ".frm":
-			moduleKind = "form"
+		moduleKind, include := metricsTestSourceKind(projectCfg, abs)
+		if !include {
+			return nil
 		}
+		seen[key] = true
 		files = append(files, symbols.SourceFile{Path: abs, ModuleKind: moduleKind})
 		return nil
 	})
@@ -225,6 +222,41 @@ func discoverMetricsSourceFiles(root string, projectCfg config.Config) ([]symbol
 	}
 	sort.SliceStable(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+// metricsTestSourceKind applies the same UserForm source-of-truth rule to the
+// literal tests/ tree that symbols.DiscoverSourceFiles applies to configured
+// source roots. A tests form pair is conventionally laid out as
+// tests/<forms-dir>/<Name>.frm and tests/<forms-dir>/code/<Name>.bas. Ordinary
+// .bas/.cls files retain their existing standard/class classification.
+func metricsTestSourceKind(cfg config.Config, path string) (string, bool) {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".cls":
+		return "class", true
+	case ".frm":
+		sidecar := filepath.Join(filepath.Dir(path), "code", strings.TrimSuffix(filepath.Base(path), ext)+".bas")
+		if strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+			if _, err := os.Stat(sidecar); err == nil {
+				return "", false
+			}
+		}
+		return "form", true
+	case ".bas":
+		if strings.EqualFold(filepath.Base(filepath.Dir(path)), "code") {
+			formsDir := filepath.Dir(filepath.Dir(path))
+			form := filepath.Join(formsDir, strings.TrimSuffix(filepath.Base(path), ext)+".frm")
+			if _, err := os.Stat(form); err == nil {
+				if strings.EqualFold(cfg.UserForm.CodeSource, "sidecar") {
+					return "form", true
+				}
+				return "", false
+			}
+		}
+		return "standard", true
+	default:
+		return "", false
+	}
 }
 
 func metricsExcluded(path string, patterns []string) (bool, []bool) {

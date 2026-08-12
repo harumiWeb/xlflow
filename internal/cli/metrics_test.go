@@ -10,6 +10,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
 func TestRootCommandIncludesMetricsCommand(t *testing.T) {
@@ -61,6 +62,71 @@ End Sub
 	if got[1].CallFanOut != 1 || got[1].BranchCount != 1 || got[1].CyclomaticComplexity != 2 {
 		t.Fatalf("Run metrics = %+v", got[1].Metrics)
 	}
+}
+
+func TestDiscoverMetricsSourceFilesRespectsUserFormCodeSourceForTests(t *testing.T) {
+	root := t.TempDir()
+	formsDir := filepath.Join(root, "tests", "forms")
+	codeDir := filepath.Join(formsDir, "code")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	frmPath := filepath.Join(formsDir, "Fixture.frm")
+	sidecarPath := filepath.Join(codeDir, "Fixture.bas")
+	if err := os.WriteFile(frmPath, []byte("VERSION 5.00\nBegin VB.Form Fixture\nEnd\nAttribute VB_Name = \"Fixture\"\nPrivate Sub Embedded()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecarPath, []byte("Option Explicit\nPrivate Sub Sidecar()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	standardPath := filepath.Join(root, "tests", "Keep.bas")
+	classPath := filepath.Join(root, "tests", "Keep.cls")
+	for path, source := range map[string]string{
+		standardPath: "Public Sub KeepStandard()\nEnd Sub\n",
+		classPath:    "Public Sub KeepClass()\nEnd Sub\n",
+	} {
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Default()
+	cfg.UserForm.CodeSource = "sidecar"
+	files, err := discoverMetricsSourceFiles(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := metricsSourceKinds(files)
+	if _, ok := got[filepath.Clean(frmPath)]; ok {
+		t.Fatalf("sidecar mode included generated form: %+v", got)
+	}
+	if got[filepath.Clean(sidecarPath)] != "form" {
+		t.Fatalf("sidecar mode classified form code as %q: %+v", got[filepath.Clean(sidecarPath)], got)
+	}
+	if got[filepath.Clean(standardPath)] != "standard" || got[filepath.Clean(classPath)] != "class" {
+		t.Fatalf("sidecar mode changed ordinary test sources: %+v", got)
+	}
+
+	cfg.UserForm.CodeSource = "frm"
+	files, err = discoverMetricsSourceFiles(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = metricsSourceKinds(files)
+	if got[filepath.Clean(frmPath)] != "form" {
+		t.Fatalf("frm mode did not include embedded form: %+v", got)
+	}
+	if _, ok := got[filepath.Clean(sidecarPath)]; ok {
+		t.Fatalf("frm mode included sidecar form code: %+v", got)
+	}
+}
+
+func metricsSourceKinds(files []symbols.SourceFile) map[string]string {
+	result := make(map[string]string, len(files))
+	for _, file := range files {
+		result[filepath.Clean(file.Path)] = file.ModuleKind
+	}
+	return result
 }
 
 func TestMetricsCommandJSONThresholdFailureRetainsMetrics(t *testing.T) {
