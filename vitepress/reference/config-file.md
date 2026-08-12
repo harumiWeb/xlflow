@@ -229,13 +229,15 @@ no wildcard.
 allowed_diagnostics = ["VB052"]
 ```
 
-This setting changes only whether workbook automation proceeds. The diagnostic
-remains an `error` in `lint`, `analyze`, and LSP, remains subject to their normal
-exit behavior, and cannot become inline-suppressible. When xlflow applies a
-waiver, command output includes a `preflight_diagnostic_allowed` warning with
-the diagnostic ID and occurrence count because Excel/VBE compilation may still
-fail. Keep the list empty in CI unless the project has explicitly reviewed and
-accepted each waiver.
+This setting changes only whether workbook automation proceeds. On each
+supported `lint`, `analyze`, or LSP surface, the diagnostic remains an `error`
+and cannot become inline-suppressible. `lint` and `analyze` retain their normal
+CLI exit behavior; LSP publishes diagnostics and does not participate in the
+CLI exit-status contract. When xlflow applies waivers, command output includes
+aggregated `preflight_diagnostic_allowed` warnings, one per distinct
+diagnostic ID with occurrence counts aggregated within each warning, because
+Excel/VBE compilation may still fail. Keep the list empty in CI unless the
+project has explicitly reviewed and accepted each waiver.
 
 ### `[lint]`
 

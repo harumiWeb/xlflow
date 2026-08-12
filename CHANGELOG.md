@@ -13,11 +13,11 @@ All notable changes to xlflow will be documented in this file.
   development flows while retaining `VBA224` as the generic fallback.
 
 - Added project-level `[preflight].allowed_diagnostics` waivers for every
-  registry-owned source-preflight blocker. Waived diagnostics remain enabled,
-  error-severity, unsuppressible lint/analyze/LSP findings, while workbook
-  commands proceed with deterministic occurrence-count warnings; parser,
-  infrastructure, duplicate-component, and UserForm integrity failures remain
-  non-waivable.
+  registry-owned source-preflight blocker. On each supported lint, analyze, or
+  LSP surface, waived diagnostics retain their error severity and suppression
+  behavior, while workbook commands proceed with deterministic
+  occurrence-count warnings; parser, infrastructure, duplicate-component, and
+  UserForm integrity failures remain non-waivable.
 
 - Added default-enabled, compile-equivalent `VB052`–`VB054` diagnostics for
   provably invalid project-local call targets, ambiguous bare Enum members,

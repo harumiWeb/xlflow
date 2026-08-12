@@ -35,7 +35,8 @@ xlflow [--wait] form export-image <name> --out <png>
 
 Workbook-writing sidecar form flows use the shared source-preflight policy.
 Registry blockers listed in `[preflight].allowed_diagnostics` can proceed with
-an aggregated warning, but malformed specs, `FRM...` / `UFY...` artifact
+aggregated warnings, one per waived diagnostic ID with occurrence counts
+aggregated within each warning. Malformed specs, `FRM...` / `UFY...` artifact
 integrity failures, unreadable source, and other non-registry failures remain
 blocking.
 

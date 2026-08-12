@@ -1034,12 +1034,14 @@ ignored. Unknown IDs, non-blocking registry IDs, and non-registry codes are
 configuration errors; wildcards are unsupported. The registry field and
 `xlflow rules` continue to describe default behavior.
 
-A listed diagnostic remains enabled at its original severity in `lint`,
-`analyze`, and LSP, keeps its normal batch exit behavior, and remains subject to
-the existing inline-suppression contract. Only the workbook source-preflight
-decision changes. Applied waivers are deduplicated by diagnostic location
-within one CLI app, aggregated deterministically by code, and emitted through
-the existing `warnings` envelope as
+A listed diagnostic remains enabled at its original severity on each supported
+`lint`, `analyze`, or LSP surface and remains subject to the existing
+inline-suppression contract. `lint` and `analyze` retain their normal CLI exit
+behavior; LSP publishes diagnostics and does not participate in the CLI
+exit-status contract. Only the workbook source-preflight decision changes.
+Applied waivers are deduplicated by diagnostic location within one CLI app,
+aggregated deterministically by code, and emitted through the existing
+`warnings` envelope as
 `preflight_diagnostic_allowed` with `rule`, `count`, and a warning that VBE
 compilation may still fail. Warnings remain attached when another diagnostic
 blocks preflight or a later Excel/VBE step fails. Caller-specific ignored
