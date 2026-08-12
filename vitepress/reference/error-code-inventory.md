@@ -52,6 +52,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `before_dialog_action`
 - `binary_expression`
 - `block_kind`
+- `branch_count`
 - `branch_false`
 - `branch_true`
 - `bridge_file_not_openable`
@@ -77,9 +78,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `by_kind`
 - `byref_diagnostics`
 - `byref_modifier`
+- `byref_parameter_count`
+- `byref_parameters`
 - `byval_modifier`
 - `cached_excel_reference`
 - `call_expression`
+- `call_fan_out`
 - `call_statement`
 - `capability_version`
 - `capture_state`
@@ -161,12 +165,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `created_parent_dirs`
 - `credential_exposure`
 - `cross_module`
+- `current_directory_dependency`
 - `current_version`
 - `customer_name`
+- `cyclomatic_complexity`
 - `data_flow`
 - `database_result`
 - `debug_log`
 - `debug_stream_init_failed`
+- `declaration_range`
 - `declaration_spacing`
 - `declare_function`
 - `declare_function_statement`
@@ -229,6 +236,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_scope_shadowing`
 - `detect_stateful_excel_call_arguments`
 - `detect_unsafe_command_construction`
+- `detect_unsafe_file_path`
 - `detect_unsafe_sql_construction`
 - `detect_unstable_last_row_patterns`
 - `detect_untrusted_data_flow`
@@ -243,6 +251,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `diff_failed`
 - `direct_callees`
 - `direct_callers`
+- `directory_traversal`
 - `disabled_count`
 - `disabled_rules`
 - `disabled_rules_precedence`
@@ -280,6 +289,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `elseif_clause`
 - `elseif_fragment`
 - `empty_parentheses`
+- `empty_path`
 - `enable_events_after`
 - `enable_events_before`
 - `enable_vba_object_model_access`
@@ -323,6 +333,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exit_do`
 - `exit_for`
 - `exit_function`
+- `exit_point_count`
+- `exit_points`
 - `exit_property`
 - `exit_statement`
 - `exit_sub`
@@ -341,6 +353,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `failed_entries`
 - `field_count`
 - `file_input`
+- `file_operation`
 - `file_picker`
 - `files_changed`
 - `files_to_change`
@@ -410,6 +423,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version`
 - `generator_version_changed`
 - `global_values`
+- `goto_count`
 - `goto_statement`
 - `graph_dependencies_failed`
 - `gui_boundaries`
@@ -438,6 +452,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `incremental_parse_unavailable`
 - `infrastructure_failure`
 - `init_failed`
+- `input_dependent`
 - `inspect_args_invalid`
 - `inspect_failed`
 - `inspect_form_args_invalid`
@@ -506,6 +521,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `live_workbook`
 - `local_type_diagnostics`
 - `local_variable`
+- `local_variable_count`
+- `local_variables`
 - `locale_sensitive_value`
 - `location_capture`
 - `logical_line`
@@ -513,6 +530,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `logs_and_continues`
 - `loop_back`
 - `loop_body`
+- `loop_count`
 - `loop_exit`
 - `lsp_args_invalid`
 - `lsp_check_failed`
@@ -532,6 +550,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `max_cols`
 - `max_concurrent`
 - `max_count`
+- `max_nesting_depth`
 - `max_rows`
 - `max_total_size_mb`
 - `may_raise`
@@ -543,6 +562,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `merged_ranges`
 - `message_pump`
 - `metadata_read_failed`
+- `metrics_exclude_unmatched`
+- `metrics_failed`
+- `metrics_threshold_exceeded`
+- `metrics_thresholds_invalid`
 - `min_keep`
 - `missing_backup_file`
 - `missing_module_attribute`
@@ -644,6 +667,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `paramarray_not_last`
 - `paramarray_optional`
 - `paramarray_shape`
+- `parameter_count`
 - `parameter_limit`
 - `parameter_list`
 - `parenthesized_condition_expression`
@@ -673,6 +697,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_ir_builds`
 - `procedure_ir_reuses`
 - `procedure_ir_singleflight`
+- `procedure_kind`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -739,6 +764,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `redim_declarator`
 - `redim_statement`
 - `refers_to`
+- `relative_path`
 - `replaced_existing`
 - `request_id`
 - `requested_bridge`
@@ -774,6 +800,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `rollback_failed`
 - `rollback_session_check_failed`
 - `root_count`
+- `root_path`
 - `row_count`
 - `row_height`
 - `row_range`
@@ -787,6 +814,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `runtime_mode`
 - `runtime_unavailable`
 - `safety_backup`
+- `same_source_destination`
 - `save_as`
 - `save_before_push`
 - `save_required`
@@ -843,6 +871,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_counts`
 - `source_file`
 - `source_files`
+- `source_line_count`
 - `source_lines`
 - `source_newer_than_workbook`
 - `source_of_truth`
@@ -865,6 +894,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `start_column`
 - `start_line`
 - `started_at`
+- `statement_count`
 - `static_modifier`
 - `status_hint`
 - `stop_statement`
@@ -886,6 +916,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `target_line`
 - `target_state`
 - `temporary_cleanup`
+- `temporary_cleanup_missing`
 - `temporary_copy`
 - `temporary_object_cleanup_failed`
 - `temporary_workbook`
@@ -930,6 +961,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ui_stream_init_failed`
 - `unary_expression`
 - `uncertain_edges`
+- `unchecked_overwrite`
 - `undeclared_variable`
 - `unexpected_helper_mode`
 - `unhandled_fault`
@@ -937,6 +969,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unknown_exit`
 - `unknown_inline_suppression_rule`
 - `unknown_origin`
+- `unknown_path`
 - `unknown_transformation`
 - `unnamed_control_placeholder`
 - `unquoted_executable_path`
@@ -956,6 +989,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unterminated_quoted_name`
 - `unterminated_string`
 - `unterminated_structured_reference`
+- `untrusted_filename`
 - `unused_inline_suppression`
 - `update_available`
 - `update_check`
@@ -1004,6 +1038,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `wait_will_resolve`
 - `while_statement`
 - `width_px`
+- `wildcard_delete`
 - `wildcard_like_input`
 - `window_not_found`
 - `window_style`

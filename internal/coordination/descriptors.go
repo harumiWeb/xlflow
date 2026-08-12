@@ -89,6 +89,7 @@ func buildDescriptors() []Descriptor {
 		cli("lint", "lint", sourceRead),
 		cli("lsp", "lsp", sourceRead),
 		cli("analyze", "analyze", sourceRead),
+		cli("metrics", "metrics", sourceRead),
 		cliExcel("check", "check", excelRead),
 		cli("inspect-gui", "inspect-gui", sourceRead),
 		cli("skill.install", "skill install", sourceMutate),

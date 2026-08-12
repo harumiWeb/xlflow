@@ -2200,6 +2200,28 @@
       "configuration_key": "detect_procedure_call_cycles",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA245",
+      "title": "Unsafe destructive file and path operation",
+      "description": "A destructive or state-dependent file operation may use an empty, root, relative, wildcard, traversing, overwritten, or externally derived path.",
+      "family": "analyze",
+      "category": "security",
+      "evidence_class": "policy",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba245",
+      "configurable": true,
+      "configuration_key": "detect_unsafe_file_path",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

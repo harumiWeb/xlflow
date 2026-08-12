@@ -4,7 +4,7 @@
 
 This spec defines the xlflow behavior that helps AI agents debug VBA runtime failures without relying on workbook-only state or implicit macro naming assumptions.
 
-Process-launch safety findings are owned by `VBA236` (`detect_unsafe_command_construction`), while SQL construction findings are owned by `VBA239` (`detect_unsafe_sql_construction`). `VBA224` remains the generic source-to-sink rule for non-SQL file, workbook, and HTTP sinks. `VBA236` and `VBA239` are policy diagnostics and do not require Excel/VBE runtime semantics.
+Process-launch safety findings are owned by `VBA236` (`detect_unsafe_command_construction`), SQL construction findings by `VBA239` (`detect_unsafe_sql_construction`), and destructive/path safety findings by `VBA245` (`detect_unsafe_file_path`). `VBA224` remains the generic source-to-sink fallback when those specialized rules are disabled. `VBA236`, `VBA239`, and `VBA245` are policy diagnostics and do not require Excel/VBE runtime semantics.
 
 Loop-performance diagnostics are split by ownership: `VBA225`
 (`detect_excel_cell_access_in_loops`) reports repeated per-cell or per-item

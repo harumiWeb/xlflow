@@ -440,6 +440,204 @@ exclude = ["src/modules/Tests/**"]
 	}
 }
 
+func TestMetricsConfigDefaultsAreDisabled(t *testing.T) {
+	cfg := Default()
+	if len(cfg.Metrics.Exclude) != 0 {
+		t.Fatalf("metrics.exclude default = %#v, want empty", cfg.Metrics.Exclude)
+	}
+	thresholds := cfg.Metrics.Thresholds
+	for name, value := range map[string]int{
+		"cyclomatic_complexity": thresholds.CyclomaticComplexity,
+		"max_nesting_depth":     thresholds.MaxNestingDepth,
+		"statement_count":       thresholds.StatementCount,
+		"source_line_count":     thresholds.SourceLineCount,
+		"branch_count":          thresholds.BranchCount,
+		"loop_count":            thresholds.LoopCount,
+		"goto_count":            thresholds.GoToCount,
+		"exit_point_count":      thresholds.ExitPointCount,
+		"parameter_count":       thresholds.ParameterCount,
+		"byref_parameter_count": thresholds.ByRefParameterCount,
+		"local_variable_count":  thresholds.LocalVariableCount,
+		"call_fan_out":          thresholds.CallFanOut,
+	} {
+		if value != 0 {
+			t.Errorf("metrics.thresholds.%s default = %d, want 0 (disabled)", name, value)
+		}
+	}
+}
+
+func TestLoadMetricsConfigNormalizesExcludeAndParsesThresholds(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[metrics]
+exclude = ["src\\modules\\Tests\\**", "src/forms/code/*.bas", "src/modules/Tests/**"]
+
+[metrics.thresholds]
+cyclomatic_complexity = 10
+max_nesting_depth = 4
+statement_count = 25
+source_line_count = 40
+branch_count = 8
+loop_count = 3
+goto_count = 2
+exit_point_count = 5
+parameter_count = 6
+byref_parameter_count = 2
+local_variable_count = 12
+call_fan_out = 9
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Metrics.Exclude, []string{"src/forms/code/*.bas", "src/modules/Tests/**"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("metrics.exclude = %#v, want %#v", got, want)
+	}
+	got := cfg.Metrics.Thresholds
+	want := Thresholds{
+		CyclomaticComplexity: 10,
+		MaxNestingDepth:      4,
+		StatementCount:       25,
+		SourceLineCount:      40,
+		BranchCount:          8,
+		LoopCount:            3,
+		GoToCount:            2,
+		ExitPointCount:       5,
+		ParameterCount:       6,
+		ByRefParameterCount:  2,
+		LocalVariableCount:   12,
+		CallFanOut:           9,
+	}
+	if got != want {
+		t.Fatalf("metrics.thresholds = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadMetricsConfigRejectsInvalidExcludePatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		want    string
+	}{
+		{name: "empty", pattern: `"   "`, want: "empty pattern"},
+		{name: "parent", pattern: `"../outside/**"`, want: "project-root-relative"},
+		{name: "absolute", pattern: `"C:\\repo\\src\\**"`, want: "project-root-relative"},
+		{name: "invalid glob", pattern: `"src/["`, want: "invalid metrics exclusion pattern"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := []byte("[project]\nentry = \"Main.Run\"\n\n[excel]\npath = \"build/Book.xlsm\"\n\n[metrics]\nexclude = [" + tt.pattern + "]\n")
+			if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadMetricsConfigRejectsNegativeThresholds(t *testing.T) {
+	keys := []string{
+		"cyclomatic_complexity", "max_nesting_depth", "statement_count", "source_line_count",
+		"branch_count", "loop_count", "goto_count", "exit_point_count", "parameter_count",
+		"byref_parameter_count", "local_variable_count", "call_fan_out",
+	}
+	for _, key := range keys {
+		t.Run(key, func(t *testing.T) {
+			dir := t.TempDir()
+			body := []byte("[project]\nentry = \"Main.Run\"\n\n[excel]\npath = \"build/Book.xlsm\"\n\n[metrics.thresholds]\n" + key + " = -1\n")
+			if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil || !strings.Contains(err.Error(), "must be zero or greater") {
+				t.Fatalf("Load error = %v, want non-negative threshold validation", err)
+			}
+		})
+	}
+}
+
+func TestWriteRoundTripsMetricsConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Metrics.Exclude = []string{"src\\z\\**", "src/a/**", "src\\z\\**"}
+	cfg.Metrics.Thresholds = Thresholds{
+		CyclomaticComplexity: 10,
+		MaxNestingDepth:      4,
+		StatementCount:       25,
+		SourceLineCount:      40,
+		BranchCount:          8,
+		LoopCount:            3,
+		GoToCount:            2,
+		ExitPointCount:       5,
+		ParameterCount:       6,
+		ByRefParameterCount:  2,
+		LocalVariableCount:   12,
+		CallFanOut:           9,
+	}
+	path := filepath.Join(dir, FileName)
+	if err := Write(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := loaded.Metrics.Exclude, []string{"src/a/**", "src/z/**"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("round-trip metrics.exclude = %#v, want %#v", got, want)
+	}
+	if loaded.Metrics.Thresholds != cfg.Metrics.Thresholds {
+		t.Fatalf("round-trip metrics.thresholds = %+v, want %+v", loaded.Metrics.Thresholds, cfg.Metrics.Thresholds)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"[metrics]", "exclude = [\"src/a/**\", \"src/z/**\"]", "[metrics.thresholds]",
+		"cyclomatic_complexity = 10", "byref_parameter_count = 2", "call_fan_out = 9",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestMetricsExcludeDoesNotNormalizeBuildExclude(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[build]
+exclude = ["src\\modules\\Tests\\**"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Build.Exclude, []string{`src\modules\Tests\**`}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("build.exclude = %#v, want raw build-only value %#v", got, want)
+	}
+}
+
 func TestLoadParsesVBALineNumbers(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte(`[project]
@@ -1592,6 +1790,17 @@ func TestUpdateUserFormCodeSourceHandlesTableCommentsAndQuotedKeys(t *testing.T)
 	}
 	if !strings.Contains(text, "[userform] # settings\ncode_source = \"sidecar\"") {
 		t.Fatalf("expected quoted key to be replaced in existing table:\n%s", text)
+	}
+}
+
+func TestLoadMetricsConfigRejectsUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	body := "[project]\nentry = \"Main.Run\"\n\n[metrics.thresholds]\nunknown_metric = 3\n"
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "unknown metrics configuration key") {
+		t.Fatalf("unknown metrics key error = %v", err)
 	}
 }
 

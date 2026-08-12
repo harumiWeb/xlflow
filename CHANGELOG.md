@@ -11,6 +11,21 @@ All notable changes to xlflow will be documented in this file.
   late-bound, dynamic, conditional, partial, or otherwise incomplete models;
   all three errors are unsuppressible and block source preflight.
 
+- Added default-enabled `VBA245` file/path safety analysis for destructive VBA
+  statements, FileSystemObject write/delete operations, workbook SaveAs paths,
+  wildcard and traversal hazards, unchecked overwrites, external-input-derived
+  paths, and missing local temporary-file cleanup. Findings include an additive
+  `file_operation` context and retain `VBA224` as the compatibility fallback
+  when the specialized rule is disabled.
+
+- Added source-only `xlflow metrics` procedure complexity reporting with a
+  versioned JSON schema (`metrics.schema_version = 1`) and deterministic values
+  for cyclomatic complexity, nesting, statements, source lines, branches,
+  loops, `GoTo`, exits, parameters, `ByRef` parameters, locals, and call
+  fan-out. Optional `[metrics.thresholds]` settings emit metrics-specific
+  `MX001` warnings and exit `1` while retaining the complete metrics payload;
+  exclusions are configured independently through `[metrics].exclude`.
+
 - Added default-enabled, compile-equivalent `VB050` module declaration-context
   diagnostics and `VB051` invalid-`Me` diagnostics. Checks use canonical
   standard/class/document/UserForm metadata across lint, LSP, and source
@@ -27,6 +42,14 @@ All notable changes to xlflow will be documented in this file.
   VBA file acquisition elevate the cycle to `warning`. Configure or disable
   it with `detect_procedure_call_cycles` or
   `[analyze].disabled_rules = ["VBA244"]`.
+- Fixed `VB023` false positives for valid composite `For Each` control targets
+  such as array elements. The rule now resolves bare control identifiers from
+  Procedure IR declarations and remains conservative for unresolved composite
+  targets.
+- Fixed `VB004` false positives for narrow `On Error Resume Next` probes that
+  restore handling on the same physical line, after a colon-separated
+  statement, or by switching to an explicit error handler. Procedure exits
+  without restoration remain covered by the rule.
 
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.

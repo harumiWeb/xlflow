@@ -65,32 +65,37 @@ type Envelope struct {
 	Runner          any `json:"runner,omitempty"`
 	Analysis        any `json:"analysis,omitempty"`
 	AnalysisMetrics any `json:"analysis_metrics,omitempty"`
-	Check           any `json:"check,omitempty"`
-	Version         any `json:"version,omitempty"`
-	Update          any `json:"update,omitempty"`
-	RunDiagnostic   any `json:"run_diagnostic,omitempty"`
-	PushDiagnostic  any `json:"push_diagnostic,omitempty"`
-	Backups         any `json:"backups,omitempty"`
-	BackupPrune     any `json:"backup_prune,omitempty"`
-	BackupDelete    any `json:"backup_delete,omitempty"`
-	Rollback        any `json:"rollback,omitempty"`
-	Target          any `json:"target,omitempty"`
-	Output          any `json:"output,omitempty"`
-	Build           any `json:"build,omitempty"`
-	Pack            any `json:"pack,omitempty"`
-	Spec            any `json:"spec,omitempty"`
-	Edit            any `json:"edit,omitempty"`
-	Project         any `json:"project,omitempty"`
-	State           any `json:"state,omitempty"`
-	TypeDB          any `json:"type_db,omitempty"`
-	Warnings        any `json:"warnings,omitempty"`
-	Hints           any `json:"hints,omitempty"`
-	DefaultEntry    any `json:"default_entry,omitempty"`
-	Suggestions     any `json:"suggestions,omitempty"`
-	Process         any `json:"process,omitempty"`
-	Recovery        any `json:"recovery,omitempty"`
-	Capabilities    any `json:"capabilities,omitempty"`
-	Rules           any `json:"rules,omitempty"`
+	// Metrics contains the protocol-neutral procedure complexity metrics
+	// projection. It is intentionally separate from AnalysisMetrics, which is
+	// owned by the diagnostics/analyze command and has different compatibility
+	// semantics.
+	Metrics        any `json:"metrics,omitempty"`
+	Check          any `json:"check,omitempty"`
+	Version        any `json:"version,omitempty"`
+	Update         any `json:"update,omitempty"`
+	RunDiagnostic  any `json:"run_diagnostic,omitempty"`
+	PushDiagnostic any `json:"push_diagnostic,omitempty"`
+	Backups        any `json:"backups,omitempty"`
+	BackupPrune    any `json:"backup_prune,omitempty"`
+	BackupDelete   any `json:"backup_delete,omitempty"`
+	Rollback       any `json:"rollback,omitempty"`
+	Target         any `json:"target,omitempty"`
+	Output         any `json:"output,omitempty"`
+	Build          any `json:"build,omitempty"`
+	Pack           any `json:"pack,omitempty"`
+	Spec           any `json:"spec,omitempty"`
+	Edit           any `json:"edit,omitempty"`
+	Project        any `json:"project,omitempty"`
+	State          any `json:"state,omitempty"`
+	TypeDB         any `json:"type_db,omitempty"`
+	Warnings       any `json:"warnings,omitempty"`
+	Hints          any `json:"hints,omitempty"`
+	DefaultEntry   any `json:"default_entry,omitempty"`
+	Suggestions    any `json:"suggestions,omitempty"`
+	Process        any `json:"process,omitempty"`
+	Recovery       any `json:"recovery,omitempty"`
+	Capabilities   any `json:"capabilities,omitempty"`
+	Rules          any `json:"rules,omitempty"`
 }
 
 type Options struct {
@@ -416,6 +421,8 @@ func renderHuman(env Envelope, opts Options) string {
 		b.WriteString(r.renderLint(env))
 	case "analyze":
 		b.WriteString(r.renderAnalysis(env))
+	case "metrics":
+		b.WriteString(r.renderMetrics(env))
 	case "check":
 		b.WriteString(r.renderCheck(env))
 		if env.Issues != nil {
@@ -1751,6 +1758,131 @@ func (r renderer) renderAnalysisMetrics(value any) string {
 		fmt.Fprintf(&b, "%d more field(s); use --json for the complete metrics.\n", len(fields)-limit)
 	}
 	return b.String()
+}
+
+// renderMetrics renders the standalone procedure-complexity projection. The
+// metrics command deliberately has its own renderer so that the existing
+// analyze/module-state presentation remains unchanged.
+func (r renderer) renderMetrics(env Envelope) string {
+	metrics := objectMap(env.Metrics)
+	procedures := listOfObjects(metrics["procedures"])
+	var b strings.Builder
+	b.WriteString(r.section("Procedure metrics"))
+	if version, ok := numberValue(metrics, "schema_version"); ok {
+		b.WriteString(r.kvRows(kvRow{"Schema", fmt.Sprintf("v%d", int(version))}))
+	}
+	if len(procedures) == 0 {
+		b.WriteString("No procedures found.\n")
+	} else {
+		headers := []string{
+			"Procedure", "Complexity", "Nesting", "Statements", "Source lines",
+			"Branches", "Loops", "GoTo", "Exits", "Parameters", "ByRef",
+			"Locals", "Fan-out",
+		}
+		rows := make([][]string, 0, len(procedures))
+		for _, procedure := range procedures {
+			rows = append(rows, []string{
+				metricsProcedureLocation(procedure),
+				metricsNumber(procedure, "cyclomatic_complexity"),
+				metricsNumber(procedure, "max_nesting_depth"),
+				metricsNumber(procedure, "statement_count"),
+				metricsNumber(procedure, "source_line_count"),
+				metricsNumber(procedure, "branch_count"),
+				metricsNumber(procedure, "loop_count"),
+				metricsNumber(procedure, "goto_count"),
+				metricsNumber(procedure, "exit_point_count", "exit_points"),
+				metricsNumber(procedure, "parameter_count", "parameters"),
+				metricsNumber(procedure, "byref_parameter_count", "byref_parameters"),
+				metricsNumber(procedure, "local_variable_count", "local_variables"),
+				metricsNumber(procedure, "call_fan_out"),
+			})
+		}
+		b.WriteString(r.table(headers, rows))
+	}
+	if diagnostics := listOfObjects(env.Diagnostics); len(diagnostics) > 0 {
+		b.WriteString(r.section("Thresholds"))
+		rows := make([][]string, 0, len(diagnostics))
+		for _, diagnostic := range diagnostics {
+			rows = append(rows, []string{
+				r.severityBadge(stringValue(diagnostic, "severity")),
+				stringValue(diagnostic, "metric"),
+				metricsDiagnosticLocation(diagnostic),
+				metricsDiagnosticMessage(diagnostic),
+			})
+		}
+		b.WriteString(r.table([]string{"Severity", "Metric", "Location", "Message"}, rows))
+	}
+	b.WriteString(r.renderWarningsAndHints(env))
+	b.WriteString(r.renderLogs(env))
+	return b.String()
+}
+
+func metricsProcedureLocation(procedure map[string]any) string {
+	name := stringValue(procedure, "name")
+	if name == "" {
+		name = stringValue(procedure, "procedure")
+	}
+	module := stringValue(procedure, "module")
+	if module != "" {
+		name = module + "." + name
+	}
+	file := stringValue(procedure, "file")
+	line := intNumber(procedure, "start_line")
+	if line == 0 {
+		line = intNumber(procedure, "startLine")
+	}
+	if line == 0 {
+		declaration := objectMap(procedure["declaration_range"])
+		line = intNumber(declaration, "startLine")
+		if line == 0 {
+			line = intNumber(declaration, "start_line")
+		}
+	}
+	if file != "" && line > 0 {
+		return fmt.Sprintf("%s:%d %s", file, line, name)
+	}
+	if file != "" && name != "" {
+		return file + " " + name
+	}
+	return name
+}
+
+func metricsNumber(procedure map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := numberValue(procedure, key); ok {
+			return fmt.Sprintf("%d", int(value))
+		}
+	}
+	// A collector may group the scalar values under a metrics object. Accept
+	// that representation as well; this keeps the renderer forward compatible
+	// while the JSON contract remains explicit at the envelope level.
+	if nested := objectMap(procedure["metrics"]); len(nested) > 0 {
+		for _, key := range keys {
+			if value, ok := numberValue(nested, key); ok {
+				return fmt.Sprintf("%d", int(value))
+			}
+		}
+	}
+	return "0"
+}
+
+func metricsDiagnosticLocation(diagnostic map[string]any) string {
+	file := stringValue(diagnostic, "file")
+	line := intNumber(diagnostic, "line")
+	if file != "" && line > 0 {
+		return fmt.Sprintf("%s:%d", file, line)
+	}
+	return file
+}
+
+func metricsDiagnosticMessage(diagnostic map[string]any) string {
+	if message := stringValue(diagnostic, "message"); message != "" {
+		return message
+	}
+	metric := stringValue(diagnostic, "metric")
+	value := metricsNumber(diagnostic, "value")
+	threshold := metricsNumber(diagnostic, "threshold")
+	return fmt.Sprintf("%s = %s exceeds threshold %s", metric, value, threshold)
 }
 
 func (r renderer) renderCheck(env Envelope) string {

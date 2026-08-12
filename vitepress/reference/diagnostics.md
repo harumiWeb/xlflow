@@ -106,6 +106,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA242`](#vba242) | analyze | information | procedure-local | no      | Expensive full-range operation                     |
 | [`VBA243`](#vba243) | analyze | information | procedure-local | no      | Value2 performance opportunity                     |
 | [`VBA244`](#vba244) | analyze | information | project-wide    | yes     | Recursive and cyclic procedure dependency          |
+| [`VBA245`](#vba245) | analyze | warning     | procedure-local | yes     | Unsafe destructive file and path operation         |
 
 ## VB001
 
@@ -2306,3 +2307,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                             |
 | Real-time editor diagnostic | no                             |
 | Fix available               | no                             |
+
+## VBA245
+
+**Unsafe destructive file and path operation.** A destructive or state-dependent file operation may use an empty, root, relative, wildcard, traversing, overwritten, or externally derived path.
+
+| Property                    | Value                     |
+| --------------------------- | ------------------------- |
+| Family                      | `analyze`                 |
+| Category                    | `security`                |
+| Evidence class              | `policy`                  |
+| Compile-equivalent          | no                        |
+| Default severity            | `warning`                 |
+| Supported severities        | `warning`                 |
+| Surfaces                    | `analyze`, `lsp`          |
+| Scope                       | `procedure-local`         |
+| Precision                   | `medium`                  |
+| Enabled by default          | yes                       |
+| Configuration               | `detect_unsafe_file_path` |
+| Inline suppression          | yes                       |
+| Blocks source preflight     | no                        |
+| Real-time editor diagnostic | yes                       |
+| Fix available               | no                        |

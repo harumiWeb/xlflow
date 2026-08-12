@@ -523,8 +523,8 @@ End Sub
 		t.Fatalf("expected one Activate finding, got %+v", vb003)
 	}
 	vb004 := issuesByCode(issues, "VB004")
-	if len(vb004) != 1 || vb004[0].Line != 8 {
-		t.Fatalf("expected only On Error Resume Next to trigger VB004, got %+v", vb004)
+	if len(vb004) != 0 {
+		t.Fatalf("On Error Resume Next replaced by an explicit handler should not trigger VB004, got %+v", vb004)
 	}
 }
 
@@ -557,6 +557,188 @@ End Sub
 	}
 	if got := issuesByCode(issues, "VB004"); len(got) != 0 {
 		t.Fatalf("bounded Err.Number probe should not trigger VB004: %+v", got)
+	}
+}
+
+func TestLinterVB004RecognizesStatementLevelRecovery(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		source    string
+		wantCount int
+	}{
+		{
+			name: "same-line-reset",
+			source: `Option Explicit
+Public Sub SameLineReset()
+  On Error Resume Next: value = UBound(Array()): On Error GoTo 0
+End Sub
+`,
+		},
+		{
+			name: "colon-reset",
+			source: `Option Explicit
+Public Sub ColonReset()
+  On Error Resume Next
+  Debug.Print 1 / 0
+  If Err Then
+    Err.Clear: On Error GoTo 0
+  End If
+End Sub
+`,
+		},
+		{
+			name: "handler-replacement",
+			source: `Option Explicit
+Public Sub HandlerReplacement()
+  On Error Resume Next
+  Call Probe
+  On Error GoTo Handler
+  Exit Sub
+Handler:
+End Sub
+`,
+		},
+		{
+			name: "broad-scope",
+			source: `Option Explicit
+Public Sub BroadScope()
+  On Error Resume Next
+  Debug.Print 1
+  Debug.Print 2
+  Debug.Print 3
+  Debug.Print 4
+  Debug.Print 5
+  On Error GoTo 0
+End Sub
+`,
+			wantCount: 1,
+		},
+		{
+			name: "conditional-reset",
+			source: `Option Explicit
+Public Sub ConditionalReset()
+  On Error Resume Next
+  #If Mac Then
+    value = 1
+  #Else
+    value = 2
+  #End If
+  On Error GoTo 0
+End Sub
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeLintModule(t, dir, "Main.bas", tt.source)
+			issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := issuesByCode(issues, "VB004")
+			if len(got) != tt.wantCount {
+				t.Fatalf("VB004 findings = %+v, want %d", got, tt.wantCount)
+			}
+		})
+	}
+}
+
+func TestLinterVB004ReportsUnrestoredProcedureExit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub NaturalExit()
+  On Error Resume Next
+  Call Probe
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("VB004 findings = %+v, want the unrestored procedure exit", got)
+	}
+}
+
+func TestLinterVB004KeepsNestedLoopScopesBroad(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub LoopScope(ByVal ready As Boolean)
+  On Error Resume Next
+  If ready Then
+    value = 1
+    For i = 1 To 10
+      value = value + i
+    Next i
+    value = 2
+  End If
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("VB004 findings = %+v, want the nested loop scope at line 3", got)
+	}
+}
+
+func TestLinterVB004AcceptsLoopErrNumberProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub LoopProbe()
+  On Error Resume Next
+  For i = 1 To 10
+    value = UBound(Array())
+    If Err.Number <> 0 Then Err.Clear
+  Next i
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB004"); len(got) != 0 {
+		t.Fatalf("loop Err.Number probe should not trigger VB004: %+v", got)
+	}
+}
+
+func TestLinterVB004KeepsRecoveryAcrossWaitLoopBroad(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Request()
+  On Error Resume Next
+  client.Open "GET", Url, False
+  client.Send
+  While client.readyState <> 4
+    DoEvents
+  Wend
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("VB004 findings = %+v, want the wait-loop scope at line 3", got)
 	}
 }
 
@@ -2149,6 +2331,57 @@ End Sub
 	if issue := findIssue(t, issues, "VB023", 16); issue.Symbol != "Item" {
 		t.Fatalf("expected VB023 to preserve declaration casing, got %+v", issue)
 	}
+}
+
+func TestLinterVB023IgnoresCompositeControlTargets(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Sub Run(ByVal values As Collection)
+  Dim slots(0) As Variant
+  For Each slots(0) In values
+  Next slots(0)
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB023"); len(got) != 0 {
+		t.Fatalf("composite For Each targets should not be treated as undeclared identifiers: %+v", got)
+	}
+}
+
+func TestLinterVB023ResolvesProcedureAndModuleDeclarations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Private moduleObject As Object
+Sub Run(ByVal objectItem As Object, ByVal variantItem As Variant, ByVal values As Collection)
+  Dim scalarItem As Long
+  For Each objectItem In values
+  Next
+  For Each scalarItem In values
+  Next
+  For Each missingItem In values
+  Next
+  For Each variantItem In values
+  Next
+  For Each moduleObject In values
+  Next
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB023"); len(got) != 2 {
+		t.Fatalf("expected only the scalar and undeclared For Each controls to trigger VB023, got %+v", got)
+	}
+	assertIssue(t, issues, "VB023", 7)
+	assertIssue(t, issues, "VB023", 9)
 }
 
 func TestLinterVB026UsesParsedErrorHandlerStatements(t *testing.T) {

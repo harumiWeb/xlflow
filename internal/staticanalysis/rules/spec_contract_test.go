@@ -18,6 +18,7 @@ var requiredSpecContracts = map[string]string{
 	"VBA242": "excel-loop-performance-analysis.md",
 	"VBA243": "excel-loop-performance-analysis.md",
 	"VBA244": "vba-procedure-call-cycles.md",
+	"VBA245": "vba-file-path-safety.md",
 }
 
 type specRuleContract struct {

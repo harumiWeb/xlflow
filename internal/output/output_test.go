@@ -262,6 +262,42 @@ func TestWriteAnalysisMetricsHumanOutputForWorkbookCommands(t *testing.T) {
 	}
 }
 
+func TestWriteProcedureMetricsJSONAndHumanOutput(t *testing.T) {
+	env := New("metrics")
+	env.Metrics = map[string]any{
+		"schema_version": 1,
+		"procedures": []map[string]any{{
+			"file": "src/modules/Main.bas", "module": "Main", "name": "Run", "start_line": 4,
+			"cyclomatic_complexity": 3, "max_nesting_depth": 2, "statement_count": 8,
+			"source_line_count": 12, "branch_count": 1, "loop_count": 1, "goto_count": 0,
+			"exit_point_count": 1, "parameter_count": 2, "byref_parameter_count": 1,
+			"local_variable_count": 3, "call_fan_out": 2,
+		}},
+	}
+	env.Diagnostics = []map[string]any{{"code": "MX001", "severity": "warning", "metric": "loop_count", "file": "src/modules/Main.bas", "line": 4, "message": "loop_count exceeds threshold"}}
+	var jsonBuf bytes.Buffer
+	if err := WriteWithOptions(&jsonBuf, env, Options{JSON: true}); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(jsonBuf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	metrics, ok := decoded["metrics"].(map[string]any)
+	if !ok || metrics["schema_version"] != float64(1) {
+		t.Fatalf("metrics JSON = %#v", decoded["metrics"])
+	}
+	var human bytes.Buffer
+	if err := WriteWithOptions(&human, env, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"Procedure metrics:", "Main.Run", "Complexity", "Fan-out", "loop_count exceeds threshold"} {
+		if !strings.Contains(human.String(), text) {
+			t.Fatalf("human metrics output missing %q: %s", text, human.String())
+		}
+	}
+}
+
 func TestWriteJSONEnvelopeIncludesPushDiagnostic(t *testing.T) {
 	env := New("push")
 	env.PushDiagnostic = map[string]any{

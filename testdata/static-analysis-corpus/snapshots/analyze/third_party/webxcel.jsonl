@@ -72,4 +72,5 @@
 {"project":"third_party/webxcel","file":"src/Modules/TestStringExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":33,"column":22}
 {"project":"third_party/webxcel","file":"src/Modules/TestStringExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":33,"column":22}
 {"project":"third_party/webxcel","file":"src/Modules/TestStringExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":33,"column":22}
-{"project":"third_party/webxcel","file":"src/Modules/TestUtils.bas","surface":"analyze","code":"VBA224","severity":"warning","line":24,"column":0}
+{"project":"third_party/webxcel","file":"src/Modules/TestUtils.bas","surface":"analyze","code":"VBA245","severity":"warning","line":13,"column":40}
+{"project":"third_party/webxcel","file":"src/Modules/TestUtils.bas","surface":"analyze","code":"VBA245","severity":"warning","line":24,"column":4}

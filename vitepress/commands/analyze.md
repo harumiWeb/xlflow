@@ -27,6 +27,14 @@ xlflow analyze --json
 Use `analyze` for fast source-level feedback before opening Excel.
 :::
 
+Procedure complexity measurements are deliberately a separate source-only
+surface. Use [`xlflow metrics`](./metrics) for the twelve deterministic
+procedure metrics and optional `[metrics.thresholds]` policy. `analyze` does
+not populate that payload, does not apply metrics thresholds, and keeps the
+existing `analysis_metrics.module_state` contract unchanged. `MX001` threshold
+diagnostics are owned by `metrics`, not by the analyzer rule registry or
+`[analyze].disabled_rules`.
+
 `VBA203` tracks each recognized `Application` state write through normal,
 early-exit, error-handler, termination, and unknown CFG exits. A direct saved
 value (including an exact saved-variable copy) restores the state only when it
@@ -103,6 +111,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VB052`  | error                 | Project-local call target is provably missing or known non-callable; blocks source preflight.                                                 |
 | `VB053`  | error                 | Bare Enum member has multiple visible candidates with no lexical winner; blocks source preflight.                                             |
 | `VB054`  | error                 | `RaiseEvent` target is undeclared in the same object module; blocks source preflight.                                                         |
+| `VBA245` | warning               | A destructive or state-dependent file operation may receive an unsafe, relative, wildcard, overwritten, traversing, or external-input path.   |
 
 Disable configurable analyzer rules with `[analyze].disabled_rules`:
 
@@ -128,7 +137,7 @@ Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-block
 
 `VBA210` checks every reachable path to a `Function` or `Property Get` normal exit, including `Exit Function`, `Exit Property`, error-handler paths that return normally, and shared cleanup labels. A dominating return assignment satisfies all paths; VBA's default-initialized return value does not. Known non-returning `Err.Raise` statements are treated as exceptional exits rather than normal fallthrough. Object returns require `Set`, known value returns require ordinary assignment or `Let`, and the diagnostic reason identifies a representative uncovered exit when practical. The rule is opt-in through `detect_function_return_path` and remains batch-only.
 
-Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, and `VBA244` are enabled by default. `VBA230` through `VBA239` are warning-level, non-blocking, and inline-suppressible. `VBA241` is non-blocking and inline-suppressible; it may use `information` for a single non-nested loop with loop-invariant dimensions and `warning` for loop-variable growth or nested loops. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, and `VBA241` are procedure-local and available in realtime diagnostics. `VBA244` is project-wide, batch-only, non-blocking, and inline-suppressible; it reports every unique directed simple cycle once, retaining the complete path in JSON. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`.
+Rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244`, and `VBA245` are enabled by default. `VBA230` through `VBA239`, `VBA241`, and `VBA245` are warning-level, non-blocking, and inline-suppressible. `VBA241` is non-blocking and inline-suppressible; it may use `information` for a single non-nested loop with loop-invariant dimensions and `warning` for loop-variable growth or nested loops. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, `VBA241`, and `VBA245` are procedure-local and available in realtime diagnostics. `VBA244` is project-wide, batch-only, non-blocking, and inline-suppressible; it reports every unique directed simple cycle once, retaining the complete path in JSON. `VBA222` is a batch-only warning that checks public function/property return types, all public parameters, and custom event parameters against project visibility and the available TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous names, and unresolved external types are reported conservatively. Host-required event handlers are excluded. Suppress an intentional case with `xlflow:disable-line VBA222` or `xlflow:disable-next-line VBA222`, or add `VBA222` to `[analyze].disabled_rules`.
 `VBA223` is a default-enabled, non-blocking, file-local, realtime warning. It uses structural credential patterns, ignores obvious placeholders where possible, and redacts source snippets with `[REDACTED]`.
 
 `VBA224` is a conservative, procedure-local warning: it reports source, sink, and propagation path context, treats unsupported transformations as unknown, does not propagate taint across procedures, and does not block preflight. Literals and explicit constant/allowlist branches are accepted; `EncodeURL` is accepted only for HTTP URLs, while generic `Trim`, `CStr`, `Replace`, `IsNumeric`, and `Len` do not remove taint. Use `xlflow:disable-line VBA224`, `xlflow:disable-next-line VBA224`, or `[analyze].disabled_rules = ["VBA224"]` for an intentional flow. `VBA206` remains a configurable warning for literal temporaries, parenthesized, property/member, array-element, indirect, and otherwise uncertain ByRef forms. Literal arguments do not produce blocking `VBA228` errors because the VBE evaluates them as temporary values. `VBA228` owns only explicit statically incompatible bare value/object/array variables and `Long`/`LongPtr`/`LongLong` mismatches, including named arguments; it is always enabled, cannot be suppressed by `VBA206` settings or inline comments, and blocks source preflight. Array-valued Function return slots retain their array shape, local values shadow same-named procedures, and callee-module-qualified project types match the callee's unqualified type declaration; a different module qualification remains incompatible. `Object`, `Variant`, `Any`, unresolved, and late-bound types remain uncertain and do not produce `VBA228`. The legacy `detect_byref_argument_mismatch` key remains supported for `VBA206`. Rules `VBA207`, `VBA210`, and `VBA213` are opt-in through legacy `[analyze]` settings because they are more dataflow-sensitive. `VBA207` uses `warning` when absence is definite and `information` when existence is unknown. `VBA213` applies only when a known `Scripting.Dictionary` is iterated directly and the key variable is used as an object or value; ordinary key iteration remains valid. `VBA214` is warning-only and allows one compatibility probe followed by `On Error GoTo 0` (with optional `Err.Number` inspection and `Err.Clear`); scopes containing wider control flow, calls, or un-restored exits are reported without severity escalation or preflight blocking. `VBA215` requires explicit `Find` `LookIn`, `LookAt`, `SearchOrder`, and `MatchByte`, or `Replace` `LookAt`, `SearchOrder`, `MatchCase`, and `MatchByte`, because Excel can reuse saved Find/Replace dialog or macro settings when they are omitted. `VBA216` blocks preflight only when xlflow can prove that explicit range roots refer to different worksheets. `VBA217` guides last-row calculations that rely on the active sheet, `End(xlDown)`, unadjusted `UsedRange.Rows.Count`, or `CurrentRegion`; it does not block preflight. `VBA218` accepts `On Error GoTo <label>` for exception-raising APIs, or only a narrow `On Error Resume Next` probe that checks `Err` and immediately restores `On Error GoTo 0`; an unbounded `Resume Next` scope is not sufficient. `Variant/Error` APIs require `IsError` before consumption. `VBA219` tracks only captured local `Workbooks.Open` results and VBA `Open ... As #handle` calls. It accepts direct local aliases, error-handler cleanup labels, pre-Open file-number aliases, and ownership transfer only at an object-returning Function's normal exit; it intentionally does not assume that parameters, helper calls, or other COM resources are owned. Diagnostics `VBA101` through `VBA106` are always enabled.
@@ -202,6 +211,17 @@ It keeps `VBA224` as the generic fallback when disabled and does not claim
 complete SQL-injection proof. Use `xlflow:disable-line VBA239`,
 `xlflow:disable-next-line VBA239`, or `[analyze].disabled_rules = ["VBA239"]`
 for intentional exceptions.
+
+`VBA245` is enabled in batch and real-time analysis. It tracks simple path
+construction for VBA file statements, FileSystemObject write/delete/copy/move
+methods, and workbook `SaveAs`/`SaveCopyAs`. It separates definite hazards
+from input-dependent and missing-temporary-cleanup risks in `file_operation`
+JSON context, while existence checks remain clean. Use
+`xlflow:disable-line VBA245`, `xlflow:disable-next-line VBA245`, or
+`[analyze].disabled_rules = ["VBA245"]` for an intentional exception. When
+disabled, `VBA224` remains the compatibility fallback for its legacy
+destructive-file and SaveAs sinks; non-destructive workbook-open flows remain
+under `VBA224`.
 
 `VBA240` is disabled by default and runs only in batch `analyze`/`check` when
 `[analyze].detect_risky_module_state = true`. It indexes module-level fields
@@ -286,6 +306,7 @@ Failed `--json` output uses the xlflow envelope plus command-specific fields.
 
 - [lint](./lint)
 - [check](./check)
+- [metrics](./metrics)
 - [inspect-gui](./inspect-gui)
 
 <!-- xlflow-command-guidance -->

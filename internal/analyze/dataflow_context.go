@@ -55,3 +55,16 @@ type SQLExecutionContext struct {
 	OriginState   string `json:"origin_state,omitempty"`
 	Parameterized bool   `json:"parameterized"`
 }
+
+// FileOperationContext describes the path and operation classification for
+// VBA245. It is additive so clients that only understand generic diagnostics
+// can continue to consume the finding.
+type FileOperationContext struct {
+	Operation   string `json:"operation"`
+	PathRole    string `json:"path_role,omitempty"`
+	RiskClass   string `json:"risk_class"`
+	RiskKind    string `json:"risk_kind"`
+	OriginState string `json:"origin_state,omitempty"`
+	Anchor      string `json:"anchor,omitempty"`
+	Overwrite   *bool  `json:"overwrite,omitempty"`
+}

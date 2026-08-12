@@ -26,13 +26,8 @@
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":280,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":314,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":342,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":345,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":365,"column":0}
-{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA224","severity":"warning","line":365,"column":0}
+{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA245","severity":"warning","line":345,"column":0}
+{"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA245","severity":"warning","line":365,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":425,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":435,"column":0}
 {"project":"self/world-news","file":"src/modules/XlflowAssert.bas","surface":"analyze","code":"VBA214","severity":"warning","line":186,"column":0}
