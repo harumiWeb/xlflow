@@ -264,6 +264,8 @@ func TestVBA246SensitiveLoggingIgnoresFunctionNames(t *testing.T) {
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
 Option Explicit
 Public Sub Run()
+    Dim token As String
+    Dim otherValue As String
     Dim request As Object
     Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
     request.SetTimeouts 1000, 1000, 1000, 1000
