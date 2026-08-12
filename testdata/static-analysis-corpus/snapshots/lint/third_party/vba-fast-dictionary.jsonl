@@ -1,5 +1,4 @@
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/BenchTests.bas","surface":"lint","code":"VB004","severity":"warning","line":107,"column":5}
-{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/BenchTests.bas","surface":"lint","code":"VB004","severity":"warning","line":166,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"lint","code":"VB007","severity":"warning","line":65,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"lint","code":"VB004","severity":"warning","line":126,"column":37}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"lint","code":"VB004","severity":"warning","line":146,"column":37}
@@ -17,3 +16,4 @@
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"lint","code":"VB020","severity":"warning","line":1570,"column":12}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"lint","code":"VB020","severity":"warning","line":313,"column":9}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"lint","code":"VB004","severity":"warning","line":636,"column":5}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"lint","code":"VB004","severity":"warning","line":1297,"column":5}

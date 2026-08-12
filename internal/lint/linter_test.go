@@ -523,8 +523,8 @@ End Sub
 		t.Fatalf("expected one Activate finding, got %+v", vb003)
 	}
 	vb004 := issuesByCode(issues, "VB004")
-	if len(vb004) != 1 || vb004[0].Line != 8 {
-		t.Fatalf("expected only On Error Resume Next to trigger VB004, got %+v", vb004)
+	if len(vb004) != 0 {
+		t.Fatalf("On Error Resume Next replaced by an explicit handler should not trigger VB004, got %+v", vb004)
 	}
 }
 
@@ -557,6 +557,156 @@ End Sub
 	}
 	if got := issuesByCode(issues, "VB004"); len(got) != 0 {
 		t.Fatalf("bounded Err.Number probe should not trigger VB004: %+v", got)
+	}
+}
+
+func TestLinterVB004RecognizesStatementLevelRecovery(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub SameLineReset()
+  On Error Resume Next: value = UBound(Array()): On Error GoTo 0
+End Sub
+
+Public Sub ColonReset()
+  On Error Resume Next
+  Debug.Print 1 / 0
+  If Err Then
+    Err.Clear: On Error GoTo 0
+  End If
+End Sub
+
+Public Sub HandlerReplacement()
+  On Error Resume Next
+  Call Probe
+  On Error GoTo Handler
+  Exit Sub
+Handler:
+End Sub
+
+Public Sub BroadScope()
+  On Error Resume Next
+  Debug.Print 1
+  Debug.Print 2
+  Debug.Print 3
+  Debug.Print 4
+  Debug.Print 5
+  On Error GoTo 0
+End Sub
+
+Public Sub ConditionalReset()
+  On Error Resume Next
+  #If Mac Then
+    value = 1
+  #Else
+    value = 2
+  #End If
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 23 {
+		t.Fatalf("VB004 findings = %+v, want only the broad scope at line 23", got)
+	}
+}
+
+func TestLinterVB004ReportsUnrestoredProcedureExit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub NaturalExit()
+  On Error Resume Next
+  Call Probe
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("VB004 findings = %+v, want the unrestored procedure exit", got)
+	}
+}
+
+func TestLinterVB004KeepsNestedLoopScopesBroad(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub LoopScope(ByVal ready As Boolean)
+  On Error Resume Next
+  If ready Then
+    value = 1
+    For i = 1 To 10
+      value = value + i
+    Next i
+    value = 2
+  End If
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("VB004 findings = %+v, want the nested loop scope at line 3", got)
+	}
+}
+
+func TestLinterVB004AcceptsLoopErrNumberProbes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub LoopProbe()
+  On Error Resume Next
+  For i = 1 To 10
+    value = UBound(Array())
+    If Err.Number <> 0 Then Err.Clear
+  Next i
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB004"); len(got) != 0 {
+		t.Fatalf("loop Err.Number probe should not trigger VB004: %+v", got)
+	}
+}
+
+func TestLinterVB004KeepsRecoveryAcrossWaitLoopBroad(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Request()
+  On Error Resume Next
+  client.Open "GET", Url, False
+  client.Send
+  While client.readyState <> 4
+    DoEvents
+  Wend
+  On Error GoTo 0
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB004")
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("VB004 findings = %+v, want the wait-loop scope at line 3", got)
 	}
 }
 

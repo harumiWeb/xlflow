@@ -105,4 +105,3 @@
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":902,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":904,"column":0}
 {"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB007","severity":"warning","line":920,"column":0}
-{"project":"third_party/iguana-tex","file":"Utils.bas","surface":"lint","code":"VB004","severity":"warning","line":954,"column":5}
