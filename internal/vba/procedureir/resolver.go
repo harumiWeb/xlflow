@@ -330,9 +330,6 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 		if r.knownMeMember(receiver, base, caller) {
 			return CallResolution{Status: ResolutionExternal}
 		}
-		if r.hostObjectReceiver(receiver) {
-			return CallResolution{Status: ResolutionExternal}
-		}
 		matches := receiverMatches(procedures, receiver, base)
 		if len(matches) == 0 && strings.EqualFold(receiver, "me") &&
 			strings.EqualFold(r.moduleKinds[strings.ToLower(cleanIdentifier(caller))], "class") {
@@ -347,6 +344,9 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 		case 1:
 			return CallResolution{Status: ResolutionMatched, Candidates: entriesToCandidates(matches)}
 		case 0:
+			if r.hostObjectReceiver(receiver) {
+				return CallResolution{Status: ResolutionExternal}
+			}
 			// A receiver that names a project module (or Me in a project
 			// object module) is a proof of project-local intent. Unknown
 			// receivers remain member calls: they may be Object/Variant,

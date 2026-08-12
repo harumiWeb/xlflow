@@ -263,22 +263,26 @@ func TestWorkspaceAnalysisIndexInitialParseFailureCanRecoverToCompleteSnapshot(t
 
 func TestWorkspaceAnalysisIndexCallQueriesFailOpenDuringInitialBackgroundScan(t *testing.T) {
 	root := t.TempDir()
+	blockedPath := filepath.Join(root, "src", "modules", "Blocked.bas")
 	path := filepath.Join(root, "src", "modules", "Main.bas")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("blocked"), 0o644); err != nil {
+	if err := os.WriteFile(blockedPath, []byte("blocked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var enteredOnce sync.Once
 	parse := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
-		enteredOnce.Do(func() { close(entered) })
-		select {
-		case <-release:
-		case <-ctx.Done():
-			return indexedFileAnalysis{}, ctx.Err()
+		if file.Path == blockedPath {
+			enteredOnce.Do(func() { close(entered) })
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return indexedFileAnalysis{}, ctx.Err()
+			}
+			return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
 		}
 		return indexedFileAnalysis{
 			path: file.Path, moduleKind: file.ModuleKind,

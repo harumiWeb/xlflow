@@ -102,7 +102,9 @@ func Build(documents []Document) ProjectSummary {
 					}
 				}
 			case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved,
-				procedureir.ResolutionExternal, procedureir.ResolutionMemberCall:
+				procedureir.ResolutionExternal, procedureir.ResolutionMemberCall,
+				procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete,
+				procedureir.ResolutionNonCallable:
 				summary.DirectUncertainty = append(summary.DirectUncertainty, uncertainty(input.id, call))
 			}
 		}

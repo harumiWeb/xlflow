@@ -3051,7 +3051,8 @@ func resumeNextScopeCallRisk(calls []procedureir.CallSite, statementID int) (cal
 			if len(candidate.Resolution.Candidates) == 1 {
 				return true, true
 			}
-		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted:
+		case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionNotAttempted,
+			procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete, procedureir.ResolutionNonCallable:
 			call = true
 		}
 	}
