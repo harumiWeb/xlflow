@@ -74,6 +74,36 @@ analyzer rule, is not controlled by `[analyze].disabled_rules`, and cannot be
 inline-suppressed. With no enabled threshold, the command returns only metrics
 and exits `0`.
 
+## Hotspot ranking
+
+The same source scan adds `metrics.hotspots`, a versioned ranking of
+procedures and modules. It uses the `percentile_equal_weight_v1` model: each
+raw signal is converted to an average-rank percentile within its cohort, active
+signals are averaged equally, and ties use stable project-relative identity
+ordering. The report retains both `raw_signals` and `normalized_signals`, so a
+score is an auditable maintainability lead rather than a definite bug finding.
+
+Enable selectors independently when a project wants findings:
+
+```toml
+[metrics.hotspots]
+procedure_top_n = 10
+module_top_n = 5
+procedure_score_threshold = 0 # 0 disables; scores are percentages 1..100
+module_score_threshold = 0
+```
+
+Top-N and score-threshold selections are unioned. Top-N-only entities produce
+informational `MX002` entries; entities selected by a score threshold produce
+warning `MX002` entries and set
+`error.code = "metrics_hotspot_threshold_exceeded"` (exit `1`). The complete
+metrics and hotspot arrays remain available in the failure envelope. Hotspot
+selectors are opt-in, are not analyzer rules, and cannot be inline-suppressed.
+Negative top-N values, non-finite scores, malformed tables, unknown keys, and
+percentages outside `0..100` are configuration errors (exit `2`). The complete
+signal and ordering contract is in
+`docs/specs/vba-procedure-and-module-hotspots.md`.
+
 ## JSON output
 
 ```json
@@ -110,7 +140,13 @@ and exits `0`.
         "local_variable_count": 2,
         "call_fan_out": 2
       }
-    ]
+    ],
+    "hotspots": {
+      "schema_version": 1,
+      "score_model": "percentile_equal_weight_v1",
+      "procedures": [],
+      "modules": []
+    }
   },
   "diagnostics": [],
   "warnings": [],
@@ -123,7 +159,9 @@ change; removing or redefining a field requires a new version. Procedures are
 sorted by normalized file, declaration start position, module, name, and kind. Threshold
 diagnostics are sorted by that procedure order and the fixed metric order. This
 ordering, slash-separated paths, normalized exclusion list, and stable JSON
-serialization make repeated runs deterministic.
+serialization make repeated runs deterministic. The nested `hotspots` report
+uses its own schema version and `percentile_equal_weight_v1` score model; its
+procedure/module arrays are ranked independently with stable identity tie-breaks.
 
 ## Related
 

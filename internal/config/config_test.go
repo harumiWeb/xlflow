@@ -600,6 +600,57 @@ func TestMetricsConfigDefaultsAreDisabled(t *testing.T) {
 			t.Errorf("metrics.thresholds.%s default = %d, want 0 (disabled)", name, value)
 		}
 	}
+	if got := cfg.Metrics.Hotspots; got != (HotspotsConfig{}) {
+		t.Fatalf("metrics.hotspots default = %+v, want zero values", got)
+	}
+}
+
+func TestLoadMetricsHotspotsConfigAndValidation(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[metrics.hotspots]
+procedure_top_n = 5
+module_top_n = 3
+procedure_score_threshold = 80.5
+module_score_threshold = 60
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := HotspotsConfig{ProcedureTopN: 5, ModuleTopN: 3, ProcedureScoreThreshold: 80.5, ModuleScoreThreshold: 60}
+	if cfg.Metrics.Hotspots != want {
+		t.Fatalf("metrics.hotspots = %+v, want %+v", cfg.Metrics.Hotspots, want)
+	}
+
+	for _, tt := range []struct {
+		name, key, value, want string
+	}{
+		{"negative procedure top n", "procedure_top_n", "-1", "procedure_top_n must be zero or greater"},
+		{"negative module top n", "module_top_n", "-1", "module_top_n must be zero or greater"},
+		{"score above 100", "procedure_score_threshold", "101", "procedure_score_threshold must be zero or between 1 and 100"},
+		{"score fractional", "module_score_threshold", "0.5", "module_score_threshold must be zero or between 1 and 100"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := t.TempDir()
+			b := []byte("[project]\nentry = \"Main.Run\"\n\n[excel]\npath = \"build/Book.xlsm\"\n\n[metrics.hotspots]\n" + tt.key + " = " + tt.value + "\n")
+			if err := os.WriteFile(filepath.Join(d, FileName), b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(d)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
 }
 
 func TestLoadMetricsConfigNormalizesExcludeAndParsesThresholds(t *testing.T) {
@@ -722,6 +773,7 @@ func TestWriteRoundTripsMetricsConfig(t *testing.T) {
 		LocalVariableCount:   12,
 		CallFanOut:           9,
 	}
+	cfg.Metrics.Hotspots = HotspotsConfig{ProcedureTopN: 5, ModuleTopN: 3, ProcedureScoreThreshold: 80.5, ModuleScoreThreshold: 60}
 	path := filepath.Join(dir, FileName)
 	if err := Write(path, cfg); err != nil {
 		t.Fatal(err)
@@ -736,6 +788,9 @@ func TestWriteRoundTripsMetricsConfig(t *testing.T) {
 	if loaded.Metrics.Thresholds != cfg.Metrics.Thresholds {
 		t.Fatalf("round-trip metrics.thresholds = %+v, want %+v", loaded.Metrics.Thresholds, cfg.Metrics.Thresholds)
 	}
+	if loaded.Metrics.Hotspots != cfg.Metrics.Hotspots {
+		t.Fatalf("round-trip metrics.hotspots = %+v, want %+v", loaded.Metrics.Hotspots, cfg.Metrics.Hotspots)
+	}
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -744,6 +799,7 @@ func TestWriteRoundTripsMetricsConfig(t *testing.T) {
 	for _, want := range []string{
 		"[metrics]", "exclude = [\"src/a/**\", \"src/z/**\"]", "[metrics.thresholds]",
 		"cyclomatic_complexity = 10", "byref_parameter_count = 2", "call_fan_out = 9",
+		"[metrics.hotspots]", "procedure_top_n = 5", "module_score_threshold = 60",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated config missing %q:\n%s", want, text)

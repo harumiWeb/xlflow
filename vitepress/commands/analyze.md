@@ -29,11 +29,12 @@ Use `analyze` for fast source-level feedback before opening Excel.
 
 Procedure complexity measurements are deliberately a separate source-only
 surface. Use [`xlflow metrics`](./metrics) for the twelve deterministic
-procedure metrics and optional `[metrics.thresholds]` policy. `analyze` does
-not populate that payload, does not apply metrics thresholds, and keeps the
-existing `analysis_metrics.module_state` contract unchanged. `MX001` threshold
-diagnostics are owned by `metrics`, not by the analyzer rule registry or
-`[analyze].disabled_rules`.
+procedure metrics, architectural procedure/module hotspot rankings, and
+optional `[metrics.thresholds]` / `[metrics.hotspots]` policies. `analyze` does
+not populate that payload, does not apply metrics thresholds or hotspot
+selectors, and keeps the existing `analysis_metrics.module_state` contract
+unchanged. `MX001` and `MX002` diagnostics are owned by `metrics`, not by the
+analyzer rule registry or `[analyze].disabled_rules`.
 
 `VBA203` tracks each recognized `Application` state write through normal,
 early-exit, error-handler, termination, and unknown CFG exits. A direct saved

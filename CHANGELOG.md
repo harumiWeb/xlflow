@@ -4,6 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added deterministic procedure and module hotspot ranking to `xlflow metrics`
+  (`metrics.hotspots`, schema version 1, score model
+  `percentile_equal_weight_v1`). The report exposes raw and normalized
+  architectural signals, supports independent top-N and percentage selectors
+  through `[metrics.hotspots]`, and emits metrics-owned `MX002` entries (top-N
+  informational, threshold-selected warning) while retaining the complete
+  metrics payload. Hotspot scores are maintainability review signals rather
+  than definite analyzer findings.
+
 - Added default-enabled `VBA246` HTTP transport-security analysis and `VBA247`
   timeout reliability analysis for common XMLHTTP, ServerXMLHTTP, WinHTTP, and
   identifiable ADODB.Stream download-and-launch patterns. Findings are

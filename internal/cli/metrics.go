@@ -14,6 +14,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/hotspots"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/proceduremetrics"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -44,10 +45,13 @@ func (a *app) metricsCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("metrics", output.ExitConfig, "metrics_thresholds_invalid", err)
 			}
+			hotspotReport := buildHotspotReport(result)
+			hotspotFindings := hotspotFindingsForConfig(hotspotReport, cfg.Metrics.Hotspots)
 			env := output.New("metrics")
 			env.Metrics = map[string]any{
 				"schema_version": proceduremetrics.JSONSchemaVersion,
 				"procedures":     result,
+				"hotspots":       hotspotReport,
 			}
 			if len(violations) > 0 {
 				env.Diagnostics = violations
@@ -57,14 +61,255 @@ func (a *app) metricsCommand() *cobra.Command {
 					Message: metricsThresholdFailureMessage(len(violations)),
 				}
 			}
+			if len(hotspotFindings) > 0 {
+				if existing, ok := env.Diagnostics.([]proceduremetrics.ThresholdViolation); ok {
+					merged := make([]any, 0, len(existing)+len(hotspotFindings))
+					for _, item := range existing {
+						merged = append(merged, item)
+					}
+					for _, item := range hotspotFindings {
+						merged = append(merged, item)
+					}
+					env.Diagnostics = merged
+				} else {
+					env.Diagnostics = hotspotFindings
+				}
+				if cfg.Metrics.Hotspots.ProcedureScoreThreshold > 0 || cfg.Metrics.Hotspots.ModuleScoreThreshold > 0 {
+					env.Status = output.StatusFailed
+					if len(violations) == 0 {
+						env.Error = &output.Error{Code: "metrics_hotspot_threshold_exceeded", Message: fmt.Sprintf("%d architectural hotspot threshold finding(s)", len(hotspotFindings))}
+					}
+				}
+			}
 			env.Warnings = warnings
 			env.Logs = []string{fmt.Sprintf("calculated metrics for %d procedure(s)", len(result))}
-			if len(violations) > 0 {
+			if len(violations) > 0 || (len(hotspotFindings) > 0 && (cfg.Metrics.Hotspots.ProcedureScoreThreshold > 0 || cfg.Metrics.Hotspots.ModuleScoreThreshold > 0)) {
 				return a.write(env, output.ExitValidation)
 			}
 			return a.write(env, output.ExitSuccess)
 		},
 	}
+}
+
+func buildHotspotReport(procedures []proceduremetrics.ProcedureMetrics) hotspots.Report {
+	procedureInputs := make([]hotspots.Input, 0, len(procedures))
+	moduleMap := map[string]hotspots.Input{}
+	callersByCallee := map[string]map[string]bool{}
+	procedureIDs := map[string]string{}
+	moduleIDsByProcedure := map[string]string{}
+	procedureAdjacency := map[string]map[string]bool{}
+	moduleOut := map[string]map[string]bool{}
+	moduleIn := map[string]map[string]bool{}
+	for _, procedure := range procedures {
+		qualified := strings.ToLower(procedure.Module + "." + procedure.Name)
+		moduleID := procedure.File + "|" + procedure.Module
+		id := procedure.File + "|" + procedure.Module + "|" + procedure.Name + "|" + string(procedure.Kind)
+		procedureIDs[qualified] = id
+		moduleIDsByProcedure[id] = moduleID
+	}
+	for _, procedure := range procedures {
+		callerID := procedure.File + "|" + procedure.Module + "|" + procedure.Name + "|" + string(procedure.Kind)
+		callerModuleID := procedure.File + "|" + procedure.Module
+		for _, callee := range procedure.ResolvedCallees {
+			if callersByCallee[callee] == nil {
+				callersByCallee[callee] = map[string]bool{}
+			}
+			callersByCallee[callee][callerID] = true
+			calleeID, ok := procedureIDs[callee]
+			if !ok {
+				continue
+			}
+			if procedureAdjacency[callerID] == nil {
+				procedureAdjacency[callerID] = map[string]bool{}
+			}
+			procedureAdjacency[callerID][calleeID] = true
+			calleeModuleID := moduleIDsByProcedure[calleeID]
+			if callerModuleID == calleeModuleID {
+				continue
+			}
+			if moduleOut[callerModuleID] == nil {
+				moduleOut[callerModuleID] = map[string]bool{}
+			}
+			if moduleIn[calleeModuleID] == nil {
+				moduleIn[calleeModuleID] = map[string]bool{}
+			}
+			moduleOut[callerModuleID][calleeModuleID] = true
+			moduleIn[calleeModuleID][callerModuleID] = true
+		}
+	}
+	cycleParticipation := cycleParticipationCounts(procedureAdjacency)
+	for _, procedure := range procedures {
+		id := procedure.File + "|" + procedure.Module + "|" + procedure.Name + "|" + string(procedure.Kind)
+		moduleID := procedure.File + "|" + procedure.Module
+		raw := map[string]int{
+			string(hotspots.SignalComplexity):       procedure.CyclomaticComplexity,
+			string(hotspots.SignalCallFanOut):       procedure.CallFanOut,
+			string(hotspots.SignalCallFanIn):        len(callersByCallee[strings.ToLower(procedure.Module+"."+procedure.Name)]),
+			string(hotspots.SignalAffectedModules):  0,
+			string(hotspots.SignalExcelEffects):     procedure.ExcelEffectCount,
+			string(hotspots.SignalMutableReads):     procedure.MutableStateReads,
+			string(hotspots.SignalMutableWrites):    procedure.MutableStateWrites,
+			string(hotspots.SignalMutableMutations): procedure.MutableStateMutations,
+			string(hotspots.SignalCycleCount):       cycleParticipation[id],
+			string(hotspots.SignalExternalDeps):     procedure.ExternalDependencyCount,
+			string(hotspots.SignalErrorHandling):    procedure.ErrorHandlingCount,
+			string(hotspots.SignalResourceOwned):    procedure.ResourceOwnershipCount,
+		}
+		uncertainty := map[string]int{
+			string(hotspots.UncertaintyAmbiguous):  procedure.AmbiguousCallCount,
+			string(hotspots.UncertaintyUnresolved): procedure.UnresolvedCallCount,
+			string(hotspots.UncertaintyDynamic):    procedure.DynamicCallCount,
+		}
+		affected := reachableProcedureModules(id, procedureAdjacency, moduleIDsByProcedure)
+		raw[string(hotspots.SignalAffectedModules)] = len(affected)
+		procedureInputs = append(procedureInputs, hotspots.Input{ID: id, Kind: "procedure", File: procedure.File, Module: procedure.Module, ModuleKind: procedure.ModuleKind, Name: procedure.Name, ProcedureKind: string(procedure.Kind), DeclarationByte: procedure.DeclarationRange.StartByte, Line: procedure.DeclarationRange.StartLine, RawSignals: raw, Uncertainty: uncertainty})
+		module := moduleMap[moduleID]
+		if module.ID == "" {
+			module = hotspots.Input{ID: moduleID, Kind: "module", File: procedure.File, Module: procedure.Module, ModuleKind: procedure.ModuleKind, Name: procedure.Module, Line: procedure.DeclarationRange.StartLine, RawSignals: map[string]int{}}
+			for _, signal := range []hotspots.SignalName{hotspots.SignalComplexity, hotspots.SignalComplexityMax, hotspots.SignalCallFanIn, hotspots.SignalCallFanOut, hotspots.SignalAffectedModules, hotspots.SignalExcelEffects, hotspots.SignalMutableReads, hotspots.SignalMutableWrites, hotspots.SignalMutableMutations, hotspots.SignalCycleCount, hotspots.SignalExternalDeps, hotspots.SignalErrorHandling, hotspots.SignalResourceOwned, hotspots.SignalPublicProcedures} {
+				module.RawSignals[string(signal)] = 0
+			}
+		}
+		module.RawSignals[string(hotspots.SignalComplexity)] += procedure.CyclomaticComplexity
+		if procedure.CyclomaticComplexity > module.RawSignals[string(hotspots.SignalComplexityMax)] {
+			module.RawSignals[string(hotspots.SignalComplexityMax)] = procedure.CyclomaticComplexity
+		}
+		module.RawSignals[string(hotspots.SignalCallFanOut)] += procedure.CallFanOut
+		module.RawSignals[string(hotspots.SignalExcelEffects)] += procedure.ExcelEffectCount
+		module.RawSignals[string(hotspots.SignalMutableReads)] += procedure.MutableStateReads
+		module.RawSignals[string(hotspots.SignalMutableWrites)] += procedure.MutableStateWrites
+		module.RawSignals[string(hotspots.SignalMutableMutations)] += procedure.MutableStateMutations
+		module.RawSignals[string(hotspots.SignalCycleCount)] += cycleParticipation[id]
+		module.RawSignals[string(hotspots.SignalExternalDeps)] += procedure.ExternalDependencyCount
+		module.RawSignals[string(hotspots.SignalErrorHandling)] += procedure.ErrorHandlingCount
+		module.RawSignals[string(hotspots.SignalResourceOwned)] += procedure.ResourceOwnershipCount
+		if module.Uncertainty == nil {
+			module.Uncertainty = map[string]int{}
+		}
+		for key, value := range uncertainty {
+			module.Uncertainty[key] += value
+		}
+		if !strings.EqualFold(strings.TrimSpace(procedure.Visibility), "private") {
+			module.RawSignals[string(hotspots.SignalPublicProcedures)]++
+		}
+		moduleMap[moduleID] = module
+	}
+	for moduleID, module := range moduleMap {
+		module.RawSignals[string(hotspots.SignalCallFanIn)] = len(moduleIn[moduleID])
+		module.RawSignals[string(hotspots.SignalCallFanOut)] = len(moduleOut[moduleID])
+		module.RawSignals[string(hotspots.SignalAffectedModules)] = len(reachableModules(moduleID, moduleOut))
+		moduleMap[moduleID] = module
+	}
+	modules := make([]hotspots.Input, 0, len(moduleMap))
+	for _, module := range moduleMap {
+		modules = append(modules, module)
+	}
+	return hotspots.BuildReport(procedureInputs, modules)
+}
+
+func reachableProcedureModules(start string, adjacency map[string]map[string]bool, moduleByProcedure map[string]string) map[string]bool {
+	modules := map[string]bool{}
+	if module := moduleByProcedure[start]; module != "" {
+		modules[module] = true
+	}
+	seen := map[string]bool{start: true}
+	queue := []string{start}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for next := range adjacency[current] {
+			if !seen[next] {
+				seen[next] = true
+				queue = append(queue, next)
+			}
+			if module := moduleByProcedure[next]; module != "" {
+				modules[module] = true
+			}
+		}
+	}
+	return modules
+}
+
+func reachableModules(start string, adjacency map[string]map[string]bool) map[string]bool {
+	seen := map[string]bool{start: true}
+	queue := []string{start}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for next := range adjacency[current] {
+			if !seen[next] {
+				seen[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+	return seen
+}
+
+// cycleParticipationCounts enumerates elementary cycles in the confirmed
+// procedure graph. Restricting traversal to nodes >= the cycle's start node
+// makes the lexicographically smallest node the canonical start, so each
+// directed cycle is counted once while keeping the result deterministic.
+func cycleParticipationCounts(adjacency map[string]map[string]bool) map[string]int {
+	result := map[string]int{}
+	nodesSet := map[string]bool{}
+	for from, targets := range adjacency {
+		nodesSet[from] = true
+		for to := range targets {
+			nodesSet[to] = true
+		}
+	}
+	nodes := make([]string, 0, len(nodesSet))
+	for node := range nodesSet {
+		nodes = append(nodes, node)
+	}
+	sort.Strings(nodes)
+	for _, start := range nodes {
+		path := []string{start}
+		visited := map[string]bool{start: true}
+		var visit func(string)
+		visit = func(current string) {
+			nexts := make([]string, 0, len(adjacency[current]))
+			for next := range adjacency[current] {
+				nexts = append(nexts, next)
+			}
+			sort.Strings(nexts)
+			for _, next := range nexts {
+				if next == start {
+					for _, member := range path {
+						result[member]++
+					}
+					continue
+				}
+				if next < start || visited[next] {
+					continue
+				}
+				visited[next] = true
+				path = append(path, next)
+				visit(next)
+				path = path[:len(path)-1]
+				delete(visited, next)
+			}
+		}
+		visit(start)
+	}
+	return result
+}
+
+func hotspotFindingsForConfig(report hotspots.Report, cfg config.HotspotsConfig) []map[string]any {
+	findings := make([]map[string]any, 0)
+	appendFindings := func(entities []hotspots.Entity, topN int, threshold float64) {
+		for _, entity := range hotspots.Select(entities, topN, threshold) {
+			severity := "information"
+			if entity.SelectedBy.Threshold {
+				severity = "warning"
+			}
+			findings = append(findings, map[string]any{"code": "MX002", "severity": severity, "kind": entity.Kind, "file": entity.File, "line": entity.Line, "module": entity.Module, "procedure": entity.Name, "rank": entity.Rank, "score": entity.Score, "score_model": entity.ScoreModel, "raw_signals": entity.RawSignals, "normalized_signals": entity.NormalizedSignals, "uncertainty": entity.Uncertainty, "active_signal_count": entity.ActiveSignalCount, "selected_by": entity.SelectedBy, "message": fmt.Sprintf("%s is an architectural hotspot candidate (score %.2f)", entity.Name, entity.Score)})
+		}
+	}
+	appendFindings(report.Procedures, cfg.ProcedureTopN, cfg.ProcedureScoreThreshold)
+	appendFindings(report.Modules, cfg.ModuleTopN, cfg.ModuleScoreThreshold)
+	return findings
 }
 
 func metricsThresholdFailureMessage(count int) string {

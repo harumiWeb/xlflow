@@ -10,6 +10,9 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/output"
+	"github.com/harumiWeb/xlflow/internal/vba/hotspots"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vba/proceduremetrics"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
@@ -168,5 +171,82 @@ cyclomatic_complexity = 1
 	}
 	if payload["status"] != output.StatusFailed || payload["error"].(map[string]any)["code"] != "metrics_threshold_exceeded" {
 		t.Fatalf("payload status/error = %#v", payload)
+	}
+}
+
+func TestMetricsCommandHotspotsReportAndSelectors(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{
+		"Main.bas":   "Attribute VB_Name = \"Main\"\nPublic Sub Run()\n If True Then\n End If\nEnd Sub\n",
+		"Helper.bas": "Attribute VB_Name = \"Helper\"\nPublic Sub Help()\nEnd Sub\n",
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(moduleDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, config.FileName), []byte(`[project]
+entry = "Main.Run"
+[excel]
+path = "build/Book.xlsm"
+[src]
+modules = "src/modules"
+[metrics.hotspots]
+procedure_top_n = 1
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr strings.Builder
+	a := &app{cwd: root, stdout: &stdout, stderr: &stderr}
+	cmd := a.rootCommand()
+	cmd.SetArgs([]string{"--json", "metrics"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("top-n metrics failed: %v\n%s", err, stdout.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &payload); err != nil {
+		t.Fatal(err)
+	}
+	metrics := payload["metrics"].(map[string]any)
+	hotspots := metrics["hotspots"].(map[string]any)
+	if len(hotspots["procedures"].([]any)) != 2 || len(payload["diagnostics"].([]any)) != 1 {
+		t.Fatalf("hotspot payload = %#v", payload)
+	}
+	diagnostic := payload["diagnostics"].([]any)[0].(map[string]any)
+	if diagnostic["code"] != "MX002" || diagnostic["severity"] != "information" {
+		t.Fatalf("hotspot diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestBuildHotspotReportAggregatesGraphSignals(t *testing.T) {
+	metrics := []proceduremetrics.ProcedureMetrics{
+		{File: "main.bas", Module: "Main", Name: "A", Kind: procedureir.ProcedureSub, ResolvedCallees: []string{"helper.b"}, Metrics: proceduremetrics.Metrics{CyclomaticComplexity: 2, CallFanOut: 1}},
+		{File: "helper.bas", Module: "Helper", Name: "B", Kind: procedureir.ProcedureSub, ResolvedCallees: []string{"main.a"}, Metrics: proceduremetrics.Metrics{CyclomaticComplexity: 3, CallFanOut: 1}},
+		{File: "other.bas", Module: "Other", Name: "C", Kind: procedureir.ProcedureSub, ResolvedCallees: []string{"helper.b"}, Metrics: proceduremetrics.Metrics{CyclomaticComplexity: 1, CallFanOut: 1}},
+	}
+	report := buildHotspotReport(metrics)
+	byProcedure := map[string]hotspots.Entity{}
+	for _, entity := range report.Procedures {
+		byProcedure[entity.Name] = entity
+	}
+	if byProcedure["A"].RawSignals["call_fan_in"] != 1 || byProcedure["A"].RawSignals["cycle_count"] != 1 {
+		t.Fatalf("procedure A graph signals = %#v", byProcedure["A"].RawSignals)
+	}
+	if byProcedure["A"].RawSignals["affected_module_count"] != 2 {
+		t.Fatalf("procedure A affected modules = %#v", byProcedure["A"].RawSignals)
+	}
+	byModule := map[string]hotspots.Entity{}
+	for _, entity := range report.Modules {
+		byModule[entity.Name] = entity
+	}
+	if byModule["Helper"].RawSignals["call_fan_in"] != 2 || byModule["Helper"].RawSignals["call_fan_out"] != 1 {
+		t.Fatalf("Helper module graph signals = %#v", byModule["Helper"].RawSignals)
+	}
+	if byModule["Main"].RawSignals["affected_module_count"] != 2 {
+		t.Fatalf("Main module affected modules = %#v", byModule["Main"].RawSignals)
 	}
 }

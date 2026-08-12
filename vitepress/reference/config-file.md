@@ -133,6 +133,12 @@ parameter_count = 0
 byref_parameter_count = 0
 local_variable_count = 0
 call_fan_out = 0
+
+[metrics.hotspots]
+procedure_top_n = 0
+module_top_n = 0
+procedure_score_threshold = 0
+module_score_threshold = 0
 ```
 
 ## Section reference
@@ -351,6 +357,28 @@ and is not controlled by `[analyze].disabled_rules`. Without enabled
 thresholds, `xlflow metrics` exits `0`; one or more `MX001` diagnostics retain
 the full metrics result and exit `1` with `error.code =
 "metrics_threshold_exceeded"`.
+
+### `[metrics.hotspots]`
+
+| Key                         | Type  | Required | Default | Description                                                                                |
+| --------------------------- | ----- | -------- | ------- | ------------------------------------------------------------------------------------------ |
+| `procedure_top_n`           | int   | no       | `0`     | Select the top N ranked procedure hotspots; `0` disables top-N selection.                  |
+| `module_top_n`              | int   | no       | `0`     | Select the top N ranked module hotspots; `0` disables top-N selection.                     |
+| `procedure_score_threshold` | float | no       | `0`     | Select procedure scores greater than or equal to this percentage (`1..100`); `0` disables. |
+| `module_score_threshold`    | float | no       | `0`     | Select module scores greater than or equal to this percentage (`1..100`); `0` disables.    |
+
+Hotspots are emitted under `metrics.hotspots` by `xlflow metrics` even when no
+selector is enabled. Scores use the versioned
+`percentile_equal_weight_v1` model and retain `raw_signals` plus
+`normalized_signals`; procedure and module cohorts are ranked independently.
+Top-N and score-threshold selections are unioned. Top-N-only `MX002` entries
+are informational; threshold-selected entries are warning-level and return
+`error.code = "metrics_hotspot_threshold_exceeded"` with exit `1`, while
+retaining the complete metrics payload. Negative top-N values, non-finite
+numbers, unknown keys, malformed tables, and percentages outside `0..100` are
+configuration errors (exit `2`). The signal vocabulary and deterministic
+ranking contract are defined in
+`docs/specs/vba-procedure-and-module-hotspots.md`.
 
 ## Defaults differ between `new` and `init`
 

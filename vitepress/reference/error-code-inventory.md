@@ -4,10 +4,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 
 - `access_denied`
 - `active_sheet`
+- `active_signal_count`
 - `active_workbook_mismatch`
+- `affected_module_count`
 - `affected_modules`
 - `allowed_diagnostics`
 - `alternative_body`
+- `ambiguous_call_count`
 - `ambiguous_test_name`
 - `analysis_metrics`
 - `analyze_disabled_rules_precedence`
@@ -85,6 +88,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `byval_modifier`
 - `cached_excel_reference`
 - `call_expression`
+- `call_fan_in`
 - `call_fan_out`
 - `call_statement`
 - `capability_version`
@@ -136,6 +140,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `compile_equivalent`
 - `compile_invoked`
 - `compile_vba`
+- `complexity_max`
 - `component_type`
 - `components_applied`
 - `compressible_short_roundtrips`
@@ -172,6 +177,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `current_directory_dependency`
 - `current_version`
 - `customer_name`
+- `cycle_count`
 - `cyclomatic_complexity`
 - `data_flow`
 - `database_result`
@@ -288,6 +294,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `duplicate_test_name`
 - `duplicate_todo`
 - `duration_ms`
+- `dynamic_call_count`
 - `dynamic_identifier`
 - `edit_args_invalid`
 - `edit_coordinates_unreconciled`
@@ -311,6 +318,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_group`
 - `enum_member`
 - `environment_variable`
+- `error_handling_count`
 - `event_declaration`
 - `event_reader_count`
 - `event_statement`
@@ -328,6 +336,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `excel_com`
 - `excel_com_failure`
 - `excel_com_state_uncertain`
+- `excel_effect_count`
 - `excel_installed`
 - `excel_instance`
 - `excel_pid`
@@ -351,6 +360,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `expected_closer`
 - `expected_error`
 - `export_image_args_invalid`
+- `external_dependency_count`
 - `external_function_declaration`
 - `external_process`
 - `external_reference`
@@ -573,6 +583,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `metadata_read_failed`
 - `metrics_exclude_unmatched`
 - `metrics_failed`
+- `metrics_hotspot_threshold_exceeded`
 - `metrics_threshold_exceeded`
 - `metrics_thresholds_invalid`
 - `min_keep`
@@ -595,9 +606,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_not_found`
 - `module_only_declaration_in_procedure`
 - `module_path`
+- `module_score_threshold`
 - `module_state`
+- `module_top_n`
 - `module_variable`
 - `modules_dir`
+- `mutable_state_mutations`
+- `mutable_state_reads`
+- `mutable_state_writes`
 - `mutator_count`
 - `named_argument`
 - `nearby_code`
@@ -615,6 +631,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `non_numeric`
 - `non_test`
 - `normal_exit`
+- `normalized_signals`
 - `not_applicable`
 - `not_attempted`
 - `not_performed`
@@ -691,6 +708,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `parser_token`
 - `passing_mode`
 - `path_translation`
+- `percentile_equal_weight_v1`
 - `plain_http_credentials`
 - `plan_invalid`
 - `poison_reason`
@@ -714,6 +732,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
+- `procedure_score_threshold`
+- `procedure_top_n`
 - `process_architecture`
 - `process_args_invalid`
 - `process_cancelled`
@@ -745,6 +765,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `property_value_type`
 - `protected_module`
 - `protocol_version`
+- `public_procedure_count`
 - `published_runs`
 - `pull_args_invalid`
 - `pull_formulas_failed`
@@ -760,6 +781,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `raise_event`
 - `raise_event_statement`
 - `raises_error`
+- `raw_signals`
 - `read_only`
 - `read_only_configuration`
 - `read_write`
@@ -789,6 +811,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `residual_path`
 - `resolved_result`
 - `resolved_value`
+- `resource_ownership_count`
 - `resource_scope`
 - `response_source`
 - `restored_from`
@@ -836,12 +859,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `saved_workbook`
 - `schema_version`
 - `schema_version_changed`
+- `score_model`
 - `script_failed`
 - `script_host`
 - `script_not_found`
 - `search_order`
 - `select_statement`
 - `selected_bridge`
+- `selected_by`
 - `selected_index`
 - `sensitive_module_constant`
 - `session_args_invalid`
@@ -988,6 +1013,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `unknown_transformation`
 - `unnamed_control_placeholder`
 - `unquoted_executable_path`
+- `unresolved_call_count`
 - `unsafe_backup_file_path`
 - `unsafe_original_workbook_path`
 - `unsupported_form_control`

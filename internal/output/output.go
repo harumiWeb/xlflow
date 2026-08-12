@@ -1800,21 +1800,58 @@ func (r renderer) renderMetrics(env Envelope) string {
 		b.WriteString(r.table(headers, rows))
 	}
 	if diagnostics := listOfObjects(env.Diagnostics); len(diagnostics) > 0 {
-		b.WriteString(r.section("Thresholds"))
-		rows := make([][]string, 0, len(diagnostics))
-		for _, diagnostic := range diagnostics {
-			rows = append(rows, []string{
-				r.severityBadge(stringValue(diagnostic, "severity")),
-				stringValue(diagnostic, "metric"),
-				metricsDiagnosticLocation(diagnostic),
-				metricsDiagnosticMessage(diagnostic),
-			})
+		renderDiagnostics := func(title string, selected []map[string]any, hotspot bool) {
+			if len(selected) == 0 {
+				return
+			}
+			b.WriteString(r.section(title))
+			rows := make([][]string, 0, len(selected))
+			for _, diagnostic := range selected {
+				label := stringValue(diagnostic, "metric")
+				if hotspot {
+					score, _ := numberValue(diagnostic, "score")
+					label = fmt.Sprintf("rank %d / score %.2f", intNumber(diagnostic, "rank"), score)
+				}
+				rows = append(rows, []string{r.severityBadge(stringValue(diagnostic, "severity")), label, metricsDiagnosticLocation(diagnostic), metricsDiagnosticMessage(diagnostic)})
+			}
+			b.WriteString(r.table([]string{"Severity", "Metric", "Location", "Message"}, rows))
 		}
-		b.WriteString(r.table([]string{"Severity", "Metric", "Location", "Message"}, rows))
+		thresholds := make([]map[string]any, 0)
+		hotspotDiagnostics := make([]map[string]any, 0)
+		for _, diagnostic := range diagnostics {
+			if stringValue(diagnostic, "code") == "MX002" {
+				hotspotDiagnostics = append(hotspotDiagnostics, diagnostic)
+			} else {
+				thresholds = append(thresholds, diagnostic)
+			}
+		}
+		renderDiagnostics("Thresholds", thresholds, false)
+		renderDiagnostics("Hotspot selections", hotspotDiagnostics, true)
+	}
+	if hotspots := objectMap(metrics["hotspots"]); len(hotspots) > 0 {
+		b.WriteString(r.section("Architectural hotspots"))
+		for _, kind := range []string{"procedures", "modules"} {
+			entities := listOfObjects(hotspots[kind])
+			if len(entities) == 0 {
+				continue
+			}
+			rows := make([][]string, 0, len(entities))
+			for _, entity := range entities {
+				rows = append(rows, []string{fmt.Sprintf("%d", intNumber(entity, "rank")), metricsProcedureLocation(entity), fmt.Sprintf("%.2f", func() float64 { n, _ := numberValue(entity, "score"); return n }()), fmt.Sprintf("%d", intNumber(entity, "active_signal_count"))})
+			}
+			b.WriteString(r.table([]string{titleCaseASCII(kind), "Entity", "Score", "Signals"}, rows))
+		}
 	}
 	b.WriteString(r.renderWarningsAndHints(env))
 	b.WriteString(r.renderLogs(env))
 	return b.String()
+}
+
+func titleCaseASCII(value string) string {
+	if value == "" {
+		return value
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func metricsProcedureLocation(procedure map[string]any) string {
@@ -1830,6 +1867,9 @@ func metricsProcedureLocation(procedure map[string]any) string {
 	line := intNumber(procedure, "start_line")
 	if line == 0 {
 		line = intNumber(procedure, "startLine")
+	}
+	if line == 0 {
+		line = intNumber(procedure, "line")
 	}
 	if line == 0 {
 		declaration := objectMap(procedure["declaration_range"])

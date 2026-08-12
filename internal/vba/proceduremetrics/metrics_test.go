@@ -58,7 +58,11 @@ func TestCollectComputesAllProcedureMetrics(t *testing.T) {
 	got := Collect(Input{IR: procedure, File: "src/Main.bas", Module: "Main", ModuleKind: "standard"})
 	want := ProcedureMetrics{
 		File: "src/Main.bas", Module: "Main", ModuleKind: "standard", Name: "Run", Kind: procedureir.ProcedureFunction,
-		DeclarationRange: testRange(2, 20),
+		Visibility:         "",
+		ResolvedCallees:    []string{"other.first", "other.second"},
+		ErrorHandlingCount: 1,
+		AmbiguousCallCount: 1,
+		DeclarationRange:   testRange(2, 20),
 		Metrics: Metrics{
 			CyclomaticComplexity: 8, MaxNestingDepth: 6, StatementCount: 15,
 			SourceLineCount: 19, BranchCount: 3, LoopCount: 4, GotoCount: 1,
