@@ -138,6 +138,10 @@ and runtime-safety cases; a legacy `VBA206` disable setting cannot disable
 
 - None
 
+## Amended by
+
+- `docs/adr/ADR-0038-project-level-preflight-diagnostic-waivers.md`
+
 ## Related
 
 - `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`

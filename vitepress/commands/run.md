@@ -45,6 +45,12 @@ xlflow run Main.Run --headless --filedialog get-open:source-files=C:\temp\a.txt 
 
 ## Notes
 
+`run` uses the same project source-preflight policy as `push`, including when
+`--push` causes both paths to execute. A code listed in
+`[preflight].allowed_diagnostics` is counted once per source location and is
+returned as a `preflight_diagnostic_allowed` warning. It remains an error in
+static-analysis output, and Excel/VBE compilation may still reject the code.
+
 ::: tip
 Discover entrypoints with `xlflow macros --json` before running macros from an agent.
 :::

@@ -67,4 +67,4 @@ exclude these project-negative diagnostics.
 ## Related
 
 - Issue #590
-- ADR-0021, ADR-0023, ADR-0024
+- ADR-0021, ADR-0023, ADR-0024, ADR-0038

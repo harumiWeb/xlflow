@@ -4,6 +4,8 @@ Generated from the canonical rule registry at `internal/staticanalysis/rules/reg
 
 Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an installed xlflow binary. `VBA000` is a synthetic analysis-failure diagnostic and is intentionally outside the registry; UserForm `FRM...` and `UFY...` diagnostics are outside this catalog.
 
+`Blocks source preflight` describes the registry default. A project may list a blocking diagnostic in `[preflight].allowed_diagnostics` to let workbook automation proceed without disabling the diagnostic or changing its severity; applied waivers are reported as command warnings.
+
 | ID                  | Family  | Severity    | Scope           | Default | Title                                              |
 | ------------------- | ------- | ----------- | --------------- | ------- | -------------------------------------------------- |
 | [`VB001`](#vb001)   | lint    | warning     | file-local      | yes     | Missing Option Explicit                            |

@@ -87,6 +87,12 @@ code_source = "sidecar"
 # Exclude project-root-relative doublestar glob patterns from `xlflow build`.
 # exclude = ["src/modules/Tests/**"]
 
+# Source-preflight diagnostic waivers.
+[preflight]
+# Diagnostics remain enabled and visible when allowed here; only their
+# source-preflight blocking effect is waived. Excel/VBE compilation may still fail.
+allowed_diagnostics = []
+
 # Static analysis rules.
 [lint]
 # Disable specific lint rules by diagnostic ID.
@@ -205,6 +211,31 @@ Negative numeric values are configuration errors. `min_keep > max_count` is also
 | `exclude` | string[] | no       | `[]`    | Project-root-relative `doublestar` glob patterns excluded from `xlflow build` source selection only. |
 
 Each pattern is normalized to `/`; Windows and WSL separators match identically. Absolute paths and patterns that traverse outside the project root are invalid. `xlflow build` reports unmatched patterns as `build_exclude_unmatched` warnings. A matching UserForm artifact excludes the whole form component, including its related `.frx`, sidecar code, and persisted spec files. This setting does not change source selection for `push` or `pack`.
+
+### `[preflight]`
+
+| Key                   | Type     | Required | Default | Description                                                                                  |
+| --------------------- | -------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `allowed_diagnostics` | string[] | no       | `[]`    | Let listed registry diagnostics pass source preflight while keeping the diagnostics enabled. |
+
+Entries are trimmed, uppercased, deduplicated in first-occurrence order, and
+must name rules whose diagnostic catalog metadata says
+`preflight_blocking: true`. Unknown IDs, non-blocking IDs, and non-registry
+integrity codes such as `FRM...` or `UFY...` are configuration errors. There is
+no wildcard.
+
+```toml
+[preflight]
+allowed_diagnostics = ["VB052"]
+```
+
+This setting changes only whether workbook automation proceeds. The diagnostic
+remains an `error` in `lint`, `analyze`, and LSP, remains subject to their normal
+exit behavior, and cannot become inline-suppressible. When xlflow applies a
+waiver, command output includes a `preflight_diagnostic_allowed` warning with
+the diagnostic ID and occurrence count because Excel/VBE compilation may still
+fail. Keep the list empty in CI unless the project has explicitly reviewed and
+accepted each waiver.
 
 ### `[lint]`
 
