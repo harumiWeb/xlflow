@@ -15,7 +15,8 @@ delete/copy/move/create methods, and workbook `SaveAs`/`SaveCopyAs`. It tracks s
 external-input sources already used by the VBA source-to-sink analysis.
 
 Findings distinguish definite path hazards (`empty_path`, `root_path`,
-`wildcard_delete`, `relative_path`, `directory_traversal`, and
+`wildcard_delete`, `relative_path`, `directory_traversal`,
+`current_directory_dependency`, `same_source_destination`, and
 `unchecked_overwrite`) from input-dependent and lifecycle risks. Existence
 checks such as `Dir`, `FileExists`, `FolderExists`, and `GetAttr` are not sinks.
 Input-dependent kinds include `untrusted_filename` and `unknown_path`; the

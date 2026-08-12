@@ -3,8 +3,13 @@
 This specification defines the generic procedure-local dataflow contract for
 `VBA224`. Destructive/path-specific classification and diagnostics belong to
 `VBA245`; process-launch-specific classification and diagnostics belong to
-`VBA236`, and SQL-specific classification belongs to `VBA239`; both rules
-reuse these states and paths with sink-specific metadata.
+`VBA236`, and SQL-specific classification belongs to `VBA239`. `VBA224`,
+`VBA236`, and `VBA239` reuse the generic `procedureir.ProcedureIR` expression
+states and CFG paths through `dataFlowFindingsContext`; `VBA245` is invoked by
+the same batch and realtime procedure loops but performs its own lexical,
+procedure-local path pass over source lines and parsed declarations. It does
+not project through the generic sink findings, which keeps its structured
+file-operation metadata and ownership separate.
 The implementation is protocol-neutral and consumes `procedureir.ProcedureIR`
 and one `cfg.Graph`; it does not parse source or depend on CLI/LSP types.
 

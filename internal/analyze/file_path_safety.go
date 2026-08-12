@@ -45,7 +45,10 @@ var (
 	fileTraversalRe   = regexp.MustCompile(`(^|[\\/])\.\.($|[\\/])`)
 	fileNameAsRe      = regexp.MustCompile(`(?i)^(.+?)\s+as\s+(.+)$`)
 	fileBinaryOpenRe  = regexp.MustCompile(`(?i)^\s*open\s+(.+?)\s+for\s+binary\b.*?\bas\s*#\s*([0-9]+)`)
+	fileOpenHandleRe  = regexp.MustCompile(`(?i)^\s*(?:call\s+)?open\b.*?\bas\s*#\s*([0-9]+)`)
 	fileBinaryWriteRe = regexp.MustCompile(`(?i)^\s*(?:put|write)\s*#\s*([0-9]+)\b`)
+	fileCloseRe       = regexp.MustCompile(`(?i)^\s*(?:call\s+)?close\b(.*)$`)
+	fileTempSegmentRe = regexp.MustCompile(`(?i)(^|[\\/])(temp|tmp)([\\/]|$)`)
 )
 
 func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -107,13 +110,16 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 				fsos[strings.ToLower(name)] = true
 			}
 		}
+		// File numbers are reusable. Any Open assignment invalidates the old
+		// binary mapping; a binary Open then installs the current path.
+		if match := fileOpenHandleRe.FindStringSubmatch(stmt); len(match) == 2 {
+			delete(binaryHandles, match[1])
+		}
 		if match := fileBinaryOpenRe.FindStringSubmatch(stmt); len(match) == 3 {
 			binaryHandles[match[2]] = fileOperationPath{role: "target", expr: strings.TrimSpace(match[1])}
 		}
-		for name := range fsos {
-			if strings.Contains(lower, "set "+name+" = createobject(\"scripting.filesystemobject\")") {
-				fsos[name] = true
-			}
+		if match := fileCloseRe.FindStringSubmatch(stmt); len(match) == 2 {
+			clearClosedBinaryHandles(match[1], binaryHandles)
 		}
 		uses := fileOperationUses(stmt, localProcedures, fsos, values, workbooks)
 		if match := fileBinaryWriteRe.FindStringSubmatch(stmt); len(match) == 2 {
@@ -166,7 +172,7 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 				findingUse := use
 				findingUse.overwrite = overwrite
 				finding := a.fileOperationFinding(file, proc, lineNo, findingUse, path, value, class, risk)
-				finding.Column = maxInt(0, strings.Index(strings.ToLower(raw), strings.ToLower(operationToken(use.operation))))
+				finding.Column = max(0, strings.Index(strings.ToLower(raw), strings.ToLower(operationToken(use.operation))))
 				findings = append(findings, finding)
 			}
 		}
@@ -252,7 +258,7 @@ func filePathSuggestion(risk string) string {
 	}
 }
 
-func filePathRisk(operation, role string, value filePathValue, overwrite *bool) (string, string) {
+func filePathRisk(operation, _ string, value filePathValue, overwrite *bool) (string, string) {
 	if value.known && value.constant == "" {
 		if value.anchor != "" {
 			return "root_path", "definite"
@@ -278,11 +284,6 @@ func filePathRisk(operation, role string, value filePathValue, overwrite *bool) 
 	if value.anchor == "" && strings.Contains(strings.ToLower(value.raw), "curdir") {
 		return "current_directory_dependency", "definite"
 	}
-	if role == "destination" && value.known && strings.EqualFold(strings.TrimSpace(value.constant), strings.TrimSpace(value.raw)) {
-		// Kept for callers that pass a literal destination; same-source checks
-		// are handled at the operation level below.
-		_ = operation
-	}
 	if overwrite != nil && *overwrite {
 		if value.origin == "clean" {
 			return "unchecked_overwrite", "definite"
@@ -292,7 +293,7 @@ func filePathRisk(operation, role string, value filePathValue, overwrite *bool) 
 	// An explicit False overwrite argument is a proof obligation already
 	// discharged by the caller.  Only implicit/default overwrite behavior is
 	// unsafe; do not re-report FSO Copy*/CreateTextFile calls that pass False.
-	if (overwrite == nil || *overwrite) && isImplicitOverwriteOperation(operation) {
+	if overwrite == nil && isImplicitOverwriteOperation(operation) {
 		if value.origin == "clean" {
 			return "unchecked_overwrite", "definite"
 		}
@@ -461,8 +462,13 @@ func fileOperationUses(stmt string, localProcedures map[string]bool, fsos map[st
 		}
 		path := args[0]
 		for _, arg := range args {
-			if strings.Contains(strings.ToLower(arg), "filename:") || strings.Contains(strings.ToLower(arg), "name:") {
-				path = strings.SplitN(arg, ":=", 2)[1]
+			parts := strings.SplitN(arg, ":=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(parts[0]))
+			if key == "filename" || key == "name" {
+				path = strings.TrimSpace(parts[1])
 				break
 			}
 		}
@@ -474,53 +480,110 @@ func fileOperationUses(stmt string, localProcedures map[string]bool, fsos map[st
 func fileNamedArguments(args []string) map[string]string {
 	result := map[string]string{}
 	for _, arg := range args {
-		parts := strings.SplitN(arg, ":=", 2)
-		if len(parts) != 2 {
+		key, value, ok := fileNamedArgument(arg)
+		if !ok {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(parts[0]))
-		if key == "" {
-			continue
-		}
-		result[key] = strings.TrimSpace(parts[1])
+		result[key] = value
 	}
 	return result
 }
 
+func fileNamedArgument(arg string) (string, string, bool) {
+	parts := strings.SplitN(arg, ":=", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	key := strings.ToLower(strings.TrimSpace(parts[0]))
+	if key == "" {
+		return "", "", false
+	}
+	return key, strings.TrimSpace(parts[1]), true
+}
+
 func normalizeFSOArguments(method string, args []string, named map[string]string) ([]string, *bool, string) {
-	path := func(keys ...string) string {
+	positional := make([]string, 0, len(args))
+	for _, arg := range args {
+		if _, _, ok := fileNamedArgument(arg); !ok {
+			positional = append(positional, strings.TrimSpace(arg))
+		}
+	}
+	path := func(position int, keys ...string) string {
 		for _, key := range keys {
 			if value, ok := named[key]; ok {
 				return value
 			}
 		}
+		if position >= 0 && position < len(positional) {
+			return positional[position]
+		}
 		return ""
 	}
-	overwriteExpr := path("overwritefiles", "overwrite", "replace")
 	var overwrite *bool
-	if overwriteExpr != "" {
-		if value, ok := parseFileBool(overwriteExpr); ok {
+	setOverwrite := func(expr string) {
+		if value, ok := parseFileBool(expr); ok {
 			overwrite = &value
 		}
 	}
+	if value := path(-1, "overwritefiles", "overwrite", "replace"); value != "" {
+		setOverwrite(value)
+	}
+	pathValues := func(roles ...[]string) ([]string, []string) {
+		result := make([]string, len(roles))
+		remaining := append([]string(nil), positional...)
+		for i, keys := range roles {
+			for _, key := range keys {
+				if value, ok := named[key]; ok {
+					result[i] = value
+					break
+				}
+			}
+		}
+		for i := range result {
+			if result[i] == "" && len(remaining) > 0 {
+				result[i] = remaining[0]
+				remaining = remaining[1:]
+			}
+		}
+		return result, remaining
+	}
 	switch method {
 	case "deletefile", "deletefolder":
-		if value := path("pathname", "path", "filename", "name"); value != "" {
+		paths, remaining := pathValues([]string{"pathname", "path", "filename", "name"})
+		if value := paths[0]; value != "" {
+			if overwrite == nil && len(remaining) > 0 {
+				setOverwrite(remaining[0])
+			}
 			return []string{value}, overwrite, ""
 		}
 	case "copyfile", "copyfolder", "movefile", "movefolder":
-		source := path("source", "sourcefile", "sourcefolder")
-		destination := path("destination", "destinationfile", "destinationfolder", "dest")
+		paths, remaining := pathValues(
+			[]string{"source", "sourcefile", "sourcefolder"},
+			[]string{"destination", "destinationfile", "destinationfolder", "dest"},
+		)
+		source, destination := paths[0], paths[1]
 		if source != "" && destination != "" {
+			if overwrite == nil && len(remaining) > 0 {
+				setOverwrite(remaining[0])
+			}
 			return []string{source, destination}, overwrite, ""
 		}
 	case "createtextfile":
-		if value := path("filename", "pathname", "path", "name"); value != "" {
+		paths, remaining := pathValues([]string{"filename", "pathname", "path", "name"})
+		if value := paths[0]; value != "" {
+			if overwrite == nil && len(remaining) > 0 {
+				setOverwrite(remaining[0])
+			}
 			return []string{value}, overwrite, ""
 		}
 	case "opentextfile":
-		filename := path("filename", "pathname", "path", "name")
-		mode := fileTextMode(path("iomode", "mode"))
+		paths, remaining := pathValues([]string{"filename", "pathname", "path", "name"})
+		filename := paths[0]
+		modeExpr := path(-1, "iomode", "mode")
+		if modeExpr == "" && len(remaining) > 0 {
+			modeExpr = remaining[0]
+		}
+		mode := fileTextMode(modeExpr)
 		if filename != "" {
 			return []string{filename}, overwrite, mode
 		}
@@ -557,7 +620,7 @@ func classifyFilePathExpr(expr string, values map[string]filePathValue, params m
 	}
 	if literal, ok := fileStringLiteral(raw); ok {
 		value.known, value.constant, value.origin = true, literal, "clean"
-		value.temporary = strings.Contains(strings.ToLower(literal), ".tmp") || strings.Contains(strings.ToLower(literal), "temp")
+		value.temporary = isTemporaryPathText(literal)
 		return value
 	}
 	lower := strings.ToLower(raw)
@@ -588,7 +651,7 @@ func classifyFilePathExpr(expr string, values map[string]filePathValue, params m
 	if strings.Contains(lower, "inputbox") || strings.Contains(lower, "range(") || strings.Contains(lower, "cells(") || strings.Contains(lower, ".value") || strings.Contains(lower, "environ") || strings.Contains(lower, "command$") || strings.Contains(lower, "responsetext") || strings.Contains(lower, "field(") || strings.Contains(lower, "line input") || strings.Contains(lower, "input #") || strings.Contains(lower, "readall") || strings.Contains(lower, "readtext") {
 		value.origin, value.known = "tainted", false
 	}
-	if strings.Contains(lower, "gettempname") || strings.Contains(lower, ".tmp") || strings.Contains(lower, "temp") {
+	if isTemporaryPathText(raw) {
 		value.temporary = true
 	}
 	if strings.Contains(raw, "&") {
@@ -877,6 +940,31 @@ func fileTemporaryCleanupMaySkip(lines []string, creationLine int, cleanup []int
 	return false
 }
 
+func isTemporaryPathText(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.Contains(lower, "gettempname") {
+		return true
+	}
+	if strings.HasSuffix(lower, ".tmp") {
+		return true
+	}
+	return fileTempSegmentRe.MatchString(lower)
+}
+
+func clearClosedBinaryHandles(rest string, handles map[string]fileOperationPath) {
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		clear(handles)
+		return
+	}
+	for _, token := range strings.Split(rest, ",") {
+		fileNumber := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(token), "#"))
+		if fileNumber != "" {
+			delete(handles, fileNumber)
+		}
+	}
+}
+
 func fileFindingAtLine(findings []Finding, line int, risk string) bool {
 	for _, finding := range findings {
 		if finding.Line == line && finding.FileOperation != nil && finding.FileOperation.RiskKind == risk {
@@ -909,11 +997,4 @@ func stripVBAFileComment(line string) string {
 		return ""
 	}
 	return rawWorksheetCodeLine(line)
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
