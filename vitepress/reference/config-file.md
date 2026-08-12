@@ -109,6 +109,24 @@ disabled_rules = []
 [analyze]
 # Disable specific analyzer rules by diagnostic ID.
 disabled_rules = []
+
+# Procedure complexity metrics are independent from lint/analyze diagnostics.
+[metrics]
+exclude = []
+
+[metrics.thresholds]
+cyclomatic_complexity = 0
+max_nesting_depth = 0
+statement_count = 0
+source_line_count = 0
+branch_count = 0
+loop_count = 0
+goto_count = 0
+exit_point_count = 0
+parameter_count = 0
+byref_parameter_count = 0
+local_variable_count = 0
+call_fan_out = 0
 ```
 
 ## Section reference
@@ -253,6 +271,48 @@ Range("A1").Value = 1
 Rules marked `inline_suppressible: false` in the catalog cannot be suppressed
 inline. This includes every preflight-blocking analyzer error. Unknown inline
 IDs, unsupported IDs, and unused suppressions are reported as command warnings.
+
+### `[metrics]`
+
+| Key       | Type     | Required | Default | Description                                                                                     |
+| --------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `exclude` | string[] | no       | `[]`    | Project-root-relative `doublestar` globs excluded from `xlflow metrics` after source discovery. |
+
+`exclude` is normalized to `/`, deduplicated, and evaluated in stable order.
+Absolute patterns and patterns that traverse outside the project root are
+invalid. A valid pattern that matches no source produces a
+`metrics_exclude_unmatched` warning. The setting affects only `metrics`; it is
+not shared with `[build].exclude`, `[lint].disabled_rules`, or
+`[analyze].disabled_rules`.
+
+### `[metrics.thresholds]`
+
+| Key                     | Type | Required | Default | Description                                                             |
+| ----------------------- | ---- | -------- | ------- | ----------------------------------------------------------------------- |
+| `cyclomatic_complexity` | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `max_nesting_depth`     | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `statement_count`       | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `source_line_count`     | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `branch_count`          | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `loop_count`            | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `goto_count`            | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `exit_point_count`      | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `parameter_count`       | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `byref_parameter_count` | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `local_variable_count`  | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+| `call_fan_out`          | int  | no       | `0`     | Report `MX001` when the procedure value is greater than this threshold. |
+
+The twelve names are the v1 metric schema. Omitted and zero values disable a
+threshold; positive values use a strict `value > threshold` comparison, so an
+equal value passes. Negative values, non-integers, unknown keys, and malformed
+tables are configuration errors. Thresholds are evaluated after the complete
+metrics collection and do not change raw values. Each exceeded
+procedure/metric pair produces one metrics-specific warning diagnostic with
+code `MX001`; it is not a static-analysis rule, cannot be inline-suppressed,
+and is not controlled by `[analyze].disabled_rules`. Without enabled
+thresholds, `xlflow metrics` exits `0`; one or more `MX001` diagnostics retain
+the full metrics result and exit `1` with `error.code =
+"metrics_threshold_exceeded"`.
 
 ## Defaults differ between `new` and `init`
 

@@ -3,7 +3,7 @@ import path from "node:path";
 
 const repo = path.resolve(".");
 const check = process.argv.includes("--check");
-const source = `${fs.readFileSync(path.join(repo, "internal/cli/root.go"), "utf8")}\n${fs.readFileSync(path.join(repo, "internal/cli/recovery.go"), "utf8")}`;
+const source = `${fs.readFileSync(path.join(repo, "internal/cli/root.go"), "utf8")}\n${fs.readFileSync(path.join(repo, "internal/cli/recovery.go"), "utf8")}\n${fs.readFileSync(path.join(repo, "internal/cli/metrics.go"), "utf8")}`;
 const commands = [
   ["capabilities", "capabilities"],
   ["rules", "rules"],
@@ -39,6 +39,7 @@ const commands = [
   ["lsp", "lsp"],
   ["fmt", "fmt"],
   ["analyze", "analyze"],
+  ["metrics", "metrics"],
   ["check", "check"],
   ["generate", "generate"],
   ["module", "module"],

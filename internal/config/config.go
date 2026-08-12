@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/BurntSushi/toml"
+	"github.com/bmatcuk/doublestar/v4"
 	excelbridge "github.com/harumiWeb/xlflow/internal/excel/bridge"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 )
@@ -28,6 +30,7 @@ type Config struct {
 	VBA      VBAConfig        `toml:"vba"`
 	UserForm UserFormConfig   `toml:"userform"`
 	Build    BuildConfig      `toml:"build"`
+	Metrics  MetricsConfig    `toml:"metrics"`
 	Backup   BackupConfig     `toml:"backup"`
 	Fmt      FmtConfig        `toml:"fmt"`
 	Lint     LintConfig       `toml:"lint"`
@@ -76,6 +79,39 @@ type UserFormConfig struct {
 type BuildConfig struct {
 	Exclude []string `toml:"exclude"`
 }
+
+// MetricsConfig controls procedure-complexity metric collection. It is kept
+// separate from BuildConfig because metric collection and release-build source
+// selection have different scopes and consumers.
+type MetricsConfig struct {
+	Exclude    []string   `toml:"exclude"`
+	Thresholds Thresholds `toml:"thresholds"`
+}
+
+// Thresholds contains optional procedure metric limits. A zero value disables
+// the corresponding threshold; positive values are evaluated as strict upper
+// bounds by the metrics command.
+//
+// The field names intentionally mirror the JSON metric names while TOML tags
+// preserve the snake_case configuration contract.
+type Thresholds struct {
+	CyclomaticComplexity int `toml:"cyclomatic_complexity"`
+	MaxNestingDepth      int `toml:"max_nesting_depth"`
+	StatementCount       int `toml:"statement_count"`
+	SourceLineCount      int `toml:"source_line_count"`
+	BranchCount          int `toml:"branch_count"`
+	LoopCount            int `toml:"loop_count"`
+	GoToCount            int `toml:"goto_count"`
+	ExitPointCount       int `toml:"exit_point_count"`
+	ParameterCount       int `toml:"parameter_count"`
+	ByRefParameterCount  int `toml:"byref_parameter_count"`
+	LocalVariableCount   int `toml:"local_variable_count"`
+	CallFanOut           int `toml:"call_fan_out"`
+}
+
+// MetricsThresholds is retained as a descriptive alias for callers that
+// prefer to qualify the threshold type. The TOML contract uses [metrics.thresholds].
+type MetricsThresholds = Thresholds
 
 type BackupConfig struct {
 	Retention BackupRetentionConfig `toml:"retention"`
@@ -369,6 +405,12 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+	for _, key := range meta.Undecoded() {
+		name := key.String()
+		if name == "metrics" || strings.HasPrefix(name, "metrics.") {
+			return cfg, fmt.Errorf("unknown metrics configuration key: %s", name)
+		}
+	}
 	applyDefaults(&cfg)
 	if err := applyLintRuleConfig(&cfg, meta); err != nil {
 		return cfg, err
@@ -377,6 +419,9 @@ func load(cwd string, allowInvalidExcelBridge bool) (Config, error) {
 		return cfg, err
 	}
 	if err := normalizeExcelBridge(&cfg, allowInvalidExcelBridge); err != nil {
+		return cfg, err
+	}
+	if err := normalizeMetricsExclude(&cfg.Metrics); err != nil {
 		return cfg, err
 	}
 	return cfg, validate(cfg)
@@ -446,6 +491,9 @@ func validate(cfg Config) error {
 	if cfg.Backup.Retention.MaxCount > 0 && cfg.Backup.Retention.MinKeep > cfg.Backup.Retention.MaxCount {
 		return errors.New("backup.retention.min_keep must be less than or equal to backup.retention.max_count when max_count is enabled")
 	}
+	if err := validateMetricsThresholds(cfg.Metrics.Thresholds); err != nil {
+		return err
+	}
 	if cfg.Lint.ProcedureNameConstant.Enabled {
 		name := strings.TrimSpace(cfg.Lint.ProcedureNameConstant.ConstantName)
 		if name == "" {
@@ -456,6 +504,63 @@ func validate(cfg Config) error {
 		}
 	}
 	return nil
+}
+
+func validateMetricsThresholds(thresholds Thresholds) error {
+	values := []struct {
+		name  string
+		value int
+	}{
+		{"cyclomatic_complexity", thresholds.CyclomaticComplexity},
+		{"max_nesting_depth", thresholds.MaxNestingDepth},
+		{"statement_count", thresholds.StatementCount},
+		{"source_line_count", thresholds.SourceLineCount},
+		{"branch_count", thresholds.BranchCount},
+		{"loop_count", thresholds.LoopCount},
+		{"goto_count", thresholds.GoToCount},
+		{"exit_point_count", thresholds.ExitPointCount},
+		{"parameter_count", thresholds.ParameterCount},
+		{"byref_parameter_count", thresholds.ByRefParameterCount},
+		{"local_variable_count", thresholds.LocalVariableCount},
+		{"call_fan_out", thresholds.CallFanOut},
+	}
+	for _, item := range values {
+		if item.value < 0 {
+			return fmt.Errorf("metrics.thresholds.%s must be zero or greater", item.name)
+		}
+	}
+	return nil
+}
+
+// normalizeMetricsExclude validates and canonicalizes procedure-metrics file
+// globs. Unlike build.exclude, metrics excludes are normalized as part of
+// configuration loading because the metrics collector consumes them directly.
+func normalizeMetricsExclude(cfg *MetricsConfig) error {
+	seen := map[string]bool{}
+	patterns := make([]string, 0, len(cfg.Exclude))
+	for _, value := range cfg.Exclude {
+		pattern := filepath.ToSlash(strings.TrimSpace(strings.ReplaceAll(value, "\\", "/")))
+		if pattern == "" {
+			return errors.New("metrics.exclude must not contain an empty pattern")
+		}
+		if strings.HasPrefix(pattern, "/") || isDriveAbsolute(pattern) || pattern == ".." || strings.HasPrefix(pattern, "../") || strings.Contains(pattern, "/../") {
+			return fmt.Errorf("metrics exclusion pattern %q must be project-root-relative", value)
+		}
+		if !doublestar.ValidatePattern(pattern) {
+			return fmt.Errorf("invalid metrics exclusion pattern %q", value)
+		}
+		if !seen[pattern] {
+			seen[pattern] = true
+			patterns = append(patterns, pattern)
+		}
+	}
+	sort.Strings(patterns)
+	cfg.Exclude = patterns
+	return nil
+}
+
+func isDriveAbsolute(path string) bool {
+	return len(path) >= 2 && path[1] == ':' && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
 }
 
 func validVBAIdentifier(name string) bool {
@@ -883,7 +988,51 @@ func legacyOptInAnalyzeRulesForWrite(cfg AnalyzeConfig) []analyzeRuleConfig {
 	return out
 }
 
+func renderMetricsConfig(cfg MetricsConfig) string {
+	var b strings.Builder
+	b.WriteString("# Procedure complexity metrics.\n")
+	b.WriteString("[metrics]\n")
+	b.WriteString("# Project-root-relative doublestar globs excluded from metric collection.\n")
+	b.WriteString("exclude = [")
+	for i, pattern := range cfg.Exclude {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconv.Quote(pattern))
+	}
+	b.WriteString("]\n\n")
+	b.WriteString("# A value of zero disables that threshold; positive values are strict upper bounds.\n")
+	b.WriteString("[metrics.thresholds]\n")
+	for _, item := range []struct {
+		name  string
+		value int
+	}{
+		{"cyclomatic_complexity", cfg.Thresholds.CyclomaticComplexity},
+		{"max_nesting_depth", cfg.Thresholds.MaxNestingDepth},
+		{"statement_count", cfg.Thresholds.StatementCount},
+		{"source_line_count", cfg.Thresholds.SourceLineCount},
+		{"branch_count", cfg.Thresholds.BranchCount},
+		{"loop_count", cfg.Thresholds.LoopCount},
+		{"goto_count", cfg.Thresholds.GoToCount},
+		{"exit_point_count", cfg.Thresholds.ExitPointCount},
+		{"parameter_count", cfg.Thresholds.ParameterCount},
+		{"byref_parameter_count", cfg.Thresholds.ByRefParameterCount},
+		{"local_variable_count", cfg.Thresholds.LocalVariableCount},
+		{"call_fan_out", cfg.Thresholds.CallFanOut},
+	} {
+		fmt.Fprintf(&b, "%s = %d\n", item.name, item.value)
+	}
+	return b.String()
+}
+
 func Write(path string, cfg Config) (err error) {
+	metricsConfig := cfg.Metrics
+	if err := normalizeMetricsExclude(&metricsConfig); err != nil {
+		return err
+	}
+	if err := validateMetricsThresholds(metricsConfig.Thresholds); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
@@ -896,6 +1045,7 @@ func Write(path string, cfg Config) (err error) {
 
 	lintConfigText := renderLintConfig(cfg.Lint)
 	analyzeConfigText := renderAnalyzeConfig(cfg.Analyze)
+	metricsConfigText := renderMetricsConfig(metricsConfig)
 
 	const tmpl = `# Project identity and entry point.
 [project]
@@ -952,6 +1102,7 @@ default_component_folders = %t
 #   "sidecar" – code is split into src/forms/code/<FormName>.bas.
 code_source = %q
 
+%s
 # Automatic backup retention is disabled by default. Uncomment to prune old
 # metadata-backed backups for the configured workbook after successful backup-
 # producing push and rollback operations.
@@ -987,6 +1138,7 @@ builtin_casing = %t
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
+		metricsConfigText,
 		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing, cfg.Fmt.KeywordCasing, cfg.Fmt.BuiltinCasing,
 		lintConfigText,
 		analyzeConfigText,

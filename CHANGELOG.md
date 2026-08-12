@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added source-only `xlflow metrics` procedure complexity reporting with a
+  versioned JSON schema (`metrics.schema_version = 1`) and deterministic values
+  for cyclomatic complexity, nesting, statements, source lines, branches,
+  loops, `GoTo`, exits, parameters, `ByRef` parameters, locals, and call
+  fan-out. Optional `[metrics.thresholds]` settings emit metrics-specific
+  `MX001` warnings and exit `1` while retaining the complete metrics payload;
+  exclusions are configured independently through `[metrics].exclude`.
+
 - Added default-enabled, compile-equivalent `VB050` module declaration-context
   diagnostics and `VB051` invalid-`Me` diagnostics. Checks use canonical
   standard/class/document/UserForm metadata across lint, LSP, and source
