@@ -1887,6 +1887,23 @@ End Enum
 	assertIssue(t, issues, "VB010", 4)
 }
 
+func TestLinterReportsReservedEnumMemberAndUnmatchedProcedureEnd(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Private Enum CallbackKind
+    Unknown
+    Function
+End Enum
+End Function
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssue(t, issues, "VB010", 4)
+	assertIssue(t, issues, "VB011", 6)
+}
+
 func TestLinterProcedureScannerIgnoresCommentsStringsAndDesignerEnd(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

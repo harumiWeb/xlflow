@@ -121,11 +121,16 @@ func (t *procedureBoundaryTracker) processStatement(lineNo int, line string) {
 				// generic syntax diagnostics; do not interpret its contents as a
 				// procedure boundary.
 			default:
+				if endKind, ok := procedureEndKind(lower); ok {
+					t.addBoundaryIssue(t.linter.issue(t.path, lineNo, "VB011", "error", "Unexpected End "+endKind+" without a matching procedure."))
+					t.addState(next, state)
+					continue
+				}
 				// A reserved procedure keyword used as a declaration member has
 				// no procedure name. Keep the historical VB010 signal for that
 				// invalid source instead of silently dropping the only finding.
 				if start, ok := procedureStart(line, lineNo); ok && start.Name == "" {
-					state.procedures = append(state.procedures, start)
+					t.addBoundaryIssue(t.linter.issue(t.path, lineNo, "VB010", "error", "Unterminated "+start.Kind+" procedure."))
 				}
 				t.addState(next, state)
 				continue
