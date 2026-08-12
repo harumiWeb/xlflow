@@ -245,6 +245,21 @@ End Sub
 	}
 }
 
+func TestVBA245MalformedSaveAsNamedTextDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    ThisWorkbook.SaveAs Replace("C:\\safe.xlsx", "name:", "")
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	if _, err := (Analyzer{RootDir: dir, Config: cfg}).Run(); err != nil {
+		t.Fatalf("malformed SaveAs named text should not abort analysis: %v", err)
+	}
+}
+
 func TestVBA245IgnoresUserDefinedSameNameAndNonDestructiveChecks(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
