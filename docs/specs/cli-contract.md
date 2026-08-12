@@ -65,6 +65,7 @@ xlflow [--json] lint
 xlflow lsp (--stdio | --check | --version) [--log-file <path>] [--performance-log]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
 xlflow [--json] analyze
+xlflow [--json] metrics
 xlflow [--json] check
 xlflow [--json] generate test <module-name>
 xlflow [--json] module new <name> --type standard|class
@@ -86,7 +87,7 @@ Unknown top-level commands fail loudly before any workbook or project configurat
 
 `--bridge` is also a persistent global flag for Excel bridge-backed commands. Supported values are `auto` and `dotnet`. Resolution order is `--bridge`, then `XLFLOW_EXCEL_BRIDGE`, then `[excel].bridge`, then the default `auto`. On Windows, `auto` selects the `.NET` bridge. Explicit `--bridge dotnet` is strict. The removed value `powershell` is rejected with a bridge-mode/configuration error.
 
-Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `diff`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `impact`, `graph`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `rules`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
+Under WSL, Excel-related top-level commands are delegated to Windows `xlflow.exe`: `new`, `init`, `doctor`, `attach`, `list`, `form`, `pull`, `push`, `rollback`, `session`, `save`, `status`, `recovery`, `runner`, `run`, `export-image`, `edit`, `macros`, `ui`, `test`, `inspect`, `diff`, `check`, and `process`. Source-oriented commands remain in WSL: `backup`, `impact`, `graph`, `inspect-gui`, `lint`, `lsp`, `fmt`, `analyze`, `metrics`, `rules`, `generate`, `module`, `skill`, `version`, `update`, and completion/help. Source-only subcommands under delegated groups also remain local when explicitly documented, currently `test list` and `form new`. Delegation preserves stdin, stdout, stderr, JSON envelopes, Windows-side recovery state, and the Windows process exit code.
 
 Delegated projects must be located under a Windows-mounted drive such as `/mnt/c/...`. The WSL working directory and absolute workbook, source/spec, input, save, and output path arguments are translated with `wslpath -w`; relative paths remain relative to the shared project directory. WSL-only absolute paths such as `/home/user/project` fail before Windows starts. Windows xlflow resolution uses `XLFLOW_WINDOWS_EXE` first and then `xlflow.exe` from the interoperable PATH. The override accepts either a Windows absolute path or a WSL path to an `.exe`.
 
@@ -266,6 +267,23 @@ or another explicit recovery path rather than saving the uncertain workbook.
 
 `check` runs `lint`, `analyze`, then `doctor`. It continues after lint/analyze findings so source issues and environment status are returned together. JSON output includes top-level `check`, `issues`, `analysis`, optional `analysis_metrics`, and doctor diagnostics. Lint/analyze findings return exit code `1`; doctor/environment failure returns exit code `3`.
 
+`metrics` is an independent source-only procedure measurement command. It
+scans configured source roots and `tests`, applies `[metrics].exclude`, and
+returns a versioned `metrics.schema_version = 1` procedure array containing
+the twelve complexity and maintainability metrics defined in
+`docs/specs/vba-procedure-complexity-metrics.md`. It does not invoke
+`analyze`, add to `analysis_metrics.module_state`, or depend on diagnostic
+enablement. Thresholds are opt-in under `[metrics.thresholds]`; each positive
+threshold uses a strict `value > threshold` comparison and zero/omitted values
+are disabled. Exceeded thresholds produce metrics-specific `MX001` warning
+diagnostics, retain the complete metrics payload, return
+`error.code = "metrics_threshold_exceeded"`, and exit `1`. With all thresholds
+disabled, the command exits `0`. Invalid thresholds or exclusion patterns are
+configuration errors and exit `2`; an unrecoverable source parse fails without
+publishing partial metrics. Procedure and diagnostic ordering, path
+normalization, sidecar/generated-file exclusions, and all counting rules are
+specified by [VBA Procedure Complexity Metrics](vba-procedure-complexity-metrics.md).
+
 `VBA229` is a default-enabled, realtime and batch compile-equivalent error for an unresolved type identifier in a procedure-local `Dim` or `Static ... As <Type>` declaration. It uses the production built-in/host/TypeLib and project symbol resolver, including embedded enum groups and class, UserForm, and document-module types, points at the type identifier, cannot be suppressed, and blocks source preflight. A missing, malformed, empty, or partially materialized generated TypeLib manifest leaves absence resolution incomplete: embedded types may still resolve positively, but a lookup miss does not emit `VBA229`. Parameters, return types, and module-level declarations remain outside this rule's v1 scope.
 
 `macros` opens the configured workbook and discovers VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. `macros --session` reads from the workbook opened by `session start`. Agents should use this command before guessing a `run` target.
@@ -365,6 +383,23 @@ disabled_rules = []
 
 [analyze]
 disabled_rules = []
+
+[metrics]
+exclude = []
+
+[metrics.thresholds]
+cyclomatic_complexity = 0
+max_nesting_depth = 0
+statement_count = 0
+source_line_count = 0
+branch_count = 0
+loop_count = 0
+goto_count = 0
+exit_point_count = 0
+parameter_count = 0
+byref_parameter_count = 0
+local_variable_count = 0
+call_fan_out = 0
 ```
 
 `[build].exclude` defines the source filtering policy used only by the Excel-backed `build` command; it never changes `push` or `pack` source selection. Each entry is a project-root-relative `doublestar` glob. Paths and patterns are normalized to `/`, so Windows and WSL separators match identically; absolute paths and patterns that traverse outside the project root are invalid. Matching is component-level: standard, class, and document components match their source file, while a UserForm matches its `.frm` and any associated `.frx`, sidecar code, or persisted spec path. A matching UserForm artifact excludes the whole form component. The resolver reports unmatched patterns as stable `build_exclude_unmatched` warnings, but malformed patterns, unreadable configured source roots or files, incomplete UserForm artifacts, duplicate included VBA component names (case-insensitive across component types), and equal resolved base/output paths are errors before Excel is opened. Included and excluded lists are sorted by normalized source path.
@@ -380,6 +415,23 @@ After a successful non-dry artifact publication, xlflow attempts to publish the 
 Cleanup of the bridge-owned staging directory runs after publication. If it alone fails, the command remains successful, retains the published output, reports `output.temporary_cleanup.status="failed"`, and adds warning `build_temporary_cleanup_failed` with the residual staging path when available. Pre-publication cleanup outcomes are retained in structured error details. `build_output_directory_failed`, `build_output_busy`, `build_temporary_artifact_missing` (including an unreadable staged artifact), and `build_output_replace_failed` are operational failures that preserve an existing output. Uncertain Excel cleanup still publishes workbook recovery quarantine.
 
 `[backup.retention]` controls automatic pruning after successful backup-producing operations. It is disabled by default. `max_count <= 0`, `max_age_days <= 0`, and `max_total_size_mb <= 0` disable their respective limits. `min_keep` must be zero or greater and always protects the newest valid backups when automatic pruning is enabled. Negative values are configuration errors, and `min_keep > max_count` is invalid when `max_count > 0`. If all limits are disabled, automatic pruning performs no deletion, though invalid or legacy entries may still be reported as skipped.
+
+`[metrics]` controls only `xlflow metrics`. `exclude` is a project-root-relative
+`doublestar` glob list applied after source discovery; it is normalized to `/`,
+deduplicated, and sorted. Absolute patterns and patterns that traverse outside
+the project root are invalid. A valid pattern that matches no source emits a
+stable `metrics_exclude_unmatched` warning. The setting does not alter
+`build`, `push`, `pack`, `lint`, or `analyze` source selection.
+
+`[metrics.thresholds]` accepts the twelve metric names defined in
+`docs/specs/vba-procedure-complexity-metrics.md`. Omitted and zero values
+disable a threshold; positive values report only `value > threshold`. Negative
+values, non-integers, unknown keys, and malformed tables are configuration
+errors. Thresholds are evaluated after all metrics are collected and do not
+change the raw values. They emit `MX001` warning diagnostics only when
+explicitly enabled, so `metrics` does not produce subjective diagnostics by
+default. `MX001` is not an analyzer rule and cannot be configured through
+`[analyze].disabled_rules` or inline suppression.
 
 ## JSON Envelope
 
@@ -550,6 +602,8 @@ Command-specific fields are added at the top level:
 - `inspect` for `inspect`
 - `issues` for `lint`
 - `analysis` for `analyze` and `check`
+- `metrics` for `metrics`, with optional metrics-specific `diagnostics` and
+  `warnings`
 - `check` for `check`
 - `capabilities` for command coordination and safety metadata
 - `run_diagnostic` for enriched `run` failures
@@ -783,8 +837,8 @@ the corresponding marker. Cleanup results add `recovery.cleared[]` and
 ## Exit Codes
 
 - `0`: success
-- `1`: user-code or validation failure, including lint findings, analysis findings, GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
-- `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form new`, `form build`, `form export-image`, `module new`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, plus `process_args_invalid` and `process_not_found` errors from the bridge
+- `1`: user-code or validation failure, including lint findings, analysis findings, metrics threshold findings (`metrics_threshold_exceeded`), GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
+- `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form new`, `form build`, `form export-image`, `module new`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, invalid metrics thresholds or exclusion patterns, plus `process_args_invalid` and `process_not_found` errors from the bridge
 - `3`: environment or operational failure, including workbook lock contention
   (`workbook_busy`, `workbook_busy_timeout`, `workbook_busy_cancelled`),
   workbook recovery (`workbook_recovery_required`,

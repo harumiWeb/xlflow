@@ -55,6 +55,7 @@ Use command pages for workflow guidance and the canonical CLI contract in [JSON 
 | [lsp](./lsp)                               | Start the reusable VBA language server for editor integrations.                            |
 | [fmt](./fmt)                               | Format VBA source files with a conservative, non-destructive formatter.                    |
 | [analyze](./analyze)                       | Analyze VBA source for runtime-risk patterns without Excel COM.                            |
+| [metrics](./metrics)                       | Calculate deterministic procedure complexity metrics without Excel COM.                    |
 | [check](./check)                           | Run lint, analyze, and doctor as a combined preflight.                                     |
 | [module](./module)                         | Create module source files and install bundled xlflow helper modules.                      |
 | [completion](./completion)                 | Generate shell completion scripts through Cobra.                                           |

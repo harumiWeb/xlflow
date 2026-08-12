@@ -52,6 +52,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `before_dialog_action`
 - `binary_expression`
 - `block_kind`
+- `branch_count`
 - `branch_false`
 - `branch_true`
 - `bridge_file_not_openable`
@@ -77,9 +78,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `by_kind`
 - `byref_diagnostics`
 - `byref_modifier`
+- `byref_parameter_count`
+- `byref_parameters`
 - `byval_modifier`
 - `cached_excel_reference`
 - `call_expression`
+- `call_fan_out`
 - `call_statement`
 - `capability_version`
 - `capture_state`
@@ -163,10 +167,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cross_module`
 - `current_version`
 - `customer_name`
+- `cyclomatic_complexity`
 - `data_flow`
 - `database_result`
 - `debug_log`
 - `debug_stream_init_failed`
+- `declaration_range`
 - `declaration_spacing`
 - `declare_function`
 - `declare_function_statement`
@@ -322,6 +328,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exit_do`
 - `exit_for`
 - `exit_function`
+- `exit_point_count`
+- `exit_points`
 - `exit_property`
 - `exit_statement`
 - `exit_sub`
@@ -409,6 +417,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generator_version`
 - `generator_version_changed`
 - `global_values`
+- `goto_count`
 - `goto_statement`
 - `graph_dependencies_failed`
 - `gui_boundaries`
@@ -505,6 +514,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `live_workbook`
 - `local_type_diagnostics`
 - `local_variable`
+- `local_variable_count`
+- `local_variables`
 - `locale_sensitive_value`
 - `location_capture`
 - `logical_line`
@@ -512,6 +523,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `logs_and_continues`
 - `loop_back`
 - `loop_body`
+- `loop_count`
 - `loop_exit`
 - `lsp_args_invalid`
 - `lsp_check_failed`
@@ -531,6 +543,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `max_cols`
 - `max_concurrent`
 - `max_count`
+- `max_nesting_depth`
 - `max_rows`
 - `max_total_size_mb`
 - `may_raise`
@@ -542,6 +555,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `merged_ranges`
 - `message_pump`
 - `metadata_read_failed`
+- `metrics_exclude_unmatched`
+- `metrics_failed`
+- `metrics_threshold_exceeded`
+- `metrics_thresholds_invalid`
 - `min_keep`
 - `missing_backup_file`
 - `missing_module_attribute`
@@ -642,6 +659,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `paramarray_not_last`
 - `paramarray_optional`
 - `paramarray_shape`
+- `parameter_count`
 - `parameter_limit`
 - `parameter_list`
 - `parenthesized_condition_expression`
@@ -671,6 +689,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_ir_builds`
 - `procedure_ir_reuses`
 - `procedure_ir_singleflight`
+- `procedure_kind`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -839,6 +858,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_counts`
 - `source_file`
 - `source_files`
+- `source_line_count`
 - `source_lines`
 - `source_newer_than_workbook`
 - `source_of_truth`
@@ -861,6 +881,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `start_column`
 - `start_line`
 - `started_at`
+- `statement_count`
 - `static_modifier`
 - `status_hint`
 - `stop_statement`

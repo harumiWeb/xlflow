@@ -116,6 +116,104 @@ Command-specific fields are top-level fields such as `issues`, `analysis`,
 `output` carries `fmt` result summaries, `export-image` output paths, and `form`
 command artifacts.
 
+## Procedure complexity metrics
+
+`xlflow metrics --json` is a source-only command. It does not open Excel or run
+`lint`, `analyze`, `check`, LSP diagnostics, or preflight. The result adds a
+versioned `metrics` object. Procedure entries are project-relative, use `/`
+path separators, and are sorted by file, declaration start position, module, name, and
+kind. The twelve metric fields are defined in
+`docs/specs/vba-procedure-complexity-metrics.md`.
+
+```json
+{
+  "status": "ok",
+  "command": "metrics",
+  "metrics": {
+    "schema_version": 1,
+    "procedures": [
+      {
+        "file": "src/modules/Main.bas",
+        "module": "Main",
+        "module_kind": "standard",
+        "name": "Run",
+        "kind": "sub",
+        "declaration_range": {
+          "startLine": 1,
+          "startColumn": 1,
+          "endLine": 18,
+          "endColumn": 7,
+          "startByte": 0,
+          "endByte": 256
+        },
+        "cyclomatic_complexity": 3,
+        "max_nesting_depth": 2,
+        "statement_count": 12,
+        "source_line_count": 18,
+        "branch_count": 1,
+        "loop_count": 1,
+        "goto_count": 0,
+        "exit_point_count": 2,
+        "parameter_count": 1,
+        "byref_parameter_count": 1,
+        "local_variable_count": 2,
+        "call_fan_out": 2
+      }
+    ]
+  },
+  "diagnostics": [],
+  "warnings": [],
+  "logs": []
+}
+```
+
+`metrics.schema_version` is `1`. Additive fields are allowed without changing
+the version; removing a field or changing its meaning requires a new version.
+Consumers must ignore unknown fields and should reject unsupported versions
+instead of guessing their semantics. An unrecoverable source parse fails
+without publishing partial procedures.
+
+Thresholds are independent from analyzer diagnostics and are disabled unless a
+positive value is configured under `[metrics.thresholds]`. `0` and omitted keys
+disable a threshold; a positive threshold is exceeded only when `value >
+threshold`. Each exceeded procedure/metric pair emits one warning diagnostic:
+
+```json
+{
+  "status": "failed",
+  "command": "metrics",
+  "error": {
+    "code": "metrics_threshold_exceeded",
+    "message": "1 procedure complexity threshold exceeded"
+  },
+  "metrics": { "schema_version": 1, "procedures": [] },
+  "diagnostics": [
+    {
+      "code": "MX001",
+      "severity": "warning",
+      "file": "src/modules/Main.bas",
+      "line": 1,
+      "module": "Main",
+      "procedure": "Run",
+      "procedure_kind": "sub",
+      "metric": "cyclomatic_complexity",
+      "value": 8,
+      "threshold": 5,
+      "message": "Run cyclomatic_complexity exceeds threshold 5 (value 8)"
+    }
+  ],
+  "warnings": [],
+  "logs": []
+}
+```
+
+The `procedures` array in a real threshold result is complete; the abbreviated
+example above only shortens it for readability. `diagnostics` are sorted by
+procedure order and the fixed metric order. `MX001` is not a static-analysis
+rule, cannot be inline-suppressed, and is unaffected by
+`[analyze].disabled_rules`. No enabled thresholds means exit `0`; one or more
+`MX001` entries retain the full metrics payload and use exit `1`.
+
 ## Build manifest
 
 `build --json` returns a versioned `build` manifest. Non-dry successful builds
