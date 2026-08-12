@@ -58,7 +58,11 @@ func TestCollectComputesAllProcedureMetrics(t *testing.T) {
 	got := Collect(Input{IR: procedure, File: "src/Main.bas", Module: "Main", ModuleKind: "standard"})
 	want := ProcedureMetrics{
 		File: "src/Main.bas", Module: "Main", ModuleKind: "standard", Name: "Run", Kind: procedureir.ProcedureFunction,
-		DeclarationRange: testRange(2, 20),
+		Visibility:         "",
+		ResolvedCallees:    []string{"other.first", "other.second"},
+		ErrorHandlingCount: 1,
+		AmbiguousCallCount: 1,
+		DeclarationRange:   testRange(2, 20),
 		Metrics: Metrics{
 			CyclomaticComplexity: 8, MaxNestingDepth: 6, StatementCount: 15,
 			SourceLineCount: 19, BranchCount: 3, LoopCount: 4, GotoCount: 1,
@@ -68,6 +72,22 @@ func TestCollectComputesAllProcedureMetrics(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("metrics = %+v, want %+v", got, want)
+	}
+}
+
+func TestExcelEffectCountUsesLeafStatementsAndIdentifierBoundaries(t *testing.T) {
+	procedure := procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{Kind: procedureir.ProcedureSub, DeclarationRange: testRange(1, 8)},
+		Statements: []procedureir.Statement{
+			{ID: 1, Kind: procedureir.StatementIf, Condition: &procedureir.Expression{Text: `Range("A1")`}, Range: testRange(2, 5)},
+			{ID: 2, ParentID: 1, Kind: procedureir.StatementUnknown, Text: `SetRange("A1")`, Range: testRange(3, 3)},
+			{ID: 3, Kind: procedureir.StatementUnknown, Text: `Set target = Range("B1")`, Range: testRange(6, 6)},
+			{ID: 4, Kind: procedureir.StatementUnknown, Text: `Application.Cells(1, 1) = 1`, Range: testRange(7, 7)},
+		},
+	}
+	got := Collect(Input{IR: procedure})
+	if got.ExcelEffectCount != 3 {
+		t.Fatalf("excel effects = %d, want 3", got.ExcelEffectCount)
 	}
 }
 

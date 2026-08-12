@@ -119,9 +119,10 @@ warning. No generated file is silently counted twice.
 - IR/CFG and call-resolution limitations remain visible: unresolved or
   ambiguous calls do not inflate fan-out, and unrecoverable syntax fails closed
   rather than producing misleading values.
-- This first version reports procedures only. Module/project aggregates,
-  historical trends, recommended thresholds, and LSP projections remain future
-  work.
+- The procedure-complexity schema remains procedure-focused; architectural
+  procedure/module hotspot ranking is an additive projection governed by
+  ADR-0039. Historical trends, recommended thresholds, and LSP projections
+  remain future work.
 
 ## Alternatives Considered
 
@@ -168,4 +169,5 @@ None.
 
 - Issue #460
 - ADR-0021, ADR-0022, ADR-0035
+- ADR-0039
 - `docs/specs/vba-procedure-complexity-metrics.md`

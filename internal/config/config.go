@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -87,8 +88,19 @@ type BuildConfig struct {
 // separate from BuildConfig because metric collection and release-build source
 // selection have different scopes and consumers.
 type MetricsConfig struct {
-	Exclude    []string   `toml:"exclude"`
-	Thresholds Thresholds `toml:"thresholds"`
+	Exclude    []string       `toml:"exclude"`
+	Thresholds Thresholds     `toml:"thresholds"`
+	Hotspots   HotspotsConfig `toml:"hotspots"`
+}
+
+// HotspotsConfig controls optional hotspot ranking in the metrics command.
+// A zero top-N or score threshold disables the corresponding limit. Score
+// thresholds are expressed as percentages in the inclusive range 1..100.
+type HotspotsConfig struct {
+	ProcedureTopN           int     `toml:"procedure_top_n"`
+	ModuleTopN              int     `toml:"module_top_n"`
+	ProcedureScoreThreshold float64 `toml:"procedure_score_threshold"`
+	ModuleScoreThreshold    float64 `toml:"module_score_threshold"`
 }
 
 // Thresholds contains optional procedure metric limits. A zero value disables
@@ -542,6 +554,9 @@ func validate(cfg Config) error {
 	if err := validateMetricsThresholds(cfg.Metrics.Thresholds); err != nil {
 		return err
 	}
+	if err := validateMetricsHotspots(cfg.Metrics.Hotspots); err != nil {
+		return err
+	}
 	if cfg.Lint.ProcedureNameConstant.Enabled {
 		name := strings.TrimSpace(cfg.Lint.ProcedureNameConstant.ConstantName)
 		if name == "" {
@@ -549,6 +564,31 @@ func validate(cfg Config) error {
 		}
 		if !validVBAIdentifier(name) {
 			return fmt.Errorf("lint.procedure_name_constant.constant_name must be a VBA identifier: %q", name)
+		}
+	}
+	return nil
+}
+
+func validateMetricsHotspots(hotspots HotspotsConfig) error {
+	if hotspots.ProcedureTopN < 0 {
+		return errors.New("metrics.hotspots.procedure_top_n must be zero or greater")
+	}
+	if hotspots.ModuleTopN < 0 {
+		return errors.New("metrics.hotspots.module_top_n must be zero or greater")
+	}
+	for _, item := range []struct {
+		name  string
+		value float64
+	}{
+		{"procedure_score_threshold", hotspots.ProcedureScoreThreshold},
+		{"module_score_threshold", hotspots.ModuleScoreThreshold},
+	} {
+		// A zero threshold disables filtering; otherwise scores are percentages.
+		if math.IsNaN(item.value) || item.value < 0 || item.value > 100 {
+			return fmt.Errorf("metrics.hotspots.%s must be zero or between 1 and 100", item.name)
+		}
+		if item.value != 0 && item.value < 1 {
+			return fmt.Errorf("metrics.hotspots.%s must be zero or between 1 and 100", item.name)
 		}
 	}
 	return nil
@@ -1171,6 +1211,12 @@ func renderMetricsConfig(cfg MetricsConfig) string {
 	} {
 		fmt.Fprintf(&b, "%s = %d\n", item.name, item.value)
 	}
+	b.WriteString("\n# Optional hotspot ranking. A zero top-N or score threshold disables it.\n")
+	b.WriteString("[metrics.hotspots]\n")
+	fmt.Fprintf(&b, "procedure_top_n = %d\n", cfg.Hotspots.ProcedureTopN)
+	fmt.Fprintf(&b, "module_top_n = %d\n", cfg.Hotspots.ModuleTopN)
+	fmt.Fprintf(&b, "procedure_score_threshold = %g\n", cfg.Hotspots.ProcedureScoreThreshold)
+	fmt.Fprintf(&b, "module_score_threshold = %g\n", cfg.Hotspots.ModuleScoreThreshold)
 	return b.String()
 }
 
@@ -1184,6 +1230,9 @@ func Write(path string, cfg Config) (err error) {
 		return err
 	}
 	if err := validateMetricsThresholds(metricsConfig.Thresholds); err != nil {
+		return err
+	}
+	if err := validateMetricsHotspots(metricsConfig.Hotspots); err != nil {
 		return err
 	}
 	analyzeConfig := cfg.Analyze
