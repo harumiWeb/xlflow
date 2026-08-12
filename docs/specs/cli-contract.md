@@ -884,7 +884,12 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB001`: missing `Option Explicit`
 - `VB002`: `Select` usage
 - `VB003`: `Activate` usage
-- `VB004`: `On Error Resume Next` usage
+- `VB004`: broad `On Error Resume Next` usage. The lint rule evaluates
+  statement-level recovery within the enclosing procedure, including
+  colon-separated statements on one physical line. A bounded probe that
+  restores normal handling with `On Error GoTo 0`, or replaces it with an
+  explicit `On Error GoTo <label>` handler, is not reported; a procedure exit
+  without either restoration remains a finding.
 - `VB005`: possible implicit `Variant`; VBA identifier type characters `$`, `%`,
   `&`, `!`, `#`, `@`, and `^` count as explicit `String`, `Integer`, `Long`,
   `Single`, `Double`, `Currency`, and `LongLong` types respectively

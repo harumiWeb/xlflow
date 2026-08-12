@@ -157,6 +157,7 @@
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB020","severity":"warning","line":815,"column":5}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB004","severity":"warning","line":828,"column":5}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB007","severity":"warning","line":835,"column":0}
+{"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB004","severity":"warning","line":855,"column":5}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB020","severity":"warning","line":879,"column":5}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB007","severity":"warning","line":889,"column":0}
 {"project":"third_party/access-examples","file":"Form_800_Link_Manager_frm.cls","surface":"lint","code":"VB004","severity":"warning","line":899,"column":5}

@@ -95,6 +95,10 @@ const (
 	parserRecoverySuggestion           = "The source may be valid VBA that the parser could not fully understand. Review the reported context; do not rewrite valid VBA solely to satisfy parser recovery."
 	maxParserRecoveryTokenRunes        = 80
 	maxParserRecoveryContextRunes      = 160
+	// VB004 recovery limits bound the forward statement scan and the short
+	// reset scope that is accepted without an Err.Number probe.
+	resumeNextScanLimit  = 16
+	resumeNextShortScope = 5
 )
 
 func (l Linter) Run() ([]Issue, error) {
@@ -368,6 +372,14 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	var procedureIR *procedureir.DocumentIR
+	if l.Config.Lint.ForbidOnErrorResumeNext || l.Config.Lint.DetectForEachControlType {
+		ir, irErr := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{Path: path}, doc)
+		if irErr != nil {
+			return nil, irErr
+		}
+		procedureIR = &ir
+	}
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		numericLiteralRecovery := vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 		lintCtx := astLintContext{
@@ -415,7 +427,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, lintCtx.parseIssues(view.Root)...)
 		}
-		flowIssues, flowErr := l.flowIssuesContext(ctx, path, string(source), view.Root)
+		flowIssues, flowErr := l.flowIssuesContext(ctx, path, string(source), view.Root, procedureIR)
 		if flowErr != nil {
 			return flowErr
 		}
@@ -767,8 +779,6 @@ func (c *astLintContext) visit(node *tree_sitter.Node, inProcedure bool, inType 
 		inType = true
 	case "qualified_member_expression", "implicit_member_expression":
 		c.memberAccessIssue(node)
-	case "on_error_statement":
-		c.onErrorIssue(node)
 	case "variable_declaration":
 		c.variableDeclarationIssues(node, inProcedure, inType)
 	}
@@ -804,46 +814,6 @@ func (c *astLintContext) memberAccessIssue(node *tree_sitter.Node) {
 		issue.Symbol = "." + name
 		c.issues = append(c.issues, issue)
 	}
-}
-
-func (c *astLintContext) onErrorIssue(node *tree_sitter.Node) {
-	if !c.linter.Config.Lint.ForbidOnErrorResumeNext {
-		return
-	}
-	if strings.EqualFold(normalizedNodeText(node, c.source), "On Error Resume Next") {
-		if c.hasNarrowOnErrorReset(vbaast.NodeRange(node).StartLine) {
-			return
-		}
-		c.issues = append(c.issues, c.linter.issueAt(c.path, vbaast.NodeRange(node), "VB004", "warning", "Avoid On Error Resume Next without a narrow recovery block."))
-	}
-}
-
-func (c *astLintContext) hasNarrowOnErrorReset(startLine int) bool {
-	if startLine <= 0 {
-		return false
-	}
-	lines := normalizedSourceLines(string(c.source))
-	seen := 0
-	sawErrNumberCheck := false
-	for i := startLine; i < len(lines) && seen < 16; i++ {
-		stmt := normalizedCodeLine(lines[i])
-		if stmt == "" {
-			continue
-		}
-		seen++
-		lower := strings.ToLower(stmt)
-		if lower == "on error goto 0" {
-			// Preserve the original short-block allowance, and also accept a
-			// bounded probe that explicitly observes Err.Number before restoring
-			// normal error handling. This covers common conversion/capacity probes
-			// without hiding broad best-effort cleanup scopes.
-			return seen <= 5 || sawErrNumberCheck
-		}
-		if strings.Contains(lower, "err.number") {
-			sawErrNumberCheck = true
-		}
-	}
-	return false
 }
 
 func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inProcedure bool, inType bool) {
@@ -917,14 +887,25 @@ func (c *astLintContext) genericParseIssue(detail parserRecoveryDetail) Issue {
 	return issue
 }
 
-func (l Linter) flowIssuesContext(ctx context.Context, path string, source string, root *tree_sitter.Node) ([]Issue, error) {
+func (l Linter) flowIssuesContext(ctx context.Context, path string, source string, root *tree_sitter.Node, ir *procedureir.DocumentIR) ([]Issue, error) {
 	cfg := l.Config.Lint
 	if !cfg.DetectConfusingCallSyntax &&
 		!cfg.DetectForEachControlType &&
-		!cfg.DetectDangerousResume {
+		!cfg.DetectDangerousResume &&
+		!cfg.ForbidOnErrorResumeNext {
 		return nil, nil
 	}
 	var issues []Issue
+	if cfg.ForbidOnErrorResumeNext {
+		if ir == nil {
+			return nil, fmt.Errorf("VB004 requires procedure IR")
+		}
+		onErrorIssues, err := l.onErrorIssuesFromProcedureIR(ctx, path, *ir)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, onErrorIssues...)
+	}
 	if cfg.DetectDangerousResume {
 		dangerousResumeIssues, err := l.dangerousResumeIssuesFromAST(ctx, path, source, root)
 		if err != nil {
@@ -940,7 +921,10 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		issues = append(issues, confusingCallIssues...)
 	}
 	if cfg.DetectForEachControlType {
-		forEachIssues, err := l.forEachIssuesFromProcedureIR(ctx, path, []byte(source))
+		if ir == nil {
+			return nil, fmt.Errorf("VB023 requires procedure IR")
+		}
+		forEachIssues, err := l.forEachIssuesFromProcedureIR(ctx, path, *ir)
 		if err != nil {
 			return nil, err
 		}
@@ -1383,11 +1367,55 @@ func confusingParenthesizedCall(stmt string) (string, bool) {
 	return name, true
 }
 
-func (l Linter) forEachIssuesFromProcedureIR(ctx context.Context, path string, source []byte) ([]Issue, error) {
-	ir, err := procedureir.BuildSourceContext(ctx, procedureir.BuildOptions{Path: path}, source)
-	if err != nil {
-		return nil, err
+func (l Linter) onErrorIssuesFromProcedureIR(ctx context.Context, path string, ir procedureir.DocumentIR) ([]Issue, error) {
+	var issues []Issue
+	for _, proc := range ir.Procedures {
+		for index, statement := range proc.Statements {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if statement.Recovered || statement.Kind != procedureir.StatementOnError || statement.Control == nil || statement.Control.Transfer != procedureir.TransferOnErrorResumeNext {
+				continue
+			}
+			if hasNarrowResumeNextRecovery(proc.Statements, index) {
+				continue
+			}
+			issues = append(issues, l.issueAt(path, statement.Range, "VB004", "warning", "Avoid On Error Resume Next without a narrow recovery block."))
+		}
 	}
+	return issues, nil
+}
+
+func hasNarrowResumeNextRecovery(statements []procedureir.Statement, start int) bool {
+	seen := 0
+	sawErrNumberCheck := false
+	sawLoop := false
+	for i := start + 1; i < len(statements) && seen < resumeNextScanLimit; i++ {
+		statement := statements[i]
+		if statement.Recovered || strings.TrimSpace(statement.Text) == "" {
+			continue
+		}
+		seen++
+		switch statement.Kind {
+		case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
+			sawLoop = true
+		}
+		if statement.Kind == procedureir.StatementOnError && statement.Control != nil {
+			switch statement.Control.Transfer {
+			case procedureir.TransferOnErrorDisable, procedureir.TransferOnErrorGoto:
+				// Both forms replace Resume Next with an explicit error mode.
+				// Keep the existing short-scope and Err.Number probe allowances.
+				return sawErrNumberCheck || (!sawLoop && seen <= resumeNextShortScope)
+			}
+		}
+		if strings.Contains(strings.ToLower(normalizedCodeLine(statement.Text)), "err.number") {
+			sawErrNumberCheck = true
+		}
+	}
+	return false
+}
+
+func (l Linter) forEachIssuesFromProcedureIR(ctx context.Context, path string, ir procedureir.DocumentIR) ([]Issue, error) {
 	var issues []Issue
 	for _, proc := range ir.Procedures {
 		for _, statement := range proc.Statements {

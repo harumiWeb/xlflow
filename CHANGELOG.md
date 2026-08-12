@@ -32,6 +32,10 @@ All notable changes to xlflow will be documented in this file.
   such as array elements. The rule now resolves bare control identifiers from
   Procedure IR declarations and remains conservative for unresolved composite
   targets.
+- Fixed `VB004` false positives for narrow `On Error Resume Next` probes that
+  restore handling on the same physical line, after a colon-separated
+  statement, or by switching to an explicit error handler. Procedure exits
+  without restoration remain covered by the rule.
 
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.
