@@ -557,7 +557,7 @@ func httpInteger(expr string, state httpAnalysisState) (int, bool) {
 	}
 	text = strings.ReplaceAll(text, "&H", "0x")
 	text = strings.ReplaceAll(text, "&h", "0x")
-	n, err := strconv.ParseInt(text, 0, 64)
+	n, err := strconv.ParseInt(text, 0, strconv.IntSize)
 	return int(n), err == nil
 }
 

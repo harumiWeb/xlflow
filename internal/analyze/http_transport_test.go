@@ -3,6 +3,7 @@ package analyze
 import (
 	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -443,6 +444,19 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA246"); len(got) != 0 {
 		t.Fatalf("non-HTTP URL findings = %+v", got)
+	}
+}
+
+func TestHTTPIntegerRejectsValuesOutsideNativeIntRange(t *testing.T) {
+	state := httpAnalysisState{strings: map[string]string{}, known: map[string]bool{}, sensitive: map[string]bool{}}
+	if strconv.IntSize == 64 {
+		if _, ok := httpInteger("9223372036854775808", state); ok {
+			t.Fatal("out-of-range 64-bit integer was accepted")
+		}
+	} else {
+		if _, ok := httpInteger("2147483648", state); ok {
+			t.Fatal("out-of-range 32-bit integer was accepted")
+		}
 	}
 }
 
