@@ -1902,6 +1902,9 @@ End Function
 	}
 	assertIssue(t, issues, "VB010", 4)
 	assertIssue(t, issues, "VB011", 6)
+	if got := issuesByCode(issues, "VB012"); len(got) != 0 {
+		t.Fatalf("unexpected VB012 diagnostic: %+v", got)
+	}
 }
 
 func TestLinterProcedureScannerIgnoresCommentsStringsAndDesignerEnd(t *testing.T) {
