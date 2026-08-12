@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled `VBA245` file/path safety analysis for destructive VBA
+  statements, FileSystemObject write/delete operations, workbook SaveAs paths,
+  wildcard and traversal hazards, unchecked overwrites, external-input-derived
+  paths, and missing local temporary-file cleanup. Findings include an additive
+  `file_operation` context and retain `VBA224` as the compatibility fallback
+  when the specialized rule is disabled.
+
 - Added source-only `xlflow metrics` procedure complexity reporting with a
   versioned JSON schema (`metrics.schema_version = 1`) and deterministic values
   for cyclomatic complexity, nesting, statements, source lines, branches,

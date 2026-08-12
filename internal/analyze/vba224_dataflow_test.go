@@ -16,6 +16,10 @@ func vba224TestConfig() config.Config {
 	cfg := config.Default()
 	cfg.Analyze.DetectUnsafeCommandConstruction = false
 	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	// Keep these tests focused on the legacy generic data-flow projection.
+	// VBA245 owns destructive/path sinks when enabled and deliberately suppresses
+	// the overlapping VBA224 findings.
+	cfg.Analyze.DetectUnsafeFilePath = false
 	return cfg
 }
 

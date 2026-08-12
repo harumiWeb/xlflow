@@ -203,6 +203,7 @@ type AnalyzeConfig struct {
 	DetectExpensiveFullRangeOperations       bool     `toml:"detect_expensive_full_range_operations"`
 	DetectValue2PerformanceOpportunities     bool     `toml:"detect_value2_performance_opportunities"`
 	DetectProcedureCallCycles                bool     `toml:"detect_procedure_call_cycles"`
+	DetectUnsafeFilePath                     bool     `toml:"detect_unsafe_file_path"`
 }
 
 type lintRuleAdapter struct {
@@ -294,6 +295,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA242": {Get: func(c AnalyzeConfig) bool { return c.DetectExpensiveFullRangeOperations }, Set: func(c *AnalyzeConfig, v bool) { c.DetectExpensiveFullRangeOperations = v }},
 	"VBA243": {Get: func(c AnalyzeConfig) bool { return c.DetectValue2PerformanceOpportunities }, Set: func(c *AnalyzeConfig, v bool) { c.DetectValue2PerformanceOpportunities = v }},
 	"VBA244": {Get: func(c AnalyzeConfig) bool { return c.DetectProcedureCallCycles }, Set: func(c *AnalyzeConfig, v bool) { c.DetectProcedureCallCycles = v }},
+	"VBA245": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeFilePath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeFilePath = v }},
 }
 
 var (

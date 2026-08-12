@@ -36,6 +36,13 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 	for _, flow := range result.Findings {
 		commandSink := isCommandExecutionSink(string(flow.Sink.Kind))
 		sqlSink := isSQLExecutionSink(string(flow.Sink.Kind))
+		fileSink := isFileOperationSink(string(flow.Sink.Kind))
+		if fileSink && a.Config.Analyze.DetectUnsafeFilePath {
+			// VBA245 owns file/path safety observations, including clean-but-
+			// dangerous constants. Preserve VBA224 as the compatibility fallback
+			// when the specialized rule is disabled.
+			continue
+		}
 		if commandSink {
 			if a.Config.Analyze.DetectUnsafeCommandConstruction {
 				if commandKeys[commandFlowKey(flow)] {
@@ -103,6 +110,15 @@ func isCommandExecutionSink(kind string) bool {
 
 func isSQLExecutionSink(kind string) bool {
 	return strings.EqualFold(strings.TrimSpace(kind), string(vbadf.SinkSQLExecution))
+}
+
+func isFileOperationSink(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "destructive_file_operation", "save_as":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a Analyzer) sqlFinding(file parsedFile, proc sourceProcedure, sql vbadf.SQLFinding) Finding {
