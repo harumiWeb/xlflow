@@ -98,6 +98,20 @@ End Sub
 	}
 }
 
+func TestIssue590ExternalLibraryQualifierIsNotProjectLocalProof(t *testing.T) {
+	r := NewResolverWithCompleteness([]ResolverSymbol{{
+		Name: "vbCrLf", Module: "VBA", ModuleKind: "external", Kind: "enum_member", Recovered: true,
+	}}, true)
+	receiver := "VBA"
+	got := r.ResolveCall(CallSite{
+		Module: "Main",
+		Callee: Callee{Text: "VBA.IsObject", BaseName: "IsObject", Member: "IsObject", Receiver: &receiver},
+	})
+	if got.Status != ResolutionMemberCall || got.ProjectLocal {
+		t.Fatalf("external library call resolution = %#v", got)
+	}
+}
+
 func TestIssue590EnumResolutionUsesLexicalWinner(t *testing.T) {
 	r := NewResolver([]ResolverSymbol{
 		{Name: "Ready", Parent: "LocalState", Module: "Main", ModuleKind: "standard", Kind: "enum_member", File: "Main.bas", Line: 2},

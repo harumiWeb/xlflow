@@ -573,7 +573,7 @@ func (r SymbolResolver) projectLocalReceiver(receiver, caller, procedure string)
 		}
 		return false
 	}
-	if _, ok := r.modules[first]; ok {
+	if r.isProjectModule(first) {
 		return true
 	}
 	return r.projectReceiverType(receiver, caller, procedure) != ""
@@ -599,7 +599,7 @@ func (r SymbolResolver) projectReceiverType(receiver, caller, procedure string) 
 			// late-bound from the diagnostic policy's point of view.
 			return ""
 		}
-		if _, ok := r.modules[strings.ToLower(lastNamePart(typeName))]; ok {
+		if r.isProjectModule(strings.ToLower(lastNamePart(typeName))) {
 			projectTypes[strings.ToLower(lastNamePart(typeName))] = struct{}{}
 			continue
 		}
@@ -614,6 +614,17 @@ func (r SymbolResolver) projectReceiverType(receiver, caller, procedure string) 
 		return typeName
 	}
 	return ""
+}
+
+func (r SymbolResolver) isProjectModule(module string) bool {
+	key := strings.ToLower(cleanIdentifier(lastNamePart(module)))
+	if _, ok := r.modules[key]; !ok {
+		return false
+	}
+	// TypeLib constants are indexed with their library as a module qualifier
+	// so Enum lookup can retain every candidate. That qualifier is external
+	// evidence, not proof that calls such as VBA.IsObject target this project.
+	return !strings.EqualFold(strings.TrimSpace(r.moduleKinds[key]), "external")
 }
 
 func knownExternalTypeName(typeName string) bool {
