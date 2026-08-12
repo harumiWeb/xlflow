@@ -497,6 +497,25 @@ func TestResolveConstant(t *testing.T) {
 	}
 }
 
+func TestResolveConstantsPreservesAmbiguousEnumCandidates(t *testing.T) {
+	db := New()
+	if err := db.MergeJSON([]byte(`{
+  "constants": [
+    {"name":"Ready","library":"ZLib","enum_group":"StateZ"},
+    {"name":"Ready","library":"ALib","enum_group":"StateA"}
+  ]
+}`)); err != nil {
+		t.Fatal(err)
+	}
+	candidates := db.ResolveConstants("ready")
+	if len(candidates) != 2 || candidates[0].Library != "ALib" || candidates[1].Library != "ZLib" {
+		t.Fatalf("ResolveConstants = %#v, want deterministic candidates", candidates)
+	}
+	if winner, ok := db.ResolveConstant("ready"); !ok || winner.Library != "ALib" && winner.Library != "ZLib" {
+		t.Fatalf("ResolveConstant compatibility winner = %#v, %v", winner, ok)
+	}
+}
+
 func TestBuiltinScriptingCompareMethodMetadataDoesNotReplaceVBAConstants(t *testing.T) {
 	db, err := LoadBuiltin()
 	if err != nil {

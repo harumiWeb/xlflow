@@ -267,6 +267,14 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 			Kind: kind, IsArray: strings.Contains(text, "("), Range: vbaast.NodeRange(child),
 			Recovered: recovered(child),
 		}
+		// tree-sitter attaches a declaration-level `As ...` clause to the
+		// variable_declaration/const_declaration node rather than each
+		// declarator. Use it when the child has no more specific type so that
+		// Variant/Object locals remain fail-open for indexed/default-member
+		// expressions.
+		if decl.Type == "" {
+			decl.Type = typeText(node, b.source)
+		}
 		decl.IsObject = looksObjectType(decl.Type) || hasWord(text, "New")
 		out = append(out, decl)
 	}
@@ -285,6 +293,30 @@ func (b *documentBuilder) simpleDeclaration(node *tree_sitter.Node, scope Symbol
 		Scope:      declarationScope(scope, declVisibility), Visibility: declVisibility,
 		Kind: strings.TrimSuffix(node.Kind(), "_statement"), Range: vbaast.NodeRange(node),
 		Recovered: recovered(node),
+	}, true
+}
+
+func (b *documentBuilder) enumMemberDeclaration(node *tree_sitter.Node, ctx visitContext) (Declaration, bool) {
+	if node == nil || strings.TrimSpace(ctx.enumName) == "" {
+		return Declaration{}, false
+	}
+	nameNode := node.ChildByFieldName("name")
+	if nameNode == nil {
+		nameNode = childByKind(node, "identifier")
+	}
+	name := cleanIdentifier(nodeText(nameNode, b.source))
+	if name == "" {
+		return Declaration{}, false
+	}
+	visibility := ctx.enumVisibility
+	if visibility == "" {
+		visibility = "Public"
+	}
+	return Declaration{
+		ID: b.takeDeclarationID(), Name: name, Type: typeText(node, b.source), Scope: ScopeModule,
+		Visibility: visibility, Kind: "enum_member", Parent: ctx.enumName,
+		Range: vbaast.NodeRange(nameNode), Recovered: recovered(node),
+		ConditionalBranches: append([]ConditionalBranch(nil), ctx.conditional...),
 	}, true
 }
 
@@ -469,6 +501,8 @@ func statementKind(node *tree_sitter.Node) (StatementKind, bool) {
 		return StatementReDim, true
 	case "call_statement":
 		return StatementCall, true
+	case "raise_event_statement":
+		return StatementRaiseEvent, true
 	case "label_statement", "line_number_statement":
 		return StatementLabel, true
 	case "goto_statement":

@@ -388,6 +388,15 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	resolutionComplete := a.PathFilter == nil
+	for _, file := range parsedFiles {
+		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
+			resolutionComplete = false
+		}
+	}
+	if a.typeDBResolutionIncomplete {
+		resolutionComplete = false
+	}
 	var cycleFindings []Finding
 	if analysisEnabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA244"); known && analysisEnabled {
 		cycleFindings, err = a.procedureCallCycleFindings(ctx, parsedFiles, projectEffects)
@@ -431,7 +440,18 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		analysis.byRefSymbols = byRefSymbols
 	}
 	findings := cycleFindings
+	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, a.typeDB)
+	var resolutionPreflight []Finding
+	for i := range parsedFiles {
+		resolvedForDiagnostics := procedureir.Resolve(parsedFiles[i].IR, resolutionResolver)
+		for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, resolutionComplete) {
+			finding := a.resolutionFinding(parsedFiles[i], diagnostic)
+			findings = append(findings, finding)
+			resolutionPreflight = append(resolutionPreflight, finding)
+		}
+	}
 	var preflightFindings []Finding
+	preflightFindings = append(preflightFindings, resolutionPreflight...)
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
 		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
@@ -606,6 +626,36 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 	default:
 		return "The VBE rejects this deterministic compile-time contract.", "Correct the source so the call or assignment satisfies the VBA compile-time contract."
 	}
+}
+
+func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
+	line := diagnostic.Range.StartLine + 1
+	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
+	for _, candidate := range sourceProceduresFromIR(file.IR, file.CFG) {
+		if line >= candidate.StartLine && line <= candidate.EndLine {
+			proc = candidate
+			break
+		}
+	}
+	reason, suggestion := compileEquivalentFindingGuidance(diagnostic.Code)
+	if reason == "The VBE rejects this deterministic compile-time contract." {
+		switch diagnostic.Code {
+		case "VB052":
+			reason = "The VBE requires a project-local call target to resolve to a callable declaration."
+			suggestion = "Call a declared Sub, Function, or Property, or qualify the project-local target correctly."
+		case "VB053":
+			reason = "The VBE cannot choose between multiple visible Enum members without a lexical winner."
+			suggestion = "Qualify the Enum member with its Enum name."
+		case "VB054":
+			reason = "The VBE requires RaiseEvent to name an Event declared in the same object module."
+			suggestion = "Declare the Event in this object module before raising it."
+		}
+	}
+	finding := a.simpleFinding(file, proc, line, diagnostic.Code, "error", diagnostic.Message, reason, suggestion)
+	finding.Column = diagnostic.Range.StartColumn + 1
+	finding.EndLine = diagnostic.Range.EndLine + 1
+	finding.EndColumn = diagnostic.Range.EndColumn + 1
+	return finding
 }
 
 // projectByRefSymbols builds the batch project's procedure index once. ByRef
@@ -1161,6 +1211,44 @@ func (a Analyzer) shouldIncludeFile(path string) bool {
 		return false
 	}
 	return true
+}
+
+func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB) procedureir.Resolver {
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, file := range files {
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = file.Module
+		}
+		for _, declaration := range file.IR.Declarations {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: file.IR.ModuleKind,
+				Kind: declaration.Kind, Visibility: declaration.Visibility, File: file.IR.Path,
+				Line: declaration.Range.StartLine, Parent: declaration.Parent, Recovered: declaration.Recovered,
+				IsArray:             declaration.IsArray,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
+			})
+		}
+		for _, procedure := range file.IR.Procedures {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: file.IR.ModuleKind,
+				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: file.IR.Path,
+				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
+			})
+		}
+	}
+	for _, constant := range typeDB.AllConstantsList() {
+		if strings.TrimSpace(constant.EnumGroup) == "" {
+			continue
+		}
+		resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+			Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+			ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
+			File: "<typelib>" + constant.Library, Line: 0,
+		})
+	}
+	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
 }
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {

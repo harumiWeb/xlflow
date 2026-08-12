@@ -37,12 +37,13 @@ type ModuleAttribute struct {
 }
 
 type ProcedureIR struct {
-	Symbol       ProcedureSymbol  `json:"symbol"`
-	Declarations []Declaration    `json:"declarations"`
-	Statements   []Statement      `json:"statements"`
-	Expressions  []Expression     `json:"expressions"`
-	Calls        []CallSite       `json:"calls"`
-	Accesses     []VariableAccess `json:"accesses"`
+	Symbol       ProcedureSymbol       `json:"symbol"`
+	Declarations []Declaration         `json:"declarations"`
+	Statements   []Statement           `json:"statements"`
+	Expressions  []Expression          `json:"expressions"`
+	Calls        []CallSite            `json:"calls"`
+	RaiseEvents  []RaiseEventReference `json:"raiseEvents,omitempty"`
+	Accesses     []VariableAccess      `json:"accesses"`
 }
 
 type ProcedureKind string
@@ -133,17 +134,19 @@ type Parameter struct {
 }
 
 type Declaration struct {
-	ID         int          `json:"id"`
-	Name       string       `json:"name"`
-	Type       string       `json:"type,omitempty"`
-	Parameters []Parameter  `json:"parameters,omitempty"`
-	Scope      SymbolScope  `json:"scope"`
-	Visibility string       `json:"visibility,omitempty"`
-	Kind       string       `json:"kind"`
-	IsArray    bool         `json:"isArray,omitempty"`
-	IsObject   bool         `json:"isObject,omitempty"`
-	Range      vbaast.Range `json:"range"`
-	Recovered  bool         `json:"recovered,omitempty"`
+	ID                  int                 `json:"id"`
+	Name                string              `json:"name"`
+	Type                string              `json:"type,omitempty"`
+	Parameters          []Parameter         `json:"parameters,omitempty"`
+	Scope               SymbolScope         `json:"scope"`
+	Visibility          string              `json:"visibility,omitempty"`
+	Kind                string              `json:"kind"`
+	Parent              string              `json:"parent,omitempty"`
+	IsArray             bool                `json:"isArray,omitempty"`
+	IsObject            bool                `json:"isObject,omitempty"`
+	Range               vbaast.Range        `json:"range"`
+	Recovered           bool                `json:"recovered,omitempty"`
+	ConditionalBranches []ConditionalBranch `json:"conditionalBranches,omitempty"`
 }
 
 type StatementKind string
@@ -153,6 +156,7 @@ const (
 	StatementAssignment  StatementKind = "assignment"
 	StatementSet         StatementKind = "set_assignment"
 	StatementCall        StatementKind = "call"
+	StatementRaiseEvent  StatementKind = "raise_event"
 	StatementIf          StatementKind = "if"
 	StatementElseIf      StatementKind = "elseif"
 	StatementElse        StatementKind = "else"
@@ -319,7 +323,12 @@ type CallSite struct {
 	Range        vbaast.Range   `json:"range"`
 	StatementID  int            `json:"statementId,omitempty"`
 	ExpressionID int            `json:"expressionId,omitempty"`
+	IsRaiseEvent bool           `json:"isRaiseEvent,omitempty"`
 	Resolution   CallResolution `json:"resolution"`
+	// NonCallableNames carries lexical declarations that shadow project
+	// procedures (for example `Dim Run` followed by `Run()`). It is an
+	// internal resolver fact and never changes wire/inspect output.
+	NonCallableNames []string `json:"-"`
 }
 
 type ProcedureRef struct {
@@ -333,11 +342,14 @@ type ResolutionStatus string
 const (
 	ResolutionNotAttempted ResolutionStatus = "not_attempted"
 	ResolutionMatched      ResolutionStatus = "matched"
+	ResolutionNonCallable  ResolutionStatus = "non_callable"
 	ResolutionAmbiguous    ResolutionStatus = "ambiguous"
 	ResolutionUnresolved   ResolutionStatus = "unresolved"
 	ResolutionExternal     ResolutionStatus = "external"
 	ResolutionBuiltinLike  ResolutionStatus = "builtin_like"
 	ResolutionMemberCall   ResolutionStatus = "member_call"
+	ResolutionDynamic      ResolutionStatus = "dynamic"
+	ResolutionIncomplete   ResolutionStatus = "incomplete"
 )
 
 type Candidate struct {
@@ -350,6 +362,12 @@ type Candidate struct {
 type CallResolution struct {
 	Status     ResolutionStatus `json:"status"`
 	Candidates []Candidate      `json:"candidates,omitempty"`
+	// ProjectLocal is set only when the resolver can prove that a negative
+	// result belongs to this project (for example Module.Missing or
+	// Me.Missing). It is intentionally not serialized: inspect-call JSON is a
+	// compatibility surface and should continue to expose only status and
+	// candidates.
+	ProjectLocal bool `json:"-"`
 }
 
 type SymbolReference struct {
@@ -359,9 +377,41 @@ type SymbolReference struct {
 	Range  vbaast.Range
 }
 
+// EnumMemberReference describes an enum constant lookup. Enum is empty for a
+// bare member reference and populated for an explicitly qualified reference.
+// Keeping this separate from CallSite lets callers use the same visibility and
+// completeness policy for expression-level enum resolution.
+type EnumMemberReference struct {
+	Name   string
+	Enum   string
+	Module string
+	Caller ProcedureRef
+	Range  vbaast.Range
+}
+
+type EnumResolution struct {
+	Status     ResolutionStatus `json:"status"`
+	Candidates []Candidate      `json:"candidates,omitempty"`
+}
+
+// RaiseEventReference is the syntax-local fact for a RaiseEvent statement.
+// Range covers only the event identifier, making it suitable for a precise
+// diagnostic while the surrounding CallSite retains legacy call-graph data.
+type RaiseEventReference struct {
+	Name                string              `json:"name"`
+	Module              string              `json:"module"`
+	Caller              ProcedureRef        `json:"caller"`
+	Range               vbaast.Range        `json:"range"`
+	Arguments           Arguments           `json:"arguments"`
+	Recovered           bool                `json:"recovered,omitempty"`
+	ConditionalBranches []ConditionalBranch `json:"conditionalBranches,omitempty"`
+	Resolution          SymbolResolution    `json:"resolution"`
+}
+
 type SymbolResolution struct {
-	Scope      SymbolScope `json:"scope"`
-	Candidates []Candidate `json:"candidates,omitempty"`
+	Status     ResolutionStatus `json:"status,omitempty"`
+	Scope      SymbolScope      `json:"scope"`
+	Candidates []Candidate      `json:"candidates,omitempty"`
 }
 
 // Resolver provides project-dependent overlays. Implementations must be safe
@@ -373,12 +423,20 @@ type Resolver interface {
 
 type ResolverSymbol struct {
 	Name       string
+	Type       string
 	Module     string
 	ModuleKind string
 	Kind       string
 	Visibility string
 	File       string
 	Line       int
+	// Parent identifies the containing Enum for enum members. It is kept
+	// generic because the symbols package also uses Parent for procedure/local
+	// ownership.
+	Parent              string
+	Recovered           bool
+	ConditionalBranches []ConditionalBranch
+	IsArray             bool
 }
 
 type TypeReference struct {

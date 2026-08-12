@@ -218,6 +218,7 @@ func New(opts Options) (*Server, func(), error) {
 		for _, projectDocument := range project.Documents {
 			projectByPath[symbolFileKey(projectDocument.IR.Path)] = projectDocument
 		}
+		resolutionResolver := workspaceResolutionResolver(project, typeDB.DB, project.Complete && typeDB.Complete)
 		analyzer := s.analyzer
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
 			if projectDocument, ok := projectByPath[symbolFileKey(ir.Path)]; ok {
@@ -231,6 +232,12 @@ func New(opts Options) (*Server, func(), error) {
 			out := make([]intel.RealtimeFinding, 0, len(findings))
 			for _, finding := range findings {
 				out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
+			}
+			resolvedIR := procedureir.Resolve(ir, resolutionResolver)
+			for _, diagnostic := range procedureir.Diagnostics(resolvedIR, project.Complete && typeDB.Complete) {
+				out = append(out, intel.RealtimeFinding{Code: diagnostic.Code, Severity: "error",
+					Line: diagnostic.Range.StartLine + 1, Column: diagnostic.Range.StartColumn + 1,
+					EndLine: diagnostic.Range.EndLine + 1, EndColumn: diagnostic.Range.EndColumn + 1, Message: diagnostic.Message})
 			}
 			return out, nil
 		}
@@ -1655,7 +1662,11 @@ func (s *Server) runDiagnosticsBody(
 			result = s.diagnosticsRequest(runCtx, request)
 		}
 		if mode == intel.DiagnosticModeFast || (mode == intel.DiagnosticModeFull && !project.Complete) {
-			result.Diagnostics = diagnosticsWithoutCode(result.Diagnostics, "VBA237")
+			// Project-negative resolution is fail-open while the workspace index
+			// is pending, stale, or backed by recovered IR.  Keep the existing
+			// interprocedural suppression and apply the same policy to VB052-
+			// VB054 so Fast and incomplete Full diagnostics cannot leak guesses.
+			result.Diagnostics = diagnosticsWithoutCodes(result.Diagnostics, "VBA237", "VB052", "VB053", "VB054")
 		}
 	} else {
 		result.Diagnostics = s.documentDiagnostics(runCtx, doc)
@@ -1726,9 +1737,17 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 }
 
 func diagnosticsWithoutCode(in []intel.Diagnostic, code string) []intel.Diagnostic {
+	return diagnosticsWithoutCodes(in, code)
+}
+
+func diagnosticsWithoutCodes(in []intel.Diagnostic, codes ...string) []intel.Diagnostic {
+	blocked := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		blocked[strings.ToUpper(code)] = struct{}{}
+	}
 	out := make([]intel.Diagnostic, 0, len(in))
 	for _, diagnostic := range in {
-		if !strings.EqualFold(diagnostic.Code, code) {
+		if _, skip := blocked[strings.ToUpper(diagnostic.Code)]; !skip {
 			out = append(out, diagnostic)
 		}
 	}
@@ -1895,6 +1914,44 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	index := newWorkspaceAnalysisIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFileContext, s.logInitialWorkspaceIndexPerformance)
 	index.nonBlockingQueries = true
 	return index
+}
+
+func workspaceResolutionResolver(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB, complete bool) procedureir.Resolver {
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, document := range project.Documents {
+		module := strings.TrimSpace(document.IR.ModuleName)
+		if module == "" {
+			module = strings.TrimSuffix(filepath.Base(document.IR.Path), filepath.Ext(document.IR.Path))
+		}
+		for _, declaration := range document.IR.Declarations {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: document.IR.ModuleKind,
+				Kind: declaration.Kind, Visibility: declaration.Visibility, File: document.IR.Path,
+				Line: declaration.Range.StartLine, Parent: declaration.Parent, IsArray: declaration.IsArray,
+				Recovered: declaration.Recovered, ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
+			})
+		}
+		for _, procedure := range document.IR.Procedures {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: document.IR.ModuleKind,
+				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: document.IR.Path,
+				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
+				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
+			})
+		}
+	}
+	if typeDB != nil {
+		for _, constant := range typeDB.AllConstantsList() {
+			if strings.TrimSpace(constant.EnumGroup) == "" {
+				continue
+			}
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+				ModuleKind: "external", Kind: "enum_member", Visibility: "Public", File: "<typelib>" + constant.Library,
+			})
+		}
+	}
+	return procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
 }
 
 func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {

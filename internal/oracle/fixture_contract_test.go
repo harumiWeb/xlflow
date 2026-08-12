@@ -11,7 +11,10 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 )
 
@@ -98,9 +101,17 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				if startColumn < 1 {
 					startColumn = 1
 				}
+				endLine := issue.EndLine
+				if endLine < 1 {
+					endLine = issue.Line
+				}
+				endColumn := issue.EndColumn
+				if endColumn < 1 {
+					endColumn = startColumn + 1
+				}
 				projections["lint"] = append(projections["lint"], Diagnostic{
 					Code: issue.Code, Severity: issue.Severity,
-					Range: &Range{StartLine: issue.Line, StartColumn: startColumn, EndLine: issue.Line, EndColumn: startColumn + 1},
+					Range: &Range{StartLine: issue.Line, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn},
 				})
 			}
 
@@ -116,6 +127,46 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 			}
 
 			lspAnalyzer := intel.Analyzer{RootDir: projectRoot, Config: cfg, DB: db}
+			// The direct intel analyzer normally runs file-local diagnostics. For
+			// this Excel-free contract test, install the same project resolver
+			// projection used by LSP Full so interprocedural VB052–VB054 contracts
+			// are checked on the LSP surface as well.
+			resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+			for _, module := range c.Modules {
+				ir, buildErr := procedureir.BuildSource(procedureir.BuildOptions{
+					RootDir: projectRoot, Path: modulePath(module), ModuleName: module.Name, ModuleKind: module.Kind,
+				}, sources[module.Name])
+				if buildErr != nil {
+					t.Fatal(buildErr)
+				}
+				for _, declaration := range ir.Declarations {
+					resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+						Name: declaration.Name, Type: declaration.Type, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
+						Kind: declaration.Kind, Visibility: declaration.Visibility, File: ir.Path, Line: declaration.Range.StartLine,
+						Parent: declaration.Parent, IsArray: declaration.IsArray,
+					})
+				}
+				for _, procedure := range ir.Procedures {
+					resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+						Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
+						Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: ir.Path,
+						Line: procedure.Symbol.DeclarationRange.StartLine,
+					})
+				}
+			}
+			projectResolver := procedureir.NewResolverWithCompleteness(resolverSymbols, true)
+			lspAnalyzer.RealtimeFindingsFunc = func(_ context.Context, _ string, _ config.Config, _ *vbaast.ParsedDocument, ir procedureir.DocumentIR, _ vbacfg.Document) ([]intel.RealtimeFinding, error) {
+				resolved := procedureir.Resolve(ir, projectResolver)
+				findings := make([]intel.RealtimeFinding, 0)
+				for _, diagnostic := range procedureir.Diagnostics(resolved, true) {
+					findings = append(findings, intel.RealtimeFinding{
+						Code: diagnostic.Code, Severity: "error", Line: diagnostic.Range.StartLine + 1,
+						Column: diagnostic.Range.StartColumn + 1, EndLine: diagnostic.Range.EndLine + 1,
+						EndColumn: diagnostic.Range.EndColumn + 1, Message: diagnostic.Message,
+					})
+				}
+				return findings, nil
+			}
 			for _, module := range c.Modules {
 				path := modulePath(module)
 				for _, diagnostic := range lspAnalyzer.DiagnosticsContext(context.Background(), intel.Document{
@@ -156,7 +207,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 53 || report.BoundFixtures != 43 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 61 || report.BoundFixtures != 51 || report.PartialFixtures != 0 || report.UnboundFixtures != 8 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -185,6 +236,14 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"invalid-public-object-member",
 		"invalid-withevents-shape",
 		"invalid-withevents-standard",
+		"issue590-ambiguous-enum",
+		"issue590-ambiguous-enum-valid",
+		"issue590-missing-project-procedure",
+		"issue590-missing-project-procedure-valid",
+		"issue590-non-callable",
+		"issue590-non-callable-valid",
+		"issue590-undeclared-raiseevent",
+		"issue590-undeclared-raiseevent-valid",
 		"known-as-type",
 		"known-enum-as-type",
 		"known-named-argument",

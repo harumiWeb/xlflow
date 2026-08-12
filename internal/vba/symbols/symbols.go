@@ -649,6 +649,13 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
 		}
+	case "event_statement", "event_declaration":
+		sym := e.simpleSymbol(node, "event", "")
+		sym.Parameters = parameters(node, e.source)
+		e.attachDocumentation(&sym, "symbol")
+		if e.includeSymbol(sym) {
+			e.symbols = append(e.symbols, sym)
+		}
 	case "type_declaration":
 		sym := e.simpleSymbol(node, "type", "")
 		e.attachDocumentation(&sym, "symbol")
@@ -660,6 +667,23 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 		e.attachDocumentation(&sym, "symbol")
 		if e.includeSymbol(sym) {
 			e.symbols = append(e.symbols, sym)
+		}
+		enumName := sym.Name
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			child := node.NamedChild(i)
+			if child == nil || child.Kind() != "enum_member" {
+				continue
+			}
+			member := e.symbolFromNode(child, "enum_member", "")
+			member.Parent = enumName
+			member.Visibility = sym.Visibility
+			if member.Visibility == "" {
+				member.Visibility = "public"
+			}
+			member.Signature = firstLine(child.Utf8Text(e.source))
+			if e.includeSymbol(member) {
+				e.symbols = append(e.symbols, member)
+			}
 		}
 	case "const_declaration":
 		e.constSymbols(node, parentProc)

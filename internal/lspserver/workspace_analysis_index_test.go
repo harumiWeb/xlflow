@@ -18,6 +18,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 )
 
@@ -94,6 +95,144 @@ func TestWorkspaceAnalysisIndexParsesOnceAndUpdatesOnlyChangedFile(t *testing.T)
 	}
 	if counts[a] != 2 || counts[b] != 1 {
 		t.Fatalf("duplicate watcher event reparsed: %#v", counts)
+	}
+}
+
+func TestWorkspaceAnalysisIndexParseFailureMarksSnapshotIncomplete(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("good"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+		if strings.TrimSpace(string(source)) == "bad" {
+			return indexedFileAnalysis{}, errors.New("parse failed")
+		}
+		return indexedFileAnalysis{
+			path: file.Path, moduleKind: file.ModuleKind,
+			symbols: []intel.Symbol{{Name: "Good", File: file.Path}},
+		}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("initial snapshot = %#v, want complete", snapshot)
+	}
+
+	if err := os.WriteFile(path, []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.updatePath(path); err == nil {
+		t.Fatal("parse failure was not returned")
+	}
+	if got, err := index.searchExact("Good"); err != nil || len(got) != 1 {
+		t.Fatalf("effective symbols were dropped after parse failure: %+v, %v", got, err)
+	}
+	if snapshot := index.projectSnapshot(); snapshot.Complete {
+		t.Fatalf("failed parse published complete snapshot: %#v", snapshot)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.removePath(path); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("known deleted path left snapshot incomplete: %#v", snapshot)
+	}
+
+	if err := os.WriteFile(path, []byte("fixed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.updatePath(path); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("clean reparse left snapshot incomplete: %#v", snapshot)
+	}
+}
+
+func TestWorkspaceAnalysisIndexRecoveredIRMarksSnapshotIncomplete(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("clean"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+		ir := procedureir.DocumentIR{Path: file.Path, ModuleName: "Main", ModuleKind: file.ModuleKind}
+		if strings.TrimSpace(string(source)) == "recovered" {
+			ir.Parse.HasMissing = true
+		}
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, procedureIR: ir}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("initial snapshot = %#v, want complete", snapshot)
+	}
+
+	if err := os.WriteFile(path, []byte("recovered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.updatePath(path); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); snapshot.Complete {
+		t.Fatalf("recovered IR published complete snapshot: %#v", snapshot)
+	}
+
+	if err := os.WriteFile(path, []byte("clean-again"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.updatePath(path); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("clean IR left snapshot incomplete: %#v", snapshot)
+	}
+}
+
+func TestWorkspaceAnalysisIndexInitialParseFailureCanRecoverToCompleteSnapshot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+		if strings.TrimSpace(string(source)) == "bad" {
+			return indexedFileAnalysis{}, errors.New("initial parse failed")
+		}
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatalf("initial discovery failed after one file parse error: %v", err)
+	}
+	if snapshot := index.projectSnapshot(); snapshot.Complete {
+		t.Fatalf("initial failed parse published complete snapshot: %#v", snapshot)
+	}
+
+	if err := os.WriteFile(path, []byte("fixed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.updatePath(path); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("clean refresh left initial snapshot incomplete: %#v", snapshot)
 	}
 }
 
@@ -370,6 +509,53 @@ func TestWorkspaceAnalysisIndexCloseRefreshStaysMaskedUntilFreshDiskPublish(t *t
 	}
 	if got, err := index.searchExact("FreshDiskName"); err != nil || len(got) != 1 {
 		t.Fatalf("fresh disk symbols missing after refresh: %+v, %v", got, err)
+	}
+}
+
+func TestWorkspaceAnalysisIndexDiskRefreshMarksSnapshotIncompleteWhileParsing(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	parse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+		if strings.TrimSpace(string(source)) == "updated" {
+			close(started)
+			<-release
+		}
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("initial snapshot = %#v, want complete", snapshot)
+	}
+	if err := os.WriteFile(path, []byte("updated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- index.updatePath(path) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("disk refresh parse did not start")
+	}
+	if snapshot := index.projectSnapshot(); snapshot.Complete {
+		t.Fatalf("in-flight disk refresh published complete snapshot: %#v", snapshot)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := index.projectSnapshot(); !snapshot.Complete {
+		t.Fatalf("published disk refresh left snapshot incomplete: %#v", snapshot)
 	}
 }
 

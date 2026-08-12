@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled, compile-equivalent `VB052`–`VB054` diagnostics for
+  provably invalid project-local call targets, ambiguous bare Enum members,
+  and undeclared `RaiseEvent` targets. Batch lint/analyze and LSP Full share
+  the canonical procedure resolver and fail open for external, built-in,
+  late-bound, dynamic, conditional, partial, or otherwise incomplete models;
+  all three errors are unsuppressible and block source preflight.
+
 - Added default-enabled, compile-equivalent `VB050` module declaration-context
   diagnostics and `VB051` invalid-`Me` diagnostics. Checks use canonical
   standard/class/document/UserForm metadata across lint, LSP, and source

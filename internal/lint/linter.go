@@ -14,6 +14,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/gui"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
+	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -30,6 +31,8 @@ type Issue struct {
 	File             string `json:"file"`
 	Line             int    `json:"line"`
 	Column           int    `json:"column,omitempty"`
+	EndLine          int    `json:"end_line,omitempty"`
+	EndColumn        int    `json:"end_column,omitempty"`
 	Message          string `json:"message"`
 	Kind             string `json:"kind,omitempty"`
 	Symbol           string `json:"symbol,omitempty"`
@@ -185,7 +188,7 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	issues = append(issues, uiIssues...)
-	projectIssues, err := l.projectIssuesContext(ctx)
+	projectIssues, err := l.projectIssuesContext(ctx, files)
 	if err != nil {
 		return Result{}, err
 	}
@@ -1999,13 +2002,17 @@ afterVisibility:
 	}
 }
 
-func (l Linter) projectIssuesContext(ctx context.Context) ([]Issue, error) {
+func (l Linter) projectIssuesContext(ctx context.Context, files []string) ([]Issue, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	issues, err := l.resolutionIssuesContext(ctx, files)
+	if err != nil {
 		return nil, err
 	}
 	cfg := l.Config.Lint
 	if !cfg.DetectScopeShadowing && !cfg.DetectUnusedPrivateProcedures {
-		return nil, nil
+		return issues, nil
 	}
 	result, err := symbols.Inspect(symbols.Options{
 		RootDir:        l.RootDir,
@@ -2019,7 +2026,6 @@ func (l Linter) projectIssuesContext(ctx context.Context) ([]Issue, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var issues []Issue
 	if cfg.DetectScopeShadowing {
 		issues = append(issues, l.symbolScopeIssues(result)...)
 	}
@@ -2038,6 +2044,105 @@ func (l Linter) projectIssuesContext(ctx context.Context) ([]Issue, error) {
 		issues = append(issues, unusedIssues...)
 	}
 	return issues, ctx.Err()
+}
+
+// resolutionIssuesContext projects the canonical procedureir resolution
+// policy into lint issues.  A filtered lint run cannot prove project-wide
+// negatives, so PathFilter deliberately makes this phase fail open.
+func (l Linter) resolutionIssuesContext(ctx context.Context, files []string) ([]Issue, error) {
+	if l.PathFilter != nil {
+		return nil, nil
+	}
+	result, err := symbols.Inspect(symbols.Options{RootDir: l.RootDir, Config: l.Config, IncludePrivate: true, IncludeLabels: false})
+	if err != nil {
+		return nil, err
+	}
+	complete := result.Summary.ParseErrors == 0 && result.Summary.MissingNodes == 0
+	typeDBResult, typeDBErr := typedb.LoadForRuntime("")
+	if typeDBErr != nil || !typeDBResult.Complete {
+		complete = false
+	}
+	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	for _, file := range result.Files {
+		for _, sym := range file.Symbols {
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
+				Visibility: sym.Visibility, File: sym.File, Line: sym.StartLine, Parent: sym.Parent, IsArray: sym.IsArray,
+			})
+		}
+	}
+	if typeDBErr == nil && typeDBResult.DB != nil {
+		for _, constant := range typeDBResult.DB.AllConstantsList() {
+			if strings.TrimSpace(constant.EnumGroup) == "" {
+				continue
+			}
+			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
+				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
+				File: "<typelib>" + constant.Library,
+			})
+		}
+	}
+	resolver := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+	issues := make([]Issue, 0)
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		module, kind := moduleForSymbols(result, l.RootDir, path)
+		ir, err := procedureir.BuildSource(procedureir.BuildOptions{RootDir: l.RootDir, Path: path, ModuleName: module, ModuleKind: kind}, source)
+		if err != nil {
+			continue
+		}
+		resolved := procedureir.Resolve(ir, resolver)
+		for _, diagnostic := range procedureir.Diagnostics(resolved, complete) {
+			issues = append(issues, Issue{Code: diagnostic.Code, Severity: "error", File: displayResolutionPath(l.RootDir, path),
+				Line: diagnostic.Range.StartLine + 1, Column: diagnostic.Range.StartColumn + 1,
+				EndLine: diagnostic.Range.EndLine + 1, EndColumn: diagnostic.Range.EndColumn + 1,
+				Message: diagnostic.Message, Suggestion: resolutionSuggestion(diagnostic.Code)})
+		}
+	}
+	return issues, nil
+}
+
+// displayResolutionPath keeps project-resolution diagnostics consistent with
+// the file-relative paths emitted by the rest of the linter and by corpus
+// source mappings. The resolver itself still consumes absolute paths so that
+// symbol identity and source loading remain unambiguous.
+func displayResolutionPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+func moduleForSymbols(result *symbols.Result, root, path string) (string, string) {
+	rel, _ := filepath.Rel(root, path)
+	rel = filepath.ToSlash(rel)
+	for _, file := range result.Files {
+		if strings.EqualFold(filepath.ToSlash(file.Path), rel) || strings.EqualFold(filepath.Clean(file.Path), filepath.Clean(path)) {
+			return file.ModuleName, file.ModuleKind
+		}
+	}
+	return "", ""
+}
+
+func resolutionSuggestion(code string) string {
+	switch code {
+	case "VB052":
+		return "Call a declared Sub, Function, or Property, or qualify the project-local target correctly."
+	case "VB053":
+		return "Qualify the Enum member with its Enum name."
+	case "VB054":
+		return "Declare the Event in this object module before raising it."
+	default:
+		return "Correct the deterministic compile-time resolution error."
+	}
 }
 
 func (l Linter) symbolScopeIssues(result *symbols.Result) []Issue {

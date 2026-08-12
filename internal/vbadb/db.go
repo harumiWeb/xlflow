@@ -17,13 +17,17 @@ const SchemaVersion = 1
 var builtinFS embed.FS
 
 type DB struct {
-	Types        map[string]TypeInfo
-	Aliases      map[string]string
-	Constants    map[string]ConstantInfo
-	ProgIDs      map[string]string
-	ProgIDNames  map[string]string
-	GlobalValues map[string]string
-	GlobalNames  map[string]string
+	Types     map[string]TypeInfo
+	Aliases   map[string]string
+	Constants map[string]ConstantInfo
+	// ConstantCandidates preserves all TypeLib constants that share a folded
+	// name. Constants remains the compatibility single-winner map used by the
+	// existing completion/signature APIs.
+	ConstantCandidates map[string][]ConstantInfo `json:"-"`
+	ProgIDs            map[string]string
+	ProgIDNames        map[string]string
+	GlobalValues       map[string]string
+	GlobalNames        map[string]string
 }
 
 type TypeInfo struct {
@@ -111,13 +115,14 @@ func LoadBuiltinInto(db *DB) error {
 
 func New() *DB {
 	return &DB{
-		Types:        map[string]TypeInfo{},
-		Aliases:      map[string]string{},
-		Constants:    map[string]ConstantInfo{},
-		ProgIDs:      map[string]string{},
-		ProgIDNames:  map[string]string{},
-		GlobalValues: map[string]string{},
-		GlobalNames:  map[string]string{},
+		Types:              map[string]TypeInfo{},
+		Aliases:            map[string]string{},
+		Constants:          map[string]ConstantInfo{},
+		ConstantCandidates: map[string][]ConstantInfo{},
+		ProgIDs:            map[string]string{},
+		ProgIDNames:        map[string]string{},
+		GlobalValues:       map[string]string{},
+		GlobalNames:        map[string]string{},
 	}
 }
 
@@ -192,7 +197,9 @@ func (db *DB) MergeData(data fileData) {
 				Source:     "xlflow",
 			})
 		}
-		db.Constants[fold(c.Name)] = c
+		key := fold(c.Name)
+		db.Constants[key] = c
+		db.ConstantCandidates[key] = append(db.ConstantCandidates[key], c)
 	}
 	for progID, typ := range data.ProgIDs {
 		key := fold(progID)
@@ -366,6 +373,32 @@ func (db *DB) ResolveConstant(name string) (ConstantInfo, bool) {
 	return c, ok
 }
 
+// ResolveConstants returns every known TypeLib constant with this folded name
+// in deterministic order. ResolveConstant remains the compatibility API for
+// callers that intentionally need one historical winner.
+func (db *DB) ResolveConstants(name string) []ConstantInfo {
+	if db == nil {
+		return nil
+	}
+	key := fold(name)
+	items := append([]ConstantInfo(nil), db.ConstantCandidates[key]...)
+	if len(items) == 0 {
+		if item, ok := db.Constants[key]; ok {
+			items = []ConstantInfo{item}
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Library != items[j].Library {
+			return items[i].Library < items[j].Library
+		}
+		if items[i].EnumGroup != items[j].EnumGroup {
+			return items[i].EnumGroup < items[j].EnumGroup
+		}
+		return items[i].Name < items[j].Name
+	})
+	return items
+}
+
 func (db *DB) ResolveProgID(progID string) (TypeInfo, bool) {
 	if db == nil {
 		return TypeInfo{}, false
@@ -506,6 +539,45 @@ func (db *DB) ConstantsList() []ConstantInfo {
 		out = append(out, constant)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// AllConstantsList returns all distinct TypeLib constants, including folded
+// names that intentionally collapse to one compatibility winner in Constants.
+func (db *DB) AllConstantsList() []ConstantInfo {
+	if db == nil {
+		return nil
+	}
+	byKey := make(map[string]ConstantInfo)
+	for _, candidates := range db.ConstantCandidates {
+		for _, candidate := range candidates {
+			key := strings.ToLower(strings.TrimSpace(candidate.Library)) + "\x00" +
+				strings.ToLower(strings.TrimSpace(candidate.EnumGroup)) + "\x00" +
+				strings.ToLower(strings.TrimSpace(candidate.Name))
+			byKey[key] = candidate
+		}
+	}
+	if len(byKey) == 0 {
+		for _, candidate := range db.Constants {
+			key := strings.ToLower(strings.TrimSpace(candidate.Library)) + "\x00" +
+				strings.ToLower(strings.TrimSpace(candidate.EnumGroup)) + "\x00" +
+				strings.ToLower(strings.TrimSpace(candidate.Name))
+			byKey[key] = candidate
+		}
+	}
+	out := make([]ConstantInfo, 0, len(byKey))
+	for _, candidate := range byKey {
+		out = append(out, candidate)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Library != out[j].Library {
+			return out[i].Library < out[j].Library
+		}
+		if out[i].EnumGroup != out[j].EnumGroup {
+			return out[i].EnumGroup < out[j].EnumGroup
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }
 

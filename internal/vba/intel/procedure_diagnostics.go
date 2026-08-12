@@ -448,7 +448,7 @@ func fastDiagnosticForProcedure(diagnostic Diagnostic, entry ProcedureCatalogEnt
 
 func interproceduralDiagnostic(code string) bool {
 	switch strings.ToUpper(code) {
-	case "VBA206", "VBA218", "VBA237":
+	case "VBA206", "VBA218", "VBA237", "VB052", "VB053", "VB054":
 		return true
 	default:
 		return false
