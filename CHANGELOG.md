@@ -20,6 +20,10 @@ All notable changes to xlflow will be documented in this file.
   VBA file acquisition elevate the cycle to `warning`. Configure or disable
   it with `detect_procedure_call_cycles` or
   `[analyze].disabled_rules = ["VBA244"]`.
+- Fixed `VB023` false positives for valid composite `For Each` control targets
+  such as array elements. The rule now resolves bare control identifiers from
+  Procedure IR declarations and remains conservative for unresolved composite
+  targets.
 
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.

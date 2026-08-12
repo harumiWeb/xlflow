@@ -854,7 +854,9 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
   identity when matching declarations to references
 - `VB021`: private procedure unreachable from known project roots; confirmed call edges, host events, tests, externally callable public standard-module APIs as possible roots, and conservative dynamic callback possibilities are considered
 - `VB022`: confusing parenthesized call syntax such as `Foo (bar)`
-- `VB023`: `For Each` control variable is undeclared or obviously incompatible
+- `VB023`: `For Each` control variable is undeclared or obviously incompatible;
+  declaration resolution uses Procedure IR for procedure and module scopes, and
+  unresolved composite control targets such as array elements remain fail-open
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 - `VB029`: `Option Explicit` is present and an assignment target or loop control variable is not declared in the project-visible namespace
