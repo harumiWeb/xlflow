@@ -75,23 +75,11 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 			}
 			continue
 		}
-		rest := ""
-		for _, prefix := range []string{"const ", "public const ", "private const ", "friend const ", "static const "} {
-			if strings.HasPrefix(lower, prefix) {
-				rest = strings.TrimSpace(trim[len(prefix):])
-				break
-			}
+		if name, expression, ok := arrayShapeConstLine(trim); ok {
+			key := strings.ToLower(cleanIdentifier(name))
+			consts[key] = true
+			constExprs[key] = expression
 		}
-		if rest == "" {
-			continue
-		}
-		eq := strings.Index(rest, "=")
-		if eq < 1 {
-			continue
-		}
-		name := strings.TrimSpace(strings.Fields(rest[:eq])[0])
-		consts[strings.ToLower(cleanIdentifier(name))] = true
-		constExprs[strings.ToLower(cleanIdentifier(name))] = strings.TrimSpace(rest[eq+1:])
 	}
 	for pass := 0; pass < len(constExprs); pass++ {
 		changed := false
@@ -128,32 +116,35 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 	// TypeLib enum members/constants are part of the resolved symbol space even
 	// though they do not appear in the source IR. A missing or incomplete
 	// runtime database is deliberately fail-open.
-	// Merge TypeLib constants even when the caller supplied a project-visible
-	// table. Batch analysis and direct LSP requests both pass a non-nil project
-	// map, but built-in constants are still immutable VBA symbols.
-	if typeDBResult, err := typedb.LoadForRuntime(""); err == nil && typeDBResult.DB != nil {
-		typeLibCounts := map[string]int{}
-		for _, constant := range typeDBResult.DB.AllConstantsList() {
-			key := normalizeQualifiedIdentifier(constant.Name)
-			if key != "" {
-				typeLibCounts[key]++
+	// Batch and LSP adapters supply a project-visible table that already includes
+	// the immutable runtime symbols. Only the standalone adapter needs to load
+	// TypeDB here; avoid reloading it once per document in project scans.
+	if l.VisibleConstants == nil {
+		if typeDBResult, err := typedb.LoadForRuntime(""); err == nil && typeDBResult.DB != nil {
+			typeLibCounts := map[string]int{}
+			constants := typeDBResult.DB.AllConstantsList()
+			for _, constant := range constants {
+				key := normalizeQualifiedIdentifier(constant.Name)
+				if key != "" {
+					typeLibCounts[key]++
+				}
+				addQualifiedConst(constant.EnumGroup, constant.Name)
+				addQualifiedConst(constant.Library, constant.Name)
 			}
-			addQualifiedConst(constant.EnumGroup, constant.Name)
-			addQualifiedConst(constant.Library, constant.Name)
-		}
-		for _, constant := range typeDBResult.DB.AllConstantsList() {
-			key := normalizeQualifiedIdentifier(constant.Name)
-			if typeLibCounts[key] != 1 {
-				delete(consts, key)
-				continue
+			for _, constant := range constants {
+				key := normalizeQualifiedIdentifier(constant.Name)
+				if typeLibCounts[key] != 1 {
+					delete(consts, key)
+					continue
+				}
+				if _, sourceExists := consts[key]; sourceExists {
+					// A source Const and a TypeLib constant with the same unqualified
+					// name are ambiguous without an explicit qualifier.
+					delete(consts, key)
+					continue
+				}
+				consts[key] = true
 			}
-			if _, sourceExists := consts[key]; sourceExists {
-				// A source Const and a TypeLib constant with the same unqualified
-				// name are ambiguous without an explicit qualifier.
-				delete(consts, key)
-				continue
-			}
-			consts[key] = true
 		}
 	}
 	var issues []Issue
@@ -200,13 +191,13 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 			continue
 		}
 		body := declarationBody(trim)
+		scopeValues := arrayShapeConstantsForLine(lineNo+1, lines, ir, constValues)
 		for _, part := range splitArrayDeclarators(body) {
 			name, bounds, ok := arrayDeclaratorBounds(part)
 			if !ok || strings.TrimSpace(bounds) == "" {
 				continue
 			}
 			for _, dim := range splitArrayDeclarators(bounds) {
-				scopeValues := arrayShapeConstantsForLine(lineNo+1, lines, ir, constValues)
 				pieces := strings.SplitN(strings.ToLower(dim), " to ", 2)
 				lo, lok := optionBase, true
 				upperExpr := strings.TrimSpace(dim)

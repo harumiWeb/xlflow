@@ -124,9 +124,13 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
 	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
 	initial := arrayInitialState(variables)
+	// Constant bounds are scoped to the current procedure. Resolve them once
+	// for this CFG walk so every ReDim transfer shares the same table without
+	// repeatedly reparsing the module and procedure declarations.
+	constants := arrayIntegerConstants(file, proc)
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
-		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial)...)
+		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants)...)
 		return uniqueArrayFindings(findings)
 	}
 
@@ -136,7 +140,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		seen[arrayFindingKey(finding)] = true
 	}
 	walkArrayCFG(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line)
+		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
 		for _, finding := range issues {
 			key := arrayFindingKey(finding)
 			if !seen[key] {
@@ -287,12 +291,12 @@ func comparisonAssignmentCarrier(statement procedureir.Statement, expression pro
 	return statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet
 }
 
-func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState) []Finding {
+func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, constants map[string]int) []Finding {
 	var findings []Finding
 	seen := map[string]bool{}
 	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
 		var issues []Finding
-		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line)
+		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants)
 		for _, finding := range issues {
 			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
 			if !seen[key] {
@@ -508,7 +512,7 @@ func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 	return state
 }
 
-func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int) (arrayFlowState, []Finding) {
+func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int) (arrayFlowState, []Finding) {
 	state = cloneArrayState(state)
 	var findings []Finding
 	add := func(code, message, reason, suggestion string) {
@@ -529,7 +533,6 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		return state, findings
 	}
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
-		constants := arrayIntegerConstants(file, proc)
 		base := optionBase(file.Lines)
 		for _, clause := range splitArgs(match[2]) {
 			redim, direct := parseDirectArrayRedimClause(clause)
@@ -558,9 +561,9 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			// A Variant can be resized only after its array nature is proven by
 			// an assignment such as Array(...).  An unproven Variant remains
 			// unknown and must not be treated as a scalar ReDim misuse.
-			variantArray := known && variable.isVariant && old.knownArray
-			resizable := known && (variable.isArray || variantArray) && !variable.fixed
-			if known && variable.isVariant && !old.knownArray {
+			variantArray := variable.isVariant && old.knownArray
+			resizable := (variable.isArray || variantArray) && !variable.fixed
+			if variable.isVariant && !old.knownArray {
 				continue
 			}
 			if !resizable {
@@ -1025,9 +1028,6 @@ func iterableSourceKnownInvalid(source string, variables map[string]arrayVariabl
 	if !arrayEraseNameRe.MatchString(name) {
 		// Numeric, Boolean, date, and string literals are definitely scalar; all other
 		// expressions remain unknown rather than guessing their result type.
-		if scalarExpressionKnown(source) {
-			return true
-		}
 		return false
 	}
 	variable, ok := variables[strings.ToLower(name)]
@@ -1311,12 +1311,13 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 				// unconditional return assignments, so leave the summary unknown.
 				continue
 			}
+			constants := arrayIntegerConstants(file, proc)
 			walkArrayCFG(proc.Graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 					value, known := arrayExpressionState(rhs, in, ctx)
 					returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 				}
-				out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line)
+				out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
 				return out
 			})
 			returnLines := make([]int, 0, len(returnCandidates))

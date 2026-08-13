@@ -1104,6 +1104,36 @@ End Sub
 	assertFinding(t, findings, "VBA102", 7)
 }
 
+func TestAnalyzerDoesNotInferAmbiguousObjectFunctionReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "First.bas", `Option Explicit
+Public Function FindRange() As Range
+  Set FindRange = Sheet1.Range("A1")
+End Function
+`)
+	writeModule(t, dir, "Second.bas", `Option Explicit
+Public Function FindRange() As Range
+  Set FindRange = Sheet1.Range("B1")
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim result As Range
+  result = FindRange()
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findings {
+		if finding.Code == "VBA102" && finding.Line == 4 {
+			t.Fatalf("ambiguous object return must not produce VBA102: %+v", findings)
+		}
+	}
+}
+
 func TestAnalyzerFindsMissingSetInObjectReturningFunction(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -4881,28 +4911,30 @@ End Sub
 	}
 }
 
-func TestAnalyzerVBA227RecognizesFixedByRefArrayShape(t *testing.T) {
+func TestAnalyzerVBA227RecognizesFixedArrayShapeWithValidByRefParameter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
-Public Sub Resize(ByRef values(0 To 1) As Long)
-  ReDim values(0 To 2)
+Public Sub Resize(ByRef values() As Long)
+  Dim fixedValues(0 To 1) As Long
+  ReDim fixedValues(0 To 2)
 End Sub
 `)
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 3 {
-		t.Fatalf("fixed ByRef array ReDim should be diagnosed: %#v", got)
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("fixed local array ReDim should be diagnosed with a valid ByRef parameter: %#v", got)
 	}
 }
 
-func TestAnalyzerVBA227TreatsFixedByRefArrayAsAllocated(t *testing.T) {
+func TestAnalyzerVBA227TreatsByRefArrayAsAllocatedAfterReDim(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
-Public Sub Probe(ByRef values(0 To 1) As Long)
+Public Sub Probe(ByRef values() As Long)
+  ReDim values(0 To 1)
   If LBound(values) <> 0 Then Debug.Print "bad"
 End Sub
 `)
@@ -4911,7 +4943,7 @@ End Sub
 		t.Fatal(err)
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
-		t.Fatalf("fixed ByRef array is allocated on entry: %#v", got)
+		t.Fatalf("ByRef array is allocated after ReDim: %#v", got)
 	}
 }
 

@@ -219,6 +219,9 @@ func New(opts Options) (*Server, func(), error) {
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
 	s.defaultDiagnosticsRequest = reflect.ValueOf(s.diagnosticsRequest).Pointer()
+	var visibleConstantsMu sync.Mutex
+	var visibleConstantsRevision uint64
+	var visibleConstants map[string]bool
 	s.projectDiagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest, project intel.ProjectAnalysisSnapshot) intel.DiagnosticResult {
 		projectEffects := s.projectEffectSummary(project)
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
@@ -227,7 +230,13 @@ func New(opts Options) (*Server, func(), error) {
 		}
 		resolutionResolver, resolvedProjectIR := s.projectResolution(project, project.Complete && typeDB.Complete)
 		analyzer := s.analyzer
-		analyzer.VisibleConstants = projectVisibleConstants(project)
+		visibleConstantsMu.Lock()
+		if visibleConstants == nil || visibleConstantsRevision != project.Revision {
+			visibleConstants = projectVisibleConstants(project, typeDB.DB)
+			visibleConstantsRevision = project.Revision
+		}
+		analyzer.VisibleConstants = visibleConstants
+		visibleConstantsMu.Unlock()
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
 			projectKey := symbolFileKey(ir.Path)
 			if projectDocument, ok := projectByPath[projectKey]; ok {
@@ -299,7 +308,7 @@ func New(opts Options) (*Server, func(), error) {
 	}, nil
 }
 
-func projectVisibleConstants(project intel.ProjectAnalysisSnapshot) map[string]bool {
+func projectVisibleConstants(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB) map[string]bool {
 	counts := make(map[string]int)
 	add := func(name string) {
 		name = strings.ToLower(strings.TrimSpace(name))
@@ -317,7 +326,7 @@ func projectVisibleConstants(project intel.ProjectAnalysisSnapshot) map[string]b
 	for _, document := range project.Documents {
 		standardModule := strings.EqualFold(document.IR.ModuleKind, "standard")
 		for _, declaration := range document.IR.Declarations {
-			if !declaration.IsConst && !strings.EqualFold(declaration.Kind, "enum_member") {
+			if !declaration.IsConst && !procedureir.IsConstKind(declaration.Kind) {
 				continue
 			}
 			if !strings.EqualFold(declaration.Visibility, "public") && !strings.EqualFold(declaration.Visibility, "friend") {
@@ -328,6 +337,31 @@ func projectVisibleConstants(project intel.ProjectAnalysisSnapshot) map[string]b
 			}
 			addQualified(document.IR.ModuleName, declaration.Name)
 			addQualified(declaration.Parent, declaration.Name)
+		}
+	}
+	if typeDB != nil {
+		constants := typeDB.AllConstantsList()
+		countsByName := make(map[string]int)
+		for _, constant := range constants {
+			name := strings.ToLower(strings.TrimSpace(constant.Name))
+			if name != "" {
+				countsByName[name]++
+			}
+		}
+		for _, constant := range constants {
+			name := strings.ToLower(strings.TrimSpace(constant.Name))
+			if name == "" {
+				continue
+			}
+			if countsByName[name] == 1 {
+				counts[name]++
+			}
+			if group := strings.ToLower(strings.TrimSpace(constant.EnumGroup)); group != "" {
+				counts[group+"."+name]++
+			}
+			if library := strings.ToLower(strings.TrimSpace(constant.Library)); library != "" {
+				counts[library+"."+name]++
+			}
 		}
 	}
 	constants := make(map[string]bool)

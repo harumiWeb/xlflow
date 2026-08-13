@@ -42,9 +42,24 @@ func EvaluateInteger(expression string, constants map[string]int) Result {
 		return result
 	}
 	if p.pos != len(p.text) {
+		if unsupportedIntegerOperator(p.text[p.pos:]) {
+			return Result{Kind: Unknown, Reason: "unsupported integer operator"}
+		}
 		return Result{Kind: Invalid, Reason: "unexpected token"}
 	}
 	return result
+}
+
+func unsupportedIntegerOperator(remainder string) bool {
+	remainder = strings.TrimSpace(remainder)
+	if remainder == "" {
+		return false
+	}
+	if strings.HasPrefix(remainder, "\\") || strings.HasPrefix(remainder, "^") {
+		return true
+	}
+	lower := strings.ToLower(remainder)
+	return strings.HasPrefix(lower, "mod") && (len(lower) == 3 || !unicode.IsLetter(rune(lower[3])))
 }
 
 type parser struct {
@@ -162,6 +177,9 @@ func combine(left, right Result, op byte) Result {
 		if right.Value == 0 {
 			return Result{Kind: Invalid, Reason: "division by zero"}
 		}
+		if left.Value%right.Value != 0 {
+			return Result{Kind: Unknown, Reason: "non-integral division"}
+		}
 		value /= right.Value
 	}
 	return Result{Kind: Known, Value: value, Type: "integer"}
@@ -179,7 +197,10 @@ func looksLikeCall(text string) bool {
 		for j < len(text) && (text[j] == ' ' || text[j] == '\t') {
 			j++
 		}
-		return j < len(text) && text[j] == '('
+		if j < len(text) && text[j] == '(' {
+			return true
+		}
+		i = j - 1
 	}
 	return false
 }

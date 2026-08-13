@@ -635,7 +635,7 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
 				Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray,
-				IsConst: strings.EqualFold(sym.Kind, "const") || strings.EqualFold(sym.Kind, "enum_member"),
+				IsConst: procedureir.IsConstKind(sym.Kind),
 			})
 			graphSymbols = append(graphSymbols, callgraph.Symbol{
 				Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
@@ -852,7 +852,7 @@ func (x *workspaceAnalysisIndex) queryResolvedCalls(query workspaceCallQuery) ([
 			Visibility: sym.Visibility,
 			File:       workspaceDisplayPath(x.root, entry.path),
 			Line:       sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray,
-			IsConst: strings.EqualFold(sym.Kind, "const") || strings.EqualFold(sym.Kind, "enum_member"),
+			IsConst: procedureir.IsConstKind(sym.Kind),
 		})
 	}
 	x.mu.RUnlock()
@@ -899,7 +899,7 @@ func (x *workspaceAnalysisIndex) callGraphSnapshot() (callgraph.Snapshot, error)
 		}
 		entry := x.effective[ref.path]
 		file := workspaceDisplayPath(x.root, entry.path)
-		resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray, IsConst: strings.EqualFold(sym.Kind, "const") || strings.EqualFold(sym.Kind, "enum_member")})
+		resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind, Visibility: sym.Visibility, File: file, Line: sym.Range.Start.Line + 1, Parent: sym.Parent, IsArray: sym.IsArray, IsConst: procedureir.IsConstKind(sym.Kind)})
 		graphSymbols = append(graphSymbols, callgraph.Symbol{
 			Name: sym.Name, Kind: sym.Kind, Module: sym.Module, ModuleKind: sym.ModuleKind, File: file,
 			Line: sym.Range.Start.Line + 1, Column: sym.Range.Start.Character + 1, EndLine: sym.Range.End.Line + 1, EndColumn: sym.Range.End.Character + 1,

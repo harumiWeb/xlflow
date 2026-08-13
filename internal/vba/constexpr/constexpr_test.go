@@ -14,6 +14,11 @@ func TestEvaluateIntegerClassifiesKnownUnknownAndInvalid(t *testing.T) {
 		{name: "unary", expr: "-Offset", kind: Known, value: 1},
 		{name: "unresolved", expr: "runtimeValue", kind: Unknown},
 		{name: "call", expr: "GetBound()", kind: Unknown},
+		{name: "trailing call", expr: "Limit + GetBound()", kind: Unknown},
+		{name: "integer division operator", expr: "10 \\ 2", kind: Unknown},
+		{name: "mod operator", expr: "10 Mod 3", kind: Unknown},
+		{name: "exponent operator", expr: "10 ^ 2", kind: Unknown},
+		{name: "non-integral division", expr: "10 / 3", kind: Unknown},
 		{name: "divide zero", expr: "4 / 0", kind: Invalid},
 		{name: "syntax", expr: "1 To 2", kind: Invalid},
 	} {

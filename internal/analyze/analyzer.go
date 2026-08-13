@@ -423,16 +423,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	}
 	analysisCtx := a.buildContext(parsedFiles)
 	analysis := a
-	analysis.visibleConstants = projectVisibleConstants(parsedFiles)
-	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
-		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
-	}
-	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
-		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
-	}
-	if analysis.Config.Analyze.DetectEventHandlerReentry {
-		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
-	}
 	var warnings []map[string]any
 	if needsTypeDB {
 		loaded, err := typedb.LoadForRuntime("")
@@ -446,6 +436,16 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 				"code": "type_db_load_warning", "message": warning,
 			})
 		}
+	}
+	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
+	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
+		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
+	}
+	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
+		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
+	}
+	if analysis.Config.Analyze.DetectEventHandlerReentry {
+		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
 	// Resolution completeness must include the generated TypeLib view. Load it
 	// before constructing the resolver so incomplete external symbols fail open
@@ -793,7 +793,7 @@ func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
 	return effects.Build(documents)
 }
 
-func projectVisibleConstants(files []parsedFile) map[string]bool {
+func projectVisibleConstants(files []parsedFile, typeDB *vbadb.DB) map[string]bool {
 	counts := make(map[string]int)
 	add := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
@@ -822,6 +822,31 @@ func projectVisibleConstants(files []parsedFile) map[string]bool {
 			}
 			addQualified(file.IR.ModuleName, declaration.Name)
 			addQualified(declaration.Parent, declaration.Name)
+		}
+	}
+	if typeDB != nil {
+		constants := typeDB.AllConstantsList()
+		countsByName := make(map[string]int)
+		for _, constant := range constants {
+			name := strings.ToLower(cleanIdentifier(constant.Name))
+			if name != "" {
+				countsByName[name]++
+			}
+		}
+		for _, constant := range constants {
+			name := strings.ToLower(cleanIdentifier(constant.Name))
+			if name == "" {
+				continue
+			}
+			if countsByName[name] == 1 {
+				counts[name]++
+			}
+			if group := strings.ToLower(cleanIdentifier(constant.EnumGroup)); group != "" {
+				counts[group+"."+name]++
+			}
+			if library := strings.ToLower(cleanIdentifier(constant.Library)); library != "" {
+				counts[library+"."+name]++
+			}
 		}
 	}
 	constants := make(map[string]bool)
@@ -1374,13 +1399,14 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 					// A receiver-less call with duplicate project candidates is
 					// ambiguous. Never infer a shape from declaration order.
 					delete(ctx.functionShapes, functionName)
+					delete(ctx.functionReturns, functionName)
 					ctx.functionAmbiguous[functionName] = true
 				} else {
 					ctx.functionNamesSeen[functionName] = true
+					if isObjectType(proc.ReturnType) {
+						ctx.functionReturns[functionName] = proc.ReturnType
+					}
 				}
-			}
-			if isObjectType(proc.ReturnType) {
-				ctx.functionReturns[functionName] = proc.ReturnType
 			}
 			// Only built-in scalar return types are strong enough to reject a
 			// For Each source. A user-defined class/UDT may expose an enumerator

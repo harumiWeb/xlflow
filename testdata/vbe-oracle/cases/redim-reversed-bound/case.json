@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "redim-reversed-bound",
-  "description": "ReDim with reversed bounds runtime probe.",
+  "description": "ReDim with reversed bounds; the VBE accepts the compile-time case while runtime bound behavior remains unverified.",
   "modules": [
     {
       "name": "Main",
@@ -21,7 +21,7 @@
   "analysis": {
     "binding_status": "unbound",
     "evidence_role": "language-observation",
-    "binding_note": "Runtime bound observation; do not bind to compile-equivalent evidence."
+    "binding_note": "Compile acceptance is recorded as a language observation; runtime bound behavior remains unbound and is not a VBA227 compile binding."
   },
   "provenance": {
     "status": "asserted",
@@ -31,7 +31,7 @@
         "excel_build": "17932",
         "bitness": "x64",
         "locale": "ja-JP",
-        "verified_at": "2026-08-13T10:22:33Z"
+        "verified_at": "2026-08-13T15:18:00Z"
       }
     ]
   }

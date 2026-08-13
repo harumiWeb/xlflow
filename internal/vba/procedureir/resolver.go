@@ -952,6 +952,13 @@ func isEnumMemberKind(kind string) bool {
 	}
 }
 
+// IsConstKind reports whether a resolver symbol denotes an immutable constant
+// value. Keep the accepted symbol kinds centralized so lint, LSP, and project
+// resolution cannot drift in their VB060 handling.
+func IsConstKind(kind string) bool {
+	return strings.EqualFold(kind, "const") || strings.EqualFold(kind, "enum_member")
+}
+
 func cleanQualifiedName(text string) string {
 	parts := strings.FieldsFunc(strings.TrimSpace(text), func(r rune) bool { return r == '.' || r == '!' })
 	cleaned := make([]string, 0, len(parts))

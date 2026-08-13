@@ -100,7 +100,7 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		{id: "VB057", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 		{id: "VB058", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 		{id: "VB059", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP}},
-		{id: "VB060", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
+		{id: "VB060", scope: ScopeProjectWide, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 		{id: "VB061", scope: ScopeFileLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 	} {
 		rule, found := Lookup(tc.id)

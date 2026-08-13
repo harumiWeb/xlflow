@@ -91,6 +91,13 @@ their reset-but-allocated state and dynamic arrays to unallocated state.
 ## Evidence
 
 - Issue #593 acceptance criteria and test matrix.
+- Focused compile-oracle controls and bindings are recorded by case ID:
+  `known-compile-accept` / `known-compile-reject` are harness controls;
+  `const-assignment-accepted` / `const-assignment-rejected` bind `VB060`;
+  and `fixed-array-valid-bound` / `fixed-array-reversed-bound` bind `VB061`.
+  `redim-scalar` is a compile rejection and `redim-reversed-bound` is a compile
+  acceptance; both remain unbound language observations because VBA227 owns
+  runtime safety rather than compile-equivalent diagnostics.
 - `docs/specs/array-lifecycle-safety.md` and ADR-0028 for the existing
   allocation/dimension model and `VBA208` ownership.
 - `docs/specs/vba-analysis-ir.md` and `internal/vba/procedureir` for array

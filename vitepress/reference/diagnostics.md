@@ -63,7 +63,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB057`](#vb057)   | lint    | error       | procedure-local | yes     | Mismatched Next control variable                   |
 | [`VB058`](#vb058)   | lint    | error       | procedure-local | yes     | Invalid Exit statement                             |
 | [`VB059`](#vb059)   | lint    | error       | procedure-local | yes     | Invalid call syntax                                |
-| [`VB060`](#vb060)   | lint    | error       | procedure-local | yes     | Assignment to constant                             |
+| [`VB060`](#vb060)   | lint    | error       | project-wide    | yes     | Assignment to constant                             |
 | [`VB061`](#vb061)   | lint    | error       | file-local      | yes     | Invalid constant array bounds                      |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
@@ -1343,7 +1343,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Default severity            | `error`                  |
 | Supported severities        | `error`                  |
 | Surfaces                    | `lint`, `lsp`, `analyze` |
-| Scope                       | `procedure-local`        |
+| Scope                       | `project-wide`           |
 | Precision                   | `high`                   |
 | Enabled by default          | yes                      |
 | Configuration               | not configurable         |

@@ -1949,7 +1949,7 @@
       "supported_severities": ["error"],
       "surfaces": ["lint", "lsp", "analyze"],
       "default_enabled": true,
-      "scope": "procedure-local",
+      "scope": "project-wide",
       "realtime": true,
       "precision": "high",
       "fix_available": false,

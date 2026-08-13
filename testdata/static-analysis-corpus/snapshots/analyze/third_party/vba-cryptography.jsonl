@@ -146,7 +146,6 @@
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA227","severity":"warning","line":345,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA227","severity":"warning","line":364,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA227","severity":"warning","line":364,"column":0}
-{"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA222","severity":"warning","line":382,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA239","severity":"warning","line":399,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA239","severity":"warning","line":399,"column":0}
 {"project":"third_party/vba-cryptography","file":"BStorage.bas","surface":"analyze","code":"VBA239","severity":"warning","line":399,"column":0}

@@ -270,8 +270,14 @@ func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc D
 	// produced by the shared lint shape checker. Reuse that checker here so
 	// callers asking specifically for compile-equivalent LSP diagnostics see
 	// the same VB060/VB061 contracts as full diagnostics and batch analyze.
+	if ctx.Err() != nil {
+		return out
+	}
 	if parsed, closeParsed, err := parsedDocumentForDocument(doc); err == nil {
 		defer closeParsed()
+		if ctx.Err() != nil {
+			return out
+		}
 		if ir, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed); err == nil {
 			for _, issue := range lint.CompileEquivalentArrayShapeIssuesWithConstants(doc.Path, doc.Source, &ir, a.VisibleConstants) {
 				if !isCompileEquivalentDiagnostic(issue.Code) {
