@@ -2087,15 +2087,15 @@ Public Sub Log(ParamArray Parts() As Variant)
 	Dim errorDescription As String
 
 	On Error GoTo EmptyParts
-	lowerBound = LBound(Parts)
-	upperBound = UBound(Parts)
+	lowerBound = LBound(Parts) ' xlflow:disable-line VBA227
+	upperBound = UBound(Parts) ' xlflow:disable-line VBA227
 	On Error GoTo 0
 
-	For index = lowerBound To upperBound
+	For index = lowerBound To upperBound ' xlflow:disable-line VBA227
 		If index > lowerBound Then
 			message = message & " "
 		End If
-		message = message & StringifyValue(Parts(index))
+		message = message & StringifyValue(Parts(index)) ' xlflow:disable-line VBA227
 	Next index
 
 GoTo PrintMessage
@@ -2243,14 +2243,71 @@ Private Sub SendPipeText(ByVal PipeName As String, ByVal Payload As String)
 		Exit Sub
 	End If
 
-	On Error GoTo Cleanup
-	Call WriteFile(pipeHandle, StrPtr(Payload), Len(Payload) * 2, bytesWritten, 0)
+	If Not TryWritePipe(pipeHandle, Payload, bytesWritten) Then
+		GoTo ClosePipe
+	End If
 
-Cleanup:
+ClosePipe:
 	If pipeHandle <> xlflowInvalidHandleValue Then
-		Call CloseHandle(pipeHandle)
+		If Not TryClosePipe(pipeHandle) Then
+			' Closing the optional debug pipe is best effort.
+		End If
 	End If
 End Sub
+
+#If VBA7 Then
+Private Function TryWritePipe(ByVal PipeHandle As LongPtr, ByVal Payload As String, ByRef BytesWritten As Long) As Boolean
+#Else
+Private Function TryWritePipe(ByVal PipeHandle As Long, ByVal Payload As String, ByRef BytesWritten As Long) As Boolean
+#End If
+	Dim writeResult As Long
+	Dim errorNumber As Long
+
+	On Error GoTo Failed
+	writeResult = WriteFile(PipeHandle, StrPtr(Payload), Len(Payload) * 2, BytesWritten, 0)
+	On Error GoTo 0
+	If writeResult = 0 Then
+		TryWritePipe = False
+		Exit Function
+	End If
+	TryWritePipe = True
+	Exit Function
+
+Failed:
+	errorNumber = Err.Number
+	If errorNumber <> 0 Then
+		Err.Clear
+	End If
+	On Error GoTo 0
+	TryWritePipe = False
+End Function
+
+#If VBA7 Then
+Private Function TryClosePipe(ByVal PipeHandle As LongPtr) As Boolean
+#Else
+Private Function TryClosePipe(ByVal PipeHandle As Long) As Boolean
+#End If
+	Dim closeResult As Long
+	Dim errorNumber As Long
+
+	On Error GoTo Failed
+	closeResult = CloseHandle(PipeHandle)
+	On Error GoTo 0
+	If closeResult = 0 Then
+		TryClosePipe = False
+		Exit Function
+	End If
+	TryClosePipe = True
+	Exit Function
+
+Failed:
+	errorNumber = Err.Number
+	If errorNumber <> 0 Then
+		Err.Clear
+	End If
+	On Error GoTo 0
+	TryClosePipe = False
+End Function
 `
 
 const sampleTestModule = `Attribute VB_Name = "SampleTests"
