@@ -14,9 +14,14 @@ be run sequentially. Do not run two oracle processes at the same time: Excel,
 the VBE command bars, modal dialogs, and cleanup ownership are single-user
 resources.
 
-The command only terminates the Excel process it created and recorded. If a run
-reports an unconfirmed cleanup or an infrastructure failure, inspect Task
-Manager before starting another run and do not promote a fixture.
+The command only terminates the Excel process it created and recorded. Other
+Excel instances may already be running or start while the oracle executes;
+they are neither attached to nor terminated. Concurrent instances discovered
+during cleanup are reported under `cleanup.concurrent_processes` for
+observability, but do not invalidate cleanup after every process whose oracle
+ownership is proven by PID plus start time has exited. If a run reports an
+unconfirmed owned-process cleanup or another infrastructure failure, inspect
+Task Manager before starting another run and do not promote a fixture.
 
 The oracle acquires a per-user Windows cross-process lock for the complete
 batch, including the known controls, selected cases, and any promotion. A
@@ -29,6 +34,12 @@ normal xlflow workbook coordination.
 Dialog detection is tied to the target Excel process/VBE owner chain through
 the existing Win32/UI Automation watcher. The oracle does not use
 `SendKeys` or keyboard-focus scripting.
+
+After injecting each fixture module, the oracle reads the `CodeModule` back
+and requires it to match the sanitized fixture source, apart from line-ending
+normalization and trailing line breaks. If VBE rewrites the source during
+injection, the run fails with `oracle_source_mutated`; compile evidence from
+the rewritten source must not be used to classify the committed fixture.
 
 ## Running cases
 
@@ -69,7 +80,9 @@ and emit structured output before the outer process deadline.
 Each bridge observation includes a `cleanup` object. It reports the owned
 Excel process identity, whether exit was confirmed for each owned process, the
 number of drain attempts, remaining dialog/process counts, and the failure
-stage. Unrelated Excel processes are not listed and are never terminated.
+stage. Only `owned_processes` contains processes proven to belong to the
+oracle; unrelated Excel processes are excluded from that list, reported under
+`concurrent_processes`, and never terminated.
 
 For example:
 
@@ -85,6 +98,7 @@ For example:
         "ownership_basis": "captured-process-pid"
       }
     ],
+    "concurrent_processes": [],
     "drain_attempts": 3,
     "remaining_windows": 0,
     "remaining_processes": 1,
@@ -93,18 +107,17 @@ For example:
 }
 ```
 
-A `unexpected-process` failure means that a newly observed Excel process
-could not be proven to belong to the oracle. It is intentionally left alone;
-the run remains failed even if that process disappears during a later drain.
-A `process-exit-confirmation` failure means the captured process could not be
-proven to have exited within the bounded drain. After either failure, inspect
-Task Manager for the recorded owned PID and any dialogs, confirm that no
+A process listed under `concurrent_processes` could not be proven to belong to
+the oracle. It is intentionally left alone and does not affect the result. A
+`process-exit-confirmation` failure means an owned process could not be proven
+to have exited within the bounded drain. After that failure, inspect Task
+Manager for the recorded owned PID and any dialogs, confirm that no
 oracle-owned Excel remains, and rerun the controls. Do not remove lock files
 manually and do not promote fixtures from that report.
 
 `failure_stage` is `null` after confirmed cleanup. Infrastructure responses
 that did not start Excel use `not-attempted`; cleanup failures use
-`unexpected-process`, `process-exit-confirmation`, or `temporary-directory`.
+`process-exit-confirmation` or `temporary-directory`.
 The execution stage for platform, startup, import, and compile failures is
 reported separately in `last_stage`.
 
@@ -254,8 +267,8 @@ rtk go test ./internal/oracle -run TestOracleBindingCoverage -v
 The test reports fixture state counts, complete and incomplete rule counts,
 sorted fixture IDs for every state (`bound`, `partially-bound`, `unbound`, and
 `not-applicable`), and sorted rule-to-case and surface coverage. The committed
-corpus currently reports 53 asserted fixtures: 43 `bound`, 0
-`partially-bound`, 8 `unbound`, and 2 `not-applicable`; the eleven bound rules
+corpus currently reports 63 asserted fixtures: 53 `bound`, 0
+`partially-bound`, 9 `unbound`, and 2 `not-applicable`; the fifteen bound rules
 have complete positive/negative coverage. The report is emitted before a
 validation failure so missing positive/negative evidence and state changes
 remain visible in CI logs.

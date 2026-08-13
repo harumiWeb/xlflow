@@ -1691,10 +1691,10 @@ func TestLinterFindsLikelyCStyleQuoteEscapesThatTriggerVBECompileDialogs(t *test
 	}
 }
 
-func TestLinterKeepsEarlierCStyleQuoteEscapeWhenLaterQuoteExists(t *testing.T) {
+func TestLinterReportsUnterminatedCStyleQuoteEscapeBeforeLaterCode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  s = \"\\\"\": Debug.Print \"x\"\nEnd Sub\n")
+	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n  s = \"\\\"\": Debug.Print x\nEnd Sub\n")
 	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
 	if err != nil {
 		t.Fatal(err)
@@ -1705,6 +1705,21 @@ func TestLinterKeepsEarlierCStyleQuoteEscapeWhenLaterQuoteExists(t *testing.T) {
 	}
 	if blocking[0].Line != 3 {
 		t.Fatalf("unexpected C-style escape issue: %+v", blocking[0])
+	}
+}
+
+func TestLinterDoesNotCarryCStyleEscapeAcrossStrings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	line := "  first = " + `"` + `\` + strings.Repeat(`"`, 2) + " " + `"` + " : second = " + `"` + "unterminated"
+	writeLintModule(t, dir, "Main.bas", "Option Explicit\nPublic Sub Run()\n"+line+"\nEnd Sub\n")
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB009"); len(got) != 0 {
+		t.Fatalf("an earlier string's C-style-like escape should not affect a later string: %+v", got)
 	}
 }
 
@@ -1731,6 +1746,27 @@ End Function
 		if issue.Code == "VB009" {
 			t.Fatalf("valid VBA-JSON escaped quote strings should not trigger VB009: %+v", issues)
 		}
+	}
+}
+
+func TestLinterAllowsClosedVBAStringsWithBackslashEscapedQuotes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim dateFStr As String
+    Dim value As String
+    dateFStr = "\"""yyyy-mm-dd hh:nn:ss\"""
+    value = "prefix \""quoted\"""
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB009"); len(got) != 0 {
+		t.Fatalf("closed VBA strings containing backslash-escaped quotes should not trigger VB009: %+v", got)
 	}
 }
 

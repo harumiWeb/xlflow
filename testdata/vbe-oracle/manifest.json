@@ -159,6 +159,14 @@
     {
       "id": "issue590-undeclared-raiseevent-valid",
       "path": "cases/issue590-undeclared-raiseevent-valid/case.json"
+    },
+    {
+      "id": "vb009-c-style-quote-escape",
+      "path": "cases/vb009-c-style-quote-escape/case.json"
+    },
+    {
+      "id": "vb009-backslash-doubled-quotes-valid",
+      "path": "cases/vb009-backslash-doubled-quotes-valid/case.json"
     }
   ]
 }

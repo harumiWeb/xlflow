@@ -125,8 +125,6 @@
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"lint","code":"VB020","severity":"warning","line":33,"column":9}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"lint","code":"VB020","severity":"warning","line":38,"column":9}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"lint","code":"VB020","severity":"warning","line":44,"column":9}
-{"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"lint","code":"VB009","severity":"error","line":637,"column":0}
-{"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"lint","code":"VB009","severity":"error","line":639,"column":0}
 {"project":"third_party/vba-web","file":"specs/Specs_WebHelpers.bas","surface":"lint","code":"VB004","severity":"warning","line":711,"column":5}
 {"project":"third_party/vba-web","file":"specs/Specs_WebRequest.bas","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/vba-web","file":"specs/Specs_WebRequest.bas","surface":"lint","code":"VB004","severity":"warning","line":573,"column":5}

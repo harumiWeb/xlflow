@@ -2638,6 +2638,7 @@ func containsTypographicQuote(line string) bool {
 
 func containsLikelyCStyleQuoteEscape(line string) bool {
 	inString := false
+	sawLikelyCStyleEscape := false
 	for i := 0; i < len(line); {
 		if line[i] != '"' {
 			i++
@@ -2649,17 +2650,25 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 		}
 		runLength := i - runStart
 		if !inString {
-			inString = (runLength-1)%2 == 0
+			inString = runLength%2 == 1
+			if inString {
+				sawLikelyCStyleEscape = false
+			}
 			continue
 		}
-		if runStart > 0 && line[runStart-1] == '\\' && runLength >= 2 && runLength%2 == 0 {
-			return true
+		if runLength%2 == 0 {
+			if runStart > 0 && line[runStart-1] == '\\' {
+				// A doubled quote after a backslash is valid VBA when the line
+				// closes its literals. It is C-style-like only when it leaves an
+				// unterminated string somewhere on the same physical line.
+				sawLikelyCStyleEscape = true
+			}
+			continue
 		}
-		if runLength%2 == 1 {
-			inString = false
-		}
+		inString = false
+		sawLikelyCStyleEscape = false
 	}
-	return false
+	return inString && sawLikelyCStyleEscape
 }
 
 func repeatedQuestionShorthandColumns(line string) []int {

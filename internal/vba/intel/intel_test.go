@@ -189,6 +189,35 @@ End Sub
 	}
 }
 
+func TestDiagnosticsVB009AllowsClosedVBAStringsWithBackslashEscapedQuotes(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	valid := Document{
+		Path: filepath.Join(t.TempDir(), "Valid.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim value As String
+    value = "prefix \""quoted\"""
+End Sub
+`,
+	}
+	if got := diagnosticsByCode(analyzer.Diagnostics(valid), "VB009"); len(got) != 0 {
+		t.Fatalf("closed VBA string diagnostic = %+v, want none", got)
+	}
+
+	invalid := Document{
+		Path: filepath.Join(t.TempDir(), "Invalid.bas"),
+		Source: `Option Explicit
+Public Sub Run()
+    Dim value As String
+    value = "prefix \""
+End Sub
+`,
+	}
+	if got := diagnosticsByCode(analyzer.Diagnostics(invalid), "VB009"); len(got) != 1 {
+		t.Fatalf("unclosed C-style quote escape diagnostic = %+v, want one", got)
+	}
+}
+
 func TestDiagnosticsVB026MatchesParsedHandlerContext(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

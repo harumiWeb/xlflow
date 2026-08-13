@@ -197,13 +197,14 @@ public sealed class ExcelBridgeSupportTests
         Assert.Equal(2, result.DrainAttempts);
         Assert.Equal(2, exitCalls);
         Assert.Single(result.OwnedProcesses);
+        Assert.Empty(result.ConcurrentProcesses);
         Assert.True(result.OwnedProcesses[0].ExitConfirmed);
         Assert.Equal(0, result.RemainingProcesses);
         Assert.Null(result.FailureStage);
     }
 
     [Fact]
-    public void ConfirmOracleProcessCleanup_RemainsFailedAfterUnexpectedProcess()
+    public void ConfirmOracleProcessCleanup_AllowsConcurrentUnownedProcess()
     {
         var owned = new OwnedExcelProcess(1234, new DateTime(2026, 8, 6, 10, 0, 0, DateTimeKind.Utc));
         var unrelated = new OwnedExcelProcess(5678, new DateTime(2026, 8, 6, 10, 1, 0, DateTimeKind.Utc));
@@ -218,9 +219,12 @@ public sealed class ExcelBridgeSupportTests
             ownershipPredicate: candidate => ExcelBridgeSupport.SameOwnedProcess(candidate, owned),
             delay: _ => { });
 
-        Assert.False(result.Confirmed);
-        Assert.Equal("unexpected-process", result.FailureStage);
+        Assert.True(result.Confirmed);
+        Assert.Null(result.FailureStage);
         Assert.Single(result.OwnedProcesses);
+        var concurrent = Assert.Single(result.ConcurrentProcesses);
+        Assert.Equal(unrelated.ProcessId, concurrent.ProcessId);
+        Assert.Equal("unrelated-concurrent-process", concurrent.OwnershipBasis);
         Assert.Equal(0, result.RemainingProcesses);
     }
 

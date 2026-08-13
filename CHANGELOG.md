@@ -76,6 +76,11 @@ All notable changes to xlflow will be documented in this file.
   without restoration remain covered by the rule.
 - Fixed `VB010` false positives for mutually exclusive conditional-compilation
   procedure declarations that share a common terminator after `#End If`.
+- Fixed the developer-only VBE oracle cleanup gate so unrelated Excel
+  instances started concurrently remain untouched and observable without
+  invalidating cleanup of the oracle-owned process.
+- Fixed `VB009` false positives for valid, closed VBA string literals where a
+  literal backslash is adjacent to doubled quote characters.
 
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.
