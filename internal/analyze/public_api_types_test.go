@@ -78,7 +78,7 @@ Public Event Changed(ByVal value As PrivatePayload)
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA222")
-	if len(got) < 8 {
+	if len(got) < 7 {
 		t.Fatalf("VBA222 findings = %+v, want procedure/property/event and exposed-interface findings", got)
 	}
 	for _, finding := range got {
@@ -92,7 +92,11 @@ Public Event Changed(ByVal value As PrivatePayload)
 	assertFindingMentions(t, got, "PrivateThing")
 	assertFindingMentions(t, got, "PrivatePayload")
 	assertFindingMentions(t, got, "PrivateStatus")
-	assertFindingMentions(t, got, "AcmeUnavailable.Widget")
+	for _, finding := range got {
+		if strings.Contains(finding.Message, "AcmeUnavailable.Widget") {
+			t.Fatalf("incomplete TypeDB must not make an external type absence actionable: %+v", finding)
+		}
+	}
 	if known := findingsWithProcedure(got, "KnownExcel"); len(known) != 0 {
 		t.Fatalf("known built-in/Excel types must be allowed: %+v", known)
 	}
@@ -173,8 +177,26 @@ End Function
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA222")
+	if len(got) != 0 {
+		t.Fatalf("incomplete TypeDB must not report missing external types: %+v", got)
+	}
+}
+
+func TestVBA222ReportsUnresolvedExternalTypesWhenTypeDBIsComplete(t *testing.T) {
+	dir := t.TempDir()
+	useCompleteTestTypeDB(t)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Missing() As Acme.Widget
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA222")
 	if len(got) != 1 || got[0].Procedure != "Missing" || !strings.Contains(got[0].Message, "Acme.Widget") {
-		t.Fatalf("VBA222 findings = %+v, want only unresolved Acme.Widget", got)
+		t.Fatalf("complete TypeDB must keep unresolved external type findings: %+v", got)
 	}
 }
 
@@ -185,7 +207,7 @@ func TestAPITypeIndexDoesNotDiscardTypeLibraryQualifier(t *testing.T) {
 }`)); err != nil {
 		t.Fatal(err)
 	}
-	index := &apiTypeIndex{byName: map[string][]apiTypeInfo{}, db: db}
+	index := &apiTypeIndex{byName: map[string][]apiTypeInfo{}, db: db, resolutionComplete: true}
 	if got := index.resolve("ADODB.DataTypeEnum", "Main"); got != apiTypeAllowed {
 		t.Fatalf("ADODB.DataTypeEnum status = %v, want allowed", got)
 	}

@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA222` false positives for unresolved external public API types when
+  the project or generated TypeLib resolution view is incomplete. Project-local
+  inaccessible and ambiguous type findings remain unchanged.
+
 - Added default-enabled, compile-equivalent `VB059` call-syntax diagnostics.
   Lint, LSP, and source preflight now reject explicit `Call` statements without
   argument parentheses, standalone empty or multi-argument parenthesized calls,
