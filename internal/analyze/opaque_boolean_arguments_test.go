@@ -1,9 +1,11 @@
 package analyze
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -60,11 +62,48 @@ End Sub
 	if got[1].OpaqueBoolean == nil || got[1].OpaqueBoolean.PositionalLiteralCount != 2 {
 		t.Fatalf("unexpected second VBA248 context: %+v", got[1])
 	}
-	if got[2].OpaqueBoolean == nil || got[2].OpaqueBoolean.PositionalLiteralCount != 1 || got[2].OpaqueBoolean.OptionalBooleanParameterCount != 3 {
+	if got[2].OpaqueBoolean == nil || got[2].OpaqueBoolean.PositionalLiteralCount != 1 || got[2].OpaqueBoolean.OptionalBooleanParameterCount == nil || *got[2].OpaqueBoolean.OptionalBooleanParameterCount != 3 {
 		t.Fatalf("unexpected single-literal VBA248 context: %+v", got[2])
 	}
 	if got[3].OpaqueBoolean == nil || !reflect.DeepEqual(got[3].OpaqueBoolean.ParameterNames, []string{"first", "last"}) {
 		t.Fatalf("unexpected mixed-parameter VBA248 context: %+v", got[3])
+	}
+}
+
+func TestVBA248ContextPreservesResolvedZeroOptionalCountAndLiteralValues(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Required(first As Boolean, second As Boolean)
+End Sub
+
+Public Sub Run()
+  Required False, True
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectOpaqueBooleanArguments = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA248")
+	if len(got) != 1 || got[0].OpaqueBoolean == nil {
+		t.Fatalf("VBA248 findings = %+v, want one finding with context", got)
+	}
+	context := got[0].OpaqueBoolean
+	if context.OptionalBooleanParameterCount == nil || *context.OptionalBooleanParameterCount != 0 {
+		t.Fatalf("resolved required Boolean parameters lost zero optional count: %+v", context)
+	}
+	if !strings.Contains(got[0].Suggestion, "first:=False, second:=True") {
+		t.Fatalf("suggestion did not preserve literal values: %q", got[0].Suggestion)
+	}
+	encoded, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"optional_boolean_parameter_count":0`) {
+		t.Fatalf("resolved zero optional count missing from JSON: %s", encoded)
 	}
 }
 

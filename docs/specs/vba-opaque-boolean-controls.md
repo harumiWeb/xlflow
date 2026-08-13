@@ -57,9 +57,11 @@ The additive JSON context is:
 ```
 
 `parameter_names` and `optional_boolean_parameter_count` are omitted when no
-unique local signature supplies them. Inline suppression uses the normal
-`xlflow:disable-line VBA248` and `xlflow:disable-next-line VBA248` forms; a
-project can also suppress the rule with `[analyze].disabled_rules`.
+unique local signature supplies them. A resolved signature includes
+`optional_boolean_parameter_count` even when its value is `0`. Inline
+suppression uses the normal `xlflow:disable-line VBA248` and
+`xlflow:disable-next-line VBA248` forms; a project can also suppress the rule
+with `[analyze].disabled_rules`.
 
 ## Declaration metrics
 

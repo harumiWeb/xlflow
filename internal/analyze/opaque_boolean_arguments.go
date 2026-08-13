@@ -14,7 +14,12 @@ type OpaqueBooleanContext struct {
 	PositionalLiteralCount        int      `json:"positional_literal_count"`
 	NamedArgumentCount            int      `json:"named_argument_count"`
 	ParameterNames                []string `json:"parameter_names,omitempty"`
-	OptionalBooleanParameterCount int      `json:"optional_boolean_parameter_count,omitempty"`
+	OptionalBooleanParameterCount *int     `json:"optional_boolean_parameter_count,omitempty"`
+}
+
+type opaqueBooleanLiteral struct {
+	ParameterIndex int
+	Value          string
 }
 
 func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProcedure, signatures map[string]procedureSignature) []Finding {
@@ -40,6 +45,7 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 		}
 		positionalLiteralCount := 0
 		positionalLiteralIndexes := make([]int, 0)
+		positionalLiterals := make([]opaqueBooleanLiteral, 0)
 		positionalIndex := 0
 		for _, expressionID := range call.Arguments.ExpressionIDs {
 			if expressionID == 0 {
@@ -49,9 +55,10 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 			if namedIDs[expressionID] {
 				continue
 			}
-			if isBooleanLiteralText(expressions[expressionID]) {
+			if value, ok := booleanLiteralValue(expressions[expressionID]); ok {
 				positionalLiteralCount++
 				positionalLiteralIndexes = append(positionalLiteralIndexes, positionalIndex)
+				positionalLiterals = append(positionalLiterals, opaqueBooleanLiteral{ParameterIndex: positionalIndex, Value: value})
 			}
 			positionalIndex++
 		}
@@ -60,6 +67,7 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 		}
 		signature, signatureOK := opaqueBooleanCallSignature(call, signatures)
 		optionalBooleanCount := 0
+		var optionalBooleanParameterCount *int
 		parameterNames := []string(nil)
 		if signatureOK {
 			for _, parameter := range signature.Params {
@@ -67,6 +75,7 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 					optionalBooleanCount++
 				}
 			}
+			optionalBooleanParameterCount = &optionalBooleanCount
 			parameterNames = positionalParameterNames(signature.Params, positionalLiteralIndexes)
 		}
 		// A single positional Boolean is only ambiguous when the resolved
@@ -84,14 +93,17 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 		suggestion := "Use named arguments, an enum, or separate procedures for distinct behaviors."
 		if len(parameterNames) > 0 {
 			examples := make([]string, 0, len(parameterNames))
-			for index, name := range parameterNames {
-				value := "True"
-				if index%2 == 1 {
-					value = "False"
+			for _, literal := range positionalLiterals {
+				if literal.ParameterIndex < 0 || literal.ParameterIndex >= len(signature.Params) {
+					continue
 				}
-				examples = append(examples, name+":="+value)
+				if name := strings.TrimSpace(signature.Params[literal.ParameterIndex].Name); name != "" {
+					examples = append(examples, name+":="+literal.Value)
+				}
 			}
-			suggestion = "Use named arguments such as " + strings.Join(examples, ", ") + ", or replace the switches with an enum or separate procedures."
+			if len(examples) > 0 {
+				suggestion = "Use named arguments such as " + strings.Join(examples, ", ") + ", or replace the switches with an enum or separate procedures."
+			}
 		}
 		finding := a.simpleFinding(file, proc, call.Range.StartLine, "VBA248", "warning", message, reason, suggestion)
 		finding.Column = call.Range.StartColumn + 1
@@ -101,19 +113,26 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 			PositionalLiteralCount:        positionalLiteralCount,
 			NamedArgumentCount:            len(call.Arguments.Named),
 			ParameterNames:                parameterNames,
-			OptionalBooleanParameterCount: optionalBooleanCount,
+			OptionalBooleanParameterCount: optionalBooleanParameterCount,
 		}
 		findings = append(findings, finding)
 	}
 	return findings
 }
 
-func isBooleanLiteralText(text string) bool {
+func booleanLiteralValue(text string) (string, bool) {
 	text = strings.TrimSpace(text)
 	for len(text) >= 2 && strings.HasPrefix(text, "(") && strings.HasSuffix(text, ")") {
 		text = strings.TrimSpace(text[1 : len(text)-1])
 	}
-	return strings.EqualFold(text, "True") || strings.EqualFold(text, "False")
+	switch {
+	case strings.EqualFold(text, "True"):
+		return "True", true
+	case strings.EqualFold(text, "False"):
+		return "False", true
+	default:
+		return "", false
+	}
 }
 
 func opaqueBooleanCallSignature(call procedureir.CallSite, signatures map[string]procedureSignature) (procedureSignature, bool) {

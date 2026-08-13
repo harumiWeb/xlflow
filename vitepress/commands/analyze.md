@@ -243,8 +243,8 @@ timeout values and XMLHTTP are not reported. Its context is
 `detect_unsafe_http_configuration`, or `detect_missing_http_timeout` for
 intentional policy exceptions.
 
-`VBA248` is disabled by default. Enable it with
-`[analyze].detect_opaque_boolean_arguments = true` to report calls containing
+`VBA248` is disabled by default. Enable it with the following TOML configuration
+to report calls containing
 multiple positional `True`/`False` literals. A single positional literal is
 reported only when the uniquely resolved target has multiple optional Boolean
 parameters; named arguments suppress that single-literal heuristic, and a
@@ -253,6 +253,11 @@ includes an `opaque_boolean` JSON context and recommends named arguments, an
 enum, or separate procedures. Use `xlflow:disable-line VBA248`,
 `xlflow:disable-next-line VBA248`, or
 `[analyze].disabled_rules = ["VBA248"]` for intentional calls.
+
+```toml
+[analyze]
+detect_opaque_boolean_arguments = true
+```
 
 Projects may configure exact development origins:
 
