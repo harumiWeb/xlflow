@@ -38,9 +38,18 @@ End Sub
 			t.Fatalf("%s count = %d, findings = %+v", code, seen[code], findings)
 		}
 	}
+	preflightSeen := map[string]int{}
 	for _, finding := range preflight {
-		if finding.Code >= "VB055" && finding.Code <= "VB058" && finding.Severity != "error" {
-			t.Fatalf("%s preflight severity = %q", finding.Code, finding.Severity)
+		if finding.Code >= "VB055" && finding.Code <= "VB058" {
+			preflightSeen[finding.Code]++
+			if finding.Severity != "error" {
+				t.Fatalf("%s preflight severity = %q", finding.Code, finding.Severity)
+			}
+		}
+	}
+	for _, code := range []string{"VB055", "VB056", "VB057", "VB058"} {
+		if preflightSeen[code] != 1 {
+			t.Fatalf("%s preflight count = %d, preflight = %+v", code, preflightSeen[code], preflight)
 		}
 	}
 }
