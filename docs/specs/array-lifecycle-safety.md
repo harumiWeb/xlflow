@@ -81,6 +81,9 @@ applies only when an array identifier is a direct operand of a comparison
 expression; an array assignment, function or bound-call argument such as
 `LBound(values)`, an indexed element, and a member access are not scalar array
 comparisons. A parenthesized array identifier remains the same direct operand.
+For object comparisons, `Set object = Nothing` assignments, including inline
+`Then Set` assignments, are not equality comparisons and are excluded; scalar
+`object = Nothing` comparisons remain diagnostics.
 VBA declaration type characters (`$`, `%`, `&`, `!`, `#`, `@`, and `^`) are
 explicit types for the shared `VB005` / `VB019` declaration checks. A second
 `Dim` or `ReDim` keyword after a declaration comma is parser recovery and is

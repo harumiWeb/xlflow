@@ -4519,6 +4519,27 @@ End Sub
 	}
 }
 
+func TestAnalyzerObjectNothingAssignmentIsNotComparison(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal shouldClear As Boolean)
+  Dim objectValue As Object
+  If shouldClear Then Set objectValue = Nothing: If objectValue = Nothing Then Debug.Print "bad"
+  If objectValue Is Nothing Then Debug.Print "safe"
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("expected only the scalar object comparison on line 4, got %+v", got)
+	}
+}
+
 func TestVBA209BatchAndRealtimeResultsMatch(t *testing.T) {
 	dir := t.TempDir()
 	source := `Option Explicit

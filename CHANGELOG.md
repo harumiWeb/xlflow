@@ -30,6 +30,10 @@ All notable changes to xlflow will be documented in this file.
   tracking nullable `Range.Find` results, avoiding false positives for
   project-defined `.Find` methods.
 
+- Fixed `VBA209` to ignore `Set object = Nothing` assignments, including inline
+  conditional assignments, while retaining diagnostics for scalar `= Nothing`
+  object comparisons.
+
 - Added deterministic procedure and module hotspot ranking to `xlflow metrics`
   (`metrics.hotspots`, schema version 1, score model
   `percentile_equal_weight_v1`). The report exposes raw and normalized
