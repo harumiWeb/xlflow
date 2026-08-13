@@ -2081,14 +2081,36 @@ func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDecla
 }
 
 func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration) []Finding {
-	lower := strings.ToLower(stmt)
 	var findings []Finding
 	for key, decl := range decls {
-		if decl.Object && strings.Contains(lower, key+" = nothing") {
+		if decl.Object && objectNothingEqualityComparisonExists(stmt, key) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+decl.Name+" Is Nothing Then` or `If Not "+decl.Name+" Is Nothing Then`."))
 		}
 	}
 	return findings
+}
+
+func objectNothingEqualityComparisonExists(stmt, name string) bool {
+	lower := strings.ToLower(stmt)
+	needle := strings.ToLower(name) + " = nothing"
+	for offset := 0; offset < len(lower); {
+		relative := strings.Index(lower[offset:], needle)
+		if relative < 0 {
+			return false
+		}
+		start := offset + relative
+		prefix := strings.TrimRightFunc(lower[:start], unicode.IsSpace)
+		if !strings.HasSuffix(prefix, "set") {
+			return true
+		}
+		setStart := len(prefix) - len("set")
+		if setStart == 0 || !isVBAIdentifierRune(rune(prefix[setStart-1])) {
+			offset = start + len(needle)
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure, project effects.ProjectSummary) []Finding {
