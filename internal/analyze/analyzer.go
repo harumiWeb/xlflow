@@ -570,9 +570,6 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 }
 
 func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Finding) {
-	if a.typeDB == nil {
-		return nil, nil
-	}
 	diagnostics := (intel.Analyzer{
 		RootDir:                    a.RootDir,
 		Config:                     a.Config,

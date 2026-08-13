@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "issue591-next-mismatch",
+  "description": "VBE rejects a Next variable that does not match its active For.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB057"],
+    "negative_controls": ["issue591-next-mismatch-valid"],
+    "expected_diagnostics": [
+      { "code": "VB057", "severity": "error", "surfaces": ["lint", "lsp", "analyze"] }
+    ]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-12T10:17:40Z"
+      }
+    ]
+  }
+}

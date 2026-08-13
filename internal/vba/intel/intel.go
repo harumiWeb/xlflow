@@ -256,7 +256,42 @@ func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc D
 			out = append(out, diagnostic)
 		}
 	}
+	// Control-flow legality is projected from the same procedure IR/CFG used
+	// by lint. Batch analyze/preflight does not run the full lint adapter, so
+	// build the shared artifacts here and retain the exact byte ranges.
+	if controlFlowDiagnostics, ok := a.controlFlowDiagnosticsContext(ctx, doc); ok {
+		out = append(out, controlFlowDiagnostics...)
+	}
 	return out
+}
+
+func (a Analyzer) controlFlowDiagnosticsContext(ctx context.Context, doc Document) ([]Diagnostic, bool) {
+	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if err != nil {
+		return nil, false
+	}
+	defer closeParsed()
+	ir, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed)
+	if err != nil {
+		return nil, false
+	}
+	controlFlow, err := controlFlowForDocumentContext(ctx, doc, ir)
+	if err != nil {
+		return nil, false
+	}
+	diagnostics := vbacfg.ValidationDiagnostics(controlFlow)
+	out := make([]Diagnostic, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		out = append(out, Diagnostic{
+			Code: diagnostic.Code, Severity: diagnostic.Severity, Source: "xlflow",
+			Message: diagnostic.Message,
+			Range: Range{
+				Start: positionForDocumentByteOffset(doc, diagnostic.Range.StartByte),
+				End:   positionForDocumentByteOffset(doc, diagnostic.Range.EndByte),
+			},
+		})
+	}
+	return out, true
 }
 
 func isCompileEquivalentDiagnostic(code string) bool {
@@ -291,12 +326,16 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 	}
 	out := make([]Diagnostic, 0, len(issues))
 	for _, issue := range issues {
+		rangeAt := issueRange(doc.Source, issue.Line, issue.Column)
+		if issue.EndLine > 0 && issue.EndColumn > 0 {
+			rangeAt = issueRangeWithEnd(doc.Source, issue.Line, issue.Column, issue.EndLine, issue.EndColumn)
+		}
 		out = append(out, Diagnostic{
 			Code:     issue.Code,
 			Severity: issue.Severity,
 			Source:   "xlflow",
 			Message:  lintDiagnosticMessage(issue),
-			Range:    issueRange(doc.Source, issue.Line, issue.Column),
+			Range:    rangeAt,
 		})
 	}
 	if ctx.Err() != nil {
@@ -6002,10 +6041,22 @@ func lineDiagnostic(code, severity string, zeroLine int, msg string) Diagnostic 
 }
 
 func issueRange(source string, oneLine int, oneColumn int) Range {
+	start := issuePosition(source, oneLine, oneColumn)
+	return Range{Start: start, End: Position{Line: start.Line, Character: start.Character + 1}}
+}
+
+func issueRangeWithEnd(source string, startLine, startColumn, endLine, endColumn int) Range {
+	return Range{
+		Start: issuePosition(source, startLine, startColumn),
+		End:   issuePosition(source, endLine, endColumn),
+	}
+}
+
+func issuePosition(source string, oneLine int, oneColumn int) Position {
 	line := max(0, oneLine-1)
 	lines := normalizedLines(source)
 	if len(lines) == 0 {
-		return Range{Start: Position{Line: line, Character: 0}, End: Position{Line: line, Character: 1}}
+		return Position{Line: line, Character: 0}
 	}
 	if line >= len(lines) {
 		line = len(lines) - 1
@@ -6022,10 +6073,7 @@ func issueRange(source string, oneLine int, oneColumn int) Range {
 		start--
 	}
 	character := utf16Len(text[:start])
-	return Range{
-		Start: Position{Line: line, Character: character},
-		End:   Position{Line: line, Character: character + 1},
-	}
+	return Position{Line: line, Character: character}
 }
 
 func WordAt(source string, pos Position) (string, Range) {

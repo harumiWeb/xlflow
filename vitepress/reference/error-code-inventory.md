@@ -289,6 +289,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dry_run`
 - `duplicate_case_id`
 - `duplicate_declaration`
+- `duplicate_label`
 - `duplicate_module_name`
 - `duplicate_skip`
 - `duplicate_test_name`
@@ -487,6 +488,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `invalid_created_at`
 - `invalid_entry`
 - `invalid_event_module`
+- `invalid_exit`
 - `invalid_formula`
 - `invalid_friend_module`
 - `invalid_implements_module`
@@ -623,7 +625,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `new_expression`
 - `new_failed`
 - `new_name`
+- `next_mismatch`
 - `next_step`
+- `next_variables`
 - `no_libraries`
 - `no_previous_tree`
 - `no_tests_found`
@@ -825,6 +829,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `rethrows_errors`
 - `retryable_when_busy`
 - `return_slot`
+- `return_statement`
 - `return_type`
 - `returned_range`
 - `returns_error_value`
@@ -1004,6 +1009,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `uncertain_edges`
 - `unchecked_overwrite`
 - `undeclared_variable`
+- `undefined_label`
 - `unexpected_helper_mode`
 - `unhandled_fault`
 - `unknown_command`

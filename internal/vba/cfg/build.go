@@ -26,6 +26,9 @@ func BuildDocumentContext(ctx context.Context, in procedureir.DocumentIR) (Docum
 			return Document{}, err
 		}
 		out.Graphs[i] = graph
+		if in.Parse.HasError || in.Parse.HasMissing {
+			out.Graphs[i].ValidationFacts = nil
+		}
 	}
 	return out, nil
 }
@@ -86,6 +89,7 @@ func BuildContext(ctx context.Context, in procedureir.ProcedureIR) (Graph, error
 	if b.canceled() {
 		return Graph{}, b.err
 	}
+	b.addValidationFacts()
 	b.finish()
 	if b.err != nil {
 		return Graph{}, b.err
@@ -530,11 +534,15 @@ func requiresUnknownFlow(statement procedureir.Statement) bool {
 	if statement.Kind == procedureir.StatementRecovered || statement.Recovered {
 		return true
 	}
+	if statement.Kind == procedureir.StatementGoTo &&
+		(statement.Control == nil || statement.Control.Transfer == "") {
+		return true
+	}
 	if statement.Kind != procedureir.StatementUnknown {
 		return false
 	}
 	switch strings.ToLower(statement.SyntaxKind) {
-	case "on_goto_statement", "stop_statement":
+	case "on_goto_statement", "return_statement", "stop_statement":
 		return true
 	default:
 		return false

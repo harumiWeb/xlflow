@@ -100,6 +100,14 @@ separated statements are separate statements ordered by byte position.
 Multiline logical statements remain one normalized statement whose range spans
 the complete source form.
 
+Control-flow statements retain protocol-neutral operands for CFG validation:
+label definition and transfer-target ranges, `For`/`For Each` control
+variables, and the complete `Next` variable list with one range per supplied
+name. Statements also carry conditional-compilation branch identity. Clone and
+incremental rebase operations copy/rebase these ranges and values together
+with the statement, so downstream CFG facts never need to inspect parser nodes
+or reparsed source text.
+
 Expressions normalize identifiers, literals, member access, calls, `New`,
 unary and binary operators, parentheses, and unknown syntax. Their relationship
 to a statement identifies roles such as assignment target, assigned value,

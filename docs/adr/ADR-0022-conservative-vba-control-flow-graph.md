@@ -75,6 +75,25 @@ text. Its diagnostic ID, fields, ordering, cleanup-label exception, inline
 suppression, CLI JSON, and LSP ranges remain unchanged. No public CLI option,
 configuration key, JSON shape, diagnostic ID, or LSP capability is added.
 
+The same graph construction also owns protocol-neutral validation facts for
+procedure-local control-flow legality. The procedure IR carries source ranges,
+normalized loop variables, `Next` variable lists, and conditional/recovery
+markers; the CFG resolves label definitions and active structured-block stacks
+once and records facts for duplicate/undefined labels, `Next` mismatches, and
+invalid exits. Facts retain statement IDs, ranges, expected/actual values, and
+a certainty bit, but never diagnostic IDs or presentation text. Facts are
+copied and rebased with graph cache artifacts. Any parser recovery,
+conditional-compilation ambiguity, or unresolved nesting makes the fact
+uncertain and the diagnostic projector omits it (fail-open to syntax or
+unknown-flow diagnostics).
+
+`internal/vba/cfg.ValidationDiagnostics` is the single projector for these
+facts. Lint and compile-equivalent analyze adapters use it directly, while
+LSP consumes the lint projection or the same projector for batch findings and
+converts byte ranges to UTF-16 only at the protocol boundary. This keeps
+`VB055`--`VB058` parity and prevents a second control-flow parser from being
+introduced in an adapter.
+
 ## Consequences
 
 - Positive: batch and LSP reliability checks share one deterministic

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "issue591-invalid-exit",
+  "description": "VBE rejects a procedure Exit that does not match the enclosing Sub.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB058"],
+    "negative_controls": ["issue591-invalid-exit-valid"],
+    "expected_diagnostics": [
+      { "code": "VB058", "severity": "error", "surfaces": ["lint", "lsp", "analyze"] }
+    ]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-12T10:11:07Z"
+      }
+    ]
+  }
+}

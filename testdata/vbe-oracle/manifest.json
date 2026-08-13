@@ -161,6 +161,38 @@
       "path": "cases/issue590-undeclared-raiseevent-valid/case.json"
     },
     {
+      "id": "issue591-duplicate-label",
+      "path": "cases/issue591-duplicate-label/case.json"
+    },
+    {
+      "id": "issue591-duplicate-label-valid",
+      "path": "cases/issue591-duplicate-label-valid/case.json"
+    },
+    {
+      "id": "issue591-undefined-label",
+      "path": "cases/issue591-undefined-label/case.json"
+    },
+    {
+      "id": "issue591-undefined-label-valid",
+      "path": "cases/issue591-undefined-label-valid/case.json"
+    },
+    {
+      "id": "issue591-next-mismatch",
+      "path": "cases/issue591-next-mismatch/case.json"
+    },
+    {
+      "id": "issue591-next-mismatch-valid",
+      "path": "cases/issue591-next-mismatch-valid/case.json"
+    },
+    {
+      "id": "issue591-invalid-exit",
+      "path": "cases/issue591-invalid-exit/case.json"
+    },
+    {
+      "id": "issue591-invalid-exit-valid",
+      "path": "cases/issue591-invalid-exit-valid/case.json"
+    },
+    {
       "id": "vb009-c-style-quote-escape",
       "path": "cases/vb009-c-style-quote-escape/case.json"
     },

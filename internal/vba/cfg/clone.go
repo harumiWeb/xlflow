@@ -1,6 +1,9 @@
 package cfg
 
-import "github.com/harumiWeb/xlflow/internal/vba/procedureir"
+import (
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+)
 
 // CloneDocument returns a deep copy suitable for publication across cache
 // boundaries.
@@ -27,8 +30,11 @@ func Clone(in Graph) Graph {
 			statement.Target = cloneExpression(statement.Target)
 			statement.Value = cloneExpression(statement.Value)
 			statement.Condition = cloneExpression(statement.Condition)
+			statement.ConditionalBranches = append([]procedureir.ConditionalBranch(nil), statement.ConditionalBranches...)
 			if statement.Control != nil {
 				control := *statement.Control
+				control.NextVariables = append([]string(nil), statement.Control.NextVariables...)
+				control.NextVariableRanges = append([]vbaast.Range(nil), statement.Control.NextVariableRanges...)
 				statement.Control = &control
 			}
 			out.Blocks[i].Statement = &statement
@@ -36,6 +42,7 @@ func Clone(in Graph) Graph {
 	}
 	out.Edges = append([]Edge(nil), in.Edges...)
 	out.UnknownFlowSources = append([]BlockID(nil), in.UnknownFlowSources...)
+	out.ValidationFacts = append([]ValidationFact(nil), in.ValidationFacts...)
 	return out
 }
 

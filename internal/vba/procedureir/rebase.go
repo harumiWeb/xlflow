@@ -43,6 +43,10 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	}
 	for i := range out.Statements {
 		out.Statements[i].Range = rebase(out.Statements[i].Range)
+		out.Statements[i].LabelRange = rebase(out.Statements[i].LabelRange)
+		for j := range out.Statements[i].ConditionalBranches {
+			out.Statements[i].ConditionalBranches[j].Range = rebase(out.Statements[i].ConditionalBranches[j].Range)
+		}
 		rebaseExpression := func(expression *Expression) {
 			if expression != nil {
 				expression.Range = rebase(expression.Range)
@@ -53,6 +57,11 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 		rebaseExpression(out.Statements[i].Condition)
 		if out.Statements[i].Control != nil {
 			out.Statements[i].Control.Range = rebase(out.Statements[i].Control.Range)
+			out.Statements[i].Control.TargetRange = rebase(out.Statements[i].Control.TargetRange)
+			out.Statements[i].Control.LoopVariableRange = rebase(out.Statements[i].Control.LoopVariableRange)
+			for j := range out.Statements[i].Control.NextVariableRanges {
+				out.Statements[i].Control.NextVariableRanges[j] = rebase(out.Statements[i].Control.NextVariableRanges[j])
+			}
 		}
 	}
 	for i := range out.Expressions {

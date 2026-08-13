@@ -48,6 +48,27 @@ const (
 	EdgeUnknown       EdgeKind = "unknown"
 )
 
+// ValidationKind identifies a protocol-neutral control-flow legality fact.
+// Diagnostic packages map these facts to user-facing rule IDs.
+type ValidationKind string
+
+const (
+	ValidationDuplicateLabel ValidationKind = "duplicate_label"
+	ValidationUndefinedLabel ValidationKind = "undefined_label"
+	ValidationNextMismatch   ValidationKind = "next_mismatch"
+	ValidationInvalidExit    ValidationKind = "invalid_exit"
+)
+
+type ValidationFact struct {
+	Kind        ValidationKind `json:"kind"`
+	StatementID int            `json:"statementId"`
+	Range       vbaast.Range   `json:"range"`
+	Name        string         `json:"name,omitempty"`
+	Expected    string         `json:"expected,omitempty"`
+	Actual      string         `json:"actual,omitempty"`
+	Certain     bool           `json:"certain"`
+}
+
 // Block is either one normalized VBA statement or a synthetic graph endpoint.
 type Block struct {
 	ID          BlockID                `json:"id"`
@@ -91,6 +112,7 @@ type Graph struct {
 	Blocks             []Block                     `json:"blocks"`
 	Edges              []Edge                      `json:"edges"`
 	UnknownFlowSources []BlockID                   `json:"unknownFlowSources,omitempty"`
+	ValidationFacts    []ValidationFact            `json:"validationFacts,omitempty"`
 	Entry              BlockID                     `json:"entry"`
 	NormalExit         BlockID                     `json:"normalExit"`
 	ExceptionalExit    BlockID                     `json:"exceptionalExit"`
