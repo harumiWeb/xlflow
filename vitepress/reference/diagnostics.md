@@ -58,6 +58,10 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB052`](#vb052)   | lint    | error       | interprocedural | yes     | Invalid procedure call target                      |
 | [`VB053`](#vb053)   | lint    | error       | interprocedural | yes     | Ambiguous Enum member                              |
 | [`VB054`](#vb054)   | lint    | error       | interprocedural | yes     | Undeclared RaiseEvent target                       |
+| [`VB055`](#vb055)   | lint    | error       | procedure-local | yes     | Duplicate procedure label                          |
+| [`VB056`](#vb056)   | lint    | error       | procedure-local | yes     | Undefined procedure label                          |
+| [`VB057`](#vb057)   | lint    | error       | procedure-local | yes     | Mismatched Next control variable                   |
+| [`VB058`](#vb058)   | lint    | error       | procedure-local | yes     | Invalid Exit statement                             |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -1204,6 +1208,94 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Supported severities        | `error`                  |
 | Surfaces                    | `lint`, `lsp`, `analyze` |
 | Scope                       | `interprocedural`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB055
+
+**Duplicate procedure label.** A procedure defines the same label more than once.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB056
+
+**Undefined procedure label.** A procedure control-flow transfer targets a label that is not defined in the procedure.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB057
+
+**Mismatched Next control variable.** A Next variable does not match the active For or For Each control variable.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `procedure-local`        |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB058
+
+**Invalid Exit statement.** An Exit statement is incompatible with the enclosing procedure or active loop.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `procedure-local`        |
 | Precision                   | `high`                   |
 | Enabled by default          | yes                      |
 | Configuration               | not configurable         |

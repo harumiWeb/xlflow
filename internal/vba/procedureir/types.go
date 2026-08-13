@@ -218,26 +218,38 @@ type ControlFlowMetadata struct {
 	Loop     LoopTest     `json:"loop,omitempty"`
 	Transfer TransferKind `json:"transfer,omitempty"`
 	Target   string       `json:"target,omitempty"`
-	Range    vbaast.Range `json:"range"`
+	// TargetRange identifies only the label token. Range continues to cover
+	// the complete control-flow statement.
+	TargetRange vbaast.Range `json:"targetRange,omitempty"`
+	// LoopVariable is the control variable declared by a For/For Each header.
+	LoopVariable      string       `json:"loopVariable,omitempty"`
+	LoopVariableRange vbaast.Range `json:"loopVariableRange,omitempty"`
+	// NextVariables are the optional variables on the matching Next closer.
+	// NextVariableRanges is parallel to this slice.
+	NextVariables      []string       `json:"nextVariables,omitempty"`
+	NextVariableRanges []vbaast.Range `json:"nextVariableRanges,omitempty"`
+	Range              vbaast.Range   `json:"range"`
 }
 
 type Statement struct {
-	ID            int                  `json:"id"`
-	ParentID      int                  `json:"parentId,omitempty"`
-	Kind          StatementKind        `json:"kind"`
-	SyntaxKind    string               `json:"syntaxKind"`
-	Text          string               `json:"text"`
-	Range         vbaast.Range         `json:"range"`
-	Recovered     bool                 `json:"recovered,omitempty"`
-	Label         string               `json:"label,omitempty"`
-	Target        *Expression          `json:"target,omitempty"`
-	Value         *Expression          `json:"value,omitempty"`
-	Condition     *Expression          `json:"condition,omitempty"`
-	TargetID      int                  `json:"targetId,omitempty"`
-	ValueID       int                  `json:"valueId,omitempty"`
-	ConditionID   int                  `json:"conditionId,omitempty"`
-	ExpressionIDs []int                `json:"expressionIds,omitempty"`
-	Control       *ControlFlowMetadata `json:"control,omitempty"`
+	ID                  int                  `json:"id"`
+	ParentID            int                  `json:"parentId,omitempty"`
+	Kind                StatementKind        `json:"kind"`
+	SyntaxKind          string               `json:"syntaxKind"`
+	Text                string               `json:"text"`
+	Range               vbaast.Range         `json:"range"`
+	Recovered           bool                 `json:"recovered,omitempty"`
+	Label               string               `json:"label,omitempty"`
+	LabelRange          vbaast.Range         `json:"labelRange,omitempty"`
+	Target              *Expression          `json:"target,omitempty"`
+	Value               *Expression          `json:"value,omitempty"`
+	Condition           *Expression          `json:"condition,omitempty"`
+	TargetID            int                  `json:"targetId,omitempty"`
+	ValueID             int                  `json:"valueId,omitempty"`
+	ConditionID         int                  `json:"conditionId,omitempty"`
+	ExpressionIDs       []int                `json:"expressionIds,omitempty"`
+	ConditionalBranches []ConditionalBranch  `json:"conditionalBranches,omitempty"`
+	Control             *ControlFlowMetadata `json:"control,omitempty"`
 }
 
 type ExpressionKind string

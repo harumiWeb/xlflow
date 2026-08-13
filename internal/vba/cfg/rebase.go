@@ -19,5 +19,8 @@ func RebaseGraph(in Graph, oldBase, newBase vbaast.Range) Graph {
 	for i := range out.Edges {
 		out.Edges[i].Range = procedureir.RebaseRange(out.Edges[i].Range, oldBase, newBase)
 	}
+	for i := range out.ValidationFacts {
+		out.ValidationFacts[i].Range = procedureir.RebaseRange(out.ValidationFacts[i].Range, oldBase, newBase)
+	}
 	return out
 }

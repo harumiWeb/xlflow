@@ -17,6 +17,28 @@ support defensive cloning: callers may mutate returned slices without changing
 the builder result or a snapshot's cached copy. Graph construction is
 deterministic for the same IR.
 
+### Validation facts
+
+ProcedureIR retains the source ranges and normalized operands needed by CFG
+validation: label definitions and transfer targets, `For`/`For Each` control
+variables, `Next` variable lists, and statement conditional-compilation and
+parser-recovery markers. Clone, rebase, and incremental artifact reuse preserve
+these values.
+
+The CFG records protocol-neutral `ValidationFact` values for certain
+procedure-local legality failures. A fact identifies its kind, statement ID,
+source range, expected/actual values where applicable, and whether the result
+is certain. Label resolution is case-insensitive and distinguishes unique,
+undefined, duplicate, and recovered targets. The active structured-block stack
+proves `Next`, loop `Exit`, and enclosing procedure `Exit` compatibility.
+Facts contain no diagnostic code or display text; `ValidationDiagnostics` is
+the shared projector for `VB055` (duplicate label), `VB056` (undefined label),
+`VB057` (mismatched `Next` variable), and `VB058` (invalid `Exit`).
+
+Recovery and conditional compilation are fail-open: if target resolution or
+nesting cannot be proven, no semantic validation fact is projected and the
+existing parser-recovery or unknown-flow behavior remains authoritative.
+
 Graph and block IDs belong to one document revision. They are assigned in
 stable source order, but are not persistent identities and must not be reused
 as workspace-global references after an edit.
@@ -233,6 +255,11 @@ The procedure IR owns normalized syntax, statement identity, ranges, and
 recovery metadata. The CFG owns executable-path structure and procedure-local
 path queries. `internal/vba/effects` owns direct and transitive effect summaries
 without changing this graph's conservative potential-fault-site fallback.
+
+Validation-fact ownership follows the same boundary: IR owns operands and
+source evidence, CFG owns resolution and certainty, and lint/analyze/LSP
+adapters only project the shared facts. The adapters must not reparse control
+flow or infer legality from diagnostic text.
 
 The CFG does not define interprocedural call propagation, public visualization,
 new CLI output, configuration, or LSP capabilities. Adapters remain responsible

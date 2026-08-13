@@ -590,6 +590,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VBA227","severity":"warning","line":297,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VBA227","severity":"warning","line":298,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VBA206","severity":"warning","line":327,"column":26}
+{"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VB058","severity":"error","line":332,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VBA227","severity":"warning","line":346,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VBA227","severity":"warning","line":347,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"analyze","code":"VBA227","severity":"warning","line":361,"column":0}
@@ -613,6 +614,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/MD5.cls","surface":"analyze","code":"VBA214","severity":"warning","line":239,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/stdCrypt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":40,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/stdCrypt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":40,"column":5}
+{"project":"third_party/std-vba","file":"src/WIP/stdCrypto/stdCrypt.cls","surface":"analyze","code":"VB058","severity":"error","line":59,"column":23}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/stdCrypt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":97,"column":8}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/stdCrypt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":99,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdCrypto/stdCrypt.cls","surface":"analyze","code":"VBA206","severity":"warning","line":99,"column":9}
@@ -665,6 +667,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdDate.cls","surface":"analyze","code":"VBA202","severity":"warning","line":189,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdDate.cls","surface":"analyze","code":"VBA202","severity":"warning","line":190,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdDate.cls","surface":"analyze","code":"VBA202","severity":"warning","line":218,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdDate.cls","surface":"analyze","code":"VB058","severity":"error","line":396,"column":36}
 {"project":"third_party/std-vba","file":"src/WIP/stdDate.cls","surface":"analyze","code":"VBA202","severity":"warning","line":998,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdDate.cls","surface":"analyze","code":"VBA202","severity":"warning","line":1002,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/SS/stdDictionary2.cls","surface":"analyze","code":"VBA227","severity":"warning","line":90,"column":0}
@@ -749,6 +752,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/stdDictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":183,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/stdDictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":193,"column":16}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/stdDictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":195,"column":16}
+{"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"analyze","code":"VB058","severity":"error","line":154,"column":28}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":155,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"analyze","code":"VBA227","severity":"warning","line":190,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"analyze","code":"VBA227","severity":"warning","line":209,"column":0}

@@ -119,7 +119,7 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 			if kind == StatementCall && (isIndexedAssignmentNode(node, v.builder.source) || isLetAssignmentNode(node, v.builder.source)) {
 				kind = StatementAssignment
 			}
-			ctx.statementID = v.addStatement(procedure, node, ctx.statementID, ctx.branch, kind)
+			ctx.statementID = v.addStatement(procedure, node, ctx.statementID, ctx.branch, ctx.conditional, kind)
 		}
 		if isExpressionNode(node.Kind()) {
 			ctx.parentExprID = v.addExpression(procedure, node, ctx)
@@ -202,12 +202,14 @@ func (v *singleVisitor) addStatement(
 	node *tree_sitter.Node,
 	parentID int,
 	branch BranchRole,
+	conditional []ConditionalBranch,
 	kind StatementKind,
 ) int {
 	id := len(procedure.Statements) + 1
 	statement := Statement{
 		ID: id, ParentID: parentID, Kind: kind, SyntaxKind: node.Kind(),
 		Text: nodeText(node, v.builder.source), Range: vbaast.NodeRange(node), Recovered: recovered(node),
+		ConditionalBranches: append([]ConditionalBranch(nil), conditional...),
 	}
 	if node.Kind() == "line_number_statement" {
 		if number := node.ChildByFieldName("number"); number != nil {
@@ -225,9 +227,17 @@ func (v *singleVisitor) addStatement(
 	switch statement.Kind {
 	case StatementLabel:
 		if node.Kind() == "line_number_statement" {
-			statement.Label = nodeText(node.ChildByFieldName("number"), v.builder.source)
+			label := node.ChildByFieldName("number")
+			statement.Label = nodeText(label, v.builder.source)
+			if label != nil {
+				statement.LabelRange = vbaast.NodeRange(label)
+			}
 		} else {
-			statement.Label = nodeText(node.ChildByFieldName("name"), v.builder.source)
+			label := node.ChildByFieldName("name")
+			statement.Label = nodeText(label, v.builder.source)
+			if label != nil {
+				statement.LabelRange = vbaast.NodeRange(label)
+			}
 		}
 	case StatementGoTo, StatementOnError, StatementResume, StatementExit:
 		statement.Label = statementOperand(statement.Text, statement.Kind)
@@ -263,11 +273,39 @@ func (v *singleVisitor) populateControlMetadata(statement *Statement, node *tree
 			ensureControl().Loop = loop
 		}
 	case "goto_statement":
+		// GoSub/Return and computed On ... GoTo/GoSub transfers are kept as
+		// conservative unknown flow. They do not have a normalized target
+		// transfer in the current procedure IR and are outside VB055/VB056.
+		fields := strings.Fields(nodeText(node, v.builder.source))
+		if len(fields) > 0 && strings.EqualFold(fields[0], "gosub") {
+			break
+		}
 		target := node.ChildByFieldName("target")
 		if target != nil {
 			value := ensureControl()
 			value.Transfer = TransferGoto
 			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
+			value.TargetRange = vbaast.NodeRange(target)
+		}
+	case "for_statement", "for_each_statement":
+		value := ensureControl()
+		if variable := node.ChildByFieldName("variable"); variable != nil {
+			value.LoopVariable = cleanIdentifier(nodeText(variable, v.builder.source))
+			value.LoopVariableRange = vbaast.NodeRange(variable)
+		}
+		if next := node.ChildByFieldName("next_variables"); next != nil && !recovered(next) {
+			for i := uint(0); i < next.NamedChildCount(); i++ {
+				variable := next.NamedChild(i)
+				if variable == nil || recovered(variable) {
+					continue
+				}
+				name := cleanIdentifier(nodeText(variable, v.builder.source))
+				if name == "" {
+					continue
+				}
+				value.NextVariables = append(value.NextVariables, name)
+				value.NextVariableRanges = append(value.NextVariableRanges, vbaast.NodeRange(variable))
+			}
 		}
 	case "exit_statement":
 		if transfer := exitTransfer(node, v.builder.source); transfer != "" {
@@ -277,6 +315,7 @@ func (v *singleVisitor) populateControlMetadata(statement *Statement, node *tree
 		value := ensureControl()
 		if target := node.ChildByFieldName("target"); target != nil {
 			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
+			value.TargetRange = vbaast.NodeRange(target)
 			if value.Target == "0" {
 				value.Transfer = TransferOnErrorDisable
 				value.Target = ""
@@ -291,6 +330,7 @@ func (v *singleVisitor) populateControlMetadata(statement *Statement, node *tree
 		if target := node.ChildByFieldName("target"); target != nil {
 			value.Transfer = TransferResumeLabel
 			value.Target = cleanIdentifier(nodeText(target, v.builder.source))
+			value.TargetRange = vbaast.NodeRange(target)
 		} else if fields := strings.Fields(nodeText(node, v.builder.source)); len(fields) == 2 &&
 			strings.EqualFold(fields[0], "Resume") && strings.EqualFold(fields[1], "Next") {
 			value.Transfer = TransferResumeNext
@@ -579,7 +619,7 @@ func (v *singleVisitor) visitBlock(node *tree_sitter.Node, ctx visitContext) {
 				continue
 			}
 			procedure := v.procedure(ctx.procedure)
-			activeParent = v.addStatement(procedure, child, stack[len(stack)-1].ifID, ctx.branch, StatementElse)
+			activeParent = v.addStatement(procedure, child, stack[len(stack)-1].ifID, ctx.branch, ctx.conditional, StatementElse)
 			continue
 		case "end_if_fragment":
 			if len(stack) > 0 {

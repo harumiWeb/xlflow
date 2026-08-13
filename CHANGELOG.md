@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled, compile-equivalent `VB055`–`VB058` diagnostics for
+  duplicate and undefined procedure labels, mismatched `Next` control
+  variables, and invalid loop/procedure `Exit` statements. Lint, analyze,
+  preflight, and LSP surfaces share conservative procedure IR/CFG facts;
+  recovery and conditional-compilation uncertainty fails open, and the
+  errors remain preflight-blocking and unavailable to inline suppression.
+
 - Added default-enabled `VBA246` HTTP transport-security analysis and `VBA247`
   timeout reliability analysis for common XMLHTTP, ServerXMLHTTP, WinHTTP, and
   identifiable ADODB.Stream download-and-launch patterns. Findings are

@@ -375,14 +375,15 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var procedureIR *procedureir.DocumentIR
-	if l.Config.Lint.ForbidOnErrorResumeNext || l.Config.Lint.DetectForEachControlType {
-		ir, irErr := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{Path: path}, doc)
-		if irErr != nil {
-			return nil, irErr
-		}
-		procedureIR = &ir
+	// The procedure IR is also the source of the shared CFG validation facts
+	// (VB055-VB058), so build it for every lint invocation. This keeps control
+	// flow legality on the same normalized structure as the existing flow
+	// rules, rather than introducing a second parser in the diagnostics layer.
+	ir, irErr := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{Path: path}, doc)
+	if irErr != nil {
+		return nil, irErr
 	}
+	procedureIR := &ir
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		numericLiteralRecovery := vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 		lintCtx := astLintContext{
@@ -895,10 +896,22 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 	if !cfg.DetectConfusingCallSyntax &&
 		!cfg.DetectForEachControlType &&
 		!cfg.DetectDangerousResume &&
-		!cfg.ForbidOnErrorResumeNext {
+		!cfg.ForbidOnErrorResumeNext && ir == nil {
 		return nil, nil
 	}
 	var issues []Issue
+	if ir != nil {
+		controlFlow, err := vbacfg.BuildDocumentContext(ctx, *ir)
+		if err != nil {
+			return nil, err
+		}
+		for _, diagnostic := range vbacfg.ValidationDiagnostics(controlFlow) {
+			issue := l.issueAt(path, diagnostic.Range, diagnostic.Code, diagnostic.Severity, diagnostic.Message)
+			issue.EndLine = diagnostic.Range.EndLine
+			issue.EndColumn = diagnostic.Range.EndColumn
+			issues = append(issues, issue)
+		}
+	}
 	if cfg.ForbidOnErrorResumeNext {
 		if ir == nil {
 			return nil, fmt.Errorf("VB004 requires procedure IR")

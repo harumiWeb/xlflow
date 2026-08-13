@@ -56,8 +56,11 @@ func cloneProcedure(in ProcedureIR) ProcedureIR {
 		out.Statements[i].Target = cloneExpressionPointer(in.Statements[i].Target)
 		out.Statements[i].Value = cloneExpressionPointer(in.Statements[i].Value)
 		out.Statements[i].Condition = cloneExpressionPointer(in.Statements[i].Condition)
+		out.Statements[i].ConditionalBranches = append([]ConditionalBranch(nil), in.Statements[i].ConditionalBranches...)
 		if in.Statements[i].Control != nil {
 			control := *in.Statements[i].Control
+			control.NextVariables = append([]string(nil), in.Statements[i].Control.NextVariables...)
+			control.NextVariableRanges = append([]vbaast.Range(nil), in.Statements[i].Control.NextVariableRanges...)
 			out.Statements[i].Control = &control
 		}
 	}
