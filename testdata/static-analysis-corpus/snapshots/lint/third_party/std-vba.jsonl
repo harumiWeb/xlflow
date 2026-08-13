@@ -5,8 +5,10 @@
 {"project":"third_party/std-vba","file":"src/WIP/JSONLogic.cls","surface":"lint","code":"VB020","severity":"warning","line":260,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer v2.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer v2.cls","surface":"lint","code":"VB010","severity":"error","line":47,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer v2.cls","surface":"lint","code":"VB059","severity":"error","line":79,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer.cls","surface":"lint","code":"VB010","severity":"error","line":36,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer.cls","surface":"lint","code":"VB059","severity":"error","line":68,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"lint","code":"VB006","severity":"warning","line":17,"column":1}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"lint","code":"VB006","severity":"warning","line":18,"column":1}
@@ -35,8 +37,10 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCallableScheduler.bas","surface":"lint","code":"VB005","severity":"warning","line":19,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB046","severity":"error","line":112,"column":13}
+{"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB059","severity":"error","line":205,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB047","severity":"error","line":235,"column":14}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB005","severity":"warning","line":327,"column":7}
+{"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB059","severity":"error","line":331,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB058","severity":"error","line":332,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB005","severity":"warning","line":361,"column":7}
 {"project":"third_party/std-vba","file":"src/WIP/stdCallback2.cls","surface":"lint","code":"VB048","severity":"error","line":381,"column":74}
@@ -72,6 +76,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdDictionary/trick/stdDictionary.cls","surface":"lint","code":"VB058","severity":"error","line":154,"column":28}
 {"project":"third_party/std-vba","file":"src/WIP/stdEndpoint.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/FibonacciIteratorExample.cls","surface":"lint","code":"VB001","severity":"warning","line":1,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/FibonacciIteratorExample.cls","surface":"lint","code":"VB059","severity":"error","line":48,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB005","severity":"warning","line":30,"column":9}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB005","severity":"warning","line":30,"column":16}
 {"project":"third_party/std-vba","file":"src/WIP/stdEnumProvider/STD_Types_IniVariantEnum.bas","surface":"lint","code":"VB005","severity":"warning","line":30,"column":22}

@@ -977,7 +977,9 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
   (`$`, `%`, `&`, `!`, `#`, `@`, `^`) are normalized as part of the identifier
   identity when matching declarations to references
 - `VB021`: private procedure unreachable from known project roots; confirmed call edges, host events, tests, externally callable public standard-module APIs as possible roots, and conservative dynamic callback possibilities are considered
-- `VB022`: confusing parenthesized call syntax such as `Foo (bar)`
+- `VB022`: legal but confusing parenthesized call syntax such as `Foo (bar)`;
+  it remains a maintainability warning and does not claim that VBE rejects the
+  source
 - `VB023`: `For Each` control variable is undeclared or obviously incompatible;
   declaration resolution uses Procedure IR for procedure and module scopes, and
   unresolved composite control targets such as array elements remain fail-open
@@ -1059,6 +1061,14 @@ Module` directives are also reported as duplicate same-kind declarations.
   module. Only a complete object-module event set is considered; external or
   incomplete references remain quiet, and the event identifier is the primary
   range.
+- `VB059`: compile-equivalent call syntax error. It reports explicit `Call`
+  statements whose arguments are not parenthesized, empty or multi-argument
+  parentheses on standalone calls, Function calls used in expressions without
+  required parentheses, and explicit `Call` targets that the AST identifies as
+  invalid. Valid ByRef/ByVal parenthesized argument idioms such as
+  `WritePair (first), (second)` remain quiet. The rule is an unsuppressible
+  error and blocks source preflight; parser recovery alone is not sufficient
+  evidence.
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
 - `VB033`: member is not present on the resolved receiver type
@@ -1077,7 +1087,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB054` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
+Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB054`, and `VB059` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
 
 `[preflight].allowed_diagnostics` is an empty-by-default project policy for the
 shared source-preflight gate used by `push`, configured-workbook `run`,
@@ -1114,7 +1124,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB054`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB054`, `VB059`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 

@@ -427,6 +427,13 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			}
 			issues = append(issues, signatureIssues...)
 		}
+		// VB059 is compile-equivalent. Add it before the generic parser-recovery
+		// fallback so its precise syntax evidence suppresses a duplicate VB014.
+		callSyntaxIssues, callSyntaxErr := l.callSyntaxIssuesFromAST(ctx, path, string(source), view.Root, procedureIR)
+		if callSyntaxErr != nil {
+			return callSyntaxErr
+		}
+		issues = append(issues, callSyntaxIssues...)
 		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) && !numericLiteralRecovery) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			issues = append(issues, lintCtx.parseIssues(view.Root)...)
@@ -2586,7 +2593,7 @@ func shouldReportParseIssue(hasError, hasMissing bool, root *tree_sitter.Node, i
 		return true
 	}
 	for line := range problemLines {
-		if !hasIssueAtLine(issues, "VB005", line) {
+		if !hasIssueAtLine(issues, "VB005", line) && !hasIssueAtLine(issues, "VB059", line) {
 			return true
 		}
 	}
@@ -2616,7 +2623,7 @@ func collectParseProblemLines(node *tree_sitter.Node, lines map[int]bool) {
 
 func hasIssueAtLine(issues []Issue, code string, line int) bool {
 	for _, issue := range issues {
-		if issue.Code == code && issue.Line == line && issue.parserRecoveryOK {
+		if issue.Code == code && issue.Line == line && (issue.parserRecoveryOK || code == "VB059") {
 			return true
 		}
 	}

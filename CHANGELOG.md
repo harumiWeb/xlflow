@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added default-enabled, compile-equivalent `VB059` call-syntax diagnostics.
+  Lint, LSP, and source preflight now reject explicit `Call` statements without
+  argument parentheses, standalone empty or multi-argument parenthesized calls,
+  Function calls used in expressions without required parentheses, and
+  syntactically identifiable invalid `Call` targets. Legal parenthesized
+  ByRef/ByVal idioms remain separate as the existing `VB022` maintainability
+  warning.
+
 - Added default-enabled, compile-equivalent `VB055`–`VB058` diagnostics for
   duplicate and undefined procedure labels, mismatched `Next` control
   variables, and invalid loop/procedure `Exit` statements. Lint, analyze,

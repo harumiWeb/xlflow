@@ -62,6 +62,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB056`](#vb056)   | lint    | error       | procedure-local | yes     | Undefined procedure label                          |
 | [`VB057`](#vb057)   | lint    | error       | procedure-local | yes     | Mismatched Next control variable                   |
 | [`VB058`](#vb058)   | lint    | error       | procedure-local | yes     | Invalid Exit statement                             |
+| [`VB059`](#vb059)   | lint    | error       | procedure-local | yes     | Invalid call syntax                                |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -1303,6 +1304,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                      |
 | Real-time editor diagnostic | yes                      |
 | Fix available               | no                       |
+
+## VB059
+
+**Invalid call syntax.** A VBA call uses a parenthesis or explicit Call form that the compiler rejects, or an expression invokes a Function without its required argument parentheses.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
 
 ## VBA101
 
