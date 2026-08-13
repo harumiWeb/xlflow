@@ -59,21 +59,26 @@ var canonicalMetricNames = [...]MetricName{
 // mutating this compatibility slice cannot make results non-deterministic.
 var MetricNames = append([]MetricName(nil), canonicalMetricNames[:]...)
 
-// Metrics contains all initial procedure metrics.  The fields are kept as
+// Metrics contains all procedure metrics. The fields are kept as
 // integers because every metric is a count in schema version 1.
 type Metrics struct {
-	CyclomaticComplexity int `json:"cyclomatic_complexity"`
-	MaxNestingDepth      int `json:"max_nesting_depth"`
-	StatementCount       int `json:"statement_count"`
-	SourceLineCount      int `json:"source_line_count"`
-	BranchCount          int `json:"branch_count"`
-	LoopCount            int `json:"loop_count"`
-	GotoCount            int `json:"goto_count"`
-	ExitPointCount       int `json:"exit_point_count"`
-	ParameterCount       int `json:"parameter_count"`
-	ByRefParameterCount  int `json:"byref_parameter_count"`
-	LocalVariableCount   int `json:"local_variable_count"`
-	CallFanOut           int `json:"call_fan_out"`
+	CyclomaticComplexity            int `json:"cyclomatic_complexity"`
+	MaxNestingDepth                 int `json:"max_nesting_depth"`
+	StatementCount                  int `json:"statement_count"`
+	SourceLineCount                 int `json:"source_line_count"`
+	BranchCount                     int `json:"branch_count"`
+	LoopCount                       int `json:"loop_count"`
+	GotoCount                       int `json:"goto_count"`
+	ExitPointCount                  int `json:"exit_point_count"`
+	ParameterCount                  int `json:"parameter_count"`
+	ByRefParameterCount             int `json:"byref_parameter_count"`
+	LocalVariableCount              int `json:"local_variable_count"`
+	CallFanOut                      int `json:"call_fan_out"`
+	BooleanParameterCount           int `json:"boolean_parameter_count"`
+	OptionalBooleanParameterCount   int `json:"optional_boolean_parameter_count"`
+	VagueBooleanParameterCount      int `json:"vague_boolean_parameter_count"`
+	BooleanControlBranchCount       int `json:"boolean_control_branch_count"`
+	BooleanControlledStatementCount int `json:"boolean_controlled_statement_count"`
 }
 
 // Value returns a metric by its stable name.  The bool is false for an
@@ -110,7 +115,7 @@ func (m Metrics) Value(name MetricName) (int, bool) {
 }
 
 // ProcedureMetrics combines the procedure identity and its metrics.  The
-// anonymous Metrics field intentionally flattens the twelve values in JSON,
+// anonymous Metrics field intentionally flattens the metric values in JSON,
 // while keeping identity available to threshold/reporting consumers.
 type ProcedureMetrics struct {
 	File                    string                    `json:"file"`
@@ -197,6 +202,12 @@ func Collect(input Input) ProcedureMetrics {
 		}
 	}
 	result.CallFanOut = callFanOut(calls)
+	booleanMetrics := booleanControlMetrics(symbol.Parameters, statements)
+	result.BooleanParameterCount = booleanMetrics.booleanParameterCount
+	result.OptionalBooleanParameterCount = booleanMetrics.optionalBooleanParameterCount
+	result.VagueBooleanParameterCount = booleanMetrics.vagueBooleanParameterCount
+	result.BooleanControlBranchCount = booleanMetrics.controlBranchCount
+	result.BooleanControlledStatementCount = booleanMetrics.controlledStatementCount
 	result.ResolvedCallees = resolvedCalleeNames(calls)
 	result.ExternalDependencyCount = externalDependencyCount(calls)
 	result.AmbiguousCallCount, result.UnresolvedCallCount, result.DynamicCallCount = callUncertaintyCounts(calls)
@@ -410,6 +421,115 @@ func branchCount(statements []procedureir.Statement) int {
 		}
 	}
 	return count
+}
+
+type booleanControlMetricValues struct {
+	booleanParameterCount         int
+	optionalBooleanParameterCount int
+	vagueBooleanParameterCount    int
+	controlBranchCount            int
+	controlledStatementCount      int
+}
+
+// booleanControlMetrics measures only source facts that are explicit in the
+// procedure IR.  It deliberately does not follow aliases or interprocedural
+// data flow: a Boolean parameter controls a branch only when its identifier is
+// the complete condition (optionally wrapped in Not or parentheses).
+func booleanControlMetrics(parameters []procedureir.Parameter, statements []procedureir.Statement) booleanControlMetricValues {
+	booleanNames := make(map[string]bool)
+	result := booleanControlMetricValues{}
+	for _, parameter := range parameters {
+		if !strings.EqualFold(strings.TrimSpace(parameter.Type), "Boolean") {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(parameter.Name))
+		if name == "" {
+			continue
+		}
+		booleanNames[name] = true
+		result.booleanParameterCount++
+		if parameter.Optional {
+			result.optionalBooleanParameterCount++
+		}
+		switch name {
+		case "flag", "mode", "option":
+			result.vagueBooleanParameterCount++
+		}
+	}
+	if len(booleanNames) == 0 {
+		return result
+	}
+	byID := make(map[int]procedureir.Statement, len(statements))
+	for _, statement := range statements {
+		if statement.ID > 0 {
+			byID[statement.ID] = statement
+		}
+	}
+	controlled := make(map[int]bool)
+	for _, statement := range statements {
+		if statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf {
+			continue
+		}
+		name := directBooleanConditionName(statement.Condition, booleanNames)
+		if name == "" {
+			continue
+		}
+		result.controlBranchCount++
+		for _, candidate := range statements {
+			if candidate.ID == 0 || candidate.ID == statement.ID || isDoCondition(candidate) {
+				continue
+			}
+			if isDescendant(candidate.ID, statement.ID, byID) {
+				controlled[candidate.ID] = true
+			}
+		}
+	}
+	result.controlledStatementCount = len(controlled)
+	return result
+}
+
+func directBooleanConditionName(condition *procedureir.Expression, booleanNames map[string]bool) string {
+	if condition == nil {
+		return ""
+	}
+	text := strings.TrimSpace(condition.Text)
+	for {
+		trimmed := strings.TrimSpace(text)
+		if len(trimmed) >= 2 && strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+			text = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			continue
+		}
+		if len(trimmed) >= 4 && strings.EqualFold(trimmed[:4], "Not ") {
+			text = strings.TrimSpace(trimmed[4:])
+			continue
+		}
+		text = trimmed
+		break
+	}
+	name := strings.ToLower(text)
+	if booleanNames[name] {
+		return name
+	}
+	return ""
+}
+
+func isDescendant(id, ancestor int, byID map[int]procedureir.Statement) bool {
+	if id <= 0 || ancestor <= 0 || id == ancestor {
+		return false
+	}
+	seen := map[int]bool{}
+	for id > 0 && !seen[id] {
+		seen[id] = true
+		statement, ok := byID[id]
+		if !ok {
+			return false
+		}
+		id = statement.ParentID
+		if id == ancestor {
+			return true
+		}
+	}
+	return false
 }
 
 func isCaseElse(statement procedureir.Statement) bool {

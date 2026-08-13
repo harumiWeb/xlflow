@@ -62,6 +62,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB056`](#vb056)   | lint    | error       | procedure-local | yes     | Undefined procedure label                          |
 | [`VB057`](#vb057)   | lint    | error       | procedure-local | yes     | Mismatched Next control variable                   |
 | [`VB058`](#vb058)   | lint    | error       | procedure-local | yes     | Invalid Exit statement                             |
+| [`VB059`](#vb059)   | lint    | error       | procedure-local | yes     | Invalid call syntax                                |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -115,6 +116,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA245`](#vba245) | analyze | warning     | procedure-local | yes     | Unsafe destructive file and path operation         |
 | [`VBA246`](#vba246) | analyze | warning     | procedure-local | yes     | Unsafe HTTP or TLS configuration                   |
 | [`VBA247`](#vba247) | analyze | warning     | procedure-local | yes     | Missing or unlimited HTTP timeout                  |
+| [`VBA248`](#vba248) | analyze | warning     | procedure-local | no      | Opaque Boolean control arguments                   |
 
 ## VB001
 
@@ -1304,6 +1306,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Real-time editor diagnostic | yes                      |
 | Fix available               | no                       |
 
+## VB059
+
+**Invalid call syntax.** A VBA call uses a parenthesis or explicit Call form that the compiler rejects, or an expression invokes a Function without its required argument parentheses.
+
+| Property                    | Value                |
+| --------------------------- | -------------------- |
+| Family                      | `lint`               |
+| Category                    | `correctness`        |
+| Evidence class              | `compile-equivalent` |
+| Compile-equivalent          | yes                  |
+| Default severity            | `error`              |
+| Supported severities        | `error`              |
+| Surfaces                    | `lint`, `lsp`        |
+| Scope                       | `procedure-local`    |
+| Precision                   | `high`               |
+| Enabled by default          | yes                  |
+| Configuration               | not configurable     |
+| Inline suppression          | no                   |
+| Blocks source preflight     | yes                  |
+| Real-time editor diagnostic | yes                  |
+| Fix available               | no                   |
+
 ## VBA101
 
 **Object assignment missing Set.** An object variable assignment likely omits Set.
@@ -2469,3 +2493,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                            |
 | Real-time editor diagnostic | yes                           |
 | Fix available               | no                            |
+
+## VBA248
+
+**Opaque Boolean control arguments.** A procedure call passes Boolean literals positionally in a way that obscures the behavior being requested.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `maintainability`                 |
+| Evidence class              | `maintainability`                 |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `procedure-local`                 |
+| Precision                   | `medium`                          |
+| Enabled by default          | no                                |
+| Configuration               | `detect_opaque_boolean_arguments` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |

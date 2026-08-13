@@ -48,6 +48,31 @@
     { "id": "sub-bare-call", "path": "cases/sub-bare-call/case.json" },
     { "id": "function-parenthesized-call", "path": "cases/function-parenthesized-call/case.json" },
     { "id": "function-bare-call", "path": "cases/function-bare-call/case.json" },
+    { "id": "issue592-standalone-empty", "path": "cases/issue592-standalone-empty/case.json" },
+    {
+      "id": "issue592-standalone-space-multi",
+      "path": "cases/issue592-standalone-space-multi/case.json"
+    },
+    {
+      "id": "issue592-call-unparenthesized",
+      "path": "cases/issue592-call-unparenthesized/case.json"
+    },
+    {
+      "id": "issue592-function-bare-expression",
+      "path": "cases/issue592-function-bare-expression/case.json"
+    },
+    {
+      "id": "issue592-invalid-call-target",
+      "path": "cases/issue592-invalid-call-target/case.json"
+    },
+    {
+      "id": "issue592-accepted-multi-idiom",
+      "path": "cases/issue592-accepted-multi-idiom/case.json"
+    },
+    { "id": "issue592-accepted-call", "path": "cases/issue592-accepted-call/case.json" },
+    { "id": "issue592-accepted-bare", "path": "cases/issue592-accepted-bare/case.json" },
+    { "id": "issue592-accepted-function", "path": "cases/issue592-accepted-function/case.json" },
+    { "id": "issue592-accepted-zero", "path": "cases/issue592-accepted-zero/case.json" },
     {
       "id": "declaration-keyword-valid-controls",
       "path": "cases/declaration-keyword-valid-controls/case.json"

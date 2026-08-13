@@ -937,10 +937,12 @@ async function assertRulesRegistryBehavior(): Promise<void> {
     rulesEnvelope([
       { id: "VB020", inline_suppressible: true },
       { id: "VB029", inline_suppressible: false },
+      { id: "VB059", inline_suppressible: false },
     ]),
   );
   assert.strictEqual(parsed.get("VB020")?.inlineSuppressible, true);
   assert.strictEqual(parsed.get("VB029")?.inlineSuppressible, false);
+  assert.strictEqual(parsed.get("VB059")?.inlineSuppressible, false);
   assert.throws(() => parseRulesEnvelope(rulesEnvelope([], 2)), /unsupported response schema/);
 
   let executable = "xlflow-one";
@@ -953,6 +955,7 @@ async function assertRulesRegistryBehavior(): Promise<void> {
         rulesEnvelope([
           { id: "VB020", inline_suppressible: true },
           { id: "VB029", inline_suppressible: false },
+          { id: "VB059", inline_suppressible: false },
         ]),
       ),
       stderr: "",
@@ -961,6 +964,7 @@ async function assertRulesRegistryBehavior(): Promise<void> {
   const service = new XlflowRulesRegistryService(() => executable, runner);
   assert.strictEqual(await service.isInlineSuppressible("vb020"), true);
   assert.strictEqual(await service.isInlineSuppressible("VB029"), false);
+  assert.strictEqual(await service.isInlineSuppressible("VB059"), false);
   assert.strictEqual(await service.isInlineSuppressible("VB999"), false);
   assert.deepStrictEqual(calls, ["xlflow-one --json rules"]);
 

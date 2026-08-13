@@ -225,6 +225,7 @@ type AnalyzeConfig struct {
 	DetectUnsafeFilePath                     bool     `toml:"detect_unsafe_file_path"`
 	DetectUnsafeHTTPConfiguration            bool     `toml:"detect_unsafe_http_configuration"`
 	DetectMissingHTTPTimeout                 bool     `toml:"detect_missing_http_timeout"`
+	DetectOpaqueBooleanArguments             bool     `toml:"detect_opaque_boolean_arguments"`
 	DevelopmentHTTPOrigins                   []string `toml:"development_http_origins"`
 }
 
@@ -320,6 +321,7 @@ var analyzeRuleAdapters = map[string]analyzeRuleAdapter{
 	"VBA245": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeFilePath }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeFilePath = v }},
 	"VBA246": {Get: func(c AnalyzeConfig) bool { return c.DetectUnsafeHTTPConfiguration }, Set: func(c *AnalyzeConfig, v bool) { c.DetectUnsafeHTTPConfiguration = v }},
 	"VBA247": {Get: func(c AnalyzeConfig) bool { return c.DetectMissingHTTPTimeout }, Set: func(c *AnalyzeConfig, v bool) { c.DetectMissingHTTPTimeout = v }},
+	"VBA248": {Get: func(c AnalyzeConfig) bool { return c.DetectOpaqueBooleanArguments }, Set: func(c *AnalyzeConfig, v bool) { c.DetectOpaqueBooleanArguments = v }},
 }
 
 var (

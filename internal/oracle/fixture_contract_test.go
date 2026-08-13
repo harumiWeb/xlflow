@@ -221,7 +221,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 71 || report.BoundFixtures != 61 || report.PartialFixtures != 0 || report.UnboundFixtures != 9 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 81 || report.BoundFixtures != 71 || report.PartialFixtures != 0 || report.UnboundFixtures != 9 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -266,6 +266,16 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"issue591-next-mismatch-valid",
 		"issue591-undefined-label",
 		"issue591-undefined-label-valid",
+		"issue592-accepted-bare",
+		"issue592-accepted-call",
+		"issue592-accepted-function",
+		"issue592-accepted-multi-idiom",
+		"issue592-accepted-zero",
+		"issue592-call-unparenthesized",
+		"issue592-function-bare-expression",
+		"issue592-invalid-call-target",
+		"issue592-standalone-empty",
+		"issue592-standalone-space-multi",
 		"known-as-type",
 		"known-enum-as-type",
 		"known-named-argument",

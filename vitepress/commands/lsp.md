@@ -101,6 +101,14 @@ overlay, parser, TypeLib database, or conditional-compilation model is
 incomplete; Fast diagnostics and dynamic/external/late-bound calls remain
 quiet. They are unsuppressible and do not offer suppression Quick Fixes.
 
+The LSP also publishes `VB059` for call forms that VBE rejects: explicit
+`Call` statements without argument parentheses, standalone empty or
+multi-argument parenthesized calls, Function calls used in expressions without
+required parentheses, and syntactically identifiable invalid `Call` targets.
+Legal parenthesized ByRef/ByVal argument idioms remain quiet, as does
+`VB022`'s valid-but-confusing maintainability warning. `VB059` is an
+unsuppressible, preflight-blocking error.
+
 The built-in VBA/COM database includes practical Excel, MSForms, Scripting, ADODB, VBIDE, Office, and VBA constant metadata for hover, completion, and basic type inference.
 
 Semantic tokens are provided by the Go language server with full-document `textDocument/semanticTokens/full` responses and `textDocument/semanticTokens/full/delta` updates. They classify VBA declarations, parameters, variables, built-in types, globals, constants, member expressions, comments, strings, numbers, operators, and keywords. Full responses carry opaque result IDs; the server retains the four most recent results for each open document and returns a delta only when its JSON payload is smaller than a full response. Unknown, expired, cross-document, or closed-document IDs fall back to a full response. Range semantic token requests are not advertised.

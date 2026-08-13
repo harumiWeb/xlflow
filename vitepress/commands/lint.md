@@ -37,47 +37,48 @@ the authoritative reference for rule metadata, including configuration,
 default state, scope, precision, preflight behavior, and inline suppression.
 The summary below explains the lint findings in workflow terms.
 
-| Code    | Severity | Description                                                                                                                          |
-| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `VB001` | warning  | Missing `Option Explicit`.                                                                                                           |
-| `VB002` | warning  | `Select` member access such as `Range("A1").Select`.                                                                                 |
-| `VB003` | warning  | `Activate` member access such as `ActiveCell.Activate`.                                                                              |
-| `VB004` | warning  | Broad `On Error Resume Next`.                                                                                                        |
-| `VB005` | warning  | Possible implicit `Variant`, including individual untyped declarators in one `Dim` statement.                                        |
-| `VB006` | warning  | Module-level `Public` variable.                                                                                                      |
-| `VB007` | warning  | Automation-hostile GUI boundary such as raw dialogs, file pickers, UserForms, message pumps, or external process launches.           |
-| `VB008` | error    | Typographic quote character that can trigger VBE compile dialogs.                                                                    |
-| `VB009` | error    | Likely C-style quote escape in a VBA string literal.                                                                                 |
-| `VB010` | error    | Unterminated `Sub`, `Function`, or `Property` procedure.                                                                             |
-| `VB011` | error    | Unexpected `End Sub`, `End Function`, or `End Property`.                                                                             |
-| `VB012` | error    | Mismatched procedure end statement.                                                                                                  |
-| `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                            |
-| `VB014` | error    | `tree-sitter-vba` recovered with an `ERROR` or `MISSING` node; this is a parser-compatibility signal, not proof that VBA is invalid. |
-| `VB015` | error    | A VBA logical line uses more than 24 line-continuation characters.                                                                   |
-| `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                             |
-| `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                                        |
-| `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                           |
-| `VB021` | warning  | Private procedure is unreachable from known project roots; dynamic callbacks are treated conservatively.                             |
-| `VB022` | warning  | Confusing parenthesized call syntax such as `Foo (bar)`.                                                                             |
-| `VB023` | warning  | `For Each` control variable is undeclared or obviously incompatible.                                                                 |
-| `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                             |
-| `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                                       |
-| `VB028` | error    | Bare `MsgBox` or `InputBox` appears while `XlflowUI.bas` is present; use `XlflowUI` or explicit `VBA.Interaction`.                   |
-| `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                                      |
-| `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                               |
-| `VB032` | error    | Repeated `?` Debug.Print shorthand such as `?? "hoge"`.                                                                              |
-| `VB037` | error    | Definite scalar assignment incorrectly uses the `Set` keyword; blocks source preflight.                                              |
-| `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                                         |
-| `VB045` | error    | Deterministic argument-count or named-argument binding error; blocks source preflight.                                               |
-| `VB046` | error    | Duplicate declaration in the same module, procedure, Enum, or Type scope; blocks source preflight.                                   |
-| `VB047` | error    | Declaration appears in an invalid module/procedure position; blocks source preflight.                                                |
-| `VB048` | error    | Invalid procedure parameter declaration; blocks source preflight.                                                                    |
-| `VB049` | error    | Inconsistent Property Get/Let/Set accessor contract; blocks source preflight.                                                        |
-| `VB050` | error    | Declaration is invalid for the canonical module kind or has an invalid WithEvents/public-member shape; blocks source preflight.      |
-| `VB051` | error    | `Me` is used in a standard module; blocks source preflight.                                                                          |
-| `VB052` | error    | Project-local call target is provably missing or known non-callable; blocks source preflight.                                        |
-| `VB053` | error    | Bare Enum member has multiple visible candidates with no lexical winner; blocks source preflight.                                    |
-| `VB054` | error    | `RaiseEvent` target is undeclared in the same object module; blocks source preflight.                                                |
+| Code    | Severity | Description                                                                                                                           |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `VB001` | warning  | Missing `Option Explicit`.                                                                                                            |
+| `VB002` | warning  | `Select` member access such as `Range("A1").Select`.                                                                                  |
+| `VB003` | warning  | `Activate` member access such as `ActiveCell.Activate`.                                                                               |
+| `VB004` | warning  | Broad `On Error Resume Next`.                                                                                                         |
+| `VB005` | warning  | Possible implicit `Variant`, including individual untyped declarators in one `Dim` statement.                                         |
+| `VB006` | warning  | Module-level `Public` variable.                                                                                                       |
+| `VB007` | warning  | Automation-hostile GUI boundary such as raw dialogs, file pickers, UserForms, message pumps, or external process launches.            |
+| `VB008` | error    | Typographic quote character that can trigger VBE compile dialogs.                                                                     |
+| `VB009` | error    | Likely C-style quote escape in a VBA string literal.                                                                                  |
+| `VB010` | error    | Unterminated `Sub`, `Function`, or `Property` procedure.                                                                              |
+| `VB011` | error    | Unexpected `End Sub`, `End Function`, or `End Property`.                                                                              |
+| `VB012` | error    | Mismatched procedure end statement.                                                                                                   |
+| `VB013` | error    | Missing whitespace before a line-continuation underscore.                                                                             |
+| `VB014` | error    | `tree-sitter-vba` recovered with an `ERROR` or `MISSING` node; this is a parser-compatibility signal, not proof that VBA is invalid.  |
+| `VB015` | error    | A VBA logical line uses more than 24 line-continuation characters.                                                                    |
+| `VB018` | warning  | Local declarations or parameters shadow module-level names, procedure names, or same-scope declarations.                              |
+| `VB019` | warning  | Multiple declarators mix typed and untyped names; in VBA each name needs its own `As <Type>`.                                         |
+| `VB020` | warning  | Procedure-local variable is declared but never referenced.                                                                            |
+| `VB021` | warning  | Private procedure is unreachable from known project roots; dynamic callbacks are treated conservatively.                              |
+| `VB022` | warning  | Confusing parenthesized call syntax such as `Foo (bar)`.                                                                              |
+| `VB023` | warning  | `For Each` control variable is undeclared or obviously incompatible.                                                                  |
+| `VB026` | warning  | `Resume` is used outside a likely error-handler context.                                                                              |
+| `VB027` | warning  | Nested `With` blocks use implicit Excel members whose target can be ambiguous.                                                        |
+| `VB028` | error    | Bare `MsgBox` or `InputBox` appears while `XlflowUI.bas` is present; use `XlflowUI` or explicit `VBA.Interaction`.                    |
+| `VB029` | error    | `Option Explicit` is present and an assignment target or loop control variable is not declared.                                       |
+| `VB031` | error    | Standard `.bas` module is missing `Attribute VB_Name`.                                                                                |
+| `VB032` | error    | Repeated `?` Debug.Print shorthand such as `?? "hoge"`.                                                                               |
+| `VB037` | error    | Definite scalar assignment incorrectly uses the `Set` keyword; blocks source preflight.                                               |
+| `VB044` | warning  | Configured local procedure-name string constant does not match its enclosing procedure name.                                          |
+| `VB045` | error    | Deterministic argument-count or named-argument binding error; blocks source preflight.                                                |
+| `VB046` | error    | Duplicate declaration in the same module, procedure, Enum, or Type scope; blocks source preflight.                                    |
+| `VB047` | error    | Declaration appears in an invalid module/procedure position; blocks source preflight.                                                 |
+| `VB048` | error    | Invalid procedure parameter declaration; blocks source preflight.                                                                     |
+| `VB049` | error    | Inconsistent Property Get/Let/Set accessor contract; blocks source preflight.                                                         |
+| `VB050` | error    | Declaration is invalid for the canonical module kind or has an invalid WithEvents/public-member shape; blocks source preflight.       |
+| `VB051` | error    | `Me` is used in a standard module; blocks source preflight.                                                                           |
+| `VB052` | error    | Project-local call target is provably missing or known non-callable; blocks source preflight.                                         |
+| `VB053` | error    | Bare Enum member has multiple visible candidates with no lexical winner; blocks source preflight.                                     |
+| `VB054` | error    | `RaiseEvent` target is undeclared in the same object module; blocks source preflight.                                                 |
+| `VB059` | error    | Invalid explicit/standalone call parentheses, Function-expression call parentheses, or explicit Call target; blocks source preflight. |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`. `VB029` also resolves public declarations from standard modules across the project, so a valid project-level assignment is not reported as undeclared.
 
@@ -101,7 +102,7 @@ Range("A2").Select ' xlflow:disable-line VB002
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match a lint diagnostic are reported as warnings.
 
-Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB054` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB054`, and `VB059` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
 `VB030` remains a warning for inferred or otherwise uncertain argument compatibility. `VB045` is reserved for deterministic argument binding errors confirmed by the VBE contract.
 
@@ -137,6 +138,14 @@ undeclared `RaiseEvent` identifier only against the complete event declarations
 of its containing object module. These three diagnostics are unsuppressible
 errors, block source preflight, and use the same resolver snapshot as `analyze`
 and LSP Full diagnostics.
+
+`VB059` uses the CST and procedure context to separate compile-invalid call
+forms from `VB022`'s legal-but-confusing style warning. It reports missing
+parentheses after explicit `Call`, empty or multi-argument parentheses on a
+standalone call, and a Function used in an expression without required
+parentheses. The parenthesized ByRef/ByVal idiom (`Name (arg1), (arg2)`) and
+other accepted unusual forms remain quiet; parser recovery without a matching
+call context is not evidence for this rule.
 
 `VB014` is fail-closed for `push` and `run`, but parser recovery alone does not prove that Excel will reject the VBA. Its JSON issue may include `parser_node` (`ERROR` or `MISSING`), `parser_token`, and a short source-line `context`; when xlflow can confidently match an unclosed multiline block, it also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`. In that case the diagnostic location marks where the closer is expected and the message identifies the opener, for example `Possible missing 'End If' for multiline If block opened at line 8.` When a parent closer is aligned exactly with its outer opener and all skipped nested openers are indented further, that parent closer is highlighted for the inner missing terminator. Conditional compilation and other ambiguous structures keep the generic recovery diagnostic. Inspect that context and validate the source in the target host before changing otherwise-valid VBA merely to satisfy parser compatibility.
 
