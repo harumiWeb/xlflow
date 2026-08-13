@@ -48,7 +48,7 @@ Public Sub Run()
 End Sub
 `)
 	cfg := config.Default()
-	cfg.Preflight.AllowedDiagnostics = []string{"VB052"}
+	cfg.Preflight.AllowedDiagnostics = []string{"VB052", "VB059"}
 	a := &app{cwd: dir, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
 	if err := a.runSourcePreflight(context.Background(), "push", cfg, "pushing to Excel", nil, nil); err != nil {
 		t.Fatalf("preflight error = %v", err)
@@ -61,6 +61,9 @@ End Sub
 	warning := warningForRule(t, a.preflightWaiverWarnings(), "VB052")
 	if warning["count"] != 2 {
 		t.Fatalf("warning = %#v, want count 2; waivers = %#v", warning, a.preflightWaivers)
+	}
+	if warning := warningForRule(t, a.preflightWaiverWarnings(), "VB059"); warning["count"] != 2 {
+		t.Fatalf("VB059 warning = %#v, want count 2; waivers = %#v", warning, a.preflightWaivers)
 	}
 }
 
@@ -112,7 +115,7 @@ End Sub
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if len(envelope.Issues) != 1 || envelope.Issues[0]["code"] != "VB054" {
+	if len(envelope.Issues) != 2 || envelope.Issues[0]["code"] != "VB059" || envelope.Issues[1]["code"] != "VB054" {
 		t.Fatalf("issues = %#v", envelope.Issues)
 	}
 	if warning := warningForRule(t, envelope.Warnings, "VB052"); warning["count"] != float64(1) {
