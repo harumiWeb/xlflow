@@ -148,7 +148,7 @@ End Sub
 
 func TestVBA222AllowsBuiltinVBAAndOLEAutomationTypes(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv(typedb.EnvDir, filepath.Join(dir, "missing-typelib-db"))
+	useCompleteTestTypeDB(t)
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function Enumerator() As IUnknown
 End Function
@@ -387,6 +387,7 @@ End Sub
 
 func TestVBA222HonorsDisableAndInlineSuppression(t *testing.T) {
 	dir := t.TempDir()
+	useCompleteTestTypeDB(t)
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Function Suppressed() As MissingType
 End Function
