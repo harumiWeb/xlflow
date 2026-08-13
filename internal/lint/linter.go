@@ -2651,6 +2651,9 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 		runLength := i - runStart
 		if !inString {
 			inString = runLength%2 == 1
+			if inString {
+				sawLikelyCStyleEscape = false
+			}
 			continue
 		}
 		if runLength%2 == 0 {
@@ -2663,6 +2666,7 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 			continue
 		}
 		inString = false
+		sawLikelyCStyleEscape = false
 	}
 	return inString && sawLikelyCStyleEscape
 }

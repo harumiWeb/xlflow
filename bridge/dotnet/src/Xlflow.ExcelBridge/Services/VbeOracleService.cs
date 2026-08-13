@@ -762,7 +762,7 @@ public sealed class VbeOracleService : IVbeOracleService
         return new OracleObservation("infrastructure_failure", "unknown", stage, elapsed, false, dialog, excel, code, message);
     }
 
-    private static string ClassifyInfrastructureCode(string stage, Exception exception)
+    internal static string ClassifyInfrastructureCode(string stage, Exception exception)
     {
         if (exception is OracleSourceMutationException)
         {
@@ -798,7 +798,7 @@ public sealed class VbeOracleService : IVbeOracleService
 
     private sealed class VbeOracleValidationException(string message, Exception? inner = null) : Exception(message, inner);
 
-    private sealed class OracleSourceMutationException(string message) : Exception(message);
+    internal sealed class OracleSourceMutationException(string message) : Exception(message);
 
     private sealed record OracleObservation(
         string Outcome,

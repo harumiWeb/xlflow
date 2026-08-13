@@ -79,7 +79,9 @@ public sealed class VbeOracleServiceTests
         var error = Assert.Throws<System.Reflection.TargetInvocationException>(() =>
             setter.Invoke(null, [module, "Option Explicit\nPublic Sub Run()\nEnd Sub\n", "Main"]));
 
-        Assert.Contains("changed oracle fixture source", error.InnerException?.Message);
+        var mutation = Assert.IsType<VbeOracleService.OracleSourceMutationException>(error.InnerException);
+        Assert.Contains("changed oracle fixture source", mutation.Message);
+        Assert.Equal("oracle_source_mutated", VbeOracleService.ClassifyInfrastructureCode("provision_components", mutation));
     }
 
     [Theory]

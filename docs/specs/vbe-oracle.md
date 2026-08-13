@@ -80,7 +80,9 @@ and emit structured output before the outer process deadline.
 Each bridge observation includes a `cleanup` object. It reports the owned
 Excel process identity, whether exit was confirmed for each owned process, the
 number of drain attempts, remaining dialog/process counts, and the failure
-stage. Unrelated Excel processes are not listed and are never terminated.
+stage. Only `owned_processes` contains processes proven to belong to the
+oracle; unrelated Excel processes are excluded from that list, reported under
+`concurrent_processes`, and never terminated.
 
 For example:
 
