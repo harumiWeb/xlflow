@@ -91,6 +91,35 @@ func TestExcelEffectCountUsesLeafStatementsAndIdentifierBoundaries(t *testing.T)
 	}
 }
 
+func TestCollectMeasuresBooleanControlParametersConservatively(t *testing.T) {
+	procedure := procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{
+			Name: "Process", Kind: procedureir.ProcedureSub,
+			Parameters: []procedureir.Parameter{
+				{Name: "enabled", Type: "Boolean"},
+				{Name: "option", Type: "Boolean", Optional: true},
+				{Name: "overwrite", Type: "Boolean", Optional: true},
+			},
+			DeclarationRange: testRange(1, 12),
+		},
+		Statements: []procedureir.Statement{
+			{ID: 1, Kind: procedureir.StatementIf, Condition: &procedureir.Expression{Text: "enabled"}, Range: testRange(2, 5)},
+			{ID: 2, ParentID: 1, Kind: procedureir.StatementCall, Range: testRange(3, 3)},
+			{ID: 3, ParentID: 1, Kind: procedureir.StatementIf, Condition: &procedureir.Expression{Text: "Not option"}, Range: testRange(4, 6)},
+			{ID: 4, ParentID: 3, Kind: procedureir.StatementCall, Range: testRange(5, 5)},
+			{ID: 5, Kind: procedureir.StatementIf, Condition: &procedureir.Expression{Text: "enabled And overwrite"}, Range: testRange(8, 10)},
+			{ID: 6, ParentID: 5, Kind: procedureir.StatementCall, Range: testRange(9, 9)},
+		},
+	}
+	got := Collect(Input{IR: procedure})
+	if got.BooleanParameterCount != 3 || got.OptionalBooleanParameterCount != 2 || got.VagueBooleanParameterCount != 1 {
+		t.Fatalf("Boolean parameter metrics = %+v", got.Metrics)
+	}
+	if got.BooleanControlBranchCount != 2 || got.BooleanControlledStatementCount != 3 {
+		t.Fatalf("Boolean control metrics = %+v, want branches=2 statements=3", got.Metrics)
+	}
+}
+
 func TestEvaluateThresholdsUsesStrictPositiveThresholdsAndStableOrder(t *testing.T) {
 	procedures := []ProcedureMetrics{
 		{Name: "Second", File: "b.bas", DeclarationRange: testRange(4, 4), Metrics: Metrics{LoopCount: 3, GotoCount: 2}},

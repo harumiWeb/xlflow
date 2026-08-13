@@ -16,7 +16,8 @@ xlflow [--json] metrics
 uses the bridge, attaches to an Excel session, runs VBA, or invokes `lint`,
 `analyze`, `check`, LSP diagnostics, or preflight findings. The command has no
 command-local options in v1; `--json` is the persistent global output flag.
-Human output is a stable procedure table containing all twelve metrics. Machine
+Human output is a stable procedure table containing the twelve core metrics and
+the additive Boolean-control measurements. Machine
 consumers must use the JSON contract below rather than parse the table.
 
 The source scan includes files under configured `[src]` roots (`modules`,
@@ -76,7 +77,12 @@ The successful result uses the normal xlflow envelope and adds:
         "parameter_count": 1,
         "byref_parameter_count": 1,
         "local_variable_count": 2,
-        "call_fan_out": 2
+        "call_fan_out": 2,
+        "boolean_parameter_count": 0,
+        "optional_boolean_parameter_count": 0,
+        "vague_boolean_parameter_count": 0,
+        "boolean_control_branch_count": 0,
+        "boolean_controlled_statement_count": 0
       }
     ]
   },
@@ -104,24 +110,30 @@ guessing their meaning.
 
 ## Counting rules
 
-All twelve values are non-negative integers. The collector consumes normalized,
+The twelve core values and five Boolean-control measurements are non-negative
+integers. The collector consumes normalized,
 source-backed procedure IR and its conservative CFG. It does not infer facts
 from diagnostic findings.
 
-| Metric                  | Definition                                                                                                                                                                                                                                                                                |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cyclomatic_complexity` | `1 + branch_count + loop_count`. Unknown CFG edges, Boolean `And`/`Or`, exceptions, and `GoTo` do not add complexity.                                                                                                                                                                     |
-| `max_nesting_depth`     | Maximum simultaneous nesting of `If`, `Select`, any loop, and `With`. `Else`, `ElseIf`, and `Case` stay within their parent structure. A single-line `If` contributes its control structure once.                                                                                         |
-| `statement_count`       | Count source-backed normalized IR statements. Colon-separated statements count separately; a continued physical statement counts once. Labels, declarations, control headers, and `Exit` statements count. The internal `do_condition` node of a `Do ... Loop` is not counted separately. |
-| `source_line_count`     | Physical line count from the procedure header through its matching `End Sub`, `End Function`, or `End Property`, inclusive. Blank lines, comments, and continuation lines count. A terminal newline does not create an extra line.                                                        |
-| `branch_count`          | One for every `If`, one for every `ElseIf`, and one for every `Case` other than `Case Else`. `Select Case`, `Else`, and `Case Else` themselves do not add a branch. Single-line and multiline forms use the same rule.                                                                    |
-| `loop_count`            | One for each `For`, `For Each`, `While`/`Wend`, and `Do`/`Loop` construct. A `Do While` or `Do Until` condition is part of that `Do`; it is not a second loop.                                                                                                                            |
-| `goto_count`            | Explicit `GoTo <label>` statements only. `On Error GoTo <label>`, `Resume`, `GoSub`, and numeric labels are excluded.                                                                                                                                                                     |
-| `exit_point_count`      | One implicit normal procedure-tail exit plus each explicit `Exit Sub`, `Exit Function`, or `Exit Property`, and each standalone `End`. `Exit For` and `Exit Do` are not procedure exits.                                                                                                  |
-| `parameter_count`       | Every declared procedure parameter, including `ParamArray` and the accessor `value` parameter of a Property Let/Set declaration.                                                                                                                                                          |
-| `byref_parameter_count` | Parameters whose effective passing mode is `ByRef`, including parameters where `ByRef` is omitted (VBA's default). `ByVal` is excluded; a `ParamArray` follows its effective `ByRef` passing mode.                                                                                        |
-| `local_variable_count`  | Each local declarator in `Dim`, `Static`, and `Const`, including multiple declarators in one declaration. Parameters, module fields, and a synthesized Function/Property return slot are excluded.                                                                                        |
-| `call_fan_out`          | Number of unique, resolved project-local callee procedures referenced by the procedure. Repeated calls to one callee count once. Ambiguous, unresolved, external, member, and built-in calls are excluded.                                                                                |
+| Metric                               | Definition                                                                                                                                                                                                                                                                                |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cyclomatic_complexity`              | `1 + branch_count + loop_count`. Unknown CFG edges, Boolean `And`/`Or`, exceptions, and `GoTo` do not add complexity.                                                                                                                                                                     |
+| `max_nesting_depth`                  | Maximum simultaneous nesting of `If`, `Select`, any loop, and `With`. `Else`, `ElseIf`, and `Case` stay within their parent structure. A single-line `If` contributes its control structure once.                                                                                         |
+| `statement_count`                    | Count source-backed normalized IR statements. Colon-separated statements count separately; a continued physical statement counts once. Labels, declarations, control headers, and `Exit` statements count. The internal `do_condition` node of a `Do ... Loop` is not counted separately. |
+| `source_line_count`                  | Physical line count from the procedure header through its matching `End Sub`, `End Function`, or `End Property`, inclusive. Blank lines, comments, and continuation lines count. A terminal newline does not create an extra line.                                                        |
+| `branch_count`                       | One for every `If`, one for every `ElseIf`, and one for every `Case` other than `Case Else`. `Select Case`, `Else`, and `Case Else` themselves do not add a branch. Single-line and multiline forms use the same rule.                                                                    |
+| `loop_count`                         | One for each `For`, `For Each`, `While`/`Wend`, and `Do`/`Loop` construct. A `Do While` or `Do Until` condition is part of that `Do`; it is not a second loop.                                                                                                                            |
+| `goto_count`                         | Explicit `GoTo <label>` statements only. `On Error GoTo <label>`, `Resume`, `GoSub`, and numeric labels are excluded.                                                                                                                                                                     |
+| `exit_point_count`                   | One implicit normal procedure-tail exit plus each explicit `Exit Sub`, `Exit Function`, or `Exit Property`, and each standalone `End`. `Exit For` and `Exit Do` are not procedure exits.                                                                                                  |
+| `parameter_count`                    | Every declared procedure parameter, including `ParamArray` and the accessor `value` parameter of a Property Let/Set declaration.                                                                                                                                                          |
+| `byref_parameter_count`              | Parameters whose effective passing mode is `ByRef`, including parameters where `ByRef` is omitted (VBA's default). `ByVal` is excluded; a `ParamArray` follows its effective `ByRef` passing mode.                                                                                        |
+| `local_variable_count`               | Each local declarator in `Dim`, `Static`, and `Const`, including multiple declarators in one declaration. Parameters, module fields, and a synthesized Function/Property return slot are excluded.                                                                                        |
+| `call_fan_out`                       | Number of unique, resolved project-local callee procedures referenced by the procedure. Repeated calls to one callee count once. Ambiguous, unresolved, external, member, and built-in calls are excluded.                                                                                |
+| `boolean_parameter_count`            | Number of parameters whose effective type is exactly `Boolean`.                                                                                                                                                                                                                           |
+| `optional_boolean_parameter_count`   | Number of Boolean parameters declared with `Optional`.                                                                                                                                                                                                                                    |
+| `vague_boolean_parameter_count`      | Number of Boolean parameters named exactly `flag`, `mode`, or `option` (case-insensitive). Prefixes and compound names are excluded.                                                                                                                                                      |
+| `boolean_control_branch_count`       | Number of `If`/`ElseIf` statements whose complete condition is one Boolean parameter, optionally wrapped in `Not` and/or parentheses. Aliases, compound `And`/`Or` expressions, and interprocedural flow are excluded.                                                                    |
+| `boolean_controlled_statement_count` | Number of unique source-backed statements in descendants of directly controlled Boolean branches. Synthetic `do_condition` nodes and the branch statement itself are excluded.                                                                                                            |
 
 The declaration, statement, and CFG facts must be normalized so equivalent
 single-line and multiline syntax has identical structural metrics. Physical
@@ -244,3 +256,4 @@ history, and LSP projections remain outside v1.
 - `vitepress/reference/json-output.md`
 - `docs/specs/vba-analysis-ir.md`
 - `docs/specs/vba-control-flow-graph.md`
+- `docs/specs/vba-opaque-boolean-controls.md`

@@ -12,6 +12,13 @@ All notable changes to xlflow will be documented in this file.
   ByRef/ByVal idioms remain separate as the existing `VB022` maintainability
   warning.
 
+- Added opt-in `VBA248` maintainability analysis for opaque positional Boolean
+  control arguments. Multiple positional `True`/`False` literals are reported
+  with structured call-site context, while named arguments suppress the
+  single-literal heuristic and conventional single flags remain clean.
+  `xlflow metrics` now exposes additive Boolean-parameter and direct-control
+  branching measurements without adding a declaration-level diagnostic.
+
 - Added default-enabled, compile-equivalent `VB055`–`VB058` diagnostics for
   duplicate and undefined procedure labels, mismatched `Next` control
   variables, and invalid loop/procedure `Exit` statements. Lint, analyze,

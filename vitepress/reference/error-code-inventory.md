@@ -57,6 +57,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `before_dialog_action`
 - `binary_expression`
 - `block_kind`
+- `boolean_control_branch_count`
+- `boolean_controlled_statement_count`
+- `boolean_parameter_count`
 - `branch_count`
 - `branch_false`
 - `branch_true`
@@ -236,6 +239,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_non_short_circuit_object_guard`
 - `detect_object_array_comparison`
 - `detect_object_use_before_set`
+- `detect_opaque_boolean_arguments`
 - `detect_procedure_call_cycles`
 - `detect_public_api_type_safety`
 - `detect_range_find_nothing_check`
@@ -621,6 +625,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `mutable_state_writes`
 - `mutator_count`
 - `named_argument`
+- `named_argument_count`
 - `nearby_code`
 - `needs_save`
 - `negative_rerun_failed`
@@ -664,6 +669,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `operator_spacing`
 - `option_after_declaration`
 - `option_statement`
+- `optional_boolean_parameter_count`
 - `optional_default_nonconstant`
 - `optional_default_type`
 - `optional_modifier`
@@ -719,6 +725,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `plain_http_credentials`
 - `plan_invalid`
 - `poison_reason`
+- `positional_literal_count`
 - `post_until`
 - `post_while`
 - `pre_until`
@@ -1066,6 +1073,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `userforms_present`
 - `uses_resume_next`
 - `uses_type`
+- `vague_boolean_parameter_count`
 - `variable_declaration`
 - `variable_declarator`
 - `vb_hide`

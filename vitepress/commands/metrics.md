@@ -24,22 +24,28 @@ project path should be omitted; this policy is independent from
 
 ## Metrics
 
-Every procedure reports these twelve integer fields:
+Every procedure reports the twelve core integer fields plus five additive
+Boolean-control measurements:
 
-| Metric                  | Meaning                                                                                                                    |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `cyclomatic_complexity` | `1 + branch_count + loop_count`.                                                                                           |
-| `max_nesting_depth`     | Maximum simultaneous `If`, `Select`, loop, and `With` nesting.                                                             |
-| `statement_count`       | Normalized source-backed statements; colon-separated statements are separate and continuations are one.                    |
-| `source_line_count`     | Physical lines from the procedure header through matching `End`, including blank/comment/continued lines.                  |
-| `branch_count`          | `If`, `ElseIf`, and each `Case` other than `Case Else`.                                                                    |
-| `loop_count`            | `For`, `For Each`, `While`/`Wend`, and each `Do`/`Loop`.                                                                   |
-| `goto_count`            | Explicit `GoTo` only; `On Error GoTo` is excluded.                                                                         |
-| `exit_point_count`      | Implicit tail exit, `Exit Sub`/`Function`/`Property`, and standalone `End`.                                                |
-| `parameter_count`       | All parameters, including Property Let/Set `value` and `ParamArray`.                                                       |
-| `byref_parameter_count` | Effective `ByRef`, including omitted `ByRef`; `ByVal` is excluded and `ParamArray` follows its effective passing mode.     |
-| `local_variable_count`  | Each `Dim`/`Static`/`Const` declarator, excluding parameters, fields, and synthetic return slots.                          |
-| `call_fan_out`          | Unique resolved project-local callees; repeated, ambiguous, unresolved, external, member, and built-in calls are excluded. |
+| Metric                               | Meaning                                                                                                                                       |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cyclomatic_complexity`              | `1 + branch_count + loop_count`.                                                                                                              |
+| `max_nesting_depth`                  | Maximum simultaneous `If`, `Select`, loop, and `With` nesting.                                                                                |
+| `statement_count`                    | Normalized source-backed statements; colon-separated statements are separate and continuations are one.                                       |
+| `source_line_count`                  | Physical lines from the procedure header through matching `End`, including blank/comment/continued lines.                                     |
+| `branch_count`                       | `If`, `ElseIf`, and each `Case` other than `Case Else`.                                                                                       |
+| `loop_count`                         | `For`, `For Each`, `While`/`Wend`, and each `Do`/`Loop`.                                                                                      |
+| `goto_count`                         | Explicit `GoTo` only; `On Error GoTo` is excluded.                                                                                            |
+| `exit_point_count`                   | Implicit tail exit, `Exit Sub`/`Function`/`Property`, and standalone `End`.                                                                   |
+| `parameter_count`                    | All parameters, including Property Let/Set `value` and `ParamArray`.                                                                          |
+| `byref_parameter_count`              | Effective `ByRef`, including omitted `ByRef`; `ByVal` is excluded and `ParamArray` follows its effective passing mode.                        |
+| `local_variable_count`               | Each `Dim`/`Static`/`Const` declarator, excluding parameters, fields, and synthetic return slots.                                             |
+| `call_fan_out`                       | Unique resolved project-local callees; repeated, ambiguous, unresolved, external, member, and built-in calls are excluded.                    |
+| `boolean_parameter_count`            | Parameters whose effective type is exactly `Boolean`.                                                                                         |
+| `optional_boolean_parameter_count`   | Boolean parameters declared with `Optional`.                                                                                                  |
+| `vague_boolean_parameter_count`      | Boolean parameters named exactly `flag`, `mode`, or `option` (case-insensitive).                                                              |
+| `boolean_control_branch_count`       | `If`/`ElseIf` statements directly controlled by one Boolean parameter. Aliases and compound conditions are excluded.                          |
+| `boolean_controlled_statement_count` | Unique source-backed statements in directly controlled branch descendants. Synthetic `do_condition` nodes and the branch itself are excluded. |
 
 Single-line and multiline syntax use the same structural rules. Properties are
 separate `property_get`, `property_let`, and `property_set` procedures. See the
@@ -139,7 +145,12 @@ signal and ordering contract is in
         "parameter_count": 1,
         "byref_parameter_count": 1,
         "local_variable_count": 2,
-        "call_fan_out": 2
+        "call_fan_out": 2,
+        "boolean_parameter_count": 0,
+        "optional_boolean_parameter_count": 0,
+        "vague_boolean_parameter_count": 0,
+        "boolean_control_branch_count": 0,
+        "boolean_controlled_statement_count": 0
       }
     ],
     "hotspots": {

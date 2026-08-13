@@ -14,7 +14,7 @@ VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
-VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247`)
+VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -215,6 +215,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	missingTimeout, ok := Lookup("VBA247")
 	if !ok || missingTimeout.Family != FamilyAnalyze || missingTimeout.Category != CategoryReliability || missingTimeout.EvidenceClass != EvidencePolicy || missingTimeout.CompileEquivalent || missingTimeout.DefaultSeverity != SeverityWarning || !missingTimeout.DefaultEnabled || !missingTimeout.Configurable || missingTimeout.ConfigurationKey != "detect_missing_http_timeout" || missingTimeout.PreflightBlocking || !missingTimeout.InlineSuppressible || !missingTimeout.Realtime || missingTimeout.Scope != ScopeProcedureLocal || missingTimeout.Precision != PrecisionMedium || !reflect.DeepEqual(missingTimeout.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
 		t.Fatalf("unexpected VBA247 metadata: %+v, %v", missingTimeout, ok)
+	}
+	opaqueBoolean, ok := Lookup("VBA248")
+	if !ok || opaqueBoolean.Family != FamilyAnalyze || opaqueBoolean.Category != CategoryMaintainability || opaqueBoolean.EvidenceClass != EvidenceMaintainability || opaqueBoolean.CompileEquivalent || opaqueBoolean.DefaultSeverity != SeverityWarning || opaqueBoolean.DefaultEnabled || !opaqueBoolean.Configurable || opaqueBoolean.ConfigurationKey != "detect_opaque_boolean_arguments" || opaqueBoolean.PreflightBlocking || !opaqueBoolean.InlineSuppressible || !opaqueBoolean.Realtime || opaqueBoolean.Scope != ScopeProcedureLocal || opaqueBoolean.Precision != PrecisionMedium || !reflect.DeepEqual(opaqueBoolean.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
+		t.Fatalf("unexpected VBA248 metadata: %+v, %v", opaqueBoolean, ok)
 	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {

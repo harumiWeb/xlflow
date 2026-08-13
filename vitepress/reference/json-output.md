@@ -122,7 +122,7 @@ command artifacts.
 `lint`, `analyze`, `check`, LSP diagnostics, or preflight. The result adds a
 versioned `metrics` object. Procedure entries are project-relative, use `/`
 path separators, and are sorted by file, declaration start position, module, name, and
-kind. The twelve metric fields are defined in
+kind. The twelve core metric fields and five additive Boolean-control fields are defined in
 `docs/specs/vba-procedure-complexity-metrics.md`; the additive hotspot projection
 is defined in `docs/specs/vba-procedure-and-module-hotspots.md`.
 
@@ -158,7 +158,12 @@ is defined in `docs/specs/vba-procedure-and-module-hotspots.md`.
         "parameter_count": 1,
         "byref_parameter_count": 1,
         "local_variable_count": 2,
-        "call_fan_out": 2
+        "call_fan_out": 2,
+        "boolean_parameter_count": 0,
+        "optional_boolean_parameter_count": 0,
+        "vague_boolean_parameter_count": 0,
+        "boolean_control_branch_count": 0,
+        "boolean_controlled_statement_count": 0
       }
     ],
     "hotspots": {

@@ -37,7 +37,7 @@ The command's machine-readable result is a versioned `metrics` object with
 `schema_version: 1` and a `procedures` array. Each procedure carries its
 project-relative slash-separated file, module and module kind, procedure name
 and kind, and a `declaration_range` object with one-based `startLine` and
-`endLine` (plus the parser's column/byte offsets), and these twelve integer
+`endLine` (plus the parser's column/byte offsets), and these twelve core integer
 metrics:
 
 - `cyclomatic_complexity`
@@ -52,6 +52,16 @@ metrics:
 - `byref_parameter_count`
 - `local_variable_count`
 - `call_fan_out`
+
+Issue #462 adds five additive raw measurements to the same version-1
+procedure object: `boolean_parameter_count`,
+`optional_boolean_parameter_count`, `vague_boolean_parameter_count`,
+`boolean_control_branch_count`, and `boolean_controlled_statement_count`.
+They measure declaration shape and direct Boolean-controlled statement breadth;
+they are not threshold metrics and never create analyzer findings. The
+call-site readability diagnostic is specified separately in
+`docs/specs/vba-opaque-boolean-controls.md` and remains independent from this
+metrics surface.
 
 The counting rules are permanent and are defined in
 `docs/specs/vba-procedure-complexity-metrics.md`. In particular, cyclomatic

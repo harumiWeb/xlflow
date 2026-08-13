@@ -270,7 +270,8 @@ or another explicit recovery path rather than saving the uncertain workbook.
 `metrics` is an independent source-only procedure measurement command. It
 scans configured source roots and `tests`, applies `[metrics].exclude`, and
 returns a versioned `metrics.schema_version = 1` procedure array containing
-the twelve complexity and maintainability metrics defined in
+the twelve core complexity metrics and five additive Boolean-control
+measurements defined in
 `docs/specs/vba-procedure-complexity-metrics.md`. It does not invoke
 `analyze`, add to `analysis_metrics.module_state`, or depend on diagnostic
 enablement. Thresholds are opt-in under `[metrics.thresholds]`; each positive
@@ -1185,6 +1186,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA245`: a destructive or state-dependent file operation receives an empty/root, relative/current-directory, wildcard, traversal, overwrite, same-source/destination, external-input, or uncleared temporary path
 - `VBA246`: a recognized HTTP client exposes credentials, weakens TLS/certificate validation, logs authorization data, uses a sensitive module constant, or downloads and launches executable/script content
 - `VBA247`: a recognized ServerXMLHTTP or WinHTTP request is sent without a proven finite timeout on every reaching path
+- `VBA248`: a procedure call passes multiple positional `True`/`False` literals, or a single positional literal targets a uniquely resolved procedure with multiple optional Boolean switches
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1207,13 +1209,22 @@ contract as `[lint].disabled_rules`.
 Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect_range_find_nothing_check`, `VBA202` = `detect_object_use_before_set`, `VBA203` = `detect_application_state_restore`, `VBA204` = `detect_error_handler_fallthrough`, `VBA205` = `forbid_unqualified_excel_objects`, `VBA206` = `detect_byref_argument_mismatch`, `VBA207` = `detect_dictionary_collection_guard`, `VBA208` = `detect_redim_preserve_dimension`, `VBA209` = `detect_object_array_comparison`, `VBA210` = `detect_function_return_path`, `VBA211` = `detect_excel_object_member_mismatch`, `VBA212` = `detect_non_short_circuit_object_guard`, `VBA213` = `detect_dictionary_iteration_value_usage`, `VBA214` = `detect_leaked_on_error_resume_next_scopes`, `VBA215` = `detect_stateful_excel_call_arguments`, `VBA216` = `detect_worksheet_root_mismatch`, `VBA217` = `detect_unstable_last_row_patterns`, `VBA218` = `detect_excel_api_failure_contracts`, `VBA219` = `detect_resource_leaks`, `VBA220` = `detect_event_handler_reentry`, `VBA221` = `detect_application_state_call_effects`, `VBA222` = `detect_public_api_type_safety`, `VBA223` = `detect_hardcoded_secrets`, `VBA224` = `detect_untrusted_data_flow`, `VBA225` = `detect_excel_cell_access_in_loops`, `VBA226` = `detect_range_value_array_shape`, `VBA227` = `detect_array_lifecycle_safety`, `VBA230` = `detect_dictionary_compare_mode_order`, `VBA231` = `detect_dictionary_loop_materialization`, `VBA232` = `detect_dictionary_key_normalization`, `VBA233` = `detect_late_bound_dictionary_constants`, `VBA234` = `detect_collection_iteration_mutation`, `VBA235` = `detect_collection_index_origin`, `VBA236` = `detect_unsafe_command_construction`, `VBA237` = `detect_error_suppression_propagation`, `VBA238` = `detect_loop_invariant_excel_object_resolution`, `VBA239` = `detect_unsafe_sql_construction`, `VBA240` = `detect_risky_module_state`, `VBA241` = `detect_redim_preserve_in_loops`, `VBA242` = `detect_expensive_full_range_operations`, `VBA243` = `detect_value2_performance_opportunities`, `VBA244` = `detect_procedure_call_cycles`, and `VBA245` = `detect_unsafe_file_path`.
 
 `VBA246` maps to `detect_unsafe_http_configuration`; `VBA247` maps to
-`detect_missing_http_timeout`.
+`detect_missing_http_timeout`; `VBA248` maps to
+`detect_opaque_boolean_arguments`.
 
 Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, and `VBA244` are enabled by default. `VBA230` through `VBA239` and `VBA241` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, and `VBA241` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types, ambiguous names, and unresolved external types are conservative warnings that include the type name; host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
 
 `VBA245`, `VBA246`, and `VBA247` extend the default-enabled analyzer set. All three are
 warning-level, non-blocking, inline-suppressible, procedure-local, and
 available in realtime diagnostics as well as batch analysis.
+
+`VBA248` is disabled by default. It is a warning-level, non-blocking,
+inline-suppressible, procedure-local rule available in realtime diagnostics and
+batch analysis. Enable it with `detect_opaque_boolean_arguments`; named
+arguments suppress the single-literal heuristic, while multiple positional
+Boolean literals remain a high-confidence call-site finding. Declaration-level
+Boolean-control measurements are emitted by `xlflow metrics` independently and
+do not create analyzer findings.
 
 `VBA202` is a batch-only, interprocedural warning for an object variable that
 may be dereferenced before a definitely non-`Nothing` value is proven on every
@@ -1378,5 +1389,18 @@ existing generic fallback. See [HTTP Transport Security Analysis](http-transport
 The legacy-compatible keys are `detect_unsafe_http_configuration` for
 `VBA246` and `detect_missing_http_timeout` for `VBA247`. Either rule can also
 be disabled with `[analyze].disabled_rules` or suppressed inline.
+
+`VBA248` is disabled by default and detects opaque Boolean control arguments at
+call sites. A call with at least two positional literal `True`/`False` values is
+reported even when its target cannot be resolved. A single positional literal
+is reported only for a uniquely resolved target with at least two optional
+Boolean parameters; named values are excluded from the positional count and
+suppress this single-literal case. The finding adds an `opaque_boolean` JSON
+context with literal/named counts and, when available, resolved parameter
+names. Use named arguments, an enum, or separate procedures to make intent
+explicit. Enable it with `detect_opaque_boolean_arguments`, disable it with
+`[analyze].disabled_rules = ["VBA248"]`, or suppress an intentional call inline.
+The declaration-level Boolean metrics are emitted by `xlflow metrics` and are
+not analyzer diagnostics.
 
 `VBA205` is warning-only and procedure-local. It identifies the ambiguous root object and recommends an explicit workbook, worksheet, range, or captured `Workbooks.Open` result. The analyzer resolves procedure IR symbols before reporting a root: local variables, parameters, module/project procedures, and member receivers that shadow names such as `Range`, `Cells`, `Rows`, and `Columns` are not Excel roots. Procedure declarations, module `Attribute` lines, and other non-executable source are not scanned as accesses. Explicit `Application` roots remain eligible because they still depend on the active Excel application state. Interactive macros may retain intentional active-selection behavior by suppressing the specific line with `xlflow:disable-line VBA205`, or by disabling `VBA205` for the project.
