@@ -171,16 +171,16 @@ func (w *callSyntaxWalker) callStatement(node *tree_sitter.Node) error {
 			}
 		}
 		if !targetOK || (!memberTarget && invalidVBAQualifiedTarget(target)) {
-			w.add(node, "invalid_call_target", cleanIdentifier(targetText), "The target of an explicit Call statement must be a procedure name or member expression.", "Use a procedure or member name as the Call target.")
+			w.addInvalidTarget(node, targetText)
 			return nil
 		}
 		if isVBAControlStatement(target) {
-			w.add(node, "invalid_call_target", cleanIdentifier(targetText), "The target of an explicit Call statement must be a procedure name or member expression.", "Use a procedure or member name as the Call target.")
+			w.addInvalidTarget(node, targetText)
 			return nil
 		}
 		arguments := node.ChildByFieldName("arguments")
 		if arguments == nil && invalidExplicitCallRemainder(remainder) {
-			w.add(node, "invalid_call_target", cleanIdentifier(targetText), "The target of an explicit Call statement must be a procedure name or member expression.", "Use a procedure or member name as the Call target.")
+			w.addInvalidTarget(node, targetText)
 			return nil
 		}
 		// `Call Procedure` is the legal zero-argument form. An argument
@@ -192,20 +192,20 @@ func (w *callSyntaxWalker) callStatement(node *tree_sitter.Node) error {
 			if nodeEnd < argumentsEnd {
 				invalid = true
 			} else {
-				remainder := strings.TrimSpace(trimVBAStatementText(w.source[argumentsEnd:nodeEnd]))
-				if invalidExplicitCallRemainder(remainder) {
-					w.add(node, "invalid_call_target", cleanIdentifier(targetText), "The target of an explicit Call statement must be a procedure name or member expression.", "Use a procedure or member name as the Call target.")
+				argumentRemainder := strings.TrimSpace(trimVBAStatementText(w.source[argumentsEnd:nodeEnd]))
+				if invalidExplicitCallRemainder(argumentRemainder) {
+					w.addInvalidTarget(node, targetText)
 					return nil
 				}
 				// A qualified member call is represented by tree-sitter as
 				// adjacent call_statement nodes (`Call rows(i).Message(...)`).
 				// A dot continuation belongs to the same valid target; commas,
 				// operators, and other trailing tokens do not.
-				invalid = remainder != "" && !strings.HasPrefix(remainder, ".")
+				invalid = argumentRemainder != "" && !strings.HasPrefix(argumentRemainder, ".")
 				if !invalid && rng.EndByte > nodeEnd {
 					extra := strings.TrimSpace(trimVBAStatementText(w.source[nodeEnd:rng.EndByte]))
 					if invalidExplicitCallRemainder(extra) {
-						w.add(node, "invalid_call_target", cleanIdentifier(targetText), "The target of an explicit Call statement must be a procedure name or member expression.", "Use a procedure or member name as the Call target.")
+						w.addInvalidTarget(node, targetText)
 						return nil
 					}
 					invalid = extra != "" && !strings.HasPrefix(extra, ".")
@@ -412,7 +412,7 @@ func (w *callSyntaxWalker) invalidExplicitTargets() {
 			}
 			targetText := strings.TrimSpace(trimVBAStatementText(rest))
 			if targetText != "" {
-				if target, _, ok := splitVBACallTarget(targetText); ok && !invalidVBAQualifiedTarget(target) && !isVBAControlStatement(target) {
+				if target, _, ok := splitVBACallTarget(targetText); ok && (validVBAImplicitMemberTarget(target) || (!invalidVBAQualifiedTarget(target) && !isVBAControlStatement(target))) {
 					continue
 				}
 			}
@@ -427,6 +427,14 @@ func (w *callSyntaxWalker) invalidExplicitTargets() {
 			w.addRange(rng, "invalid_call_target", cleanIdentifier(targetText), "The target of an explicit Call statement must be a procedure name or member expression.", "Use a procedure or member name as the Call target.")
 		}
 	}
+}
+
+func validVBAImplicitMemberTarget(target string) bool {
+	target = strings.TrimSpace(target)
+	if !strings.HasPrefix(target, ".") {
+		return false
+	}
+	return !invalidVBAQualifiedTarget(strings.TrimPrefix(target, "."))
 }
 
 func (w *callSyntaxWalker) hasErrorInByteRange(start, end int) bool {
@@ -447,6 +455,16 @@ func (w *callSyntaxWalker) add(node *tree_sitter.Node, kind, symbol, message, su
 		rng = vbaast.NodeRange(node)
 	}
 	w.addRange(rng, kind, symbol, message, suggestion)
+}
+
+func (w *callSyntaxWalker) addInvalidTarget(node *tree_sitter.Node, targetText string) {
+	w.add(
+		node,
+		"invalid_call_target",
+		cleanIdentifier(targetText),
+		"The target of an explicit Call statement must be a procedure name or member expression.",
+		"Use a procedure or member name as the Call target.",
+	)
 }
 
 func (w *callSyntaxWalker) addRange(rng vbaast.Range, kind, symbol, message, suggestion string) {

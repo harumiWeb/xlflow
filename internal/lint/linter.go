@@ -2593,7 +2593,9 @@ func shouldReportParseIssue(hasError, hasMissing bool, root *tree_sitter.Node, i
 		return true
 	}
 	for line := range problemLines {
-		if !hasIssueAtLine(issues, "VB005", line) && !hasIssueAtLine(issues, "VB059", line) {
+		// VB059 is compile-equivalent evidence on its own; parser recovery is
+		// still required for the generic VB005 location check.
+		if !hasIssueAtLine(issues, "VB005", line, true) && !hasIssueAtLine(issues, "VB059", line, false) {
 			return true
 		}
 	}
@@ -2621,9 +2623,9 @@ func collectParseProblemLines(node *tree_sitter.Node, lines map[int]bool) {
 	}
 }
 
-func hasIssueAtLine(issues []Issue, code string, line int) bool {
+func hasIssueAtLine(issues []Issue, code string, line int, requireRecoveryOK bool) bool {
 	for _, issue := range issues {
-		if issue.Code == code && issue.Line == line && (issue.parserRecoveryOK || code == "VB059") {
+		if issue.Code == code && issue.Line == line && (!requireRecoveryOK || issue.parserRecoveryOK) {
 			return true
 		}
 	}

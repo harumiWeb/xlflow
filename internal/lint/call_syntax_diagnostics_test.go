@@ -1,9 +1,11 @@
 package lint
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 )
 
 func TestCallSyntaxDiagnostics(t *testing.T) {
@@ -344,5 +346,29 @@ End Sub
 	}
 	if len(issuesByCode(issues, "VB014")) == 0 {
 		t.Fatalf("unrelated parser recovery was hidden by VB059: %#v", issues)
+	}
+}
+
+func TestInvalidExplicitTargetsAllowsImplicitMemberWithRecovery(t *testing.T) {
+	source := "Sub Probe()\n    Call .Delete\nEnd Sub\n"
+	start := strings.Index(source, "Call .Delete")
+	if start < 0 {
+		t.Fatal("implicit member call not found in probe source")
+	}
+	walker := callSyntaxWalker{
+		linter: Linter{Config: config.Default()},
+		path:   "Main.bas",
+		source: source,
+		seen:   make(map[string]bool),
+		errorRanges: []vbaast.Range{{
+			StartLine: 2,
+			EndLine:   2,
+			StartByte: start,
+			EndByte:   start + len("Call .Delete"),
+		}},
+	}
+	walker.invalidExplicitTargets()
+	if got := issuesByCode(walker.issues, callSyntaxDiagnosticCode); len(got) != 0 {
+		t.Fatalf("legal implicit member call produced recovery fallback: %#v", got)
 	}
 }

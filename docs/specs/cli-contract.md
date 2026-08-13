@@ -1087,7 +1087,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB054`, and `VB059` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
+Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB059` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
 
 `[preflight].allowed_diagnostics` is an empty-by-default project policy for the
 shared source-preflight gate used by `push`, configured-workbook `run`,
@@ -1124,7 +1124,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB054`, `VB059`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB059`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 

@@ -1,15 +1,17 @@
 package intel
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 )
 
 func TestDiagnosticsExposeVB059FromSharedLint(t *testing.T) {
-	analyzer := Analyzer{RootDir: t.TempDir(), Config: config.Default()}
+	root := t.TempDir()
+	analyzer := Analyzer{RootDir: root, Config: config.Default()}
 	doc := Document{
-		Path: t.TempDir() + "\\Main.bas",
+		Path: filepath.Join(root, "Main.bas"),
 		Source: `Attribute VB_Name = "Main"
 Option Explicit
 Public Sub Probe()
