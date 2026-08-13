@@ -990,7 +990,10 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
   source
 - `VB023`: `For Each` control variable is undeclared or obviously incompatible;
   declaration resolution uses Procedure IR for procedure and module scopes, and
-  unresolved composite control targets such as array elements remain fail-open
+  unresolved composite control targets such as array elements remain fail-open.
+  Iterable-source validation complements this control-variable check using the
+  shared array/collection shape facts; known dynamic arrays are accepted, while
+  unknown, external, and unresolved Variant sources remain fail-open
 - `VB026`: `Resume` is used outside a likely error-handler context
 - `VB027`: nested `With` blocks use implicit Excel members whose target can be ambiguous
 - `VB029`: `Option Explicit` is present and an assignment target or loop control variable is not declared in the project-visible namespace
@@ -1077,6 +1080,10 @@ Module` directives are also reported as duplicate same-kind declarations.
   `WritePair (first), (second)` remain quiet. The rule is an unsuppressible
   error and blocks source preflight; parser recovery alone is not sufficient
   evidence.
+- `VB060`: an assignment targets a `Const` value rejected by the VBE; it is an
+  unsuppressible error and blocks source preflight.
+- `VB061`: a fixed array declaration has a constant lower bound greater than
+  its upper bound; it is an unsuppressible error and blocks source preflight.
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
 - `VB033`: member is not present on the resolved receiver type
@@ -1095,7 +1102,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB059` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
+Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB061` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
 
 `[preflight].allowed_diagnostics` is an empty-by-default project policy for the
 shared source-preflight gate used by `push`, configured-workbook `run`,
@@ -1132,7 +1139,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB059`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB061`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 
@@ -1273,8 +1280,16 @@ and standalone getter predicates, remain allowed.
 `VBA226` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. Its legacy configuration key is `detect_range_value_array_shape`; add `VBA226` to `[analyze].disabled_rules` to disable it. Known single-cell values are scalars, known multi-cell values are two-dimensional arrays, and dynamic or merged shapes remain uncertain unless unsafe consumption or a statically proven mismatch is visible.
 
 For `VBA226`, the configurable analyzer mapping is `VBA226 = detect_range_value_array_shape`.
-`VBA227` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. It uses a conservative CFG allocation lattice (`allocated`, `unallocated`, and `unknown`) for fixed, dynamic, multidimensional, object, and Variant arrays. It reports unallocated bound/access operations, invalid dimensions or known bounds, fixed-array `ReDim`, and unknown Variant array operations. The shared state supplies `VBA208` `ReDim Preserve` findings and object-array missing-`Set` findings under `VBA101` / `VBA102`, which retain their existing ownership and configuration contracts. Unique project-local Function and Property Get return assignments may establish an array value; mixed, recursive, ambiguous, and external returns remain unknown. Batch summaries may use project-local files, while real-time summaries are limited to the active document. `Range.Value` / `Value2` shape findings remain owned by `VBA226` and are not duplicated. Disable it with `[analyze].disabled_rules = ["VBA227"]` or use `detect_array_lifecycle_safety`.
+`VBA227` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. It uses a conservative CFG allocation lattice (`allocated`, `unallocated`, and `unknown`) for fixed, dynamic, multidimensional, object, and Variant arrays. It reports unallocated bound/access operations, invalid dimensions or known bounds, fixed-array `ReDim`, incompatible `Erase`, known scalar bound/iterable sources, and impossible constant `ReDim` bounds. Unknown Variant operations remain fail-open. The shared state supplies `VBA208` `ReDim Preserve` findings and object-array missing-`Set` findings under `VBA101` / `VBA102`, which retain their existing ownership and configuration contracts. Unique project-local Function and Property Get return assignments may establish an array value; mixed, recursive, ambiguous, and external returns remain unknown. Batch summaries may use project-local files, while real-time summaries are limited to the active document. `Range.Value` / `Value2` shape findings remain owned by `VBA226` and are not duplicated. Disable it with `[analyze].disabled_rules = ["VBA227"]` or use `detect_array_lifecycle_safety`.
 For `VBA227`, the configurable analyzer mapping is `VBA227 = detect_array_lifecycle_safety`.
+The shared state also exposes operation shapes (`scalar`, fixed-array rank,
+dynamic-array rank/unknown, `Variant`, and `unknown`) to array-sensitive
+validation. Runtime-only checks such as incompatible `Erase`, scalar
+`ReDim`, proven non-array bounds, and non-iterable `For Each` sources remain
+warning-level and non-blocking; compile-equivalent declaration and assignment
+contracts use their canonical error diagnostics. `VB023` continues to own the
+`For Each` control-variable contract, while unknown, external, and unresolved
+`Variant` iterable sources remain fail-open.
 `VBA224` is a non-blocking, inline-suppressible warning. It tracks only within one procedure, treats parameters and the documented external-input APIs as untrusted sources, reports the documented sensitive APIs as sinks, and labels unsupported transformations as unknown. Literals and explicit constant/allowlist branches are accepted; only the narrow `EncodeURL` contract is accepted for HTTP URLs, while generic `Trim`, `CStr`, `Replace`, `IsNumeric`, and `Len` do not remove taint. Inter-procedure propagation is not performed in v1. `VBA206` uses resolved project-local signatures, supports positional and named arguments, and skips ByVal and ParamArray parameters. It remains a warning for literals, computed values, parenthesized arguments, properties, members, and array elements passed ByRef; its inline/configuration suppression contract is unchanged. Literal arguments are evaluated as temporary values and therefore never escalate to `VBA228`, even when their apparent literal type differs from the declared parameter type. `VBA228` owns only explicit statically incompatible bare value/object/array variables and `Long`/`LongPtr`/`LongLong` mismatches, including named arguments, and cannot be suppressed by `VBA206` settings. Array-valued Function return slots retain their array shape, local values shadow same-named project procedures, and a project type qualified by the resolved callee's declaring module is the same type as that callee's unqualified declaration. Types qualified by a different module remain incompatible. `Object`, `Variant`, `Any`, unresolved calls, and late-bound types do not produce a certain `VBA228` claim. `PtrSafe Declare` pointer-width warnings remain under `VBA206`. Rules `VBA207`, `VBA210`, and `VBA213` are disabled by default and can still be enabled with their legacy `[analyze]` booleans during the compatibility window. `VBA207` emits `warning` only when absence is definite and `information` when existence cannot be proven either way. `VBA214` accepts one compatibility probe followed by immediate restoration (with optional `Err.Number` inspection and `Err.Clear`), but reports wider scopes and any un-restored exit. `VBA225` is enabled in batch and real-time analysis, non-blocking, and warning by default; nested-loop context does not change severity. The shared Dictionary/Collection state, helper-summary limits, accepted guards, and ownership boundaries for `VBA207`, `VBA213`, and `VBA230` through `VBA235` are defined in [VBA Dictionary and Collection Safety Analysis](vba-dictionary-collection-safety.md). Analyzer diagnostics `VBA101` through `VBA106` are always enabled.
 
 `VBA236` is warning-only, non-blocking, inline-suppressible, and available in

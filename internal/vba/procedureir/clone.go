@@ -8,6 +8,7 @@ func Clone(in DocumentIR) DocumentIR {
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
 	for i := range out.Declarations {
 		out.Declarations[i].Parameters = cloneParameters(in.Declarations[i].Parameters)
+		out.Declarations[i].ArrayBounds = cloneArrayBounds(in.Declarations[i].ArrayBounds)
 		out.Declarations[i].ConditionalBranches = append([]ConditionalBranch(nil), in.Declarations[i].ConditionalBranches...)
 	}
 	out.TypeReferences = make([]TypeReference, len(in.TypeReferences))
@@ -43,10 +44,12 @@ func CloneCallSite(in CallSite) CallSite {
 func cloneProcedure(in ProcedureIR) ProcedureIR {
 	out := in
 	out.Symbol.Parameters = cloneParameters(in.Symbol.Parameters)
+	out.Symbol.ArrayBounds = cloneArrayBounds(in.Symbol.ArrayBounds)
 	out.Symbol.ConditionalBranches = append([]ConditionalBranch(nil), in.Symbol.ConditionalBranches...)
 	out.Declarations = append([]Declaration(nil), in.Declarations...)
 	for i := range out.Declarations {
 		out.Declarations[i].Parameters = cloneParameters(in.Declarations[i].Parameters)
+		out.Declarations[i].ArrayBounds = cloneArrayBounds(in.Declarations[i].ArrayBounds)
 		out.Declarations[i].ConditionalBranches = append([]ConditionalBranch(nil), in.Declarations[i].ConditionalBranches...)
 	}
 	out.Statements = make([]Statement, len(in.Statements))
@@ -98,6 +101,15 @@ func cloneParameters(in []Parameter) []Parameter {
 			out[i].ArrayBounds[j].LowerRange = cloneRangePointer(in[i].ArrayBounds[j].LowerRange)
 			out[i].ArrayBounds[j].UpperRange = cloneRangePointer(in[i].ArrayBounds[j].UpperRange)
 		}
+	}
+	return out
+}
+
+func cloneArrayBounds(in []ArrayBound) []ArrayBound {
+	out := append([]ArrayBound(nil), in...)
+	for i := range out {
+		out[i].LowerRange = cloneRangePointer(in[i].LowerRange)
+		out[i].UpperRange = cloneRangePointer(in[i].UpperRange)
 	}
 	return out
 }

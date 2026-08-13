@@ -59,6 +59,10 @@ type Analyzer struct {
 	RootDir string
 	Config  config.Config
 	DB      *vbadb.DB
+	// VisibleConstants carries project-level Const/Enum names for callers that
+	// already own a coherent workspace snapshot. File-local callers may leave
+	// it nil; the shared checker then remains conservative.
+	VisibleConstants map[string]bool
 	// TypeDBResolutionIncomplete is true when the production type database
 	// loaded with warnings. Type-dependent unresolved-name diagnostics must
 	// fail closed until the generated TypeLib view is complete.
@@ -262,6 +266,25 @@ func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc D
 	if controlFlowDiagnostics, ok := a.controlFlowDiagnosticsContext(ctx, doc); ok {
 		out = append(out, controlFlowDiagnostics...)
 	}
+	// Const assignments and impossible fixed-array declaration bounds are
+	// produced by the shared lint shape checker. Reuse that checker here so
+	// callers asking specifically for compile-equivalent LSP diagnostics see
+	// the same VB060/VB061 contracts as full diagnostics and batch analyze.
+	if parsed, closeParsed, err := parsedDocumentForDocument(doc); err == nil {
+		defer closeParsed()
+		if ir, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed); err == nil {
+			for _, issue := range lint.CompileEquivalentArrayShapeIssuesWithConstants(doc.Path, doc.Source, &ir, a.VisibleConstants) {
+				if !isCompileEquivalentDiagnostic(issue.Code) {
+					continue
+				}
+				rangeAt := issueRange(doc.Source, issue.Line, issue.Column)
+				if issue.EndLine > 0 && issue.EndColumn > 0 {
+					rangeAt = issueRangeWithEnd(doc.Source, issue.Line, issue.Column, issue.EndLine, issue.EndColumn)
+				}
+				out = append(out, Diagnostic{Code: issue.Code, Severity: issue.Severity, Source: "xlflow", Message: issue.Message, Range: rangeAt})
+			}
+		}
+	}
 	return out
 }
 
@@ -314,6 +337,7 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 		Config:                 a.Config,
 		ModuleKind:             doc.ModuleKind,
 		VisibleDeclarations:    a.visibleDeclarations,
+		VisibleConstants:       a.VisibleConstants,
 		TypeDeclarations:       a.typeDeclarations,
 		ObjectTypeDeclarations: a.objectTypeDeclarations,
 	}.LintParsedContext(ctx, parsed)

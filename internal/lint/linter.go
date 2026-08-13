@@ -62,6 +62,7 @@ type Linter struct {
 	ModuleKind             string
 	PathFilter             func(string) bool
 	VisibleDeclarations    map[string]bool
+	VisibleConstants       map[string]bool
 	TypeDeclarations       map[string]int
 	ObjectTypeDeclarations map[string]int
 }
@@ -134,11 +135,15 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	visibleDeclarations := l.VisibleDeclarations
+	visibleConstants := l.VisibleConstants
 	typeDeclarations := l.TypeDeclarations
 	objectTypeDeclarations := l.ObjectTypeDeclarations
 	missing := 0
 	if visibleDeclarations == nil {
 		missing++
+	}
+	if visibleConstants == nil {
+		visibleConstants = l.projectConstantDeclarationsContext(ctx, files)
 	}
 	if typeDeclarations == nil {
 		missing++
@@ -176,6 +181,7 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		}
 		fileLinter := l
 		fileLinter.VisibleDeclarations = visibleDeclarations
+		fileLinter.VisibleConstants = visibleConstants
 		fileLinter.TypeDeclarations = typeDeclarations
 		fileLinter.ObjectTypeDeclarations = objectTypeDeclarations
 		fileIssues, err := fileLinter.lintFileContext(ctx, file)
@@ -503,6 +509,112 @@ func (l Linter) projectTypeDeclarationsContext(ctx context.Context, files []stri
 func (l Linter) projectObjectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
 	_, _, objects := l.projectDeclarationsContext(ctx, files)
 	return objects
+}
+
+// projectConstantDeclarationsContext collects project-visible Const and Enum
+// names for VB060.  Values are intentionally not evaluated here; the
+// file-local shape checker resolves expressions in the declaring source and
+// uses this table only to recognize a cross-module assignment target.
+func (l Linter) projectConstantDeclarationsContext(ctx context.Context, files []string) map[string]bool {
+	counts := make(map[string]int)
+	add := func(name string) {
+		key := strings.ToLower(cleanIdentifier(name))
+		if key != "" {
+			counts[key]++
+		}
+	}
+	addQualified := func(qualifier, name string) {
+		qualifier = strings.ToLower(cleanIdentifier(qualifier))
+		name = strings.ToLower(cleanIdentifier(name))
+		if qualifier != "" && name != "" {
+			counts[qualifier+"."+name]++
+		}
+	}
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return uniqueVisibleConstants(counts)
+		}
+		standardModule := strings.EqualFold(l.moduleKindForPath(path), "standard")
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		moduleName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		if file, err := symbols.InspectSourceContext(ctx, symbols.SourceOptions{
+			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path), IncludePrivate: true,
+		}, source); err == nil && strings.TrimSpace(file.ModuleName) != "" {
+			moduleName = file.ModuleName
+		}
+		inEnum := false
+		enumVisible := false
+		enumName := ""
+		for _, line := range strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n") {
+			trim := strings.TrimSpace(strings.SplitN(line, "'", 2)[0])
+			lower := strings.ToLower(trim)
+			if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "private enum ") || strings.HasPrefix(lower, "friend enum ") {
+				inEnum = true
+				enumVisible = strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "friend enum ") || strings.HasPrefix(lower, "enum ")
+				fields := strings.Fields(trim)
+				enumName = ""
+				for i, field := range fields[:min(len(fields), 3)] {
+					if strings.EqualFold(field, "enum") && i+1 < len(fields) {
+						enumName = fields[i+1]
+						break
+					}
+				}
+				continue
+			}
+			if inEnum && strings.HasPrefix(lower, "end enum") {
+				inEnum = false
+				enumVisible = false
+				enumName = ""
+				continue
+			}
+			if inEnum {
+				if !enumVisible {
+					continue
+				}
+				fields := strings.Fields(strings.SplitN(trim, "=", 2)[0])
+				if len(fields) > 0 {
+					if standardModule {
+						add(fields[0])
+					}
+					addQualified(enumName, fields[0])
+				}
+				continue
+			}
+			var rest string
+			for _, prefix := range []string{"public const ", "friend const "} {
+				if strings.HasPrefix(lower, prefix) {
+					rest = strings.TrimSpace(trim[len(prefix):])
+					break
+				}
+			}
+			if rest == "" {
+				continue
+			}
+			if eq := strings.Index(rest, "="); eq > 0 {
+				fields := strings.Fields(strings.TrimSpace(rest[:eq]))
+				if len(fields) > 0 {
+					if standardModule {
+						add(fields[0])
+					}
+					addQualified(moduleName, fields[0])
+				}
+			}
+		}
+	}
+	return uniqueVisibleConstants(counts)
+}
+
+func uniqueVisibleConstants(counts map[string]int) map[string]bool {
+	constants := make(map[string]bool)
+	for name, count := range counts {
+		if count == 1 {
+			constants[name] = true
+		}
+	}
+	return constants
 }
 
 // projectDeclarationsContext parses each project file once and collects all
@@ -953,6 +1065,7 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		}
 		issues = append(issues, forEachIssues...)
 	}
+	issues = append(issues, l.arrayShapeIssues(path, source, ir)...)
 	return issues, ctx.Err()
 }
 
@@ -2163,6 +2276,7 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
 				Visibility: sym.Visibility, File: sym.File, Line: sym.StartLine, Parent: sym.Parent, IsArray: sym.IsArray,
+				IsConst:   strings.EqualFold(sym.Kind, "const") || strings.EqualFold(sym.Kind, "enum_member"),
 				Recovered: strings.EqualFold(sym.Kind, "enum_member") && !typeDBComplete,
 			})
 		}
@@ -2176,6 +2290,7 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
 				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
 				File: "<typelib>" + constant.Library, Recovered: !typeDBComplete,
+				IsConst: true, ValueShape: procedureir.ValueShapeScalar,
 			})
 		}
 	}

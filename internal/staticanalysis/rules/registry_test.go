@@ -11,7 +11,7 @@ func TestRegistryContainsEveryProductionDiagnostic(t *testing.T) {
 	want := strings.Fields(`
 VB001 VB002 VB003 VB004 VB005 VB006 VB007 VB008 VB009 VB010 VB011 VB012 VB013 VB014 VB015
 VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB033 VB034
-VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059
+VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059 VB060 VB061
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
 VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248`)
@@ -100,6 +100,8 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 		{id: "VB057", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 		{id: "VB058", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 		{id: "VB059", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP}},
+		{id: "VB060", scope: ScopeProcedureLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
+		{id: "VB061", scope: ScopeFileLocal, surfaces: []RuleSurface{SurfaceLint, SurfaceLSP, SurfaceAnalyze}},
 	} {
 		rule, found := Lookup(tc.id)
 		if !found || rule.Family != FamilyLint || rule.Category != CategoryCorrectness || rule.EvidenceClass != EvidenceCompileEquivalent || !rule.CompileEquivalent || rule.DefaultSeverity != SeverityError || !reflect.DeepEqual(rule.SupportedSeverities, []RuleSeverity{SeverityError}) || !reflect.DeepEqual(rule.Surfaces, tc.surfaces) || !rule.DefaultEnabled || rule.Scope != tc.scope || !rule.Realtime || rule.Precision != PrecisionHigh || rule.Configurable || rule.ConfigurationKey != "" || rule.InlineSuppressible || !rule.PreflightBlocking || rule.FixAvailable {

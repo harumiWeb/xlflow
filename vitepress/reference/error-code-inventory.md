@@ -159,6 +159,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `consequence_body`
 - `const_declaration`
 - `const_declarator`
+- `constant_assignment`
 - `constant_name`
 - `control_count`
 - `control_enumeration_failed`

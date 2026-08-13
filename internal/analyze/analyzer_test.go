@@ -4608,7 +4608,7 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA227")
-	for _, line := range []int{15, 20, 22, 25} {
+	for _, line := range []int{15, 20, 25} {
 		found := false
 		for _, finding := range got {
 			if finding.Line == line {
@@ -4626,8 +4626,385 @@ End Sub
 	if got101 := findingsByCode(findings, "VBA101"); len(got101) != 1 || got101[0].Line != 27 {
 		t.Fatalf("expected missing Set for object array element, got %+v", got101)
 	}
-	if got227 := findingsByCode(findings, "VBA227"); len(got227) != 4 {
+	if got227 := findingsByCode(findings, "VBA227"); len(got227) != 3 {
 		t.Fatalf("unexpected VBA227 duplicates or safe-path findings: %+v", got227)
+	}
+}
+
+func TestAnalyzerVBA227ValidatesScalarArrayOperationsAndIterableSources(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim scalar As Long
+  Dim values() As Long
+  Dim unknown As Variant
+  Dim implicit
+  Dim userValue As UserDefinedType
+  Dim item As Variant
+  Erase scalar
+  If LBound(scalar) > 0 Then Debug.Print "bad"
+  If UBound(scalar) > 0 Then Debug.Print "bad"
+  For Each item In scalar
+  Next item
+  For Each item In True
+  Next item
+  For Each item In 1 + 2
+  Next item
+  For Each item In unknown
+  Next item
+  For Each item In implicit
+  Next item
+  For Each item In userValue
+  Next item
+  Erase implicit
+  If LBound(implicit) > 0 Then Debug.Print "bad"
+  ReDim implicit(0 To 1)
+  ReDim values(3 To 1)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 7 {
+		t.Fatalf("scalar array operations and impossible ReDim bounds = %+v, want seven findings", got)
+	}
+	for _, finding := range got {
+		if finding.Line == 18 {
+			t.Fatalf("unknown Variant For Each source must remain conservative: %+v", finding)
+		}
+	}
+	for _, line := range []int{9, 10, 11, 12, 14, 16, 27} {
+		found := false
+		for _, finding := range got {
+			if finding.Line == line {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected VBA227 on line %d, got %+v", line, got)
+		}
+	}
+}
+
+func TestAnalyzerVBA227KeepsUnknownVariantReDimConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim unknown As Variant
+  Dim proven As Variant
+  ReDim unknown(0 To 1)
+  proven = Array(1, 2)
+  ReDim Preserve proven(0 To 2)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 5 {
+			t.Fatalf("unknown Variant ReDim must remain silent: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227AppliesOptionBaseToReDimBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Option Base 1
+Public Sub Run()
+  Dim values() As Long
+  ReDim values(0)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("Option Base 1 should make ReDim values(0) impossible: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227EvaluatesEnumReDimBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Enum Bounds
+  LowerBound = 3
+End Enum
+Public Sub Run()
+  Dim values() As Long
+  ReDim values(LowerBound To 1)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("Enum bound should make ReDim impossible: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227EvaluatesConstReDimBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Const LowerBound As Long = 3
+Public Sub Run()
+  Dim values() As Long
+  ReDim values(LowerBound To 1)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("Const bound should make ReDim impossible: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227ScopesLocalConstReDimBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub First()
+  Const LowerBound As Long = 3
+  Dim values() As Long
+  ReDim values(LowerBound To 1)
+End Sub
+
+Private Sub Second()
+  Const LowerBound As Long = 0
+  Dim values() As Long
+  ReDim values(LowerBound To 1)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("local Const bounds must be scoped to each procedure: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227AcceptsParamArrayForEachSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ParamArray values() As Variant)
+  Dim item As Variant
+  For Each item In values
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("ParamArray is always iterable and should not produce VBA227: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsScalarArrayElementAsForEachSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values() As Long
+  Dim item As Variant
+  ReDim values(0 To 1)
+  For Each item In values(0)
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("For Each over a scalar array element should produce VBA227: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsEraseAndBoundsOnObjectScalar(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim value As Object
+  Erase value
+  If LBound(value) > 0 Then Debug.Print "bad"
+  If UBound(value) > 0 Then Debug.Print "bad"
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 3 {
+		t.Fatalf("object scalar array operations should be diagnosed: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsBoundsOnScalarExpressions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  If LBound(1) > 0 Then Debug.Print "bad"
+  If UBound("value") > 0 Then Debug.Print "bad"
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 {
+		t.Fatalf("literal scalar bound targets should be diagnosed: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesFixedByRefArrayShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Resize(ByRef values(0 To 1) As Long)
+  ReDim values(0 To 2)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("fixed ByRef array ReDim should be diagnosed: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227TreatsFixedByRefArrayAsAllocated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe(ByRef values(0 To 1) As Long)
+  If LBound(values) <> 0 Then Debug.Print "bad"
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("fixed ByRef array is allocated on entry: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Values() As Long()
+  ReDim Values(0 To 1)
+  Values(0) = 1
+End Function
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("dynamic array function return should be resizable: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsScalarFunctionForEachSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function ScalarValue() As Long
+  ScalarValue = 1
+End Function
+
+Public Sub Run()
+  Dim item As Variant
+  For Each item In ScalarValue()
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 8 {
+		t.Fatalf("scalar function For Each source should produce VBA227: %#v", got)
+	}
+}
+
+func TestAnalyzerVBA227AllowsCollectionFunctionForEachSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Items() As Collection
+  Set Items = New Collection
+End Function
+
+Public Sub Run()
+  Dim item As Variant
+  For Each item In Items()
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("Collection function For Each source should remain valid: %#v", got)
+	}
+}
+
+func TestAnalyzerProjectsVB060AndVB061IntoAnalyzeAndPreflight(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Const Limit As Long = 2
+Public Sub Run()
+  Dim bad(3 To 1) As Long
+  Limit = 3
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VB060"); len(got) != 1 || got[0].Severity != "error" {
+		t.Fatalf("VB060 analyze findings = %#v", got)
+	}
+	if got := findingsByCode(result.Findings, "VB061"); len(got) != 1 || got[0].Severity != "error" {
+		t.Fatalf("VB061 analyze findings = %#v", got)
+	}
+	if got := findingsByCode(result.PreflightFindings, "VB060"); len(got) != 1 {
+		t.Fatalf("VB060 preflight findings = %#v", got)
+	}
+	if got := findingsByCode(result.PreflightFindings, "VB061"); len(got) != 1 {
+		t.Fatalf("VB061 preflight findings = %#v", got)
 	}
 }
 
@@ -4782,8 +5159,8 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA227")
-	if len(got) != 2 || got[0].Line != 6 || got[1].Line != 10 {
-		t.Fatalf("expected conservative branch and Variant diagnostics, got %+v", got)
+	if len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("expected only the conservative dynamic-array diagnostic; unknown Variant operations stay quiet, got %+v", got)
 	}
 }
 
@@ -4943,8 +5320,8 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA227")
-	if len(got) != 1 || got[0].Line != 24 {
-		t.Fatalf("conditional allocation must remain unknown while matching branch allocations stay safe: %+v", got)
+	if len(got) != 0 {
+		t.Fatalf("Variant array-return assignments remain unknown unless array nature is proven: %+v", got)
 	}
 }
 
@@ -4998,8 +5375,8 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA227")
-	if len(got) != 1 || got[0].Line != 9 {
-		t.Fatalf("scalar Range.Value return must not be summarized as an allocated array: %+v", got)
+	if len(got) != 0 {
+		t.Fatalf("scalar Range.Value return must remain unknown without an array proof: %+v", got)
 	}
 }
 
@@ -5026,8 +5403,8 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 5 {
-		t.Fatalf("realtime analysis must not use another module's array-return summary: %+v", got)
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("realtime analysis must keep external Variant array returns unknown: %+v", got)
 	}
 }
 

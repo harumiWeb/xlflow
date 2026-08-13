@@ -227,6 +227,7 @@ func New(opts Options) (*Server, func(), error) {
 		}
 		resolutionResolver, resolvedProjectIR := s.projectResolution(project, project.Complete && typeDB.Complete)
 		analyzer := s.analyzer
+		analyzer.VisibleConstants = projectVisibleConstants(project)
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
 			projectKey := symbolFileKey(ir.Path)
 			if projectDocument, ok := projectByPath[projectKey]; ok {
@@ -296,6 +297,46 @@ func New(opts Options) (*Server, func(), error) {
 		s.docs.closeAll()
 		cleanup()
 	}, nil
+}
+
+func projectVisibleConstants(project intel.ProjectAnalysisSnapshot) map[string]bool {
+	counts := make(map[string]int)
+	add := func(name string) {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			counts[name]++
+		}
+	}
+	addQualified := func(qualifier, name string) {
+		qualifier = strings.ToLower(strings.TrimSpace(qualifier))
+		name = strings.ToLower(strings.TrimSpace(name))
+		if qualifier != "" && name != "" {
+			counts[qualifier+"."+name]++
+		}
+	}
+	for _, document := range project.Documents {
+		standardModule := strings.EqualFold(document.IR.ModuleKind, "standard")
+		for _, declaration := range document.IR.Declarations {
+			if !declaration.IsConst && !strings.EqualFold(declaration.Kind, "enum_member") {
+				continue
+			}
+			if !strings.EqualFold(declaration.Visibility, "public") && !strings.EqualFold(declaration.Visibility, "friend") {
+				continue
+			}
+			if standardModule {
+				add(declaration.Name)
+			}
+			addQualified(document.IR.ModuleName, declaration.Name)
+			addQualified(declaration.Parent, declaration.Name)
+		}
+	}
+	constants := make(map[string]bool)
+	for name, count := range counts {
+		if count == 1 {
+			constants[name] = true
+		}
+	}
+	return constants
 }
 
 func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) effects.ProjectSummary {
@@ -1967,6 +2008,7 @@ func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapsho
 				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: document.IR.ModuleKind,
 				Kind: declaration.Kind, Visibility: declaration.Visibility, File: document.IR.Path,
 				Line: declaration.Range.StartLine, Parent: declaration.Parent, IsArray: declaration.IsArray,
+				IsConst: declaration.IsConst, ValueShape: declaration.ValueShape,
 				Recovered: declaration.Recovered, ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
 			})
 		}
@@ -1975,6 +2017,7 @@ func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapsho
 				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: document.IR.ModuleKind,
 				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: document.IR.Path,
 				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
+				IsArray: procedure.Symbol.IsArray, ValueShape: procedure.Symbol.ValueShape,
 				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
 			})
 		}
@@ -1996,6 +2039,7 @@ func workspaceTypeLibResolverSymbols(typeDB *vbadb.DB) []procedureir.ResolverSym
 		out = append(out, procedureir.ResolverSymbol{
 			Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
 			ModuleKind: "external", Kind: "enum_member", Visibility: "Public", File: "<typelib>" + constant.Library,
+			IsConst: true, ValueShape: procedureir.ValueShapeScalar,
 		})
 	}
 	return out

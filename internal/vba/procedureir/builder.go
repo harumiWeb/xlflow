@@ -106,14 +106,46 @@ func (b *documentBuilder) procedureSymbol(node *tree_sitter.Node) ProcedureSymbo
 		bodyRange = zeroRangeAtStart(vbaast.NodeRange(end))
 	}
 	event, eventKind := ClassifyEvent(b.moduleKind, name)
+	returnType := typeText(header, b.source)
+	isArray, valueShape, arrayBounds := b.procedureReturnShape(header)
 	return ProcedureSymbol{
 		Name: name, QualifiedName: qualified, Kind: kind,
 		Visibility: visibilityOfNode(header, b.source),
-		Parameters: b.parameters(header), ReturnType: typeText(header, b.source),
+		Parameters: b.parameters(header), ReturnType: returnType, IsArray: isArray,
+		ValueShape: valueShape, ArrayBounds: arrayBounds,
 		DeclarationRange: vbaast.NodeRange(node), BodyRange: bodyRange,
 		IsEventHandler: event, EventKind: eventKind, Recovered: recovered(node),
 		ConditionalBranches: conditionalBranches(node, b.source),
 	}
+}
+
+func (b *documentBuilder) procedureReturnShape(header *tree_sitter.Node) (bool, ValueShapeKind, []ArrayBound) {
+	if header == nil {
+		return false, ValueShapeUnknown, nil
+	}
+	asType := childByKind(header, "as_type_clause")
+	if asType == nil {
+		return false, ValueShapeUnknown, nil
+	}
+	text := strings.TrimSpace(nodeText(asType, b.source))
+	if !strings.HasSuffix(text, ")") {
+		return false, valueShapeForDeclaration(Declaration{Type: typeText(header, b.source)}, text), nil
+	}
+	open := strings.LastIndex(text, "(")
+	if open < 0 {
+		return false, ValueShapeUnknown, nil
+	}
+	bounds := asType.ChildByFieldName("bounds")
+	if bounds == nil {
+		bounds = childByKind(asType, "array_bounds")
+	}
+	if strings.TrimSpace(text[open+1:len(text)-1]) == "" {
+		return true, ValueShapeDynamicArray, nil
+	}
+	if bounds == nil {
+		return true, ValueShapeFixedArray, nil
+	}
+	return true, ValueShapeFixedArray, b.arrayBounds(bounds)
 }
 
 func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
@@ -161,9 +193,26 @@ func (b *documentBuilder) parameters(node *tree_sitter.Node) []Parameter {
 			param.Recovered = param.Recovered || recovered(value)
 		}
 		b.parameterArrayFacts(&param, child)
+		param.ValueShape = valueShapeForParameter(param)
 		out = append(out, param)
 	}
 	return out
+}
+
+func valueShapeForParameter(param Parameter) ValueShapeKind {
+	if !param.IsArray {
+		if strings.EqualFold(strings.TrimSpace(param.Type), "Variant") || param.ParamArray {
+			return ValueShapeVariant
+		}
+		return ValueShapeScalar
+	}
+	if param.ArrayShape == ArrayShapeBounded {
+		return ValueShapeFixedArray
+	}
+	if param.ArrayShape == ArrayShapeDynamic {
+		return ValueShapeDynamicArray
+	}
+	return ValueShapeUnknown
 }
 
 // ParametersFromNode exposes the canonical declaration-parameter projection
@@ -264,7 +313,7 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 			ID:   b.takeDeclarationID(),
 			Name: nodeText(childByFieldOrKind(child, "name", "identifier"), b.source),
 			Type: typeText(child, b.source), Scope: declarationScope(scope, declVisibility), Visibility: declVisibility,
-			Kind: kind, IsArray: strings.Contains(text, "("), Range: vbaast.NodeRange(child),
+			Kind: kind, IsArray: b.isArrayDeclarator(child), IsConst: kind == "const", Range: vbaast.NodeRange(child),
 			Recovered: recovered(child),
 		}
 		// tree-sitter attaches a declaration-level `As ...` clause to the
@@ -276,9 +325,86 @@ func (b *documentBuilder) declarations(node *tree_sitter.Node, scope SymbolScope
 			decl.Type = typeText(node, b.source)
 		}
 		decl.IsObject = looksObjectType(decl.Type) || hasWord(text, "New")
+		decl.ValueShape = valueShapeForDeclaration(decl, text)
+		if decl.IsArray {
+			if bounds := child.ChildByFieldName("bounds"); bounds != nil {
+				decl.ArrayBounds = b.arrayBounds(bounds)
+				if len(decl.ArrayBounds) > 0 {
+					decl.ValueShape = ValueShapeFixedArray
+				}
+			}
+		}
 		out = append(out, decl)
 	}
 	return out
+}
+
+// isArrayDeclarator distinguishes the parentheses belonging to a declarator
+// from parentheses in its initializer (for example Const F = Array(1, 2)).
+// Looking immediately after the identifier mirrors the symbol extractor and
+// keeps the shared value shape conservative when the parser recovered a
+// malformed declaration.
+func (b *documentBuilder) isArrayDeclarator(node *tree_sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	name := childByFieldOrKind(node, "name", "identifier")
+	if name == nil {
+		return false
+	}
+	start, end := int(name.EndByte()), int(node.EndByte())
+	if start < 0 || end < start || end > len(b.source) {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(b.source[start:end])), "(")
+}
+
+func (b *documentBuilder) arrayBounds(bounds *tree_sitter.Node) []ArrayBound {
+	if bounds == nil {
+		return nil
+	}
+	facts := make([]ArrayBound, 0, bounds.NamedChildCount())
+	for i := uint(0); i < bounds.NamedChildCount(); i++ {
+		bound := bounds.NamedChild(i)
+		if bound == nil || bound.Kind() != "array_bound" {
+			continue
+		}
+		fact := ArrayBound{Range: vbaast.NodeRange(bound), Recovered: recovered(bound)}
+		lower := bound.ChildByFieldName("lower")
+		upper := bound.ChildByFieldName("upper")
+		if lower != nil && upper != nil {
+			fact.Lower, fact.Upper = nodeText(lower, b.source), nodeText(upper, b.source)
+			fact.LowerRange, fact.UpperRange = rangePointer(lower), rangePointer(upper)
+		} else if lower != nil || upper != nil {
+			if lower != nil {
+				fact.Lower, fact.LowerRange = nodeText(lower, b.source), rangePointer(lower)
+			}
+			if upper != nil {
+				fact.Upper, fact.UpperRange = nodeText(upper, b.source), rangePointer(upper)
+			}
+			fact.Recovered = true
+		} else {
+			fact.Expression = nodeText(bound, b.source)
+		}
+		fact.Recovered = fact.Recovered || recovered(lower) || recovered(upper)
+		facts = append(facts, fact)
+	}
+	return facts
+}
+
+func valueShapeForDeclaration(decl Declaration, text string) ValueShapeKind {
+	if decl.IsArray {
+		open := strings.Index(text, "(")
+		close := strings.LastIndex(text, ")")
+		if open >= 0 && close > open && strings.TrimSpace(text[open+1:close]) != "" {
+			return ValueShapeFixedArray
+		}
+		return ValueShapeDynamicArray
+	}
+	if strings.EqualFold(strings.TrimSpace(decl.Type), "Variant") {
+		return ValueShapeVariant
+	}
+	return ValueShapeScalar
 }
 
 func (b *documentBuilder) simpleDeclaration(node *tree_sitter.Node, scope SymbolScope) (Declaration, bool) {
@@ -315,6 +441,7 @@ func (b *documentBuilder) enumMemberDeclaration(node *tree_sitter.Node, ctx visi
 	return Declaration{
 		ID: b.takeDeclarationID(), Name: name, Type: typeText(node, b.source), Scope: ScopeModule,
 		Visibility: visibility, Kind: "enum_member", Parent: ctx.enumName,
+		IsConst: true, ValueShape: ValueShapeScalar,
 		Range: vbaast.NodeRange(nameNode), Recovered: recovered(node),
 		ConditionalBranches: append([]ConditionalBranch(nil), ctx.conditional...),
 	}, true

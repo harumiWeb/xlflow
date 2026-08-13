@@ -224,6 +224,16 @@
     {
       "id": "vb009-backslash-doubled-quotes-valid",
       "path": "cases/vb009-backslash-doubled-quotes-valid/case.json"
-    }
+    },
+    { "id": "const-assignment-rejected", "path": "cases/const-assignment-rejected/case.json" },
+    { "id": "const-assignment-accepted", "path": "cases/const-assignment-accepted/case.json" },
+    { "id": "fixed-array-reversed-bound", "path": "cases/fixed-array-reversed-bound/case.json" },
+    { "id": "fixed-array-valid-bound", "path": "cases/fixed-array-valid-bound/case.json" },
+    { "id": "redim-fixed-array", "path": "cases/redim-fixed-array/case.json" },
+    { "id": "redim-scalar", "path": "cases/redim-scalar/case.json" },
+    { "id": "erase-scalar", "path": "cases/erase-scalar/case.json" },
+    { "id": "lbound-scalar", "path": "cases/lbound-scalar/case.json" },
+    { "id": "foreach-scalar", "path": "cases/foreach-scalar/case.json" },
+    { "id": "redim-reversed-bound", "path": "cases/redim-reversed-bound/case.json" }
   ]
 }

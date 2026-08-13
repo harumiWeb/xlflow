@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "fixed-array-valid-bound",
+  "description": "Declare a fixed array with valid bounds control.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB061"],
+    "forbidden_diagnostics": [
+      { "code": "VB061", "severity": "error", "surfaces": ["lint", "analyze", "lsp"] }
+    ]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-13T10:22:33Z"
+      }
+    ]
+  }
+}
