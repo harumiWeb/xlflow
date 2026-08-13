@@ -907,7 +907,9 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB006`: module-level `Public` variable usage
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. Direct `MsgBox` and `InputBox` usage remains in scope for this rule; `XlflowUI.MsgBox` and `XlflowUI.InputBox` are the approved dialog wrappers for runtime-aware automation. JSON findings may include `kind`, `symbol`, and `suggestion`.
 - `VB008`: typographic quote characters that can trigger VBE compile dialogs
-- `VB009`: likely C-style quote escapes in VBA string literals
+- `VB009`: likely C-style quote escapes that leave a VBA string literal
+  unterminated. A literal backslash adjacent to doubled VBA quote characters is
+  not reported when the physical line's string literals are closed.
 - `VB010`: unterminated `Sub`, `Function`, or `Property` procedure. Procedure
   boundary validation follows mutually exclusive `#If`/`#ElseIf`/`#Else`
   compilation branches, so a declaration selected in one branch may share its

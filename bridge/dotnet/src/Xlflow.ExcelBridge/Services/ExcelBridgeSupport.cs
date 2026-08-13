@@ -151,6 +151,7 @@ internal sealed record OracleCleanupProcessDiagnostic(
 internal sealed record OracleCleanupDiagnostics(
     bool Confirmed,
     IReadOnlyList<OracleCleanupProcessDiagnostic> OwnedProcesses,
+    IReadOnlyList<OracleCleanupProcessDiagnostic> ConcurrentProcesses,
     int DrainAttempts,
     int RemainingWindows,
     int RemainingProcesses,
@@ -158,6 +159,7 @@ internal sealed record OracleCleanupDiagnostics(
 {
     public static OracleCleanupDiagnostics NotAttempted { get; } = new(
         true,
+        Array.Empty<OracleCleanupProcessDiagnostic>(),
         Array.Empty<OracleCleanupProcessDiagnostic>(),
         0,
         0,
@@ -1603,8 +1605,9 @@ internal static class ExcelBridgeSupport
     // COM wrappers and terminating the captured process avoids allowing a
     // modal VBE/Excel state to block app.Quit indefinitely. Newly discovered
     // Excel processes are adopted only when they are the captured instance or
-    // descendants of the bridge/oracle process tree; a baseline-only check is
-    // not sufficient because a user can start Excel while the oracle runs.
+    // descendants of the bridge/oracle process tree. Other Excel processes
+    // may start concurrently and are observed without being terminated or
+    // weakening confirmation of the explicitly owned process cleanup.
     public static bool ReleaseOracleExcelAndConfirmExit(
         object? workbook,
         object? excel,
@@ -1668,6 +1671,7 @@ internal static class ExcelBridgeSupport
         var maxDrainBudget = drainBudget.GetValueOrDefault(OracleCleanupDrainBudget);
         var drainStopwatch = Stopwatch.StartNew();
         var diagnostics = new Dictionary<string, OracleCleanupProcessDiagnostic>(StringComparer.Ordinal);
+        var concurrentDiagnostics = new Dictionary<string, OracleCleanupProcessDiagnostic>(StringComparer.Ordinal);
         foreach (var process in ownedProcesses)
         {
             diagnostics[ProcessDiagnosticKey(process)] = new OracleCleanupProcessDiagnostic(
@@ -1677,7 +1681,6 @@ internal static class ExcelBridgeSupport
                 "captured-process-pid");
         }
 
-        var unexpectedProcessObserved = false;
         var remainingProcesses = 0;
         var drainAttempts = 0;
         var allOwnedExited = ownedProcesses.Count == 0;
@@ -1686,7 +1689,6 @@ internal static class ExcelBridgeSupport
         {
             drainAttempts++;
             var discovered = false;
-            var unexpectedProcessesThisAttempt = 0;
             foreach (var process in discoverProcesses())
             {
                 if (ownershipPredicate(process))
@@ -1704,11 +1706,14 @@ internal static class ExcelBridgeSupport
                 }
                 else if (!baselineProcesses.Any(existing => SameOwnedProcess(existing, process)))
                 {
-                    // A new Excel process without a proven oracle relationship
-                    // is evidence that cleanup cannot be confirmed. Leave it
-                    // untouched rather than risking a user's unsaved work.
-                    unexpectedProcessObserved = true;
-                    unexpectedProcessesThisAttempt++;
+                    // A user may start an unrelated Excel instance while the
+                    // oracle runs. Keep it visible, but never adopt, terminate,
+                    // or treat it as evidence about the owned oracle instance.
+                    concurrentDiagnostics[ProcessDiagnosticKey(process)] = new OracleCleanupProcessDiagnostic(
+                        process.ProcessId,
+                        process.StartTime,
+                        false,
+                        "unrelated-concurrent-process");
                 }
             }
 
@@ -1730,8 +1735,8 @@ internal static class ExcelBridgeSupport
                 allOwnedExited &= exited;
             }
 
-            remainingProcesses = unexpectedProcessesThisAttempt + diagnostics.Values.Count(item => !item.ExitConfirmed);
-            if (!unexpectedProcessObserved && allOwnedExited && !discovered)
+            remainingProcesses = diagnostics.Values.Count(item => !item.ExitConfirmed);
+            if (allOwnedExited && !discovered)
             {
                 break;
             }
@@ -1747,15 +1752,12 @@ internal static class ExcelBridgeSupport
             }
         }
 
-        var confirmed = !unexpectedProcessObserved && allOwnedExited && diagnostics.Values.All(item => item.ExitConfirmed);
-        var failureStage = confirmed
-            ? null
-            : unexpectedProcessObserved
-                ? "unexpected-process"
-                : "process-exit-confirmation";
+        var confirmed = allOwnedExited && diagnostics.Values.All(item => item.ExitConfirmed);
+        var failureStage = confirmed ? null : "process-exit-confirmation";
         return new OracleCleanupDiagnostics(
             confirmed,
             diagnostics.Values.OrderBy(item => item.ProcessId).ToArray(),
+            concurrentDiagnostics.Values.OrderBy(item => item.ProcessId).ToArray(),
             drainAttempts,
             0,
             remainingProcesses,

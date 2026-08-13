@@ -440,7 +440,7 @@ public sealed class VbeOracleService : IVbeOracleService
                     {
                         source = File.ReadAllText(module.SourcePath, Encoding.UTF8);
                     }
-                    VbaSourceHelper.SetCodeModuleText(codeModule, SanitizeOracleSource(source));
+                    SetOracleCodeModuleText(codeModule, source, module.Name);
                 }
                 finally
                 {
@@ -474,6 +474,26 @@ public sealed class VbeOracleService : IVbeOracleService
         // components. NormalizeDocumentModuleContent removes VBIDE export
         // headers and the class metadata block before CodeModule injection.
         return VbaSourceHelper.NormalizeDocumentModuleContent(source.TrimStart('\uFEFF'));
+    }
+
+    private static void SetOracleCodeModuleText(object codeModule, string source, string moduleName)
+    {
+        var expected = SanitizeOracleSource(source);
+        VbaSourceHelper.SetCodeModuleText(codeModule, expected);
+        var actual = VbaSourceHelper.GetCodeModuleText(codeModule);
+        if (!string.Equals(NormalizeOracleCode(expected), NormalizeOracleCode(actual), StringComparison.Ordinal))
+        {
+            throw new OracleSourceMutationException(
+                $"VBE changed oracle fixture source while provisioning module '{moduleName}'; compile evidence would not describe the committed fixture.");
+        }
+    }
+
+    private static string NormalizeOracleCode(string source)
+    {
+        return source
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .TrimEnd('\n');
     }
 
     private static bool MatchesDocumentTarget(int componentType, string candidateName, string moduleName, string documentTarget)
@@ -527,7 +547,7 @@ public sealed class VbeOracleService : IVbeOracleService
             {
                 source = File.ReadAllText(module.SourcePath, Encoding.UTF8);
             }
-            VbaSourceHelper.SetCodeModuleText(codeModule, SanitizeOracleSource(source));
+            SetOracleCodeModuleText(codeModule, source, module.Name);
         }
         finally
         {
@@ -724,6 +744,12 @@ public sealed class VbeOracleService : IVbeOracleService
                 ["exit_confirmed"] = process.ExitConfirmed,
                 ["ownership_basis"] = process.OwnershipBasis,
             }).ToArray(),
+            ["concurrent_processes"] = cleanup.ConcurrentProcesses.Select(process => new Dictionary<string, object?>
+            {
+                ["pid"] = process.ProcessId,
+                ["start_time"] = process.StartTime?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                ["ownership_basis"] = process.OwnershipBasis,
+            }).ToArray(),
             ["drain_attempts"] = cleanup.DrainAttempts,
             ["remaining_windows"] = cleanup.RemainingWindows,
             ["remaining_processes"] = cleanup.RemainingProcesses,
@@ -738,6 +764,10 @@ public sealed class VbeOracleService : IVbeOracleService
 
     private static string ClassifyInfrastructureCode(string stage, Exception exception)
     {
+        if (exception is OracleSourceMutationException)
+        {
+            return "oracle_source_mutated";
+        }
         if (exception.Message.Contains("VBProject", StringComparison.OrdinalIgnoreCase))
         {
             return "oracle_vbproject_access_denied";
@@ -767,6 +797,8 @@ public sealed class VbeOracleService : IVbeOracleService
     }
 
     private sealed class VbeOracleValidationException(string message, Exception? inner = null) : Exception(message, inner);
+
+    private sealed class OracleSourceMutationException(string message) : Exception(message);
 
     private sealed record OracleObservation(
         string Outcome,

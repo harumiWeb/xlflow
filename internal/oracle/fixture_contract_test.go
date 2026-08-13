@@ -115,15 +115,17 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 				})
 			}
 
-			analyzeResult, err := (analyze.Analyzer{RootDir: projectRoot, Config: cfg}).RunResult()
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, finding := range analyzeResult.Findings {
-				projections["analyze"] = append(projections["analyze"], Diagnostic{
-					Code: finding.Code, Severity: finding.Severity,
-					Range: &Range{StartLine: finding.Line, StartColumn: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn},
-				})
+			if analysisUsesSurface(c.Analysis, "analyze") {
+				analyzeResult, err := (analyze.Analyzer{RootDir: projectRoot, Config: cfg}).RunResult()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, finding := range analyzeResult.Findings {
+					projections["analyze"] = append(projections["analyze"], Diagnostic{
+						Code: finding.Code, Severity: finding.Severity,
+						Range: &Range{StartLine: finding.Line, StartColumn: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn},
+					})
+				}
 			}
 
 			lspAnalyzer := intel.Analyzer{RootDir: projectRoot, Config: cfg, DB: db}
@@ -131,41 +133,43 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 			// this Excel-free contract test, install the same project resolver
 			// projection used by LSP Full so interprocedural VB052–VB054 contracts
 			// are checked on the LSP surface as well.
-			resolverSymbols := make([]procedureir.ResolverSymbol, 0)
-			for _, module := range c.Modules {
-				ir, buildErr := procedureir.BuildSource(procedureir.BuildOptions{
-					RootDir: projectRoot, Path: modulePath(module), ModuleName: module.Name, ModuleKind: module.Kind,
-				}, sources[module.Name])
-				if buildErr != nil {
-					t.Fatal(buildErr)
+			if analysisUsesSurface(c.Analysis, "analyze") {
+				resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+				for _, module := range c.Modules {
+					ir, buildErr := procedureir.BuildSource(procedureir.BuildOptions{
+						RootDir: projectRoot, Path: modulePath(module), ModuleName: module.Name, ModuleKind: module.Kind,
+					}, sources[module.Name])
+					if buildErr != nil {
+						t.Fatal(buildErr)
+					}
+					for _, declaration := range ir.Declarations {
+						resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+							Name: declaration.Name, Type: declaration.Type, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
+							Kind: declaration.Kind, Visibility: declaration.Visibility, File: ir.Path, Line: declaration.Range.StartLine,
+							Parent: declaration.Parent, IsArray: declaration.IsArray,
+						})
+					}
+					for _, procedure := range ir.Procedures {
+						resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+							Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
+							Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: ir.Path,
+							Line: procedure.Symbol.DeclarationRange.StartLine,
+						})
+					}
 				}
-				for _, declaration := range ir.Declarations {
-					resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-						Name: declaration.Name, Type: declaration.Type, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
-						Kind: declaration.Kind, Visibility: declaration.Visibility, File: ir.Path, Line: declaration.Range.StartLine,
-						Parent: declaration.Parent, IsArray: declaration.IsArray,
-					})
+				projectResolver := procedureir.NewResolverWithCompleteness(resolverSymbols, true)
+				lspAnalyzer.RealtimeFindingsFunc = func(_ context.Context, _ string, _ config.Config, _ *vbaast.ParsedDocument, ir procedureir.DocumentIR, _ vbacfg.Document) ([]intel.RealtimeFinding, error) {
+					resolved := procedureir.Resolve(ir, projectResolver)
+					findings := make([]intel.RealtimeFinding, 0)
+					for _, diagnostic := range procedureir.Diagnostics(resolved, true) {
+						findings = append(findings, intel.RealtimeFinding{
+							Code: diagnostic.Code, Severity: "error", Line: diagnostic.Range.StartLine,
+							Column: diagnostic.Range.StartColumn, EndLine: diagnostic.Range.EndLine,
+							EndColumn: diagnostic.Range.EndColumn, Message: diagnostic.Message,
+						})
+					}
+					return findings, nil
 				}
-				for _, procedure := range ir.Procedures {
-					resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-						Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
-						Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: ir.Path,
-						Line: procedure.Symbol.DeclarationRange.StartLine,
-					})
-				}
-			}
-			projectResolver := procedureir.NewResolverWithCompleteness(resolverSymbols, true)
-			lspAnalyzer.RealtimeFindingsFunc = func(_ context.Context, _ string, _ config.Config, _ *vbaast.ParsedDocument, ir procedureir.DocumentIR, _ vbacfg.Document) ([]intel.RealtimeFinding, error) {
-				resolved := procedureir.Resolve(ir, projectResolver)
-				findings := make([]intel.RealtimeFinding, 0)
-				for _, diagnostic := range procedureir.Diagnostics(resolved, true) {
-					findings = append(findings, intel.RealtimeFinding{
-						Code: diagnostic.Code, Severity: "error", Line: diagnostic.Range.StartLine,
-						Column: diagnostic.Range.StartColumn, EndLine: diagnostic.Range.EndLine,
-						EndColumn: diagnostic.Range.EndColumn, Message: diagnostic.Message,
-					})
-				}
-				return findings, nil
 			}
 			for _, module := range c.Modules {
 				path := modulePath(module)
@@ -188,6 +192,16 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 	}
 }
 
+func analysisUsesSurface(analysis AnalysisExpectation, surface string) bool {
+	expectations := append(append([]DiagnosticExpectation(nil), analysis.ExpectedDiagnostics...), analysis.ForbiddenDiagnostics...)
+	for _, expectation := range expectations {
+		if containsString(effectiveSurfaces(expectation.Code, expectation.Surfaces), surface) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestOracleBindingCoverage(t *testing.T) {
 	manifestPath := filepath.Join("..", "..", "testdata", "vbe-oracle", "manifest.json")
 	manifest, root, err := LoadManifest(manifestPath)
@@ -207,7 +221,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 61 || report.BoundFixtures != 51 || report.PartialFixtures != 0 || report.UnboundFixtures != 9 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 63 || report.BoundFixtures != 53 || report.PartialFixtures != 0 || report.UnboundFixtures != 9 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -268,6 +282,8 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"valid-module-document-worksheet",
 		"valid-module-form",
 		"valid-module-standard",
+		"vb009-backslash-doubled-quotes-valid",
+		"vb009-c-style-quote-escape",
 	})
 	assertIDs("partially-bound", report.PartialIDs, nil)
 	assertIDs("unbound", report.UnboundIDs, []string{

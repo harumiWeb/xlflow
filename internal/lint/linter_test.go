@@ -1734,6 +1734,27 @@ End Function
 	}
 }
 
+func TestLinterAllowsClosedVBAStringsWithBackslashEscapedQuotes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeLintModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+    Dim dateFStr As String
+    Dim value As String
+    dateFStr = "\"""yyyy-mm-dd hh:nn:ss\"""
+    value = "prefix \""quoted\"""
+End Sub
+`)
+
+	issues, err := Linter{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB009"); len(got) != 0 {
+		t.Fatalf("closed VBA strings containing backslash-escaped quotes should not trigger VB009: %+v", got)
+	}
+}
+
 func TestLinterAllowsValidProcedureBoundaries(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
