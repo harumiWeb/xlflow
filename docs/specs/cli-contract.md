@@ -284,6 +284,31 @@ publishing partial metrics. Procedure and diagnostic ordering, path
 normalization, sidecar/generated-file exclusions, and all counting rules are
 specified by [VBA Procedure Complexity Metrics](vba-procedure-complexity-metrics.md).
 
+The same result includes `metrics.hotspots`, a versioned procedure/module
+ranking projection defined by
+`docs/specs/vba-procedure-and-module-hotspots.md`. Hotspots use the
+`percentile_equal_weight_v1` model, expose raw and normalized signal maps, and
+rank procedure and module cohorts independently with deterministic tie-breaks.
+The report is present even when no selector is configured. `[metrics.hotspots]`
+supports independent procedure/module top-N and percentage score thresholds;
+top-N and threshold selections are unioned and recorded in `selected_by`.
+Selected entities emit metrics-owned `MX002`: top-N-only entries are
+informational, while threshold-selected entries are warning-level, set
+`error.code = "metrics_hotspot_threshold_exceeded"`, and exit `1` while retaining the
+complete metrics and hotspot arrays. Hotspot configuration errors (negative
+top-N, non-finite or out-of-range percentages, unknown keys, and malformed
+tables) exit `2`. Hotspot scores are maintainability review signals, not
+definite analyzer findings, and `MX002` is not inline-suppressible.
+
+When both an `MX001` complexity threshold and a threshold-selected `MX002`
+occur, the envelope retains both diagnostic sets in deterministic order:
+`MX001` entries first (procedure order, then canonical metric order), followed
+by `MX002` procedure entries and then module entries in rank order. The
+compatibility error code `metrics_threshold_exceeded` wins whenever at least
+one `MX001` is present. `metrics_hotspot_threshold_exceeded` is used only when
+hotspot threshold findings are present without an `MX001`; Top-N-only findings
+never fail the command.
+
 `VBA229` is a default-enabled, realtime and batch compile-equivalent error for an unresolved type identifier in a procedure-local `Dim` or `Static ... As <Type>` declaration. It uses the production built-in/host/TypeLib and project symbol resolver, including embedded enum groups and class, UserForm, and document-module types, points at the type identifier, cannot be suppressed, and blocks source preflight. A missing, malformed, empty, or partially materialized generated TypeLib manifest leaves absence resolution incomplete: embedded types may still resolve positively, but a lookup miss does not emit `VBA229`. Parameters, return types, and module-level declarations remain outside this rule's v1 scope.
 
 `macros` opens the configured workbook and discovers VBA entrypoints without executing user code. JSON output includes top-level `macros`, where each entry contains `module`, `name`, `qualified_name`, `kind` when available, and `args` when available. `macros --session` reads from the workbook opened by `session start`. Agents should use this command before guessing a `run` target.
@@ -401,6 +426,12 @@ parameter_count = 0
 byref_parameter_count = 0
 local_variable_count = 0
 call_fan_out = 0
+
+[metrics.hotspots]
+procedure_top_n = 0
+module_top_n = 0
+procedure_score_threshold = 0
+module_score_threshold = 0
 ```
 
 `[analyze].development_http_origins` is an optional list of exact normalized
@@ -443,6 +474,20 @@ change the raw values. They emit `MX001` warning diagnostics only when
 explicitly enabled, so `metrics` does not produce subjective diagnostics by
 default. `MX001` is not an analyzer rule and cannot be configured through
 `[analyze].disabled_rules` or inline suppression.
+
+`[metrics.hotspots]` controls only the ranking projection embedded in
+`xlflow metrics`. `procedure_top_n` and `module_top_n` are non-negative
+integers; `0` disables the corresponding top-N selector. Positive
+`procedure_score_threshold` and `module_score_threshold` values are inclusive
+percentages in `1..100`; `0` disables the corresponding selector. Top-N and
+threshold selection are independent and unioned. A threshold-selected entity
+emits warning `MX002` and sets `error.code = "metrics_hotspot_threshold_exceeded"`;
+top-N-only entities emit informational `MX002` entries. Invalid selector
+values, non-finite selector percentages, unknown keys, and malformed tables are
+configuration errors and exit `2`; a non-finite computed score is an internal
+failure without partial metrics output. The score model, signal vocabulary, normalized percentile rules,
+and deterministic ranking contract are defined by
+[VBA Procedure and Module Hotspots](vba-procedure-and-module-hotspots.md).
 
 ## JSON Envelope
 
@@ -848,7 +893,7 @@ the corresponding marker. Cleanup results add `recovery.cleared[]` and
 ## Exit Codes
 
 - `0`: success
-- `1`: user-code or validation failure, including lint findings, analysis findings, metrics threshold findings (`metrics_threshold_exceeded`), GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
+- `1`: user-code or validation failure, including lint findings, analysis findings, metrics threshold findings (`metrics_threshold_exceeded`), hotspot score-threshold findings (`metrics_hotspot_threshold_exceeded`), GUI boundary preflight failures, macro failure, macro timeout, VBE compile failure, missing macro target, removed-helper findings, missing UI sheets or buttons, VBA test failure, no tests found, missing or ambiguous filter targets, active workbook mismatches, duplicate test names within one module, invalid exported ranges, existing output files, unsupported export-image formats, unsupported form export-image formats, missing UserForms, `form_already_exists`, `unsupported_form_control`, `designer_write_failed`, capture window lookup failures, image capture failures, `edit` session requirements, invalid workbook edit selectors, invalid edit colors, `invalid_sheet_name`, `sheet_exists`, `fmt_check_failed` (unformatted files in `--check` mode), and workbook event-handler failures returned by the bridge
 - `2`: CLI argument or configuration error, including invalid `push`, `run`, `session`, `save`, `runner`, `export-image`, `form new`, `form build`, `form export-image`, `module new`, `edit`, and `process` option combinations, invalid `fmt` mode combinations, invalid metrics thresholds or exclusion patterns, plus `process_args_invalid` and `process_not_found` errors from the bridge
 - `3`: environment or operational failure, including workbook lock contention
   (`workbook_busy`, `workbook_busy_timeout`, `workbook_busy_cancelled`),
@@ -907,8 +952,17 @@ Core declaration, member-access, error-handling, Excel object, and procedure-sco
 - `VB006`: module-level `Public` variable usage
 - `VB007`: automation-hostile GUI boundaries such as file pickers, modal dialogs, UserForms, message pumps, or external process launches. Direct `MsgBox` and `InputBox` usage remains in scope for this rule; `XlflowUI.MsgBox` and `XlflowUI.InputBox` are the approved dialog wrappers for runtime-aware automation. JSON findings may include `kind`, `symbol`, and `suggestion`.
 - `VB008`: typographic quote characters that can trigger VBE compile dialogs
-- `VB009`: likely C-style quote escapes in VBA string literals
-- `VB010`: unterminated `Sub`, `Function`, or `Property` procedure
+- `VB009`: likely C-style quote escapes that leave a VBA string literal
+  unterminated. A literal backslash adjacent to doubled VBA quote characters is
+  not reported when the physical line's string literals are closed.
+- `VB010`: unterminated `Sub`, `Function`, or `Property` procedure. Procedure
+  boundary validation follows mutually exclusive `#If`/`#ElseIf`/`#Else`
+  compilation branches, so a declaration selected in one branch may share its
+  matching `End` statement after `#End If` without producing a false
+  unterminated-procedure finding. `Function`, `Sub`, or `Property` words inside
+  `Enum`/`Type` declarations are not procedure starts when they have a valid
+  member name; reserved-keyword members remain invalid VBA and are not silently
+  accepted by this rule.
 - `VB011`: unexpected `End Sub`, `End Function`, or `End Property`
 - `VB012`: mismatched procedure end statement
 - `VB028`: bare `MsgBox` or `InputBox` calls are present while `XlflowUI.bas` is in the source tree. These calls can bind to `XlflowUI.MsgBox` / `XlflowUI.InputBox` instead of the VBA built-ins and fail at compile time. Use `XlflowUI` wrappers for xlflow-managed dialogs, or explicitly call `VBA.Interaction.MsgBox` / `VBA.Interaction.InputBox` for intentional native dialogs.

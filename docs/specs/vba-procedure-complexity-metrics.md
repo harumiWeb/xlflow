@@ -2,7 +2,9 @@
 
 This specification defines the source-only `xlflow metrics` command and its
 procedure metric schema. ADR-0036 records why metrics have an independent
-surface and why thresholds are not analyzer rules.
+surface and why thresholds are not analyzer rules. The additive architectural
+hotspot projection is defined by
+`docs/specs/vba-procedure-and-module-hotspots.md` and ADR-0039.
 
 ## Scope and command
 
@@ -174,7 +176,16 @@ procedure/metric pair:
     "code": "metrics_threshold_exceeded",
     "message": "1 procedure complexity threshold exceeded"
   },
-  "metrics": { "schema_version": 1, "procedures": [] },
+  "metrics": {
+    "schema_version": 1,
+    "procedures": [],
+    "hotspots": {
+      "schema_version": 1,
+      "score_model": "percentile_equal_weight_v1",
+      "procedures": [],
+      "modules": []
+    }
+  },
   "diagnostics": [
     {
       "code": "MX001",
@@ -220,12 +231,15 @@ Consumers should key a procedure by `(file, line, module, name, kind)` rather
 than by name alone. They should preserve `schema_version`, tolerate additive
 fields, and treat a missing or unsupported version as unavailable metrics.
 Threshold diagnostics are suitable for CI gates, while raw values are suitable
-for future reports, baselines, and trend stores. Module/project aggregates,
-recommended thresholds, history, and LSP projections are outside v1.
+for reports, baselines, and trend stores. Procedure/module hotspot ranking is
+an additive v1 projection with its own schema and score model; see
+`docs/specs/vba-procedure-and-module-hotspots.md`. Recommended thresholds,
+history, and LSP projections remain outside v1.
 
 ## Related
 
 - `docs/adr/ADR-0036-procedure-complexity-metrics.md`
+- `docs/adr/ADR-0039-procedure-and-module-hotspots.md`
 - `docs/specs/cli-contract.md`
 - `vitepress/reference/json-output.md`
 - `docs/specs/vba-analysis-ir.md`

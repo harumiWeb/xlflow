@@ -70,6 +70,20 @@ public sealed class VbeOracleServiceTests
         Assert.Contains("Option Explicit", result);
     }
 
+    [Fact]
+    public void OracleProvisioningRejectsVbeSourceMutation()
+    {
+        var setter = typeof(VbeOracleService).GetMethod("SetOracleCodeModuleText", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var module = new MutatingCodeModule();
+
+        var error = Assert.Throws<System.Reflection.TargetInvocationException>(() =>
+            setter.Invoke(null, [module, "Option Explicit\nPublic Sub Run()\nEnd Sub\n", "Main"]));
+
+        var mutation = Assert.IsType<VbeOracleService.OracleSourceMutationException>(error.InnerException);
+        Assert.Contains("changed oracle fixture source", mutation.Message);
+        Assert.Equal("oracle_source_mutated", VbeOracleService.ClassifyInfrastructureCode("provision_components", mutation));
+    }
+
     [Theory]
     [InlineData(100, "ThisWorkbook", "ThisWorkbook", "workbook", true)]
     [InlineData(100, "THISWORKBOOK", "ThisWorkbook", "workbook", true)]
@@ -110,5 +124,26 @@ public sealed class VbeOracleServiceTests
         var decoded = decode.Invoke(null, [encoded]);
         var exception = Record.Exception(() => validate.Invoke(null, [decoded]));
         Assert.Null(exception);
+    }
+
+    public sealed class MutatingCodeModule
+    {
+        private string text = "";
+
+        public int CountOfLines => string.IsNullOrEmpty(text) ? 0 : text.Split('\n').Length;
+
+        public string Lines(object startLine, object count) => text;
+
+        public object? DeleteLines(object startLine, object count)
+        {
+            text = "";
+            return null;
+        }
+
+        public object? InsertLines(object startLine, object value)
+        {
+            text = Convert.ToString(value) + "' VBE mutation";
+            return null;
+        }
     }
 }

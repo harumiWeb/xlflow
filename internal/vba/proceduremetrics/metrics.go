@@ -113,12 +113,24 @@ func (m Metrics) Value(name MetricName) (int, bool) {
 // anonymous Metrics field intentionally flattens the twelve values in JSON,
 // while keeping identity available to threshold/reporting consumers.
 type ProcedureMetrics struct {
-	File             string                    `json:"file"`
-	Module           string                    `json:"module"`
-	ModuleKind       string                    `json:"module_kind"`
-	Name             string                    `json:"name"`
-	Kind             procedureir.ProcedureKind `json:"kind"`
-	DeclarationRange vbast.Range               `json:"declaration_range"`
+	File                    string                    `json:"file"`
+	Module                  string                    `json:"module"`
+	ModuleKind              string                    `json:"module_kind"`
+	Name                    string                    `json:"name"`
+	Kind                    procedureir.ProcedureKind `json:"kind"`
+	Visibility              string                    `json:"visibility,omitempty"`
+	ResolvedCallees         []string                  `json:"-"`
+	ExternalDependencyCount int                       `json:"-"`
+	ExcelEffectCount        int                       `json:"-"`
+	MutableStateReads       int                       `json:"-"`
+	MutableStateWrites      int                       `json:"-"`
+	MutableStateMutations   int                       `json:"-"`
+	ErrorHandlingCount      int                       `json:"-"`
+	ResourceOwnershipCount  int                       `json:"-"`
+	AmbiguousCallCount      int                       `json:"-"`
+	UnresolvedCallCount     int                       `json:"-"`
+	DynamicCallCount        int                       `json:"-"`
+	DeclarationRange        vbast.Range               `json:"declaration_range"`
 	Metrics
 }
 
@@ -158,6 +170,7 @@ func Collect(input Input) ProcedureMetrics {
 		ModuleKind:       input.ModuleKind,
 		Name:             symbol.Name,
 		Kind:             symbol.Kind,
+		Visibility:       symbol.Visibility,
 		DeclarationRange: symbol.DeclarationRange,
 	}
 	result.SourceLineCount = sourceLineCount(symbol.DeclarationRange)
@@ -184,7 +197,94 @@ func Collect(input Input) ProcedureMetrics {
 		}
 	}
 	result.CallFanOut = callFanOut(calls)
+	result.ResolvedCallees = resolvedCalleeNames(calls)
+	result.ExternalDependencyCount = externalDependencyCount(calls)
+	result.AmbiguousCallCount, result.UnresolvedCallCount, result.DynamicCallCount = callUncertaintyCounts(calls)
+	for _, access := range procedure.Accesses {
+		if access.Scope != procedureir.ScopeModule && access.Scope != procedureir.ScopeProject {
+			continue
+		}
+		switch access.Mode {
+		case procedureir.AccessRead:
+			result.MutableStateReads++
+		case procedureir.AccessWrite:
+			result.MutableStateWrites++
+			result.MutableStateMutations++
+		case procedureir.AccessReadWrite:
+			result.MutableStateReads++
+			result.MutableStateWrites++
+			result.MutableStateMutations++
+		}
+	}
+	children := make(map[int]bool, len(statements))
+	for _, statement := range statements {
+		if statement.ParentID != 0 {
+			children[statement.ParentID] = true
+		}
+	}
+	for _, statement := range statements {
+		texts := make([]string, 0, 4)
+		// Statement.Text for a control node contains its complete nested body.
+		// Only leaf text is used for executable effects; control expressions are
+		// added separately so `If Range(...) Then` remains observable.
+		if !children[statement.ID] {
+			texts = append(texts, statement.Text)
+		}
+		for _, expression := range []*procedureir.Expression{statement.Target, statement.Value, statement.Condition} {
+			if expression != nil {
+				texts = append(texts, expression.Text)
+			}
+		}
+		if containsExcelEffect(texts) {
+			result.ExcelEffectCount++
+		}
+		text := strings.ToLower(statement.Text)
+		if statement.Kind == procedureir.StatementOnError || statement.Kind == procedureir.StatementResume || strings.Contains(text, "err.raise") {
+			result.ErrorHandlingCount++
+		}
+		if strings.Contains(text, "workbooks.open") || strings.HasPrefix(strings.TrimSpace(text), "open ") {
+			result.ResourceOwnershipCount++
+		}
+	}
 	return result
+}
+
+func containsExcelEffect(texts []string) bool {
+	for _, text := range texts {
+		lower := strings.ToLower(text)
+		for _, name := range []string{"application", "range", "cells", "worksheets", "workbooks"} {
+			if containsVBAReference(lower, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsVBAReference(text, name string) bool {
+	for offset := 0; offset < len(text); {
+		relative := strings.Index(text[offset:], name)
+		if relative < 0 {
+			return false
+		}
+		index := offset + relative
+		beforeOK := index == 0 || !isVBAIdentifierByte(text[index-1])
+		end := index + len(name)
+		after := end
+		for after < len(text) && (text[after] == ' ' || text[after] == '\t') {
+			after++
+		}
+		afterOK := after < len(text) && (text[after] == '(' || text[after] == '.')
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = index + len(name)
+	}
+	return false
+}
+
+func isVBAIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
 // CollectProcedure is a convenience for callers that have only a procedure
@@ -457,6 +557,10 @@ func exitPointCount(kind procedureir.ProcedureKind, statements []procedureir.Sta
 }
 
 func callFanOut(calls []procedureir.CallSite) int {
+	return len(resolvedCalleeNames(calls))
+}
+
+func resolvedCalleeNames(calls []procedureir.CallSite) []string {
 	seen := make(map[string]struct{}, len(calls))
 	for _, call := range calls {
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
@@ -471,7 +575,40 @@ func callFanOut(calls []procedureir.CallSite) int {
 		}
 		seen[strings.ToLower(key)] = struct{}{}
 	}
+	result := make([]string, 0, len(seen))
+	for key := range seen {
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func externalDependencyCount(calls []procedureir.CallSite) int {
+	seen := map[string]bool{}
+	for _, call := range calls {
+		status := strings.ToLower(string(call.Resolution.Status))
+		if status == string(procedureir.ResolutionExternal) || status == string(procedureir.ResolutionMemberCall) || status == string(procedureir.ResolutionBuiltinLike) {
+			key := strings.ToLower(strings.TrimSpace(call.Callee.Text))
+			if key != "" {
+				seen[key] = true
+			}
+		}
+	}
 	return len(seen)
+}
+
+func callUncertaintyCounts(calls []procedureir.CallSite) (ambiguous, unresolved, dynamic int) {
+	for _, call := range calls {
+		switch call.Resolution.Status {
+		case procedureir.ResolutionAmbiguous:
+			ambiguous++
+		case procedureir.ResolutionUnresolved, procedureir.ResolutionIncomplete:
+			unresolved++
+		case procedureir.ResolutionDynamic:
+			dynamic++
+		}
+	}
+	return ambiguous, unresolved, dynamic
 }
 
 func sourceLineCount(r vbast.Range) int {

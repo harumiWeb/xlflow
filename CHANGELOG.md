@@ -11,6 +11,15 @@ All notable changes to xlflow will be documented in this file.
   recovery and conditional-compilation uncertainty fails open, and the
   errors remain preflight-blocking and unavailable to inline suppression.
 
+- Added deterministic procedure and module hotspot ranking to `xlflow metrics`
+  (`metrics.hotspots`, schema version 1, score model
+  `percentile_equal_weight_v1`). The report exposes raw and normalized
+  architectural signals, supports independent top-N and percentage selectors
+  through `[metrics.hotspots]`, and emits metrics-owned `MX002` entries (top-N
+  informational, threshold-selected warning) while retaining the complete
+  metrics payload. Hotspot scores are maintainability review signals rather
+  than definite analyzer findings.
+
 - Added default-enabled `VBA246` HTTP transport-security analysis and `VBA247`
   timeout reliability analysis for common XMLHTTP, ServerXMLHTTP, WinHTTP, and
   identifiable ADODB.Stream download-and-launch patterns. Findings are
@@ -72,6 +81,13 @@ All notable changes to xlflow will be documented in this file.
   restore handling on the same physical line, after a colon-separated
   statement, or by switching to an explicit error handler. Procedure exits
   without restoration remain covered by the rule.
+- Fixed `VB010` false positives for mutually exclusive conditional-compilation
+  procedure declarations that share a common terminator after `#End If`.
+- Fixed the developer-only VBE oracle cleanup gate so unrelated Excel
+  instances started concurrently remain untouched and observable without
+  invalidating cleanup of the oracle-owned process.
+- Fixed `VB009` false positives for valid, closed VBA string literals where a
+  literal backslash is adjacent to doubled quote characters.
 
 - Added opt-in `VBA242` performance analysis for expensive operations over
   entire rows, columns, worksheets, or unbounded `UsedRange` expressions.

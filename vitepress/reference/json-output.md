@@ -123,7 +123,8 @@ command artifacts.
 versioned `metrics` object. Procedure entries are project-relative, use `/`
 path separators, and are sorted by file, declaration start position, module, name, and
 kind. The twelve metric fields are defined in
-`docs/specs/vba-procedure-complexity-metrics.md`.
+`docs/specs/vba-procedure-complexity-metrics.md`; the additive hotspot projection
+is defined in `docs/specs/vba-procedure-and-module-hotspots.md`.
 
 ```json
 {
@@ -159,7 +160,13 @@ kind. The twelve metric fields are defined in
         "local_variable_count": 2,
         "call_fan_out": 2
       }
-    ]
+    ],
+    "hotspots": {
+      "schema_version": 1,
+      "score_model": "percentile_equal_weight_v1",
+      "procedures": [],
+      "modules": []
+    }
   },
   "diagnostics": [],
   "warnings": [],
@@ -186,7 +193,16 @@ threshold`. Each exceeded procedure/metric pair emits one warning diagnostic:
     "code": "metrics_threshold_exceeded",
     "message": "1 procedure complexity threshold exceeded"
   },
-  "metrics": { "schema_version": 1, "procedures": [] },
+  "metrics": {
+    "schema_version": 1,
+    "procedures": [],
+    "hotspots": {
+      "schema_version": 1,
+      "score_model": "percentile_equal_weight_v1",
+      "procedures": [],
+      "modules": []
+    }
+  },
   "diagnostics": [
     {
       "code": "MX001",
@@ -213,6 +229,67 @@ procedure order and the fixed metric order. `MX001` is not a static-analysis
 rule, cannot be inline-suppressed, and is unaffected by
 `[analyze].disabled_rules`. No enabled thresholds means exit `0`; one or more
 `MX001` entries retain the full metrics payload and use exit `1`.
+
+### Hotspot ranking
+
+`metrics.hotspots` is always present in a successful or threshold-failure
+metrics result. It ranks procedure and module cohorts independently with the
+versioned `percentile_equal_weight_v1` model. Each entity includes `rank`, a
+`score` from `0` to `100`, `active_signal_count`, stable identity fields, and
+both `raw_signals` and `normalized_signals`; selected entities additionally
+include `selected_by` (`top_n` and/or `threshold`).
+
+Each entity also exposes `uncertainty` counts for ambiguous, unresolved, and
+dynamic calls. These counts are audit evidence only and do not contribute to
+the composite score.
+
+```json
+{
+  "schema_version": 1,
+  "score_model": "percentile_equal_weight_v1",
+  "procedures": [
+    {
+      "id": "src/modules/Main.bas|Main|Run|sub",
+      "kind": "procedure",
+      "file": "src/modules/Main.bas",
+      "module": "Main",
+      "module_kind": "standard",
+      "name": "Run",
+      "procedure_kind": "sub",
+      "line": 1,
+      "rank": 1,
+      "score": 87.5,
+      "score_model": "percentile_equal_weight_v1",
+      "active_signal_count": 4,
+      "raw_signals": {
+        "complexity": 8,
+        "call_fan_in": 3,
+        "call_fan_out": 4,
+        "affected_module_count": 2
+      },
+      "normalized_signals": {
+        "complexity": 100,
+        "call_fan_in": 75,
+        "call_fan_out": 75,
+        "affected_module_count": 100
+      },
+      "selected_by": { "top_n": true }
+    }
+  ],
+  "modules": []
+}
+```
+
+Raw signal names (including module-only `complexity_max` and
+`public_procedure_count`) and counting boundaries are defined in
+`docs/specs/vba-procedure-and-module-hotspots.md`. Average-rank percentiles
+ignore constant/singleton signals, scores are equal-weight means rounded to
+two decimals, and stable identity tie-breakers make ranking independent of
+source enumeration. Top-N-only `MX002` diagnostics are informational;
+threshold-selected entities are warning-level and use
+`error.code = "metrics_hotspot_threshold_exceeded"` with exit `1`. The full
+metrics and hotspot arrays remain in that failure envelope. `MX002` is not an
+analyzer rule and cannot be inline-suppressed.
 
 ## Build manifest
 
