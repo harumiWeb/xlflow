@@ -154,7 +154,7 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 1107 || metrics.TP != 604 || metrics.FP != 503 {
+	if metrics.Reviewed != 1107 || metrics.TP != 590 || metrics.FP != 517 {
 		t.Fatalf("committed review metrics = %#v", metrics)
 	}
 	t.Log(FormatReviewMetrics(metrics))

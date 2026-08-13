@@ -167,9 +167,6 @@ End Sub
 
 Public Sub SetQualifiedWindowStyle(ByVal style As VBA.VbAppWinStyle)
 End Sub
-
-Public Function Missing() As Acme.Widget
-End Function
 `)
 
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
@@ -178,6 +175,23 @@ End Function
 	}
 	got := findingsByCode(findings, "VBA222")
 	if len(got) != 0 {
+		t.Fatalf("built-in and OLE Automation types must be allowed: %+v", got)
+	}
+}
+
+func TestVBA222FailsOpenForIncompleteTypeDB(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(typedb.EnvDir, filepath.Join(dir, "missing-typelib-db"))
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Missing() As Acme.Widget
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA222"); len(got) != 0 {
 		t.Fatalf("incomplete TypeDB must not report missing external types: %+v", got)
 	}
 }
