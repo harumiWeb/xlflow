@@ -992,6 +992,40 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA201FindsImplicitWithRangeReceiver(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim found As Range
+  With Range("A1:A10")
+    Set found = .Find(What:="x")
+    Debug.Print found.Value
+  End With
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA201"); len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("implicit With Range.Find should trigger VBA201 on the dereference line: %+v", got)
+	}
+
+	source, err := os.ReadFile(filepath.Join(dir, "src", "modules", "Main.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA201"); len(got) != 1 || got[0].Line != 6 {
+		t.Fatalf("realtime implicit With Range.Find should trigger VBA201 on the dereference line: %+v", got)
+	}
+}
+
 func TestSourceRealtimeFindingsParsedMatchesSource(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

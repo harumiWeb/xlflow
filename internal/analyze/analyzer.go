@@ -266,8 +266,9 @@ type sourceDeclaration struct {
 }
 
 type withInfo struct {
-	Target string
-	Type   string
+	Target     string
+	Type       string
+	Expression string
 }
 
 func (a Analyzer) Run() ([]Finding, error) {
@@ -1075,6 +1076,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	}
 	findAssignments := map[string]rangeFindAssignmentInfo{}
 	guardedFinds := map[string]bool{}
+	withStack := make([]withInfo, 0)
 	worksheetRoots := newWorksheetRootTracker(worksheetCodenames)
 	var findings []Finding
 	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
@@ -1096,10 +1098,14 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 			continue
 		}
 		if endWithRe.MatchString(stmt) {
+			if len(withStack) > 0 {
+				withStack = withStack[:len(withStack)-1]
+			}
 			worksheetRoots.popWith()
 			continue
 		}
 		if m := withRe.FindStringSubmatch(stmt); len(m) > 0 {
+			withStack = append(withStack, resolveWithInfo(m[1], decls))
 			if worksheetStatementStart {
 				if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
 					findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
@@ -1119,7 +1125,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 			worksheetRoots.observeSetAssignment(worksheetStmt)
 		}
 		if setAssignRe.MatchString(stmt) {
-			if name, receiver, ok := rangeFindAssignment(stmt); ok {
+			if name, receiver, ok := rangeFindAssignment(stmt, currentWithExpression(withStack)); ok {
 				findAssignments[strings.ToLower(name)] = rangeFindAssignmentInfo{Line: lineNo, Receiver: receiver}
 			}
 			continue
@@ -1432,7 +1438,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			findings = append(findings, a.legacyMemberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)...)
 		}
 		if setAssignRe.MatchString(stmt) {
-			if name, receiver, ok := rangeFindAssignment(stmt); ok {
+			if name, receiver, ok := rangeFindAssignment(stmt, currentWithExpression(withStack)); ok {
 				findAssignments[strings.ToLower(name)] = rangeFindAssignmentInfo{Line: lineNo, Receiver: receiver}
 			}
 			continue
@@ -1791,7 +1797,7 @@ func (a Analyzer) rangeFindFindings(file parsedFile, proc sourceProcedure, lineN
 			guarded[name] = true
 		}
 	}
-	if name, receiver, ok := rangeFindAssignment(stmt); ok {
+	if name, receiver, ok := rangeFindAssignment(stmt, ""); ok {
 		findAssignments[strings.ToLower(name)] = rangeFindAssignmentInfo{Line: lineNo, Receiver: receiver}
 		return nil
 	}
@@ -3346,15 +3352,17 @@ func resolveWithInfo(expr string, decls map[string]sourceDeclaration) withInfo {
 	if expr == "" {
 		return withInfo{}
 	}
+	info := withInfo{Expression: expr}
 	base := expr
 	if idx := strings.Index(base, "("); idx >= 0 {
 		base = base[:idx]
 	}
 	base = lastName(strings.TrimSpace(strings.TrimPrefix(base, "Set ")))
 	if decl, ok := decls[strings.ToLower(base)]; ok {
-		return withInfo{Target: base, Type: decl.Type}
+		info.Target = base
+		info.Type = decl.Type
 	}
-	return withInfo{}
+	return info
 }
 
 func currentWithInfo(stack []withInfo) (withInfo, bool) {
@@ -3364,6 +3372,15 @@ func currentWithInfo(stack []withInfo) (withInfo, bool) {
 		}
 	}
 	return withInfo{}, false
+}
+
+func currentWithExpression(stack []withInfo) string {
+	for i := len(stack) - 1; i >= 0; i-- {
+		if expression := strings.TrimSpace(stack[i].Expression); expression != "" {
+			return expression
+		}
+	}
+	return ""
 }
 
 func invalidMemberRuleFor(typ, member string) (invalidMemberRule, bool) {
@@ -3378,7 +3395,7 @@ func invalidMemberRuleFor(typ, member string) (invalidMemberRule, bool) {
 	return rule, true
 }
 
-func rangeFindAssignment(stmt string) (string, string, bool) {
+func rangeFindAssignment(stmt, withExpression string) (string, string, bool) {
 	left, _, ok := strings.Cut(stmt, "=")
 	if !ok {
 		return "", "", false
@@ -3397,7 +3414,10 @@ func rangeFindAssignment(stmt string) (string, string, bool) {
 	}
 	receiver := strings.TrimSpace(right[:memberIndex])
 	if receiver == "" {
-		return "", "", false
+		receiver = strings.TrimSpace(withExpression)
+		if receiver == "" {
+			return "", "", false
+		}
 	}
 	return cleanIdentifier(fields[len(fields)-1]), receiver, true
 }
