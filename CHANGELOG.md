@@ -11,6 +11,10 @@ All notable changes to xlflow will be documented in this file.
   recovery and conditional-compilation uncertainty fails open, and the
   errors remain preflight-blocking and unavailable to inline suppression.
 
+- Fixed `VBA201` to require a receiver resolved as `Excel.Range` before
+  tracking nullable `Range.Find` results, avoiding false positives for
+  project-defined `.Find` methods.
+
 - Added deterministic procedure and module hotspot ranking to `xlflow metrics`
   (`metrics.hotspots`, schema version 1, score model
   `percentile_equal_weight_v1`). The report exposes raw and normalized

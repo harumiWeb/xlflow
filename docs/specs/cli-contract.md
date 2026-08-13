@@ -1130,7 +1130,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA104`: known Excel object/member mismatch such as `Worksheet.DisplayGridlines`
 - `VBA105`: removed `XlflowLog` trace helper call
 - `VBA106`: removed `XlflowSetTraceFile` trace helper call
-- `VBA201`: `Range.Find` result is dereferenced before a `Nothing` check
+- `VBA201`: a result assigned from `Excel.Range.Find` is dereferenced before a `Nothing` check when the `.Find` receiver resolves as `Excel.Range`; project-defined or unresolved `.Find` receivers are excluded
 - `VBA202`: object variable may be dereferenced before a definitely non-`Nothing` value is proven on every reachable path
 - `VBA203`: a change to `Application.ScreenUpdating`, `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.Calculation`, `Application.StatusBar`, `Application.Cursor`, `Application.Interactive`, `Application.AskToUpdateLinks`, `Application.AutomationSecurity`, or `Application.CutCopyMode` can reach an exit without restoring its previous value
 - `VBA204`: normal execution can fall through into an error-handler label
