@@ -4524,9 +4524,10 @@ func TestAnalyzerObjectNothingAssignmentIsNotComparison(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run(ByVal shouldClear As Boolean)
-  Dim objectValue As Object
-  If shouldClear Then Set objectValue = Nothing: If objectValue = Nothing Then Debug.Print "bad"
-  If objectValue Is Nothing Then Debug.Print "safe"
+  Dim assignedObject As Object
+  Dim comparedObject As Object
+  If shouldClear Then Set assignedObject = Nothing: If comparedObject = Nothing Then Debug.Print "bad"
+  If comparedObject Is Nothing Then Debug.Print "safe"
 End Sub
 `)
 
@@ -4535,8 +4536,10 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA209")
-	if len(got) != 1 || got[0].Line != 4 {
-		t.Fatalf("expected only the scalar object comparison on line 4, got %+v", got)
+	if len(got) != 1 || got[0].Line != 5 ||
+		!strings.Contains(got[0].Message, "comparedObject") ||
+		strings.Contains(got[0].Message, "assignedObject") {
+		t.Fatalf("expected only the scalar object comparison for comparedObject, got %+v", got)
 	}
 }
 

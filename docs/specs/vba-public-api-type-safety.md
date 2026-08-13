@@ -37,11 +37,17 @@ database entry only when that entry belongs to the same library; an unrelated
 type such as `ADODB.DataTypeEnum` must not satisfy `DAO.DataTypeEnum`.
 
 An external type absent from both the project index and the available TypeLib
-database is reported conservatively as unresolved. This rule does not attempt
-to prove the complete VBE reference configuration or whether an optional
-library is installed. Every finding includes the problematic type in its
-message, reason, and suggestion and points at the parameter or declaration
-line when the parser provides that range.
+database is reported conservatively as unresolved only when resolution is
+complete. If the generated TypeLib manifest is missing, empty, malformed,
+partial, or the project is otherwise parsed through an incomplete view, absence
+from that view is not evidence that the external reference is missing; the
+unresolved-external branch fails open. Positive matches from the embedded or
+generated database remain allowed, and project-local inaccessible or ambiguous
+types remain reportable. This rule does not attempt to prove the complete VBE
+reference configuration or whether an optional library is installed. Every
+finding includes the problematic type in its message, reason, and suggestion
+and points at the parameter or declaration line when the parser provides that
+range.
 
 The implementation uses `procedureir` only for syntax facts and module
 attributes; the project index and diagnostic ownership remain in `analyze`.

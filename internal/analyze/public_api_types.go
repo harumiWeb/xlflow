@@ -20,12 +20,17 @@ type apiTypeInfo struct {
 }
 
 type apiTypeIndex struct {
-	byName map[string][]apiTypeInfo
-	db     *vbadb.DB
+	byName             map[string][]apiTypeInfo
+	db                 *vbadb.DB
+	resolutionComplete bool
 }
 
-func buildAPITypeIndex(files []parsedFile, db *vbadb.DB) *apiTypeIndex {
-	index := &apiTypeIndex{byName: map[string][]apiTypeInfo{}, db: db}
+func buildAPITypeIndex(files []parsedFile, db *vbadb.DB, resolutionComplete bool) *apiTypeIndex {
+	index := &apiTypeIndex{
+		byName:             map[string][]apiTypeInfo{},
+		db:                 db,
+		resolutionComplete: resolutionComplete,
+	}
 	for _, file := range files {
 		module := strings.TrimSpace(file.IR.ModuleName)
 		if module == "" {
@@ -146,6 +151,13 @@ func (a Analyzer) checkPublicAPIType(file parsedFile, proc sourceProcedure, inde
 	}
 	status := index.resolve(typeName, file.IR.ModuleName)
 	if status == apiTypeAllowed {
+		return nil
+	}
+	// Absence from the TypeLib database is not evidence of an unresolved
+	// external type while the project or generated TypeLib view is incomplete.
+	// Project-local visibility and ambiguity findings remain actionable because
+	// they do not depend on proving the complete external reference set.
+	if status == apiTypeUnresolved && !index.resolutionComplete {
 		return nil
 	}
 	var message, reason, suggestion string

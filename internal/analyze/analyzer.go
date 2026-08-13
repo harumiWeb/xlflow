@@ -474,7 +474,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	}
 	var publicAPITypeIndex *apiTypeIndex
 	if analysis.Config.Analyze.DetectPublicAPITypeSafety {
-		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB)
+		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB, resolutionComplete)
 	}
 	var analysisMetrics any
 	if analysis.Config.Analyze.DetectRiskyModuleState {

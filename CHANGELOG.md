@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA222` false positives for unresolved external public API types when
+  the project or generated TypeLib resolution view is incomplete. Project-local
+  inaccessible and ambiguous type findings remain unchanged.
+
 - Fixed the bundled `XlflowDebug` scaffold helper so `new` projects and helper
   modules installed by `init --with-module` produce no default `xlflow analyze`
   findings. ParamArray array-bound checks use narrow `VBA227` suppressions, and
