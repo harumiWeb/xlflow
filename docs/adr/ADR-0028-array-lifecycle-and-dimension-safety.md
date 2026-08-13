@@ -88,7 +88,7 @@ None.
 
 ## Superseded by
 
-None.
+ADR-0040: Shared Array Operation Shape Validation.
 
 ## Related
 

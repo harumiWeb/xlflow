@@ -206,6 +206,8 @@ type resolverEntry struct {
 	recovered           bool
 	conditionalBranches []ConditionalBranch
 	isArray             bool
+	isConst             bool
+	valueShape          ValueShapeKind
 }
 
 // SymbolResolver is a deterministic protocol-neutral project resolver.
@@ -244,6 +246,8 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 			module:   symbol.Module, moduleKind: symbol.ModuleKind, visibility: symbol.Visibility,
 			parent: symbol.Parent, recovered: symbol.Recovered,
 			isArray:             symbol.IsArray,
+			isConst:             symbol.IsConst,
+			valueShape:          symbol.ValueShape,
 			conditionalBranches: append([]ConditionalBranch(nil), symbol.ConditionalBranches...),
 		}
 		key := strings.ToLower(cleanIdentifier(symbol.Name))
@@ -946,6 +950,13 @@ func isEnumMemberKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+// IsConstKind reports whether a resolver symbol denotes an immutable constant
+// value. Keep the accepted symbol kinds centralized so lint, LSP, and project
+// resolution cannot drift in their VB060 handling.
+func IsConstKind(kind string) bool {
+	return strings.EqualFold(kind, "const") || strings.EqualFold(kind, "enum_member")
 }
 
 func cleanQualifiedName(text string) string {

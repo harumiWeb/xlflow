@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -31,5 +32,42 @@ End Sub
 	}
 	if len(diagnosticsByCode(diagnostics, "VB014")) != 0 {
 		t.Fatalf("VB059 syntax evidence should replace generic parser recovery: %#v", diagnostics)
+	}
+}
+
+func TestCompileEquivalentDiagnosticsExposeArrayShapeRules(t *testing.T) {
+	root := t.TempDir()
+	doc := Document{
+		Path: filepath.Join(root, "Main.bas"),
+		Source: `Option Explicit
+Public Const Limit As Long = 2
+Public Sub Probe()
+    Dim bad(3 To 1) As Long
+    Limit = 3
+End Sub
+`,
+	}
+	diagnostics := (Analyzer{RootDir: root, Config: config.Default()}).CompileEquivalentDiagnosticsContext(context.Background(), doc)
+	if got := diagnosticsByCode(diagnostics, "VB060"); len(got) != 1 || got[0].Severity != "error" {
+		t.Fatalf("VB060 diagnostics = %#v", diagnostics)
+	}
+	if got := diagnosticsByCode(diagnostics, "VB061"); len(got) != 1 || got[0].Severity != "error" {
+		t.Fatalf("VB061 diagnostics = %#v", diagnostics)
+	}
+}
+
+func TestCompileEquivalentDiagnosticsUseVisibleProjectConstants(t *testing.T) {
+	root := t.TempDir()
+	doc := Document{
+		Path: filepath.Join(root, "Main.bas"),
+		Source: `Option Explicit
+Public Sub Probe()
+    ProjectLimit = 3
+End Sub
+`,
+	}
+	diagnostics := (Analyzer{RootDir: root, Config: config.Default(), VisibleConstants: map[string]bool{"projectlimit": true}}).CompileEquivalentDiagnosticsContext(context.Background(), doc)
+	if got := diagnosticsByCode(diagnostics, "VB060"); len(got) != 1 || got[0].Severity != "error" {
+		t.Fatalf("project VB060 diagnostics = %#v", diagnostics)
 	}
 }

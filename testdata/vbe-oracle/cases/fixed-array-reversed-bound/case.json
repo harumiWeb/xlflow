@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "fixed-array-reversed-bound",
+  "description": "Declare a fixed array with lower bound above upper bound.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB061"],
+    "negative_controls": ["fixed-array-valid-bound"],
+    "expected_diagnostics": [
+      { "code": "VB061", "severity": "error", "surfaces": ["lint", "analyze", "lsp"] }
+    ]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-13T10:22:33Z"
+      }
+    ]
+  }
+}

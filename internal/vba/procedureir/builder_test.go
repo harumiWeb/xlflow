@@ -781,6 +781,90 @@ Public publicAfter As Long
 	assertAccess(t, doc.Procedures[0].Accesses, "publicAfter", ScopeModule, AccessRead)
 }
 
+func TestDeclarationValueShapesRetainArrayBoundsAndConstness(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Shapes.bas"}, []byte(`Option Explicit
+Public Const Limit As Long = 2
+Public fixed(1 To Limit, 0 To 3) As Long
+Public dynamic() As Long
+Public scalar As Long
+Public Sub Run()
+  Dim local(2 To 4) As Long
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixed, dynamic, scalar, constant Declaration
+	for _, declaration := range doc.Declarations {
+		switch declaration.Name {
+		case "fixed":
+			fixed = declaration
+		case "dynamic":
+			dynamic = declaration
+		case "scalar":
+			scalar = declaration
+		case "Limit":
+			constant = declaration
+		}
+	}
+	if fixed.ValueShape != ValueShapeFixedArray || len(fixed.ArrayBounds) != 2 || fixed.ArrayBounds[0].Lower != "1" || fixed.ArrayBounds[0].Upper != "Limit" {
+		t.Fatalf("fixed declaration shape = %#v", fixed)
+	}
+	if dynamic.ValueShape != ValueShapeDynamicArray || len(dynamic.ArrayBounds) != 0 {
+		t.Fatalf("dynamic declaration shape = %#v", dynamic)
+	}
+	if scalar.ValueShape != ValueShapeScalar || constant.ValueShape != ValueShapeScalar || !constant.IsConst {
+		t.Fatalf("scalar/constant shapes = scalar=%#v const=%#v", scalar, constant)
+	}
+	if len(doc.Procedures) != 1 || len(doc.Procedures[0].Declarations) != 1 || doc.Procedures[0].Declarations[0].ValueShape != ValueShapeFixedArray {
+		t.Fatalf("local declaration shape = %#v", doc.Procedures)
+	}
+}
+
+func TestProcedureReturnValueShapeRetainsArraySyntax(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Returns.bas"}, []byte(`Option Explicit
+Public Function FixedValues() As Long(1 To 2)
+End Function
+Public Function DynamicValues() As Variant()
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 {
+		t.Fatalf("procedures = %#v", doc.Procedures)
+	}
+	fixed, dynamic := doc.Procedures[0].Symbol, doc.Procedures[1].Symbol
+	if !fixed.IsArray || fixed.ValueShape != ValueShapeFixedArray || len(fixed.ArrayBounds) != 1 {
+		t.Fatalf("fixed return shape = %#v", fixed)
+	}
+	if !dynamic.IsArray || dynamic.ValueShape != ValueShapeDynamicArray {
+		t.Fatalf("dynamic return shape = %#v", dynamic)
+	}
+}
+
+func TestClonePreservesArrayShapeBoundsOwnership(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Shapes.bas"}, []byte(`Public fixed(1 To 2) As Long
+Public Function Values() As Long(1 To 2)
+End Function
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clone := Clone(doc)
+	if len(clone.Declarations) == 0 || len(clone.Declarations[0].ArrayBounds) != 1 || len(clone.Procedures[0].Symbol.ArrayBounds) != 1 {
+		t.Fatalf("clone lost array bounds: %#v", clone)
+	}
+	clone.Declarations[0].ArrayBounds[0].LowerRange.StartLine = 99
+	clone.Procedures[0].Symbol.ArrayBounds[0].UpperRange.StartLine = 99
+	if doc.Declarations[0].ArrayBounds[0].LowerRange.StartLine == 99 || doc.Procedures[0].Symbol.ArrayBounds[0].UpperRange.StartLine == 99 {
+		t.Fatal("Clone shares array-bound range pointers")
+	}
+}
+
 func TestVisibilityOnlyUsesDeclarationHeader(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Const AccessLabel As String = "Public"

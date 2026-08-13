@@ -62,6 +62,7 @@ type Linter struct {
 	ModuleKind             string
 	PathFilter             func(string) bool
 	VisibleDeclarations    map[string]bool
+	VisibleConstants       map[string]bool
 	TypeDeclarations       map[string]int
 	ObjectTypeDeclarations map[string]int
 }
@@ -134,6 +135,7 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	visibleDeclarations := l.VisibleDeclarations
+	visibleConstants := l.VisibleConstants
 	typeDeclarations := l.TypeDeclarations
 	objectTypeDeclarations := l.ObjectTypeDeclarations
 	missing := 0
@@ -146,19 +148,10 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 	if objectTypeDeclarations == nil {
 		missing++
 	}
-	switch missing {
-	case 1:
-		if visibleDeclarations == nil {
-			visibleDeclarations = l.projectVisibleDeclarationsContext(ctx, files)
-		}
-		if typeDeclarations == nil {
-			typeDeclarations = l.projectTypeDeclarationsContext(ctx, files)
-		}
-		if objectTypeDeclarations == nil {
-			objectTypeDeclarations = l.projectObjectTypeDeclarationsContext(ctx, files)
-		}
-	case 2, 3:
-		projectVisible, projectTypes, projectObjects := l.projectDeclarationsContext(ctx, files)
+	var projectConstants map[string]bool
+	if missing > 0 || visibleConstants == nil {
+		projectVisible, projectTypes, projectObjects, constants := l.projectDeclarationsContext(ctx, files)
+		projectConstants = constants
 		if visibleDeclarations == nil {
 			visibleDeclarations = projectVisible
 		}
@@ -169,6 +162,9 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 			objectTypeDeclarations = projectObjects
 		}
 	}
+	if visibleConstants == nil {
+		visibleConstants = projectConstants
+	}
 	issues := make([]Issue, 0)
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -176,6 +172,7 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 		}
 		fileLinter := l
 		fileLinter.VisibleDeclarations = visibleDeclarations
+		fileLinter.VisibleConstants = visibleConstants
 		fileLinter.TypeDeclarations = typeDeclarations
 		fileLinter.ObjectTypeDeclarations = objectTypeDeclarations
 		fileIssues, err := fileLinter.lintFileContext(ctx, file)
@@ -490,31 +487,39 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 	return issues, nil
 }
 
-func (l Linter) projectVisibleDeclarationsContext(ctx context.Context, files []string) map[string]bool {
-	visible, _, _ := l.projectDeclarationsContext(ctx, files)
-	return visible
-}
-
-func (l Linter) projectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
-	_, types, _ := l.projectDeclarationsContext(ctx, files)
-	return types
-}
-
-func (l Linter) projectObjectTypeDeclarationsContext(ctx context.Context, files []string) map[string]int {
-	_, _, objects := l.projectDeclarationsContext(ctx, files)
-	return objects
+func uniqueVisibleConstants(counts map[string]int) map[string]bool {
+	constants := make(map[string]bool)
+	for name, count := range counts {
+		if count == 1 {
+			constants[name] = true
+		}
+	}
+	return constants
 }
 
 // projectDeclarationsContext parses each project file once and collects all
 // declaration maps needed by project-aware lint rules. Keeping these scans
 // together avoids reparsing the same tree three times during a normal lint run.
-func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) (map[string]bool, map[string]int, map[string]int) {
+func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) (map[string]bool, map[string]int, map[string]int, map[string]bool) {
 	visible := make(map[string]bool)
 	types := make(map[string]int)
 	objects := make(map[string]int)
+	constantCounts := make(map[string]int)
+	addConstant := func(name string, standard bool) {
+		key := canonicalDeclarationKey(name)
+		if key != "" && standard {
+			constantCounts[key]++
+		}
+	}
+	addQualifiedConstant := func(qualifier, name string) {
+		qualifier, name = canonicalDeclarationKey(qualifier), canonicalDeclarationKey(name)
+		if qualifier != "" && name != "" {
+			constantCounts[qualifier+"."+name]++
+		}
+	}
 	for _, path := range files {
 		if err := ctx.Err(); err != nil {
-			return visible, types, objects
+			return visible, types, objects, uniqueVisibleConstants(constantCounts)
 		}
 		source, err := os.ReadFile(path)
 		if err != nil {
@@ -525,6 +530,47 @@ func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) 
 		}, source)
 		if err != nil {
 			continue
+		}
+		moduleName := file.ModuleName
+		if moduleName == "" {
+			moduleName = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
+		standardModule := strings.EqualFold(l.moduleKindForPath(path), "standard") || strings.EqualFold(file.ModuleKind, "standard")
+		inEnum, enumVisible, enumName := false, false, ""
+		for _, line := range strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n") {
+			trim := strings.TrimSpace(strings.SplitN(line, "'", 2)[0])
+			lower := strings.ToLower(trim)
+			if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "friend enum ") || strings.HasPrefix(lower, "private enum ") {
+				inEnum = true
+				enumVisible = strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "friend enum ")
+				fields := strings.Fields(trim)
+				enumName = ""
+				for i, field := range fields {
+					if strings.EqualFold(field, "enum") && i+1 < len(fields) {
+						enumName = fields[i+1]
+						break
+					}
+				}
+				continue
+			}
+			if inEnum && strings.HasPrefix(lower, "end enum") {
+				inEnum, enumVisible, enumName = false, false, ""
+				continue
+			}
+			if inEnum {
+				if enumVisible && len(strings.Fields(trim)) > 0 {
+					name := strings.Fields(strings.SplitN(trim, "=", 2)[0])[0]
+					addConstant(name, standardModule)
+					addQualifiedConstant(enumName, name)
+				}
+				continue
+			}
+			if name, _, ok := arrayShapeConstLine(trim); ok && (strings.HasPrefix(lower, "public const ") || strings.HasPrefix(lower, "friend const ")) {
+				// Public/Friend module constants are project-visible; standard-module
+				// filtering is enforced by the symbol resolver for other declarations.
+				addConstant(name, true)
+				addQualifiedConstant(moduleName, name)
+			}
 		}
 		for _, sym := range file.Symbols {
 			if projectVisibleDeclaration(sym, file.ModuleKind) {
@@ -540,7 +586,26 @@ func (l Linter) projectDeclarationsContext(ctx context.Context, files []string) 
 			}
 		}
 	}
-	return visible, types, objects
+	if result, err := typedb.LoadForRuntime(""); err == nil && result.DB != nil {
+		constants := result.DB.AllConstantsList()
+		counts := make(map[string]int)
+		for _, constant := range constants {
+			counts[canonicalDeclarationKey(constant.Name)]++
+		}
+		for _, constant := range constants {
+			name := canonicalDeclarationKey(constant.Name)
+			if name != "" && counts[name] == 1 {
+				constantCounts[name]++
+			}
+			if group := canonicalDeclarationKey(constant.EnumGroup); group != "" && name != "" {
+				constantCounts[group+"."+name]++
+			}
+			if library := canonicalDeclarationKey(constant.Library); library != "" && name != "" {
+				constantCounts[library+"."+name]++
+			}
+		}
+	}
+	return visible, types, objects, uniqueVisibleConstants(constantCounts)
 }
 
 func (l Linter) moduleKindForPath(path string) string {
@@ -953,6 +1018,7 @@ func (l Linter) flowIssuesContext(ctx context.Context, path string, source strin
 		}
 		issues = append(issues, forEachIssues...)
 	}
+	issues = append(issues, l.arrayShapeIssues(path, source, ir)...)
 	return issues, ctx.Err()
 }
 
@@ -2163,6 +2229,7 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 				Name: sym.Name, Type: sym.ReturnType, Module: sym.Module, ModuleKind: sym.ModuleKind, Kind: sym.Kind,
 				Visibility: sym.Visibility, File: sym.File, Line: sym.StartLine, Parent: sym.Parent, IsArray: sym.IsArray,
+				IsConst:   procedureir.IsConstKind(sym.Kind),
 				Recovered: strings.EqualFold(sym.Kind, "enum_member") && !typeDBComplete,
 			})
 		}
@@ -2176,6 +2243,7 @@ func (l Linter) resolutionIssuesContextWithResult(ctx context.Context, files []s
 				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
 				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
 				File: "<typelib>" + constant.Library, Recovered: !typeDBComplete,
+				IsConst: true, ValueShape: procedureir.ValueShapeScalar,
 			})
 		}
 	}

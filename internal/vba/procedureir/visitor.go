@@ -175,14 +175,17 @@ func (v *singleVisitor) enterProcedure(node *tree_sitter.Node, parent visitConte
 		}
 		procedure.Declarations = append(procedure.Declarations, Declaration{
 			ID: v.builder.takeDeclarationID(), Name: symbol.Name, Type: symbol.ReturnType,
-			Scope: ScopeLocal, Kind: "return_slot", Range: nameRange,
+			Scope: ScopeLocal, Kind: "return_slot", IsArray: symbol.IsArray,
+			ValueShape: symbol.ValueShape, ArrayBounds: append([]ArrayBound(nil), symbol.ArrayBounds...), Range: nameRange,
 		})
 	}
 	for _, parameter := range symbol.Parameters {
 		procedure.Declarations = append(procedure.Declarations, Declaration{
 			ID: v.builder.takeDeclarationID(), Name: parameter.Name, Type: parameter.Type,
 			Scope: ScopeParameter, Kind: "parameter", IsArray: parameter.IsArray,
-			IsObject: looksObjectType(parameter.Type), Range: parameter.Range,
+			ParamArray: parameter.ParamArray, ValueShape: valueShapeForParameter(parameter),
+			ArrayBounds: append([]ArrayBound(nil), parameter.ArrayBounds...),
+			IsObject:    looksObjectType(parameter.Type), Range: parameter.Range,
 		})
 	}
 	v.document.Procedures = append(v.document.Procedures, procedure)
