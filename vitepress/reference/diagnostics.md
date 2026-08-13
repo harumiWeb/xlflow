@@ -116,6 +116,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA245`](#vba245) | analyze | warning     | procedure-local | yes     | Unsafe destructive file and path operation         |
 | [`VBA246`](#vba246) | analyze | warning     | procedure-local | yes     | Unsafe HTTP or TLS configuration                   |
 | [`VBA247`](#vba247) | analyze | warning     | procedure-local | yes     | Missing or unlimited HTTP timeout                  |
+| [`VBA248`](#vba248) | analyze | warning     | procedure-local | no      | Opaque Boolean control arguments                   |
 
 ## VB001
 
@@ -2492,3 +2493,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                            |
 | Real-time editor diagnostic | yes                           |
 | Fix available               | no                            |
+
+## VBA248
+
+**Opaque Boolean control arguments.** A procedure call passes Boolean literals positionally in a way that obscures the behavior being requested.
+
+| Property                    | Value                             |
+| --------------------------- | --------------------------------- |
+| Family                      | `analyze`                         |
+| Category                    | `maintainability`                 |
+| Evidence class              | `maintainability`                 |
+| Compile-equivalent          | no                                |
+| Default severity            | `warning`                         |
+| Supported severities        | `warning`                         |
+| Surfaces                    | `analyze`, `lsp`                  |
+| Scope                       | `procedure-local`                 |
+| Precision                   | `medium`                          |
+| Enabled by default          | no                                |
+| Configuration               | `detect_opaque_boolean_arguments` |
+| Inline suppression          | yes                               |
+| Blocks source preflight     | no                                |
+| Real-time editor diagnostic | yes                               |
+| Fix available               | no                                |

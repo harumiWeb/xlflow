@@ -371,6 +371,66 @@ disabled_rules = ["VBA243"]
 	}
 }
 
+func TestOpaqueBooleanArgumentsDefaultsDisabledAndIsConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA248"); !ok || enabled || cfg.Analyze.DetectOpaqueBooleanArguments {
+		t.Fatalf("VBA248 enabled = %v, known = %v, config = %v; want disabled configurable rule", enabled, ok, cfg.Analyze.DetectOpaqueBooleanArguments)
+	}
+
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_opaque_boolean_arguments = true
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(loaded.Analyze, "VBA248"); !ok || !enabled || !loaded.Analyze.DetectOpaqueBooleanArguments {
+		t.Fatalf("loaded VBA248 enabled = %v, known = %v, config = %v; want enabled", enabled, ok, loaded.Analyze.DetectOpaqueBooleanArguments)
+	}
+	if !hasConfigWarning(loaded.Warnings, "deprecated_analyze_rule_config", "VBA248") {
+		t.Fatalf("expected legacy compatibility-key warning for VBA248: %+v", loaded.Warnings)
+	}
+}
+
+func TestOpaqueBooleanArgumentsDisabledRulesTakePrecedence(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_opaque_boolean_arguments = true
+disabled_rules = ["VBA248"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA248"); !ok || enabled || cfg.Analyze.DetectOpaqueBooleanArguments {
+		t.Fatalf("VBA248 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectOpaqueBooleanArguments)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA248") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA248") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA248, got %+v", cfg.Warnings)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

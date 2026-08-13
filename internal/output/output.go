@@ -1777,7 +1777,8 @@ func (r renderer) renderMetrics(env Envelope) string {
 		headers := []string{
 			"Procedure", "Complexity", "Nesting", "Statements", "Source lines",
 			"Branches", "Loops", "GoTo", "Exits", "Parameters", "ByRef",
-			"Locals", "Fan-out",
+			"Locals", "Fan-out", "Boolean params", "Optional Boolean",
+			"Vague Boolean", "Boolean branches", "Boolean statements",
 		}
 		rows := make([][]string, 0, len(procedures))
 		for _, procedure := range procedures {
@@ -1795,6 +1796,11 @@ func (r renderer) renderMetrics(env Envelope) string {
 				metricsNumber(procedure, "byref_parameter_count", "byref_parameters"),
 				metricsNumber(procedure, "local_variable_count", "local_variables"),
 				metricsNumber(procedure, "call_fan_out"),
+				metricsNumber(procedure, "boolean_parameter_count"),
+				metricsNumber(procedure, "optional_boolean_parameter_count"),
+				metricsNumber(procedure, "vague_boolean_parameter_count"),
+				metricsNumber(procedure, "boolean_control_branch_count"),
+				metricsNumber(procedure, "boolean_controlled_statement_count"),
 			})
 		}
 		b.WriteString(r.table(headers, rows))

@@ -2376,6 +2376,28 @@
       "configuration_key": "detect_missing_http_timeout",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA248",
+      "title": "Opaque Boolean control arguments",
+      "description": "A procedure call passes Boolean literals positionally in a way that obscures the behavior being requested.",
+      "family": "analyze",
+      "category": "maintainability",
+      "evidence_class": "maintainability",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": false,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "medium",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba248",
+      "configurable": true,
+      "configuration_key": "detect_opaque_boolean_arguments",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

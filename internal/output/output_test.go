@@ -291,7 +291,7 @@ func TestWriteProcedureMetricsJSONAndHumanOutput(t *testing.T) {
 	if err := WriteWithOptions(&human, env, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Procedure metrics:", "Main.Run", "Complexity", "Fan-out", "loop_count exceeds threshold"} {
+	for _, text := range []string{"Procedure metrics:", "Main.Run", "Complexity", "Fan-out", "Boolean params", "Boolean branches", "loop_count exceeds threshold"} {
 		if !strings.Contains(human.String(), text) {
 			t.Fatalf("human metrics output missing %q: %s", text, human.String())
 		}

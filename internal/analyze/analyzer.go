@@ -55,8 +55,11 @@ type Finding struct {
 	FileOperation *FileOperationContext `json:"file_operation,omitempty"`
 	// HTTPSecurity and HTTPReliability are redacted HTTP-specific contexts for
 	// VBA246 and VBA247. They never contain header values or complete URLs.
-	HTTPSecurity          *HTTPSecurityContext    `json:"http_security,omitempty"`
-	HTTPReliability       *HTTPReliabilityContext `json:"http_reliability,omitempty"`
+	HTTPSecurity    *HTTPSecurityContext    `json:"http_security,omitempty"`
+	HTTPReliability *HTTPReliabilityContext `json:"http_reliability,omitempty"`
+	// OpaqueBoolean describes the positional Boolean literals that made a
+	// VBA248 call-site finding actionable without embedding parser internals.
+	OpaqueBoolean         *OpaqueBooleanContext `json:"opaque_boolean,omitempty"`
 	httpOwnedSinks        map[int]bool
 	dataFlowSinkStartByte int
 }
@@ -212,10 +215,11 @@ type procedureSignature struct {
 }
 
 type parameterInfo struct {
-	Name    string
-	Type    string
-	Passing string
-	Range   vbaast.Range
+	Name     string
+	Type     string
+	Passing  string
+	Optional bool
+	Range    vbaast.Range
 }
 
 type parsedFile struct {
@@ -1032,7 +1036,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -1079,6 +1083,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	withStack := make([]withInfo, 0)
 	worksheetRoots := newWorksheetRootTracker(worksheetCodenames)
 	var findings []Finding
+	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
 	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
 	}
@@ -1371,6 +1376,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
+	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, ctx.procedures)...)
 	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
 	}
@@ -1616,7 +1622,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 		params := make([]parameterInfo, len(procedure.Symbol.Parameters))
 		for i, parameter := range procedure.Symbol.Parameters {
 			params[i] = parameterInfo{
-				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing, Range: parameter.Range,
+				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing, Optional: parameter.Optional, Range: parameter.Range,
 			}
 		}
 		source := sourceProcedure{
