@@ -309,7 +309,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	// always enabled because they represent VBE compile rejections and cannot
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
-	needsTypedExcelAnalysis := a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
+	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
@@ -938,7 +938,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
-	if (cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && typeDB == nil {
+	if (cfg.Analyze.DetectRangeFindNothingCheck || cfg.Analyze.DetectStatefulExcelCallArguments || cfg.Analyze.DetectExcelAPIFailureContracts || cfg.Analyze.DetectExcelCellAccessInLoops || cfg.Analyze.DetectLoopInvariantExcelObjectResolution || cfg.Analyze.DetectExpensiveFullRangeOperations || cfg.Analyze.DetectValue2PerformanceOpportunities || cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction || cfg.Analyze.DetectUnsafeFilePath) && typeDB == nil {
 		var err error
 		typeDB, err = vbadb.LoadBuiltin()
 		if err != nil {
@@ -1073,7 +1073,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	for _, param := range proc.Params {
 		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
 	}
-	findAssignments := map[string]int{}
+	findAssignments := map[string]rangeFindAssignmentInfo{}
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(worksheetCodenames)
 	var findings []Finding
@@ -1119,8 +1119,8 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 			worksheetRoots.observeSetAssignment(worksheetStmt)
 		}
 		if setAssignRe.MatchString(stmt) {
-			if name, ok := rangeFindAssignment(stmt); ok {
-				findAssignments[strings.ToLower(name)] = lineNo
+			if name, receiver, ok := rangeFindAssignment(stmt); ok {
+				findAssignments[strings.ToLower(name)] = rangeFindAssignmentInfo{Line: lineNo, Receiver: receiver}
 			}
 			continue
 		}
@@ -1361,7 +1361,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	shadowedVBA205 := vba205ShadowedIdentifiers(proc, decls, ctx)
 	withStack := make([]withInfo, 0)
-	findAssignments := map[string]int{}
+	findAssignments := map[string]rangeFindAssignmentInfo{}
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
@@ -1432,8 +1432,8 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			findings = append(findings, a.legacyMemberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)...)
 		}
 		if setAssignRe.MatchString(stmt) {
-			if name, ok := rangeFindAssignment(stmt); ok {
-				findAssignments[strings.ToLower(name)] = lineNo
+			if name, receiver, ok := rangeFindAssignment(stmt); ok {
+				findAssignments[strings.ToLower(name)] = rangeFindAssignmentInfo{Line: lineNo, Receiver: receiver}
 			}
 			continue
 		}
@@ -1779,25 +1779,33 @@ func (a Analyzer) memberMismatchFindings(file parsedFile, proc sourceProcedure, 
 	return findings
 }
 
-func (a Analyzer) rangeFindFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, findAssignments map[string]int, guarded map[string]bool) []Finding {
+type rangeFindAssignmentInfo struct {
+	Line     int
+	Receiver string
+}
+
+func (a Analyzer) rangeFindFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, findAssignments map[string]rangeFindAssignmentInfo, guarded map[string]bool) []Finding {
 	lower := strings.ToLower(stmt)
 	for name := range findAssignments {
 		if strings.Contains(lower, "if "+name+" is nothing") || strings.Contains(lower, "if not "+name+" is nothing") {
 			guarded[name] = true
 		}
 	}
-	if name, ok := rangeFindAssignment(stmt); ok {
-		findAssignments[strings.ToLower(name)] = lineNo
+	if name, receiver, ok := rangeFindAssignment(stmt); ok {
+		findAssignments[strings.ToLower(name)] = rangeFindAssignmentInfo{Line: lineNo, Receiver: receiver}
 		return nil
 	}
 	var findings []Finding
-	for name, assignLine := range findAssignments {
+	for name, assignment := range findAssignments {
 		if guarded[name] {
+			continue
+		}
+		if !a.rangeFindReceiverIsExcelRange(file, assignment.Receiver, assignment.Line) {
 			continue
 		}
 		if strings.Contains(lower, name+".") {
 			suggestion := "Add If " + name + " Is Nothing Then handling after the Find assignment."
-			if assignLine == 0 {
+			if assignment.Line == 0 {
 				suggestion = "Check the Find result for Nothing before dereferencing it."
 			}
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA201", "warning", "Range.Find result "+name+" is dereferenced before a Nothing check.", "Range.Find returns Nothing when no match is found, so dereferencing the result can raise runtime error 91.", suggestion))
@@ -3370,23 +3378,68 @@ func invalidMemberRuleFor(typ, member string) (invalidMemberRule, bool) {
 	return rule, true
 }
 
-func rangeFindAssignment(stmt string) (string, bool) {
-	lower := strings.ToLower(stmt)
-	if !strings.Contains(lower, ".find(") && !strings.Contains(lower, ".find ") {
-		return "", false
-	}
+func rangeFindAssignment(stmt string) (string, string, bool) {
 	left, _, ok := strings.Cut(stmt, "=")
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 	left = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(left), "Set "))
 	fields := strings.FieldsFunc(left, func(r rune) bool {
 		return !isVBAIdentifierRune(r)
 	})
 	if len(fields) == 0 {
-		return "", false
+		return "", "", false
 	}
-	return cleanIdentifier(fields[len(fields)-1]), true
+	right := strings.TrimSpace(stmt[strings.Index(stmt, "=")+1:])
+	memberIndex, ok := vbaMemberCallIndex(right, "Find")
+	if !ok {
+		return "", "", false
+	}
+	receiver := strings.TrimSpace(right[:memberIndex])
+	if receiver == "" {
+		return "", "", false
+	}
+	return cleanIdentifier(fields[len(fields)-1]), receiver, true
+}
+
+func (a Analyzer) rangeFindReceiverIsExcelRange(file parsedFile, receiver string, line int) bool {
+	typ, ok := resolveExcelExpressionType(file, a.typeDB, receiver, line-1, a.RootDir, a.Config)
+	return ok && isExcelRangeType(typ)
+}
+
+func vbaMemberCallIndex(text, member string) (int, bool) {
+	lower := strings.ToLower(text)
+	wanted := "." + strings.ToLower(member)
+	for offset := 0; offset+len(wanted) <= len(lower); {
+		index := strings.Index(lower[offset:], wanted)
+		if index < 0 {
+			return 0, false
+		}
+		index += offset
+		if !vbaTextOffsetInString(text, index) {
+			end := index + len(wanted)
+			if end == len(lower) || lower[end] == '(' || unicode.IsSpace(rune(lower[end])) {
+				return index, true
+			}
+		}
+		offset = index + len(wanted)
+	}
+	return 0, false
+}
+
+func vbaTextOffsetInString(text string, offset int) bool {
+	inString := false
+	for i := 0; i < offset && i < len(text); i++ {
+		if text[i] != '"' {
+			continue
+		}
+		if inString && i+1 < len(text) && text[i+1] == '"' {
+			i++
+			continue
+		}
+		inString = !inString
+	}
+	return inString
 }
 
 func isCleanupFallthroughLabel(label string) bool {
