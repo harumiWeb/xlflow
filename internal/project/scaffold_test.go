@@ -306,6 +306,27 @@ func TestInstallHelperModulesUsesConfiguredModuleRoot(t *testing.T) {
 	}
 }
 
+func TestInstallHelperModulesAnalyzeCleanly(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := InstallHelperModules(dir, config.SourceConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	helperRoot := filepath.Clean(filepath.Join(dir, "src", "modules", "Xlflow"))
+	findings, err := (analyze.Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return filepath.Clean(filepath.Dir(path)) == helperRoot
+		},
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("installed helper modules should analyze cleanly (diagnostic code/file details): %+v", findings)
+	}
+}
+
 func TestInstallHelperModulesRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	moduleDir := filepath.Join(dir, "src", "modules", "Xlflow")
@@ -848,6 +869,23 @@ func TestNewScaffoldLintsWithoutIssuesOrWarnings(t *testing.T) {
 	}
 }
 
+func TestNewScaffoldAnalyzesWithoutFindings(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := (analyze.Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("new scaffold should analyze cleanly (diagnostic code/file details): %+v", findings)
+	}
+}
+
 func TestNewScaffoldLintsWithoutVB021IssuesWhenOptedIn(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
@@ -914,13 +952,13 @@ func TestNewScaffoldAssertHelperAnalyzesCleanly(t *testing.T) {
 	}
 }
 
-func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
+func TestNewScaffoldDebugHelperAnalyzesCleanly(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
 	debugPath := filepath.Join(dir, "src", "modules", "Xlflow", "XlflowDebug.bas")
-	issues, err := lint.Linter{
+	findings, err := analyze.Analyzer{
 		RootDir: dir,
 		Config:  config.Default(),
 		PathFilter: func(path string) bool {
@@ -930,8 +968,8 @@ func TestNewScaffoldDebugHelperLintsCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 0 {
-		t.Fatalf("debug helper should lint cleanly: %+v", issues)
+	if len(findings) != 0 {
+		t.Fatalf("debug helper should analyze cleanly (diagnostic code/file details): %+v", findings)
 	}
 }
 

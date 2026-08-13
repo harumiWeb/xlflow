@@ -8,6 +8,11 @@ All notable changes to xlflow will be documented in this file.
   the project or generated TypeLib resolution view is incomplete. Project-local
   inaccessible and ambiguous type findings remain unchanged.
 
+- Fixed the bundled `XlflowDebug` scaffold helper so `new` projects and helper
+  modules installed by `init --with-module` produce no default `xlflow analyze`
+  findings. ParamArray array-bound checks use narrow `VBA227` suppressions, and
+  optional debug-pipe write/close failures now return checked best-effort results.
+
 - Added default-enabled, compile-equivalent `VB059` call-syntax diagnostics.
   Lint, LSP, and source preflight now reject explicit `Call` statements without
   argument parentheses, standalone empty or multi-argument parenthesized calls,
