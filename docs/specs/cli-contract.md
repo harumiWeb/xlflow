@@ -1084,6 +1084,20 @@ Module` directives are also reported as duplicate same-kind declarations.
   unsuppressible error and blocks source preflight.
 - `VB061`: a fixed array declaration has a constant lower bound greater than
   its upper bound; it is an unsuppressible error and blocks source preflight.
+- `VB062`: a conditional branch statement uses a form that VBA rejects. The
+  finding is an unsuppressible compile-equivalent error and blocks source
+  preflight; ambiguous parser recovery remains `VB014`.
+- `VB063`: a `Select Case` branch is outside a `Select Case` block, duplicates
+  `Case Else`, or follows `Case Else`. The finding is an unsuppressible
+  compile-equivalent error and blocks source preflight; malformed/recovered
+  constructs remain `VB014`.
+- `VB064`: an `Open` statement contains a provably malformed file-mode shape,
+  such as a missing mode after `For`. The finding is an unsuppressible
+  compile-equivalent error and blocks source preflight; ambiguous recovery
+  remains `VB014`.
+- `VB065`: a `TypeOf` expression has a provably malformed syntax shape. The
+  finding is an unsuppressible compile-equivalent error and blocks source
+  preflight; ambiguous recovery remains `VB014`.
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
 - `VB033`: member is not present on the resolved receiver type
@@ -1102,7 +1116,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB061` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
+Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB065` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
 
 `[preflight].allowed_diagnostics` is an empty-by-default project policy for the
 shared source-preflight gate used by `push`, configured-workbook `run`,
@@ -1139,7 +1153,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB061`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB065`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 

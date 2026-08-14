@@ -45,6 +45,11 @@ type Issue struct {
 	OpeningLine      int    `json:"opening_line,omitempty"`
 	OpeningColumn    int    `json:"opening_column,omitempty"`
 	parserRecoveryOK bool   `json:"-"`
+	// diagnosticRange retains the source range used to create an issue even
+	// when the public EndLine/EndColumn fields are intentionally omitted for
+	// compatibility.  Parser-recovery precedence needs this internal range to
+	// distinguish independent defects on one physical (colon-separated) line.
+	diagnosticRange vbaast.Range `json:"-"`
 }
 
 type Result struct {
@@ -431,9 +436,61 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 			return callSyntaxErr
 		}
 		issues = append(issues, callSyntaxIssues...)
+		// Conditional branch ordering and missing-Then forms are interpreted
+		// from the same conservative statement structure used by the parser
+		// recovery scanner.  Add them before the generic fallback so a
+		// high-confidence VB062 finding owns the overlapping recovery range.
+		issues = append(issues, l.conditionalBranchSyntaxIssues(path, string(source))...)
+		issues = append(issues, l.openTypeOfSyntaxIssues(path, string(source), view.Root)...)
+		// Select/Case ordering is a source-structure fact when the CST is
+		// otherwise complete. Keep the helper ahead of the generic fallback so
+		// its actionable diagnostic owns the offending Case statement.
+		for _, syntax := range selectCaseSyntaxIssues(string(source), view.Root) {
+			issue := l.issueAt(path, syntax.Range, syntax.Code, "error", syntax.Message)
+			issue.EndLine = syntax.Range.EndLine
+			issue.EndColumn = syntax.Range.EndColumn
+			issue.Kind = syntax.Kind
+			issue.Suggestion = syntax.Suggestion
+			issues = append(issues, issue)
+		}
 		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) && !numericLiteralRecovery) ||
 			shouldReportStructuralParseIssue(string(source)) {
-			issues = append(issues, lintCtx.parseIssues(view.Root)...)
+			parseIssues := lintCtx.parseIssues(view.Root)
+			// Keep the historical single generic parser-recovery fallback for
+			// ambiguous CST recovery, but never collapse the independent,
+			// source-anchored unmatched-block findings produced above.  The
+			// latter can legitimately contain one VB014 per missing closer.
+			parserOwnerPresent := hasParserRecoveryOwner(issues)
+			if !parserOwnerPresent && len(parseIssues) > 1 && !hasTargetedParserRecovery(parseIssues) {
+				parseIssues = parseIssues[:1]
+			}
+			filteredParseIssues := make([]Issue, 0, len(parseIssues))
+			for _, parseIssue := range parseIssues {
+				if parseIssue.Code == "VB014" {
+					problem := parseIssue.diagnosticRange
+					// Structural recovery can synthesize a location-less VB014
+					// at line 1 when the parser tree has no explicit recovery
+					// node. A specific recovery diagnostic already owns that
+					// malformed statement; do not add this redundant fallback.
+					// A targeted unmatched-block recovery has a concrete block
+					// range even when no tree-sitter node could be associated with
+					// it. Only the truly location-less generic fallback may be
+					// discarded here; otherwise a specific branch finding could
+					// hide an unrelated missing End If/Next/End Select diagnostic.
+					locationlessGenericRecovery := parseIssue.ParserNode == "" && parseIssue.BlockKind == "" && parseIssue.ExpectedCloser == ""
+					if (problem.StartLine == 0 || locationlessGenericRecovery) && hasSpecificRecoveryDiagnostic(issues) {
+						continue
+					}
+					if problem.StartLine == 0 {
+						problem = vbaast.Range{StartLine: parseIssue.Line, StartColumn: parseIssue.Column, EndLine: parseIssue.EndLine, EndColumn: parseIssue.EndColumn}
+					}
+					if parserRecoverySuppressed(problem, issues) {
+						continue
+					}
+				}
+				filteredParseIssues = append(filteredParseIssues, parseIssue)
+			}
+			issues = append(issues, filteredParseIssues...)
 		}
 		flowIssues, flowErr := l.flowIssuesContext(ctx, path, string(source), view.Root, procedureIR)
 		if flowErr != nil {
@@ -485,6 +542,66 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		issues, _ = applyInlineSuppressions(issues, directives)
 	}
 	return issues, nil
+}
+
+func hasSpecificRecoveryDiagnostic(issues []Issue) bool {
+	for _, issue := range issues {
+		if policy, ok := parserRecoveryPolicies[issue.Code]; ok && policy.suppressLocationless {
+			return true
+		}
+	}
+	return false
+}
+
+func hasParserRecoveryOwner(issues []Issue) bool {
+	for _, issue := range issues {
+		if ownsParserRecovery(issue) {
+			return true
+		}
+	}
+	return false
+}
+
+type parserRecoveryPolicy struct {
+	overlapsRecovery     bool
+	suppressLocationless bool
+}
+
+// parserRecoveryPolicies is the single source of truth for syntax findings
+// that can own a parser-recovery range.  Only the new issue594 families need
+// to suppress a location-less structural fallback; older rules already have
+// concrete ranges and must not hide an unrelated unmatched-block finding.
+var parserRecoveryPolicies = map[string]parserRecoveryPolicy{
+	"VB008": {overlapsRecovery: true},
+	"VB009": {overlapsRecovery: true},
+	"VB010": {overlapsRecovery: true},
+	"VB011": {overlapsRecovery: true},
+	"VB012": {overlapsRecovery: true},
+	"VB013": {overlapsRecovery: true},
+	"VB015": {overlapsRecovery: true},
+	"VB032": {overlapsRecovery: true},
+	"VB059": {overlapsRecovery: true},
+	"VB062": {overlapsRecovery: true, suppressLocationless: true},
+	"VB063": {overlapsRecovery: true, suppressLocationless: true},
+	"VB064": {overlapsRecovery: true, suppressLocationless: true},
+	"VB065": {overlapsRecovery: true, suppressLocationless: true},
+}
+
+func ownsParserRecovery(issue Issue) bool {
+	if issue.Code == "VB005" {
+		return issue.parserRecoveryOK
+	}
+	policy, ok := parserRecoveryPolicies[issue.Code]
+	return ok && policy.overlapsRecovery
+}
+
+func hasTargetedParserRecovery(issues []Issue) bool {
+	for _, issue := range issues {
+		if issue.BlockKind != "" || issue.ExpectedCloser != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func uniqueVisibleConstants(counts map[string]int) map[string]bool {
@@ -747,13 +864,25 @@ func (l Linter) textSafetyIssuesContext(ctx context.Context, path string, source
 			inTypeBlock = true
 		}
 		if missingLineContinuationWhitespace(detectionCode) {
-			issues = append(issues, l.issue(path, lineNo, "VB013", "error", "Line-continuation underscore must be preceded by whitespace."))
+			issue := l.issue(path, lineNo, "VB013", "error", "Line-continuation underscore must be preceded by whitespace.")
+			if column := missingLineContinuationWhitespaceColumn(detectionCode); column > 0 {
+				issue.diagnosticRange = vbaast.Range{StartLine: lineNo, StartColumn: column, EndLine: lineNo, EndColumn: column + 1}
+			}
+			issues = append(issues, issue)
 		}
 		if containsTypographicQuote(code) {
-			issues = append(issues, l.issue(path, lineNo, "VB008", "error", "Typographic quote found in VBA source. Use straight double quotes for string delimiters before pushing to Excel."))
+			issue := l.issue(path, lineNo, "VB008", "error", "Typographic quote found in VBA source. Use straight double quotes for string delimiters before pushing to Excel.")
+			if column, width := firstTypographicQuotePosition(code); column > 0 {
+				issue.diagnosticRange = vbaast.Range{StartLine: lineNo, StartColumn: column, EndLine: lineNo, EndColumn: column + width}
+			}
+			issues = append(issues, issue)
 		}
 		if containsLikelyCStyleQuoteEscape(code) {
-			issues = append(issues, l.issue(path, lineNo, "VB009", "error", "Likely C-style quote escape found in VBA source. Use doubled quotes, for example \"\"\"\", to represent a quote character."))
+			issue := l.issue(path, lineNo, "VB009", "error", "Likely C-style quote escape found in VBA source. Use doubled quotes, for example \"\"\"\", to represent a quote character.")
+			if column := likelyCStyleQuoteEscapePosition(code); column > 0 {
+				issue.diagnosticRange = vbaast.Range{StartLine: lineNo, StartColumn: column, EndLine: lineNo, EndColumn: column + 1}
+			}
+			issues = append(issues, issue)
 		}
 		if logicalLine.Len() == 0 {
 			for _, column := range repeatedQuestionShorthandColumns(detectionCode) {
@@ -928,7 +1057,6 @@ func (c *astLintContext) variableDeclarationIssues(node *tree_sitter.Node, inPro
 }
 
 func (c *astLintContext) parseIssues(root *tree_sitter.Node) []Issue {
-	detail := parserRecoveryDetailFor(root, c.source)
 	if blocks, reliable := unmatchedBlockCandidates(string(c.source)); reliable && len(blocks) > 0 {
 		blockDetails := parserRecoveryDetailsForBlocks(parserRecoveryDetailsFor(root, c.source), blocks)
 		issues := make([]Issue, 0, len(blocks))
@@ -949,8 +1077,15 @@ func (c *astLintContext) parseIssues(root *tree_sitter.Node) []Issue {
 		}
 		return issues
 	}
-	issue := c.genericParseIssue(detail)
-	return []Issue{issue}
+	details := parserRecoveryDetailsFor(root, c.source)
+	if len(details) == 0 {
+		return []Issue{c.genericParseIssue(parserRecoveryDetail{})}
+	}
+	issues := make([]Issue, 0, len(details))
+	for _, detail := range details {
+		issues = append(issues, c.genericParseIssue(detail))
+	}
+	return issues
 }
 
 func (c *astLintContext) genericParseIssue(detail parserRecoveryDetail) Issue {
@@ -1872,17 +2007,6 @@ func (d parserRecoveryDetail) rangeAt() vbaast.Range {
 	return d.range_
 }
 
-// parserRecoveryDetailFor returns the first concrete tree-sitter recovery
-// node in source order. VB014 is deliberately fail-closed, but its detail is
-// diagnostic evidence rather than a claim that VBA itself is invalid.
-func parserRecoveryDetailFor(root *tree_sitter.Node, source []byte) parserRecoveryDetail {
-	details := parserRecoveryDetailsFor(root, source)
-	if len(details) == 0 {
-		return parserRecoveryDetail{}
-	}
-	return details[0]
-}
-
 func parserRecoveryDetailsFor(root *tree_sitter.Node, source []byte) []parserRecoveryDetail {
 	details := make([]parserRecoveryDetail, 0)
 	collectParserRecoveryDetails(root, source, &details)
@@ -2643,61 +2767,162 @@ func intString(value int) string {
 	return string(digits)
 }
 
-func hasSpecificSyntaxIssue(issues []Issue) bool {
-	for _, issue := range issues {
-		if issue.Code == "VB008" || issue.Code == "VB009" || issue.Code == "VB010" || issue.Code == "VB011" || issue.Code == "VB012" || issue.Code == "VB013" || issue.Code == "VB015" || issue.Code == "VB032" {
-			return true
-		}
-	}
-	return false
-}
-
 func shouldReportParseIssue(hasError, hasMissing bool, root *tree_sitter.Node, issues []Issue) bool {
-	if (!hasError && !hasMissing) || hasSpecificSyntaxIssue(issues) {
+	if !hasError && !hasMissing {
 		return false
 	}
-	problemLines := parseProblemLines(root)
-	if len(problemLines) == 0 {
+	problemRanges := parseProblemRanges(root)
+	if len(problemRanges) == 0 {
 		return true
 	}
-	for line := range problemLines {
-		// VB059 is compile-equivalent evidence on its own; parser recovery is
-		// still required for the generic VB005 location check.
-		if !hasIssueAtLine(issues, "VB005", line, true) && !hasIssueAtLine(issues, "VB059", line, false) {
+	for _, problem := range problemRanges {
+		if !parserRecoverySuppressed(problem, issues) {
 			return true
 		}
 	}
 	return false
 }
 
-func parseProblemLines(root *tree_sitter.Node) map[int]bool {
-	lines := make(map[int]bool)
-	collectParseProblemLines(root, lines)
-	return lines
+func parserRecoverySuppressed(problem vbaast.Range, issues []Issue) bool {
+	for _, issue := range issues {
+		if !ownsParserRecovery(issue) {
+			continue
+		}
+		if issueOverlapsParserRecovery(issue, problem) {
+			return true
+		}
+	}
+	return false
 }
 
-func collectParseProblemLines(node *tree_sitter.Node, lines map[int]bool) {
+func parseProblemRanges(root *tree_sitter.Node) []vbaast.Range {
+	if root == nil {
+		return nil
+	}
+	ranges := make([]vbaast.Range, 0)
+	collectParseProblemRanges(root, &ranges)
+	return ranges
+}
+
+// collectParseProblemRanges mirrors parserRecoveryDetailsFor's outermost
+// recovery-node walk.  A parent ERROR node owns its nested recovery tokens;
+// reporting both would make precedence depend on tree-sitter's recovery
+// shape rather than on source ranges.
+func collectParseProblemRanges(node *tree_sitter.Node, ranges *[]vbaast.Range) {
 	if node == nil {
 		return
 	}
 	if node.IsError() || node.IsMissing() {
-		r := vbaast.NodeRange(node)
-		if r.StartLine > 0 {
-			lines[r.StartLine] = true
-		}
+		*ranges = append(*ranges, vbaast.NodeRange(node))
+		return
 	}
 	for i := uint(0); i < node.ChildCount(); i++ {
-		collectParseProblemLines(node.Child(i), lines)
+		collectParseProblemRanges(node.Child(i), ranges)
 	}
 }
 
-func hasIssueAtLine(issues []Issue, code string, line int, requireRecoveryOK bool) bool {
-	for _, issue := range issues {
-		if issue.Code == code && issue.Line == line && (!requireRecoveryOK || issue.parserRecoveryOK) {
-			return true
+func issueOverlapsParserRecovery(issue Issue, problem vbaast.Range) bool {
+	range_, precise := issueDiagnosticRange(issue)
+	if !precise {
+		// Preserve the historical line-based behavior for diagnostics that do
+		// not expose a source span.  This fallback is intentionally narrow: a
+		// finding on a different line cannot suppress this recovery node.
+		return issue.Line >= problem.StartLine && issue.Line <= problem.EndLine
+	}
+	return sourceRangesOverlap(range_, problem)
+}
+
+func issueDiagnosticRange(issue Issue) (vbaast.Range, bool) {
+	range_ := issue.diagnosticRange
+	if range_.StartLine == 0 {
+		range_ = vbaast.Range{
+			StartLine:   issue.Line,
+			StartColumn: issue.Column,
+			EndLine:     issue.EndLine,
+			EndColumn:   issue.EndColumn,
+		}
+	} else {
+		// A few legacy producers fill EndLine/EndColumn after issueAt.  Merge
+		// those public fields when the internal range was initially line-only.
+		if range_.StartColumn == 0 && issue.Column > 0 {
+			range_.StartColumn = issue.Column
+		}
+		if range_.EndLine == 0 && issue.EndLine > 0 {
+			range_.EndLine = issue.EndLine
+		}
+		if range_.EndColumn == 0 && issue.EndColumn > 0 {
+			range_.EndColumn = issue.EndColumn
 		}
 	}
-	return false
+	if range_.StartLine == 0 {
+		return vbaast.Range{}, false
+	}
+	// A line-only Issue has no useful span.  Keep the explicit column form as
+	// a point range so unrelated colon-separated findings on that line remain
+	// distinguishable from the parser recovery location.
+	if range_.StartColumn == 0 {
+		return range_, false
+	}
+	if range_.EndLine == 0 {
+		range_.EndLine = range_.StartLine
+	}
+	if range_.EndColumn == 0 {
+		range_.EndColumn = range_.StartColumn
+	}
+	return range_, true
+}
+
+func sourceRangesOverlap(a, b vbaast.Range) bool {
+	aStart, aEnd := sourceRangeEndpoints(a)
+	bStart, bEnd := sourceRangeEndpoints(b)
+	aPoint := sourcePositionEqual(aStart, aEnd)
+	bPoint := sourcePositionEqual(bStart, bEnd)
+	if aPoint && bPoint {
+		return sourcePositionEqual(aStart, bStart)
+	}
+	if aPoint {
+		// Issue ranges are source spans and therefore half-open.  A point at
+		// the parser span's end is the first position after that syntax and
+		// must remain independent from it.
+		return (sourcePositionEqual(aStart, bStart) || sourcePositionBefore(bStart, aStart)) && sourcePositionBefore(aStart, bEnd)
+	}
+	if bPoint {
+		return sourcePositionBetweenInclusive(bStart, aStart, aEnd)
+	}
+	return sourcePositionBefore(aStart, bEnd) && sourcePositionBefore(bStart, aEnd)
+}
+
+func sourceRangeEndpoints(r vbaast.Range) (start, end sourcePosition) {
+	start = sourcePosition{line: r.StartLine, column: r.StartColumn}
+	end = sourcePosition{line: r.EndLine, column: r.EndColumn}
+	if end.line == 0 {
+		end.line = start.line
+	}
+	if end.column == 0 {
+		end.column = start.column
+	}
+	return start, end
+}
+
+type sourcePosition struct {
+	line   int
+	column int
+}
+
+func sourcePositionBefore(a, b sourcePosition) bool {
+	if a.line != b.line {
+		return a.line < b.line
+	}
+	return a.column < b.column
+}
+
+func sourcePositionEqual(a, b sourcePosition) bool {
+	return a.line == b.line && a.column == b.column
+}
+
+func sourcePositionBetweenInclusive(value, start, end sourcePosition) bool {
+	return (sourcePositionEqual(value, start) || sourcePositionBefore(start, value)) &&
+		(sourcePositionEqual(value, end) || sourcePositionBefore(value, end))
 }
 
 func (l Linter) issue(path string, line int, code, severity, message string) Issue {
@@ -2713,12 +2938,13 @@ func (l Linter) issueAt(path string, r vbaast.Range, code, severity, message str
 		r.StartLine = 1
 	}
 	return Issue{
-		Code:     code,
-		Severity: severity,
-		File:     filepath.ToSlash(file),
-		Line:     r.StartLine,
-		Column:   r.StartColumn,
-		Message:  message,
+		Code:            code,
+		Severity:        severity,
+		File:            filepath.ToSlash(file),
+		Line:            r.StartLine,
+		Column:          r.StartColumn,
+		Message:         message,
+		diagnosticRange: r,
 	}
 }
 
@@ -2726,9 +2952,24 @@ func containsTypographicQuote(line string) bool {
 	return strings.ContainsAny(line, "“”‘’")
 }
 
+func firstTypographicQuotePosition(line string) (column, width int) {
+	for index, r := range line {
+		if !strings.ContainsRune("“”‘’", r) {
+			continue
+		}
+		return index + 1, utf8.RuneLen(r)
+	}
+	return 0, 0
+}
+
 func containsLikelyCStyleQuoteEscape(line string) bool {
+	return likelyCStyleQuoteEscapePosition(line) > 0
+}
+
+func likelyCStyleQuoteEscapePosition(line string) int {
 	inString := false
 	sawLikelyCStyleEscape := false
+	escapePosition := 0
 	for i := 0; i < len(line); {
 		if line[i] != '"' {
 			i++
@@ -2743,6 +2984,7 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 			inString = runLength%2 == 1
 			if inString {
 				sawLikelyCStyleEscape = false
+				escapePosition = 0
 			}
 			continue
 		}
@@ -2752,13 +2994,18 @@ func containsLikelyCStyleQuoteEscape(line string) bool {
 				// closes its literals. It is C-style-like only when it leaves an
 				// unterminated string somewhere on the same physical line.
 				sawLikelyCStyleEscape = true
+				escapePosition = runStart
 			}
 			continue
 		}
 		inString = false
 		sawLikelyCStyleEscape = false
+		escapePosition = 0
 	}
-	return inString && sawLikelyCStyleEscape
+	if inString && sawLikelyCStyleEscape {
+		return escapePosition + 1
+	}
+	return 0
 }
 
 func repeatedQuestionShorthandColumns(line string) []int {
@@ -3123,14 +3370,21 @@ func maskStringLiterals(line string) string {
 }
 
 func missingLineContinuationWhitespace(line string) bool {
+	return missingLineContinuationWhitespaceColumn(line) > 0
+}
+
+func missingLineContinuationWhitespaceColumn(line string) int {
 	trimmed := strings.TrimRight(line, " \t")
 	if !strings.HasSuffix(trimmed, "_") || len(trimmed) < 2 {
-		return false
+		return 0
 	}
 	if endsWithIdentifierUnderscore(trimmed) {
-		return false
+		return 0
 	}
-	return trimmed[len(trimmed)-2] != ' ' && trimmed[len(trimmed)-2] != '\t'
+	if trimmed[len(trimmed)-2] == ' ' || trimmed[len(trimmed)-2] == '\t' {
+		return 0
+	}
+	return len(trimmed)
 }
 
 func hasValidLineContinuation(line string) bool {
