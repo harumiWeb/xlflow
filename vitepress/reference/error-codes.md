@@ -55,7 +55,7 @@ Common examples:
 - `wsl_path_translation_failed`
 - `windows_xlflow_execution_failed`
 
-Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, and `VB026` through `VB061`. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA247`; `VBA248` is a maintainability finding.
+Lint codes include `VB001` through `VB015`, `VB018` through `VB023`, and `VB026` through `VB065`. Analyzer codes include `VBA101` through `VBA106` and runtime-risk findings `VBA201` through `VBA247`; `VBA248` is a maintainability finding.
 
 ## Recovery map
 

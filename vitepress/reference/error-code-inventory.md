@@ -97,10 +97,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `capability_version`
 - `capture_state`
 - `carried_streams`
+- `case_after_else`
 - `case_clause`
 - `case_else`
 - `case_expression`
 - `case_id`
+- `case_outside_select`
 - `case_selection_invalid`
 - `cell_diffs`
 - `cells_updated`
@@ -293,8 +295,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `download_and_execute`
 - `downstream_callees`
 - `dry_run`
+- `duplicate_case_else`
 - `duplicate_case_id`
 - `duplicate_declaration`
+- `duplicate_else`
 - `duplicate_label`
 - `duplicate_module_name`
 - `duplicate_skip`
@@ -308,8 +312,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `else_clause`
 - `else_fragment`
 - `else_if`
+- `else_without_if`
+- `elseif_after_else`
 - `elseif_clause`
 - `elseif_fragment`
+- `elseif_without_if`
 - `empty_parentheses`
 - `empty_path`
 - `enable_events_after`
@@ -368,6 +375,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `expected_error`
 - `explicit_call_requires_parentheses`
 - `export_image_args_invalid`
+- `expression_statement`
 - `external_dependency_count`
 - `external_function_declaration`
 - `external_process`
@@ -600,9 +608,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `min_keep`
 - `missing_backup_file`
 - `missing_http_timeout`
+- `missing_mode`
 - `missing_module_attribute`
 - `missing_required_field`
 - `missing_test_case`
+- `missing_then`
 - `modal_dialog`
 - `mode_name`
 - `module_already_exists`
@@ -662,6 +672,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `on_error_resume_next`
 - `on_error_statement`
 - `on_goto_statement`
+- `open_statement`
 - `open_workbook`
 - `opening_column`
 - `opening_line`
@@ -992,6 +1003,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `too_long`
 - `top_n`
 - `total_diffs`
+- `trailing_token`
 - `tree_sitter_vba`
 - `trust_vba_access`
 - `txt_customer`
@@ -1011,6 +1023,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_declaration`
 - `type_expression`
 - `type_member`
+- `type_of_expression`
 - `type_preprocessor_else`
 - `type_preprocessor_elseif`
 - `type_preprocessor_if`

@@ -1279,8 +1279,17 @@ func TestLinterRejectsInvalidFlatIfBranchOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := issuesByCode(issues, "VB014"); len(got) == 0 {
-				t.Fatalf("invalid flat If branch ownership should trigger VB014: %s", source)
+			if strings.Contains(source, "#If") {
+				if got := issuesByCode(issues, "VB014"); len(got) == 0 {
+					t.Fatalf("conditional-compilation branch ownership should remain VB014: %s", source)
+				}
+				return
+			}
+			if got := issuesByCode(issues, conditionalBranchDiagnosticCode); len(got) == 0 {
+				t.Fatalf("invalid flat If branch ownership should trigger VB062: %s; issues=%+v", source, issues)
+			}
+			if got := issuesByCode(issues, "VB014"); len(got) != 0 {
+				t.Fatalf("specific branch diagnostic should suppress overlapping VB014: %+v", got)
 			}
 		})
 	}

@@ -549,6 +549,13 @@ type openBlock struct {
 	line     int
 	column   int
 	elseSeen bool
+	// branchUncertain is used by the specific conditional syntax pass when
+	// an If opener is known to be malformed (for example, missing Then). It
+	// keeps subsequent Else/ElseIf tokens attached to that malformed opener
+	// so the pass does not cascade one defect into orphan-branch findings.
+	// The structural VB014 scanner leaves this false and retains its existing
+	// conservative block behavior.
+	branchUncertain bool
 }
 
 type blockAnchor struct {
