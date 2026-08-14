@@ -16,6 +16,10 @@ All notable changes to xlflow will be documented in this file.
   `TypeOf` expressions. Lint, LSP, and source preflight share unsuppressible,
   preflight-blocking errors; ambiguous parser recovery remains `VB014`.
 
+- Reduced `VBA202` false positives for private object helpers, successful Excel
+  member/factory assignments, read-only `ByRef` aliases, UserForm controls,
+  and error-handler cleanup paths. Public or unresolved boundaries,
+  `On Error Resume Next`, and nullable object results remain conservative.
 - Fixed `VBA222` false positives for unresolved external public API types when
   the project or generated TypeLib resolution view is incomplete. Project-local
   inaccessible and ambiguous type findings remain unchanged.

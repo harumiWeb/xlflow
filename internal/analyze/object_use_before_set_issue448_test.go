@@ -349,6 +349,7 @@ func TestVBA202Issue448PreservesStateAcrossByValObjectArgument(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Private Sub Observe(ByVal target As Worksheet)
+  Debug.Print target.Name
 End Sub
 
 Public Sub UseByVal()
@@ -365,6 +366,301 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("ByVal object calls must preserve caller state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesStateAcrossReadOnlyByRefObjectArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Observe(ByRef target As Worksheet)
+  Debug.Print target.Name
+End Sub
+
+Public Sub UseByRef()
+  Dim target As Worksheet
+  Set target = ThisWorkbook.Worksheets(1)
+  Observe target
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("read-only ByRef object calls must preserve caller state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesByRefSemanticsForParenthesizedObjectArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub AssignTarget(ByRef target As Worksheet)
+  Set target = ThisWorkbook.Worksheets(1)
+End Sub
+
+Public Sub UseParenthesized()
+  Dim target As Worksheet
+  AssignTarget (target)
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("parenthesized ByRef actual must not mutate the caller's object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448PreservesStateAcrossParenthesizedUnresolvedObjectArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UseUnresolvedParenthesized()
+  Dim target As Worksheet
+  Set target = ThisWorkbook.Worksheets(1)
+  ExternalHelper (target)
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an unresolved parenthesized object actual must preserve caller state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448KeepsPublicByValEntryConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Observe(ByVal target As Worksheet)
+  Debug.Print target.Name
+End Sub
+
+Public Sub UseByVal()
+  Dim target As Worksheet
+  Set target = ThisWorkbook.Worksheets(1)
+  Observe target
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Procedure != "Observe" {
+		t.Fatalf("public ByVal entry must remain conservative: %+v", got)
+	}
+}
+
+func TestVBA202Issue448UsesQualifiedObjectFunctionSummary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Public Function BuildSheet() As Worksheet
+  Set BuildSheet = ThisWorkbook.Worksheets(1)
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim target As Worksheet
+  Set target = Helpers.BuildSheet()
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("qualified object-returning function should use its summary: %+v", got)
+	}
+}
+
+func TestVBA202Issue448UsesTypedReceiverObjectFunctionSummary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Factory.cls", `Attribute VB_Name = "Factory"
+Option Explicit
+Public Function BuildDictionary() As Object
+  Set BuildDictionary = CreateObject("Scripting.Dictionary")
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim factory As Factory
+  Dim target As Object
+  Set factory = New Factory
+  Set target = factory.BuildDictionary()
+  Debug.Print target.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("typed receiver object-returning function should use its summary: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksExcelMemberFactoriesAndTypeNameGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ResolveTarget(ByVal wb As Workbook) As Range
+  Dim currentSelection As Object
+  Dim selectedRange As Range
+  Set currentSelection = wb.Application.Selection
+  If TypeName(currentSelection) <> "Range" Then
+    Err.Raise 5
+  End If
+  Set selectedRange = currentSelection
+  Set ResolveTarget = selectedRange.Cells(1, 1)
+End Function
+
+Public Sub Run()
+  Dim wb As Workbook
+  Dim target As Range
+  Set wb = Application.Workbooks(1)
+  Set target = ResolveTarget(wb)
+  Debug.Print target.Address
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Excel member factories and TypeName guard should establish object state: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksExcelFactoryAfterPublicBoundaryGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal wb As Workbook)
+  Dim targetSheet As Worksheet
+  If wb Is Nothing Then Exit Sub
+  Set targetSheet = wb.Worksheets(1)
+  PrepareSheet targetSheet
+  Debug.Print targetSheet.Name
+End Sub
+
+Private Sub PrepareSheet(ByVal targetSheet As Worksheet)
+  targetSheet.Range("A1").Value2 = "ready"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a guarded Excel receiver and its factory result should remain safe across a private ByVal helper: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotAssumeExcelFactoryUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal wb As Workbook)
+  Dim targetSheet As Worksheet
+  If wb Is Nothing Then Exit Sub
+  On Error Resume Next
+  Set targetSheet = wb.Worksheets(1)
+  On Error GoTo 0
+  Debug.Print targetSheet.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 8 {
+		t.Fatalf("Resume Next may leave an Excel factory result Nothing: %+v", got)
+	}
+}
+
+func TestVBA202Issue448UsesUserFormControlAsPrivateByValObject(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub ConfigureControl(ByVal targetControl As Object)
+  targetControl.Visible = True
+End Sub
+
+Private Sub UserForm_Initialize()
+  ConfigureControl Me.TextBox1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a UserForm control passed to a private ByVal helper is initialized by the form: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesBooleanCleanupGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function Decode(ByVal responseBody As Variant) As String
+  Dim stream As Object
+  Dim streamOpened As Boolean
+  On Error GoTo ErrHandler
+  Set stream = CreateObject("ADODB.Stream")
+  stream.Open
+  streamOpened = True
+  Decode = stream.ReadText
+
+CleanExit:
+  If streamOpened Then
+    stream.Close
+  End If
+  Exit Function
+
+ErrHandler:
+  If Not streamOpened Then Err.Raise Err.Number
+  On Error GoTo CloseFailed
+  stream.Close
+  On Error GoTo 0
+  Err.Raise Err.Number
+
+CloseFailed:
+  On Error GoTo 0
+  Err.Raise Err.Number
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("boolean cleanup guard should prove stream is open before Close: %+v", got)
 	}
 }
 

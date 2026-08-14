@@ -251,6 +251,7 @@ type sourceProcedure struct {
 	Name             string
 	Module           string
 	ModuleKind       string
+	Visibility       string
 	ReturnType       string
 	ReturnValueShape procedureir.ValueShapeKind
 	StartLine        int
@@ -1743,6 +1744,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			Name:             procedure.Symbol.Name,
 			Module:           module,
 			ModuleKind:       document.ModuleKind,
+			Visibility:       procedure.Symbol.Visibility,
 			ReturnType:       procedure.Symbol.ReturnType,
 			ReturnValueShape: procedure.Symbol.ValueShape,
 			StartLine:        procedure.Symbol.DeclarationRange.StartLine,

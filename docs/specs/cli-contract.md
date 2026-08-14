@@ -1275,6 +1275,25 @@ reads. Safe use requires a dominating proof across all reachable paths; an
 explicit reset or a possibly empty loop therefore invalidates later use until
 another definite initialization.
 
+Private project-local object procedures may additionally establish parameter
+entry state when every reachable direct call site supplies a definitely
+non-`Nothing` object. `ByVal` calls and resolved `ByRef` calls that only read
+the parameter preserve the caller's state; a `ByRef` callee that can write the
+reference must have its own definite non-`Nothing` assignment summary before
+the state is propagated. Public, unresolved, ambiguous, and dynamically bound
+boundaries remain conservative. Successful Excel member/factory expressions
+such as `Workbook.Worksheets(1)`, `Worksheet.Range(...)`, `Range.Resize(...)`,
+and `Shapes.AddShape` establish the assigned result on their normal
+continuation, but not under `On Error Resume Next`; nullable `Range.Find`
+results remain excluded. Form-code `Me.<control>` expressions are treated as
+designer-created objects when passed to a private helper. `TypeName` and
+`Is Nothing` guards, boolean open/cleanup flags, and exceptional-only
+`Err.Number` branches refine the CFG state. Recognized boolean open/cleanup
+flags are named from the object identifier and must start with that object name
+and end with `Opened`, such as `streamOpened`; arbitrary `IsOpen`/`Open` names
+are not inferred by this rule. A normal continuation after a
+known `Err.Raise` is not treated as reachable.
+
 `VBA212` is warning-only, non-blocking, inline-suppressible, and available in
 batch and realtime analysis. It pairs guards and unsafe operands by their AST
 access path, including nested members and array/Collection/Dictionary index
