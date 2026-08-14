@@ -512,7 +512,7 @@ func parseNumber(text string) Result {
 			return unknown("single-precision overflow")
 		}
 	case '@':
-		scaled := math.Round(value * 10000)
+		scaled := math.RoundToEven(value * 10000)
 		if scaled < math.MinInt64 || scaled >= math.MaxInt64 {
 			return unknown("currency overflow")
 		}
