@@ -81,6 +81,10 @@ The summary below explains the lint findings in workflow terms.
 | `VB059` | error    | Invalid explicit/standalone call parentheses, Function-expression call parentheses, or explicit Call target; blocks source preflight. |
 | `VB060` | error    | Assignment to a `Const` value; blocks source preflight.                                                                               |
 | `VB061` | error    | Fixed array declaration has a constant lower bound greater than its upper bound; blocks source preflight.                             |
+| `VB062` | error    | Conditional branch statement uses a form rejected by VBA; blocks source preflight.                                                    |
+| `VB063` | error    | `Select Case` branch is outside its block, duplicates `Case Else`, or follows `Case Else`; blocks source preflight.                   |
+| `VB064` | error    | `Open` statement has a provably malformed file-mode shape; blocks source preflight.                                                   |
+| `VB065` | error    | `TypeOf` expression has a provably malformed syntax shape; blocks source preflight.                                                   |
 
 Core declaration, member-access, error-handling, and procedure-scope checks are AST-backed. They ignore comments and strings, distinguish module-level declarations from procedure-local declarations, and report individual declarators such as `a` in `Dim a, b As Long`. `VB029` also resolves public declarations from standard modules across the project, so a valid project-level assignment is not reported as undeclared.
 
@@ -104,7 +108,7 @@ Range("A2").Select ' xlflow:disable-line VB002
 
 Multiple IDs may be listed with spaces. Unknown IDs, unsupported preflight-blocking IDs, and suppressions that no longer match a lint diagnostic are reported as warnings.
 
-Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB061` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
+Safety diagnostics `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB065` are always enabled and cannot be suppressed inline because they prevent VBE compile dialogs before `push` or `run` opens Excel.
 
 `VB030` remains a warning for inferred or otherwise uncertain argument compatibility. `VB045` is reserved for deterministic argument binding errors confirmed by the VBE contract.
 
@@ -148,6 +152,16 @@ standalone call, and a Function used in an expression without required
 parentheses. The parenthesized ByRef/ByVal idiom (`Name (arg1), (arg2)`) and
 other accepted unusual forms remain quiet; parser recovery without a matching
 call context is not evidence for this rule.
+
+`VB062` reports only conditional branch shapes that are provably rejected by
+VBA; ambiguous `If`/`ElseIf`/`Else` recovery remains the generic `VB014`
+diagnostic. `VB063` reports `Case` outside `Select Case`, duplicate `Case Else`,
+and a `Case` after `Case Else` while leaving malformed/recovered blocks to
+`VB014`. `VB064` reports a missing or malformed `Open ... For <mode>` shape only
+when the parser identifies the broken mode node. `VB065` reports only
+provably malformed `TypeOf` expression shapes. All four rules are
+unsuppressible, preflight-blocking errors; parser ambiguity remains fail-closed
+under `VB014` without speculative classification.
 
 `VB014` is fail-closed for `push` and `run`, but parser recovery alone does not prove that Excel will reject the VBA. Its JSON issue may include `parser_node` (`ERROR` or `MISSING`), `parser_token`, and a short source-line `context`; when xlflow can confidently match an unclosed multiline block, it also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`. In that case the diagnostic location marks where the closer is expected and the message identifies the opener, for example `Possible missing 'End If' for multiline If block opened at line 8.` When a parent closer is aligned exactly with its outer opener and all skipped nested openers are indented further, that parent closer is highlighted for the inner missing terminator. Conditional compilation and other ambiguous structures keep the generic recovery diagnostic. Inspect that context and validate the source in the target host before changing otherwise-valid VBA merely to satisfy parser compatibility.
 

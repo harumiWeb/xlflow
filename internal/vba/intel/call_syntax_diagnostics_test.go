@@ -71,3 +71,46 @@ End Sub
 		t.Fatalf("project VB060 diagnostics = %#v", diagnostics)
 	}
 }
+
+func TestDiagnosticsExposeIssue594SyntaxRules(t *testing.T) {
+	root := t.TempDir()
+	cases := []struct {
+		name   string
+		code   string
+		source string
+	}{
+		{
+			name:   "conditional branch",
+			code:   "VB062",
+			source: "Option Explicit\nPublic Sub Probe()\n    If ready\n        Debug.Print \"x\"\n    End If\nEnd Sub\n",
+		},
+		{
+			name:   "select case",
+			code:   "VB063",
+			source: "Option Explicit\nPublic Sub Probe()\n    Select Case value\n    Case Else\n    Case Else\n    End Select\nEnd Sub\n",
+		},
+		{
+			name:   "open mode",
+			code:   "VB064",
+			source: "Option Explicit\nPublic Sub Probe()\n    Open path For As #1\nEnd Sub\n",
+		},
+		{
+			name:   "TypeOf trailing token",
+			code:   "VB065",
+			source: "Option Explicit\nPublic Sub Probe()\n    Dim value As Object\n    TypeOf value Is Collection Extra\nEnd Sub\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := Document{Path: filepath.Join(root, tc.name+".bas"), Source: tc.source}
+			diagnostics := (Analyzer{RootDir: root, Config: config.Default()}).Diagnostics(doc)
+			got := diagnosticsByCode(diagnostics, tc.code)
+			if len(got) != 1 || got[0].Severity != "error" {
+				t.Fatalf("%s diagnostics = %#v", tc.code, diagnostics)
+			}
+			if len(diagnosticsByCode(diagnostics, "VB014")) != 0 {
+				t.Fatalf("%s should suppress overlapping VB014: %#v", tc.code, diagnostics)
+			}
+		})
+	}
+}

@@ -10,6 +10,12 @@ All notable changes to xlflow will be documented in this file.
   recognition now uses parsed assignments and exact IR call members, so string
   contents and longer cleanup-like identifiers cannot suppress a finding.
 
+- Added default-enabled, compile-equivalent `VB062`–`VB065` syntax
+  diagnostics for provably invalid conditional branches, `Select Case`
+  branch ordering, malformed `Open ... For <mode>` shapes, and malformed
+  `TypeOf` expressions. Lint, LSP, and source preflight share unsuppressible,
+  preflight-blocking errors; ambiguous parser recovery remains `VB014`.
+
 - Fixed `VBA222` false positives for unresolved external public API types when
   the project or generated TypeLib resolution view is incomplete. Project-local
   inaccessible and ambiguous type findings remain unchanged.

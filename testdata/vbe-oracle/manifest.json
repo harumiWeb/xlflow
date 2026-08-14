@@ -234,6 +234,48 @@
     { "id": "erase-scalar", "path": "cases/erase-scalar/case.json" },
     { "id": "lbound-scalar", "path": "cases/lbound-scalar/case.json" },
     { "id": "foreach-scalar", "path": "cases/foreach-scalar/case.json" },
-    { "id": "redim-reversed-bound", "path": "cases/redim-reversed-bound/case.json" }
+    { "id": "redim-reversed-bound", "path": "cases/redim-reversed-bound/case.json" },
+    {
+      "id": "issue594-conditional-elseif-after-else",
+      "path": "cases/issue594-conditional-elseif-after-else/case.json"
+    },
+    {
+      "id": "issue594-conditional-missing-then",
+      "path": "cases/issue594-conditional-missing-then/case.json"
+    },
+    {
+      "id": "issue594-conditional-orphan-else",
+      "path": "cases/issue594-conditional-orphan-else/case.json"
+    },
+    {
+      "id": "issue594-conditional-orphan-elseif",
+      "path": "cases/issue594-conditional-orphan-elseif/case.json"
+    },
+    {
+      "id": "issue594-conditional-valid",
+      "path": "cases/issue594-conditional-valid/case.json"
+    },
+    {
+      "id": "issue594-open-missing-for-mode",
+      "path": "cases/issue594-open-missing-for-mode/case.json"
+    },
+    { "id": "issue594-open-valid", "path": "cases/issue594-open-valid/case.json" },
+    {
+      "id": "issue594-select-case-duplicate-else",
+      "path": "cases/issue594-select-case-duplicate-else/case.json"
+    },
+    {
+      "id": "issue594-select-case-outside",
+      "path": "cases/issue594-select-case-outside/case.json"
+    },
+    {
+      "id": "issue594-select-case-valid",
+      "path": "cases/issue594-select-case-valid/case.json"
+    },
+    {
+      "id": "issue594-typeof-trailing-token",
+      "path": "cases/issue594-typeof-trailing-token/case.json"
+    },
+    { "id": "issue594-typeof-valid", "path": "cases/issue594-typeof-valid/case.json" }
   ]
 }
