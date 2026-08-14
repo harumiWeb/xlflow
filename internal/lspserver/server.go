@@ -379,70 +379,11 @@ func projectVisibleConstants(project intel.ProjectAnalysisSnapshot, typeDB *vbad
 }
 
 func projectConstantValues(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB) map[string]constexpr.Value {
-	values := make(map[string]constexpr.Value)
+	documents := make([]lint.ConstantValueDocument, 0, len(project.Documents))
 	for _, document := range project.Documents {
-		fileValues := lint.ConstantValuesFromSource(document.Source, &document.IR, nil)
-		standard := strings.EqualFold(document.IR.ModuleKind, "standard")
-		for _, declaration := range document.IR.Declarations {
-			if !declaration.IsConst && !procedureir.IsConstKind(declaration.Kind) {
-				continue
-			}
-			if !strings.EqualFold(declaration.Visibility, "public") && !strings.EqualFold(declaration.Visibility, "friend") {
-				continue
-			}
-			name := projectConstantIdentifier(declaration.Name)
-			value, ok := fileValues[name]
-			if !ok {
-				continue
-			}
-			if standard {
-				values[name] = value
-			}
-			if document.IR.ModuleName != "" {
-				values[projectConstantIdentifier(document.IR.ModuleName)+"."+name] = value
-			}
-			if declaration.Parent != "" {
-				values[projectConstantIdentifier(declaration.Parent)+"."+name] = value
-			}
-		}
+		documents = append(documents, lint.ConstantValueDocument{Source: document.Source, IR: &document.IR})
 	}
-	if typeDB == nil {
-		return values
-	}
-	all := typeDB.AllConstantsList()
-	counts := make(map[string]int)
-	for _, constant := range all {
-		name := projectConstantIdentifier(constant.Name)
-		if name != "" {
-			counts[name]++
-		}
-	}
-	for _, constant := range all {
-		name := projectConstantIdentifier(constant.Name)
-		if name == "" {
-			continue
-		}
-		var value constexpr.Value
-		if strings.EqualFold(constant.Type, "String") {
-			value = constexpr.Value{Kind: constexpr.ValueString, String: constant.Value}
-		} else {
-			result := constexpr.Evaluate(constant.Value, nil)
-			if result.Kind != constexpr.Known {
-				continue
-			}
-			value = result.Typed
-		}
-		if counts[name] == 1 {
-			values[name] = value
-		}
-		if group := projectConstantIdentifier(constant.EnumGroup); group != "" {
-			values[group+"."+name] = value
-		}
-		if library := projectConstantIdentifier(constant.Library); library != "" {
-			values[library+"."+name] = value
-		}
-	}
-	return values
+	return lint.ProjectConstantValues(documents, typeDB)
 }
 
 func projectConstantIdentifier(text string) string {

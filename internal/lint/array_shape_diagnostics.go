@@ -25,7 +25,8 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 		if value.Kind != constexpr.ValueInteger && value.Kind != constexpr.ValueLong && value.Kind != constexpr.ValueLongLong {
 			continue
 		}
-		if int64(int(value.Integer)) != value.Integer {
+		integer, ok := constexpr.IntegerAsInt(value)
+		if !ok {
 			continue
 		}
 		key := normalizeQualifiedIdentifier(name)
@@ -35,7 +36,7 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 		if !strings.Contains(key, ".") && l.VisibleConstants != nil && !l.VisibleConstants[key] {
 			continue
 		}
-		constValues[key] = int(value.Integer)
+		constValues[key] = integer
 		consts[key] = true
 		if strings.Contains(key, ".") {
 			qualifiedConsts[key] = true

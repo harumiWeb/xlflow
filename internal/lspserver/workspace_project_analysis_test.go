@@ -59,7 +59,7 @@ func TestWorkspaceProjectSnapshotHoldsResolvedIRAndDefensiveCFG(t *testing.T) {
 	}
 	doc := intel.Document{URI: "file:///Main.bas", Path: path, Source: "source", ModuleKind: "standard"}
 	index.setOverlay(doc, indexedFileAnalysis{
-		procedureIR: ir, controlFlow: graph,
+		procedureIR: ir, controlFlow: graph, source: doc.Source,
 		symbols: []intel.Symbol{
 			{Name: "Run", Kind: "sub", Module: "Main", ModuleKind: "standard", File: path, Range: intel.Range{Start: intel.Position{Line: 0}}},
 			{Name: "Work", Kind: "sub", Module: "Main", ModuleKind: "standard", File: path, Range: intel.Range{Start: intel.Position{Line: 3}}},
@@ -69,6 +69,9 @@ func TestWorkspaceProjectSnapshotHoldsResolvedIRAndDefensiveCFG(t *testing.T) {
 	snapshot := index.projectSnapshot()
 	if !snapshot.Complete || len(snapshot.Documents) != 1 || len(snapshot.Documents[0].CFG.Graphs) != 2 {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.Documents[0].Source != doc.Source {
+		t.Fatalf("snapshot source = %q, want %q", snapshot.Documents[0].Source, doc.Source)
 	}
 	if snapshot.Revision == 0 {
 		t.Fatal("published project snapshot revision was not advanced")

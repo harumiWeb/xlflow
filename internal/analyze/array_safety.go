@@ -931,10 +931,11 @@ func arrayIntegerConstants(file parsedFile, proc sourceProcedure, projectValues 
 		if value.Kind != constexpr.ValueInteger && value.Kind != constexpr.ValueLong && value.Kind != constexpr.ValueLongLong {
 			continue
 		}
-		if int64(int(value.Integer)) != value.Integer {
+		integer, ok := constexpr.IntegerAsInt(value)
+		if !ok {
 			continue
 		}
-		constants[strings.ToLower(name)] = int(value.Integer)
+		constants[strings.ToLower(name)] = integer
 	}
 	inEnum := false
 	var next *int

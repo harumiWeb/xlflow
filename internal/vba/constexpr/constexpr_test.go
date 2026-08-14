@@ -3,10 +3,10 @@ package constexpr
 import "testing"
 
 func TestValuesResolveIsCaseInsensitiveAndDeterministic(t *testing.T) {
-	values := Values{
+	values := NewValues(map[string]Value{
 		"LIMIT": {Kind: ValueLong, Integer: 1},
 		"limit": {Kind: ValueLong, Integer: 2},
-	}
+	})
 	for i := 0; i < 20; i++ {
 		value, ok := values.Resolve("Limit")
 		if !ok || value.Integer != 1 {
@@ -45,10 +45,10 @@ func TestEvaluateIntegerClassifiesKnownUnknownAndInvalid(t *testing.T) {
 }
 
 func TestEvaluateTypedValuesAndOperators(t *testing.T) {
-	values := Values{
+	values := NewValues(map[string]Value{
 		"limit": {Kind: ValueLong, Integer: 3},
 		"label": {Kind: ValueString, String: "ok"},
-	}
+	})
 	tests := []struct {
 		name string
 		expr string
@@ -84,7 +84,7 @@ func TestEvaluateTypedValuesAndOperators(t *testing.T) {
 }
 
 func TestEvaluateDoesNotExecuteCalls(t *testing.T) {
-	values := Values{}
+	values := NewValues(nil)
 	if result := Evaluate("DangerousFunction()", values); result.Kind != Unknown {
 		t.Fatalf("call result = %#v, want Unknown", result)
 	}
@@ -105,6 +105,12 @@ func TestEvaluateNumericBoundaryFixtures(t *testing.T) {
 		{expr: "9223372036854775808^", kind: Unknown},
 		{expr: "1e309", kind: Unknown},
 		{expr: "1e39!", kind: Unknown},
+		{expr: "&HFF&", kind: Known, value: 255},
+		{expr: "&H10%", kind: Known, value: 16},
+		{expr: "1 And 3", kind: Unknown},
+		{expr: "1 & 2", kind: Unknown},
+		{expr: "True = -1", kind: Unknown},
+		{expr: "922337203685477.5808@", kind: Unknown},
 	} {
 		t.Run(test.expr, func(t *testing.T) {
 			result := Evaluate(test.expr, nil)

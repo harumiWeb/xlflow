@@ -57,24 +57,29 @@ type Environment interface {
 // Values adapts a map to Environment. Keys are matched case-insensitively.
 type Values map[string]Value
 
-func (v Values) Resolve(name string) (Value, bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	// A map may contain keys that differ only by case when declarations come
-	// from separate snapshots. Pick the lexicographically smallest spelling so
-	// evaluation does not depend on Go's randomized map iteration order.
-	selected := ""
-	var value Value
-	for key, candidate := range v {
-		if !strings.EqualFold(key, name) || (selected != "" && key >= selected) {
+// NewValues normalizes a value map once for deterministic, constant-time
+// case-insensitive lookups. When declarations differ only by case or
+// surrounding whitespace, the lexicographically smallest spelling wins.
+func NewValues(values map[string]Value) Values {
+	normalized := make(Values, len(values))
+	spellings := make(map[string]string, len(values))
+	for key, value := range values {
+		folded := strings.ToLower(strings.TrimSpace(key))
+		if folded == "" {
 			continue
 		}
-		selected = key
-		value = candidate
+		if prior, ok := spellings[folded]; ok && prior <= key {
+			continue
+		}
+		spellings[folded] = key
+		normalized[folded] = value
 	}
-	if selected == "" {
-		return Value{}, false
-	}
-	return value, true
+	return normalized
+}
+
+func (v Values) Resolve(name string) (Value, bool) {
+	value, ok := v[strings.ToLower(strings.TrimSpace(name))]
+	return value, ok
 }
 
 // Result keeps the historical integer Value field for existing consumers and
@@ -113,7 +118,7 @@ func Evaluate(expression string, env Environment) Result {
 
 // EvaluateValues is a convenience adapter for callers that own a value map.
 func EvaluateValues(expression string, values map[string]Value) Result {
-	return Evaluate(expression, Values(values))
+	return Evaluate(expression, NewValues(values))
 }
 
 // EvaluateInteger preserves the original API used by array and loop analysis.
@@ -127,14 +132,18 @@ func EvaluateInteger(expression string, constants map[string]int) Result {
 		// literals while the final int projection still enforces its own width.
 		values[name] = Value{Kind: ValueLongLong, Integer: int64(value)}
 	}
-	result := Evaluate(expression, values)
+	result := Evaluate(expression, NewValues(values))
 	if result.Kind != Known {
 		return result
 	}
-	if !isIntegral(result.Typed) || int64(int(result.Typed.Integer)) != result.Typed.Integer {
+	if !isIntegral(result.Typed) {
 		return Result{Kind: Unknown, Reason: "non-integral or unrepresentable integer"}
 	}
-	result.Value = int(result.Typed.Integer)
+	value, ok := hostInt(result.Typed.Integer)
+	if !ok {
+		return Result{Kind: Unknown, Reason: "non-integral or unrepresentable integer"}
+	}
+	result.Value = value
 	result.Type = string(result.Typed.Kind)
 	return result
 }
@@ -145,11 +154,29 @@ func known(value Value) Result {
 	}
 	result := Result{Kind: Known, Typed: value, Type: string(value.Kind)}
 	if isIntegral(value) {
-		if int64(int(value.Integer)) == value.Integer {
-			result.Value = int(value.Integer)
+		if projected, ok := hostInt(value.Integer); ok {
+			result.Value = projected
 		}
 	}
 	return result
+}
+
+func hostInt(value int64) (int, bool) {
+	if strconv.IntSize == 32 {
+		if value < math.MinInt32 || value > math.MaxInt32 {
+			return 0, false
+		}
+	}
+	return int(value), true
+}
+
+// IntegerAsInt projects an integral VBA value to the host int used by legacy
+// range and array adapters, rejecting values outside the host width.
+func IntegerAsInt(value Value) (int, bool) {
+	if !isIntegral(value) {
+		return 0, false
+	}
+	return hostInt(value.Integer)
 }
 
 func unknown(reason string) Result { return Result{Kind: Unknown, Reason: reason} }
@@ -247,6 +274,9 @@ func newLexer(text string) lexer {
 				start := i
 				i += 2
 				for i < len(text) && (unicode.IsDigit(rune(text[i])) || unicode.IsLetter(rune(text[i]))) {
+					i++
+				}
+				if i < len(text) && strings.ContainsRune("%&^", rune(text[i])) {
 					i++
 				}
 				out.tokens = append(out.tokens, token{kind: tokenNumber, text: text[start:i]})
@@ -481,7 +511,7 @@ func parseNumber(text string) Result {
 		}
 	case '@':
 		scaled := math.Round(value * 10000)
-		if scaled < math.MinInt64 || scaled > math.MaxInt64 {
+		if scaled < math.MinInt64 || scaled >= math.MaxInt64 {
 			return unknown("currency overflow")
 		}
 		return known(Value{Kind: ValueCurrency, Currency: int64(scaled)})
@@ -525,6 +555,9 @@ func unary(value Result, op string) Result {
 		}
 		return invalid("unary minus requires numeric operand")
 	case "not":
+		if isNumeric(value.Typed) {
+			return unknown("bitwise Not is not modelled")
+		}
 		if value.Typed.Kind != ValueBoolean {
 			return invalid("Not requires Boolean operand")
 		}
@@ -590,10 +623,15 @@ func combine(left, right Result, op string) Result {
 		if left.Typed.Kind == ValueString && right.Typed.Kind == ValueString {
 			return known(Value{Kind: ValueString, String: left.Typed.String + right.Typed.String})
 		}
-		return invalid("string concatenation requires String operands")
+		return unknown("concatenation coercion is not modelled")
 	}
 	if op == "and" || op == "or" || op == "xor" || op == "eqv" || op == "imp" {
 		if left.Typed.Kind != ValueBoolean || right.Typed.Kind != ValueBoolean {
+			if (isNumeric(left.Typed) && isNumeric(right.Typed)) ||
+				(left.Typed.Kind == ValueBoolean && isNumeric(right.Typed)) ||
+				(right.Typed.Kind == ValueBoolean && isNumeric(left.Typed)) {
+				return unknown("bitwise operator semantics are not modelled")
+			}
 			return invalid("Boolean operator requires Boolean operands")
 		}
 		lv, rv := left.Typed.Boolean, right.Typed.Boolean
@@ -736,6 +774,13 @@ func compare(left, right Result, op string) Result {
 	}
 	if left.Typed.Kind == ValueBoolean && right.Typed.Kind == ValueBoolean {
 		return compareFloat(boolFloat(left.Typed.Boolean), boolFloat(right.Typed.Boolean), op)
+	}
+	if (left.Typed.Kind == ValueBoolean && isNumeric(right.Typed)) ||
+		(right.Typed.Kind == ValueBoolean && isNumeric(left.Typed)) {
+		return unknown("comparison coercion is not modelled")
+	}
+	if left.Typed.Kind == ValueDate && right.Typed.Kind == ValueDate {
+		return unknown("date comparison is not modelled")
 	}
 	if !isNumeric(left.Typed) || !isNumeric(right.Typed) {
 		return invalid("comparison requires compatible operands")

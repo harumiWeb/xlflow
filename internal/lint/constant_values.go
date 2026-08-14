@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -45,6 +46,8 @@ func constantValuesFromSource(source string, ir *procedureir.DocumentIR, base ma
 			active += delta[line]
 			insideProcedure[line] = active > 0
 		}
+	} else {
+		markProcedureLines(lines, insideProcedure)
 	}
 	type pending struct {
 		name, expression string
@@ -114,6 +117,7 @@ func constantValuesFromSource(source string, ir *procedureir.DocumentIR, base ma
 	// Resolve forward references without making map iteration order observable.
 	for pass := 0; pass < len(pendingConsts); pass++ {
 		changed := false
+		environment := constexpr.NewValues(values)
 		enumNext := make(map[string]int64)
 		enumSeen := make(map[string]bool)
 		for _, item := range pendingConsts {
@@ -134,7 +138,7 @@ func constantValuesFromSource(source string, ir *procedureir.DocumentIR, base ma
 				}
 				enumSeen[group] = true
 			}
-			result := constexpr.Evaluate(expression, constexpr.Values(values))
+			result := constexpr.Evaluate(expression, environment)
 			if result.Kind != constexpr.Known {
 				if item.enumGroup != "" {
 					delete(enumNext, strings.ToLower(item.enumGroup))
@@ -148,16 +152,21 @@ func constantValuesFromSource(source string, ir *procedureir.DocumentIR, base ma
 			key := strings.ToLower(item.name)
 			if prior, exists := values[key]; !exists || prior != result.Typed {
 				values[key] = result.Typed
+				environment[key] = result.Typed
 				for _, qualified := range item.qualified {
-					values[strings.ToLower(qualified)] = result.Typed
+					qualifiedKey := strings.ToLower(qualified)
+					values[qualifiedKey] = result.Typed
+					environment[qualifiedKey] = result.Typed
 				}
 				if ir != nil && ir.ModuleName != "" {
-					values[strings.ToLower(cleanIdentifier(ir.ModuleName))+"."+key] = result.Typed
+					moduleKey := strings.ToLower(cleanIdentifier(ir.ModuleName)) + "." + key
+					values[moduleKey] = result.Typed
+					environment[moduleKey] = result.Typed
 				}
 				changed = true
 			}
 			if item.enumGroup != "" {
-				if result.Typed.Integer == int64(^uint64(0)>>1) {
+				if result.Typed.Integer == math.MaxInt64 {
 					delete(enumNext, strings.ToLower(item.enumGroup))
 				} else {
 					enumNext[strings.ToLower(item.enumGroup)] = result.Typed.Integer + 1
@@ -169,6 +178,36 @@ func constantValuesFromSource(source string, ir *procedureir.DocumentIR, base ma
 		}
 	}
 	return values
+}
+
+// markProcedureLines conservatively identifies procedure bodies when callers
+// do not have a parsed DocumentIR. It keeps the source-only projection useful
+// while ensuring procedure-local Const declarations cannot leak into the
+// module-level environment.
+func markProcedureLines(lines []string, inside []bool) {
+	depth := 0
+	for lineNo, line := range lines {
+		trim := strings.TrimSpace(strings.SplitN(line, "'", 2)[0])
+		lower := strings.ToLower(trim)
+		fields := strings.Fields(lower)
+		if depth > 0 {
+			inside[lineNo+1] = true
+			if len(fields) >= 2 && fields[0] == "end" && (fields[1] == "sub" || fields[1] == "function" || fields[1] == "property") {
+				depth = 0
+			}
+			continue
+		}
+		if len(fields) == 0 || fields[0] == "declare" || fields[0] == "end" {
+			continue
+		}
+		for _, field := range fields {
+			if field == "sub" || field == "function" || field == "property" {
+				depth = 1
+				inside[lineNo+1] = true
+				break
+			}
+		}
+	}
 }
 
 func isIntegralConstant(value constexpr.Value) bool {
@@ -186,81 +225,16 @@ func ConstantValuesFromSource(source string, ir *procedureir.DocumentIR, base ma
 	return constantValuesFromSource(source, ir, base)
 }
 
-func (l Linter) projectConstantValuesContext(ctx context.Context, files []string) map[string]constexpr.Value {
-	values := make(map[string]constexpr.Value)
-	for _, path := range files {
-		if err := ctx.Err(); err != nil {
-			return values
-		}
-		source, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		parsed, err := ast.ParseDocument(path, source)
-		if err != nil {
-			continue
-		}
-		ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{
-			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path),
-		}, parsed)
-		parsed.Close()
-		if err != nil {
-			continue
-		}
-		fileValues := constantValuesFromSource(string(source), &ir, nil)
-		standard := strings.EqualFold(ir.ModuleKind, "standard")
-		for _, declaration := range ir.Declarations {
-			if !declaration.IsConst && !procedureir.IsConstKind(declaration.Kind) {
-				continue
-			}
-			if !strings.EqualFold(declaration.Visibility, "public") && !strings.EqualFold(declaration.Visibility, "friend") {
-				continue
-			}
-			value, ok := fileValues[strings.ToLower(cleanIdentifier(declaration.Name))]
-			if !ok {
-				continue
-			}
-			if standard {
-				values[strings.ToLower(cleanIdentifier(declaration.Name))] = value
-			}
-			if ir.ModuleName != "" {
-				values[strings.ToLower(cleanIdentifier(ir.ModuleName))+"."+strings.ToLower(cleanIdentifier(declaration.Name))] = value
-			}
-			if declaration.Parent != "" {
-				values[strings.ToLower(cleanIdentifier(declaration.Parent))+"."+strings.ToLower(cleanIdentifier(declaration.Name))] = value
-			}
-		}
-	}
-	if result, err := typedb.LoadForRuntime(""); err == nil && result.DB != nil {
-		constants := result.DB.AllConstantsList()
-		counts := make(map[string]int)
-		for _, constant := range constants {
-			name := strings.ToLower(cleanIdentifier(constant.Name))
-			if name != "" {
-				counts[name]++
-			}
-		}
-		for _, constant := range constants {
-			value, ok := staticTypeLibConstantValue(constant)
-			if !ok {
-				continue
-			}
-			name := strings.ToLower(cleanIdentifier(constant.Name))
-			if name != "" && counts[name] == 1 {
-				values[name] = value
-			}
-			if group := strings.ToLower(cleanIdentifier(constant.EnumGroup)); group != "" && name != "" {
-				values[group+"."+name] = value
-			}
-			if library := strings.ToLower(cleanIdentifier(constant.Library)); library != "" && name != "" {
-				values[library+"."+name] = value
-			}
-		}
-	}
-	return values
+// ConstantValueDocument is the immutable source/IR pair used to build a
+// project-wide constant environment.
+type ConstantValueDocument struct {
+	Source string
+	IR     *procedureir.DocumentIR
 }
 
-func staticTypeLibConstantValue(constant vbadb.ConstantInfo) (constexpr.Value, bool) {
+// TypeLibConstantValue converts a static TypeLib record without invoking VBA
+// or Excel. Unsupported and malformed records remain unknown to callers.
+func TypeLibConstantValue(constant vbadb.ConstantInfo) (constexpr.Value, bool) {
 	switch strings.ToLower(strings.TrimSpace(constant.Type)) {
 	case "string":
 		return constexpr.Value{Kind: constexpr.ValueString, String: constant.Value}, true
@@ -277,4 +251,140 @@ func staticTypeLibConstantValue(constant vbadb.ConstantInfo) (constexpr.Value, b
 		return constexpr.Value{}, false
 	}
 	return result.Typed, true
+}
+
+// ProjectConstantValues builds a deterministic, ambiguity-free project
+// environment. Qualified source and TypeLib names are retained only when
+// their qualifier is unique; unqualified names are retained only when there
+// is one visible declaration. Repeated passes resolve cross-module forward
+// references without making map iteration order observable.
+func ProjectConstantValues(documents []ConstantValueDocument, typeDB *vbadb.DB) map[string]constexpr.Value {
+	type candidate struct {
+		identity string
+		value    constexpr.Value
+		known    bool
+	}
+	add := func(byKey map[string][]candidate, key, identity string, value constexpr.Value, known bool) {
+		key = normalizeConstantValueKey(key)
+		if key == "" {
+			return
+		}
+		for _, prior := range byKey[key] {
+			if prior.identity == identity {
+				return
+			}
+		}
+		byKey[key] = append(byKey[key], candidate{identity: identity, value: value, known: known})
+	}
+	unique := func(byKey map[string][]candidate) map[string]constexpr.Value {
+		values := make(map[string]constexpr.Value, len(byKey))
+		for key, candidates := range byKey {
+			if len(candidates) == 1 && candidates[0].known {
+				values[key] = candidates[0].value
+			}
+		}
+		return values
+	}
+	equal := func(left, right map[string]constexpr.Value) bool {
+		if len(left) != len(right) {
+			return false
+		}
+		for key, value := range left {
+			if other, ok := right[key]; !ok || other != value {
+				return false
+			}
+		}
+		return true
+	}
+	environment := map[string]constexpr.Value{}
+	passes := len(documents) + 2
+	if passes < 2 {
+		passes = 2
+	}
+	for pass := 0; pass < passes; pass++ {
+		byKey := make(map[string][]candidate)
+		if typeDB != nil {
+			for index, constant := range typeDB.AllConstantsList() {
+				value, ok := TypeLibConstantValue(constant)
+				identity := "typelib:" + strconv.Itoa(index)
+				name := cleanIdentifier(constant.Name)
+				add(byKey, name, identity, value, ok)
+				add(byKey, cleanIdentifier(constant.EnumGroup)+"."+name, identity, value, ok)
+				add(byKey, cleanIdentifier(constant.Library)+"."+name, identity, value, ok)
+			}
+		}
+		for documentIndex, document := range documents {
+			if document.IR == nil {
+				continue
+			}
+			fileValues := constantValuesFromSource(document.Source, document.IR, environment)
+			standard := strings.EqualFold(document.IR.ModuleKind, "standard")
+			for declarationIndex, declaration := range document.IR.Declarations {
+				if !declaration.IsConst && !procedureir.IsConstKind(declaration.Kind) {
+					continue
+				}
+				if !strings.EqualFold(declaration.Visibility, "public") && !strings.EqualFold(declaration.Visibility, "friend") {
+					continue
+				}
+				name := cleanIdentifier(declaration.Name)
+				value, ok := fileValues[normalizeConstantValueKey(name)]
+				if name == "" {
+					continue
+				}
+				identity := "source:" + strconv.Itoa(documentIndex) + ":" + strconv.Itoa(declarationIndex)
+				if standard {
+					add(byKey, name, identity, value, ok)
+				}
+				add(byKey, cleanIdentifier(document.IR.ModuleName)+"."+name, identity, value, ok)
+				add(byKey, cleanIdentifier(declaration.Parent)+"."+name, identity, value, ok)
+			}
+		}
+		next := unique(byKey)
+		if equal(environment, next) {
+			return next
+		}
+		environment = next
+	}
+	return environment
+}
+
+func normalizeConstantValueKey(text string) string {
+	parts := strings.Split(text, ".")
+	for index, part := range parts {
+		parts[index] = strings.ToLower(cleanIdentifier(part))
+		if parts[index] == "" {
+			return ""
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
+func (l Linter) projectConstantValuesContext(ctx context.Context, files []string) map[string]constexpr.Value {
+	var documents []ConstantValueDocument
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return ProjectConstantValues(documents, nil)
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		parsed, err := ast.ParseDocument(path, source)
+		if err != nil {
+			continue
+		}
+		ir, err := procedureir.BuildParsedContext(ctx, procedureir.BuildOptions{
+			RootDir: l.RootDir, Path: path, ModuleKind: l.moduleKindForPath(path),
+		}, parsed)
+		parsed.Close()
+		if err != nil {
+			continue
+		}
+		documents = append(documents, ConstantValueDocument{Source: string(source), IR: &ir})
+	}
+	var typeDB *vbadb.DB
+	if result, err := typedb.LoadForRuntime(""); err == nil {
+		typeDB = result.DB
+	}
+	return ProjectConstantValues(documents, typeDB)
 }

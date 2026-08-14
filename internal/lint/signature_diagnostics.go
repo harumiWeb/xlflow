@@ -573,11 +573,20 @@ func optionalDefaultResultTypeMismatch(result constexpr.Result, typ string, kind
 	case constexpr.ValueString:
 		return target != "string"
 	case constexpr.ValueBoolean:
-		return target != "boolean"
+		return target != "boolean" && !isNumericSignatureTarget(target)
 	case constexpr.ValueDate:
-		return target != "date"
+		return target != "date" && target != "double"
 	case constexpr.ValueInteger, constexpr.ValueLong, constexpr.ValueLongLong, constexpr.ValueSingle, constexpr.ValueDouble, constexpr.ValueCurrency:
 		return target == "string" || target == "boolean"
+	default:
+		return false
+	}
+}
+
+func isNumericSignatureTarget(target string) bool {
+	switch target {
+	case "byte", "currency", "decimal", "double", "integer", "long", "longlong", "longptr", "single":
+		return true
 	default:
 		return false
 	}

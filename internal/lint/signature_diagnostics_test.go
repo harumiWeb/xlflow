@@ -336,6 +336,17 @@ func TestOptionalDefaultDateLiteralHandling(t *testing.T) {
 	}
 }
 
+func TestOptionalDefaultKnownBooleanAndDateNumericCompatibility(t *testing.T) {
+	source := "Sub Defaults(Optional flag As Long = True, Optional stamp As Double = #1/1/2024#)\nEnd Sub\n"
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB048"); len(got) != 0 {
+		t.Fatalf("Boolean-to-numeric and Date-to-Double defaults should be compatible: %+v", got)
+	}
+}
+
 func manyParameters(n int) string {
 	params := ""
 	for i := 1; i <= n; i++ {
