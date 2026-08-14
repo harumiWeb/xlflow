@@ -162,12 +162,14 @@ func known(value Value) Result {
 }
 
 func hostInt(value int64) (int, bool) {
-	if strconv.IntSize == 32 {
-		if value < math.MinInt32 || value > math.MaxInt32 {
-			return 0, false
-		}
+	// Atoi performs the final host-width check itself. This avoids a direct
+	// narrowing conversion from the 64-bit ParseInt result while preserving
+	// the historical int projection on both 32-bit and 64-bit hosts.
+	projected, err := strconv.Atoi(strconv.FormatInt(value, 10))
+	if err != nil {
+		return 0, false
 	}
-	return int(value), true
+	return projected, true
 }
 
 // IntegerAsInt projects an integral VBA value to the host int used by legacy
