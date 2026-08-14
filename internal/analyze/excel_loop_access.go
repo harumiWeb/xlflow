@@ -8,6 +8,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -723,124 +724,12 @@ func excelLoopIsSmall(text string, constants map[string]int) bool {
 	return false
 }
 
-type integerExpressionParser struct {
-	text      string
-	position  int
-	constants map[string]int
-}
-
 func constantIntegerExpression(text string, constants map[string]int) (int, error) {
-	parser := &integerExpressionParser{text: strings.TrimSpace(text), constants: constants}
-	value, err := parser.parseExpression()
-	if err != nil {
-		return 0, err
-	}
-	parser.skipSpace()
-	if parser.position != len(parser.text) {
+	result := constexpr.EvaluateInteger(text, constants)
+	if result.Kind != constexpr.Known {
 		return 0, strconv.ErrSyntax
 	}
-	return value, nil
-}
-
-func (p *integerExpressionParser) parseExpression() (int, error) {
-	value, err := p.parseTerm()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		p.skipSpace()
-		if p.position >= len(p.text) {
-			return value, nil
-		}
-		op := p.text[p.position]
-		if op != '+' && op != '-' {
-			return value, nil
-		}
-		p.position++
-		right, err := p.parseTerm()
-		if err != nil {
-			return 0, err
-		}
-		if op == '+' {
-			value += right
-		} else {
-			value -= right
-		}
-	}
-}
-
-func (p *integerExpressionParser) parseTerm() (int, error) {
-	value, err := p.parseFactor()
-	if err != nil {
-		return 0, err
-	}
-	for {
-		p.skipSpace()
-		if p.position >= len(p.text) || (p.text[p.position] != '*' && p.text[p.position] != '/') {
-			return value, nil
-		}
-		op := p.text[p.position]
-		p.position++
-		right, err := p.parseFactor()
-		if err != nil {
-			return 0, err
-		}
-		if op == '*' {
-			value *= right
-		} else {
-			if right == 0 {
-				return 0, strconv.ErrSyntax
-			}
-			value /= right
-		}
-	}
-}
-
-func (p *integerExpressionParser) parseFactor() (int, error) {
-	p.skipSpace()
-	if p.position >= len(p.text) {
-		return 0, strconv.ErrSyntax
-	}
-	if p.text[p.position] == '+' || p.text[p.position] == '-' {
-		negative := p.text[p.position] == '-'
-		p.position++
-		value, err := p.parseFactor()
-		if negative {
-			value = -value
-		}
-		return value, err
-	}
-	if p.text[p.position] == '(' {
-		p.position++
-		value, err := p.parseExpression()
-		p.skipSpace()
-		if err != nil || p.position >= len(p.text) || p.text[p.position] != ')' {
-			return 0, strconv.ErrSyntax
-		}
-		p.position++
-		return value, nil
-	}
-	start := p.position
-	for p.position < len(p.text) && ((p.text[p.position] >= '0' && p.text[p.position] <= '9') || (p.text[p.position] >= 'A' && p.text[p.position] <= 'Z') || (p.text[p.position] >= 'a' && p.text[p.position] <= 'z') || p.text[p.position] == '_') {
-		p.position++
-	}
-	if start == p.position {
-		return 0, strconv.ErrSyntax
-	}
-	token := p.text[start:p.position]
-	if value, err := strconv.Atoi(token); err == nil {
-		return value, nil
-	}
-	if value, ok := p.constants[strings.ToLower(token)]; ok {
-		return value, nil
-	}
-	return 0, strconv.ErrSyntax
-}
-
-func (p *integerExpressionParser) skipSpace() {
-	for p.position < len(p.text) && (p.text[p.position] == ' ' || p.text[p.position] == '\t') {
-		p.position++
-	}
+	return result.Value, nil
 }
 
 func excelLoopHeaderText(text string) string {

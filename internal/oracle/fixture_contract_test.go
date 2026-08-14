@@ -146,14 +146,16 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 						resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 							Name: declaration.Name, Type: declaration.Type, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
 							Kind: declaration.Kind, Visibility: declaration.Visibility, File: ir.Path, Line: declaration.Range.StartLine,
-							Parent: declaration.Parent, IsArray: declaration.IsArray,
+							Parent: declaration.Parent, IsArray: declaration.IsArray, IsConst: declaration.IsConst,
+							ValueShape: declaration.ValueShape,
 						})
 					}
 					for _, procedure := range ir.Procedures {
 						resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
 							Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: ir.ModuleName, ModuleKind: ir.ModuleKind,
 							Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: ir.Path,
-							Line: procedure.Symbol.DeclarationRange.StartLine,
+							Line:    procedure.Symbol.DeclarationRange.StartLine,
+							IsArray: procedure.Symbol.IsArray, ValueShape: procedure.Symbol.ValueShape,
 						})
 					}
 				}
@@ -221,7 +223,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 81 || report.BoundFixtures != 71 || report.PartialFixtures != 0 || report.UnboundFixtures != 9 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 91 || report.BoundFixtures != 75 || report.PartialFixtures != 0 || report.UnboundFixtures != 15 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -235,12 +237,16 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"byref-compatible",
 		"byref-incompatible",
 		"byref-literal-temporaries",
+		"const-assignment-accepted",
+		"const-assignment-rejected",
 		"declaration-keyword-valid-controls",
 		"declaration-redim-after-comma",
 		"declaration-repeated-dim-after-comma",
 		"duplicate-declaration",
 		"duplicate-declaration-valid-controls",
 		"duplicate-named-argument",
+		"fixed-array-reversed-bound",
+		"fixed-array-valid-bound",
 		"invalid-declaration-placement",
 		"invalid-declaration-placement-valid-controls",
 		"invalid-event-standard",
@@ -306,10 +312,16 @@ func TestOracleBindingCoverage(t *testing.T) {
 	assertIDs("partially-bound", report.PartialIDs, nil)
 	assertIDs("unbound", report.UnboundIDs, []string{
 		"byref-parenthesized-variable",
+		"erase-scalar",
+		"foreach-scalar",
 		"function-bare-call",
 		"function-parenthesized-call",
+		"lbound-scalar",
 		"missing-set-object-assignment",
 		"object-to-object-parameter",
+		"redim-fixed-array",
+		"redim-reversed-bound",
+		"redim-scalar",
 		"scalar-to-object-parameter",
 		"sub-bare-call",
 		"sub-parenthesized-call",

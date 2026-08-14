@@ -93,6 +93,7 @@ type Analyzer struct {
 	PathFilter                 func(string) bool
 	typeDB                     *vbadb.DB
 	typeDBResolutionIncomplete bool
+	visibleConstants           map[string]bool
 	byRefSymbols               []intel.Symbol
 	errorGuardAliases          map[string]bool
 	errorValueWrappers         map[string]bool
@@ -199,6 +200,9 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 
 type analysisContext struct {
 	functionReturns    map[string]string
+	functionShapes     map[string]procedureir.ValueShapeKind
+	functionNamesSeen  map[string]bool
+	functionAmbiguous  map[string]bool
 	arrayReturns       map[string]arrayValue
 	procedures         map[string]procedureSignature
 	procedureResolver  procedureir.SymbolResolver
@@ -215,11 +219,15 @@ type procedureSignature struct {
 }
 
 type parameterInfo struct {
-	Name     string
-	Type     string
-	Passing  string
-	Optional bool
-	Range    vbaast.Range
+	Name        string
+	Type        string
+	Passing     string
+	Optional    bool
+	ParamArray  bool
+	ValueShape  procedureir.ValueShapeKind
+	ArrayShape  procedureir.ArrayShape
+	ArrayBounds []procedureir.ArrayBound
+	Range       vbaast.Range
 }
 
 type parsedFile struct {
@@ -238,24 +246,25 @@ type parsedFile struct {
 }
 
 type sourceProcedure struct {
-	Kind          string
-	ProcedureKind procedureir.ProcedureKind
-	Name          string
-	Module        string
-	ModuleKind    string
-	ReturnType    string
-	StartLine     int
-	EndLine       int
-	StartByte     int
-	EndByte       int
-	Params        []parameterInfo
-	Declarations  []procedureir.Declaration
-	Statements    []procedureir.Statement
-	Expressions   []procedureir.Expression
-	Calls         []procedureir.CallSite
-	Accesses      []procedureir.VariableAccess
-	Graph         *vbacfg.Graph
-	Effects       *effects.ProcedureSummary
+	Kind             string
+	ProcedureKind    procedureir.ProcedureKind
+	Name             string
+	Module           string
+	ModuleKind       string
+	ReturnType       string
+	ReturnValueShape procedureir.ValueShapeKind
+	StartLine        int
+	EndLine          int
+	StartByte        int
+	EndByte          int
+	Params           []parameterInfo
+	Declarations     []procedureir.Declaration
+	Statements       []procedureir.Statement
+	Expressions      []procedureir.Expression
+	Calls            []procedureir.CallSite
+	Accesses         []procedureir.VariableAccess
+	Graph            *vbacfg.Graph
+	Effects          *effects.ProcedureSummary
 }
 
 type sourceDeclaration struct {
@@ -264,6 +273,8 @@ type sourceDeclaration struct {
 	Line          int
 	Object        bool
 	Array         bool
+	Fixed         bool
+	Dimensions    []arrayDimension
 	NewExpression bool
 	Parameter     bool
 	Static        bool
@@ -412,15 +423,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	}
 	analysisCtx := a.buildContext(parsedFiles)
 	analysis := a
-	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
-		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
-	}
-	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
-		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
-	}
-	if analysis.Config.Analyze.DetectEventHandlerReentry {
-		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
-	}
 	var warnings []map[string]any
 	if needsTypeDB {
 		loaded, err := typedb.LoadForRuntime("")
@@ -434,6 +436,16 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 				"code": "type_db_load_warning", "message": warning,
 			})
 		}
+	}
+	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
+	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
+		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
+	}
+	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
+		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
+	}
+	if analysis.Config.Analyze.DetectEventHandlerReentry {
+		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
 	// Resolution completeness must include the generated TypeLib view. Load it
 	// before constructing the resolver so incomplete external symbols fail open
@@ -581,6 +593,7 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Findi
 		DB:                         a.typeDB,
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
+		VisibleConstants:           a.visibleConstants,
 	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil, nil
@@ -628,6 +641,10 @@ func hasRuleSurface(metadata staticrules.RuleMetadata, wanted staticrules.RuleSu
 
 func compileEquivalentFindingGuidance(code string) (string, string) {
 	switch code {
+	case "VB060":
+		return "VBE rejects assignments to Const declarations.", "Remove the assignment or declare a writable variable instead."
+	case "VB061":
+		return "VBE rejects a fixed array declaration whose lower bound exceeds its upper bound.", "Use constant bounds with lower less than or equal to upper."
 	case "VB037":
 		return "VBE rejects Set when the assignment target has a scalar value type.", "Remove Set from the scalar assignment."
 	case "VB045":
@@ -774,6 +791,71 @@ func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
 		documents = append(documents, effects.Document{IR: files[i].IR, CFG: files[i].CFG})
 	}
 	return effects.Build(documents)
+}
+
+func projectVisibleConstants(files []parsedFile, typeDB *vbadb.DB) map[string]bool {
+	counts := make(map[string]int)
+	add := func(name string) {
+		name = strings.ToLower(cleanIdentifier(name))
+		if name != "" {
+			counts[name]++
+		}
+	}
+	addQualified := func(qualifier, name string) {
+		qualifier = strings.ToLower(cleanIdentifier(qualifier))
+		name = strings.ToLower(cleanIdentifier(name))
+		if qualifier != "" && name != "" {
+			counts[qualifier+"."+name]++
+		}
+	}
+	for _, file := range files {
+		standardModule := strings.EqualFold(file.ModuleKind, "standard")
+		for _, declaration := range file.IR.Declarations {
+			if !declaration.IsConst && !strings.EqualFold(declaration.Kind, "enum_member") {
+				continue
+			}
+			if !strings.EqualFold(declaration.Visibility, "public") && !strings.EqualFold(declaration.Visibility, "friend") {
+				continue
+			}
+			if standardModule {
+				add(declaration.Name)
+			}
+			addQualified(file.IR.ModuleName, declaration.Name)
+			addQualified(declaration.Parent, declaration.Name)
+		}
+	}
+	if typeDB != nil {
+		constants := typeDB.AllConstantsList()
+		countsByName := make(map[string]int)
+		for _, constant := range constants {
+			name := strings.ToLower(cleanIdentifier(constant.Name))
+			if name != "" {
+				countsByName[name]++
+			}
+		}
+		for _, constant := range constants {
+			name := strings.ToLower(cleanIdentifier(constant.Name))
+			if name == "" {
+				continue
+			}
+			if countsByName[name] == 1 {
+				counts[name]++
+			}
+			if group := strings.ToLower(cleanIdentifier(constant.EnumGroup)); group != "" {
+				counts[group+"."+name]++
+			}
+			if library := strings.ToLower(cleanIdentifier(constant.Library)); library != "" {
+				counts[library+"."+name]++
+			}
+		}
+	}
+	constants := make(map[string]bool)
+	for name, count := range counts {
+		if count == 1 {
+			constants[name] = true
+		}
+	}
+	return constants
 }
 
 func closeParsedFiles(files []parsedFile) {
@@ -1246,7 +1328,8 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 				Name: declaration.Name, Type: declaration.Type, Module: module, ModuleKind: file.IR.ModuleKind,
 				Kind: declaration.Kind, Visibility: declaration.Visibility, File: file.IR.Path,
 				Line: declaration.Range.StartLine, Parent: declaration.Parent, Recovered: declaration.Recovered,
-				IsArray:             declaration.IsArray,
+				IsArray: declaration.IsArray, IsConst: declaration.IsConst,
+				ValueShape:          declaration.ValueShape,
 				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), declaration.ConditionalBranches...),
 			})
 		}
@@ -1255,6 +1338,7 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 				Name: procedure.Symbol.Name, Type: procedure.Symbol.ReturnType, Module: module, ModuleKind: file.IR.ModuleKind,
 				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility, File: file.IR.Path,
 				Line: procedure.Symbol.DeclarationRange.StartLine, Recovered: procedure.Symbol.Recovered,
+				IsArray: procedure.Symbol.IsArray, ValueShape: procedure.Symbol.ValueShape,
 				ConditionalBranches: append([]procedureir.ConditionalBranch(nil), procedure.Symbol.ConditionalBranches...),
 			})
 		}
@@ -1268,6 +1352,7 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 				Name: constant.Name, Parent: constant.EnumGroup, Module: constant.Library,
 				ModuleKind: "external", Kind: "enum_member", Visibility: "Public",
 				File: "<typelib>" + constant.Library, Line: 0,
+				IsConst: true, ValueShape: procedureir.ValueShapeScalar,
 			})
 		}
 	}
@@ -1277,6 +1362,9 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx := analysisContext{
 		functionReturns:    map[string]string{},
+		functionShapes:     map[string]procedureir.ValueShapeKind{},
+		functionNamesSeen:  map[string]bool{},
+		functionAmbiguous:  map[string]bool{},
 		arrayReturns:       map[string]arrayValue{},
 		procedures:         map[string]procedureSignature{},
 		objectSummaries:    buildObjectProcedureSummaries(files),
@@ -1305,8 +1393,29 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 			})
 		}
 		for _, proc := range sourceProceduresFromIR(file.IR) {
-			if isObjectType(proc.ReturnType) {
-				ctx.functionReturns[strings.ToLower(proc.Name)] = proc.ReturnType
+			functionName := strings.ToLower(proc.Name)
+			if functionName != "" {
+				if ctx.functionNamesSeen[functionName] {
+					// A receiver-less call with duplicate project candidates is
+					// ambiguous. Never infer a shape from declaration order.
+					delete(ctx.functionShapes, functionName)
+					delete(ctx.functionReturns, functionName)
+					ctx.functionAmbiguous[functionName] = true
+				} else {
+					ctx.functionNamesSeen[functionName] = true
+					if isObjectType(proc.ReturnType) {
+						ctx.functionReturns[functionName] = proc.ReturnType
+					}
+				}
+			}
+			// Only built-in scalar return types are strong enough to reject a
+			// For Each source. A user-defined class/UDT may expose an enumerator
+			// and therefore remains unknown even when its IR shape is scalar.
+			if functionName == "" || ctx.functionAmbiguous[functionName] {
+				continue
+			}
+			if proc.ReturnValueShape == procedureir.ValueShapeScalar && arrayKnownScalarType(proc.ReturnType) && !isObjectType(proc.ReturnType) {
+				ctx.functionShapes[functionName] = proc.ReturnValueShape
 			}
 			signature := procedureSignature{
 				Name:       proc.Name,
@@ -1622,26 +1731,30 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 		params := make([]parameterInfo, len(procedure.Symbol.Parameters))
 		for i, parameter := range procedure.Symbol.Parameters {
 			params[i] = parameterInfo{
-				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing, Optional: parameter.Optional, Range: parameter.Range,
+				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing,
+				Optional: parameter.Optional, ParamArray: parameter.ParamArray,
+				ValueShape: parameter.ValueShape, ArrayShape: parameter.ArrayShape,
+				ArrayBounds: append([]procedureir.ArrayBound(nil), parameter.ArrayBounds...), Range: parameter.Range,
 			}
 		}
 		source := sourceProcedure{
-			Kind:          kind,
-			ProcedureKind: procedure.Symbol.Kind,
-			Name:          procedure.Symbol.Name,
-			Module:        module,
-			ModuleKind:    document.ModuleKind,
-			ReturnType:    procedure.Symbol.ReturnType,
-			StartLine:     procedure.Symbol.DeclarationRange.StartLine,
-			EndLine:       procedure.Symbol.DeclarationRange.EndLine,
-			StartByte:     procedure.Symbol.DeclarationRange.StartByte,
-			EndByte:       procedure.Symbol.DeclarationRange.EndByte,
-			Params:        params,
-			Declarations:  append([]procedureir.Declaration(nil), procedure.Declarations...),
-			Statements:    append([]procedureir.Statement(nil), procedure.Statements...),
-			Expressions:   append([]procedureir.Expression(nil), procedure.Expressions...),
-			Calls:         append([]procedureir.CallSite(nil), procedure.Calls...),
-			Accesses:      append([]procedureir.VariableAccess(nil), procedure.Accesses...),
+			Kind:             kind,
+			ProcedureKind:    procedure.Symbol.Kind,
+			Name:             procedure.Symbol.Name,
+			Module:           module,
+			ModuleKind:       document.ModuleKind,
+			ReturnType:       procedure.Symbol.ReturnType,
+			ReturnValueShape: procedure.Symbol.ValueShape,
+			StartLine:        procedure.Symbol.DeclarationRange.StartLine,
+			EndLine:          procedure.Symbol.DeclarationRange.EndLine,
+			StartByte:        procedure.Symbol.DeclarationRange.StartByte,
+			EndByte:          procedure.Symbol.DeclarationRange.EndByte,
+			Params:           params,
+			Declarations:     append([]procedureir.Declaration(nil), procedure.Declarations...),
+			Statements:       append([]procedureir.Statement(nil), procedure.Statements...),
+			Expressions:      append([]procedureir.Expression(nil), procedure.Expressions...),
+			Calls:            append([]procedureir.CallSite(nil), procedure.Calls...),
+			Accesses:         append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			graph := controlFlow[0].Graphs[procedureIndex]

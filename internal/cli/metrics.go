@@ -435,6 +435,7 @@ func collectProcedureMetrics(ctx context.Context, root string, cfg config.Config
 				Name: procedure.Symbol.Name, Module: item.doc.ModuleName, ModuleKind: item.moduleKind,
 				Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility,
 				File: item.relative, Line: procedure.Symbol.DeclarationRange.StartLine,
+				IsArray: procedure.Symbol.IsArray, ValueShape: procedure.Symbol.ValueShape,
 			})
 		}
 	}

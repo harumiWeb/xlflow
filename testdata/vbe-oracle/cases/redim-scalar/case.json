@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "redim-scalar",
+  "description": "ReDim a scalar; the VBE rejects this compile-time case while VBA227 remains a runtime-safety rule.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "language-observation",
+    "binding_note": "Compile rejection is recorded as a language observation; do not bind VBA227 to compile-equivalent evidence."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-13T15:18:00Z"
+      }
+    ]
+  }
+}

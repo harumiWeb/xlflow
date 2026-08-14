@@ -12,6 +12,12 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	for i := range out.Symbol.ConditionalBranches {
 		out.Symbol.ConditionalBranches[i].Range = rebase(out.Symbol.ConditionalBranches[i].Range)
 	}
+	for i := range out.Symbol.ArrayBounds {
+		bound := &out.Symbol.ArrayBounds[i]
+		bound.Range = rebase(bound.Range)
+		bound.LowerRange = rebasePointer(bound.LowerRange, rebase)
+		bound.UpperRange = rebasePointer(bound.UpperRange, rebase)
+	}
 	for i := range out.Symbol.Parameters {
 		out.Symbol.Parameters[i].Range = rebase(out.Symbol.Parameters[i].Range)
 		out.Symbol.Parameters[i].DefaultRange = rebasePointer(out.Symbol.Parameters[i].DefaultRange, rebase)
@@ -25,6 +31,12 @@ func RebaseProcedure(in ProcedureIR, oldBase, newBase vbaast.Range) ProcedureIR 
 	}
 	for i := range out.Declarations {
 		out.Declarations[i].Range = rebase(out.Declarations[i].Range)
+		for j := range out.Declarations[i].ArrayBounds {
+			bound := &out.Declarations[i].ArrayBounds[j]
+			bound.Range = rebase(bound.Range)
+			bound.LowerRange = rebasePointer(bound.LowerRange, rebase)
+			bound.UpperRange = rebasePointer(bound.UpperRange, rebase)
+		}
 		for j := range out.Declarations[i].ConditionalBranches {
 			out.Declarations[i].ConditionalBranches[j].Range = rebase(out.Declarations[i].ConditionalBranches[j].Range)
 		}

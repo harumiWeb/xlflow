@@ -17,6 +17,15 @@ All notable changes to xlflow will be documented in this file.
   findings. ParamArray array-bound checks use narrow `VBA227` suppressions, and
   optional debug-pipe write/close failures now return checked best-effort results.
 
+- Expanded static array-operation validation for issue #593. Shared array
+  shapes now cover fixed and dynamic arrays, multidimensional declarations,
+  `Variant` values, array-returning procedures, `Array(...)`, `ParamArray`, and
+  `ByRef` flows. The analyzer can validate statically provable `ReDim`,
+  `Erase`, `LBound` / `UBound`, and `For Each` source misuse while preserving
+  `VBA208` ownership for `ReDim Preserve` and conservative handling for
+  unknown `Variant` state. Compile-equivalent declaration and constant
+  assignment cases remain separate from runtime-safety warnings.
+
 - Added default-enabled, compile-equivalent `VB059` call-syntax diagnostics.
   Lint, LSP, and source preflight now reject explicit `Call` statements without
   argument parentheses, standalone empty or multi-argument parenthesized calls,

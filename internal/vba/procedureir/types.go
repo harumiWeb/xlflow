@@ -58,17 +58,20 @@ const (
 )
 
 type ProcedureSymbol struct {
-	Name             string        `json:"name"`
-	QualifiedName    string        `json:"qualifiedName"`
-	Kind             ProcedureKind `json:"kind"`
-	Visibility       string        `json:"visibility,omitempty"`
-	Parameters       []Parameter   `json:"parameters"`
-	ReturnType       string        `json:"returnType,omitempty"`
-	DeclarationRange vbaast.Range  `json:"declarationRange"`
-	BodyRange        vbaast.Range  `json:"bodyRange"`
-	IsEventHandler   bool          `json:"isEventHandler"`
-	EventKind        string        `json:"eventKind,omitempty"`
-	Recovered        bool          `json:"recovered,omitempty"`
+	Name             string         `json:"name"`
+	QualifiedName    string         `json:"qualifiedName"`
+	Kind             ProcedureKind  `json:"kind"`
+	Visibility       string         `json:"visibility,omitempty"`
+	Parameters       []Parameter    `json:"parameters"`
+	ReturnType       string         `json:"returnType,omitempty"`
+	IsArray          bool           `json:"isArray,omitempty"`
+	ValueShape       ValueShapeKind `json:"valueShape,omitempty"`
+	ArrayBounds      []ArrayBound   `json:"arrayBounds,omitempty"`
+	DeclarationRange vbaast.Range   `json:"declarationRange"`
+	BodyRange        vbaast.Range   `json:"bodyRange"`
+	IsEventHandler   bool           `json:"isEventHandler"`
+	EventKind        string         `json:"eventKind,omitempty"`
+	Recovered        bool           `json:"recovered,omitempty"`
 	// ConditionalBranches records the mutually-exclusive compilation branches
 	// that contribute this procedure header.  The first (consequence) branch
 	// remains the canonical signature in Parameters; consumers that require a
@@ -87,6 +90,20 @@ const (
 	ArrayShapeDynamic ArrayShape = "dynamic"
 	ArrayShapeBounded ArrayShape = "bounded"
 	ArrayShapeInvalid ArrayShape = "invalid"
+)
+
+// ValueShapeKind is the declaration-level value shape shared by consumers
+// that need to distinguish scalar values from array-capable values.  It is
+// intentionally separate from ArrayShape, which describes only the syntax of
+// a procedure parameter's bounds clause.
+type ValueShapeKind string
+
+const (
+	ValueShapeUnknown      ValueShapeKind = "unknown"
+	ValueShapeScalar       ValueShapeKind = "scalar"
+	ValueShapeVariant      ValueShapeKind = "variant"
+	ValueShapeFixedArray   ValueShapeKind = "fixed-array"
+	ValueShapeDynamicArray ValueShapeKind = "dynamic-array"
 )
 
 // ArrayBound is one dimension in a parameter's bounds clause.  A bound with
@@ -130,7 +147,10 @@ type Parameter struct {
 	ArrayShape      ArrayShape    `json:"arrayShape,omitempty"`
 	BoundsRange     *vbaast.Range `json:"boundsRange,omitempty"`
 	ArrayBounds     []ArrayBound  `json:"arrayBounds,omitempty"`
-	Recovered       bool          `json:"recovered,omitempty"`
+	// ValueShape is the normalized declaration shape. ArrayShape remains the
+	// source-compatible syntax fact used by signature validation.
+	ValueShape ValueShapeKind `json:"valueShape,omitempty"`
+	Recovered  bool           `json:"recovered,omitempty"`
 }
 
 type Declaration struct {
@@ -144,6 +164,10 @@ type Declaration struct {
 	Parent              string              `json:"parent,omitempty"`
 	IsArray             bool                `json:"isArray,omitempty"`
 	IsObject            bool                `json:"isObject,omitempty"`
+	IsConst             bool                `json:"isConst,omitempty"`
+	ParamArray          bool                `json:"paramArray,omitempty"`
+	ValueShape          ValueShapeKind      `json:"valueShape,omitempty"`
+	ArrayBounds         []ArrayBound        `json:"arrayBounds,omitempty"`
 	Range               vbaast.Range        `json:"range"`
 	Recovered           bool                `json:"recovered,omitempty"`
 	ConditionalBranches []ConditionalBranch `json:"conditionalBranches,omitempty"`
@@ -449,6 +473,8 @@ type ResolverSymbol struct {
 	Recovered           bool
 	ConditionalBranches []ConditionalBranch
 	IsArray             bool
+	IsConst             bool
+	ValueShape          ValueShapeKind
 }
 
 type TypeReference struct {

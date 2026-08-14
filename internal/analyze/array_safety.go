@@ -41,14 +41,19 @@ const (
 )
 
 type arrayVariable struct {
-	name       string
-	typ        string
-	isArray    bool
-	isVariant  bool
-	isObject   bool
-	fixed      bool
-	parameter  bool
-	dimensions []arrayDimension
+	name      string
+	typ       string
+	isArray   bool
+	isVariant bool
+	isObject  bool
+	// knownScalar is intentionally narrower than "not an array".  Only
+	// built-in scalar declarations are strong enough to prove that an array
+	// operation or For Each source is invalid.  User-defined classes/UDTs and
+	// unresolved external types remain unknown and therefore fail open.
+	knownScalar bool
+	fixed       bool
+	parameter   bool
+	dimensions  []arrayDimension
 }
 
 type arrayValue struct {
@@ -77,15 +82,35 @@ var (
 	arrayRedimTypeSuffixRe = regexp.MustCompile(`(?i)^as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?$`)
 	arrayEraseRe           = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
 	arrayEraseNameRe       = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
-	arrayBoundCallRe       = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([A-Za-z_]\w*)\s*(?:,\s*([^)]*))?\)`)
+	arrayBoundCallRe       = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
 	arrayForBoundRe        = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayForEachRe         = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
+	arrayIndexedSourceRe   = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
 )
 
 func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
-	variables := arrayVariables(file, proc, moduleDecls)
-	if len(variables) == 0 {
-		return nil
+	// Array-shape enrichment is local to this rule. Do not mutate the shared
+	// declaration map used by object, Excel, and dictionary analyses later in
+	// the same module; doing so can change unrelated findings for subsequent
+	// procedures.
+	moduleDecls = cloneDeclarations(moduleDecls)
+	// Keep module-level Const/Enum declarations visible to the shared shape
+	// lattice; the historical text scanner only indexed Dim/Static/visibility
+	// declarations.
+	for _, declaration := range file.IR.Declarations {
+		key := strings.ToLower(declaration.Name)
+		if key == "" {
+			continue
+		}
+		if _, exists := moduleDecls[key]; exists {
+			continue
+		}
+		moduleDecls[key] = sourceDeclaration{
+			Name: declaration.Name, Type: declaration.Type, Line: declaration.Range.StartLine,
+			Object: declaration.IsObject, Array: declaration.IsArray,
+		}
 	}
+	variables := arrayVariables(file, proc, moduleDecls)
 	objectArrayDiagnosticsApplicable := false
 	for _, variable := range variables {
 		if variable.isArray && variable.isObject {
@@ -97,10 +122,15 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		return nil
 	}
 	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
+	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
 	initial := arrayInitialState(variables)
+	// Constant bounds are scoped to the current procedure. Resolve them once
+	// for this CFG walk so every ReDim transfer shares the same table without
+	// repeatedly reparsing the module and procedure declarations.
+	constants := arrayIntegerConstants(file, proc)
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
-		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial)...)
+		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants)...)
 		return uniqueArrayFindings(findings)
 	}
 
@@ -110,7 +140,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		seen[arrayFindingKey(finding)] = true
 	}
 	walkArrayCFG(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line)
+		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
 		for _, finding := range issues {
 			key := arrayFindingKey(finding)
 			if !seen[key] {
@@ -121,6 +151,34 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		return out
 	})
 	sortFindings(findings)
+	return findings
+}
+
+func (a Analyzer) arrayForEachFindings(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, ctx analysisContext) []Finding {
+	if !a.Config.Analyze.DetectArrayLifecycleSafety {
+		return nil
+	}
+	var findings []Finding
+	for _, statement := range proc.Statements {
+		if statement.Recovered || statement.Kind != procedureir.StatementForEach {
+			continue
+		}
+		source := ""
+		// The grammar has used both `value` and `collection` for the source
+		// expression across parser versions.  Prefer the unambiguous statement
+		// text when it matches the canonical For Each form, then fall back to
+		// the IR value expression for recovered/alternate forms.
+		if match := arrayForEachRe.FindStringSubmatch(statement.Text); len(match) > 0 {
+			source = match[1]
+		} else if statement.Value != nil {
+			source = statement.Value.Text
+		}
+		source = strings.TrimSpace(strings.SplitN(source, "'", 2)[0])
+		if !iterableSourceKnownInvalid(source, variables, arrayInitialState(variables), ctx) {
+			continue
+		}
+		findings = append(findings, a.simpleFinding(file, proc, statement.Range.StartLine, "VBA227", "warning", strings.TrimSpace(source)+" is not a collection or array and cannot be used as a For Each source.", "For Each requires an iterable Collection or array value; this source is a known scalar.", "Iterate an array or Collection, or change the source expression to an iterable value."))
+	}
 	return findings
 }
 
@@ -233,12 +291,12 @@ func comparisonAssignmentCarrier(statement procedureir.Statement, expression pro
 	return statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet
 }
 
-func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState) []Finding {
+func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, constants map[string]int) []Finding {
 	var findings []Finding
 	seen := map[string]bool{}
 	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
 		var issues []Finding
-		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line)
+		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants)
 		for _, finding := range issues {
 			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
 			if !seen[key] {
@@ -432,16 +490,20 @@ func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 			state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
 			continue
 		}
+		if !variable.isArray {
+			state[name] = arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginLocal}
+			continue
+		}
 		value := arrayValue{
 			knownArray:    variable.isArray,
 			origin:        arrayOriginLocal,
 			dimensions:    append([]arrayDimension(nil), variable.dimensions...),
 			preserveShape: append([]arrayDimension(nil), variable.dimensions...),
 		}
-		if variable.parameter {
-			value.kind = arrayUnknown
-		} else if variable.fixed {
+		if variable.fixed {
 			value.kind = arrayAllocated
+		} else if variable.parameter {
+			value.kind = arrayUnknown
 		} else {
 			value.kind = arrayUnallocated
 		}
@@ -450,7 +512,7 @@ func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 	return state
 }
 
-func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int) (arrayFlowState, []Finding) {
+func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int) (arrayFlowState, []Finding) {
 	state = cloneArrayState(state)
 	var findings []Finding
 	add := func(code, message, reason, suggestion string) {
@@ -471,6 +533,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		return state, findings
 	}
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+		base := optionBase(file.Lines)
 		for _, clause := range splitArgs(match[2]) {
 			redim, direct := parseDirectArrayRedimClause(clause)
 			if !direct {
@@ -486,14 +549,37 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 			name := strings.ToLower(redim.name)
 			variable, known := variables[name]
+			// An unresolved target may be an implicit Variant or an external
+			// member.  ReDim is valid for some of those runtime shapes, so only
+			// report a target mismatch once the shared declaration facts prove a
+			// scalar or fixed array.
+			if !known {
+				continue
+			}
 			old := state[name]
-			dimensions := parseArrayDimensions(redim.dimensions, 0)
-			if !known || !variable.isArray || variable.fixed {
+			dimensions := parseArrayDimensionsWithConstants(redim.dimensions, base, constants)
+			// A Variant can be resized only after its array nature is proven by
+			// an assignment such as Array(...).  An unproven Variant remains
+			// unknown and must not be treated as a scalar ReDim misuse.
+			variantArray := variable.isVariant && old.knownArray
+			resizable := (variable.isArray || variantArray) && !variable.fixed
+			if variable.isVariant && !old.knownArray {
+				continue
+			}
+			if !resizable {
+				// An unresolved object/UDT/external declaration is not a proven
+				// scalar.  Leave it unknown rather than guessing that ReDim is
+				// invalid; the shared shape contract is deliberately fail-open.
+				if !variable.isArray && !variable.isVariant && !variable.knownScalar {
+					continue
+				}
 				add("VBA227", redim.name+" is not a dynamic array and cannot be resized with ReDim.", "ReDim requires a dynamic array; fixed-size arrays and scalar values have no resizable allocation state.", "Declare the value as a dynamic array, or remove ReDim and use its declared bounds.")
+			} else if impossibleArrayBounds(dimensions) {
+				add("VBA227", redim.name+" has impossible constant ReDim bounds.", "A ReDim lower bound cannot be greater than its upper bound.", "Use bounds whose lower value is less than or equal to the upper value, or keep the bounds dynamic.")
 			} else if direct && match[1] != "" && !preserveDimensionsSafe(old.preserveShape, dimensions) {
 				add("VBA208", "ReDim Preserve may change a non-final or unknown array dimension.", "VBA can only preserve an array while changing its final dimension, and that cannot be proven when the prior shape is unknown.", "Only change the final dimension, or copy values into a newly sized array explicitly.")
 			}
-			if known && variable.isArray && !variable.fixed {
+			if resizable && !impossibleArrayBounds(dimensions) {
 				next := arrayValue{kind: arrayAllocated, knownArray: true, dimensions: dimensions, origin: arrayOriginLocal}
 				if direct {
 					next.preserveShape = dimensions
@@ -524,6 +610,8 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 					state[name] = arrayValue{kind: arrayUnallocated, knownArray: true, origin: arrayOriginLocal}
 				} else if variable.isVariant {
 					state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+				} else if variable.knownScalar || variable.isObject {
+					add("VBA227", strings.TrimSpace(target)+" is not an array and cannot be erased as an array.", "Erase applies to arrays; a scalar value has no array allocation to clear.", "Erase an array variable or remove the Erase statement for this scalar value.")
 				}
 			}
 		}
@@ -537,10 +625,30 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	}
 
 	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
-		name := strings.ToLower(bound[2])
+		argument := strings.TrimSpace(bound[2])
+		name := strings.ToLower(argument)
 		value, ok := state[name]
 		variable, known := variables[name]
-		if !ok || !known || value.origin == arrayOriginRangeValue {
+		if !known {
+			if scalarExpressionKnown(argument) {
+				add("VBA227", bound[1]+" cannot be used on a known scalar expression.", "LBound and UBound require an array value; this argument is a statically known scalar.", "Pass an array value to the bound function or remove the bound query.")
+			}
+			continue
+		}
+		if !variable.isArray && !variable.isVariant {
+			if !variable.knownScalar && !variable.isObject {
+				continue
+			}
+			add("VBA227", bound[1]+" cannot be used on non-array "+variable.name+".", "LBound and UBound require an array value; this target is a known scalar.", "Pass an array variable to the bound function or remove the bound query.")
+			continue
+		}
+		if !ok || value.origin == arrayOriginRangeValue {
+			continue
+		}
+		// A Variant has no statically proven array nature.  Keep this path
+		// fail-open; only a proven array (or a proven scalar handled above) is
+		// actionable here.
+		if variable.isVariant && !value.knownArray {
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
@@ -562,8 +670,17 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		}
 	}
 
+	if match := arrayForEachRe.FindStringSubmatch(text); len(match) > 0 {
+		if iterableSourceKnownInvalid(match[1], variables, state, ctx) {
+			add("VBA227", strings.TrimSpace(match[1])+" is not a collection or array and cannot be used as a For Each source.", "For Each requires an iterable Collection or array value; this source is a known scalar.", "Iterate an array or Collection, or change the source expression to an iterable value.")
+		}
+	}
+
 	for _, use := range arrayIndexedUses(text, variables) {
 		value := state[strings.ToLower(use.name)]
+		if variable, ok := variables[strings.ToLower(use.name)]; ok && variable.isVariant && !value.knownArray {
+			continue
+		}
 		if value.origin == arrayOriginRangeValue {
 			continue
 		}
@@ -634,18 +751,50 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
 	}
-	for _, param := range proc.Params {
-		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Array: strings.Contains(param.Type, "()"), Object: isObjectType(param.Type), Parameter: true}
-	}
 	base := optionBase(file.Lines)
-	variables := map[string]arrayVariable{}
-	for key, decl := range decls {
-		if !decl.Array && !strings.EqualFold(strings.TrimSpace(decl.Type), "Variant") {
+	// The legacy line scanner intentionally ignores Const and Enum syntax.
+	// Fill those gaps from the shared procedure IR so a known scalar constant
+	// can still be classified as a non-iterable/non-array operation target.
+	for _, declaration := range proc.Declarations {
+		key := strings.ToLower(declaration.Name)
+		if key == "" {
 			continue
 		}
-		variable := arrayVariable{name: decl.Name, typ: decl.Type, isArray: decl.Array, isVariant: strings.EqualFold(strings.TrimSpace(decl.Type), "Variant"), isObject: decl.Object, parameter: decl.Parameter}
+		if _, exists := decls[key]; exists {
+			continue
+		}
+		decls[key] = sourceDeclaration{
+			Name: declaration.Name, Type: declaration.Type, Line: declaration.Range.StartLine,
+			Object: declaration.IsObject, Array: declaration.IsArray,
+			Fixed:      declaration.ValueShape == procedureir.ValueShapeFixedArray,
+			Dimensions: parameterArrayDimensions(declaration.ArrayBounds, base),
+		}
+	}
+	for _, param := range proc.Params {
+		array := strings.Contains(param.Type, "()") || param.ValueShape == procedureir.ValueShapeFixedArray || param.ValueShape == procedureir.ValueShapeDynamicArray
+		decls[strings.ToLower(param.Name)] = sourceDeclaration{
+			Name: param.Name, Type: param.Type, Array: array,
+			Fixed:      param.ValueShape == procedureir.ValueShapeFixedArray,
+			Dimensions: parameterArrayDimensions(param.ArrayBounds, base),
+			Object:     isObjectType(param.Type), Parameter: true,
+		}
+	}
+	variables := map[string]arrayVariable{}
+	for key, decl := range decls {
+		typeName := strings.TrimSpace(decl.Type)
+		// VBA declarations without an As clause are implicit Variant values.
+		// Treat them exactly like an explicit Variant so array-sensitive rules
+		// do not turn an unresolved value into a false scalar proof.
+		isVariant := typeName == "" || strings.EqualFold(typeName, "Variant")
+		variable := arrayVariable{name: decl.Name, typ: decl.Type, isArray: decl.Array, isVariant: isVariant, isObject: decl.Object, knownScalar: !isVariant && arrayKnownScalarType(typeName), parameter: decl.Parameter}
 		if decl.Array {
 			variable.dimensions, variable.fixed = declarationDimensions(file.Lines, decl.Line, decl.Name, base)
+			if len(decl.Dimensions) > 0 {
+				variable.dimensions = append([]arrayDimension(nil), decl.Dimensions...)
+			}
+			if decl.Fixed {
+				variable.fixed = true
+			}
 			if len(variable.dimensions) > 0 {
 				variable.fixed = true
 			}
@@ -653,6 +802,24 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 		variables[key] = variable
 	}
 	return variables
+}
+
+func parameterArrayDimensions(bounds []procedureir.ArrayBound, base int) []arrayDimension {
+	if len(bounds) == 0 {
+		return nil
+	}
+	dimensions := make([]arrayDimension, 0, len(bounds))
+	for _, bound := range bounds {
+		lowerText, upperText := strings.TrimSpace(bound.Lower), strings.TrimSpace(bound.Upper)
+		if lowerText == "" && upperText == "" {
+			upperText = strings.TrimSpace(bound.Expression)
+			lowerText = strconv.Itoa(base)
+		}
+		dimensions = append(dimensions, arrayDimension{
+			lower: integerBound(lowerText), upper: integerBound(upperText),
+		})
+	}
+	return dimensions
 }
 
 func optionBase(lines []string) int {
@@ -713,9 +880,193 @@ func parseArrayDimensions(text string, base int) []arrayDimension {
 	return dimensions
 }
 
+func parseArrayDimensionsWithConstants(text string, base int, constants map[string]int) []arrayDimension {
+	var dimensions []arrayDimension
+	for _, part := range splitArgs(text) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		pieces := strings.SplitN(strings.ToLower(part), " to ", 2)
+		if len(pieces) == 2 {
+			dimensions = append(dimensions, arrayDimension{lower: integerBoundWithConstants(pieces[0], constants), upper: integerBoundWithConstants(pieces[1], constants)})
+			continue
+		}
+		dimensions = append(dimensions, arrayDimension{lower: integerBoundWithConstants(strconv.Itoa(base), constants), upper: integerBoundWithConstants(part, constants)})
+	}
+	return dimensions
+}
+
+// arrayIntegerConstants extends the shared range-value constant table with
+// the Enum members that are valid integer bound names in VBA.  The parser is
+// intentionally small and fail-open: unresolved expressions simply do not
+// enter the table, so dynamic bounds remain unclassified.
+func arrayIntegerConstants(file parsedFile, proc sourceProcedure) map[string]int {
+	constants := rangeValueIntegerConstants(rangeValueModuleIntegerConstants(file.Lines, file.IR), proc)
+	inEnum := false
+	var next *int
+	for _, line := range file.Lines {
+		code := strings.TrimSpace(normalizedCodeLine(line))
+		lower := strings.ToLower(code)
+		if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "private enum ") || strings.HasPrefix(lower, "friend enum ") {
+			inEnum = true
+			next = nil
+			continue
+		}
+		if inEnum && strings.HasPrefix(lower, "end enum") {
+			inEnum = false
+			next = nil
+			continue
+		}
+		if !inEnum || code == "" {
+			continue
+		}
+		parts := strings.SplitN(code, "=", 2)
+		fields := strings.Fields(parts[0])
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.TrimSpace(fields[0])
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(cleanIdentifier(name))
+		if len(parts) == 2 {
+			value, err := constantIntegerExpression(strings.TrimSpace(parts[1]), constants)
+			if err != nil {
+				next = nil
+				continue
+			}
+			constants[key] = value
+			n := value + 1
+			next = &n
+			continue
+		}
+		if next == nil {
+			continue
+		}
+		constants[key] = *next
+		n := *next + 1
+		next = &n
+	}
+	return constants
+}
+
 func integerBound(text string) arrayBound {
 	value, ok := integerLiteral(text)
 	return arrayBound{known: ok, value: value, expression: canonicalArrayBoundExpression(text)}
+}
+
+func integerBoundWithConstants(text string, constants map[string]int) arrayBound {
+	value, err := constantIntegerExpression(text, constants)
+	if err != nil {
+		return arrayBound{expression: canonicalArrayBoundExpression(text)}
+	}
+	return arrayBound{known: true, value: value, expression: canonicalArrayBoundExpression(text)}
+}
+
+func impossibleArrayBounds(dimensions []arrayDimension) bool {
+	for _, dimension := range dimensions {
+		if dimension.lower.known && dimension.upper.known && dimension.lower.value > dimension.upper.value {
+			return true
+		}
+	}
+	return false
+}
+
+func iterableSourceKnownInvalid(source string, variables map[string]arrayVariable, state arrayFlowState, ctx analysisContext) bool {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return false
+	}
+	// A uniquely resolved scalar Function/Property Get return is as strong as
+	// a scalar declaration.  Unknown, external, or duplicate call targets are
+	// deliberately absent from functionShapes and therefore remain fail-open.
+	if strings.Contains(source, "(") {
+		callee := arrayCallName(source)
+		if returnType, ok := ctx.functionReturns[callee]; ok && isObjectType(returnType) {
+			// Known Collection/Dictionary/Object-compatible returns are valid
+			// iterable sources even though their value shape is non-array.
+			return false
+		}
+		if shape, ok := ctx.functionShapes[callee]; ok {
+			switch shape {
+			case procedureir.ValueShapeScalar:
+				return true
+			case procedureir.ValueShapeFixedArray, procedureir.ValueShapeDynamicArray:
+				return false
+			}
+		}
+	}
+	// An indexed element of a statically typed scalar array is itself a
+	// scalar, even though the base expression is an allocated array. Variant
+	// and object arrays remain conservative because their elements may hold an
+	// array or implement the Collection iteration contract.
+	if match := arrayIndexedSourceRe.FindStringSubmatch(source); len(match) > 0 {
+		if variable, ok := variables[strings.ToLower(match[1])]; ok && variable.isArray && !variable.isVariant && !variable.isObject && variable.knownScalar {
+			return true
+		}
+	}
+	if value, known := arrayExpressionState(source, state, ctx); known {
+		if value.knownArray {
+			return false
+		}
+		// Unknown calls and Variant values remain conservative.  A known scalar
+		// expression is handled below where its declaration is available.
+		if strings.Contains(source, "(") {
+			return false
+		}
+	}
+	if scalarExpressionKnown(source) {
+		return true
+	}
+	name := source
+	if dot := strings.IndexAny(name, ".("); dot >= 0 {
+		name = name[:dot]
+	}
+	name = strings.TrimSpace(name)
+	if !arrayEraseNameRe.MatchString(name) {
+		// Numeric, Boolean, date, and string literals are definitely scalar; all other
+		// expressions remain unknown rather than guessing their result type.
+		return false
+	}
+	variable, ok := variables[strings.ToLower(name)]
+	if !ok || variable.isArray || variable.isVariant || variable.isObject || !variable.knownScalar || dcKindFromType(variable.typ) != dcUnknown {
+		return false
+	}
+	return true
+}
+
+func arrayKnownScalarType(typ string) bool {
+	switch strings.ToLower(cleanIdentifier(strings.TrimSpace(typ))) {
+	case "byte", "boolean", "integer", "long", "longlong", "longptr", "single", "double", "currency", "decimal", "date", "string":
+		return true
+	default:
+		return false
+	}
+}
+
+func scalarExpressionKnown(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	switch lower {
+	case "true", "false", "nothing", "empty", "null":
+		return true
+	}
+	if strings.HasPrefix(text, `"`) || (strings.HasPrefix(text, "#") && strings.HasSuffix(text, "#")) {
+		return true
+	}
+	if _, ok := integerLiteral(text); ok {
+		return true
+	}
+	if _, err := strconv.ParseFloat(strings.TrimRight(text, "%&!@$^"), 64); err == nil {
+		return true
+	}
+	_, err := constantIntegerExpression(text, nil)
+	return err == nil
 }
 
 func integerLiteral(text string) (int, bool) {
@@ -817,7 +1168,8 @@ func arrayIndexedUses(text string, variables map[string]arrayVariable) []arrayUs
 		}
 		name := text[start:i]
 		key := strings.ToLower(name)
-		if _, ok := variables[key]; !ok {
+		variable, ok := variables[key]
+		if !ok || !variable.isArray && !variable.isVariant {
 			continue
 		}
 		for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
@@ -959,12 +1311,13 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 				// unconditional return assignments, so leave the summary unknown.
 				continue
 			}
+			constants := arrayIntegerConstants(file, proc)
 			walkArrayCFG(proc.Graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 					value, known := arrayExpressionState(rhs, in, ctx)
 					returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 				}
-				out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line)
+				out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
 				return out
 			})
 			returnLines := make([]int, 0, len(returnCandidates))

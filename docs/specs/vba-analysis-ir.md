@@ -48,6 +48,12 @@ information is syntactic parent/child nesting only.
 `ProcedureSymbol` distinguishes `Sub`, `Function`, `Property Get`,
 `Property Let`, and `Property Set`. It records visibility, parameters, return
 type where applicable, declaration and body ranges, and event-handler metadata.
+Function and property return slots also retain the normalized value shape
+(`scalar`, `Variant`, fixed array, dynamic array, or `unknown`) and parsed array
+bounds when the return type declares an array. Module and procedure
+declarations retain the same value-shape classification plus `Const`/Enum
+constness, so array-sensitive consumers do not need to infer those facts from
+rule-specific text scans.
 Property accessor kinds stay distinct even when they share the same VBA name.
 Parameters are the canonical declaration-signature facts consumed by
 declaration validation and projected by symbol/call tooling. Each parameter

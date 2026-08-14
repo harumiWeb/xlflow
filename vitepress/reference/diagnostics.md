@@ -63,6 +63,8 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB057`](#vb057)   | lint    | error       | procedure-local | yes     | Mismatched Next control variable                   |
 | [`VB058`](#vb058)   | lint    | error       | procedure-local | yes     | Invalid Exit statement                             |
 | [`VB059`](#vb059)   | lint    | error       | procedure-local | yes     | Invalid call syntax                                |
+| [`VB060`](#vb060)   | lint    | error       | project-wide    | yes     | Assignment to constant                             |
+| [`VB061`](#vb061)   | lint    | error       | file-local      | yes     | Invalid constant array bounds                      |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -1327,6 +1329,50 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                  |
 | Real-time editor diagnostic | yes                  |
 | Fix available               | no                   |
+
+## VB060
+
+**Assignment to constant.** An assignment targets a Const declaration.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `project-wide`           |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
+
+## VB061
+
+**Invalid constant array bounds.** A fixed array declaration has a constant lower bound greater than its upper bound.
+
+| Property                    | Value                    |
+| --------------------------- | ------------------------ |
+| Family                      | `lint`                   |
+| Category                    | `correctness`            |
+| Evidence class              | `compile-equivalent`     |
+| Compile-equivalent          | yes                      |
+| Default severity            | `error`                  |
+| Supported severities        | `error`                  |
+| Surfaces                    | `lint`, `lsp`, `analyze` |
+| Scope                       | `file-local`             |
+| Precision                   | `high`                   |
+| Enabled by default          | yes                      |
+| Configuration               | not configurable         |
+| Inline suppression          | no                       |
+| Blocks source preflight     | yes                      |
+| Real-time editor diagnostic | yes                      |
+| Fix available               | no                       |
 
 ## VBA101
 

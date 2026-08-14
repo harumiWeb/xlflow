@@ -1,8 +1,10 @@
 # Array Lifecycle and Dimension Safety
 
-This specification defines the `VBA227` analyzer rule for issue #444. It
-extends the existing `ReDim Preserve`, array comparison, object-array `Set`,
-and `Range.Value` checks through one conservative array-state model.
+This specification defines the `VBA227` analyzer rule for issue #444 and the
+array-operation validation boundary expanded by issue #593. It extends the
+existing `ReDim Preserve`, array comparison, object-array `Set`, and
+`Range.Value` checks through one conservative array-state model. The shared
+shape contract and rationale are recorded in ADR-0040.
 
 ## Public contract
 
@@ -53,18 +55,34 @@ agree. Exceptional and uncertain CFG edges use the pre-statement state. This
 means an indexed access after an allocation on only one branch remains a
 warning.
 
+The operation-facing shape is `scalar`, `fixed-array(rank)`,
+`dynamic-array(rank/unknown)`, `Variant`, or `unknown`. Declaration metadata,
+procedure signatures, array-return summaries, `Array(...)`, and `ParamArray`
+are normalized into this shape before operation checks run. Assignments,
+`ByRef` calls, and branch joins retain a shape only when it is proven on every
+incoming path. An unresolved or external value, and a `Variant` whose array
+nature is not proven, remains `unknown`.
+
 ## Diagnostics and ownership
 
 `VBA227` reports:
 
 - `LBound` / `UBound` before allocation, invalid dimension numbers, and
   dimension or bound contradictions;
-- indexed access before `ReDim`, after `Erase`, or after an unproven Variant
-  assignment;
-- `ReDim` on fixed-size arrays or non-array values;
+- indexed access before `ReDim` or after `Erase` when the target is a proven
+  array;
+- `ReDim` on fixed-size arrays or known scalar values;
+- `Erase` on a target proven incompatible with an array or object reset;
+- `For Each` over a source proven not to be an array or collection (the
+  existing `VB023` control-variable contract remains separate);
 - known subscript-count mismatches and inconsistent loop lower-bound
-  assumptions; and
-- unknown Variant array operations.
+  assumptions.
+
+Constant declaration bounds and constant `ReDim` bounds are checked according
+to their operation contract. Compile-equivalent declaration/assignment cases
+use canonical blocking rule contracts; runtime-only array failures remain
+`VBA227` warnings and do not become preflight claims. Dynamic bounds and
+unknown values are not diagnosed.
 
 `VBA208` remains the owner of `ReDim Preserve` safety. It warns when a
 non-final dimension changes and remains conservative when the prior shape is
@@ -106,14 +124,17 @@ and external calls remain unknown.
 ## Boundaries
 
 The rule does not open Excel or claim that `IsArray` proves allocation or a
-dimension count. It accepts literal numeric bounds only when they are
-statically visible; dynamic expressions remain unknown. It does not change
+dimension count. It accepts literal numeric bounds and the small shared
+integer-constant subset (Const/Enum references with arithmetic) only when they
+are statically visible; dynamic expressions remain unknown. It does not change
 the `Finding` JSON envelope or preflight blocking behavior.
 
 ## Related
 
 - `docs/adr/ADR-0028-array-lifecycle-and-dimension-safety.md`
+- `docs/adr/ADR-0040-array-operation-shape-validation.md`
 - `docs/adr/ADR-0027-range-value-array-shape-safety.md`
 - `docs/specs/range-value-array-shape-safety.md`
 - `docs/specs/cli-contract.md`
 - Issue #444
+- Issue #593
