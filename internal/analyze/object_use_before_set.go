@@ -419,6 +419,12 @@ func objectProcedureWritesParameter(proc sourceProcedure, name string, summaries
 	for _, call := range proc.Calls {
 		actuals := objectCallActuals(call, expressions)
 		for actualIndex, actual := range actuals {
+			if actual.parenthesized {
+				// Parenthesized actuals are temporary ByVal expressions even
+				// when the formal parameter is declared ByRef; they cannot
+				// propagate a callee mutation back to this parameter.
+				continue
+			}
 			if !strings.EqualFold(cleanIdentifier(actual.text), cleanIdentifier(name)) {
 				continue
 			}
@@ -539,13 +545,13 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 			// MaybeNothing and manufacture a finding for that unreachable block.
 			continue
 		}
+		if objectFlowAssigned(flow.in[block.ID], variable) || reported[key] {
+			continue
+		}
 		if objectErrorResumeNextAt(proc, access.StatementID) {
 			continue
 		}
 		if objectFlowGuardedByOpenFlag(proc, access.StatementID, access.Name, guardCache) {
-			continue
-		}
-		if objectFlowAssigned(flow.in[block.ID], variable) || reported[key] {
 			continue
 		}
 		findings = append(findings, a.simpleFinding(
@@ -643,6 +649,7 @@ func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 type objectFlowGuardCache struct {
 	graph      *vbacfg.Graph
 	dominators map[vbacfg.BlockID][]vbacfg.BlockID
+	successors map[vbacfg.BlockID][]vbacfg.BlockID
 }
 
 func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectName string, cache *objectFlowGuardCache) bool {
@@ -679,11 +686,12 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 		}
 		safeReachable := false
 		unsafeReachable := false
+		cache.buildSuccessors()
 		for _, edge := range flowProc.Graph.Edges {
 			if edge.From != conditionBlock.ID || (edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse) {
 				continue
 			}
-			reachesAccess := objectFlowCanReach(flowProc.Graph, edge.To, accessBlock.ID)
+			reachesAccess := objectFlowCanReach(cache.successors, edge.To, accessBlock.ID)
 			if edge.Kind == safeBranch {
 				safeReachable = safeReachable || reachesAccess
 			} else {
@@ -695,6 +703,19 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 		}
 	}
 	return false
+}
+
+func (cache *objectFlowGuardCache) buildSuccessors() {
+	if cache.successors != nil {
+		return
+	}
+	cache.successors = make(map[vbacfg.BlockID][]vbacfg.BlockID, len(cache.graph.Blocks))
+	for _, edge := range cache.graph.Edges {
+		if edge.Class == vbacfg.EdgeExceptional {
+			continue
+		}
+		cache.successors[edge.From] = append(cache.successors[edge.From], edge.To)
+	}
 }
 
 func objectBooleanGuard(statement procedureir.Statement) (string, bool, bool) {
@@ -765,7 +786,7 @@ func objectBlockSetContains(blocks []vbacfg.BlockID, candidate vbacfg.BlockID) b
 	return false
 }
 
-func objectFlowCanReach(graph *vbacfg.Graph, start, target vbacfg.BlockID) bool {
+func objectFlowCanReach(successors map[vbacfg.BlockID][]vbacfg.BlockID, start, target vbacfg.BlockID) bool {
 	if start == target {
 		return true
 	}
@@ -774,15 +795,15 @@ func objectFlowCanReach(graph *vbacfg.Graph, start, target vbacfg.BlockID) bool 
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, edge := range graph.Edges {
-			if edge.From != current || edge.Class == vbacfg.EdgeExceptional || seen[edge.To] {
+		for _, successor := range successors[current] {
+			if seen[successor] {
 				continue
 			}
-			if edge.To == target {
+			if successor == target {
 				return true
 			}
-			seen[edge.To] = true
-			queue = append(queue, edge.To)
+			seen[successor] = true
+			queue = append(queue, successor)
 		}
 	}
 	return false
@@ -1582,6 +1603,12 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 				assigned = state[variable.key()]
 				continue
 			}
+			if actual.parenthesized {
+				// Parenthesized actuals are passed through a temporary ByVal
+				// value even when the formal parameter is ByRef.
+				assigned = state[variable.key()]
+				continue
+			}
 			if !summary.ByRefWritten[formalIndex] {
 				// A ByRef parameter that is only read remains an alias to the
 				// caller's object.  Lack of a guaranteed assignment is not the
@@ -1610,9 +1637,10 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 }
 
 type objectCallActual struct {
-	expressionID int
-	text         string
-	scope        procedureir.SymbolScope
+	expressionID  int
+	text          string
+	scope         procedureir.SymbolScope
+	parenthesized bool
 }
 
 func objectProcedureAllowsParameterEntry(proc sourceProcedure) bool {
@@ -1652,14 +1680,16 @@ func objectCallActuals(call procedureir.CallSite, expressions map[int]procedurei
 			actuals = append(actuals, objectCallActual{})
 			continue
 		}
+		parenthesized := false
 		for expression.Kind == procedureir.ExpressionParentheses && len(expression.Children) == 1 {
+			parenthesized = true
 			nested, nestedOK := expressions[expression.Children[0]]
 			if !nestedOK {
 				break
 			}
 			expression = nested
 		}
-		actuals = append(actuals, objectCallActual{expressionID: expression.ID, text: expression.Text, scope: procedureir.ScopeUnresolved})
+		actuals = append(actuals, objectCallActual{expressionID: expression.ID, text: expression.Text, scope: procedureir.ScopeUnresolved, parenthesized: parenthesized})
 	}
 	return actuals
 }

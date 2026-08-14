@@ -1288,7 +1288,10 @@ continuation, but not under `On Error Resume Next`; nullable `Range.Find`
 results remain excluded. Form-code `Me.<control>` expressions are treated as
 designer-created objects when passed to a private helper. `TypeName` and
 `Is Nothing` guards, boolean open/cleanup flags, and exceptional-only
-`Err.Number` branches refine the CFG state; a normal continuation after a
+`Err.Number` branches refine the CFG state. Recognized boolean open/cleanup
+flags are named from the object identifier and must start with that object name
+and end with `Opened`, such as `streamOpened`; arbitrary `IsOpen`/`Open` names
+are not inferred by this rule. A normal continuation after a
 known `Err.Raise` is not treated as reachable.
 
 `VBA212` is warning-only, non-blocking, inline-suppressible, and available in

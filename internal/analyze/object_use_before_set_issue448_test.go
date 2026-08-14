@@ -394,6 +394,31 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PreservesByRefSemanticsForParenthesizedObjectArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub AssignTarget(ByRef target As Worksheet)
+  Set target = ThisWorkbook.Worksheets(1)
+End Sub
+
+Public Sub UseParenthesized()
+  Dim target As Worksheet
+  AssignTarget (target)
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA202")
+	if len(got) != 1 || got[0].Line != 9 {
+		t.Fatalf("parenthesized ByRef actual must not mutate the caller's object state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448KeepsPublicByValEntryConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
