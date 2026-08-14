@@ -122,6 +122,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cleanup_confirmed`
 - `cli_paths`
 - `clipboard_retry_succeeded`
+- `close_statement`
 - `closes_workbook`
 - `cmd_exe`
 - `code_path`
