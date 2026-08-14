@@ -190,6 +190,14 @@ names (`Cleanup`, `clean_up`, `Finally`, and `Done`) plus qualified labels whose
 final underscore-delimited component is `Cleanup` or `clean_up`, such as
 `auth_Cleanup` and `AutoProxy_Cleanup`.
 
+The same exception applies semantically when the handler label is an intentional
+shared normal/error continuation: every normal path from the label to the
+procedure's normal exit must be limited to cleanup operations such as closing,
+releasing, quitting, or setting an owned object to `Nothing`, or to a loop-exit
+finalization assignment for the procedure result. Arbitrary assignments,
+logging, error reporting, and other handler code remain eligible for `VBA204`,
+even when the label is also reached by normal flow.
+
 This replaces the previous preceding-text heuristic and correctly accounts for
 structured branches and jumps. The existing cleanup-label exception, inline
 suppression, diagnostic position, message, reason, suggestion, severity,

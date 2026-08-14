@@ -3048,6 +3048,72 @@ End Sub
 	}
 }
 
+func TestAnalyzerCFGVBA204AllowsSemanticSharedCleanupHandlers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function CloseSharedHandle(ByVal handle As Long) As Boolean
+  On Error GoTo ErrorHandling
+  If handle <> 0 Then Debug.Print handle
+ErrorHandling:
+  Close #1
+End Function
+
+Public Function FinalizeDimensions(ByRef values As Variant) As Long
+  Dim dimension As Long
+  Dim tempBound As Long
+  On Error GoTo FinalDimension
+  For dimension = 1 To 60
+    tempBound = LBound(values, dimension)
+  Next dimension
+FinalDimension:
+  FinalizeDimensions = dimension - 1
+End Function
+
+Public Function ClosePipe(ByVal fileHandle As Long) As Long
+  On Error GoTo utc_ErrorHandling
+  Do While fileHandle > 0
+    fileHandle = fileHandle - 1
+  Loop
+utc_ErrorHandling:
+  ClosePipe = CLng(pclose(fileHandle))
+End Function
+
+Public Function LoopFailure() As Long
+  Dim i As Long
+  On Error GoTo Handler
+  For i = 1 To 2
+    Debug.Print i
+  Next i
+Handler:
+  LoopFailure = 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "LoopFailure" || got[0].Line != 35 {
+		t.Fatalf("semantic shared cleanup handlers should only retain LoopFailure: %+v", got)
+	}
+
+	modulePath := filepath.Join(dir, "src", "modules", "Main.bas")
+	source, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, modulePath, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA204")
+	if len(got) != 1 || got[0].Procedure != "LoopFailure" || got[0].Line != 35 {
+		t.Fatalf("realtime semantic shared cleanup handlers should only retain LoopFailure: %+v", got)
+	}
+}
+
 func TestAnalyzerCFGVBA204DoesNotTreatDirectErrRaiseAsFallthrough(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

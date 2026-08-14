@@ -2863,14 +2863,24 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 				continue
 			}
 			implicitEntry := false
+			loopExitVariables := map[string]bool{}
 			for _, edge := range flowGraph.Edges {
 				if edge.To == block.ID && edge.Class == vbacfg.EdgeNormal && reachable[edge.From] &&
 					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
 					implicitEntry = true
-					break
+					if edge.Kind == vbacfg.EdgeLoopExit {
+						for _, candidate := range proc.Statements {
+							if candidate.ID == edge.StatementID && candidate.Control != nil && candidate.Control.LoopVariable != "" {
+								loopExitVariables[strings.ToLower(candidate.Control.LoopVariable)] = true
+							}
+						}
+					}
 				}
 			}
 			if !implicitEntry {
+				continue
+			}
+			if isSemanticCleanupFallthrough(proc, block, flowGraph, loopExitVariables) {
 				continue
 			}
 			lineNo := statement.Range.StartLine
@@ -3498,6 +3508,156 @@ func isCleanupFallthroughLabel(label string) bool {
 	default:
 		return strings.HasSuffix(normalized, "_cleanup") || strings.HasSuffix(normalized, "_clean_up")
 	}
+}
+
+// isSemanticCleanupFallthrough recognizes handler labels that are intentionally
+// shared by normal completion and error transfer. The name-based exception
+// above remains the compatibility escape hatch, while this path covers
+// qualified or project-specific labels whose body is demonstrably limited to
+// resource cleanup or loop finalization. Arbitrary handler code is rejected so
+// a normal fallthrough into logging or error reporting remains VBA204.
+func isSemanticCleanupFallthrough(proc sourceProcedure, labelBlock vbacfg.Block, graph vbacfg.Graph, loopExitVariables map[string]bool) bool {
+	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
+	for _, block := range graph.Blocks {
+		blocks[block.ID] = block
+	}
+
+	queue := []vbacfg.BlockID{labelBlock.ID}
+	seen := map[vbacfg.BlockID]bool{}
+	reachedNormalExit := false
+	foundCleanup := false
+	for len(queue) > 0 {
+		blockID := queue[0]
+		queue = queue[1:]
+		if seen[blockID] {
+			continue
+		}
+		seen[blockID] = true
+		if blockID == graph.NormalExit {
+			reachedNormalExit = true
+			continue
+		}
+		if blockID == graph.ExceptionalExit || blockID == graph.TerminationExit || blockID == graph.UnknownExit {
+			return false
+		}
+		block, ok := blocks[blockID]
+		if !ok {
+			return false
+		}
+		if block.Statement != nil {
+			if !isSemanticCleanupStatement(proc, *block.Statement, loopExitVariables) {
+				return false
+			}
+			if isExecutableSemanticCleanup(proc, *block.Statement, loopExitVariables) {
+				foundCleanup = true
+			}
+		}
+		for _, edge := range graph.Edges {
+			if edge.From != blockID || edge.Class != vbacfg.EdgeNormal {
+				continue
+			}
+			if edge.Kind == vbacfg.EdgeUnknown || edge.Uncertain {
+				return false
+			}
+			queue = append(queue, edge.To)
+		}
+	}
+	return reachedNormalExit && foundCleanup
+}
+
+func isSemanticCleanupStatement(proc sourceProcedure, statement procedureir.Statement, loopExitVariables map[string]bool) bool {
+	if statement.Recovered {
+		return false
+	}
+	switch statement.Kind {
+	case procedureir.StatementDeclaration, procedureir.StatementLabel,
+		procedureir.StatementOnError, procedureir.StatementExit, procedureir.StatementEnd:
+		return true
+	case procedureir.StatementAssignment, procedureir.StatementSet:
+		return isCleanupAssignment(statement.Text) || isLoopFinalizationAssignment(proc, statement, loopExitVariables)
+	case procedureir.StatementCall:
+		return isCleanupCall(statement.Text)
+	case procedureir.StatementUnknown:
+		return isCleanupAssignment(statement.Text) || isCleanupCall(statement.Text)
+	default:
+		return false
+	}
+}
+
+func isExecutableSemanticCleanup(proc sourceProcedure, statement procedureir.Statement, loopExitVariables map[string]bool) bool {
+	if statement.Kind == procedureir.StatementDeclaration || statement.Kind == procedureir.StatementLabel || statement.Kind == procedureir.StatementOnError || statement.Kind == procedureir.StatementExit || statement.Kind == procedureir.StatementEnd {
+		return false
+	}
+	if statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet {
+		return isCleanupAssignment(statement.Text) || isLoopFinalizationAssignment(proc, statement, loopExitVariables)
+	}
+	return statement.Kind == procedureir.StatementCall || statement.Kind == procedureir.StatementUnknown
+}
+
+func isCleanupAssignment(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(lower, "= nothing") ||
+		strings.Contains(lower, "pclose(") || strings.Contains(lower, ".close(") ||
+		strings.Contains(lower, ".quit(") || strings.Contains(lower, "free(") ||
+		strings.Contains(lower, "release(") || strings.Contains(lower, "destroy(")
+}
+
+func isCleanupCall(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.HasPrefix(lower, "call ") || strings.HasPrefix(lower, "call\t") {
+		lower = strings.TrimSpace(lower[len("call"):])
+	}
+	first := lower
+	for _, separator := range []string{" ", "\t", "(", "#"} {
+		if index := strings.Index(first, separator); index >= 0 {
+			first = first[:index]
+		}
+	}
+	return strings.HasPrefix(first, "close") || strings.Contains(first, ".close") ||
+		strings.Contains(first, ".quit") || strings.HasPrefix(first, "free") ||
+		strings.HasPrefix(first, "release") || strings.HasPrefix(first, "destroy")
+}
+
+func isLoopFinalizationAssignment(proc sourceProcedure, statement procedureir.Statement, loopExitVariables map[string]bool) bool {
+	if statement.Kind != procedureir.StatementAssignment || statement.Target == nil || statement.Value == nil {
+		return false
+	}
+	if len(loopExitVariables) == 0 {
+		return false
+	}
+	target := strings.ToLower(strings.TrimSpace(statement.Target.Text))
+	procedureName := strings.ToLower(strings.TrimSpace(proc.Name))
+	if target != procedureName {
+		return false
+	}
+	value := strings.ToLower(strings.TrimSpace(statement.Value.Text))
+	if value == "" || value == "true" || value == "false" || value == "nothing" || value == "empty" || value == "null" {
+		return false
+	}
+	if !strings.ContainsAny(value, "+-*/&") {
+		return false
+	}
+	for variable := range loopExitVariables {
+		if containsVBAIdentifier(value, variable) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsVBAIdentifier(text, name string) bool {
+	text = strings.ToLower(text)
+	name = strings.ToLower(name)
+	for start := 0; start <= len(text)-len(name); start++ {
+		if !strings.HasPrefix(text[start:], name) {
+			continue
+		}
+		end := start + len(name)
+		if (start == 0 || !isIdentifierPart(text[start-1])) && (end == len(text) || !isIdentifierPart(text[end])) {
+			return true
+		}
+	}
+	return false
 }
 
 func errorHandlerFallthroughSuggestion(proc sourceProcedure, label string) string {

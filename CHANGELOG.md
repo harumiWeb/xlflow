@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA204` false positives for project-specific labels used as shared
+  cleanup or loop-finalization paths, while retaining findings for normal
+  fallthrough into logging, error reporting, or arbitrary handler code.
+
 - Fixed `VBA222` false positives for unresolved external public API types when
   the project or generated TypeLib resolution view is incomplete. Project-local
   inaccessible and ambiguous type findings remain unchanged.

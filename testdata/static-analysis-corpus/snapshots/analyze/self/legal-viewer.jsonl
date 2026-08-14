@@ -194,7 +194,6 @@
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1023,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1087,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1088,"column":0}
-{"project":"self/legal-viewer","file":"src/modules/JsonConverter.bas","surface":"analyze","code":"VBA204","severity":"warning","line":1120,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/Main.bas","surface":"analyze","code":"VBA237","severity":"warning","line":19,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/Main.bas","surface":"analyze","code":"VBA237","severity":"warning","line":31,"column":0}
 {"project":"self/legal-viewer","file":"src/modules/Main.bas","surface":"analyze","code":"VBA237","severity":"warning","line":43,"column":0}
