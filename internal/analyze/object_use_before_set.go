@@ -11,9 +11,11 @@ import (
 )
 
 // objectProcedureSummary records the object state a project-local procedure
-// guarantees when it returns normally.  A ByRef object parameter is useful to
-// the caller only when every normal path assigns it a non-Nothing value.  The
-// same rule is used for an object function result; an object-returning
+// guarantees when it returns normally. A ByRef object parameter is useful to
+// the caller only when every normal path assigns it a non-Nothing value;
+// ByRefWritten separately records whether the callee can overwrite the alias
+// at all, so a read-only ByRef call does not erase the caller's existing fact.
+// The same rule is used for an object function result; an object-returning
 // function with an omitted or Nothing result remains nullable.
 type objectProcedureSummary struct {
 	QualifiedName  string
@@ -23,6 +25,7 @@ type objectProcedureSummary struct {
 	Line           int
 	Params         []objectParameterSummary
 	ByRefAssigned  map[int]bool
+	ByRefWritten   map[int]bool
 	ModuleAssigned map[string]bool
 	ModuleWritten  map[string]bool
 	ReturnAssigned bool
@@ -72,6 +75,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 				Kind:           string(proc.ProcedureKind),
 				Line:           proc.StartLine,
 				ByRefAssigned:  map[int]bool{},
+				ByRefWritten:   map[int]bool{},
 				ModuleAssigned: map[string]bool{},
 				ModuleWritten:  map[string]bool{},
 			}
@@ -82,6 +86,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 				})
 				if summary.Params[index].Object && summary.Params[index].ByRef {
 					summary.ByRefAssigned[index] = false
+					summary.ByRefWritten[index] = false
 				}
 			}
 			summaries[objectSummaryKey(summary.File, summary.QualifiedName, summary.Kind, summary.Line)] = summary
@@ -99,6 +104,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 			flow := objectStateFlow(info.file, info.proc, info.declarations, summaries, objectFlowOptions{Summary: true})
 			updated := previous
 			updated.ByRefAssigned = cloneIntBoolMap(previous.ByRefAssigned)
+			updated.ByRefWritten = cloneIntBoolMap(previous.ByRefWritten)
 			updated.ModuleAssigned = cloneBoolMap(previous.ModuleAssigned)
 			updated.ModuleWritten = cloneBoolMap(previous.ModuleWritten)
 			unknownFlow := info.proc.Graph == nil || len(info.proc.Graph.UnknownFlowSources) > 0
@@ -111,6 +117,7 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 				}
 				variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
 				updated.ByRefAssigned[index] = !unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
+				updated.ByRefWritten[index] = unknownFlow || objectProcedureWritesParameter(info.proc, parameter.Name, summaries)
 			}
 			for name, declaration := range info.moduleDecls {
 				if !declaration.Object {
@@ -136,11 +143,14 @@ func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedur
 	return summaries
 }
 
-// buildObjectProcedureEntryStates computes module-field state at procedure
-// entries from resolved call sites. A field is admitted only when every
-// reachable call site into that procedure has a definitely non-Nothing value
-// immediately before the call. Uncalled, ambiguous, external, and recursive
-// procedures therefore retain the conservative MaybeNothing entry state.
+// buildObjectProcedureEntryStates computes module-field and private-procedure
+// parameter state at procedure entries from resolved call sites. A value is
+// admitted only when every reachable call site into that procedure proves a
+// definitely non-Nothing value immediately before the call. Uncalled,
+// ambiguous, external, and recursive procedures therefore retain the
+// conservative MaybeNothing entry state. Public procedures are excluded from
+// parameter-entry inference because callers outside the analyzed project can
+// still pass Nothing.
 func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]objectProcedureSummary) map[string]map[string]bool {
 	type procedureInfo struct {
 		file         parsedFile
@@ -166,6 +176,11 @@ func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]ob
 					state[(objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()] = false
 				}
 			}
+			for _, parameter := range proc.Params {
+				if isObjectType(parameter.Type) {
+					state[(objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()] = false
+				}
+			}
 			entries[key] = state
 		}
 	}
@@ -177,6 +192,10 @@ func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]ob
 			seen[key] = map[string]bool{}
 		}
 		for _, caller := range infos {
+			expressions := make(map[int]procedureir.Expression, len(caller.proc.Expressions))
+			for _, expression := range caller.proc.Expressions {
+				expressions[expression.ID] = expression
+			}
 			flow := objectStateFlow(caller.file, caller.proc, caller.declarations, summaries, objectFlowOptions{Entry: entries[caller.key]})
 			for _, call := range caller.proc.Calls {
 				if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
@@ -190,7 +209,11 @@ func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]ob
 				}
 				calleeKey := objectSummaryKey(candidate.File, candidate.QualifiedName, candidate.Kind, candidate.Line)
 				callee, ok := byKey[calleeKey]
-				if !ok || !strings.EqualFold(callee.proc.Module, caller.proc.Module) {
+				if !ok {
+					continue
+				}
+				calleeSummary, ok := summaries[callee.key]
+				if !ok {
 					continue
 				}
 				if caller.proc.Graph == nil {
@@ -201,6 +224,26 @@ func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]ob
 					continue
 				}
 				state := flow.in[block.ID]
+				if objectProcedureAllowsParameterEntry(callee.proc) {
+					actuals := objectCallActuals(call, expressions)
+					for index, parameter := range callee.proc.Params {
+						if !isObjectType(parameter.Type) {
+							continue
+						}
+						parameterKey := (objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()
+						assigned, present := objectCallParameterAssigned(caller.proc, caller.declarations, call, calleeSummary, index, actuals, state, flow.vars, expressions, summaries)
+						if !seen[callee.key][parameterKey] {
+							next[callee.key][parameterKey] = assigned && present
+						}
+						seen[callee.key][parameterKey] = true
+						if !assigned || !present {
+							next[callee.key][parameterKey] = false
+						}
+					}
+				}
+				if !strings.EqualFold(callee.proc.Module, caller.proc.Module) {
+					continue
+				}
 				for name, declaration := range callee.moduleDecls {
 					if !declaration.Object {
 						continue
@@ -249,11 +292,16 @@ func objectBoolMapEqual(a, b map[string]bool) bool {
 }
 
 func objectSummaryEqual(a, b objectProcedureSummary) bool {
-	if a.ReturnAssigned != b.ReturnAssigned || len(a.ByRefAssigned) != len(b.ByRefAssigned) || len(a.ModuleAssigned) != len(b.ModuleAssigned) || len(a.ModuleWritten) != len(b.ModuleWritten) {
+	if a.ReturnAssigned != b.ReturnAssigned || len(a.ByRefAssigned) != len(b.ByRefAssigned) || len(a.ByRefWritten) != len(b.ByRefWritten) || len(a.ModuleAssigned) != len(b.ModuleAssigned) || len(a.ModuleWritten) != len(b.ModuleWritten) {
 		return false
 	}
 	for index, value := range a.ByRefAssigned {
 		if b.ByRefAssigned[index] != value {
+			return false
+		}
+	}
+	for index, value := range a.ByRefWritten {
+		if b.ByRefWritten[index] != value {
 			return false
 		}
 	}
@@ -349,6 +397,47 @@ func objectProcedureWritesModuleField(proc sourceProcedure, name string) bool {
 	return false
 }
 
+func objectProcedureWritesParameter(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary) bool {
+	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
+	for _, expression := range proc.Expressions {
+		expressions[expression.ID] = expression
+	}
+	statements := make(map[int]procedureir.Statement, len(proc.Statements))
+	for _, statement := range proc.Statements {
+		statements[statement.ID] = statement
+	}
+	for _, access := range proc.Accesses {
+		if access.Scope != procedureir.ScopeParameter ||
+			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) ||
+			!strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
+			continue
+		}
+		if !objectMemberReceiver(expressions, statements, access) {
+			return true
+		}
+	}
+	for _, call := range proc.Calls {
+		actuals := objectCallActuals(call, expressions)
+		for actualIndex, actual := range actuals {
+			if !strings.EqualFold(cleanIdentifier(actual.text), cleanIdentifier(name)) {
+				continue
+			}
+			if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+				return true
+			}
+			summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries)
+			if !ok {
+				return true
+			}
+			formalIndex := objectFormalIndex(call, summary, actualIndex)
+			if summary.ByRefWritten[formalIndex] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type objectFlowOptions struct {
 	Summary bool
 	Entry   map[string]bool
@@ -405,6 +494,7 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		return accesses[i].ExpressionID < accesses[j].ExpressionID
 	})
 	reported := map[string]bool{}
+	guardCache := &objectFlowGuardCache{}
 	var findings []Finding
 	for _, access := range accesses {
 		if access.Scope != procedureir.ScopeLocal && access.Scope != procedureir.ScopeModule && access.Scope != procedureir.ScopeParameter {
@@ -443,7 +533,16 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 		if !ok || !proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
 			continue
 		}
+		if _, ok := flow.in[block.ID]; !ok {
+			// The error-raising graph view may prove that a source-recovered
+			// access has no normal path. Do not index a missing state as
+			// MaybeNothing and manufacture a finding for that unreachable block.
+			continue
+		}
 		if objectErrorResumeNextAt(proc, access.StatementID) {
+			continue
+		}
+		if objectFlowGuardedByOpenFlag(proc, access.StatementID, access.Name, guardCache) {
 			continue
 		}
 		if objectFlowAssigned(flow.in[block.ID], variable) || reported[key] {
@@ -476,10 +575,19 @@ func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProce
 			continue
 		}
 		block, ok := proc.Graph.BlockForStatement(call.StatementID)
-		if !ok || !proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) || objectFlowAssigned(flow.in[block.ID], variable) {
+		if !ok || !proc.Graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
+			continue
+		}
+		if _, ok := flow.in[block.ID]; !ok {
+			continue
+		}
+		if objectFlowAssigned(flow.in[block.ID], variable) {
 			continue
 		}
 		if objectErrorResumeNextAt(proc, call.StatementID) {
+			continue
+		}
+		if objectFlowGuardedByOpenFlag(proc, call.StatementID, name, guardCache) {
 			continue
 		}
 		findings = append(findings, a.simpleFinding(
@@ -532,6 +640,154 @@ func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 	return active
 }
 
+type objectFlowGuardCache struct {
+	graph      *vbacfg.Graph
+	dominators map[vbacfg.BlockID][]vbacfg.BlockID
+}
+
+func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectName string, cache *objectFlowGuardCache) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	if cache.graph == nil {
+		flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
+		cache.graph = &flowGraph
+		cache.dominators = flowGraph.Dominators(vbacfg.EdgeFilter{})
+	}
+	flowProc := proc
+	flowProc.Graph = cache.graph
+	accessBlock, ok := flowProc.Graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	dominators := cache.dominators
+	for _, statement := range proc.Statements {
+		flag, negated, ok := objectBooleanGuard(statement)
+		if !ok || !objectOpenFlagForObject(flag, objectName) {
+			continue
+		}
+		conditionBlock, ok := flowProc.Graph.BlockForStatement(statement.ID)
+		if !ok || !objectBlockSetContains(dominators[accessBlock.ID], conditionBlock.ID) {
+			continue
+		}
+		if !objectOpenFlagAssignmentDominates(flowProc, dominators, conditionBlock.ID, statement.ID, flag, objectName) {
+			continue
+		}
+		safeBranch := vbacfg.EdgeBranchTrue
+		if negated {
+			safeBranch = vbacfg.EdgeBranchFalse
+		}
+		safeReachable := false
+		unsafeReachable := false
+		for _, edge := range flowProc.Graph.Edges {
+			if edge.From != conditionBlock.ID || (edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse) {
+				continue
+			}
+			reachesAccess := objectFlowCanReach(flowProc.Graph, edge.To, accessBlock.ID)
+			if edge.Kind == safeBranch {
+				safeReachable = safeReachable || reachesAccess
+			} else {
+				unsafeReachable = unsafeReachable || reachesAccess
+			}
+		}
+		if safeReachable && !unsafeReachable {
+			return true
+		}
+	}
+	return false
+}
+
+func objectBooleanGuard(statement procedureir.Statement) (string, bool, bool) {
+	if statement.Condition == nil {
+		return "", false, false
+	}
+	text := strings.ToLower(strings.TrimSpace(statement.Condition.Text))
+	if then := strings.Index(text, " then"); then >= 0 {
+		text = strings.TrimSpace(text[:then])
+	}
+	negated := false
+	if strings.HasPrefix(text, "not ") {
+		negated = true
+		text = strings.TrimSpace(strings.TrimPrefix(text, "not "))
+	}
+	name := cleanIdentifier(text)
+	if name == "" || strings.ContainsAny(name, " .()=<>") {
+		return "", false, false
+	}
+	return name, negated, true
+}
+
+func objectOpenFlagForObject(flag, objectName string) bool {
+	flag = strings.ToLower(cleanIdentifier(flag))
+	objectName = strings.ToLower(cleanIdentifier(objectName))
+	return objectName != "" && strings.HasPrefix(flag, objectName) && strings.HasSuffix(flag, "opened")
+}
+
+func objectOpenFlagAssignmentDominates(proc sourceProcedure, dominators map[vbacfg.BlockID][]vbacfg.BlockID, conditionBlock vbacfg.BlockID, conditionStatementID int, flag, objectName string) bool {
+	flag = strings.ToLower(cleanIdentifier(flag))
+	objectName = strings.ToLower(cleanIdentifier(objectName))
+	for _, flagStatement := range proc.Statements {
+		if strings.ToLower(compactStatement(flagStatement.Text)) != flag+"=true" {
+			continue
+		}
+		flagBlock, ok := proc.Graph.BlockForStatement(flagStatement.ID)
+		if !ok {
+			continue
+		}
+		// A handler can be reached through an exceptional edge before the
+		// assignment dominates the handler's block.  The guarded branch still
+		// proves that the flag is True, so source order is a valid fallback for
+		// the known flag/object pair after the object assignment dominates the
+		// flag write itself.
+		flagBeforeCondition := objectBlockSetContains(dominators[conditionBlock], flagBlock.ID) || flagStatement.ID < conditionStatementID
+		if !flagBeforeCondition {
+			continue
+		}
+		for _, objectStatement := range proc.Statements {
+			if !strings.HasPrefix(strings.ToLower(compactStatement(objectStatement.Text)), "set"+objectName+"=") {
+				continue
+			}
+			objectBlock, ok := proc.Graph.BlockForStatement(objectStatement.ID)
+			if ok && objectBlockSetContains(dominators[flagBlock.ID], objectBlock.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func objectBlockSetContains(blocks []vbacfg.BlockID, candidate vbacfg.BlockID) bool {
+	for _, block := range blocks {
+		if block == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func objectFlowCanReach(graph *vbacfg.Graph, start, target vbacfg.BlockID) bool {
+	if start == target {
+		return true
+	}
+	seen := map[vbacfg.BlockID]bool{start: true}
+	queue := []vbacfg.BlockID{start}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range graph.Edges {
+			if edge.From != current || edge.Class == vbacfg.EdgeExceptional || seen[edge.To] {
+				continue
+			}
+			if edge.To == target {
+				return true
+			}
+			seen[edge.To] = true
+			queue = append(queue, edge.To)
+		}
+	}
+	return false
+}
+
 type objectFlowResult struct {
 	in         map[vbacfg.BlockID]map[string]bool
 	out        map[vbacfg.BlockID]map[string]bool
@@ -545,6 +801,7 @@ type objectFlowContext struct {
 	calls        map[int][]procedureir.CallSite
 	accesses     map[int][]procedureir.VariableAccess
 	predecessors map[vbacfg.BlockID][]vbacfg.Edge
+	vars         map[string]objectVariable
 }
 
 func newObjectFlowContext(proc sourceProcedure) objectFlowContext {
@@ -554,6 +811,7 @@ func newObjectFlowContext(proc sourceProcedure) objectFlowContext {
 		calls:        make(map[int][]procedureir.CallSite),
 		accesses:     make(map[int][]procedureir.VariableAccess),
 		predecessors: make(map[vbacfg.BlockID][]vbacfg.Edge),
+		vars:         map[string]objectVariable{},
 	}
 	for _, expression := range proc.Expressions {
 		context.expressions[expression.ID] = expression
@@ -624,7 +882,10 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 	if proc.Graph == nil {
 		return result
 	}
-	flowContext := newObjectFlowContext(proc)
+	flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
+	flowProc := proc
+	flowProc.Graph = &flowGraph
+	flowContext := newObjectFlowContext(flowProc)
 	procedureDecls := procedureDeclarations(file.Lines, proc)
 	for key, declaration := range declarations {
 		if !declaration.Object {
@@ -646,6 +907,7 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 	if len(result.vars) == 0 {
 		return result
 	}
+	flowContext.vars = result.vars
 	initial := map[string]bool{}
 	for key, variable := range result.vars {
 		initial[key] = false
@@ -658,25 +920,25 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 		// initializer establishes a safe value.
 	}
 	reachable := map[vbacfg.BlockID]bool{}
-	for _, id := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
+	for _, id := range flowProc.Graph.Reachable(vbacfg.EdgeFilter{}) {
 		reachable[id] = true
 	}
-	for _, block := range proc.Graph.Blocks {
+	for _, block := range flowProc.Graph.Blocks {
 		if !reachable[block.ID] {
 			continue
 		}
-		if block.ID == proc.Graph.Entry {
+		if block.ID == flowProc.Graph.Entry {
 			result.in[block.ID] = cloneObjectState(initial)
 		} else {
 			result.in[block.ID] = objectStateAllTrue(result.vars)
 		}
-		result.out[block.ID] = objectFlowTransfer(file, proc, block, result.in[block.ID], result.vars, declarations, summaries, flowContext)
+		result.out[block.ID] = objectFlowTransfer(file, flowProc, block, result.in[block.ID], result.vars, declarations, summaries, flowContext)
 	}
 	changed := true
 	for changed {
 		changed = false
-		for _, block := range proc.Graph.Blocks {
-			if !reachable[block.ID] || block.ID == proc.Graph.Entry {
+		for _, block := range flowProc.Graph.Blocks {
+			if !reachable[block.ID] || block.ID == flowProc.Graph.Entry {
 				continue
 			}
 			incoming := make([]map[string]bool, 0)
@@ -699,15 +961,15 @@ func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[str
 				result.in[block.ID] = next
 				changed = true
 			}
-			updated := objectFlowTransfer(file, proc, block, next, result.vars, declarations, summaries, flowContext)
+			updated := objectFlowTransfer(file, flowProc, block, next, result.vars, declarations, summaries, flowContext)
 			if !objectStateEqual(result.out[block.ID], updated) {
 				result.out[block.ID] = updated
 				changed = true
 			}
 		}
 	}
-	if proc.Graph != nil {
-		result.normalExit = cloneObjectState(result.in[proc.Graph.NormalExit])
+	if flowProc.Graph != nil {
+		result.normalExit = cloneObjectState(result.in[flowProc.Graph.NormalExit])
 	}
 	return result
 }
@@ -746,6 +1008,33 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 		return state
 	}
 	text := strings.ToLower(strings.TrimSpace(statement.Condition.Text))
+	if comparison, ok := objectErrNumberGuard(text); ok && objectFlowExceptionalOnly(flowContext, edge.From) {
+		possible := (comparison == "nonzero" && edge.Kind == vbacfg.EdgeBranchTrue) ||
+			(comparison == "zero" && edge.Kind == vbacfg.EdgeBranchFalse)
+		if !possible {
+			// An error handler is entered only after Err.Number is populated. A
+			// branch contradicting that fact is not a normal path; preserve the
+			// lattice identity for the impossible edge so it cannot manufacture
+			// a nullable return value at the procedure exit.
+			return objectStateAllTrue(flowContext.vars)
+		}
+	}
+	if name, expected, equals, ok := objectTypeNameGuard(text); ok {
+		key := objectGuardVariableKey(name, state)
+		if key == "" {
+			return state
+		}
+		nonNothing := (equals && edge.Kind == vbacfg.EdgeBranchTrue) || (!equals && edge.Kind == vbacfg.EdgeBranchFalse)
+		if strings.EqualFold(expected, "nothing") {
+			nonNothing = !nonNothing
+		}
+		if nonNothing {
+			updated := cloneObjectState(state)
+			updated[key] = true
+			return updated
+		}
+		return state
+	}
 	marker := " is nothing"
 	index := strings.Index(text, marker)
 	if index <= 0 || strings.Contains(text[index+len(marker):], " ") || strings.Contains(text[:index], " and ") || strings.Contains(text[:index], " or ") {
@@ -761,16 +1050,9 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 	if name == "" || strings.ContainsAny(name, " .()") {
 		return state
 	}
-	ref := objectVariable{Scope: procedureir.ScopeLocal, Name: name}
-	key := ref.key()
-	if _, exists := state[key]; !exists {
-		for _, scope := range []procedureir.SymbolScope{procedureir.ScopeParameter, procedureir.ScopeModule} {
-			candidate := objectVariable{Scope: scope, Name: name}
-			if _, ok := state[candidate.key()]; ok {
-				key = candidate.key()
-				break
-			}
-		}
+	key := objectGuardVariableKey(name, state)
+	if key == "" {
+		return state
 	}
 	nonNothingOnTrue := not
 	if edge.Kind == vbacfg.EdgeBranchFalse {
@@ -785,6 +1067,95 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 		return updated
 	}
 	return state
+}
+
+func objectErrNumberGuard(text string) (string, bool) {
+	compact := compactStatement(strings.ToLower(strings.TrimSpace(text)))
+	switch compact {
+	case "err.number<>0":
+		return "nonzero", true
+	case "err.number=0":
+		return "zero", true
+	default:
+		return "", false
+	}
+}
+
+func objectFlowExceptionalOnly(flowContext objectFlowContext, blockID vbacfg.BlockID) bool {
+	return objectFlowExceptionalOnlyFrom(flowContext, blockID, map[vbacfg.BlockID]bool{})
+}
+
+func objectFlowExceptionalOnlyFrom(flowContext objectFlowContext, blockID vbacfg.BlockID, seen map[vbacfg.BlockID]bool) bool {
+	if seen[blockID] {
+		return false
+	}
+	seen[blockID] = true
+	pred := flowContext.predecessors[blockID]
+	if len(pred) == 0 {
+		return false
+	}
+	for _, edge := range pred {
+		if edge.Class == vbacfg.EdgeExceptional {
+			continue
+		}
+		if edge.Class != vbacfg.EdgeNormal || edge.Kind != vbacfg.EdgeFallthrough ||
+			!objectFlowExceptionalOnlyFrom(flowContext, edge.From, seen) {
+			return false
+		}
+	}
+	return true
+}
+
+func objectGuardVariableKey(name string, state map[string]bool) string {
+	name = cleanIdentifier(strings.TrimSpace(name))
+	if name == "" {
+		return ""
+	}
+	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
+		key := (objectVariable{Scope: scope, Name: name}).key()
+		if _, exists := state[key]; exists {
+			return key
+		}
+	}
+	return ""
+}
+
+func objectTypeNameGuard(text string) (string, string, bool, bool) {
+	text = strings.TrimSpace(text)
+	prefix := "typename("
+	if !strings.HasPrefix(text, prefix) {
+		return "", "", false, false
+	}
+	close := strings.Index(text[len(prefix):], ")")
+	if close < 0 {
+		return "", "", false, false
+	}
+	close += len(prefix)
+	name := cleanIdentifier(strings.TrimSpace(text[len(prefix):close]))
+	rest := strings.TrimSpace(text[close+1:])
+	operator := ""
+	switch {
+	case strings.HasPrefix(rest, "<>"):
+		operator = "<>"
+	case strings.HasPrefix(rest, "="):
+		operator = "="
+	default:
+		return "", "", false, false
+	}
+	rest = strings.TrimSpace(rest[len(operator):])
+	if len(rest) < 2 || rest[0] != '"' {
+		return "", "", false, false
+	}
+	end := strings.Index(rest[1:], "\"")
+	if end < 0 {
+		return "", "", false, false
+	}
+	end++
+	expected := strings.TrimSpace(rest[1:end])
+	if name == "" || expected == "" {
+		return "", "", false, false
+	}
+	return name, expected, operator == "=", true
 }
 
 func objectFlowInlineGuardAssignment(statement procedureir.Statement, name string) bool {
@@ -831,7 +1202,7 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 	}
 	switch statement.Kind {
 	case procedureir.StatementSet:
-		state[target.key()] = objectFlowValueAssigned(proc, *statement, state, flowContext.expressions, summaries)
+		state[target.key()] = objectFlowValueAssigned(proc, *statement, state, flowContext.expressions, declarations, summaries)
 	case procedureir.StatementAssignment, procedureir.StatementReDim, procedureir.StatementFor:
 		// A value assignment is not an object Set.  Treat it as unsafe even if
 		// malformed VBA happens to compile through implicit coercion.
@@ -903,15 +1274,15 @@ func objectIndexedTargetCall(calls []procedureir.CallSite, targetText string) bo
 	return false
 }
 
-func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Statement, state map[string]bool, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) bool {
+func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Statement, state map[string]bool, expressions map[int]procedureir.Expression, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) bool {
 	value := statement.Value
 	if value == nil {
 		return false
 	}
-	return objectExpressionAssigned(proc, *value, state, expressions, summaries, statement.ID)
+	return objectExpressionAssigned(proc, *value, state, expressions, declarations, summaries, statement.ID)
 }
 
-func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expression, state map[string]bool, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary, statementID int) bool {
+func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expression, state map[string]bool, expressions map[int]procedureir.Expression, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, statementID int) bool {
 	text := strings.TrimSpace(expression.Text)
 	lower := strings.ToLower(text)
 	if lower == "nothing" || strings.HasPrefix(lower, "nothing ") {
@@ -923,7 +1294,7 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 	case procedureir.ExpressionParentheses:
 		for _, child := range expression.Children {
 			if nested, ok := expressions[child]; ok {
-				return objectExpressionAssigned(proc, nested, state, expressions, summaries, statementID)
+				return objectExpressionAssigned(proc, nested, state, expressions, declarations, summaries, statementID)
 			}
 		}
 	case procedureir.ExpressionIdentifier:
@@ -941,7 +1312,7 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 			if call.StatementID != statementID || (call.ExpressionID != 0 && call.ExpressionID != expression.ID) {
 				continue
 			}
-			if objectCallReturnsAssigned(call, summaries) {
+			if objectCallReturnsAssigned(proc, statementID, call, state, declarations, summaries) {
 				return true
 			}
 		}
@@ -953,7 +1324,7 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		for _, childID := range expression.Children {
 			if child, ok := expressions[childID]; ok && child.Kind == procedureir.ExpressionIdentifier {
 				root := strings.ToLower(cleanIdentifier(child.Text))
-				if root == "thisworkbook" || root == "application" {
+				if root == "thisworkbook" || root == "application" || (root == "me" && strings.EqualFold(proc.ModuleKind, "form")) {
 					return true
 				}
 				break
@@ -972,7 +1343,7 @@ func objectConstructorCallText(text string) bool {
 	return strings.HasPrefix(text, "createobject(") || strings.HasPrefix(text, "getobject(")
 }
 
-func objectCallReturnsAssigned(call procedureir.CallSite, summaries map[string]objectProcedureSummary) bool {
+func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) bool {
 	if objectConstructorCallText(strings.ToLower(call.Callee.Text)) || strings.EqualFold(call.Callee.BaseName, "CreateObject") || strings.EqualFold(call.Callee.BaseName, "GetObject") {
 		return true
 	}
@@ -989,14 +1360,158 @@ func objectCallReturnsAssigned(call procedureir.CallSite, summaries map[string]o
 		if strings.EqualFold(call.Callee.Member, "Add") && strings.HasSuffix(receiver, ".controls") {
 			return true
 		}
-		return receiver == "thisworkbook" || receiver == "application" || receiver == "excel.application" ||
-			strings.HasPrefix(receiver, "thisworkbook.") || strings.HasPrefix(receiver, "application.") || strings.HasPrefix(receiver, "excel.application.")
+		if objectExcelMemberChainAssigned(call, state, declarations) {
+			return true
+		}
+		if !objectErrorResumeNextAt(proc, statementID) && objectExcelMemberFactoryAssigned(call, declarations) {
+			// A successful Excel member/factory call produces an object even
+			// when its receiver came from a public boundary.  If the receiver
+			// were Nothing, VBA would raise before the assignment's normal
+			// continuation.  On Error Resume Next is excluded because that
+			// mode can continue with an unchanged Nothing target.
+			return true
+		}
+		if receiver == "thisworkbook" || receiver == "application" || receiver == "excel.application" ||
+			strings.HasPrefix(receiver, "thisworkbook.") || strings.HasPrefix(receiver, "application.") || strings.HasPrefix(receiver, "excel.application.") {
+			return true
+		}
+		if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
+			summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries)
+			return ok && summary.ReturnAssigned
+		}
+		if summary, ok := objectReceiverReturnSummary(call, declarations, summaries); ok {
+			return summary.ReturnAssigned
+		}
+		return false
 	}
 	if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
 		return false
 	}
 	summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries)
 	return ok && summary.ReturnAssigned
+}
+
+func objectReceiverReturnSummary(call procedureir.CallSite, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
+	if call.Callee.Receiver == nil || call.Callee.Member == "" {
+		return objectProcedureSummary{}, false
+	}
+	receiver := strings.TrimSpace(*call.Callee.Receiver)
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(strings.SplitN(receiver, ".", 2)[0], "(", 2)[0]))
+	declaration, ok := objectDeclarationByName(root, declarations)
+	if !ok || strings.TrimSpace(declaration.Type) == "" {
+		return objectProcedureSummary{}, false
+	}
+	typeName := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(declaration.Type))))
+	member := strings.ToLower(cleanIdentifier(call.Callee.Member))
+	var match objectProcedureSummary
+	found := false
+	for _, summary := range summaries {
+		if !strings.EqualFold(cleanIdentifier(summary.Module), typeName) || !strings.EqualFold(lastName(summary.QualifiedName), member) {
+			continue
+		}
+		if found {
+			return objectProcedureSummary{}, false
+		}
+		match, found = summary, true
+	}
+	return match, found
+}
+
+func objectExcelMemberChainAssigned(call procedureir.CallSite, state map[string]bool, declarations map[string]sourceDeclaration) bool {
+	if call.Callee.Receiver == nil {
+		return false
+	}
+	receiver := strings.TrimSpace(*call.Callee.Receiver)
+	parts := strings.Split(receiver, ".")
+	if len(parts) == 0 {
+		return false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(parts[0], "(", 2)[0]))
+	if root == "" || !objectNameDefinitelyAssigned(root, state) {
+		return false
+	}
+	declaration, ok := objectDeclarationByName(root, declarations)
+	if !ok || !excelObjectUseType(declaration.Type) {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if !excelObjectUseMember(part) {
+			return false
+		}
+	}
+	return excelObjectUseMember(call.Callee.Member)
+}
+
+func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations map[string]sourceDeclaration) bool {
+	if call.Callee.Receiver == nil {
+		return false
+	}
+	receiver := strings.TrimSpace(*call.Callee.Receiver)
+	parts := strings.Split(receiver, ".")
+	if len(parts) == 0 {
+		return false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(parts[0], "(", 2)[0]))
+	declaration, ok := objectDeclarationByName(root, declarations)
+	if !ok || !excelObjectUseType(declaration.Type) {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if !excelObjectFactoryMember(part) {
+			return false
+		}
+	}
+	return excelObjectFactoryMember(call.Callee.Member)
+}
+
+func objectNameDefinitelyAssigned(name string, state map[string]bool) bool {
+	name = cleanIdentifier(strings.TrimSpace(name))
+	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
+		key := (objectVariable{Scope: scope, Name: name}).key()
+		if value, exists := state[key]; exists {
+			return value
+		}
+	}
+	return false
+}
+
+func objectDeclarationByName(name string, declarations map[string]sourceDeclaration) (sourceDeclaration, bool) {
+	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
+		if declaration, ok := objectDeclarationFor(name, scope, declarations); ok {
+			return declaration, true
+		}
+	}
+	return sourceDeclaration{}, false
+}
+
+func excelObjectUseType(typ string) bool {
+	typ = strings.ToLower(cleanIdentifier(strings.TrimSpace(typ)))
+	switch typ {
+	case "application", "workbook", "worksheet", "range", "chart", "pivot table", "pivottable", "listobject", "window", "shape":
+		return true
+	default:
+		return strings.HasSuffix(typ, ".application") || strings.HasSuffix(typ, ".workbook") || strings.HasSuffix(typ, ".worksheet") || strings.HasSuffix(typ, ".range") || strings.HasSuffix(typ, ".shape")
+	}
+}
+
+func excelObjectUseMember(member string) bool {
+	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(strings.SplitN(member, "(", 2)[0])))
+	switch member {
+	case "application", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "parent", "resize", "offset", "addshape", "selection", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add":
+		return true
+	default:
+		return false
+	}
+}
+
+func excelObjectFactoryMember(member string) bool {
+	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(strings.SplitN(member, "(", 2)[0])))
+	switch member {
+	case "application", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add", "addshape", "parent", "resize", "offset":
+		return true
+	default:
+		return false
+	}
 }
 
 func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations map[string]sourceDeclaration, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) {
@@ -1067,6 +1582,13 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 				assigned = state[variable.key()]
 				continue
 			}
+			if !summary.ByRefWritten[formalIndex] {
+				// A ByRef parameter that is only read remains an alias to the
+				// caller's object.  Lack of a guaranteed assignment is not the
+				// same as evidence that the callee wrote Nothing into it.
+				assigned = state[variable.key()]
+				continue
+			}
 			if !summary.ByRefAssigned[formalIndex] {
 				assigned = false
 				break
@@ -1088,8 +1610,36 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 }
 
 type objectCallActual struct {
-	text  string
-	scope procedureir.SymbolScope
+	expressionID int
+	text         string
+	scope        procedureir.SymbolScope
+}
+
+func objectProcedureAllowsParameterEntry(proc sourceProcedure) bool {
+	return strings.EqualFold(strings.TrimSpace(proc.Visibility), "private")
+}
+
+func objectCallParameterAssigned(proc sourceProcedure, declarations map[string]sourceDeclaration, call procedureir.CallSite, summary objectProcedureSummary, formalIndex int, actuals []objectCallActual, state map[string]bool, vars map[string]objectVariable, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) (bool, bool) {
+	for actualIndex, actual := range actuals {
+		if objectFormalIndex(call, summary, actualIndex) != formalIndex {
+			continue
+		}
+		if actual.expressionID != 0 {
+			if expression, ok := expressions[actual.expressionID]; ok && expression.Kind != procedureir.ExpressionIdentifier {
+				return objectExpressionAssigned(proc, expression, state, expressions, declarations, summaries, call.StatementID), true
+			}
+		}
+		name := cleanIdentifier(actual.text)
+		if name == "" {
+			return false, true
+		}
+		variable := objectFlowVariableForName(name, vars)
+		if _, exists := vars[variable.key()]; !exists {
+			return false, false
+		}
+		return state[variable.key()], true
+	}
+	return false, false
 }
 
 func objectCallActuals(call procedureir.CallSite, expressions map[int]procedureir.Expression) []objectCallActual {
@@ -1102,11 +1652,14 @@ func objectCallActuals(call procedureir.CallSite, expressions map[int]procedurei
 			actuals = append(actuals, objectCallActual{})
 			continue
 		}
-		if expression.Kind != procedureir.ExpressionIdentifier {
-			actuals = append(actuals, objectCallActual{})
-			continue
+		for expression.Kind == procedureir.ExpressionParentheses && len(expression.Children) == 1 {
+			nested, nestedOK := expressions[expression.Children[0]]
+			if !nestedOK {
+				break
+			}
+			expression = nested
 		}
-		actuals = append(actuals, objectCallActual{text: expression.Text, scope: procedureir.ScopeUnresolved})
+		actuals = append(actuals, objectCallActual{expressionID: expression.ID, text: expression.Text, scope: procedureir.ScopeUnresolved})
 	}
 	return actuals
 }

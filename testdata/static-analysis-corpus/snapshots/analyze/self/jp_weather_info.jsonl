@@ -1,17 +1,10 @@
-{"project":"self/jp_weather_info","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA202","severity":"warning","line":96,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":96,"column":22}
-{"project":"self/jp_weather_info","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA202","severity":"warning","line":107,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":107,"column":18}
 {"project":"self/jp_weather_info","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":109,"column":18}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherApi.bas","surface":"analyze","code":"VBA224","severity":"warning","line":30,"column":0}
-{"project":"self/jp_weather_info","file":"src/modules/WeatherApi.bas","surface":"analyze","code":"VBA202","severity":"warning","line":77,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":18,"column":0}
-{"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":37,"column":0}
-{"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":64,"column":0}
-{"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":89,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":116,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA225","severity":"warning","line":116,"column":0}
-{"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":124,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":156,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":168,"column":0}
 {"project":"self/jp_weather_info","file":"src/modules/WeatherSheet.bas","surface":"analyze","code":"VBA202","severity":"warning","line":180,"column":0}
