@@ -62,6 +62,7 @@ func TestEvaluateTypedValuesAndOperators(t *testing.T) {
 		{name: "numeric comparison", expr: "limit >= 3", kind: Known, want: Value{Kind: ValueBoolean, Boolean: true}},
 		{name: "float", expr: "1.5! + 2.5#", kind: Known, want: Value{Kind: ValueDouble, Float: 4}},
 		{name: "currency", expr: "1.25@ + 0.75@", kind: Known, want: Value{Kind: ValueCurrency, Currency: 20000}},
+		{name: "currency midpoint", expr: "0.00025@", kind: Known, want: Value{Kind: ValueCurrency, Currency: 2}},
 		{name: "currency banker rounding", expr: "1.23445@", kind: Known, want: Value{Kind: ValueCurrency, Currency: 12344}},
 		{name: "hex", expr: "&H10", kind: Known, want: Value{Kind: ValueLong, Integer: 16}},
 		{name: "octal", expr: "&O10", kind: Known, want: Value{Kind: ValueLong, Integer: 8}},
