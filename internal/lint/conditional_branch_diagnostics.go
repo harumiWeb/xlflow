@@ -53,6 +53,7 @@ func (l Linter) conditionalBranchSyntaxIssues(path, source string) []Issue {
 
 	stack := make([]openBlock, 0, 4)
 	issues := make([]Issue, 0)
+	inProcedure := false
 	for index := 0; index < len(statements); index++ {
 		statement := statements[index]
 		text := conditionalBranchStatementText(statement.text)
@@ -69,6 +70,31 @@ func (l Linter) conditionalBranchSyntaxIssues(path, source string) []Issue {
 			continue
 		}
 		lower := strings.ToLower(strings.TrimSpace(text))
+
+		// VB062 is procedure-local.  Module-level branch-looking statements
+		// are still handled by the existing placement/parser-recovery rules;
+		// classifying them here would duplicate those diagnostics and violate
+		// the rule's declared scope.  Check procedure boundaries before branch
+		// ownership so an `If` after `End Sub` cannot inherit the prior stack.
+		if isProcedureEndStatement(lower) {
+			if inProcedure {
+				if len(stack) != 0 {
+					return conditionalBranchCertainIssues(issues)
+				}
+				inProcedure = false
+			}
+			continue
+		}
+		if _, ok := procedureStart(text, statement.line); ok {
+			if len(stack) != 0 {
+				return conditionalBranchCertainIssues(issues)
+			}
+			inProcedure = true
+			continue
+		}
+		if !inProcedure {
+			continue
+		}
 
 		word, rest := firstVBAWord(text)
 		switch strings.ToLower(word) {
@@ -118,19 +144,6 @@ func (l Linter) conditionalBranchSyntaxIssues(path, source string) []Issue {
 		// above.  Do not attempt structural recovery after an already-invalid
 		// statement: mismatched closers make ownership ambiguous, and callers
 		// should retain VB014 instead of receiving speculative VB062 findings.
-		if isProcedureEndStatement(lower) {
-			if len(stack) != 0 {
-				return conditionalBranchCertainIssues(issues)
-			}
-			continue
-		}
-		if _, ok := procedureStart(text, statement.line); ok {
-			if len(stack) != 0 {
-				return conditionalBranchCertainIssues(issues)
-			}
-			continue
-		}
-
 		if closer, count, ok := blockCloser(lower); ok {
 			if count <= 0 || len(stack) < count {
 				return conditionalBranchCertainIssues(issues)

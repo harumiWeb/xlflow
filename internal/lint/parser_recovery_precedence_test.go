@@ -97,3 +97,29 @@ End Sub
 		t.Fatalf("overlapping VB059 should suppress duplicate VB014: %+v", got)
 	}
 }
+
+func TestParserRecoveryRetainsMultipleUnclosedBlockDiagnostics(t *testing.T) {
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+Sub Main()
+    If enabled Then
+        For Each item In items
+            Debug.Print item
+End Sub
+`
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB014")
+	if len(got) != 2 {
+		t.Fatalf("unclosed blocks = %+v, want one VB014 per missing closer", got)
+	}
+	kinds := map[string]bool{}
+	for _, issue := range got {
+		kinds[issue.BlockKind] = true
+	}
+	if !kinds["if"] || !kinds["for"] {
+		t.Fatalf("unclosed block kinds = %#v, want if and for", kinds)
+	}
+}

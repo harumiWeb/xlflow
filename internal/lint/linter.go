@@ -456,16 +456,16 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		if (shouldReportParseIssue(view.HasError, view.HasMissing, view.Root, issues) && !vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) && !numericLiteralRecovery) ||
 			shouldReportStructuralParseIssue(string(source)) {
 			parseIssues := lintCtx.parseIssues(view.Root)
-			filteredParseIssues := make([]Issue, 0, len(parseIssues))
+			// Keep the historical single generic parser-recovery fallback for
+			// ambiguous CST recovery, but never collapse the independent,
+			// source-anchored unmatched-block findings produced above.  The
+			// latter can legitimately contain one VB014 per missing closer.
 			parserOwnerPresent := hasParserRecoveryOwner(issues)
-			for parseIndex, parseIssue := range parseIssues {
-				// Preserve the historical single VB014 fallback when no
-				// high-confidence syntax rule owns any recovery range. Once a
-				// specific owner exists, retain distinct unowned ranges so a
-				// neighboring malformed statement is not hidden.
-				if parseIndex > 0 && !parserOwnerPresent {
-					break
-				}
+			if !parserOwnerPresent && len(parseIssues) > 1 && !hasTargetedParserRecovery(parseIssues) {
+				parseIssues = parseIssues[:1]
+			}
+			filteredParseIssues := make([]Issue, 0, len(parseIssues))
+			for _, parseIssue := range parseIssues {
 				if parseIssue.Code == "VB014" {
 					problem := parseIssue.diagnosticRange
 					// Structural recovery can synthesize a location-less VB014
@@ -546,7 +546,7 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 
 func hasSpecificRecoveryDiagnostic(issues []Issue) bool {
 	for _, issue := range issues {
-		if issue.Code == "VB062" || issue.Code == "VB063" || issue.Code == "VB064" || issue.Code == "VB065" {
+		if policy, ok := parserRecoveryPolicies[issue.Code]; ok && policy.suppressLocationless {
 			return true
 		}
 	}
@@ -555,10 +555,49 @@ func hasSpecificRecoveryDiagnostic(issues []Issue) bool {
 
 func hasParserRecoveryOwner(issues []Issue) bool {
 	for _, issue := range issues {
-		if issue.Code == "VB005" && issue.parserRecoveryOK {
+		if ownsParserRecovery(issue) {
 			return true
 		}
-		if issue.Code == "VB059" || parserRecoverySpecificCodes[issue.Code] {
+	}
+	return false
+}
+
+type parserRecoveryPolicy struct {
+	overlapsRecovery     bool
+	suppressLocationless bool
+}
+
+// parserRecoveryPolicies is the single source of truth for syntax findings
+// that can own a parser-recovery range.  Only the new issue594 families need
+// to suppress a location-less structural fallback; older rules already have
+// concrete ranges and must not hide an unrelated unmatched-block finding.
+var parserRecoveryPolicies = map[string]parserRecoveryPolicy{
+	"VB008": {overlapsRecovery: true},
+	"VB009": {overlapsRecovery: true},
+	"VB010": {overlapsRecovery: true},
+	"VB011": {overlapsRecovery: true},
+	"VB012": {overlapsRecovery: true},
+	"VB013": {overlapsRecovery: true},
+	"VB015": {overlapsRecovery: true},
+	"VB032": {overlapsRecovery: true},
+	"VB059": {overlapsRecovery: true},
+	"VB062": {overlapsRecovery: true, suppressLocationless: true},
+	"VB063": {overlapsRecovery: true, suppressLocationless: true},
+	"VB064": {overlapsRecovery: true, suppressLocationless: true},
+	"VB065": {overlapsRecovery: true, suppressLocationless: true},
+}
+
+func ownsParserRecovery(issue Issue) bool {
+	if issue.Code == "VB005" {
+		return issue.parserRecoveryOK
+	}
+	policy, ok := parserRecoveryPolicies[issue.Code]
+	return ok && policy.overlapsRecovery
+}
+
+func hasTargetedParserRecovery(issues []Issue) bool {
+	for _, issue := range issues {
+		if issue.BlockKind != "" || issue.ExpectedCloser != "" {
 			return true
 		}
 	}
@@ -2744,37 +2783,9 @@ func shouldReportParseIssue(hasError, hasMissing bool, root *tree_sitter.Node, i
 	return false
 }
 
-// parserRecoverySpecificCodes are compile-equivalent source checks that can
-// take precedence over the generic VB014 recovery fallback.  Keep this
-// population explicit: VB014 itself is the fallback, while VB059 is handled
-// alongside this set because it is produced by the AST-backed call scanner.
-var parserRecoverySpecificCodes = map[string]bool{
-	"VB008": true,
-	"VB009": true,
-	"VB010": true,
-	"VB011": true,
-	"VB012": true,
-	"VB013": true,
-	"VB015": true,
-	"VB032": true,
-	"VB062": true,
-	"VB063": true,
-	"VB064": true,
-	"VB065": true,
-}
-
 func parserRecoverySuppressed(problem vbaast.Range, issues []Issue) bool {
 	for _, issue := range issues {
-		switch {
-		case issue.Code == "VB005":
-			// VB005 is only parser-recovery-safe for the text scanner's UDT
-			// fallback.  AST-derived VB005 findings must not hide VB014.
-			if !issue.parserRecoveryOK {
-				continue
-			}
-		case issue.Code == "VB059", parserRecoverySpecificCodes[issue.Code]:
-			// These diagnostics are compile-equivalent syntax evidence.
-		default:
+		if !ownsParserRecovery(issue) {
 			continue
 		}
 		if issueOverlapsParserRecovery(issue, problem) {

@@ -159,6 +159,27 @@ func TestLinterPublishesConditionalBranchSyntaxDiagnostic(t *testing.T) {
 	}
 }
 
+func TestLinterDoesNotClassifyModuleScopeConditionalSyntaxAsVB062(t *testing.T) {
+	source := []byte(`Attribute VB_Name = "Main"
+Option Explicit
+If ready Then
+  Debug.Print "x"
+Else
+  Debug.Print "y"
+End If
+`)
+	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, conditionalBranchDiagnosticCode); len(got) != 0 {
+		t.Fatalf("module-scope conditional syntax should not produce VB062: %+v", got)
+	}
+	if got := issuesByCode(issues, "VB014"); len(got) == 0 {
+		t.Fatalf("module-scope conditional syntax should retain existing recovery/placement diagnostics: %+v", issues)
+	}
+}
+
 func TestConditionalBranchDoesNotHideMalformedNeighboringRecovery(t *testing.T) {
 	source := []byte("Sub Main()\n  If ready\n    Debug.Print (1\nEnd Sub\n")
 	issues, err := (Linter{Config: config.Default()}).LintSource("Main.bas", source)
