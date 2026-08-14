@@ -3144,6 +3144,72 @@ End Function
 	}
 }
 
+func TestAnalyzerCFGVBA204RejectsTextualCleanupLookalikes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Function StringLookalike() As Long
+  Dim message As String
+  On Error GoTo Handler
+  StringLookalike = 1
+Handler:
+  message = "reset = nothing"
+End Function
+
+Public Function CallLookalike() As Long
+  On Error GoTo Handler
+  CallLookalike = 1
+Handler:
+  CloseAndPurgeAll
+End Function
+
+Public Function AssignmentLookalike() As Long
+  Dim handle As Object
+  On Error GoTo Handler
+  AssignmentLookalike = 1
+Handler:
+  Set handle = NothingCached
+End Function
+
+Public Function ExactCleanup() As Long
+  On Error GoTo Handler
+  ExactCleanup = 1
+Handler:
+  Close #1
+End Function
+
+Public Function AliasedCleanup(ByVal fileHandle As Long) As Long
+  On Error GoTo Handler
+  AliasedCleanup = 1
+Handler:
+  AliasedCleanup = CLng(utc_pclose(fileHandle))
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA204")
+	if len(got) != 3 || got[0].Procedure != "StringLookalike" || got[1].Procedure != "CallLookalike" || got[2].Procedure != "AssignmentLookalike" {
+		t.Fatalf("textual cleanup lookalikes should retain VBA204 while exact Close remains safe: %+v", got)
+	}
+
+	modulePath := filepath.Join(dir, "src", "modules", "Main.bas")
+	source, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, modulePath, config.Default(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = findingsByCode(realtime, "VBA204")
+	if len(got) != 3 || got[0].Procedure != "StringLookalike" || got[1].Procedure != "CallLookalike" || got[2].Procedure != "AssignmentLookalike" {
+		t.Fatalf("realtime textual cleanup lookalikes should retain VBA204: %+v", got)
+	}
+}
+
 func TestAnalyzerCFGVBA204DoesNotTreatDirectErrRaiseAsFallthrough(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

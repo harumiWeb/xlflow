@@ -3687,11 +3687,11 @@ func isSemanticCleanupStatement(proc sourceProcedure, statement procedureir.Stat
 		procedureir.StatementOnError, procedureir.StatementExit, procedureir.StatementEnd:
 		return true
 	case procedureir.StatementAssignment, procedureir.StatementSet:
-		return isCleanupAssignment(statement.Text) || isLoopFinalizationAssignment(proc, statement, loopExitVariables)
+		return isCleanupAssignment(statement) || isCleanupCall(proc, statement) || isLoopFinalizationAssignment(proc, statement, loopExitVariables)
 	case procedureir.StatementCall:
-		return isCleanupCall(statement.Text)
+		return isCleanupCall(proc, statement)
 	case procedureir.StatementUnknown:
-		return isCleanupAssignment(statement.Text) || isCleanupCall(statement.Text)
+		return isCleanupAssignment(statement) || isCleanupCall(proc, statement)
 	default:
 		return false
 	}
@@ -3702,33 +3702,42 @@ func isExecutableSemanticCleanup(proc sourceProcedure, statement procedureir.Sta
 		return false
 	}
 	if statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet {
-		return isCleanupAssignment(statement.Text) || isLoopFinalizationAssignment(proc, statement, loopExitVariables)
+		return isCleanupAssignment(statement) || isCleanupCall(proc, statement) || isLoopFinalizationAssignment(proc, statement, loopExitVariables)
 	}
-	return statement.Kind == procedureir.StatementCall || statement.Kind == procedureir.StatementUnknown
+	return isCleanupCall(proc, statement)
 }
 
-func isCleanupAssignment(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	return strings.Contains(lower, "= nothing") ||
-		strings.Contains(lower, "pclose(") || strings.Contains(lower, ".close(") ||
-		strings.Contains(lower, ".quit(") || strings.Contains(lower, "free(") ||
-		strings.Contains(lower, "release(") || strings.Contains(lower, "destroy(")
+func isCleanupAssignment(statement procedureir.Statement) bool {
+	if statement.Value == nil || statement.Value.Recovered {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(statement.Value.Text), "Nothing")
 }
 
-func isCleanupCall(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if strings.HasPrefix(lower, "call ") || strings.HasPrefix(lower, "call\t") {
-		lower = strings.TrimSpace(lower[len("call"):])
-	}
-	first := lower
-	for _, separator := range []string{" ", "\t", "(", "#"} {
-		if index := strings.Index(first, separator); index >= 0 {
-			first = first[:index]
+func isCleanupCall(proc sourceProcedure, statement procedureir.Statement) bool {
+	for _, call := range proc.Calls {
+		if call.StatementID != statement.ID {
+			continue
+		}
+		member := strings.TrimSpace(call.Callee.Member)
+		if member == "" {
+			member = strings.TrimSpace(call.Callee.BaseName)
+		}
+		member = strings.ToLower(cleanIdentifier(member))
+		switch member {
+		case "close", "pclose", "quit", "free", "release", "destroy":
+			return true
+		}
+		// Declare Function aliases such as utc_pclose retain the cleanup
+		// operation in a namespaced suffix. Do not generalize this to arbitrary
+		// prefixes: CloseAndPurgeAll and ReleaseUserData are ordinary calls.
+		if strings.HasSuffix(member, "_pclose") {
+			return true
 		}
 	}
-	return strings.HasPrefix(first, "close") || strings.Contains(first, ".close") ||
-		strings.Contains(first, ".quit") || strings.HasPrefix(first, "free") ||
-		strings.HasPrefix(first, "release") || strings.HasPrefix(first, "destroy")
+	// File-number Close is a VBA statement rather than a call expression, so
+	// ProcedureIR exposes its exact syntax kind instead of a CallSite.
+	return strings.EqualFold(statement.SyntaxKind, "close_statement")
 }
 
 func isLoopFinalizationAssignment(proc sourceProcedure, statement procedureir.Statement, loopExitVariables map[string]bool) bool {
