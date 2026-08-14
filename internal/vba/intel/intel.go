@@ -19,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/doccomments"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -63,6 +64,9 @@ type Analyzer struct {
 	// already own a coherent workspace snapshot. File-local callers may leave
 	// it nil; the shared checker then remains conservative.
 	VisibleConstants map[string]bool
+	// ConstantValues carries the immutable value-bearing project constants for
+	// compile-equivalent declaration and array checks.
+	ConstantValues map[string]constexpr.Value
 	// TypeDBResolutionIncomplete is true when the production type database
 	// loaded with warnings. Type-dependent unresolved-name diagnostics must
 	// fail closed until the generated TypeLib view is complete.
@@ -279,7 +283,7 @@ func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc D
 			return out
 		}
 		if ir, err := procedureIRForDocumentContext(ctx, doc, a.RootDir, parsed); err == nil {
-			for _, issue := range lint.CompileEquivalentArrayShapeIssuesWithConstants(doc.Path, doc.Source, &ir, a.VisibleConstants) {
+			for _, issue := range lint.CompileEquivalentArrayShapeIssuesWithValues(doc.Path, doc.Source, &ir, a.VisibleConstants, a.ConstantValues) {
 				if !isCompileEquivalentDiagnostic(issue.Code) {
 					continue
 				}
@@ -344,6 +348,7 @@ func (a Analyzer) diagnosticsFullContext(ctx context.Context, doc Document) []Di
 		ModuleKind:             doc.ModuleKind,
 		VisibleDeclarations:    a.visibleDeclarations,
 		VisibleConstants:       a.VisibleConstants,
+		ConstantValues:         a.ConstantValues,
 		TypeDeclarations:       a.typeDeclarations,
 		ObjectTypeDeclarations: a.objectTypeDeclarations,
 	}.LintParsedContext(ctx, parsed)

@@ -40,11 +40,13 @@ type DiagnosticResult struct {
 }
 
 // ProjectAnalysisDocument is an immutable, protocol-neutral document input for
-// project-aware Full diagnostics. IR calls are resolved against the exact
-// workspace snapshot represented by Revision; CFG is built from the same IR.
+// project-aware Full diagnostics. IR calls and source-derived constant values
+// are resolved against the exact workspace snapshot represented by Revision;
+// CFG is built from the same IR.
 type ProjectAnalysisDocument struct {
-	IR  procedureir.DocumentIR
-	CFG vbacfg.Document
+	IR     procedureir.DocumentIR
+	CFG    vbacfg.Document
+	Source string
 }
 
 // ProjectAnalysisSnapshot is a coherent view of saved files and published

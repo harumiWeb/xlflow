@@ -262,6 +262,24 @@ func TestOptionalDefaultExpressionIsUnknown(t *testing.T) {
 	}
 }
 
+func TestOptionalDefaultUsesSharedConstantEvaluation(t *testing.T) {
+	source := `Public Const Limit As Long = 2
+Enum State
+    Ready = Limit + 1
+End Enum
+Sub Defaults(Optional value As Long = Ready, Optional text As String = Limit + 1)
+End Sub
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB048")
+	if len(got) != 1 || got[0].Kind != "optional_default_type" {
+		t.Fatalf("shared Const/Enum evaluation findings = %+v, want one type mismatch", got)
+	}
+}
+
 func TestOptionalDefaultLiteralTypeMismatch(t *testing.T) {
 	source := "Sub Defaults(Optional text As Long = \"bad\", Optional flag As Boolean = 1)\nEnd Sub\n"
 	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
@@ -315,6 +333,17 @@ func TestOptionalDefaultDateLiteralHandling(t *testing.T) {
 	}
 	if !optionalDefaultTypeMismatch(value, "Long", signatureTypeIntrinsic) {
 		t.Fatal("date literal should mismatch a non-Date Optional parameter")
+	}
+}
+
+func TestOptionalDefaultKnownBooleanAndDateNumericCompatibility(t *testing.T) {
+	source := "Sub Defaults(Optional flag As Long = True, Optional stamp As Double = #1/1/2024#)\nEnd Sub\n"
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB048"); len(got) != 0 {
+		t.Fatalf("Boolean-to-numeric and Date-to-Double defaults should be compatible: %+v", got)
 	}
 }
 

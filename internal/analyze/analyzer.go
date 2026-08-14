@@ -13,12 +13,14 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
@@ -94,6 +96,7 @@ type Analyzer struct {
 	typeDB                     *vbadb.DB
 	typeDBResolutionIncomplete bool
 	visibleConstants           map[string]bool
+	visibleConstantValues      map[string]constexpr.Value
 	byRefSymbols               []intel.Symbol
 	errorGuardAliases          map[string]bool
 	errorValueWrappers         map[string]bool
@@ -242,6 +245,7 @@ type parsedFile struct {
 	Parsed                    *vbaast.ParsedDocument
 	IntelDocument             intel.Document
 	RangeValueModuleConstants map[string]int
+	ConstantValues            map[string]constexpr.Value
 	DataFlowModuleBindings    map[string]bool
 }
 
@@ -391,6 +395,10 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		if a.Config.Analyze.DetectRangeValueArrayShape {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
+		var constantValues map[string]constexpr.Value
+		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison {
+			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
+		}
 		var dataFlowModuleBindings map[string]bool
 		if a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
@@ -406,6 +414,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			Parsed:                    parsed,
 			IntelDocument:             intelDocument,
 			RangeValueModuleConstants: rangeValueConstants,
+			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		})
 	}
@@ -439,6 +448,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		}
 	}
 	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
+	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
 	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
 		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
 	}
@@ -595,6 +605,7 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Findi
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 		VisibleConstants:           a.visibleConstants,
+		ConstantValues:             a.visibleConstantValues,
 	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
 	if len(diagnostics) == 0 {
 		return nil, nil
@@ -1020,6 +1031,13 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBContext(ctx context.Context, roo
 // diagnostics use it for cross-file rules while legacy callers retain the
 // single-document entry point above.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary) ([]Finding, error) {
+	return SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, nil)
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext is
+// the snapshot-aware form used by LSP and other project callers that already
+// own a value-bearing constant environment.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1043,6 +1061,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 		if cfg.Analyze.DetectRangeValueArrayShape {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
+		var constantValues map[string]constexpr.Value
+		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison {
+			constantValues = lint.ConstantValuesFromSource(string(view.Source), &ir, projectConstants)
+		}
 		var dataFlowModuleBindings map[string]bool
 		if cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
@@ -1056,9 +1078,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 			IR:                        ir,
 			CFG:                       controlFlow,
 			RangeValueModuleConstants: rangeValueConstants,
+			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
-		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB}
+		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB, visibleConstantValues: projectConstants}
 		if dictionaryCollectionAnalysisEnabled(cfg.Analyze) {
 			analyzer.dictionaryCollection = buildDictionaryCollectionIndex([]parsedFile{file})
 		}
