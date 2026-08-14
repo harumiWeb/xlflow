@@ -300,11 +300,26 @@ func rangeValueModuleIntegerConstants(lines []string, ir procedureir.DocumentIR)
 			insideProcedure[line] = true
 		}
 	}
+	conditionalDepth := 0
 	for lineIndex, line := range lines {
 		if insideProcedure[lineIndex+1] {
 			continue
 		}
-		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(line)))
+		code := strings.TrimSpace(normalizedCodeLine(line))
+		if strings.HasPrefix(strings.ToLower(code), "#if ") {
+			conditionalDepth++
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(code), "#end if") {
+			if conditionalDepth > 0 {
+				conditionalDepth--
+			}
+			continue
+		}
+		if conditionalDepth > 0 || strings.HasPrefix(strings.ToLower(code), "#elseif ") || strings.HasPrefix(strings.ToLower(code), "#else") {
+			continue
+		}
+		match := constIntegerRe.FindStringSubmatch(code)
 		if len(match) != 3 {
 			continue
 		}
@@ -321,6 +336,9 @@ func rangeValueIntegerConstants(moduleConstants map[string]int, proc sourceProce
 		constants[name] = value
 	}
 	for _, statement := range proc.Statements {
+		if len(statement.ConditionalBranches) > 0 {
+			continue
+		}
 		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
 		if len(match) != 3 {
 			continue

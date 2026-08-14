@@ -624,7 +624,7 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 	graphSymbols := make([]callgraph.Symbol, 0, symbolCapacity)
 	for _, raw := range rawEntries {
 		entry := indexedFileAnalysis{
-			path: raw.path, procedureIR: procedureir.Clone(raw.procedureIR),
+			path: raw.path, source: raw.source, procedureIR: procedureir.Clone(raw.procedureIR),
 			controlFlow: vbacfg.CloneDocument(raw.controlFlow),
 			callSites:   cloneCallSites(raw.callSites), typeReferences: cloneTypeReferences(raw.typeReferences),
 			symbols: append([]intel.Symbol(nil), raw.symbols...),
@@ -653,7 +653,7 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 	var typeReferences []calls.TypeReference
 	for _, entry := range entries {
 		resolvedIR := procedureir.Resolve(entry.procedureIR, resolver)
-		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: entry.controlFlow})
+		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: entry.controlFlow, Source: entry.source})
 		sites = append(sites, entry.callSites...)
 		typeReferences = append(typeReferences, entry.typeReferences...)
 	}

@@ -29,12 +29,14 @@ import (
 	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/config"
 	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
+	"github.com/harumiWeb/xlflow/internal/lint"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
@@ -222,6 +224,7 @@ func New(opts Options) (*Server, func(), error) {
 	var visibleConstantsMu sync.Mutex
 	var visibleConstantsRevision uint64
 	var visibleConstants map[string]bool
+	var constantValues map[string]constexpr.Value
 	s.projectDiagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest, project intel.ProjectAnalysisSnapshot) intel.DiagnosticResult {
 		projectEffects := s.projectEffectSummary(project)
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
@@ -233,9 +236,11 @@ func New(opts Options) (*Server, func(), error) {
 		visibleConstantsMu.Lock()
 		if visibleConstants == nil || visibleConstantsRevision != project.Revision {
 			visibleConstants = projectVisibleConstants(project, typeDB.DB)
+			constantValues = projectConstantValues(project, typeDB.DB)
 			visibleConstantsRevision = project.Revision
 		}
 		analyzer.VisibleConstants = visibleConstants
+		analyzer.ConstantValues = constantValues
 		visibleConstantsMu.Unlock()
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
 			projectKey := symbolFileKey(ir.Path)
@@ -247,7 +252,7 @@ func New(opts Options) (*Server, func(), error) {
 				}
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects)
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, analyzer.ConstantValues)
 			if err != nil {
 				return nil, err
 			}
@@ -311,14 +316,14 @@ func New(opts Options) (*Server, func(), error) {
 func projectVisibleConstants(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB) map[string]bool {
 	counts := make(map[string]int)
 	add := func(name string) {
-		name = strings.ToLower(strings.TrimSpace(name))
+		name = projectConstantIdentifier(name)
 		if name != "" {
 			counts[name]++
 		}
 	}
 	addQualified := func(qualifier, name string) {
-		qualifier = strings.ToLower(strings.TrimSpace(qualifier))
-		name = strings.ToLower(strings.TrimSpace(name))
+		qualifier = projectConstantIdentifier(qualifier)
+		name = projectConstantIdentifier(name)
 		if qualifier != "" && name != "" {
 			counts[qualifier+"."+name]++
 		}
@@ -343,23 +348,23 @@ func projectVisibleConstants(project intel.ProjectAnalysisSnapshot, typeDB *vbad
 		constants := typeDB.AllConstantsList()
 		countsByName := make(map[string]int)
 		for _, constant := range constants {
-			name := strings.ToLower(strings.TrimSpace(constant.Name))
+			name := projectConstantIdentifier(constant.Name)
 			if name != "" {
 				countsByName[name]++
 			}
 		}
 		for _, constant := range constants {
-			name := strings.ToLower(strings.TrimSpace(constant.Name))
+			name := projectConstantIdentifier(constant.Name)
 			if name == "" {
 				continue
 			}
 			if countsByName[name] == 1 {
 				counts[name]++
 			}
-			if group := strings.ToLower(strings.TrimSpace(constant.EnumGroup)); group != "" {
+			if group := projectConstantIdentifier(constant.EnumGroup); group != "" {
 				counts[group+"."+name]++
 			}
-			if library := strings.ToLower(strings.TrimSpace(constant.Library)); library != "" {
+			if library := projectConstantIdentifier(constant.Library); library != "" {
 				counts[library+"."+name]++
 			}
 		}
@@ -371,6 +376,21 @@ func projectVisibleConstants(project intel.ProjectAnalysisSnapshot, typeDB *vbad
 		}
 	}
 	return constants
+}
+
+func projectConstantValues(project intel.ProjectAnalysisSnapshot, typeDB *vbadb.DB) map[string]constexpr.Value {
+	documents := make([]lint.ConstantValueDocument, 0, len(project.Documents))
+	for _, document := range project.Documents {
+		documents = append(documents, lint.ConstantValueDocument{Source: document.Source, IR: &document.IR})
+	}
+	return lint.ProjectConstantValues(documents, typeDB)
+}
+
+func projectConstantIdentifier(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.Trim(text, "[]")
+	text = strings.TrimRight(text, "$%&#@^!")
+	return strings.ToLower(text)
 }
 
 func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) effects.ProjectSummary {

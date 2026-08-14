@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -138,10 +139,10 @@ func (l Linter) validateProcedureSignature(path string, sig procedureSignature, 
 			}
 		}
 		if param.optional && strings.TrimSpace(param.defaultValue) != "" {
-			constant, definitelyNonconstant := classifyOptionalDefault(param.defaultValue)
+			constant, definitelyNonconstant, evaluated := l.classifyOptionalDefault(param.defaultValue)
 			if definitelyNonconstant {
 				issues = append(issues, signatureIssue(l, path, param.nameRange, sig.name, "optional_default_nonconstant", "Optional parameter defaults must be constant expressions."))
-			} else if constant && optionalDefaultTypeMismatch(param.defaultValue, param.typ, kind) {
+			} else if constant && optionalDefaultResultTypeMismatch(evaluated, param.typ, kind) {
 				issues = append(issues, signatureIssue(l, path, param.nameRange, sig.name, "optional_default_type", fmt.Sprintf("Optional default %q is incompatible with parameter type %s.", strings.TrimSpace(param.defaultValue), displaySignatureType(param.typ))))
 			}
 		}
@@ -524,36 +525,71 @@ func displaySignatureType(typ string) string {
 }
 
 // classifyOptionalDefault returns whether the expression is a known constant
-// and whether it is definitely non-constant.  Expressions such as Const or
-// Enum references and arithmetic are intentionally unknown here; #595's
-// shared evaluator will own those cases, so this rule must remain fail-open.
-func classifyOptionalDefault(value string) (constant, definitelyNonconstant bool) {
+// and whether it is definitely non-constant. Runtime calls remain a definite
+// error, while unresolved/unsupported expressions stay Unknown so the rule
+// remains fail-open.
+func (l Linter) classifyOptionalDefault(value string) (constant, definitelyNonconstant bool, result constexpr.Result) {
 	value = strings.TrimSpace(value)
 	for strings.HasPrefix(value, "(") && strings.HasSuffix(value, ")") && balancedParens(value) {
 		value = strings.TrimSpace(value[1 : len(value)-1])
 	}
 	if value == "" {
-		return false, false
+		return false, false, constexpr.Result{Kind: constexpr.Unknown, Reason: "empty expression"}
 	}
 	if identifierCallDefault.MatchString(value) || strings.HasPrefix(strings.ToLower(value), "new ") {
-		return false, true
+		return false, true, constexpr.Result{Kind: constexpr.Unknown, Reason: "runtime expression"}
 	}
-	if strings.EqualFold(value, "true") || strings.EqualFold(value, "false") || strings.EqualFold(value, "empty") || strings.EqualFold(value, "null") || strings.EqualFold(value, "nothing") {
-		return true, false
+	result = constexpr.EvaluateValues(value, l.constantEvaluationValues())
+	if result.Kind == constexpr.Known {
+		return true, false, result
 	}
-	if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
-		return true, false
+	return false, false, result
+}
+
+// constantEvaluationValues keeps project-level ambiguity conservative. The
+// legacy VisibleConstants map records only names that have a unique unqualified
+// winner; qualified names are safe to retain because their scope is explicit.
+func (l Linter) constantEvaluationValues() map[string]constexpr.Value {
+	if l.ConstantValues == nil || l.VisibleConstants == nil {
+		return l.ConstantValues
 	}
-	if strings.HasPrefix(value, "#") && strings.HasSuffix(value, "#") {
-		return true, false
+	filtered := make(map[string]constexpr.Value, len(l.ConstantValues))
+	for name, value := range l.ConstantValues {
+		key := strings.ToLower(cleanIdentifier(name))
+		_, local := l.localConstantValues[key]
+		if local || l.VisibleConstants[key] {
+			filtered[name] = value
+		}
 	}
-	if isNumericLiteral(value) {
-		return true, false
+	return filtered
+}
+
+func optionalDefaultResultTypeMismatch(result constexpr.Result, typ string, kind signatureType) bool {
+	if result.Kind != constexpr.Known || kind == signatureTypeVariant || kind == signatureTypeUnknown || kind == signatureTypeUDT {
+		return false
 	}
-	if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
-		return classifyOptionalDefault(strings.TrimSpace(value[1:]))
+	target := strings.ToLower(cleanIdentifier(typ))
+	switch result.Typed.Kind {
+	case constexpr.ValueString:
+		return target != "string"
+	case constexpr.ValueBoolean:
+		return target != "boolean" && !isNumericSignatureTarget(target)
+	case constexpr.ValueDate:
+		return target != "date" && target != "double"
+	case constexpr.ValueInteger, constexpr.ValueLong, constexpr.ValueLongLong, constexpr.ValueSingle, constexpr.ValueDouble, constexpr.ValueCurrency:
+		return target == "string" || target == "boolean"
+	default:
+		return false
 	}
-	return false, false
+}
+
+func isNumericSignatureTarget(target string) bool {
+	switch target {
+	case "byte", "currency", "decimal", "double", "integer", "long", "longlong", "longptr", "single":
+		return true
+	default:
+		return false
+	}
 }
 
 func optionalDefaultTypeMismatch(value, typ string, kind signatureType) bool {

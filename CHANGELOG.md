@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added a shared, Excel-free VBA constant-expression evaluator for issue #595.
+  Typed `Known` / `Unknown` / `Invalid` results now power Optional defaults,
+  Const and Enum references, fixed-array bounds, and `ReDim` bounds across
+  batch and LSP analysis. Runtime calls, ambiguous or unresolved values, and
+  safely unmodelled overflow remain fail-open instead of becoming diagnostics.
+
 - Fixed `VBA204` false positives for project-specific labels used as shared
   cleanup or loop-finalization paths, while retaining findings for normal
   fallthrough into logging, error reporting, or arbitrary handler code. Cleanup

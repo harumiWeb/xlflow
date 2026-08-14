@@ -19,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vba/reachability"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -64,10 +65,15 @@ type Linter struct {
 	// document (for example, an editor buffer whose project metadata already
 	// identified it as a document module). Batch lint leaves this empty and
 	// uses the canonical source-root classification from symbols instead.
-	ModuleKind             string
-	PathFilter             func(string) bool
-	VisibleDeclarations    map[string]bool
-	VisibleConstants       map[string]bool
+	ModuleKind          string
+	PathFilter          func(string) bool
+	VisibleDeclarations map[string]bool
+	VisibleConstants    map[string]bool
+	// ConstantValues carries the immutable, value-bearing subset of the
+	// project constant environment. VisibleConstants remains for legacy
+	// name-only callers and constant-assignment diagnostics.
+	ConstantValues         map[string]constexpr.Value
+	localConstantValues    map[string]constexpr.Value
 	TypeDeclarations       map[string]int
 	ObjectTypeDeclarations map[string]int
 }
@@ -138,6 +144,9 @@ func (l Linter) RunResultContext(ctx context.Context) (Result, error) {
 	files, err := l.filesContext(ctx)
 	if err != nil {
 		return Result{}, err
+	}
+	if l.ConstantValues == nil {
+		l.ConstantValues = l.projectConstantValuesContext(ctx, files)
 	}
 	visibleDeclarations := l.VisibleDeclarations
 	visibleConstants := l.VisibleConstants
@@ -386,6 +395,12 @@ func (l Linter) lintParsedContext(ctx context.Context, doc *vbaast.ParsedDocumen
 		return nil, irErr
 	}
 	procedureIR := &ir
+	l.localConstantValues = constantValuesFromSource(string(source), procedureIR, nil)
+	if l.ConstantValues == nil {
+		l.ConstantValues = l.localConstantValues
+	} else {
+		l.ConstantValues = constantValuesFromSource(string(source), procedureIR, l.ConstantValues)
+	}
 	if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		numericLiteralRecovery := vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
 		lintCtx := astLintContext{

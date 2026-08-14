@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/lint"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -127,7 +129,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	// Constant bounds are scoped to the current procedure. Resolve them once
 	// for this CFG walk so every ReDim transfer shares the same table without
 	// repeatedly reparsing the module and procedure declarations.
-	constants := arrayIntegerConstants(file, proc)
+	constants := arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants)
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
 		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants)...)
@@ -901,13 +903,59 @@ func parseArrayDimensionsWithConstants(text string, base int, constants map[stri
 // the Enum members that are valid integer bound names in VBA.  The parser is
 // intentionally small and fail-open: unresolved expressions simply do not
 // enter the table, so dynamic bounds remain unclassified.
-func arrayIntegerConstants(file parsedFile, proc sourceProcedure) map[string]int {
+func arrayIntegerConstants(file parsedFile, proc sourceProcedure, projectValues map[string]constexpr.Value, visibleNames map[string]bool) map[string]int {
 	constants := rangeValueIntegerConstants(rangeValueModuleIntegerConstants(file.Lines, file.IR), proc)
+	// Seed the ReDim evaluator from the shared typed projection so arithmetic,
+	// Enum references, and qualified project constants follow the same rules as
+	// declaration and Optional-default validation. Non-integral and unresolved
+	// values intentionally stay out of this integer-only adapter.
+	sharedValues := file.ConstantValues
+	if sharedValues == nil {
+		sharedValues = lint.ConstantValuesFromSource(string(file.Source), &file.IR, nil)
+	}
+	if len(projectValues) > 0 {
+		merged := make(map[string]constexpr.Value, len(sharedValues)+len(projectValues))
+		for name, value := range projectValues {
+			key := strings.ToLower(cleanIdentifier(name))
+			if visibleNames != nil && !visibleNames[key] {
+				continue
+			}
+			merged[name] = value
+		}
+		for name, value := range sharedValues {
+			merged[name] = value
+		}
+		sharedValues = merged
+	}
+	for name, value := range sharedValues {
+		if value.Kind != constexpr.ValueInteger && value.Kind != constexpr.ValueLong && value.Kind != constexpr.ValueLongLong {
+			continue
+		}
+		integer, ok := constexpr.IntegerAsInt(value)
+		if !ok {
+			continue
+		}
+		constants[strings.ToLower(name)] = integer
+	}
 	inEnum := false
 	var next *int
+	conditionalDepth := 0
 	for _, line := range file.Lines {
 		code := strings.TrimSpace(normalizedCodeLine(line))
 		lower := strings.ToLower(code)
+		if strings.HasPrefix(lower, "#if ") {
+			conditionalDepth++
+			continue
+		}
+		if strings.HasPrefix(lower, "#end if") {
+			if conditionalDepth > 0 {
+				conditionalDepth--
+			}
+			continue
+		}
+		if conditionalDepth > 0 || strings.HasPrefix(lower, "#elseif ") || strings.HasPrefix(lower, "#else") {
+			continue
+		}
 		if strings.HasPrefix(lower, "enum ") || strings.HasPrefix(lower, "public enum ") || strings.HasPrefix(lower, "private enum ") || strings.HasPrefix(lower, "friend enum ") {
 			inEnum = true
 			next = nil
@@ -1311,7 +1359,7 @@ func inferArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
 				// unconditional return assignments, so leave the summary unknown.
 				continue
 			}
-			constants := arrayIntegerConstants(file, proc)
+			constants := arrayIntegerConstants(file, proc, nil, nil)
 			walkArrayCFG(proc.Graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 					value, known := arrayExpressionState(rhs, in, ctx)
