@@ -419,6 +419,27 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448PreservesStateAcrossParenthesizedUnresolvedObjectArgument(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub UseUnresolvedParenthesized()
+  Dim target As Worksheet
+  Set target = ThisWorkbook.Worksheets(1)
+  ExternalHelper (target)
+  Debug.Print target.Name
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an unresolved parenthesized object actual must preserve caller state: %+v", got)
+	}
+}
+
 func TestVBA202Issue448KeepsPublicByValEntryConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

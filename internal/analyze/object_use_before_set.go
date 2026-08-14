@@ -1589,6 +1589,12 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 		if _, exists := vars[variable.key()]; !exists {
 			continue
 		}
+		if actual.parenthesized && len(candidates) == 0 {
+			// An unresolved call receives a temporary ByVal value for a
+			// parenthesized actual, so it cannot change the caller's object
+			// reference.
+			continue
+		}
 		assigned := false
 		known := false
 		for _, summary := range candidates {
