@@ -262,6 +262,24 @@ func TestOptionalDefaultExpressionIsUnknown(t *testing.T) {
 	}
 }
 
+func TestOptionalDefaultUsesSharedConstantEvaluation(t *testing.T) {
+	source := `Public Const Limit As Long = 2
+Enum State
+    Ready = Limit + 1
+End Enum
+Sub Defaults(Optional value As Long = Ready, Optional text As String = Limit + 1)
+End Sub
+`
+	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := issuesByCode(issues, "VB048")
+	if len(got) != 1 || got[0].Kind != "optional_default_type" {
+		t.Fatalf("shared Const/Enum evaluation findings = %+v, want one type mismatch", got)
+	}
+}
+
 func TestOptionalDefaultLiteralTypeMismatch(t *testing.T) {
 	source := "Sub Defaults(Optional text As Long = \"bad\", Optional flag As Boolean = 1)\nEnd Sub\n"
 	issues, err := (Linter{}).LintSourceContext(context.Background(), "Main.bas", []byte(source))

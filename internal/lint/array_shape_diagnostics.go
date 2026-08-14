@@ -21,6 +21,26 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 	qualifiedConsts := map[string]bool{}
 	constValues := map[string]int{}
 	constExprs := map[string]string{}
+	for name, value := range l.ConstantValues {
+		if value.Kind != constexpr.ValueInteger && value.Kind != constexpr.ValueLong && value.Kind != constexpr.ValueLongLong {
+			continue
+		}
+		if int64(int(value.Integer)) != value.Integer {
+			continue
+		}
+		key := normalizeQualifiedIdentifier(name)
+		if key == "" {
+			continue
+		}
+		if !strings.Contains(key, ".") && l.VisibleConstants != nil && !l.VisibleConstants[key] {
+			continue
+		}
+		constValues[key] = int(value.Integer)
+		consts[key] = true
+		if strings.Contains(key, ".") {
+			qualifiedConsts[key] = true
+		}
+	}
 	addQualifiedConst := func(qualifier, name string) {
 		qualifier = normalizeQualifiedIdentifier(qualifier)
 		name = normalizeQualifiedIdentifier(name)
@@ -392,6 +412,12 @@ func CompileEquivalentArrayShapeIssues(path, source string, ir *procedureir.Docu
 // resolver or expression-inference implementation in this rule.
 func CompileEquivalentArrayShapeIssuesWithConstants(path, source string, ir *procedureir.DocumentIR, visibleConstants map[string]bool) []Issue {
 	return (Linter{VisibleConstants: visibleConstants}).arrayShapeIssues(path, source, ir)
+}
+
+// CompileEquivalentArrayShapeIssuesWithValues is the value-bearing project
+// adapter used by batch/LSP callers that already own a coherent snapshot.
+func CompileEquivalentArrayShapeIssuesWithValues(path, source string, ir *procedureir.DocumentIR, visibleConstants map[string]bool, values map[string]constexpr.Value) []Issue {
+	return (Linter{VisibleConstants: visibleConstants, ConstantValues: values}).arrayShapeIssues(path, source, ir)
 }
 
 func declarationPrefix(lower string) bool {
