@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA214` false positives when a narrow `On Error Resume Next`
+  compatibility probe captures `Err.Description` before clearing the error and
+  restoring normal error handling.
 - Added a shared, Excel-free VBA constant-expression evaluator for issue #595.
   Typed `Known` / `Unknown` / `Invalid` results now power Optional defaults,
   Const and Enum references, fixed-array bounds, and `ReDim` bounds across

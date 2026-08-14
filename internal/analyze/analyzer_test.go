@@ -3306,6 +3306,33 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA214AllowsErrDescriptionCompatibilityProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub DescriptionProbe()
+  Dim ws As Worksheet
+  Dim probeError As String
+  On Error Resume Next
+  Set ws = ThisWorkbook.Worksheets("Data")
+  If Err.Number <> 0 Then
+    probeError = Err.Description
+    Err.Clear
+  End If
+  On Error GoTo 0
+  If Len(probeError) > 0 Then Exit Sub
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA214"); len(got) != 0 {
+		t.Fatalf("Err.Description probe should not report VBA214: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA214ReportsScopeBoundsAndEarlyExits(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
