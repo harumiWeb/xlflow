@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA214` false positives when a narrow `On Error Resume Next`
+  compatibility probe captures `Err.Description` before clearing the error and
+  restoring normal error handling.
+
 - Fixed `VBA204` false positives for project-specific labels used as shared
   cleanup or loop-finalization paths, while retaining findings for normal
   fallthrough into logging, error reporting, or arbitrary handler code. Cleanup
