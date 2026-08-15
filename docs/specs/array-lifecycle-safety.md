@@ -65,12 +65,13 @@ nature is not proven, remains `unknown`.
 
 ## Diagnostics and ownership
 
-`VBA227` reports:
+`VBA227` reports only possible or partially known cases of:
 
 - `LBound` / `UBound` before allocation, invalid dimension numbers, and
-  dimension or bound contradictions;
-- indexed access before `ReDim` or after `Erase` when the target is a proven
-  array;
+  dimension or bound contradictions when the allocation or shape is not fully
+  proven;
+- indexed access before `ReDim` or after `Erase` when allocation is possible
+  but not proven to fail on every relevant path;
 - `ReDim` on fixed-size arrays or known scalar values;
 - `Erase` on a target proven incompatible with an array or object reset;
 - `For Each` over a source proven not to be an array or collection (the
@@ -78,11 +79,17 @@ nature is not proven, remains `unknown`.
 - known subscript-count mismatches and inconsistent loop lower-bound
   assumptions.
 
+Fully proven `array_unallocated` and `array_subscript_out_of_bounds` accesses
+are owned only by `VBA249`; `VBA227` must not duplicate those findings at the
+same expression.
+
 Constant declaration bounds and constant `ReDim` bounds are checked according
 to their operation contract. Compile-equivalent declaration/assignment cases
-use canonical blocking rule contracts; runtime-only array failures remain
-`VBA227` warnings and do not become preflight claims. Dynamic bounds and
-unknown values are not diagnosed.
+use canonical blocking rule contracts. A runtime array failure that the shared
+constant, type, and CFG/dataflow facts prove on every relevant path is
+projected by `VBA249` as a `runtime-error` severity `error`; a possible or
+partially known failure remains a non-blocking `VBA227` warning and does not
+become a preflight claim. Dynamic bounds and unknown values are not diagnosed.
 
 `VBA208` remains the owner of `ReDim Preserve` safety. It warns when a
 non-final dimension changes and remains conservative when the prior shape is

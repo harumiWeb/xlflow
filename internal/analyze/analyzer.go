@@ -61,7 +61,14 @@ type Finding struct {
 	HTTPReliability *HTTPReliabilityContext `json:"http_reliability,omitempty"`
 	// OpaqueBoolean describes the positional Boolean literals that made a
 	// VBA248 call-site finding actionable without embedding parser internals.
-	OpaqueBoolean         *OpaqueBooleanContext `json:"opaque_boolean,omitempty"`
+	OpaqueBoolean *OpaqueBooleanContext `json:"opaque_boolean,omitempty"`
+	// RuntimeError carries the deterministic runtime-failure kind for VBA249.
+	// It is deliberately additive so existing finding consumers can continue
+	// to consume the common envelope without inferring runtime semantics from
+	// severity alone.
+	RuntimeError          *RuntimeErrorContext `json:"runtime_error,omitempty"`
+	arrayLifecycleFinding bool
+	arrayOperationKey     string
 	httpOwnedSinks        map[int]bool
 	dataFlowSinkStartByte int
 }
@@ -396,7 +403,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison {
+		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
 			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
 		}
 		var dataFlowModuleBindings map[string]bool
@@ -1062,7 +1069,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison {
+		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
 			constantValues = lint.ConstantValuesFromSource(string(view.Source), &ir, projectConstants)
 		}
 		var dataFlowModuleBindings map[string]bool
@@ -1142,7 +1149,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can
 // resolve the latest workspace-document overlays through its symbol provider.
-var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248"}
+var sourceRealtimeRuleIDs = []string{"VBA201", "VBA204", "VBA206", "VBA208", "VBA209", "VBA212", "VBA213", "VBA215", "VBA216", "VBA217", "VBA218", "VBA219", "VBA223", "VBA224", "VBA225", "VBA226", "VBA227", "VBA228", "VBA229", "VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235", "VBA236", "VBA237", "VBA238", "VBA239", "VBA241", "VBA242", "VBA243", "VBA245", "VBA246", "VBA247", "VBA248", "VBA249"}
 
 func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 	for _, rule := range staticrules.ByFamily(staticrules.FamilyAnalyze) {
@@ -1190,6 +1197,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	worksheetRoots := newWorksheetRootTracker(worksheetCodenames)
 	var findings []Finding
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
+	findings = append(findings, a.deterministicRuntimeErrorFindings(file, proc, analysisCtx, moduleDecls)...)
 	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
 	}
@@ -1249,6 +1257,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
+	findings = suppressDeterministicArrayWarningDuplicates(findings)
 	if a.Config.Analyze.DetectRedimPreserveInLoops {
 		findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
 	}
@@ -1510,6 +1519,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, ctx.procedures)...)
+	findings = append(findings, a.deterministicRuntimeErrorFindings(file, proc, ctx, moduleDecls)...)
 	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
 	}
@@ -1612,6 +1622,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries, ctx.objectEntryStates[key])...)
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
+	findings = suppressDeterministicArrayWarningDuplicates(findings)
 	if a.Config.Analyze.DetectRedimPreserveInLoops {
 		findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
 	}

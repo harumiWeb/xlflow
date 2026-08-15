@@ -123,6 +123,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VBA246`](#vba246) | analyze | warning     | procedure-local | yes     | Unsafe HTTP or TLS configuration                   |
 | [`VBA247`](#vba247) | analyze | warning     | procedure-local | yes     | Missing or unlimited HTTP timeout                  |
 | [`VBA248`](#vba248) | analyze | warning     | procedure-local | no      | Opaque Boolean control arguments                   |
+| [`VBA249`](#vba249) | analyze | error       | procedure-local | yes     | Deterministic runtime error                        |
 
 ## VB001
 
@@ -2653,3 +2654,25 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | no                                |
 | Real-time editor diagnostic | yes                               |
 | Fix available               | no                                |
+
+## VBA249
+
+**Deterministic runtime error.** Constant evaluation, type information, control-flow, or dataflow facts prove that an expression will fail at runtime.
+
+| Property                    | Value                                 |
+| --------------------------- | ------------------------------------- |
+| Family                      | `analyze`                             |
+| Category                    | `runtime-safety`                      |
+| Evidence class              | `runtime-error`                       |
+| Compile-equivalent          | no                                    |
+| Default severity            | `error`                               |
+| Supported severities        | `error`                               |
+| Surfaces                    | `analyze`, `lsp`                      |
+| Scope                       | `procedure-local`                     |
+| Precision                   | `high`                                |
+| Enabled by default          | yes                                   |
+| Configuration               | `detect_deterministic_runtime_errors` |
+| Inline suppression          | yes                                   |
+| Blocks source preflight     | no                                    |
+| Real-time editor diagnostic | yes                                   |
+| Fix available               | no                                    |

@@ -33,8 +33,11 @@ eligibility, fix availability, documentation URL, evidence class, and whether
 the rule is compile-equivalent. Evidence metadata is normative: a
 compile-equivalent rule supports only `error`, is not inline-suppressible, and
 blocks source preflight; inference, runtime-safety, policy, and maintainability
-rules remain warning-only and non-blocking. Surface metadata remains consistent
-with family and real-time eligibility.
+rules remain warning-only and non-blocking. The `runtime-error` amendment
+defined by ADR-0042 is the deliberate exception: it supports only
+`error`, remains inline-suppressible, and is non-preflight-blocking because
+it proves a later execution failure rather than a VBE compile rejection.
+Surface metadata remains consistent with family and real-time eligibility.
 
 The Go package validates the complete registry at load time and exposes sorted,
 defensive projections through lookup, enumeration, and family filtering. It
@@ -141,6 +144,7 @@ and runtime-safety cases; a legacy `VBA206` disable setting cannot disable
 ## Amended by
 
 - `docs/adr/ADR-0038-project-level-preflight-diagnostic-waivers.md`
+- `docs/adr/ADR-0042-deterministic-runtime-error-diagnostics.md`
 
 ## Related
 

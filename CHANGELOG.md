@@ -13,6 +13,14 @@ All notable changes to xlflow will be documented in this file.
   batch and LSP analysis. Runtime calls, ambiguous or unresolved values, and
   safely unmodelled overflow remain fail-open instead of becoming diagnostics.
 
+- Added default-enabled `VBA249` deterministic runtime-error diagnostics for
+  proven division, numeric-operand, conversion, and array allocation/bound
+  failures derived from shared constant, type, CFG, and dataflow facts.
+  `runtime-error` findings use `error` severity but remain inline-suppressible
+  and non-preflight-blocking so they stay distinct from VBE compile-equivalent
+  errors; unknown `Variant`, late-bound, external, locale-dependent, and
+  branch-merged values remain silent.
+
 - Fixed `VBA204` false positives for project-specific labels used as shared
   cleanup or loop-finalization paths, while retaining findings for normal
   fallthrough into logging, error reporting, or arbitrary handler code. Cleanup

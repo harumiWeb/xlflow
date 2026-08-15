@@ -1240,8 +1240,8 @@ End Sub
 	if err != nil {
 		t.Fatalf("declaration keyword recovery should not abort analyzer: %v", err)
 	}
-	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 4 {
-		t.Fatalf("declaration recovery should retain only the actual array access finding, got %+v", got)
+	if got := findingsByCode(findings, "VBA249"); len(got) != 1 || got[0].Line != 4 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("declaration recovery should retain only the actual deterministic array access finding, got %+v", got)
 	}
 }
 
@@ -4796,17 +4796,19 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := findingsByCode(findings, "VBA227")
+	got227 := findingsByCode(findings, "VBA227")
+	got249 := findingsByCode(findings, "VBA249")
+	allArrayFindings := append(append([]Finding(nil), got227...), got249...)
 	for _, line := range []int{15, 20, 25} {
 		found := false
-		for _, finding := range got {
+		for _, finding := range allArrayFindings {
 			if finding.Line == line {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Fatalf("expected VBA227 on line %d, got %+v", line, got)
+			t.Fatalf("expected deterministic array finding on line %d, got VBA227=%+v VBA249=%+v", line, got227, got249)
 		}
 	}
 	if got208 := findingsByCode(findings, "VBA208"); len(got208) != 1 || got208[0].Line != 18 {
@@ -4815,8 +4817,8 @@ End Sub
 	if got101 := findingsByCode(findings, "VBA101"); len(got101) != 1 || got101[0].Line != 27 {
 		t.Fatalf("expected missing Set for object array element, got %+v", got101)
 	}
-	if got227 := findingsByCode(findings, "VBA227"); len(got227) != 3 {
-		t.Fatalf("unexpected VBA227 duplicates or safe-path findings: %+v", got227)
+	if len(got227) != 1 || len(got249) != 2 {
+		t.Fatalf("unexpected array ownership projection: VBA227=%+v VBA249=%+v", got227, got249)
 	}
 }
 
@@ -5358,7 +5360,7 @@ End Sub
 func TestAnalyzerArrayLifecyclePreservesMatchingShapesAndMultiTargetTransitions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeModule(t, dir, "Main.bas", `Option Explicit
+	source := `Option Explicit
 Public Sub Run(ByVal shouldAllocate As Boolean)
   Dim values() As Long
   Dim leftValues() As Long
@@ -5385,21 +5387,32 @@ Public Sub Run(ByVal shouldAllocate As Boolean)
   leftValues(1) = 1
   rightValues(1) = 1
 End Sub
-`)
+`
+	writeModule(t, dir, "Main.bas", source)
 
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := findingsByCode(findings, "VBA227")
+	got := findingsByCode(findings, "VBA249")
 	if len(got) != 2 {
-		t.Fatalf("expected only the two accesses after Erase to report, got %+v", got)
+		t.Fatalf("expected only the two accesses after Erase to report as deterministic runtime errors, got %+v", got)
 	}
 	expected := map[int]string{25: "leftValues", 26: "rightValues"}
 	for _, finding := range got {
 		name, ok := expected[finding.Line]
-		if !ok || !strings.Contains(finding.Message, name) {
-			t.Fatalf("unexpected VBA227 finding after multi-target Erase: %+v", finding)
+		lineText := ""
+		if finding.Line > 0 {
+			lines := strings.Split(source, "\n")
+			if finding.Line <= len(lines) {
+				lineText = lines[finding.Line-1]
+			}
+		}
+		if !ok || !strings.Contains(lineText, name) {
+			t.Fatalf("unexpected VBA249 finding after multi-target Erase: %+v", finding)
+		}
+		if finding.RuntimeError == nil || finding.RuntimeError.Kind != "array_unallocated" {
+			t.Fatalf("unexpected VBA249 context after multi-target Erase: %+v", finding)
 		}
 	}
 }
@@ -5605,7 +5618,7 @@ func TestVBA227BatchAndRealtimeResultsMatch(t *testing.T) {
 	source := `Option Explicit
 Public Sub Run()
   Dim values() As Long
-  values(0) = 1 ' xlflow:disable-line VBA227
+	values(0) = 1 ' xlflow:disable-line VBA227 VBA249
   ReDim values(0 To 1)
   values(1) = 2
 End Sub
