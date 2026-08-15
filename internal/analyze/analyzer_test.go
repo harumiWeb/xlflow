@@ -264,6 +264,42 @@ End Sub
 	if got := findingsByCode(realtime, "VBA225"); len(got) != 0 {
 		t.Fatalf("realtime array named cells should not produce VBA225: %+v", got)
 	}
+
+	projectRealtimePath := filepath.Join(dir, "src", "modules", "RealtimeProject.bas")
+	projectRealtimeSource := []byte(`Option Explicit
+Public Sub Run()
+  Dim index As Long
+  Dim result As Variant
+  For index = 1 To 100
+    result = cells(index, 1).Value2
+  Next index
+End Sub
+`)
+	projectRealtime, err := SourceRealtimeFindings(dir, projectRealtimePath, config.Default(), projectRealtimeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(projectRealtime, "VBA225"); len(got) != 1 {
+		t.Fatalf("realtime project Range binding should produce VBA225: %+v", got)
+	}
+
+	variantRealtimePath := filepath.Join(variantDir, "src", "modules", "Realtime.bas")
+	variantRealtimeSource := []byte(`Option Explicit
+Public Sub Run()
+  Dim index As Long
+  Dim result As Variant
+  For index = 1 To 100
+    result = cells(index, 1).Value2
+  Next index
+End Sub
+`)
+	variantRealtime, err := SourceRealtimeFindings(variantDir, variantRealtimePath, config.Default(), variantRealtimeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(variantRealtime, "VBA225"); len(got) != 0 {
+		t.Fatalf("realtime project Variant cells should not produce VBA225: %+v", got)
+	}
 }
 
 func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {

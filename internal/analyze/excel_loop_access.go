@@ -264,11 +264,13 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 	} else if needHelperSummaries {
 		// Realtime analysis owns one document and does not have the batch
 		// resolver. Build same-document summaries so local helpers still work.
-		summaries = buildRealtimeExcelLoopSummaries(file, a.typeDB, a.RootDir, a.Config)
+		summaries = buildRealtimeExcelLoopSummaries(file, a.typeDB, a.excelRootBindings, a.RootDir, a.Config)
 	}
 	rootBindings := excelRootBindingIndex(nil)
 	if a.excelLoopAccess != nil {
 		rootBindings = a.excelLoopAccess.RootBindings
+	} else if a.excelRootBindings != nil {
+		rootBindings = a.excelRootBindings
 	} else {
 		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
 	}
@@ -417,9 +419,11 @@ func excelProcedureHasLocalLoopCall(file parsedFile, proc sourceProcedure, regio
 	return false
 }
 
-func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) map[string]excelAccessSummary {
+func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings excelRootBindingIndex, rootDir string, cfg config.Config) map[string]excelAccessSummary {
 	summaries := map[string]excelAccessSummary{}
-	rootBindings := buildExcelRootBindingIndex([]parsedFile{file})
+	if rootBindings == nil {
+		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
+	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	for i, candidate := range file.IR.Procedures {
 		if i >= len(procedures) {
@@ -447,6 +451,39 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootDir stri
 		}
 	}
 	return summaries
+}
+
+func buildRealtimeExcelRootBindingIndex(rootDir string, cfg config.Config, file parsedFile) excelRootBindingIndex {
+	doc := intel.Document{Path: file.Path, Source: string(file.Source), ModuleKind: file.ModuleKind}
+	projectSymbols, err := (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols([]intel.Document{doc}, "")
+	if err != nil {
+		return buildExcelRootBindingIndex([]parsedFile{file})
+	}
+	bindings := excelRootBindingIndex{}
+	for _, symbol := range projectSymbols {
+		name := strings.ToLower(strings.TrimSpace(symbol.Name))
+		if !vba242IsRootName(name) {
+			continue
+		}
+		bindings[name] = append(bindings[name], excelRootBinding{
+			Type: symbol.ReturnType, Kind: symbol.Kind, Visibility: symbol.Visibility,
+			Module: symbol.Module, Scope: excelSymbolScope(symbol.Kind, symbol.Visibility),
+		})
+	}
+	if len(bindings) == 0 {
+		return buildExcelRootBindingIndex([]parsedFile{file})
+	}
+	return bindings
+}
+
+func excelSymbolScope(kind, visibility string) procedureir.SymbolScope {
+	if strings.EqualFold(strings.TrimSpace(visibility), "private") {
+		return procedureir.ScopeModule
+	}
+	if strings.TrimSpace(visibility) == "" && excelRootBindingHasValueType(kind) {
+		return procedureir.ScopeModule
+	}
+	return procedureir.ScopeProject
 }
 
 func excelHelperSummary(file parsedFile, call procedureir.CallSite, summaries map[string]excelAccessSummary) (excelAccessSummary, bool) {
