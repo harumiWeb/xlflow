@@ -68,6 +68,7 @@ type Finding struct {
 	// severity alone.
 	RuntimeError          *RuntimeErrorContext `json:"runtime_error,omitempty"`
 	arrayLifecycleFinding bool
+	arrayOperationKey     string
 	httpOwnedSinks        map[int]bool
 	dataFlowSinkStartByte int
 }

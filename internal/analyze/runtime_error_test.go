@@ -274,6 +274,31 @@ End Sub
 	}
 }
 
+func TestVBA249KeepsUnrelatedArrayLifecycleWarningOnSameLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values(0 To 1) As Long
+  Dim scalar As Long
+  Debug.Print LBound(scalar): values(3) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got227 := findingsByCode(findings, "VBA227")
+	got249 := findingsByCode(findings, "VBA249")
+	if len(got227) != 1 || !strings.Contains(got227[0].Message, "LBound") {
+		t.Fatalf("unrelated scalar LBound warning must remain on a line with a deterministic array failure: %+v", got227)
+	}
+	if len(got249) != 1 || got249[0].RuntimeError == nil || got249[0].RuntimeError.Kind != "array_subscript_out_of_bounds" {
+		t.Fatalf("deterministic array bounds failure should remain on the same line: %+v", got249)
+	}
+}
+
 func TestVBA249DetectsKnownArrayBoundsAndKeepsUnknownShapesSilent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

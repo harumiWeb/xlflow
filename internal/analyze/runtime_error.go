@@ -136,7 +136,7 @@ func (a Analyzer) deterministicArrayRuntimeFindings(file parsedFile, proc source
 	seen := map[string]bool{}
 	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 		for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants) {
-			key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.message
+			key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
 			if seen[key] {
 				continue
 			}
@@ -144,6 +144,7 @@ func (a Analyzer) deterministicArrayRuntimeFindings(file parsedFile, proc source
 			message, reason, suggestion := deterministicRuntimeFailureText(issue.kind)
 			finding := a.simpleFinding(file, proc, issue.line, "VBA249", "error", message, reason, suggestion)
 			finding.RuntimeError = &RuntimeErrorContext{Kind: issue.kind}
+			finding.arrayOperationKey = issue.operationKey
 			findings = append(findings, finding)
 		}
 		// Use the existing transfer, with the legacy warning gate forced on so
@@ -166,15 +167,23 @@ func (a Analyzer) deterministicArrayRuntimeFindings(file parsedFile, proc source
 }
 
 type deterministicArrayRuntimeIssue struct {
-	line    int
-	kind    string
-	message string
+	line         int
+	kind         string
+	operationKey string
+}
+
+func arrayBoundOperationKey(kind, name, failure string) string {
+	return "bound:" + strings.ToLower(strings.TrimSpace(kind)) + ":" + strings.ToLower(strings.TrimSpace(name)) + ":" + strings.ToLower(strings.TrimSpace(failure))
+}
+
+func arrayIndexOperationKey(name, failure string) string {
+	return "index:" + strings.ToLower(strings.TrimSpace(name)) + ":" + strings.ToLower(strings.TrimSpace(failure))
 }
 
 func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState, variables map[string]arrayVariable, constants map[string]int) []deterministicArrayRuntimeIssue {
 	var issues []deterministicArrayRuntimeIssue
-	add := func(kind, message string) {
-		issues = append(issues, deterministicArrayRuntimeIssue{line: line, kind: kind, message: message})
+	add := func(kind, operationKey string) {
+		issues = append(issues, deterministicArrayRuntimeIssue{line: line, kind: kind, operationKey: operationKey})
 	}
 	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
 		name := strings.ToLower(strings.TrimSpace(bound[2]))
@@ -184,7 +193,7 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 		}
 		value := state[name]
 		if value.kind == arrayUnallocated && value.knownArray {
-			add("array_unallocated", name+":"+strings.ToLower(bound[1]))
+			add("array_unallocated", arrayBoundOperationKey(bound[1], name, "unallocated"))
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
@@ -199,7 +208,7 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 			dimension = parsed
 		}
 		if dimension < 1 || len(value.dimensions) > 0 && dimension > len(value.dimensions) {
-			add("array_subscript_out_of_bounds", name+":"+strings.ToLower(bound[1]))
+			add("array_subscript_out_of_bounds", arrayBoundOperationKey(bound[1], name, "bounds"))
 		}
 	}
 	lowerText := strings.ToLower(strings.TrimSpace(text))
@@ -224,14 +233,14 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 		}
 		value := state[name]
 		if value.kind == arrayUnallocated && value.knownArray {
-			add("array_unallocated", name+":index")
+			add("array_unallocated", arrayIndexOperationKey(name, "unallocated"))
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
 			continue
 		}
 		if len(value.dimensions) > 0 && len(use.args) != len(value.dimensions) {
-			add("array_subscript_out_of_bounds", name+":dimension")
+			add("array_subscript_out_of_bounds", arrayIndexOperationKey(name, "dimension"))
 			continue
 		}
 		for index, argument := range use.args {
@@ -244,7 +253,7 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 			}
 			bound := value.dimensions[index]
 			if bound.lower.known && result.Value < bound.lower.value || bound.upper.known && result.Value > bound.upper.value {
-				add("array_subscript_out_of_bounds", name+":bounds")
+				add("array_subscript_out_of_bounds", arrayIndexOperationKey(name, "bounds"))
 			}
 		}
 	}
@@ -255,26 +264,30 @@ func suppressDeterministicArrayWarningDuplicates(findings []Finding) []Finding {
 	if len(findings) == 0 {
 		return findings
 	}
-	runtimeLines := map[string]bool{}
+	runtimeOperations := map[string]bool{}
 	for _, finding := range findings {
 		if finding.Code != "VBA249" || finding.RuntimeError == nil {
 			continue
 		}
-		if finding.RuntimeError.Kind == "array_unallocated" || finding.RuntimeError.Kind == "array_subscript_out_of_bounds" {
-			runtimeLines[finding.File+":"+strconv.Itoa(finding.Line)] = true
+		if (finding.RuntimeError.Kind == "array_unallocated" || finding.RuntimeError.Kind == "array_subscript_out_of_bounds") && finding.arrayOperationKey != "" {
+			runtimeOperations[arrayOperationFindingKey(finding)] = true
 		}
 	}
-	if len(runtimeLines) == 0 {
+	if len(runtimeOperations) == 0 {
 		return findings
 	}
 	out := make([]Finding, 0, len(findings))
 	for _, finding := range findings {
-		if finding.Code == "VBA227" && finding.arrayLifecycleFinding && runtimeLines[finding.File+":"+strconv.Itoa(finding.Line)] {
+		if finding.Code == "VBA227" && finding.arrayLifecycleFinding && finding.arrayOperationKey != "" && runtimeOperations[arrayOperationFindingKey(finding)] {
 			continue
 		}
 		out = append(out, finding)
 	}
 	return out
+}
+
+func arrayOperationFindingKey(finding Finding) string {
+	return finding.File + ":" + strconv.Itoa(finding.Line) + ":" + finding.arrayOperationKey
 }
 
 func runtimeConstantEnvironment(base constexpr.Environment, state runtimeConstantState) constexpr.Environment {

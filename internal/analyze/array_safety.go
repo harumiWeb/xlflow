@@ -517,7 +517,7 @@ func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int) (arrayFlowState, []Finding) {
 	state = cloneArrayState(state)
 	var findings []Finding
-	add := func(code, message, reason, suggestion string) {
+	addWithKey := func(operationKey, code, message, reason, suggestion string) {
 		if code == "VBA227" && !a.Config.Analyze.DetectArrayLifecycleSafety {
 			return
 		}
@@ -529,7 +529,11 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		}
 		finding := a.simpleFinding(file, proc, line, code, "warning", message, reason, suggestion)
 		finding.arrayLifecycleFinding = code == "VBA227"
+		finding.arrayOperationKey = operationKey
 		findings = append(findings, finding)
+	}
+	add := func(code, message, reason, suggestion string) {
+		addWithKey("", code, message, reason, suggestion)
 	}
 
 	lower := strings.ToLower(strings.TrimSpace(text))
@@ -635,7 +639,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		variable, known := variables[name]
 		if !known {
 			if scalarExpressionKnown(argument) {
-				add("VBA227", bound[1]+" cannot be used on a known scalar expression.", "LBound and UBound require an array value; this argument is a statically known scalar.", "Pass an array value to the bound function or remove the bound query.")
+				addWithKey(arrayBoundOperationKey(bound[1], argument, "scalar"), "VBA227", bound[1]+" cannot be used on a known scalar expression.", "LBound and UBound require an array value; this argument is a statically known scalar.", "Pass an array value to the bound function or remove the bound query.")
 			}
 			continue
 		}
@@ -643,7 +647,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			if !variable.knownScalar && !variable.isObject {
 				continue
 			}
-			add("VBA227", bound[1]+" cannot be used on non-array "+variable.name+".", "LBound and UBound require an array value; this target is a known scalar.", "Pass an array variable to the bound function or remove the bound query.")
+			addWithKey(arrayBoundOperationKey(bound[1], argument, "scalar"), "VBA227", bound[1]+" cannot be used on non-array "+variable.name+".", "LBound and UBound require an array value; this target is a known scalar.", "Pass an array variable to the bound function or remove the bound query.")
 			continue
 		}
 		if !ok || value.origin == arrayOriginRangeValue {
@@ -656,7 +660,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
-			add("VBA227", bound[1]+" is used before "+variable.name+" is proven to be allocated.", "LBound and UBound raise a runtime error for an unallocated dynamic array and are unsafe for an unknown Variant.", "Allocate the array on every path before querying its bounds, or guard the operation explicitly.")
+			addWithKey(arrayBoundOperationKey(bound[1], argument, "unallocated"), "VBA227", bound[1]+" is used before "+variable.name+" is proven to be allocated.", "LBound and UBound raise a runtime error for an unallocated dynamic array and are unsafe for an unknown Variant.", "Allocate the array on every path before querying its bounds, or guard the operation explicitly.")
 			continue
 		}
 		dimension := 1
@@ -670,7 +674,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			dimension = parsed
 		}
 		if dimension < 1 || len(value.dimensions) > 0 && dimension > len(value.dimensions) {
-			add("VBA227", bound[1]+" uses invalid dimension "+strconv.Itoa(dimension)+" for "+variable.name+".", "The requested dimension is outside the array dimensions known at this point.", "Use a valid dimension number for the array, or avoid assuming a shape that is not statically known.")
+			addWithKey(arrayBoundOperationKey(bound[1], argument, "bounds"), "VBA227", bound[1]+" uses invalid dimension "+strconv.Itoa(dimension)+" for "+variable.name+".", "The requested dimension is outside the array dimensions known at this point.", "Use a valid dimension number for the array, or avoid assuming a shape that is not statically known.")
 		}
 	}
 
@@ -689,11 +693,11 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
-			add("VBA227", use.name+" is indexed before its array allocation is guaranteed.", "An array access can fail after Erase, before ReDim, or on a branch where allocation is not established.", "Allocate the array on every path before indexing it, or guard the access with a proven allocation check.")
+			addWithKey(arrayIndexOperationKey(use.name, "unallocated"), "VBA227", use.name+" is indexed before its array allocation is guaranteed.", "An array access can fail after Erase, before ReDim, or on a branch where allocation is not established.", "Allocate the array on every path before indexing it, or guard the access with a proven allocation check.")
 			continue
 		}
 		if len(value.dimensions) > 0 && len(use.args) != len(value.dimensions) {
-			add("VBA227", use.name+" is indexed with "+strconv.Itoa(len(use.args))+" dimension(s), but its known shape has "+strconv.Itoa(len(value.dimensions))+".", "The number of subscripts must match the array dimensions known to the analyzer.", "Use the correct number of subscripts or revise the declared array shape.")
+			addWithKey(arrayIndexOperationKey(use.name, "dimension"), "VBA227", use.name+" is indexed with "+strconv.Itoa(len(use.args))+" dimension(s), but its known shape has "+strconv.Itoa(len(value.dimensions))+".", "The number of subscripts must match the array dimensions known to the analyzer.", "Use the correct number of subscripts or revise the declared array shape.")
 			continue
 		}
 		for i, arg := range use.args {
@@ -703,7 +707,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			if literal, ok := integerLiteral(arg); ok {
 				dimension := value.dimensions[i]
 				if dimension.lower.known && literal < dimension.lower.value || dimension.upper.known && literal > dimension.upper.value {
-					add("VBA227", use.name+" is indexed outside its known bounds.", "The subscript contradicts the lower or upper bound established by the declaration or ReDim.", "Use an index within the declared bounds, or establish the bounds dynamically before access.")
+					addWithKey(arrayIndexOperationKey(use.name, "bounds"), "VBA227", use.name+" is indexed outside its known bounds.", "The subscript contradicts the lower or upper bound established by the declaration or ReDim.", "Use an index within the declared bounds, or establish the bounds dynamically before access.")
 				}
 			}
 		}
