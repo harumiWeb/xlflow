@@ -135,7 +135,7 @@ var (
 	nextRe                        = regexp.MustCompile(`(?i)^\s*next\b`)
 	dictionaryCreateRe            = regexp.MustCompile(`(?i)^\s*createobject\s*\(\s*"scripting\.dictionary"\s*\)\s*$`)
 	dictionaryNewRe               = regexp.MustCompile(`(?i)^\s*new\s+scripting\.dictionary\s*$`)
-	errProbeReferenceRe           = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|clear)\b`)
+	errProbeReferenceRe           = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])err\s*\.\s*(?:number|description|clear)\b`)
 )
 
 var objectTypes = map[string]bool{
