@@ -2534,7 +2534,7 @@
     {
       "id": "VBA249",
       "title": "Deterministic runtime error",
-      "description": "Constant evaluation, type information, or control-flow facts prove that an expression will fail at runtime.",
+      "description": "Constant evaluation, type information, control-flow, or dataflow facts prove that an expression will fail at runtime.",
       "family": "analyze",
       "category": "runtime-safety",
       "evidence_class": "runtime-error",

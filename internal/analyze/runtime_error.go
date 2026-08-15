@@ -39,16 +39,18 @@ func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc source
 	for name, value := range a.visibleConstantValues {
 		values[name] = value
 	}
-	for name, value := range file.ConstantValues {
-		values[name] = value
-	}
-	// Batch and realtime callers do not always materialize the optional
-	// file-local cache. Build it on demand so module Const values use the same
-	// shared evaluator as the other analysis rules. Always run the projection:
-	// it is idempotent when ConstantValues is already populated and fills any
-	// missing qualified/forward references deterministically.
-	for name, value := range lint.ConstantValuesFromSource(string(file.Source), &file.IR, values) {
-		values[name] = value
+	// Batch and realtime callers materialize the file-local cache once when
+	// VBA249 is enabled. Keep a fallback for direct helper callers that build a
+	// parsedFile by hand, but never rescan the complete source once per
+	// procedure in the normal analyzer path.
+	if file.ConstantValues == nil {
+		for name, value := range lint.ConstantValuesFromSource(string(file.Source), &file.IR, values) {
+			values[name] = value
+		}
+	} else {
+		for name, value := range file.ConstantValues {
+			values[name] = value
+		}
 	}
 	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
 	for _, expression := range proc.Expressions {
@@ -265,10 +267,9 @@ func suppressDeterministicArrayWarningDuplicates(findings []Finding) []Finding {
 	if len(runtimeLines) == 0 {
 		return findings
 	}
-	out := findings[:0]
+	out := make([]Finding, 0, len(findings))
 	for _, finding := range findings {
-		if finding.Code == "VBA227" && runtimeLines[finding.File+":"+strconv.Itoa(finding.Line)] &&
-			(strings.Contains(finding.Message, "indexed before") || strings.Contains(finding.Message, "indexed outside") || strings.Contains(finding.Message, "used before") || strings.Contains(finding.Message, "invalid dimension")) {
+		if finding.Code == "VBA227" && finding.arrayLifecycleFinding && runtimeLines[finding.File+":"+strconv.Itoa(finding.Line)] {
 			continue
 		}
 		out = append(out, finding)
@@ -566,18 +567,7 @@ func runtimeSimpleIdentifier(text string) string {
 }
 
 func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, analyzer Analyzer, file parsedFile, proc sourceProcedure, statement procedureir.Statement, expressions map[int]procedureir.Expression, env constexpr.Environment) []Finding {
-	for _, expression := range expressionsForRuntimeStatement(statement, expressions) {
-		if expression.Recovered || expression.Text == "" {
-			continue
-		}
-		kind, ok := deterministicRuntimeConversionFailure(expression.Text, env)
-		if !ok {
-			result := constexpr.Evaluate(expression.Text, env)
-			kind, ok = deterministicRuntimeFailureKind(result, expression, expressions, env)
-		}
-		if !ok {
-			continue
-		}
+	add := func(expression procedureir.Expression, kind string) {
 		line := expression.Range.StartLine
 		if line <= 0 {
 			line = statement.Range.StartLine
@@ -587,7 +577,7 @@ func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, an
 		}
 		key := strconv.Itoa(line) + ":" + kind + ":" + expression.Text
 		if seen[key] {
-			continue
+			return
 		}
 		seen[key] = true
 		message, reason, suggestion := deterministicRuntimeFailureText(kind)
@@ -595,7 +585,49 @@ func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, an
 		finding.RuntimeError = &RuntimeErrorContext{Kind: kind}
 		findings = append(findings, finding)
 	}
+	for _, expression := range expressionsForRuntimeStatement(statement, expressions) {
+		if expression.Recovered || expression.Text == "" {
+			continue
+		}
+		// A conversion can be nested inside a larger expression, while the
+		// shared evaluator intentionally leaves the enclosing call unknown.
+		// Walk the expression tree so supported conversions are checked at the
+		// exact call site instead of only when they are the root expression.
+		for _, candidate := range runtimeExpressionTree(expression, expressions) {
+			if candidate.Recovered || candidate.Text == "" {
+				continue
+			}
+			if kind, ok := deterministicRuntimeConversionFailure(candidate.Text, env); ok {
+				add(candidate, kind)
+			}
+		}
+		if result := constexpr.Evaluate(expression.Text, env); result.Kind == constexpr.Invalid {
+			if kind, ok := deterministicRuntimeFailureKind(result, expression, expressions, env); ok {
+				add(expression, kind)
+			}
+		}
+	}
 	return findings
+}
+
+func runtimeExpressionTree(root procedureir.Expression, expressions map[int]procedureir.Expression) []procedureir.Expression {
+	out := make([]procedureir.Expression, 0, 1+len(root.Children))
+	visited := make(map[int]bool)
+	var visit func(procedureir.Expression)
+	visit = func(expression procedureir.Expression) {
+		if visited[expression.ID] {
+			return
+		}
+		visited[expression.ID] = true
+		out = append(out, expression)
+		for _, childID := range expression.Children {
+			if child, ok := expressions[childID]; ok {
+				visit(child)
+			}
+		}
+	}
+	visit(root)
+	return out
 }
 
 // deterministicRuntimeConversionFailure models only the conversion domains
@@ -639,18 +671,22 @@ func deterministicRuntimeConversionFailure(expression string, env constexpr.Envi
 	name := strings.ToLower(match[1])
 	switch name {
 	case "cbyte":
+		value = math.RoundToEven(value)
 		if value < 0 || value > 255 {
 			return "conversion_overflow", true
 		}
 	case "cint":
+		value = math.RoundToEven(value)
 		if value < -32768 || value > 32767 {
 			return "conversion_overflow", true
 		}
 	case "clng":
+		value = math.RoundToEven(value)
 		if value < -2147483648 || value > 2147483647 {
 			return "conversion_overflow", true
 		}
 	case "clnglng":
+		value = math.RoundToEven(value)
 		if value < float64(math.MinInt64) || value > float64(math.MaxInt64) {
 			return "conversion_overflow", true
 		}

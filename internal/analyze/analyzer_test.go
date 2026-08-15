@@ -5360,7 +5360,7 @@ End Sub
 func TestAnalyzerArrayLifecyclePreservesMatchingShapesAndMultiTargetTransitions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeModule(t, dir, "Main.bas", `Option Explicit
+	source := `Option Explicit
 Public Sub Run(ByVal shouldAllocate As Boolean)
   Dim values() As Long
   Dim leftValues() As Long
@@ -5387,7 +5387,8 @@ Public Sub Run(ByVal shouldAllocate As Boolean)
   leftValues(1) = 1
   rightValues(1) = 1
 End Sub
-`)
+`
+	writeModule(t, dir, "Main.bas", source)
 
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
@@ -5400,8 +5401,14 @@ End Sub
 	expected := map[int]string{25: "leftValues", 26: "rightValues"}
 	for _, finding := range got {
 		name, ok := expected[finding.Line]
-		nearby := strings.Join(finding.NearbyCode, " ")
-		if !ok || !strings.Contains(nearby, name) {
+		lineText := ""
+		if finding.Line > 0 {
+			lines := strings.Split(source, "\n")
+			if finding.Line <= len(lines) {
+				lineText = lines[finding.Line-1]
+			}
+		}
+		if !ok || !strings.Contains(lineText, name) {
 			t.Fatalf("unexpected VBA249 finding after multi-target Erase: %+v", finding)
 		}
 		if finding.RuntimeError == nil || finding.RuntimeError.Kind != "array_unallocated" {

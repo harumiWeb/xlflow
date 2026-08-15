@@ -226,6 +226,7 @@ Public Sub Run()
   Dim value As Long
   value = CInt("not numeric")
   value = CInt(40000)
+  value = CInt(32767.4)
   value = CInt("40000")
   value = CInt(12)
 End Sub
@@ -242,9 +243,34 @@ End Sub
 	if got[0].RuntimeError == nil || got[1].RuntimeError == nil {
 		t.Fatalf("conversion findings must carry runtime context: %+v", got)
 	}
+	for _, finding := range got {
+		if finding.Line == 6 {
+			t.Fatalf("banker's-rounded CInt(32767.4) must remain valid: %+v", got)
+		}
+	}
 	kinds := []string{got[0].RuntimeError.Kind, got[1].RuntimeError.Kind}
 	if !strings.Contains(strings.Join(kinds, ","), "conversion_type_mismatch") || !strings.Contains(strings.Join(kinds, ","), "conversion_overflow") {
 		t.Fatalf("unexpected conversion kinds: %v", kinds)
+	}
+}
+
+func TestVBA249DetectsNestedNumericConversionFailure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim value As Long
+  value = 1 + CInt(40000)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) != 1 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "conversion_overflow" {
+		t.Fatalf("nested conversion overflow should be reported once: %+v", got)
 	}
 }
 

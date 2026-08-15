@@ -2657,7 +2657,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA249
 
-**Deterministic runtime error.** Constant evaluation, type information, or control-flow facts prove that an expression will fail at runtime.
+**Deterministic runtime error.** Constant evaluation, type information, control-flow, or dataflow facts prove that an expression will fail at runtime.
 
 | Property                    | Value                                 |
 | --------------------------- | ------------------------------------- |

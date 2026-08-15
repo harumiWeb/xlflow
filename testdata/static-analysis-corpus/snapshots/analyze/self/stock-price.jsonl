@@ -4,11 +4,8 @@
 {"project":"self/stock-price","file":"src/modules/App.bas","surface":"analyze","code":"VBA203","severity":"warning","line":32,"column":0}
 {"project":"self/stock-price","file":"src/modules/App.bas","surface":"analyze","code":"VBA203","severity":"warning","line":33,"column":0}
 {"project":"self/stock-price","file":"src/modules/App.bas","surface":"analyze","code":"VBA203","severity":"warning","line":34,"column":0}
-{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
-{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
-{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
-{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
-{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":44,"column":0}
+{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA249","severity":"error","line":44,"column":0}
+{"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA249","severity":"error","line":44,"column":0}
 {"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":45,"column":0}
 {"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":47,"column":0}
 {"project":"self/stock-price","file":"src/modules/CsvUtil.bas","surface":"analyze","code":"VBA227","severity":"warning","line":62,"column":0}

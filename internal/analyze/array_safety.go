@@ -527,7 +527,9 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		if code == "VBA209" && !a.Config.Analyze.DetectObjectArrayComparison {
 			return
 		}
-		findings = append(findings, a.simpleFinding(file, proc, line, code, "warning", message, reason, suggestion))
+		finding := a.simpleFinding(file, proc, line, code, "warning", message, reason, suggestion)
+		finding.arrayLifecycleFinding = code == "VBA227"
+		findings = append(findings, finding)
 	}
 
 	lower := strings.ToLower(strings.TrimSpace(text))

@@ -8,10 +8,7 @@
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/BenchTests.bas","surface":"analyze","code":"VBA227","severity":"warning","line":176,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA206","severity":"warning","line":67,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA206","severity":"warning","line":67,"column":5}
-{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":71,"column":0}
-{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":71,"column":0}
-{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":71,"column":0}
-{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":71,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA249","severity":"error","line":71,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":82,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":82,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"benchmarking/src/Benchmarking.bas","surface":"analyze","code":"VBA227","severity":"warning","line":95,"column":0}
@@ -168,6 +165,7 @@
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":442,"column":9}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":442,"column":9}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":447,"column":13}
+{"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA249","severity":"error","line":1333,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1595,"column":9}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1664,"column":9}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1739,"column":13}
@@ -178,6 +176,8 @@
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1928,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1929,"column":5}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA206","severity":"warning","line":1930,"column":5}
+{"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA249","severity":"error","line":2384,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA249","severity":"error","line":2387,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA241","severity":"information","line":2401,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2403,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/Dictionary.cls","surface":"analyze","code":"VBA227","severity":"warning","line":2417,"column":0}
@@ -214,9 +214,13 @@
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VB045","severity":"error","line":93,"column":26}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA230","severity":"warning","line":153,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA214","severity":"warning","line":158,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA249","severity":"error","line":165,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA249","severity":"error","line":166,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VB045","severity":"error","line":272,"column":22}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA237","severity":"warning","line":277,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA249","severity":"error","line":278,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA237","severity":"warning","line":283,"column":0}
+{"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA249","severity":"error","line":284,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA244","severity":"information","line":335,"column":26}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA214","severity":"warning","line":451,"column":0}
 {"project":"third_party/vba-fast-dictionary","file":"src/test/TestDictionary.bas","surface":"analyze","code":"VBA214","severity":"warning","line":474,"column":0}

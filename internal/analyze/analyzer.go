@@ -67,6 +67,7 @@ type Finding struct {
 	// to consume the common envelope without inferring runtime semantics from
 	// severity alone.
 	RuntimeError          *RuntimeErrorContext `json:"runtime_error,omitempty"`
+	arrayLifecycleFinding bool
 	httpOwnedSinks        map[int]bool
 	dataFlowSinkStartByte int
 }
@@ -401,7 +402,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison {
+		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
 			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
 		}
 		var dataFlowModuleBindings map[string]bool
@@ -1067,7 +1068,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			rangeValueConstants = rangeValueModuleIntegerConstants(lines, ir)
 		}
 		var constantValues map[string]constexpr.Value
-		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison {
+		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
 			constantValues = lint.ConstantValuesFromSource(string(view.Source), &ir, projectConstants)
 		}
 		var dataFlowModuleBindings map[string]bool
