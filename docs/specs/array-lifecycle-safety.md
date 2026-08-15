@@ -80,9 +80,11 @@ nature is not proven, remains `unknown`.
 
 Constant declaration bounds and constant `ReDim` bounds are checked according
 to their operation contract. Compile-equivalent declaration/assignment cases
-use canonical blocking rule contracts; runtime-only array failures remain
-`VBA227` warnings and do not become preflight claims. Dynamic bounds and
-unknown values are not diagnosed.
+use canonical blocking rule contracts. A runtime array failure that the shared
+constant, type, and CFG/dataflow facts prove on every relevant path is
+projected by `VBA249` as a `runtime-error` severity `error`; a possible or
+partially known failure remains a non-blocking `VBA227` warning and does not
+become a preflight claim. Dynamic bounds and unknown values are not diagnosed.
 
 `VBA208` remains the owner of `ReDim Preserve` safety. It warns when a
 non-final dimension changes and remains conservative when the prior shape is

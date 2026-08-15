@@ -538,8 +538,11 @@ Each item publishes the canonical rule `id`, `title`, `description`, `family`,
 `documentation_url`. `configuration_key` is empty for a non-configurable rule.
 `surfaces` identifies the supported `lint`, `analyze`, and `lsp` projections;
 `supported_severities` is constrained by evidence class: compile-equivalent
-rules expose only `error`, while advisory evidence classes expose only
-`warning`. Version 1 evolves additively: new rule entries
+and runtime-error rules expose only `error`, while advisory evidence classes
+expose only `warning`. Compile-equivalent errors are unsuppressible and block
+source preflight; runtime-error errors remain inline-suppressible and
+non-blocking because the source may compile and fail only when the expression
+executes. Version 1 evolves additively: new rule entries
 and fields may be added, clients must ignore fields and IDs they do not recognize, and a
 field removal or incompatible meaning change requires a new `schema_version`.
 Unavailable, failed, malformed, or unsupported-version metadata must be treated
@@ -1155,6 +1158,11 @@ Source files may also suppress specific line-bound diagnostics locally with apos
 
 Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB065`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
+`VBA249` is intentionally excluded from this preflight-blocking set. Its
+`error` severity records a deterministic runtime failure, while its
+`runtime-error` evidence class keeps the source-preflight decision
+non-blocking and allows normal inline/configuration suppression.
+
 Unknown inline suppression IDs are reported in command `warnings` as `unknown_inline_suppression_rule`. Known suppressions that do not suppress a diagnostic for the current command family are reported as `unused_inline_suppression`; `lint` evaluates `VB...` usage and `analyze` evaluates `VBA...` usage. Config-level `disabled_rules` remain global, while inline suppression is local to the annotated source line.
 
 Configurable lint rule IDs map to legacy keys as follows: `VB001` = `require_option_explicit`, `VB002` = `forbid_select`, `VB003` = `forbid_activate`, `VB004` = `forbid_on_error_resume_next`, `VB005` = `detect_implicit_variant`, `VB006` = `forbid_public_module_fields`, `VB007` = `forbid_interactive_input`, `VB018` = `detect_scope_shadowing`, `VB019` = `detect_multiple_declarator_clarity`, `VB020` = `detect_unused_local_variables`, `VB021` = `detect_unused_private_procedures`, `VB022` = `detect_confusing_call_syntax`, `VB023` = `detect_for_each_control_type`, `VB026` = `detect_dangerous_resume`, and `VB027` = `detect_nested_with_ambiguity`. `VB044` uses `[lint.procedure_name_constant]` instead of a legacy boolean; it is disabled by default, requires `constant_name` when enabled, and may be disabled through `[lint].disabled_rules`.
@@ -1215,6 +1223,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA246`: a recognized HTTP client exposes credentials, weakens TLS/certificate validation, logs authorization data, uses a sensitive module constant, or downloads and launches executable/script content
 - `VBA247`: a recognized ServerXMLHTTP or WinHTTP request is sent without a proven finite timeout on every reaching path
 - `VBA248`: a procedure call passes multiple positional `True`/`False` literals, or a single positional literal targets a uniquely resolved procedure with multiple optional Boolean switches
+- `VBA249`: a constant, type, CFG, and dataflow fact proves that an expression will fail at runtime on every relevant reachable path
 
 `VBA203` correlates each changed `Application` property with its saved prior
 value across control-flow joins. A path on which the property was never changed
@@ -1238,9 +1247,22 @@ Configurable analyzer rule IDs map to legacy keys as follows: `VBA201` = `detect
 
 `VBA246` maps to `detect_unsafe_http_configuration`; `VBA247` maps to
 `detect_missing_http_timeout`; `VBA248` maps to
-`detect_opaque_boolean_arguments`.
+`detect_opaque_boolean_arguments`; `VBA249` maps to
+`detect_deterministic_runtime_errors`.
 
-Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, and `VBA244` are enabled by default. `VBA230` through `VBA239` and `VBA241` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, and `VBA241` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types and ambiguous names remain conservative warnings that include the type name. Unresolved external types are warned about only when the project and TypeLib resolution view is complete; missing, empty, malformed, or partial generated TypeLib data makes their absence unknown and the rule fails open for that branch. Host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
+Analyzer rules `VBA201` through `VBA206`, `VBA208`, `VBA209`, `VBA211`, `VBA212`, `VBA214` through `VBA227`, `VBA230` through `VBA239`, `VBA241`, `VBA244`, and `VBA249` are enabled by default. `VBA230` through `VBA239` and `VBA241` are warning-level, non-blocking, and inline-suppressible; `VBA241` may emit `information` for a single non-nested loop with loop-invariant dimensions. `VBA237` is interprocedural and Full-only in LSP; `VBA238`, `VBA239`, and `VBA241` are procedure-local and available in realtime diagnostics. `VBA222` is a batch-only, warning-level, non-blocking rule; it checks public function/property return types, all public parameters, and custom event parameters. Intrinsic types and types resolved from the project or available TypeLib database are allowed. Private/unexposed project types and ambiguous names remain conservative warnings that include the type name. Unresolved external types are warned about only when the project and TypeLib resolution view is complete; missing, empty, malformed, or partial generated TypeLib data makes their absence unknown and the rule fails open for that branch. Host-required event handlers are excluded. It can be suppressed inline or with `[analyze].disabled_rules = ["VBA222"]`. `VBA240` is disabled by default, warning-level, non-blocking, inline-suppressible, and batch-only; enable it with `detect_risky_module_state` and disable it with `[analyze].disabled_rules = ["VBA240"]` for project-specific policy. `VBA242` and `VBA243` are disabled by default, information-level, procedure-local, non-blocking, inline-suppressible, and available in realtime diagnostics; enable them with `detect_expensive_full_range_operations` and `detect_value2_performance_opportunities`, respectively, or disable them explicitly with `[analyze].disabled_rules = ["VBA242"]` and `[analyze].disabled_rules = ["VBA243"]`. When enabled, full-range and Value2 opportunities outside loops use `information` and reachable loop operations use `warning`. `VBA244` is default-enabled, information-level for ordinary cycles, warning-level when dangerous effects are present, project-wide, non-blocking, inline-suppressible, and batch-only; disable it with `detect_procedure_call_cycles = false` or `[analyze].disabled_rules = ["VBA244"]`.
+
+`VBA249` is default-enabled, `error`-level, high-precision, procedure-local,
+available in batch and real-time analysis, inline-suppressible, and
+non-blocking. Its `runtime-error` evidence class distinguishes a proven
+execution failure from both compile-equivalent errors and warning-level
+runtime-safety inference. It reports only deterministic division, conversion,
+numeric-operand, and array allocation/bound failures described in
+[Deterministic VBA Runtime-Error Diagnostics](vba-runtime-error-diagnostics.md).
+Unknown `Variant`, late-bound, external, locale-dependent, and branch-merged
+values remain silent. Disable it with
+`[analyze].disabled_rules = ["VBA249"]` or suppress an intentional local case
+with `xlflow:disable-line VBA249` / `xlflow:disable-next-line VBA249`.
 
 `VBA245`, `VBA246`, and `VBA247` extend the default-enabled analyzer set. All three are
 warning-level, non-blocking, inline-suppressible, procedure-local, and
