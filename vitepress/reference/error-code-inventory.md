@@ -21,6 +21,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `argument_list`
 - `array_bound`
 - `array_bounds`
+- `array_subscript_out_of_bounds`
+- `array_unallocated`
 - `as_type_clause`
 - `assignable_to`
 - `assignment_diagnostics`
@@ -167,6 +169,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `control_count`
 - `control_enumeration_failed`
 - `control_failed`
+- `conversion_overflow`
+- `conversion_type_mismatch`
 - `coordinate_system`
 - `coordination_acquire_failed`
 - `coordination_identity_failed`
@@ -218,6 +222,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `detect_collection_iteration_mutation`
 - `detect_confusing_call_syntax`
 - `detect_dangerous_resume`
+- `detect_deterministic_runtime_errors`
 - `detect_dictionary_collection_guard`
 - `detect_dictionary_compare_mode_order`
 - `detect_dictionary_iteration_value_usage`
@@ -280,6 +285,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `discard_required`
 - `discarded_runs`
 - `display_alerts`
+- `division_by_zero`
 - `do_condition`
 - `do_statement`
 - `doc_comment`
@@ -663,6 +669,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `not_vba_document`
 - `nothing_literal`
 - `number_format`
+- `numeric_type_mismatch`
 - `obsolete_tls_protocol`
 - `old_name`
 - `older_than`
@@ -872,6 +879,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `run_command`
 - `run_diagnostic`
 - `runner_args_invalid`
+- `runtime_error`
 - `runtime_form_load_failed`
 - `runtime_form_loads_initialize`
 - `runtime_form_temp_copy`

@@ -4,13 +4,19 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA225` false positives when a local, parameter, or module-level VBA
+  binding such as `cells` shadows Excel's unqualified `Cells` function. The
+  Procedure IR now gates the textual fallback, including propagated helper
+  summaries, while explicitly typed `Range` and `Worksheet` bindings remain
+  eligible.
+
 ## v0.30.0
 
 - Completed the `VB012` procedure-terminator compatibility audit across the
   `Sub`, `Function`, `Property Get`, `Property Let`, and `Property Set` opener
   matrix in standard, class, `ThisWorkbook`, and worksheet document modules.
-  Excel 16.0 build 17932 accepts `Property Get` with `End Sub` or `End
-Function`; those accepted forms now use non-blocking, suppressible `VB066`
+  Excel 16.0 build 17932 accepts `Property Get` with `End Sub` or
+  `End Function`; those accepted forms now use non-blocking, suppressible `VB066`
   style warnings, while VBE-rejected mismatches remain `VB012` compile errors
   that block source preflight. Parser structure, VBE validity, and style policy
   are documented and covered separately.
@@ -22,6 +28,14 @@ Function`; those accepted forms now use non-blocking, suppressible `VB066`
   Const and Enum references, fixed-array bounds, and `ReDim` bounds across
   batch and LSP analysis. Runtime calls, ambiguous or unresolved values, and
   safely unmodelled overflow remain fail-open instead of becoming diagnostics.
+
+- Added default-enabled `VBA249` deterministic runtime-error diagnostics for
+  proven division, numeric-operand, conversion, and array allocation/bound
+  failures derived from shared constant, type, CFG, and dataflow facts.
+  `runtime-error` findings use `error` severity but remain inline-suppressible
+  and non-preflight-blocking so they stay distinct from VBE compile-equivalent
+  errors; unknown `Variant`, late-bound, external, locale-dependent, and
+  branch-merged values remain silent.
 
 - Fixed `VBA204` false positives for project-specific labels used as shared
   cleanup or loop-finalization paths, while retaining findings for normal

@@ -114,7 +114,10 @@ jobs:
         with:
           global-json-file: global.json
       - name: Run deterministic static-analysis corpus
-        timeout-minutes: 10
+        # The real-world suite currently runs close to ten minutes on Ubuntu
+        # runners; leave headroom for runner variance without changing the
+        # deterministic corpus gate itself.
+        timeout-minutes: 15
         shell: bash
         env:
           # The real-world snapshot suite is intentionally opt-in so the

@@ -1,9 +1,12 @@
 package lint
 
 import (
+	"bytes"
 	"strings"
+	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/gui"
+	"github.com/harumiWeb/xlflow/internal/vba/ast"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -43,8 +46,10 @@ func DefaultProcedureBoundaryClassifier(context ProcedureBoundaryContext) Proced
 // IsAcceptedProcedureBoundaryRecovery reports the one parser-recovery shape
 // covered by the promoted VBE evidence: a Property Get closed by End Sub or
 // End Function in an audited module kind. It is intentionally conservative;
-// the parse tree must contain exactly one recovery range and that range must
-// cover the accepted closer. Other parser errors remain hard parse failures.
+// the parse tree must contain exactly one recovery range, an error node for
+// the exact accepted closer token, and no independent recovery node or code
+// after that token on the same line. Other parser errors remain hard parse
+// failures.
 // The helper is used by the batch analyzer's parse gate so VBE-accepted source
 // can reach the normal non-blocking VB066 lint projection.
 func IsAcceptedProcedureBoundaryRecovery(root *tree_sitter.Node, source []byte, moduleKind string) bool {
@@ -83,7 +88,84 @@ func IsAcceptedProcedureBoundaryRecovery(root *tree_sitter.Node, source []byte, 
 	if tracker.ambiguous || len(tracker.conditionals) != 0 || len(accepted) != 1 {
 		return false
 	}
-	closingLine := accepted[0].ClosingLine
 	problem := problemRanges[0]
-	return closingLine >= problem.StartLine && closingLine <= problem.EndLine
+	return acceptedProcedureBoundaryRecoveryMatches(root, source, problem, accepted[0])
+}
+
+func acceptedProcedureBoundaryRecoveryMatches(root *tree_sitter.Node, source []byte, problem ast.Range, context ProcedureBoundaryContext) bool {
+	line, lineStart, ok := sourceLineAt(source, context.ClosingLine)
+	if !ok {
+		return false
+	}
+	code := gui.StripComment(string(line))
+	trimmed := strings.TrimSpace(code)
+	fields := strings.Fields(trimmed)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "End") || !strings.EqualFold(fields[1], context.TerminatorKind) {
+		// A colon-separated statement, even one tree-sitter can recover as a
+		// legal-looking node, is an independent construct and must not be
+		// admitted by the single-boundary parser exception.
+		return false
+	}
+	leading := len(code) - len(strings.TrimLeftFunc(code, unicode.IsSpace))
+	tokenStart := lineStart + leading
+	tokenEnd := tokenStart + len(trimmed)
+	if problem.StartByte > tokenStart || problem.EndByte < tokenEnd {
+		return false
+	}
+	return hasOnlyAcceptedProcedureTerminatorRecovery(root, problem, tokenStart, tokenEnd)
+}
+
+func sourceLineAt(source []byte, lineNo int) ([]byte, int, bool) {
+	if lineNo < 1 {
+		return nil, 0, false
+	}
+	start := 0
+	for current := 1; start <= len(source); current++ {
+		end := bytes.IndexByte(source[start:], '\n')
+		hasNewline := end >= 0
+		if !hasNewline {
+			end = len(source) - start
+		}
+		lineEnd := start + end
+		line := bytes.TrimSuffix(source[start:lineEnd], []byte{'\r'})
+		if current == lineNo {
+			return line, start, true
+		}
+		if !hasNewline {
+			return nil, 0, false
+		}
+		start = lineEnd + 1
+	}
+	return nil, 0, false
+}
+
+func hasOnlyAcceptedProcedureTerminatorRecovery(root *tree_sitter.Node, problem ast.Range, tokenStart, tokenEnd int) bool {
+	if root == nil {
+		return false
+	}
+	foundProblem := false
+	foundToken := false
+	independent := false
+	var walk func(*tree_sitter.Node)
+	walk = func(node *tree_sitter.Node) {
+		if node == nil {
+			return
+		}
+		if node.IsError() || node.IsMissing() {
+			range_ := ast.NodeRange(node)
+			switch {
+			case range_.StartByte == problem.StartByte && range_.EndByte == problem.EndByte:
+				foundProblem = true
+			case range_.StartByte == tokenStart && range_.EndByte == tokenEnd:
+				foundToken = true
+			default:
+				independent = true
+			}
+		}
+		for index := uint(0); index < node.ChildCount(); index++ {
+			walk(node.Child(index))
+		}
+	}
+	walk(root)
+	return foundProblem && foundToken && !independent
 }

@@ -2552,6 +2552,28 @@
       "configuration_key": "detect_opaque_boolean_arguments",
       "inline_suppressible": true,
       "preflight_blocking": false
+    },
+    {
+      "id": "VBA249",
+      "title": "Deterministic runtime error",
+      "description": "Constant evaluation, type information, control-flow, or dataflow facts prove that an expression will fail at runtime.",
+      "family": "analyze",
+      "category": "runtime-safety",
+      "evidence_class": "runtime-error",
+      "compile_equivalent": false,
+      "default_severity": "error",
+      "supported_severities": ["error"],
+      "surfaces": ["analyze", "lsp"],
+      "default_enabled": true,
+      "scope": "procedure-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vba249",
+      "configurable": true,
+      "configuration_key": "detect_deterministic_runtime_errors",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     }
   ]
 }

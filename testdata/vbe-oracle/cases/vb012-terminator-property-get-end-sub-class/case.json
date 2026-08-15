@@ -22,6 +22,9 @@
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
     "rule_codes": ["VB012"],
+    "expected_diagnostics": [
+      { "code": "VB066", "severity": "warning", "surfaces": ["lint", "lsp"] }
+    ],
     "forbidden_diagnostics": [{ "code": "VB012", "severity": "error", "surfaces": ["lint", "lsp"] }]
   },
   "provenance": {

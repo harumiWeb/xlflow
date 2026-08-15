@@ -35,12 +35,15 @@ const (
 
 // RuleEvidenceClass describes the strongest evidence behind a diagnostic.
 // Only compile-equivalent evidence is strong enough to make a source
-// preflight blocking claim.
+// preflight blocking claim. Runtime-error evidence is distinct from
+// compile-equivalent evidence: it proves that execution will fail, but does
+// not claim that the VBA source itself is rejected by the compiler.
 type RuleEvidenceClass string
 
 const (
 	EvidenceCompileEquivalent RuleEvidenceClass = "compile-equivalent"
 	EvidenceInference         RuleEvidenceClass = "inference"
+	EvidenceRuntimeError      RuleEvidenceClass = "runtime-error"
 	EvidenceRuntimeSafety     RuleEvidenceClass = "runtime-safety"
 	EvidencePolicy            RuleEvidenceClass = "policy"
 	EvidenceMaintainability   RuleEvidenceClass = "maintainability"
@@ -231,6 +234,13 @@ func Validate(items []RuleMetadata) error {
 			if rule.InlineSuppressible || !rule.PreflightBlocking {
 				return fmt.Errorf("%s compile-equivalent rules must be unsuppressible and preflight-blocking", rule.ID)
 			}
+		} else if rule.EvidenceClass == EvidenceRuntimeError {
+			if rule.DefaultSeverity != SeverityError || len(rule.SupportedSeverities) != 1 || rule.SupportedSeverities[0] != SeverityError {
+				return fmt.Errorf("%s runtime-error rules must support error severity only", rule.ID)
+			}
+			if !rule.InlineSuppressible || rule.PreflightBlocking {
+				return fmt.Errorf("%s runtime-error rules must be suppressible and non-preflight-blocking", rule.ID)
+			}
 		} else {
 			if rule.DefaultSeverity == SeverityError || rule.PreflightBlocking {
 				return fmt.Errorf("%s non-compile-equivalent rules cannot be error or preflight-blocking", rule.ID)
@@ -257,7 +267,7 @@ func validCategory(v RuleCategory) bool {
 		v == CategoryArchitecture || v == CategorySecurity || v == CategoryTypeSafety
 }
 func validEvidenceClass(v RuleEvidenceClass) bool {
-	return v == EvidenceCompileEquivalent || v == EvidenceInference || v == EvidenceRuntimeSafety || v == EvidencePolicy || v == EvidenceMaintainability
+	return v == EvidenceCompileEquivalent || v == EvidenceInference || v == EvidenceRuntimeError || v == EvidenceRuntimeSafety || v == EvidencePolicy || v == EvidenceMaintainability
 }
 func validSeverity(v RuleSeverity) bool {
 	return v == SeverityError || v == SeverityWarning || v == SeverityInformation

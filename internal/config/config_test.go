@@ -431,6 +431,46 @@ disabled_rules = ["VBA248"]
 	}
 }
 
+func TestDeterministicRuntimeErrorsDefaultEnabledAndConfigurable(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA249"); !ok || !enabled || !cfg.Analyze.DetectDeterministicRuntimeErrors {
+		t.Fatalf("VBA249 enabled = %v, known = %v, config = %v; want enabled configurable rule", enabled, ok, cfg.Analyze.DetectDeterministicRuntimeErrors)
+	}
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA249"); !ok || enabled {
+		t.Fatalf("disabled VBA249 enabled = %v, known = %v", enabled, ok)
+	}
+}
+
+func TestDeterministicRuntimeErrorsDisabledRulesTakePrecedence(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`[project]
+entry = "Main.Run"
+
+[excel]
+path = "build/Book.xlsm"
+
+[analyze]
+detect_deterministic_runtime_errors = true
+disabled_rules = ["VBA249"]
+`)
+	if err := os.WriteFile(filepath.Join(dir, FileName), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled, ok := AnalyzeRuleEnabled(cfg.Analyze, "VBA249"); !ok || enabled || cfg.Analyze.DetectDeterministicRuntimeErrors {
+		t.Fatalf("VBA249 enabled = %v, known = %v, config = %v; want disabled", enabled, ok, cfg.Analyze.DetectDeterministicRuntimeErrors)
+	}
+	if !hasConfigWarning(cfg.Warnings, "conflicting_analyze_rule_config", "VBA249") ||
+		!hasConfigWarning(cfg.Warnings, "analyze_disabled_rules_precedence", "VBA249") {
+		t.Fatalf("expected disabled_rules precedence warnings for VBA249, got %+v", cfg.Warnings)
+	}
+}
+
 func TestProcedureCallCyclesDefaultEnabledAndConfigurable(t *testing.T) {
 	t.Parallel()
 	cfg := Default()

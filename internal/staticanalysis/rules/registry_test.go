@@ -14,7 +14,7 @@ VB018 VB019 VB020 VB021 VB022 VB023 VB026 VB027 VB028 VB029 VB030 VB031 VB032 VB
 VB035 VB036 VB037 VB038 VB039 VB040 VB041 VB042 VB043 VB044 VB045 VB046 VB047 VB048 VB049 VB050 VB051 VB052 VB053 VB054 VB055 VB056 VB057 VB058 VB059 VB060 VB061 VB062 VB063 VB064 VB065 VB066
 VBA101 VBA102 VBA103 VBA104 VBA105 VBA106 VBA201 VBA202 VBA203 VBA204 VBA205 VBA206 VBA207
 VBA208 VBA209 VBA210 VBA211 VBA212 VBA213 VBA214 VBA215 VBA216 VBA217 VBA218 VBA219 VBA220 VBA221 VBA222 VBA223 VBA224 VBA225 VBA226 VBA227 VBA228 VBA229
-VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248`)
+VBA230 VBA231 VBA232 VBA233 VBA234 VBA235 VBA236 VBA237 VBA238 VBA239 VBA240 VBA241 VBA242 VBA243 VBA244 VBA245 VBA246 VBA247 VBA248 VBA249`)
 	gotRules := All()
 	got := make([]string, len(gotRules))
 	for i, rule := range gotRules {
@@ -226,6 +226,10 @@ func TestLookupAndFamilyFiltering(t *testing.T) {
 	if !ok || opaqueBoolean.Family != FamilyAnalyze || opaqueBoolean.Category != CategoryMaintainability || opaqueBoolean.EvidenceClass != EvidenceMaintainability || opaqueBoolean.CompileEquivalent || opaqueBoolean.DefaultSeverity != SeverityWarning || opaqueBoolean.DefaultEnabled || !opaqueBoolean.Configurable || opaqueBoolean.ConfigurationKey != "detect_opaque_boolean_arguments" || opaqueBoolean.PreflightBlocking || !opaqueBoolean.InlineSuppressible || !opaqueBoolean.Realtime || opaqueBoolean.Scope != ScopeProcedureLocal || opaqueBoolean.Precision != PrecisionMedium || !reflect.DeepEqual(opaqueBoolean.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
 		t.Fatalf("unexpected VBA248 metadata: %+v, %v", opaqueBoolean, ok)
 	}
+	runtimeError, ok := Lookup("VBA249")
+	if !ok || runtimeError.Family != FamilyAnalyze || runtimeError.Category != CategoryRuntimeSafety || runtimeError.EvidenceClass != EvidenceRuntimeError || runtimeError.CompileEquivalent || runtimeError.DefaultSeverity != SeverityError || !reflect.DeepEqual(runtimeError.SupportedSeverities, []RuleSeverity{SeverityError}) || !runtimeError.DefaultEnabled || !runtimeError.Configurable || runtimeError.ConfigurationKey != "detect_deterministic_runtime_errors" || runtimeError.PreflightBlocking || !runtimeError.InlineSuppressible || !runtimeError.Realtime || runtimeError.Scope != ScopeProcedureLocal || runtimeError.Precision != PrecisionHigh || !reflect.DeepEqual(runtimeError.Surfaces, []RuleSurface{SurfaceAnalyze, SurfaceLSP}) {
+		t.Fatalf("unexpected VBA249 metadata: %+v, %v", runtimeError, ok)
+	}
 	for _, rule := range ByFamily(FamilyLint) {
 		if rule.Family != FamilyLint {
 			t.Fatalf("lint family contains %+v", rule)
@@ -306,6 +310,32 @@ func TestValidateRejectsInvalidMetadata(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rule := compileEquivalent
+			tc.edit(&rule)
+			if err := Validate([]RuleMetadata{rule}); err == nil {
+				t.Fatalf("Validate accepted %+v", rule)
+			}
+		})
+	}
+	runtimeError, ok := Lookup("VBA249")
+	if !ok {
+		t.Fatal("VBA249 missing")
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*RuleMetadata)
+	}{
+		{"runtime-error warning", func(r *RuleMetadata) {
+			r.DefaultSeverity = SeverityWarning
+			r.SupportedSeverities = []RuleSeverity{SeverityWarning}
+		}},
+		{"runtime-error supports warning", func(r *RuleMetadata) {
+			r.SupportedSeverities = []RuleSeverity{SeverityError, SeverityWarning}
+		}},
+		{"runtime-error non-suppressible", func(r *RuleMetadata) { r.InlineSuppressible = false }},
+		{"runtime-error preflight-blocking", func(r *RuleMetadata) { r.PreflightBlocking = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := runtimeError
 			tc.edit(&rule)
 			if err := Validate([]RuleMetadata{rule}); err == nil {
 				t.Fatalf("Validate accepted %+v", rule)

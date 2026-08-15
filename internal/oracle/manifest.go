@@ -513,6 +513,15 @@ func validateAnalysisBinding(c Case) error {
 		}
 		for _, expectation := range contracts {
 			if _, ok := seenCodes[expectation.Code]; !ok {
+				// Accepted compile-equivalent fixtures may also assert the
+				// non-blocking style projection retained for the same source.
+				// Keep compile-equivalent bindings in rule_codes while allowing
+				// these supplemental non-compile-equivalent expectations to make
+				// the lint/LSP contract explicit.
+				metadata, metadataErr := staticcontract.CanonicalRuleMetadata(expectation.Code)
+				if c.VBE.Expected == ExpectedAccepted && analysis.BindingStatus == BindingBound && metadataErr == nil && !metadata.CompileEquivalent {
+					continue
+				}
 				if analysis.BindingStatus == BindingBound {
 					return fmt.Errorf("oracle case %q: bound diagnostic code %q is not declared by analysis.rule_codes", c.ID, expectation.Code)
 				}

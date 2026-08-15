@@ -38,7 +38,7 @@ func TestAnalyzerAcceptsVBEAcceptedPropertyGetTerminatorRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+			result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
 			if err != nil {
 				var parseErr *ParseError
 				if errors.As(err, &parseErr) {
@@ -46,7 +46,34 @@ func TestAnalyzerAcceptsVBEAcceptedPropertyGetTerminatorRecovery(t *testing.T) {
 				}
 				t.Fatal(err)
 			}
+			if result.AnalyzedFiles != 1 {
+				t.Fatalf("analyzed files = %d, want 1 for %s", result.AnalyzedFiles, path)
+			}
 		})
+	}
+}
+
+func TestAnalyzerRejectsAcceptedTerminatorWithMalformedColonStatement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "src", "modules", "Probe.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `Attribute VB_Name = "Probe"
+Option Explicit
+
+Public Property Get VB012Probe() As Long
+    VB012Probe = 1
+End Sub: Dim
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("malformed same-line recovery error = %v, want ParseError", err)
 	}
 }
 

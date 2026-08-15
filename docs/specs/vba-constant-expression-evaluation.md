@@ -75,6 +75,11 @@ and therefore evaluate as `Unknown`.
 - Fixed declaration bounds, `ReDim` bounds, and compile-equivalent array
   adapters use the integer compatibility projection; dynamic or non-integral
   bounds remain unclassified.
+- `VBA249` projects only the runtime-invalid subset whose operands and failure
+  contract are statically known, such as division by a known zero or numeric
+  arithmetic with a known nonnumeric string. An `Invalid` result that depends
+  on unresolved, locale-dependent, or otherwise unsupported runtime behavior
+  remains silent rather than becoming a deterministic runtime-error finding.
 - Dedicated evaluator fixtures cover suffixes, numeric boundaries,
   floating-point and currency literals, strings, Booleans, Const/Enum
   references, precedence, invalid expressions, unresolved names, and calls.

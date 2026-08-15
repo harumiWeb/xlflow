@@ -22,6 +22,7 @@ var requiredSpecContracts = map[string]string{
 	"VBA246": "http-transport-security-analysis.md",
 	"VBA247": "http-transport-security-analysis.md",
 	"VBA248": "vba-opaque-boolean-controls.md",
+	"VBA249": "vba-runtime-error-diagnostics.md",
 }
 
 type specRuleContract struct {
