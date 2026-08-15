@@ -179,12 +179,23 @@ Private Function JoinCells(ByVal inputText As String) As String
   JoinCells = result
 End Function
 `)
+	writeModule(t, dir, "Bindings.bas", `Option Explicit
+Public cells As Range
+`)
 	writeModule(t, dir, "Main.bas", `Option Explicit
 Public Sub Run()
   Dim index As Long
   Dim result As String
   For index = 1 To 100
     result = JoinCells(CStr(index))
+  Next index
+End Sub
+
+Public Sub ReadProjectRangeNamedCells()
+  Dim index As Long
+  Dim result As Variant
+  For index = 1 To 100
+    result = cells(index, 1).Value2
   Next index
 End Sub
 
@@ -203,8 +214,36 @@ End Sub
 		t.Fatal(err)
 	}
 	got := findingsByCode(findings, "VBA225")
-	if len(got) != 1 || got[0].Procedure != "ReadRangeNamedCells" {
-		t.Fatalf("array named cells should not produce direct or propagated VBA225, while a Range binding remains eligible: %+v", got)
+	if len(got) != 2 {
+		t.Fatalf("array named cells should not produce direct or propagated VBA225, while Range bindings remain eligible: %+v", got)
+	}
+	procedures := map[string]bool{}
+	for _, finding := range got {
+		procedures[finding.Procedure] = true
+	}
+	if !procedures["ReadRangeNamedCells"] || !procedures["ReadProjectRangeNamedCells"] {
+		t.Fatalf("Range bindings should remain eligible across the current and another module: %+v", got)
+	}
+
+	variantDir := t.TempDir()
+	writeModule(t, variantDir, "Bindings.bas", `Option Explicit
+Public cells As Variant
+`)
+	writeModule(t, variantDir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim index As Long
+  Dim result As Variant
+  For index = 1 To 100
+    result = cells(index, 1).Value2
+  Next index
+End Sub
+`)
+	variantFindings, err := (Analyzer{RootDir: variantDir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(variantFindings, "VBA225"); len(got) != 0 {
+		t.Fatalf("project Variant cells should not produce VBA225: %+v", got)
 	}
 
 	realtimePath := filepath.Join(dir, "src", "modules", "Realtime.bas")
