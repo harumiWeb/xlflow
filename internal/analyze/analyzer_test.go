@@ -164,6 +164,69 @@ End Sub
 	}
 }
 
+func TestVBA225IgnoresArrayNamedCellsAndHelperPropagation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Helpers.bas", `Option Explicit
+Private Function JoinCells(ByVal inputText As String) As String
+  Dim cells As Variant
+  Dim index As Long
+  Dim result As String
+  cells = Split(inputText, "|")
+  For index = LBound(cells) To UBound(cells)
+    result = result & CStr(cells(index))
+  Next index
+  JoinCells = result
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim index As Long
+  Dim result As String
+  For index = 1 To 100
+    result = JoinCells(CStr(index))
+  Next index
+End Sub
+
+Public Sub ReadRangeNamedCells()
+  Dim cells As Range
+  Dim index As Long
+  Dim result As Variant
+  Set cells = Range("A1:A100")
+  For index = 1 To 100
+    result = cells(index, 1).Value2
+  Next index
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || got[0].Procedure != "ReadRangeNamedCells" {
+		t.Fatalf("array named cells should not produce direct or propagated VBA225, while a Range binding remains eligible: %+v", got)
+	}
+
+	realtimePath := filepath.Join(dir, "src", "modules", "Realtime.bas")
+	realtimeSource := []byte(`Option Explicit
+Public Sub Run()
+  Dim cells As Variant
+  Dim index As Long
+  cells = Split("a|b", "|")
+  For index = LBound(cells) To UBound(cells)
+    Debug.Print CStr(cells(index))
+  Next index
+End Sub
+`)
+	realtime, err := SourceRealtimeFindings(dir, realtimePath, config.Default(), realtimeSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(realtime, "VBA225"); len(got) != 0 {
+		t.Fatalf("realtime array named cells should not produce VBA225: %+v", got)
+	}
+}
+
 func TestVBA225SupportsForEachOffsetWorksheetFunctionsAndBorders(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -78,8 +78,9 @@ type excelAccessSummary struct {
 }
 
 type excelRangeVariables struct {
-	Range   map[string]bool
-	PerCell map[string]bool
+	Range    map[string]bool
+	PerCell  map[string]bool
+	Shadowed map[string]bool
 }
 
 type excelLoopAccessIndex struct {
@@ -769,7 +770,11 @@ func excelColumnNumber(value string) int {
 }
 
 func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) excelRangeVariables {
-	vars := excelRangeVariables{Range: map[string]bool{}, PerCell: map[string]bool{}}
+	vars := excelRangeVariables{
+		Range:    map[string]bool{},
+		PerCell:  map[string]bool{},
+		Shadowed: vba242ShadowedRoots(file, proc),
+	}
 	for _, declaration := range proc.Declarations {
 		if isExcelRangeType(declaration.Type) {
 			vars.Range[strings.ToLower(declaration.Name)] = true
@@ -811,7 +816,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 			continue
 		}
 		typ, resolved := resolveExcelExpressionType(file, db, receiver, line-1, rootDir, cfg)
-		perCell := isPerCellExcelExpression(file, db, receiver, rangeVars, line-1, rootDir, cfg)
+		perCell := isPerCellExcelExpression(file, proc, db, receiver, rangeVars, line-1, rootDir, cfg)
 		if !resolved && !perCell {
 			continue
 		}
@@ -852,7 +857,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 	if strings.Contains(lower, "worksheetfunction.") || strings.Contains(lower, ".evaluate(") {
 		out = append(out, excelLoopAccess{Category: excelAccessWorksheetCall, Line: line, Read: true})
 	}
-	if excelCellCallRe.MatchString(text) {
+	if excelCellCallRe.MatchString(text) && isPerCellExcelExpression(file, proc, db, "Cells(1, 1)", rangeVars, line-1, rootDir, cfg) {
 		out = append(out, excelLoopAccess{Category: excelAccessRangeLookup, Member: "Cells", Line: line, Read: true})
 	}
 	directRangeLookup := directExcelLookupRe.MatchString(text)
@@ -887,13 +892,16 @@ func isExcelWorksheetOrRangeType(typ string) bool {
 	return isExcelRangeType(lower) || strings.Contains(lower, "worksheet") || strings.Contains(lower, "worksheets") || strings.Contains(lower, "excel.application")
 }
 
-func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, rangeVars excelRangeVariables, line int, rootDir string, cfg config.Config) bool {
+func isPerCellExcelExpression(file parsedFile, proc sourceProcedure, db *vbadb.DB, expression string, rangeVars excelRangeVariables, line int, rootDir string, cfg config.Config) bool {
 	lower := strings.ToLower(strings.TrimSpace(expression))
 	if rangeVars.PerCell[lower] {
 		return true
 	}
 	if strings.HasPrefix(lower, "cells(") {
-		return true
+		if !rangeVars.Shadowed["cells"] || rangeVars.Range["cells"] {
+			return true
+		}
+		return isExcelWorksheetOrRangeType(excelRootBindingType(file, proc, "cells"))
 	}
 	if strings.HasPrefix(lower, "range(") || strings.Contains(lower, ".range(") {
 		count := literalRangeCellCount(lower)
@@ -914,6 +922,25 @@ func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, 
 	}
 	typ, ok := resolveExcelExpressionType(file, db, root, line, rootDir, cfg)
 	return ok && isExcelWorksheetOrRangeType(typ)
+}
+
+func excelRootBindingType(file parsedFile, proc sourceProcedure, name string) string {
+	for _, parameter := range proc.Params {
+		if strings.EqualFold(strings.TrimSpace(parameter.Name), name) {
+			return parameter.Type
+		}
+	}
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), name) {
+			return declaration.Type
+		}
+	}
+	for _, declaration := range file.IR.Declarations {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), name) {
+			return declaration.Type
+		}
+	}
+	return ""
 }
 
 func statementMemberExpressions(statement procedureir.Statement, expressions []procedureir.Expression) []procedureir.Expression {
