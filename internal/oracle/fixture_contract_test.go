@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/analyze"
@@ -114,6 +115,27 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 					Range: &Range{StartLine: issue.Line, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn},
 				})
 			}
+			blocking := lint.PushBlockingIssues(lintResult.Issues)
+			hasBlockingCode := func(code string) bool {
+				for _, issue := range blocking {
+					if issue.Code == code {
+						return true
+					}
+				}
+				return false
+			}
+			if strings.HasPrefix(entry.ID, "vb012-terminator-") {
+				switch c.VBE.Expected {
+				case ExpectedRejected:
+					if !hasBlockingCode("VB012") {
+						t.Fatalf("VBE-rejected fixture did not block on VB012: issues=%+v blocking=%+v", lintResult.Issues, blocking)
+					}
+				case ExpectedAccepted:
+					if len(blocking) != 0 {
+						t.Fatalf("VBE-accepted fixture became preflight-blocking: %+v", blocking)
+					}
+				}
+			}
 
 			if analysisUsesSurface(c.Analysis, "analyze") {
 				analyzeResult, err := (analyze.Analyzer{RootDir: projectRoot, Config: cfg}).RunResult()
@@ -190,6 +212,21 @@ func TestCommittedFixtureContractsWithoutExcel(t *testing.T) {
 			if err := CheckDiagnosticProjections(c.Analysis, projections); err != nil {
 				t.Fatal(err)
 			}
+			acceptedStyle := strings.Contains(entry.ID, "vb012-terminator-property-get-end-function-") || strings.Contains(entry.ID, "vb012-terminator-property-get-end-sub-")
+			if acceptedStyle {
+				for _, surface := range []string{"lint", "lsp"} {
+					found := false
+					for _, diagnostic := range projections[surface] {
+						if diagnostic.Code == "VB066" && diagnostic.Severity == "warning" {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Fatalf("accepted Property Get mismatch missing VB066 warning on %s: %+v", surface, projections[surface])
+					}
+				}
+			}
 		})
 	}
 }
@@ -223,7 +260,7 @@ func TestOracleBindingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AssertedFixtures != 103 || report.BoundFixtures != 87 || report.PartialFixtures != 0 || report.UnboundFixtures != 15 || report.NotApplicable != 2 {
+	if report.AssertedFixtures != 163 || report.BoundFixtures != 147 || report.PartialFixtures != 0 || report.UnboundFixtures != 15 || report.NotApplicable != 2 {
 		t.Fatalf("unexpected current corpus coverage: %+v", report)
 	}
 	assertIDs := func(name string, got, want []string) {
@@ -320,6 +357,66 @@ func TestOracleBindingCoverage(t *testing.T) {
 		"valid-module-standard",
 		"vb009-backslash-doubled-quotes-valid",
 		"vb009-c-style-quote-escape",
+		"vb012-terminator-function-end-function-class",
+		"vb012-terminator-function-end-function-document-workbook",
+		"vb012-terminator-function-end-function-document-worksheet",
+		"vb012-terminator-function-end-function-standard",
+		"vb012-terminator-function-end-property-class",
+		"vb012-terminator-function-end-property-document-workbook",
+		"vb012-terminator-function-end-property-document-worksheet",
+		"vb012-terminator-function-end-property-standard",
+		"vb012-terminator-function-end-sub-class",
+		"vb012-terminator-function-end-sub-document-workbook",
+		"vb012-terminator-function-end-sub-document-worksheet",
+		"vb012-terminator-function-end-sub-standard",
+		"vb012-terminator-property-get-end-function-class",
+		"vb012-terminator-property-get-end-function-document-workbook",
+		"vb012-terminator-property-get-end-function-document-worksheet",
+		"vb012-terminator-property-get-end-function-standard",
+		"vb012-terminator-property-get-end-property-class",
+		"vb012-terminator-property-get-end-property-document-workbook",
+		"vb012-terminator-property-get-end-property-document-worksheet",
+		"vb012-terminator-property-get-end-property-standard",
+		"vb012-terminator-property-get-end-sub-class",
+		"vb012-terminator-property-get-end-sub-document-workbook",
+		"vb012-terminator-property-get-end-sub-document-worksheet",
+		"vb012-terminator-property-get-end-sub-standard",
+		"vb012-terminator-property-let-end-function-class",
+		"vb012-terminator-property-let-end-function-document-workbook",
+		"vb012-terminator-property-let-end-function-document-worksheet",
+		"vb012-terminator-property-let-end-function-standard",
+		"vb012-terminator-property-let-end-property-class",
+		"vb012-terminator-property-let-end-property-document-workbook",
+		"vb012-terminator-property-let-end-property-document-worksheet",
+		"vb012-terminator-property-let-end-property-standard",
+		"vb012-terminator-property-let-end-sub-class",
+		"vb012-terminator-property-let-end-sub-document-workbook",
+		"vb012-terminator-property-let-end-sub-document-worksheet",
+		"vb012-terminator-property-let-end-sub-standard",
+		"vb012-terminator-property-set-end-function-class",
+		"vb012-terminator-property-set-end-function-document-workbook",
+		"vb012-terminator-property-set-end-function-document-worksheet",
+		"vb012-terminator-property-set-end-function-standard",
+		"vb012-terminator-property-set-end-property-class",
+		"vb012-terminator-property-set-end-property-document-workbook",
+		"vb012-terminator-property-set-end-property-document-worksheet",
+		"vb012-terminator-property-set-end-property-standard",
+		"vb012-terminator-property-set-end-sub-class",
+		"vb012-terminator-property-set-end-sub-document-workbook",
+		"vb012-terminator-property-set-end-sub-document-worksheet",
+		"vb012-terminator-property-set-end-sub-standard",
+		"vb012-terminator-sub-end-function-class",
+		"vb012-terminator-sub-end-function-document-workbook",
+		"vb012-terminator-sub-end-function-document-worksheet",
+		"vb012-terminator-sub-end-function-standard",
+		"vb012-terminator-sub-end-property-class",
+		"vb012-terminator-sub-end-property-document-workbook",
+		"vb012-terminator-sub-end-property-document-worksheet",
+		"vb012-terminator-sub-end-property-standard",
+		"vb012-terminator-sub-end-sub-class",
+		"vb012-terminator-sub-end-sub-document-workbook",
+		"vb012-terminator-sub-end-sub-document-worksheet",
+		"vb012-terminator-sub-end-sub-standard",
 	})
 	assertIDs("partially-bound", report.PartialIDs, nil)
 	assertIDs("unbound", report.UnboundIDs, []string{

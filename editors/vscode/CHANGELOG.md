@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.10.0
+
 - Fixed VBA hover documentation for procedures in currently open modules.
 
 ## v0.9.0

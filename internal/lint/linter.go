@@ -65,10 +65,16 @@ type Linter struct {
 	// document (for example, an editor buffer whose project metadata already
 	// identified it as a document module). Batch lint leaves this empty and
 	// uses the canonical source-root classification from symbols instead.
-	ModuleKind          string
-	PathFilter          func(string) bool
-	VisibleDeclarations map[string]bool
-	VisibleConstants    map[string]bool
+	ModuleKind string
+	// ProcedureBoundaryClassifier optionally overrides the evidence-backed
+	// procedure terminator compatibility table.  A nil value selects
+	// DefaultProcedureBoundaryClassifier. Keeping this hook at the boundary
+	// tracker makes parser structure, compiler validity, and style policy
+	// independently testable.
+	ProcedureBoundaryClassifier ProcedureBoundaryClassifier
+	PathFilter                  func(string) bool
+	VisibleDeclarations         map[string]bool
+	VisibleConstants            map[string]bool
 	// ConstantValues carries the immutable, value-bearing subset of the
 	// project constant environment. VisibleConstants remains for legacy
 	// name-only callers and constant-assignment diagnostics.
@@ -79,9 +85,10 @@ type Linter struct {
 }
 
 type procedureFrame struct {
-	Kind   string
-	Name   string
-	LineNo int
+	Kind     string
+	Accessor string
+	Name     string
+	LineNo   int
 }
 
 var (
@@ -583,9 +590,10 @@ type parserRecoveryPolicy struct {
 }
 
 // parserRecoveryPolicies is the single source of truth for syntax findings
-// that can own a parser-recovery range.  Only the new issue594 families need
-// to suppress a location-less structural fallback; older rules already have
-// concrete ranges and must not hide an unrelated unmatched-block finding.
+// that can own a parser-recovery range.  The issue594 families and the
+// evidence-backed VB066 accepted-form style warning suppress a location-less
+// structural fallback; older rules already have concrete ranges and must not
+// hide an unrelated unmatched-block finding.
 var parserRecoveryPolicies = map[string]parserRecoveryPolicy{
 	"VB008": {overlapsRecovery: true},
 	"VB009": {overlapsRecovery: true},
@@ -600,6 +608,11 @@ var parserRecoveryPolicies = map[string]parserRecoveryPolicy{
 	"VB063": {overlapsRecovery: true, suppressLocationless: true},
 	"VB064": {overlapsRecovery: true, suppressLocationless: true},
 	"VB065": {overlapsRecovery: true, suppressLocationless: true},
+	// VBE accepts Property Get with End Sub/End Function even though the
+	// tree-sitter grammar may recover around the noncanonical closer. VB066
+	// owns only that confirmed style range so an accepted source is not made
+	// preflight-blocking by a duplicate generic VB014.
+	"VB066": {overlapsRecovery: true, suppressLocationless: true},
 }
 
 func ownsParserRecovery(issue Issue) bool {
@@ -3278,12 +3291,25 @@ afterModifiers:
 		}
 		switch fields[index+1] {
 		case "get", "let", "set":
-			return procedureFrame{Kind: "Property", Name: procedureName(names, index+2), LineNo: lineNo}, true
+			return procedureFrame{Kind: "Property", Accessor: normalizeProcedureAccessor(fields[index+1]), Name: procedureName(names, index+2), LineNo: lineNo}, true
 		default:
 			return procedureFrame{}, false
 		}
 	default:
 		return procedureFrame{}, false
+	}
+}
+
+func normalizeProcedureAccessor(accessor string) string {
+	switch strings.ToLower(strings.TrimSpace(accessor)) {
+	case "get":
+		return "Get"
+	case "let":
+		return "Let"
+	case "set":
+		return "Set"
+	default:
+		return ""
 	}
 }
 

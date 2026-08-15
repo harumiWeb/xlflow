@@ -4,6 +4,16 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.30.0
+
+- Completed the `VB012` procedure-terminator compatibility audit across the
+  `Sub`, `Function`, `Property Get`, `Property Let`, and `Property Set` opener
+  matrix in standard, class, `ThisWorkbook`, and worksheet document modules.
+  Excel 16.0 build 17932 accepts `Property Get` with `End Sub` or `End
+Function`; those accepted forms now use non-blocking, suppressible `VB066`
+  style warnings, while VBE-rejected mismatches remain `VB012` compile errors
+  that block source preflight. Parser structure, VBE validity, and style policy
+  are documented and covered separately.
 - Fixed `VBA214` false positives when a narrow `On Error Resume Next`
   compatibility probe captures `Err.Description` before clearing the error and
   restoring normal error handling.

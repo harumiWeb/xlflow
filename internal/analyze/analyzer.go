@@ -371,7 +371,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			if readErr := parsed.Read(func(view vbaast.ParsedView) error {
 				declarationRecovery = vbaast.IsDeclarationKeywordRecovery(view.Root, view.Source) ||
 					vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) ||
-					vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
+					vbaast.IsNumericLiteralRecovery(view.Root, view.Source) ||
+					lint.IsAcceptedProcedureBoundaryRecovery(view.Root, view.Source, moduleKind)
 				return nil
 			}); readErr != nil {
 				parsed.Close()

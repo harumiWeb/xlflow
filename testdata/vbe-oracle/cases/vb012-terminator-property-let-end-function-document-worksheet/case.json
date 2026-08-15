@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "vb012-terminator-property-let-end-function-document-worksheet",
+  "description": "VB012 terminator compatibility probe: Property Let with End Function in a document-worksheet module.",
+  "modules": [
+    {
+      "name": "Sheet1",
+      "kind": "document",
+      "path": "Sheet1.bas",
+      "entry": true,
+      "document_target": "worksheet"
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "rejected",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "compile-error"
+  },
+  "analysis": {
+    "binding_status": "bound",
+    "evidence_role": "compile-equivalent",
+    "rule_codes": ["VB012"],
+    "negative_controls": ["vb012-terminator-property-let-end-property-document-worksheet"],
+    "expected_diagnostics": [{ "code": "VB012", "severity": "error", "surfaces": ["lint", "lsp"] }]
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-15T04:47:13Z"
+      }
+    ]
+  }
+}
