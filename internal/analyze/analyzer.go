@@ -1069,6 +1069,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		moduleKind, classifyErr := realtimeModuleKind(rootDir, cfg, view.Path)
+		if classifyErr != nil {
+			return classifyErr
+		}
 		lines := normalizedSourceLines(string(view.Source))
 		var rangeValueConstants map[string]int
 		if cfg.Analyze.DetectRangeValueArrayShape {
@@ -1086,6 +1090,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			Path:                      view.Path,
 			Lines:                     lines,
 			Module:                    strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			ModuleKind:                moduleKind,
 			Source:                    view.Source,
 			Root:                      view.Root,
 			IR:                        ir,
@@ -1180,6 +1185,17 @@ func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 		}
 	}
 	return false
+}
+
+func realtimeModuleKind(rootDir string, cfg config.Config, path string) (string, error) {
+	sourceFile, included, err := symbols.SourceFileForPath(rootDir, cfg, path)
+	if err != nil {
+		return "", err
+	}
+	if !included {
+		return "", nil
+	}
+	return sourceFile.ModuleKind, nil
 }
 
 func realtimeFindings(findings []Finding) []Finding {

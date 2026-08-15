@@ -53,6 +53,34 @@ func TestAnalyzerAcceptsVBEAcceptedPropertyGetTerminatorRecovery(t *testing.T) {
 	}
 }
 
+func TestSourceRealtimeClassifiesWorkbookAndWorksheetDocuments(t *testing.T) {
+	cfg := config.Default()
+	for _, tc := range []struct {
+		name string
+	}{
+		{name: "ThisWorkbook.bas"},
+		{name: "Sheet1.bas"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, cfg.Src.Workbook, tc.name)
+			kind, err := realtimeModuleKind(dir, cfg, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind != "document" {
+				t.Fatalf("realtime module kind for %s = %q, want document", tc.name, kind)
+			}
+			if _, err := SourceRealtimeFindings(dir, path, cfg, []byte(`Option Explicit
+Public Sub Run()
+End Sub
+`)); err != nil {
+				t.Fatalf("realtime analysis for %s: %v", tc.name, err)
+			}
+		})
+	}
+}
+
 func TestAnalyzerRejectsAcceptedTerminatorWithMalformedColonStatement(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "modules", "Probe.bas")

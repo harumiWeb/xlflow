@@ -167,9 +167,6 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 			continue
 		}
 		for _, code := range c.Analysis.RuleCodes {
-			if supplementalAcceptedStyleBinding(c, code) {
-				continue
-			}
 			coverage := ruleMap[code]
 			positiveSurfaces := expectedSurfaces(c.Analysis.ExpectedDiagnostics, code)
 			controlIDs := c.Analysis.NegativeControls
@@ -268,7 +265,7 @@ func supplementalAcceptedStyleBinding(c Case, code string) bool {
 		return false
 	}
 	rule, err := staticcontract.CanonicalRuleMetadata(code)
-	return err == nil && rule.Family == rules.FamilyLint && rule.Category == rules.CategoryMaintainability && rule.EvidenceClass == rules.EvidenceMaintainability && !rule.CompileEquivalent && !rule.PreflightBlocking
+	return err == nil && rule.Family == rules.FamilyLint && rule.Category == rules.CategoryMaintainability && rule.EvidenceClass == rules.EvidenceMaintainability && !rule.CompileEquivalent && rule.DefaultSeverity == rules.SeverityWarning && !rule.PreflightBlocking
 }
 
 func coverageValidationErrors(rulesCoverage []BindingRuleCoverage) []string {
