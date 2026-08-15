@@ -148,6 +148,9 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 			continue
 		}
 		for _, code := range c.Analysis.RuleCodes {
+			if supplementalAcceptedStyleBinding(c, code) {
+				continue
+			}
 			coverage := ruleMap[code]
 			if coverage == nil {
 				coverage = &BindingRuleCoverage{Code: code}
@@ -207,6 +210,9 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 			continue
 		}
 		for _, code := range c.Analysis.RuleCodes {
+			if supplementalAcceptedStyleBinding(c, code) {
+				continue
+			}
 			coverage := ruleMap[code]
 			boundReference := acceptedReferencedByRejected(c.ID, code, cases, BindingBound)
 			partialReference := acceptedReferencedByRejected(c.ID, code, cases, BindingPartiallyBound)
@@ -252,6 +258,14 @@ func ValidateBindingCoverage(cases []Case) (BindingCoverage, error) {
 		return report, fmt.Errorf("oracle binding coverage validation failed:\n- %s", strings.Join(uniqueStrings(validationErrors), "\n- "))
 	}
 	return report, nil
+}
+
+func supplementalAcceptedStyleBinding(c Case, code string) bool {
+	if c.VBE.Expected != ExpectedAccepted || c.Analysis.BindingStatus != BindingBound {
+		return false
+	}
+	rule, err := staticcontract.CanonicalRuleMetadata(code)
+	return err == nil && rule.Family == rules.FamilyLint && rule.Category == rules.CategoryMaintainability && rule.EvidenceClass == rules.EvidenceMaintainability && !rule.CompileEquivalent && rule.DefaultSeverity == rules.SeverityWarning && !rule.PreflightBlocking
 }
 
 func coverageValidationErrors(rulesCoverage []BindingRuleCoverage) []string {

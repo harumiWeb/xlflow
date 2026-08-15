@@ -94,6 +94,10 @@ type Result struct {
 	Warnings          []map[string]any
 	AnalysisMetrics   any       `json:"analysis_metrics,omitempty"`
 	PreflightFindings []Finding `json:"-"`
+	// AnalyzedFiles lets regression tests and callers distinguish a successful
+	// no-finding run from a run that did not discover any source files. It is
+	// intentionally omitted from serialized CLI payloads.
+	AnalyzedFiles int `json:"-"`
 }
 
 type Analyzer struct {
@@ -379,7 +383,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			if readErr := parsed.Read(func(view vbaast.ParsedView) error {
 				declarationRecovery = vbaast.IsDeclarationKeywordRecovery(view.Root, view.Source) ||
 					vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) ||
-					vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
+					vbaast.IsNumericLiteralRecovery(view.Root, view.Source) ||
+					lint.IsAcceptedProcedureBoundaryRecovery(view.Root, view.Source, moduleKind)
 				return nil
 			}); readErr != nil {
 				parsed.Close()
@@ -556,7 +561,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
-	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics, PreflightFindings: preflightFindings}, nil
+	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics, PreflightFindings: preflightFindings, AnalyzedFiles: len(parsedFiles)}, nil
 }
 
 func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
@@ -1064,6 +1069,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		moduleKind, classifyErr := realtimeModuleKind(rootDir, cfg, view.Path)
+		if classifyErr != nil {
+			return classifyErr
+		}
 		lines := normalizedSourceLines(string(view.Source))
 		var rangeValueConstants map[string]int
 		if cfg.Analyze.DetectRangeValueArrayShape {
@@ -1081,6 +1090,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			Path:                      view.Path,
 			Lines:                     lines,
 			Module:                    strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			ModuleKind:                moduleKind,
 			Source:                    view.Source,
 			Root:                      view.Root,
 			IR:                        ir,
@@ -1175,6 +1185,17 @@ func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 		}
 	}
 	return false
+}
+
+func realtimeModuleKind(rootDir string, cfg config.Config, path string) (string, error) {
+	sourceFile, included, err := symbols.SourceFileForPath(rootDir, cfg, path)
+	if err != nil {
+		return "", err
+	}
+	if !included {
+		return "", nil
+	}
+	return sourceFile.ModuleKind, nil
 }
 
 func realtimeFindings(findings []Finding) []Finding {

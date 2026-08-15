@@ -35,6 +35,25 @@ function run(label, command, args, { outputIsFailure = false } = {}) {
   return true;
 }
 
+function runInChunks(label, command, prefixArgs, items, options = {}) {
+  const chunkSize = options.chunkSize ?? 32;
+  for (let offset = 0; offset < items.length; offset += chunkSize) {
+    const chunk = items.slice(offset, offset + chunkSize);
+    const end = offset + chunk.length;
+    if (
+      !run(
+        `${label} (${offset + 1}-${end}/${items.length})`,
+        command,
+        [...prefixArgs, ...chunk],
+        options,
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const files = stagedFiles();
 if (files.length === 0) {
   process.exit(0);
@@ -46,7 +65,12 @@ const vendoredCorpusPrefix = "testdata/static-analysis-corpus/projects/third_par
 const sourceFiles = files.filter((file) => !file.startsWith(vendoredCorpusPrefix));
 let ok =
   sourceFiles.length === 0 ||
-  run("git diff --cached --check", "git", ["diff", "--cached", "--check", "--", ...sourceFiles]);
+  runInChunks(
+    "git diff --cached --check",
+    "git",
+    ["diff", "--cached", "--check", "--"],
+    sourceFiles,
+  );
 
 const goFiles = files.filter((file) => file.toLowerCase().endsWith(".go"));
 if (goFiles.length > 0) {

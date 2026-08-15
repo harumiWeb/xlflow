@@ -942,6 +942,66 @@ real-time eligibility for the lint and analyzer rules described below. The
 generated diagnostic catalog and `xlflow rules --json` are projections of that
 registry; this section defines command behavior and compatibility.
 
+### Procedure terminator compatibility evidence
+
+`VB010`, `VB011`, `VB012`, and the procedure-boundary cases of `VB014` describe
+source structure around procedure boundaries, but their evidence layers are not
+interchangeable. In particular,
+tree-sitter structure or the boundary tracker is an xlflow parser observation;
+it is not, by itself, proof that Excel's VBE rejects the source. The local VBE
+oracle is authoritative for compile acceptance, while xlflow may retain a
+separate style or maintainability preference for an accepted form.
+
+The procedure-terminator audit for issue #597 uses one isolated oracle fixture
+for each opener/terminator pair in the following matrix, repeated for standard,
+class, ThisWorkbook, and worksheet modules (60 fixtures in total):
+
+| Opener         | Terminators under test                    |
+| -------------- | ----------------------------------------- |
+| `Sub`          | `End Sub`, `End Function`, `End Property` |
+| `Function`     | `End Sub`, `End Function`, `End Property` |
+| `Property Get` | `End Sub`, `End Function`, `End Property` |
+| `Property Let` | `End Sub`, `End Function`, `End Property` |
+| `Property Set` | `End Sub`, `End Function`, `End Property` |
+
+Each fixture contains exactly one procedure boundary and records three
+independent results:
+
+- parser/CST and boundary-tracker interpretation;
+- observed VBE Compile acceptance or rejection, with Excel version/build,
+  bitness, locale, and cleanup provenance; and
+- the xlflow diagnostic policy, including severity and source-preflight
+  blocking.
+
+The promoted issue #597 run used Excel 16.0, build 17932, x64, `ja-JP`, and
+covered all 60 fixtures sequentially after the known accept/reject controls.
+The result was consistent for standard modules, class modules, `ThisWorkbook`,
+and worksheet document modules:
+
+| Opener         | `End Sub`                              | `End Function`                         | `End Property`                   |
+| -------------- | -------------------------------------- | -------------------------------------- | -------------------------------- |
+| `Sub`          | accepted baseline                      | rejected: `VB012` error/blocking       | rejected: `VB012` error/blocking |
+| `Function`     | rejected: `VB012` error/blocking       | accepted baseline                      | rejected: `VB012` error/blocking |
+| `Property Get` | accepted by VBE: `VB066` style warning | accepted by VBE: `VB066` style warning | accepted baseline                |
+| `Property Let` | rejected: `VB012` error/blocking       | rejected: `VB012` error/blocking       | accepted baseline                |
+| `Property Set` | rejected: `VB012` error/blocking       | rejected: `VB012` error/blocking       | accepted baseline                |
+
+`VB012` therefore remains a correctness, compile-equivalent, unsuppressible
+`error` and source-preflight blocker only for the rejected combinations. `VB066`
+(`Procedure terminator style mismatch`) represents the accepted `Property Get`
+forms. It is a default-enabled, high-precision, file-local `warning` on `lint`
+and LSP, is inline-suppressible, and is never compile-equivalent or
+preflight-blocking. The accepted fixtures forbid `VB012` on both public
+surfaces, so a parser/CST mismatch cannot block `push` or `run` merely because
+the source uses a noncanonical closer. The focused regression contract also
+ensures that the confirmed accepted forms do not retain a duplicate `VB014`
+recovery blocker.
+
+The `lint` and LSP projections must use the same classification. A VBE-accepted
+terminator form must not block `push`, `run`, or another source-preflight gate
+because of `VB012`; parser-recovery findings remain a separate contract and
+must be tested explicitly for the same accepted fixture.
+
 Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). `VB021` may use the same optional `context` field on one representative declaration of an unreachable private call cluster; the value lists the cluster's qualified procedure names while each declaration retains its own issue location. When xlflow can confidently identify an unclosed block, VB014 also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`; its primary location is the point where the closer is expected, while the metadata identifies the unmatched opener. Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
 
 Analyzer finding objects use the same core location and remediation fields. Their public severity is `error`, `warning`, or `information`; human output preserves all three values, JSON uses the lowercase string, and LSP projects `information` as `DiagnosticSeverity.Information`. `VBA214` additionally includes `scope_end_line`: `line` identifies the `On Error Resume Next` start, and `scope_end_line` identifies the path-specific restoration or exit boundary.
@@ -1101,6 +1161,12 @@ Module` directives are also reported as duplicate same-kind declarations.
 - `VB065`: a `TypeOf` expression has a provably malformed syntax shape. The
   finding is an unsuppressible compile-equivalent error and blocks source
   preflight; ambiguous recovery remains `VB014`.
+- `VB066`: a `Property Get` uses `End Sub` or `End Function`. Excel's VBE
+  accepts these forms, but `End Property` remains xlflow's canonical style.
+  The finding is a default-enabled, high-precision, file-local warning on
+  `lint` and LSP, supports inline suppression, and never blocks source
+  preflight. This style preference is intentionally separate from `VB012`,
+  which is reserved for VBE-rejected terminator combinations.
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
 - `VB033`: member is not present on the resolved receiver type
@@ -1119,7 +1185,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB065` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
+Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB065` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible. `VB066` is deliberately outside this safety range: it is a suppressible style warning for VBE-accepted `Property Get` terminators and never blocks preflight.
 
 `[preflight].allowed_diagnostics` is an empty-by-default project policy for the
 shared source-preflight gate used by `push`, configured-workbook `run`,
@@ -1156,7 +1222,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB065`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB065`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. `VB066` is not in this list because it is an inline-suppressible, non-blocking style warning. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 `VBA249` is intentionally excluded from this preflight-blocking set. Its
 `error` severity records a deterministic runtime failure, while its

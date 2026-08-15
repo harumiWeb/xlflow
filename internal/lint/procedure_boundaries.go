@@ -6,6 +6,59 @@ import (
 	"strings"
 )
 
+// ProcedureBoundaryOutcome records the evidence-backed interpretation of a
+// mismatched procedure terminator.  A zero-valued ProcedureBoundaryDecision
+// is treated as compile-invalid so a nil classifier and a classifier that only
+// fills the context both retain the historical VB012 behavior.
+type ProcedureBoundaryOutcome string
+
+const (
+	// ProcedureBoundaryCompileInvalid means that the host/compiler rejects the
+	// opener/terminator combination.  It is reported as VB012/error by default.
+	ProcedureBoundaryCompileInvalid ProcedureBoundaryOutcome = "compile-invalid"
+	// ProcedureBoundaryStyleMismatch means that the host accepts the source,
+	// while the project may still want a separate style diagnostic.  A custom
+	// diagnostic code can be supplied in ProcedureBoundaryDecision.  The
+	// production classifier supplies the registry-backed VB066 style code.
+	ProcedureBoundaryStyleMismatch ProcedureBoundaryOutcome = "style-mismatch"
+	// ProcedureBoundaryAccepted suppresses a structural mismatch finding when
+	// host evidence confirms that the source compiles.  Parser recovery remains
+	// a separate concern and is not altered by this decision.
+	ProcedureBoundaryAccepted ProcedureBoundaryOutcome = "accepted"
+)
+
+// ProcedureBoundaryContext is the normalized procedure opener and terminator
+// pair presented to ProcedureBoundaryClassifier.  Property accessor identity
+// is intentionally retained: VBA's Property Get/Let/Set forms share the
+// Property terminator token but may have different host behavior.
+type ProcedureBoundaryContext struct {
+	ModuleKind     string
+	OpenerKind     string
+	Accessor       string
+	TerminatorKind string
+	ProcedureName  string
+	OpeningLine    int
+	ClosingLine    int
+}
+
+// ProcedureBoundaryDecision is the result of an evidence-backed
+// classification. Code and Severity are only needed for style diagnostics;
+// compile-invalid and accepted outcomes use VB012/error and no issue,
+// respectively, when they are left empty. The production table supplies the
+// registry-backed VB066 style code for the confirmed accepted mismatch.
+type ProcedureBoundaryDecision struct {
+	Outcome  ProcedureBoundaryOutcome
+	Code     string
+	Severity string
+	Message  string
+}
+
+// ProcedureBoundaryClassifier lets tests and host-specific evidence tables
+// classify a procedure terminator without coupling the parser's structural
+// stack to a particular Office/VBE result.  The production tracker installs
+// DefaultProcedureBoundaryClassifier when callers do not provide an override.
+type ProcedureBoundaryClassifier func(ProcedureBoundaryContext) ProcedureBoundaryDecision
+
 // procedureBoundaryState is one possible source interpretation while a
 // conditional-compilation group is being scanned.  VBA compiles exactly one
 // branch, so each branch must get its own procedure stack; merging the raw
@@ -26,7 +79,9 @@ type conditionalProcedureFrame struct {
 
 type procedureBoundaryTracker struct {
 	linter       Linter
+	classifier   ProcedureBoundaryClassifier
 	path         string
+	moduleKind   string
 	states       procedureBoundaryStates
 	conditionals []conditionalProcedureFrame
 	issues       []Issue
@@ -37,11 +92,17 @@ type procedureBoundaryTracker struct {
 const maxProcedureBoundaryStates = 512
 
 func newProcedureBoundaryTracker(linter Linter, path string) *procedureBoundaryTracker {
+	classifier := linter.ProcedureBoundaryClassifier
+	if classifier == nil {
+		classifier = DefaultProcedureBoundaryClassifier
+	}
 	tracker := &procedureBoundaryTracker{
-		linter:    linter,
-		path:      path,
-		states:    make(procedureBoundaryStates),
-		issueKeys: make(map[string]struct{}),
+		linter:     linter,
+		classifier: classifier,
+		path:       path,
+		moduleKind: strings.ToLower(strings.TrimSpace(linter.moduleKindForPath(path))),
+		states:     make(procedureBoundaryStates),
+		issueKeys:  make(map[string]struct{}),
 	}
 	tracker.addState(tracker.states, procedureBoundaryState{})
 	return tracker
@@ -164,9 +225,9 @@ func (t *procedureBoundaryTracker) processStatement(lineNo int, line string) {
 			top := state.procedures[len(state.procedures)-1]
 			state.procedures = state.procedures[:len(state.procedures)-1]
 			if top.Kind != endKind {
-				issue := t.linter.issue(t.path, lineNo, "VB012", "error", "Mismatched End "+endKind+" for "+top.Kind+" procedure.")
-				issue.Symbol = top.Name
-				t.addBoundaryIssue(issue)
+				if issue := t.mismatchedTerminatorIssue(top, endKind, lineNo); issue != nil {
+					t.addBoundaryIssue(*issue)
+				}
 			}
 			t.addState(next, state)
 			continue
@@ -181,6 +242,54 @@ func (t *procedureBoundaryTracker) processStatement(lineNo int, line string) {
 		}
 	}
 	t.states = next
+}
+
+func (t *procedureBoundaryTracker) mismatchedTerminatorIssue(top procedureFrame, endKind string, lineNo int) *Issue {
+	decision := ProcedureBoundaryDecision{Outcome: ProcedureBoundaryCompileInvalid}
+	if t.classifier != nil {
+		decision = t.classifier(ProcedureBoundaryContext{
+			ModuleKind:     t.moduleKind,
+			OpenerKind:     top.Kind,
+			Accessor:       top.Accessor,
+			TerminatorKind: endKind,
+			ProcedureName:  top.Name,
+			OpeningLine:    top.LineNo,
+			ClosingLine:    lineNo,
+		})
+	}
+
+	switch decision.Outcome {
+	case ProcedureBoundaryAccepted:
+		return nil
+	case ProcedureBoundaryStyleMismatch:
+		code := strings.TrimSpace(decision.Code)
+		if code == "" {
+			// A style decision without a registry code is intentionally
+			// non-emitting.  The production classifier always supplies VB066;
+			// this fallback keeps custom experiments from inventing an
+			// unregistered diagnostic.
+			return nil
+		}
+		severity := strings.TrimSpace(decision.Severity)
+		if severity == "" {
+			severity = "warning"
+		}
+		message := decision.Message
+		if strings.TrimSpace(message) == "" {
+			message = "Mismatched End " + endKind + " for " + top.Kind + " procedure."
+		}
+		issue := t.linter.issue(t.path, lineNo, code, severity, message)
+		issue.Symbol = top.Name
+		return &issue
+	default:
+		message := decision.Message
+		if strings.TrimSpace(message) == "" {
+			message = "Mismatched End " + endKind + " for " + top.Kind + " procedure."
+		}
+		issue := t.linter.issue(t.path, lineNo, "VB012", "error", message)
+		issue.Symbol = top.Name
+		return &issue
+	}
 }
 
 func (t *procedureBoundaryTracker) finish() []Issue {
@@ -260,6 +369,7 @@ func procedureBoundaryStateKey(state procedureBoundaryState) string {
 	for _, procedure := range state.procedures {
 		parts = append(parts, strings.Join([]string{
 			procedure.Kind,
+			procedure.Accessor,
 			procedure.Name,
 			strconv.Itoa(procedure.LineNo),
 		}, "\x1e"))
