@@ -110,6 +110,7 @@ type Analyzer struct {
 	eventSafeProcedures        map[string]bool
 	applicationStateLeaks      *applicationStateLeakIndex
 	excelLoopAccess            *excelLoopAccessIndex
+	excelRootBindings          excelRootBindingIndex
 	dictionaryCollection       *dictionaryCollectionIndex
 }
 
@@ -1088,7 +1089,14 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
-		analyzer := Analyzer{RootDir: rootDir, Config: cfg, typeDB: typeDB, visibleConstantValues: projectConstants}
+		var excelRootBindings excelRootBindingIndex
+		if cfg.Analyze.DetectExcelCellAccessInLoops {
+			excelRootBindings = buildRealtimeExcelRootBindingIndex(rootDir, cfg, file)
+		}
+		analyzer := Analyzer{
+			RootDir: rootDir, Config: cfg, typeDB: typeDB,
+			visibleConstantValues: projectConstants, excelRootBindings: excelRootBindings,
+		}
 		if dictionaryCollectionAnalysisEnabled(cfg.Analyze) {
 			analyzer.dictionaryCollection = buildDictionaryCollectionIndex([]parsedFile{file})
 		}

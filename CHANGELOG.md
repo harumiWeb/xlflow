@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed `VBA225` false positives when a local, parameter, or module-level VBA
+  binding such as `cells` shadows Excel's unqualified `Cells` function. The
+  Procedure IR now gates the textual fallback, including propagated helper
+  summaries, while explicitly typed `Range` and `Worksheet` bindings remain
+  eligible.
+
 - Fixed `VBA214` false positives when a narrow `On Error Resume Next`
   compatibility probe captures `Err.Description` before clearing the error and
   restoring normal error handling.

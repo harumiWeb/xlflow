@@ -81,6 +81,16 @@ do not establish certain evidence.
 | Address or worksheet lookup | Repeated `Cells`, `Range`, `Offset`, `Worksheets`, or `Sheets` lookup used to reach an iteration-specific cell or range. |
 | Worksheet function call     | A resolved `WorksheetFunction` or Excel `Application` function called for the current loop item or cell.                 |
 
+Unqualified Excel root names are recognized only when the procedure IR does not
+contain a project-local binding with the same name. A local, parameter, or
+module-level identifier such as `Dim cells As Variant` is therefore not
+reclassified as Excel's implicit `Cells` function; its helper summary must not
+create a `VBA225` finding either. A binding explicitly typed as `Range` or
+`Worksheet` remains eligible, and a visible `Public` binding from another
+standard module is resolved with the same symbol-kind and type rules. Batch and
+real-time analysis use the same project-wide binding view, with the edited
+realtime document overlaid on the workspace snapshot.
+
 `For Each cell In range.Cells` is treated as a cell loop. Reads, writes,
 formula assignments, formatting, and recognized worksheet-function calls on
 `cell` are therefore eligible even when the loop variable is not used as an
@@ -88,8 +98,9 @@ explicit `Cells(row, column)` index. A helper call inside a loop contributes
 evidence only when it resolves to one project-local procedure whose direct or
 propagated summary contains one of the recognized access kinds. Ambiguous,
 external, and dynamic helper calls remain uncertainty and do not create a
-`VBA225` finding by themselves. Batch analysis uses project-wide summaries;
-the real-time path uses summaries available in the current document snapshot.
+`VBA225` finding by themselves. Batch analysis uses project-wide summaries; the
+real-time path uses the same project-wide root-binding view and summaries from
+the current document overlay.
 
 ## Bulk-operation exemptions and remediation
 

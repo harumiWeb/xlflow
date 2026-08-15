@@ -78,16 +78,84 @@ type excelAccessSummary struct {
 }
 
 type excelRangeVariables struct {
-	Range   map[string]bool
-	PerCell map[string]bool
+	Range        map[string]bool
+	PerCell      map[string]bool
+	Shadowed     map[string]bool
+	RootBindings excelRootBindingIndex
 }
 
 type excelLoopAccessIndex struct {
-	Summaries map[string]excelAccessSummary
+	Summaries    map[string]excelAccessSummary
+	RootBindings excelRootBindingIndex
+}
+
+type excelRootBinding struct {
+	Type       string
+	Kind       string
+	Visibility string
+	Module     string
+	Scope      procedureir.SymbolScope
+}
+
+type excelRootBindingIndex map[string][]excelRootBinding
+
+func buildExcelRootBindingIndex(files []parsedFile) excelRootBindingIndex {
+	bindings := excelRootBindingIndex{}
+	for _, file := range files {
+		module := strings.TrimSpace(file.IR.ModuleName)
+		if module == "" {
+			module = file.Module
+		}
+		moduleKind := strings.TrimSpace(file.IR.ModuleKind)
+		if moduleKind == "" {
+			moduleKind = file.ModuleKind
+		}
+		for _, declaration := range file.IR.Declarations {
+			name := strings.ToLower(strings.TrimSpace(declaration.Name))
+			if !vba242IsRootName(name) {
+				continue
+			}
+			kind := declaration.Kind
+			if strings.EqualFold(kind, "variable") {
+				kind = excelModuleVariableKind(moduleKind)
+			}
+			bindings[name] = append(bindings[name], excelRootBinding{
+				Type: declaration.Type, Kind: kind, Visibility: declaration.Visibility,
+				Module: module, Scope: declaration.Scope,
+			})
+		}
+		for _, procedure := range file.IR.Procedures {
+			name := strings.ToLower(strings.TrimSpace(procedure.Symbol.Name))
+			if !vba242IsRootName(name) {
+				continue
+			}
+			scope := procedureir.ScopeProject
+			if strings.EqualFold(strings.TrimSpace(procedure.Symbol.Visibility), "private") {
+				scope = procedureir.ScopeModule
+			}
+			bindings[name] = append(bindings[name], excelRootBinding{
+				Type: procedure.Symbol.ReturnType, Kind: string(procedure.Symbol.Kind), Visibility: procedure.Symbol.Visibility,
+				Module: module, Scope: scope,
+			})
+		}
+	}
+	return bindings
+}
+
+func excelModuleVariableKind(moduleKind string) string {
+	switch strings.ToLower(strings.TrimSpace(moduleKind)) {
+	case "class", "form", "document", "sheet", "workbook":
+		return "field"
+	default:
+		return "module_variable"
+	}
 }
 
 func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) *excelLoopAccessIndex {
-	index := &excelLoopAccessIndex{Summaries: map[string]excelAccessSummary{}}
+	index := &excelLoopAccessIndex{
+		Summaries:    map[string]excelAccessSummary{},
+		RootBindings: buildExcelRootBindingIndex(files),
+	}
 	if db == nil {
 		return index
 	}
@@ -98,7 +166,7 @@ func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string,
 				continue
 			}
 			key := excelProcedureKey(file.IR, file.IR.Procedures[i].Symbol)
-			index.Summaries[key] = directExcelAccessSummary(file, proc, db, rootDir, cfg)
+			index.Summaries[key] = directExcelAccessSummary(file, proc, db, index.RootBindings, rootDir, cfg)
 		}
 	}
 
@@ -167,9 +235,9 @@ func mergeExcelSummary(dst *excelAccessSummary, src excelAccessSummary) bool {
 	return changed
 }
 
-func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.DB, rootDir string, cfg config.Config) excelAccessSummary {
+func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.DB, rootBindings excelRootBindingIndex, rootDir string, cfg config.Config) excelAccessSummary {
 	summary := excelAccessSummary{Categories: map[string]bool{}, Members: map[string]bool{}}
-	loopVars := rangeVariablesForProcedure(proc, file, db, rootDir, cfg)
+	loopVars := rangeVariablesForProcedure(proc, file, db, rootBindings, rootDir, cfg)
 	for _, statement := range proc.Statements {
 		for _, access := range classifyExcelStatement(file, proc, statement, db, loopVars, rootDir, cfg) {
 			summary.Categories[access.Category] = true
@@ -196,9 +264,17 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 	} else if needHelperSummaries {
 		// Realtime analysis owns one document and does not have the batch
 		// resolver. Build same-document summaries so local helpers still work.
-		summaries = buildRealtimeExcelLoopSummaries(file, a.typeDB, a.RootDir, a.Config)
+		summaries = buildRealtimeExcelLoopSummaries(file, a.typeDB, a.excelRootBindings, a.RootDir, a.Config)
 	}
-	loopVars := rangeVariablesForProcedure(proc, file, a.typeDB, a.RootDir, a.Config)
+	rootBindings := excelRootBindingIndex(nil)
+	if a.excelLoopAccess != nil {
+		rootBindings = a.excelLoopAccess.RootBindings
+	} else if a.excelRootBindings != nil {
+		rootBindings = a.excelRootBindings
+	} else {
+		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
+	}
+	loopVars := rangeVariablesForProcedure(proc, file, a.typeDB, rootBindings, a.RootDir, a.Config)
 	byStatement := map[int][]excelLoopAccess{}
 	for _, statement := range proc.Statements {
 		accesses := classifyExcelStatement(file, proc, statement, a.typeDB, loopVars, a.RootDir, a.Config)
@@ -343,15 +419,18 @@ func excelProcedureHasLocalLoopCall(file parsedFile, proc sourceProcedure, regio
 	return false
 }
 
-func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) map[string]excelAccessSummary {
+func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings excelRootBindingIndex, rootDir string, cfg config.Config) map[string]excelAccessSummary {
 	summaries := map[string]excelAccessSummary{}
+	if rootBindings == nil {
+		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
+	}
 	procedures := sourceProceduresFromIR(file.IR, file.CFG)
 	for i, candidate := range file.IR.Procedures {
 		if i >= len(procedures) {
 			continue
 		}
 		key := excelProcedureKey(file.IR, candidate.Symbol)
-		summaries[key] = directExcelAccessSummary(file, procedures[i], db, rootDir, cfg)
+		summaries[key] = directExcelAccessSummary(file, procedures[i], db, rootBindings, rootDir, cfg)
 	}
 	changed := true
 	for changed {
@@ -372,6 +451,39 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootDir stri
 		}
 	}
 	return summaries
+}
+
+func buildRealtimeExcelRootBindingIndex(rootDir string, cfg config.Config, file parsedFile) excelRootBindingIndex {
+	doc := intel.Document{Path: file.Path, Source: string(file.Source), ModuleKind: file.ModuleKind}
+	projectSymbols, err := (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols([]intel.Document{doc}, "")
+	if err != nil {
+		return buildExcelRootBindingIndex([]parsedFile{file})
+	}
+	bindings := excelRootBindingIndex{}
+	for _, symbol := range projectSymbols {
+		name := strings.ToLower(strings.TrimSpace(symbol.Name))
+		if !vba242IsRootName(name) {
+			continue
+		}
+		bindings[name] = append(bindings[name], excelRootBinding{
+			Type: symbol.ReturnType, Kind: symbol.Kind, Visibility: symbol.Visibility,
+			Module: symbol.Module, Scope: excelSymbolScope(symbol.Kind, symbol.Visibility),
+		})
+	}
+	if len(bindings) == 0 {
+		return buildExcelRootBindingIndex([]parsedFile{file})
+	}
+	return bindings
+}
+
+func excelSymbolScope(kind, visibility string) procedureir.SymbolScope {
+	if strings.EqualFold(strings.TrimSpace(visibility), "private") {
+		return procedureir.ScopeModule
+	}
+	if strings.TrimSpace(visibility) == "" && excelRootBindingHasValueType(kind) {
+		return procedureir.ScopeModule
+	}
+	return procedureir.ScopeProject
 }
 
 func excelHelperSummary(file parsedFile, call procedureir.CallSite, summaries map[string]excelAccessSummary) (excelAccessSummary, bool) {
@@ -768,8 +880,18 @@ func excelColumnNumber(value string) int {
 	return total
 }
 
-func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) excelRangeVariables {
-	vars := excelRangeVariables{Range: map[string]bool{}, PerCell: map[string]bool{}}
+func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb.DB, rootBindings excelRootBindingIndex, rootDir string, cfg config.Config) excelRangeVariables {
+	vars := excelRangeVariables{
+		Range:        map[string]bool{},
+		PerCell:      map[string]bool{},
+		Shadowed:     vba242ShadowedRoots(file, proc),
+		RootBindings: rootBindings,
+	}
+	for name := range rootBindings {
+		if len(excelVisibleRootBindings(file, name, rootBindings)) > 0 {
+			vars.Shadowed[name] = true
+		}
+	}
 	for _, declaration := range proc.Declarations {
 		if isExcelRangeType(declaration.Type) {
 			vars.Range[strings.ToLower(declaration.Name)] = true
@@ -811,7 +933,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 			continue
 		}
 		typ, resolved := resolveExcelExpressionType(file, db, receiver, line-1, rootDir, cfg)
-		perCell := isPerCellExcelExpression(file, db, receiver, rangeVars, line-1, rootDir, cfg)
+		perCell := isPerCellExcelExpression(file, proc, db, receiver, rangeVars, line-1, rootDir, cfg)
 		if !resolved && !perCell {
 			continue
 		}
@@ -852,7 +974,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 	if strings.Contains(lower, "worksheetfunction.") || strings.Contains(lower, ".evaluate(") {
 		out = append(out, excelLoopAccess{Category: excelAccessWorksheetCall, Line: line, Read: true})
 	}
-	if excelCellCallRe.MatchString(text) {
+	if excelCellCallRe.MatchString(text) && isPerCellExcelExpression(file, proc, db, "Cells(1, 1)", rangeVars, line-1, rootDir, cfg) {
 		out = append(out, excelLoopAccess{Category: excelAccessRangeLookup, Member: "Cells", Line: line, Read: true})
 	}
 	directRangeLookup := directExcelLookupRe.MatchString(text)
@@ -887,13 +1009,16 @@ func isExcelWorksheetOrRangeType(typ string) bool {
 	return isExcelRangeType(lower) || strings.Contains(lower, "worksheet") || strings.Contains(lower, "worksheets") || strings.Contains(lower, "excel.application")
 }
 
-func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, rangeVars excelRangeVariables, line int, rootDir string, cfg config.Config) bool {
+func isPerCellExcelExpression(file parsedFile, proc sourceProcedure, db *vbadb.DB, expression string, rangeVars excelRangeVariables, line int, rootDir string, cfg config.Config) bool {
 	lower := strings.ToLower(strings.TrimSpace(expression))
 	if rangeVars.PerCell[lower] {
 		return true
 	}
 	if strings.HasPrefix(lower, "cells(") {
-		return true
+		if !rangeVars.Shadowed["cells"] || rangeVars.Range["cells"] {
+			return true
+		}
+		return isExcelWorksheetOrRangeType(excelRootBindingType(file, proc, "cells", rangeVars.RootBindings))
 	}
 	if strings.HasPrefix(lower, "range(") || strings.Contains(lower, ".range(") {
 		count := literalRangeCellCount(lower)
@@ -914,6 +1039,81 @@ func isPerCellExcelExpression(file parsedFile, db *vbadb.DB, expression string, 
 	}
 	typ, ok := resolveExcelExpressionType(file, db, root, line, rootDir, cfg)
 	return ok && isExcelWorksheetOrRangeType(typ)
+}
+
+func excelRootBindingType(file parsedFile, proc sourceProcedure, name string, rootBindings excelRootBindingIndex) string {
+	for _, parameter := range proc.Params {
+		if strings.EqualFold(strings.TrimSpace(parameter.Name), name) {
+			return parameter.Type
+		}
+	}
+	for _, declaration := range proc.Declarations {
+		if strings.EqualFold(strings.TrimSpace(declaration.Name), name) {
+			return declaration.Type
+		}
+	}
+	visible := excelVisibleRootBindings(file, name, rootBindings)
+	if len(visible) != 1 || !excelRootBindingHasValueType(visible[0].Kind) {
+		return ""
+	}
+	return visible[0].Type
+}
+
+func excelVisibleRootBindings(file parsedFile, name string, rootBindings excelRootBindingIndex) []excelRootBinding {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return nil
+	}
+	module := strings.TrimSpace(file.IR.ModuleName)
+	if module == "" {
+		module = file.Module
+	}
+	bindings := rootBindings[name]
+	if len(bindings) == 0 {
+		return nil
+	}
+	currentModule := make([]excelRootBinding, 0, len(bindings))
+	project := make([]excelRootBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if !excelRootBindingCanShadow(binding.Kind) {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(binding.Module), module) {
+			currentModule = append(currentModule, binding)
+			continue
+		}
+		if binding.Scope != procedureir.ScopeProject || strings.EqualFold(strings.TrimSpace(binding.Visibility), "private") {
+			continue
+		}
+		if binding.Kind == "field" || binding.Kind == "withevents_field" {
+			continue
+		}
+		project = append(project, binding)
+	}
+	if len(currentModule) > 0 {
+		return currentModule
+	}
+	return project
+}
+
+func excelRootBindingCanShadow(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "module_variable", "variable", "const", "constant", "field", "withevents_field",
+		"sub", "function", "property", "property_get", "property_let", "property_set",
+		"declare", "declare_sub", "declare_function":
+		return true
+	default:
+		return false
+	}
+}
+
+func excelRootBindingHasValueType(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "module_variable", "variable", "const", "constant", "field", "withevents_field":
+		return true
+	default:
+		return false
+	}
 }
 
 func statementMemberExpressions(statement procedureir.Statement, expressions []procedureir.Expression) []procedureir.Expression {
