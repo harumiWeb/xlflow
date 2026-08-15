@@ -21,7 +21,7 @@
   "analysis": {
     "binding_status": "bound",
     "evidence_role": "compile-equivalent",
-    "rule_codes": ["VB012"],
+    "rule_codes": ["VB012", "VB066"],
     "expected_diagnostics": [
       { "code": "VB066", "severity": "warning", "surfaces": ["lint", "lsp"] }
     ],

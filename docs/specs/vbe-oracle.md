@@ -213,16 +213,17 @@ Every declared rule code is resolved against the authoritative static-analysis
 rule registry. The registry validates the canonical diagnostic ID, supported
 `lint`/`analyze`/`lsp` surfaces, and supported severities; fixture validation
 rejects unknown or non-canonical codes, unsupported surfaces, and unsupported
-severities. A `compile-equivalent` fixture binding must reference only registry
+severities. A `compile-equivalent` fixture binding must reference registry
 rules with `compile_equivalent: true`; rejected bound expectations for those
-rules must use `severity: "error"`. Bound and partially-bound fixtures require every
-compile-equivalent contract code to
-be listed in `rule_codes`; bound fixtures additionally require every declared
+rules must use `severity: "error"`. Bound and partially-bound fixtures require
+every compile-equivalent contract code to be listed in `rule_codes`; bound
+fixtures additionally require every declared
 compile-equivalent rule code to appear in the contract that matches the VBE
 result (`expected` for rejected cases, `forbidden` for accepted cases). A
-bound accepted compile-equivalent fixture may add an explicit expectation for a
-registered non-compile-equivalent style or maintainability rule (for example,
-`VB066`) without treating that warning as VBE compiler evidence or a
+bound accepted compile-equivalent fixture may additionally list a registered
+non-compile-equivalent, non-blocking style or maintainability rule (for
+example, `VB066`) and put it in the explicit `expected` warning contract. That
+supplemental rule is not treated as VBE compiler evidence or a
 preflight-blocking binding. Until a fixture is
 connected to an implemented rule, keep it `unbound` and do not alter the VBE
 expectation to satisfy an analyzer test. Binding notes must be omitted when

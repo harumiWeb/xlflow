@@ -438,7 +438,12 @@ func validateAnalysisBinding(c Case) error {
 			return fmt.Errorf("oracle case %q has invalid analysis rule code %q: %w", c.ID, code, err)
 		}
 		if analysis.EvidenceRole == EvidenceRoleCompileEquivalent && !rule.CompileEquivalent {
-			return fmt.Errorf("oracle case %q binds non-compile-equivalent rule %q as compile-equivalent", c.ID, code)
+			// An accepted, fully-bound fixture may also carry the explicit
+			// non-blocking style projection for the same source. It remains a
+			// supplemental policy/style contract, not compiler evidence.
+			if !supplementalAcceptedStyleBinding(c, code) {
+				return fmt.Errorf("oracle case %q binds non-compile-equivalent rule %q as compile-equivalent", c.ID, code)
+			}
 		}
 		if _, ok := seenCodes[code]; ok {
 			return fmt.Errorf("oracle case %q repeats analysis rule code %q", c.ID, code)
@@ -487,6 +492,9 @@ func validateAnalysisBinding(c Case) error {
 		}
 		for _, code := range analysis.RuleCodes {
 			if !diagnosticCodeDeclared(code, boundExpectations) {
+				if supplementalAcceptedStyleBinding(c, code) && diagnosticCodeDeclared(code, analysis.ExpectedDiagnostics) {
+					continue
+				}
 				return fmt.Errorf("oracle case %q: bound rule code %q is not declared by an analysis contract", c.ID, code)
 			}
 			if c.VBE.Expected == ExpectedRejected {
@@ -513,15 +521,6 @@ func validateAnalysisBinding(c Case) error {
 		}
 		for _, expectation := range contracts {
 			if _, ok := seenCodes[expectation.Code]; !ok {
-				// Accepted compile-equivalent fixtures may also assert the
-				// non-blocking style projection retained for the same source.
-				// Keep compile-equivalent bindings in rule_codes while allowing
-				// these supplemental non-compile-equivalent expectations to make
-				// the lint/LSP contract explicit.
-				metadata, metadataErr := staticcontract.CanonicalRuleMetadata(expectation.Code)
-				if c.VBE.Expected == ExpectedAccepted && analysis.BindingStatus == BindingBound && metadataErr == nil && !metadata.CompileEquivalent {
-					continue
-				}
 				if analysis.BindingStatus == BindingBound {
 					return fmt.Errorf("oracle case %q: bound diagnostic code %q is not declared by analysis.rule_codes", c.ID, expectation.Code)
 				}
