@@ -128,6 +128,15 @@ the active document; it does not resolve array-return summaries from another
 module. Mixed return kinds, missing assignments, recursion, ambiguous names,
 and external calls remain unknown.
 
+A unique project-local scalar `Function` or `Property Get` with one array
+parameter may also be recognized as an allocation probe when its normal return
+is exactly `UBound(parameter) - LBound(parameter) + 1` and its error-recovery
+label returns zero. A direct call comparison such as `CountBytes(values) > 0`,
+`CountBytes(values) >= 1`, `CountBytes(values) <> 0`, or the false branch of
+`CountBytes(values) = 0` then proves `values` allocated on that branch. The
+rule does not infer allocation from arbitrary Boolean helpers, compound
+conditions, or the opposite branch.
+
 ## Boundaries
 
 The rule does not open Excel or claim that `IsArray` proves allocation or a

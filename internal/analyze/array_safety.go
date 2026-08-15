@@ -88,6 +88,10 @@ var (
 	arrayForBoundRe        = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
 	arrayForEachRe         = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
 	arrayIndexedSourceRe   = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
+	arrayGuardCallRe       = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:(=|<>|>=|<=|>|<)\s*(-?\d+))?\s*$`)
+	arrayGuardReversedRe   = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
+	arrayOnErrorGotoRe     = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
+	arrayLabelRe           = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
 )
 
 func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
@@ -141,7 +145,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	for _, finding := range findings {
 		seen[arrayFindingKey(finding)] = true
 	}
-	walkArrayCFG(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
+	walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
 		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
 		for _, finding := range issues {
 			key := arrayFindingKey(finding)
@@ -151,6 +155,8 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 			}
 		}
 		return out
+	}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		return applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 	})
 	sortFindings(findings)
 	return findings
@@ -316,6 +322,10 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 // uncertain edges retain the predecessor's input state because the statement
 // may not have completed before control leaves the block.
 func walkArrayCFG(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState) {
+	walkArrayCFGWithEdges(graph, lines, initial, visit, nil)
+}
+
+func walkArrayCFGWithEdges(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
 	if graph == nil {
 		return
 	}
@@ -362,12 +372,116 @@ func walkArrayCFG(graph *vbacfg.Graph, lines []string, initial arrayFlowState, v
 			next := out
 			if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
 				next = in
+			} else if edgeState != nil {
+				next = edgeState(block, edge, next)
 			}
 			if mergeArrayState(inStates, edge.To, next) {
 				queued[edge.To] = true
 			}
 		}
 	}
+}
+
+// applyArrayAllocationGuard refines only the branch where a proven array
+// length helper returns a positive value. The opposite branch is left at its
+// existing lattice value because an arbitrary caller may have additional
+// paths or side effects that this rule cannot prove.
+func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, guards map[string]bool, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+		return state
+	}
+	if statement.Condition == nil {
+		return state
+	}
+	argument, allocatedBranch, ok := arrayAllocationGuardCondition(statement.Condition.Text, guards)
+	if !ok || edge.Kind != allocatedBranch {
+		return state
+	}
+	name := strings.ToLower(cleanIdentifier(argument))
+	variable, known := variables[name]
+	if !known || !variable.isArray {
+		return state
+	}
+	value, known := state[name]
+	if !known {
+		return state
+	}
+	updated := cloneArrayState(state)
+	value.kind = arrayAllocated
+	value.knownArray = true
+	updated[name] = value
+	return updated
+}
+
+func arrayAllocationGuardCondition(text string, guards map[string]bool) (string, vbacfg.EdgeKind, bool) {
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(text), "if ") {
+		text = strings.TrimSpace(text[3:])
+	}
+	if then := strings.LastIndex(strings.ToLower(text), " then"); then >= 0 && strings.TrimSpace(text[then+5:]) == "" {
+		text = strings.TrimSpace(text[:then])
+	}
+	for len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+
+	functionName, argument, operator, literal, reversed, ok := parseArrayAllocationGuard(text)
+	if !ok {
+		return "", "", false
+	}
+	functionName = strings.ToLower(lastName(functionName))
+	if _, ok := guards[functionName]; !ok {
+		return "", "", false
+	}
+
+	if operator == "" {
+		return argument, vbacfg.EdgeBranchTrue, true
+	}
+	value, err := strconv.Atoi(literal)
+	if err != nil {
+		return "", "", false
+	}
+	if reversed {
+		switch operator {
+		case ">":
+			operator = "<"
+		case ">=":
+			operator = "<="
+		case "<":
+			operator = ">"
+		case "<=":
+			operator = ">="
+		}
+	}
+
+	// The helper's proven return domain is zero for the handled failure path
+	// and a positive array length after successful bounds inspection.
+	switch {
+	case operator == "=" && value == 0:
+		return argument, vbacfg.EdgeBranchFalse, true
+	case operator == "<>" && value == 0:
+		return argument, vbacfg.EdgeBranchTrue, true
+	case operator == ">" && value >= 0:
+		return argument, vbacfg.EdgeBranchTrue, true
+	case operator == ">=" && value >= 1:
+		return argument, vbacfg.EdgeBranchTrue, true
+	case operator == "<" && value <= 0:
+		return argument, vbacfg.EdgeBranchFalse, true
+	case operator == "<=" && value < 0:
+		return argument, vbacfg.EdgeBranchFalse, true
+	default:
+		return "", "", false
+	}
+}
+
+func parseArrayAllocationGuard(text string) (functionName, argument, operator, literal string, reversed, ok bool) {
+	if match := arrayGuardCallRe.FindStringSubmatch(text); len(match) == 5 {
+		return match[1], match[2], match[3], match[4], false, true
+	}
+	if match := arrayGuardReversedRe.FindStringSubmatch(text); len(match) == 5 {
+		return match[3], match[4], match[2], match[1], true, true
+	}
+	return "", "", "", "", false, false
 }
 
 func mergeArrayState(states map[vbacfg.BlockID]arrayFlowState, id vbacfg.BlockID, incoming arrayFlowState) bool {
@@ -1334,6 +1448,94 @@ func arrayCallName(text string) string {
 		name = name[:open]
 	}
 	return strings.ToLower(cleanIdentifier(name))
+}
+
+// inferArrayAllocationGuards recognizes a deliberately small helper
+// contract: a scalar Function with one array parameter returns
+// UBound(parameter)-LBound(parameter)+1 on its normal path and returns zero
+// from an On Error GoTo recovery label. That contract is enough to prove the
+// positive branch of a direct call, while arbitrary helper functions remain
+// unknown.
+func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
+	candidates := map[string][]string{}
+	procedureNames := map[string]int{}
+	for _, file := range files {
+		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+			name := strings.ToLower(proc.Name)
+			if name != "" {
+				procedureNames[name]++
+			}
+			parameter, ok := arrayAllocationGuardParameter(proc)
+			if !ok {
+				continue
+			}
+			candidates[name] = append(candidates[name], parameter)
+		}
+	}
+	guards := map[string]bool{}
+	for name, parameters := range candidates {
+		if name == "" || procedureNames[name] != 1 || len(parameters) != 1 {
+			continue
+		}
+		guards[name] = true
+	}
+	return guards
+}
+
+func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return "", false
+	}
+	if !arrayKnownScalarType(proc.ReturnType) || isObjectType(proc.ReturnType) || len(proc.Params) != 1 {
+		return "", false
+	}
+	parameter := proc.Params[0]
+	if parameter.Name == "" || !parameterIsArray(parameter) || proc.Name == "" {
+		return "", false
+	}
+
+	errorLabel := ""
+	recovery := false
+	hasRecovery := false
+	positiveReturns := 0
+	recoveryZeroReturns := 0
+	invalidReturn := false
+	for _, statement := range proc.Statements {
+		text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+		if match := arrayOnErrorGotoRe.FindStringSubmatch(text); len(match) == 2 {
+			errorLabel = strings.ToLower(match[1])
+			hasRecovery = true
+		}
+		if match := arrayLabelRe.FindStringSubmatch(text); len(match) == 2 {
+			recovery = errorLabel != "" && strings.EqualFold(match[1], errorLabel)
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed || !strings.EqualFold(lhs, proc.Name) {
+			continue
+		}
+		switch {
+		case arrayLengthExpressionMatches(rhs, parameter.Name):
+			positiveReturns++
+		case recovery && strings.TrimSpace(rhs) == "0":
+			recoveryZeroReturns++
+		default:
+			invalidReturn = true
+		}
+	}
+	if !hasRecovery || positiveReturns != 1 || recoveryZeroReturns != 1 || invalidReturn {
+		return "", false
+	}
+	return strings.ToLower(parameter.Name), true
+}
+
+func parameterIsArray(parameter parameterInfo) bool {
+	return strings.Contains(parameter.Type, "()") || parameter.ValueShape == procedureir.ValueShapeFixedArray || parameter.ValueShape == procedureir.ValueShapeDynamicArray
+}
+
+func arrayLengthExpressionMatches(rhs, parameter string) bool {
+	compact := strings.Join(strings.Fields(strings.ToLower(rhs)), "")
+	expected := "ubound(" + strings.ToLower(parameter) + ")-lbound(" + strings.ToLower(parameter) + ")+1"
+	return compact == expected
 }
 
 // inferArrayReturnSummaries intentionally summarizes only normal, directly

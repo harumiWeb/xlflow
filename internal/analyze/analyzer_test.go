@@ -5246,6 +5246,67 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227UsesSuccessfulArrayLengthGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Private Function CountBytes(ByRef values() As Byte) As Long
+  On Error GoTo EmptyValues
+  CountBytes = UBound(values) - LBound(values) + 1
+  Exit Function
+EmptyValues:
+  CountBytes = 0
+End Function
+
+Public Sub Guarded(ByRef values() As Byte)
+  If CountBytes(values) = 0 Then
+    Debug.Print "empty"
+  Else
+    If LBound(values) > 0 Then Debug.Print "safe"
+    values(LBound(values)) = 1
+  End If
+End Sub
+
+Public Sub PositiveGuard(ByRef values() As Byte)
+  If CountBytes(values) > 0 Then
+    If UBound(values) > 0 Then Debug.Print "safe"
+  End If
+End Sub
+
+Public Sub Unguarded(ByRef values() As Byte)
+  If LBound(values) > 0 Then Debug.Print "unsafe"
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGuardResults := func(surface string, got []Finding) {
+		for _, finding := range findingsByCode(got, "VBA227") {
+			if finding.Procedure == "Guarded" || finding.Procedure == "PositiveGuard" {
+				t.Fatalf("%s: successful array-length guard should establish allocation on its safe branch: %+v", surface, finding)
+			}
+		}
+		unsafeCount := 0
+		for _, finding := range findingsByCode(got, "VBA227") {
+			if finding.Procedure == "Unguarded" {
+				unsafeCount++
+			}
+		}
+		if unsafeCount == 0 {
+			t.Fatalf("%s: unguarded array bounds access should remain diagnosed: %+v", surface, findingsByCode(got, "VBA227"))
+		}
+	}
+	assertGuardResults("batch", findings)
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), config.Default(), []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGuardResults("realtime", realtime)
+}
+
 func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

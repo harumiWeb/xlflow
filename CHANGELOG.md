@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives when a project-local array-length helper
+  returns `UBound(values) - LBound(values) + 1` on success and zero from its
+  error-recovery path. Direct positive-length branches now establish array
+  allocation while invalid allocations and unknown helper conditions remain
+  diagnosed conservatively.
+
 - Fixed `VBA225` false positives when a local, parameter, or module-level VBA
   binding such as `cells` shadows Excel's unqualified `Cells` function. The
   Procedure IR now gates the textual fallback, including propagated helper
