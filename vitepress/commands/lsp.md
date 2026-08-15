@@ -111,8 +111,7 @@ unsuppressible, preflight-blocking error.
 
 The LSP also publishes `VB062` for provably invalid conditional branch forms,
 `VB063` for `Case` outside `Select Case`, duplicate `Case Else`, or a branch
-after `Case Else`, `VB064` for parser-confirmed malformed `Open ... For
-<mode>` shapes, and `VB065` for provably malformed `TypeOf` expressions. These
+after `Case Else`, `VB064` for parser-confirmed malformed `Open ... For <mode>` shapes, and `VB065` for provably malformed `TypeOf` expressions. These
 compile-equivalent syntax diagnostics are unsuppressible and preflight-blocking;
 ambiguous parser recovery remains the generic `VB014` finding.
 
