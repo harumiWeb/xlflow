@@ -70,6 +70,19 @@ type arrayValue struct {
 
 type arrayFlowState map[string]arrayValue
 
+// arrayResumeNextCapacityGuard describes the narrow growable-buffer idiom
+// where an unallocated array is probed with UBound under Resume Next, a
+// capacity fallback ReDim Preserve allocates it when data is present, and a
+// following loop writes only the requested range. The guard is used only for
+// the probe and that loop's indexed writes; it does not globally mark the
+// array allocated.
+type arrayResumeNextCapacityGuard struct {
+	target         string
+	probeLine      int
+	indexStartLine int
+	indexEndLine   int
+}
+
 type arrayUse struct {
 	name string
 	args []string
@@ -97,6 +110,12 @@ var (
 	arrayIsArrayGuardRe       = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	arraySetupGuardRe         = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
 	arrayOnErrorGotoRe        = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
+	arrayOnErrorResumeNextRe  = regexp.MustCompile(`(?i)^\s*on\s+error\s+resume\s+next\s*$`)
+	arrayOnErrorGotoZeroRe    = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+0\s*$`)
+	arrayErrNumberFailureRe   = regexp.MustCompile(`(?i)^\s*if\s+err\.number\s*<>\s*0\s+then\s*$`)
+	arrayCapacityProbeRe      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
+	arrayCapacityIfRe         = regexp.MustCompile(`(?i)^\s*if\s+.+\s*>\s*([A-Za-z_]\w*)\s+then\s*$`)
+	arrayForZeroToCountRe     = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
 	arrayLabelRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
 )
 
@@ -123,6 +142,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		}
 	}
 	variables := arrayVariables(file, proc, moduleDecls)
+	capacityGuards := arrayResumeNextCapacityGuards(file, proc, variables)
 	objectArrayDiagnosticsApplicable := false
 	for _, variable := range variables {
 		if variable.isArray && variable.isObject {
@@ -143,7 +163,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	constants := arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants)
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
-		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants)...)
+		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants, capacityGuards)...)
 		return uniqueArrayFindings(findings)
 	}
 
@@ -153,7 +173,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		seen[arrayFindingKey(finding)] = true
 	}
 	walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
+		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
 		for _, call := range arrayCallsAtLine(proc.Calls, line) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 		}
@@ -177,7 +197,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	})
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
 		walkArrayCFGWithSourceLines(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-			out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
+			out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
 				out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 			}
@@ -338,12 +358,12 @@ func comparisonAssignmentCarrier(statement procedureir.Statement, expression pro
 	return statement.Kind == procedureir.StatementAssignment || statement.Kind == procedureir.StatementSet
 }
 
-func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, constants map[string]int) []Finding {
+func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) []Finding {
 	var findings []Finding
 	seen := map[string]bool{}
 	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
 		var issues []Finding
-		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants)
+		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants, capacityGuards)
 		for _, finding := range issues {
 			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
 			if !seen[key] {
@@ -354,6 +374,187 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 	}
 	sortFindings(findings)
 	return findings
+}
+
+func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable) []arrayResumeNextCapacityGuard {
+	start := max(0, proc.StartLine-1)
+	end := min(len(file.Lines), proc.EndLine)
+	if start >= end {
+		return nil
+	}
+	lineText := func(index int) string {
+		return strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+	}
+	nextNonEmpty := func(index int) (int, string, bool) {
+		for index < end {
+			text := lineText(index)
+			if text != "" {
+				return index, text, true
+			}
+			index++
+		}
+		return 0, "", false
+	}
+
+	var guards []arrayResumeNextCapacityGuard
+	for index := start; index < end; index++ {
+		if !arrayOnErrorResumeNextRe.MatchString(lineText(index)) {
+			continue
+		}
+		probeIndex := -1
+		var capacityName, targetName string
+		for candidate := index + 1; candidate < end; candidate++ {
+			text := lineText(candidate)
+			if arrayOnErrorGotoZeroRe.MatchString(text) {
+				break
+			}
+			if match := arrayCapacityProbeRe.FindStringSubmatch(text); len(match) == 3 {
+				probeIndex = candidate
+				capacityName = strings.ToLower(match[1])
+				targetName = strings.ToLower(match[2])
+				break
+			}
+		}
+		if probeIndex < 0 {
+			continue
+		}
+		variable, known := variables[targetName]
+		if !known || !variable.isArray {
+			continue
+		}
+		errIndex, errText, ok := nextNonEmpty(probeIndex + 1)
+		if !ok || !arrayErrNumberFailureRe.MatchString(errText) {
+			continue
+		}
+		errEnd := arraySourceIfEnd(file.Lines, errIndex, end)
+		if errEnd < 0 {
+			continue
+		}
+		capacityZero := false
+		errCleared := false
+		for candidate := errIndex + 1; candidate < errEnd; candidate++ {
+			text := lineText(candidate)
+			if strings.EqualFold(text, "err.clear") {
+				errCleared = true
+			}
+			lhs, rhs, indexed, assigned := arrayAssignment(text)
+			if assigned && !indexed && strings.EqualFold(lhs, capacityName) && strings.TrimSpace(rhs) == "0" {
+				capacityZero = true
+			}
+		}
+		if !capacityZero || !errCleared {
+			continue
+		}
+		restoreIndex, restoreText, ok := nextNonEmpty(errEnd + 1)
+		if !ok || !arrayOnErrorGotoZeroRe.MatchString(restoreText) {
+			continue
+		}
+		capacityIfIndex, capacityIfText, ok := nextNonEmpty(restoreIndex + 1)
+		if !ok {
+			continue
+		}
+		capacityMatch := arrayCapacityIfRe.FindStringSubmatch(capacityIfText)
+		if len(capacityMatch) != 2 || !strings.EqualFold(capacityMatch[1], capacityName) {
+			continue
+		}
+		capacityIfEnd := arraySourceIfEnd(file.Lines, capacityIfIndex, end)
+		if capacityIfEnd < 0 {
+			continue
+		}
+		preserveTarget := false
+		for candidate := capacityIfIndex + 1; candidate < capacityIfEnd; candidate++ {
+			match := arrayRedimRe.FindStringSubmatch(lineText(candidate))
+			if len(match) == 0 || strings.TrimSpace(match[1]) == "" {
+				continue
+			}
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct && strings.EqualFold(redim.name, targetName) {
+					preserveTarget = true
+					break
+				}
+			}
+			if preserveTarget {
+				break
+			}
+		}
+		if !preserveTarget {
+			continue
+		}
+		forIndex, forText, ok := nextNonEmpty(capacityIfEnd + 1)
+		if !ok || !arrayForZeroToCountRe.MatchString(forText) {
+			continue
+		}
+		targetIndexed := false
+		nextIndex := -1
+		for candidate := forIndex + 1; candidate < end; candidate++ {
+			text := lineText(candidate)
+			lower := strings.ToLower(text)
+			if lower == "next" || strings.HasPrefix(lower, "next ") {
+				nextIndex = candidate
+				break
+			}
+			for _, use := range arrayIndexedUses(text, variables) {
+				if strings.EqualFold(use.name, targetName) && len(use.args) > 0 {
+					targetIndexed = true
+					break
+				}
+			}
+		}
+		if !targetIndexed || nextIndex < 0 {
+			continue
+		}
+		guards = append(guards, arrayResumeNextCapacityGuard{
+			target:         targetName,
+			probeLine:      probeIndex + 1,
+			indexStartLine: forIndex + 2,
+			indexEndLine:   nextIndex,
+		})
+	}
+	return guards
+}
+
+func arraySourceIfEnd(lines []string, start, end int) int {
+	depth := 0
+	for index := start; index < end; index++ {
+		text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(lines[index])))
+		if text == "" {
+			continue
+		}
+		if depth == 0 {
+			depth = 1
+			continue
+		}
+		if strings.HasPrefix(text, "if ") && strings.HasSuffix(text, " then") {
+			depth++
+			continue
+		}
+		if text == "end if" {
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
+func arrayResumeNextCapacityProbeApplies(guards []arrayResumeNextCapacityGuard, name string, line int) bool {
+	for _, guard := range guards {
+		if guard.probeLine == line && strings.EqualFold(guard.target, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayResumeNextCapacityIndexApplies(guards []arrayResumeNextCapacityGuard, name string, line int) bool {
+	for _, guard := range guards {
+		if line >= guard.indexStartLine && line <= guard.indexEndLine && strings.EqualFold(guard.target, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // walkArrayCFG owns the common allocation-state worklist used by both the
@@ -1569,7 +1770,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 							}
 						}
 					}
-					out, _ := a.arrayTransfer(file, caller, ctx, variables, in, text, line, constants)
+					out, _ := a.arrayTransfer(file, caller, ctx, variables, in, text, line, constants, nil)
 					for _, call := range arrayCallsAtLine(caller.Calls, line) {
 						out = applyArrayModuleCallEffects(out, file, caller, call, ctx, variables, moduleDecls)
 					}
@@ -1741,7 +1942,7 @@ func parameterIsByRefArray(parameter parameterInfo) bool {
 	return parameterIsArray(parameter) && !strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal")
 }
 
-func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int) (arrayFlowState, []Finding) {
+func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) (arrayFlowState, []Finding) {
 	state = cloneArrayState(state)
 	var findings []Finding
 	addWithKey := func(operationKey, code, message, reason, suggestion string) {
@@ -1891,6 +2092,11 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
+			if arrayResumeNextCapacityProbeApplies(capacityGuards, name, line) {
+				// A recognized Resume Next capacity probe deliberately catches
+				// this bounds failure before its fallback allocation branch.
+				continue
+			}
 			if allocationProbeParameter != "" && strings.EqualFold(argument, allocationProbeParameter) {
 				// A recognized allocation probe deliberately catches this
 				// bounds failure and returns zero from its recovery label.
@@ -1925,6 +2131,9 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		// not an element access whose dimension or allocation should be checked
 		// at the call site. The callee owns any element-access diagnostics.
 		if len(use.args) == 0 {
+			continue
+		}
+		if arrayResumeNextCapacityIndexApplies(capacityGuards, use.name, line) {
 			continue
 		}
 		value := state[strings.ToLower(use.name)]
@@ -2852,7 +3061,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 					value, known := arrayExpressionState(rhs, in, ctx)
 					returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 				}
-				out, _ := (Analyzer{}).arrayTransfer(procedure.file, proc, ctx, procedure.variables, in, text, line, procedure.constants)
+				out, _ := (Analyzer{}).arrayTransfer(procedure.file, proc, ctx, procedure.variables, in, text, line, procedure.constants, nil)
 				return out
 			}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 				return applyArrayAllocationGuard(out, block.Statement, edge, arrayAllocationGuards, procedure.variables)

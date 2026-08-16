@@ -6045,6 +6045,59 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesResumeNextArrayCapacityProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub AppendBytes(ByRef target() As Byte, ByRef targetCount As Long, ByRef source() As Byte, ByVal sourceCount As Long)
+  Dim capacity As Long
+  Dim index As Long
+  On Error Resume Next
+  capacity = UBound(target) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+    capacity = 0
+  End If
+  On Error GoTo 0
+  If targetCount + sourceCount > capacity Then
+    capacity = targetCount + sourceCount
+    ReDim Preserve target(0 To capacity - 1)
+  End If
+  For index = 0 To sourceCount - 1
+    target(targetCount + index) = source(index)
+  Next index
+End Sub
+
+Private Sub Unsafe(ByRef values() As Byte)
+  Dim capacity As Long
+  On Error Resume Next
+  capacity = UBound(values) + 1
+  If Err.Number <> 0 Then
+    Err.Clear
+  End If
+  On Error GoTo 0
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim target() As Byte
+  Dim source() As Byte
+  ReDim source(0 To 0)
+  AppendBytes target, 0, source, 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Procedure != "Unsafe" || got[1].Procedure != "Unsafe" {
+		t.Fatalf("only the unguarded Resume Next probe should remain unsafe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

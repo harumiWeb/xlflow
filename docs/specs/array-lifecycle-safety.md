@@ -77,6 +77,12 @@ semantics. On `On Error Resume Next` exceptional edges, a deterministic plain
 `ReDim` or recognized array-factory assignment retains its established
 allocation state; `ReDim Preserve` remains conservative when its prior
 allocation or shape is unknown.
+The rule also recognizes the narrow growable-buffer idiom that probes
+`UBound(target) + 1` under `On Error Resume Next`, clears `Err`, restores error
+handling, and conditionally performs `ReDim Preserve target(...)` before a
+bounded write loop. The probe and that loop's indexed writes are treated as
+covered by the fallback allocation; an unrelated `Resume Next` bounds query or
+indexed access remains conservative.
 
 The operation-facing shape is `scalar`, `fixed-array(rank)`,
 `dynamic-array(rank/unknown)`, `Variant`, or `unknown`. Declaration metadata,

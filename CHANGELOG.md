@@ -35,6 +35,11 @@ All notable changes to xlflow will be documented in this file.
   retain their allocated state when passed through private `ByRef` helpers;
   conditional setup calls remain conservative.
 
+- Reduced `VBA227` false positives for growable Byte buffers that use a guarded
+  `UBound` capacity probe under `On Error Resume Next` followed by conditional
+  `ReDim Preserve` and a bounded write loop. Unrelated `Resume Next` probes
+  remain conservative.
+
 - Reduced `VBA227` false positives for class-level dynamic arrays configured by
   project-local `Friend`/`Private` helpers: proven `ByRef` `ReDim` effects now
   flow through matching rejecting role guards and validated role branches.

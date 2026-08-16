@@ -152,7 +152,7 @@ func (a Analyzer) deterministicArrayRuntimeFindings(file parsedFile, proc source
 		// lower-confidence VBA227 warning rule.
 		probe := a
 		probe.Config.Analyze.DetectArrayLifecycleSafety = true
-		out, _ := probe.arrayTransfer(file, proc, ctx, variables, in, text, line, constants)
+		out, _ := probe.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
 		return out
 	}
 	if proc.Graph != nil {
