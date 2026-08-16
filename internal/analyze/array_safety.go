@@ -1667,6 +1667,13 @@ func procedureHasByRefArrayParameter(proc sourceProcedure) bool {
 }
 
 func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, targetKey string, target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState) {
+	// A self-recursive ByRef helper preserves the entry array state supplied by
+	// its caller. Treating the recursive edge as an independent unknown entry
+	// would poison the evidence from the allocated external call and keep the
+	// callee conservative forever.
+	if strings.EqualFold(targetKey, arrayProcedureKey(caller)) {
+		return
+	}
 	arguments := arrayCallArgumentTexts(caller, call)
 	if len(call.Arguments.Named) > 0 || len(arguments) != call.Arguments.Count {
 		return

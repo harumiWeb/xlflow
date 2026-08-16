@@ -40,6 +40,8 @@ All notable changes to xlflow will be documented in this file.
 - Reduced `VBA227` false positives for guarded non-empty `String` assignments
   to dynamic `Byte` arrays, while keeping unguarded empty-string paths
   conservative.
+- Reduced `VBA227` false positives for private recursive `ByRef` array helpers
+  when an allocated external entry is proven.
 
 - Fixed `VBA225` false positives when a local, parameter, or module-level VBA
   binding such as `cells` shadows Excel's unqualified `Cells` function. The

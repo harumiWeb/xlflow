@@ -5095,6 +5095,34 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesAllocatedArrayThroughRecursivePrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub SortValues(ByRef values() As String, ByVal low As Long, ByVal high As Long)
+  If low >= high Then Exit Sub
+  Debug.Print values(low)
+  SortValues values, low, high - 1
+End Sub
+
+Public Sub Run()
+  Dim values() As String
+  ReDim values(1 To 2)
+  values(1) = "a"
+  values(2) = "b"
+  SortValues values, 1, 2
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated array should remain allocated through a recursive private ByRef helper: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesAllocatedArrayThroughPrivateByRefHelperChain(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

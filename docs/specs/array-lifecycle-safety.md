@@ -104,6 +104,11 @@ whose syntactic non-empty guard is visible. An unguarded String assignment
 remains unknown because an empty string can still leave no usable element
 bounds; arbitrary `Variant` and function-return assignments remain unknown.
 
+A private `ByRef` array helper that calls itself recursively preserves the
+allocation state established by a proven external entry call. The recursive
+edge is not treated as an independent unknown entry; public or otherwise
+unresolved callers remain conservative.
+
 ## Diagnostics and ownership
 
 `VBA227` reports only possible or partially known cases of:
