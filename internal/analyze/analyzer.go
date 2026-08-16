@@ -216,6 +216,7 @@ type analysisContext struct {
 	functionAmbiguous     map[string]bool
 	arrayReturns          map[string]arrayValue
 	arrayAllocationGuards map[string]bool
+	arrayByRefEntryStates map[string]map[int]bool
 	procedures            map[string]procedureSignature
 	procedureResolver     procedureir.SymbolResolver
 	objectSummaries       map[string]objectProcedureSummary
@@ -291,6 +292,7 @@ type sourceDeclaration struct {
 	Dimensions    []arrayDimension
 	NewExpression bool
 	Parameter     bool
+	ParamArray    bool
 	Static        bool
 }
 
@@ -1409,6 +1411,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 		functionAmbiguous:     map[string]bool{},
 		arrayReturns:          map[string]arrayValue{},
 		arrayAllocationGuards: map[string]bool{},
+		arrayByRefEntryStates: map[string]map[int]bool{},
 		procedures:            map[string]procedureSignature{},
 		objectSummaries:       buildObjectProcedureSummaries(files),
 		worksheetCodenames:    map[string]string{},
@@ -1470,8 +1473,9 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 		}
 	}
 	ctx.procedureResolver = procedureir.NewResolver(resolverSymbols)
-	ctx.arrayReturns = inferArrayReturnSummaries(files)
 	ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
+	ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards)
+	ctx.arrayByRefEntryStates = inferArrayByRefEntryStates(a, files, ctx)
 	return ctx
 }
 

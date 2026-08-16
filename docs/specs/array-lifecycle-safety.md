@@ -47,21 +47,49 @@ Fixed-size arrays begin allocated. Dynamic arrays begin unallocated. `ReDim`
 records its statically known dimensions and allocates a dynamic array. `Erase`
 deallocates a dynamic array but preserves fixed-array allocation; Erase on a
 fixed array is an element reset. Array literals, known array-returning
-functions, and known array assignments establish allocation. Unknown Variant
-and external values do not.
+functions, and known array assignments establish allocation. An explicit
+whole-array assignment such as `values() = Split(text, "|")` is an assignment,
+not an indexed access. A whole-array argument such as `ConvertToJson(values(),
+4)` is likewise not an indexed access at the call site; the callee owns any
+element-access diagnostics. `ParamArray` values begin allocated even when the
+caller supplies no arguments; their extent and bounds may remain unknown.
+Unknown Variant and external values do not establish allocation.
+
+An `IsArray(variant)` true branch establishes array-ness for that Variant, so a
+whole-array assignment from the guarded Variant can establish the target's
+allocation. The false branch remains unknown until a recognized array factory
+or other allocation operation establishes its state.
+
+The same allocation-probe contract also applies when the positive length is
+first assigned to a scalar local and that local is compared with zero or a
+positive threshold. The proof remains path-sensitive; unrelated scalar
+assignments do not establish allocation.
 
 At a join, allocation and dimensions are retained only when all incoming paths
 agree. Exceptional and uncertain CFG edges use the pre-statement state. This
 means an indexed access after an allocation on only one branch remains a
 warning.
+Within a multiline CFG block, the `VBA227` lifecycle pass evaluates physical
+source lines in order so an allocation earlier in the block is visible to a
+later bound query or indexed access. This ordering refinement is local to
+`VBA227`; `VBA208` and `VBA249` retain their existing CFG-block evaluation
+semantics. On `On Error Resume Next` exceptional edges, a deterministic plain
+`ReDim` or recognized array-factory assignment retains its established
+allocation state; `ReDim Preserve` remains conservative when its prior
+allocation or shape is unknown.
 
 The operation-facing shape is `scalar`, `fixed-array(rank)`,
 `dynamic-array(rank/unknown)`, `Variant`, or `unknown`. Declaration metadata,
 procedure signatures, array-return summaries, `Array(...)`, and `ParamArray`
 are normalized into this shape before operation checks run. Assignments,
 `ByRef` calls, and branch joins retain a shape only when it is proven on every
-incoming path. An unresolved or external value, and a `Variant` whose array
-nature is not proven, remains `unknown`.
+incoming path. For a unique project-local `Private` procedure, or a procedure
+in an `Option Private Module`, a direct array argument may seed a `ByRef` array
+parameter only when every observed call site passes an allocated array. These
+entry facts are solved across the same restricted helper chain. Public,
+ambiguous, dynamic, and unresolved calls remain unknown. An unresolved or
+external value, and a `Variant` whose array nature is not proven, remains
+`unknown`.
 
 ## Diagnostics and ownership
 
@@ -125,25 +153,34 @@ Batch analysis may use a unique project-local `Function` or `Property Get`
 summary when every observed normal return assignment returns an allocated
 array with a consistent shape. Real-time analysis restricts this summary to
 the active document; it does not resolve array-return summaries from another
-module. Mixed return kinds, missing assignments, recursion, ambiguous names,
-and external calls remain unknown.
+module. Batch summaries are solved to a fixed point across unique helper chains,
+so declaration order does not change a proven result. Recognized allocation
+guards refine the normal branch, and a definitely failing constant `ReDim`
+without local error handling is excluded from normal-return evidence. Mixed
+return kinds, missing assignments, recursive or ambiguous chains, and external
+calls remain unknown.
 
-A unique project-local scalar `Function` or `Property Get` with one array
-parameter may also be recognized as an allocation probe when its normal return
-is exactly `UBound(parameter) - LBound(parameter) + 1` and its error-recovery
-label returns zero. A direct call comparison such as `CountBytes(values) > 0`,
-`CountBytes(values) >= 1`, `CountBytes(values) <> 0`, or the false branch of
-`CountBytes(values) = 0` then proves `values` allocated on that branch. The
-rule does not infer allocation from arbitrary Boolean helpers, compound
-conditions, or the opposite branch.
+A unique project-local scalar `Function` or `Property Get` with one array or
+`Variant` parameter may also be recognized as an allocation probe when its
+normal return is exactly `UBound(parameter) - LBound(parameter) + 1` or
+`UBound(parameter) + 1` and its error-recovery label returns zero. The probe's
+own bound reads are covered by that recovery contract and are not reported as
+unallocated-array findings. A direct call comparison such as
+`CountBytes(values) > 0`, `CountBytes(values) >= 1`, `CountBytes(values) <> 0`,
+or the false branch of `CountBytes(values) = 0` then proves `values` allocated
+on that branch, including when the helper accepts the value through a Variant
+parameter. The rule does not infer allocation from arbitrary Boolean helpers,
+compound conditions, or the opposite branch.
 
 ## Boundaries
 
-The rule does not open Excel or claim that `IsArray` proves allocation or a
-dimension count. It accepts literal numeric bounds and the small shared
-integer-constant subset (Const/Enum references with arithmetic) only when they
-are statically visible; dynamic expressions remain unknown. It does not change
-the `Finding` JSON envelope or preflight blocking behavior.
+The rule does not open Excel or claim that `IsArray` proves a dimension count.
+Its true branch establishes only array-ness for a Variant whole-array
+assignment, while a positive recognized allocation-probe result establishes
+allocation for the guarded value. It accepts literal numeric bounds and the
+small shared integer-constant subset (Const/Enum references with arithmetic)
+only when they are statically visible; dynamic expressions remain unknown. It
+does not change the `Finding` JSON envelope or preflight blocking behavior.
 
 ## Related
 

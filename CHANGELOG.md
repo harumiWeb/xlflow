@@ -6,9 +6,29 @@ All notable changes to xlflow will be documented in this file.
 
 - Reduced `VBA227` false positives when a project-local array-length helper
   returns `UBound(values) - LBound(values) + 1` on success and zero from its
-  error-recovery path. Direct positive-length branches now establish array
-  allocation while invalid allocations and unknown helper conditions remain
-  diagnosed conservatively.
+  error-recovery path. The same proof now recognizes `UBound(values) + 1`
+  helpers and Variant parameters, so positive-length branches establish array
+  allocation, including when the positive result is first stored in a scalar
+  local and compared later. The helper's handled probe and invalid allocations remain
+  diagnosed conservatively. Whole-array `arr() = ...` assignments, `ParamArray`
+  allocation, qualified/nested array factory calls, and proven allocated arrays
+  passed through unique project-local `ByRef` helpers no longer produce
+  allocation-state false positives. Unique project-local array-return helper
+  chains are also resolved independent of declaration order; public and
+  ambiguous calls remain conservative. The same restricted proof now carries
+  allocated arrays through nested project-local `ByRef` helper chains, and
+  excludes definitely failing constant `ReDim` branches from normal array
+  return summaries when no local error handler can recover them. The corrected
+  whole-array state also removes the corresponding deterministic `VBA249`
+  duplicate runtime findings. Within a multiline CFG block, `VBA227` now
+  evaluates lifecycle operations in source order, while `VBA208` and `VBA249`
+  retain their existing CFG-block semantics. Deterministic plain `ReDim` and
+  recognized array-factory assignments also retain their established state on
+  `On Error Resume Next` exceptional edges; whole-array arguments such as
+  `ConvertToJson(values(), 4)` are no longer treated as indexed accesses at the
+  call site; `IsArray(variant)` true branches now establish allocation for
+  guarded whole-array assignments; `ReDim Preserve` remains conservative when
+  its prior allocation or shape is unknown.
 
 - Fixed `VBA225` false positives when a local, parameter, or module-level VBA
   binding such as `cells` shadows Excel's unqualified `Cells` function. The
