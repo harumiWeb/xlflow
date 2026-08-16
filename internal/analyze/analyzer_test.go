@@ -6010,6 +6010,41 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesImplicitZeroArrayLengthGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private moduleBytes() As Byte
+
+Private Function ByteArrayLength(ByRef values() As Byte) As Long
+  On Error GoTo Unallocated
+  ByteArrayLength = UBound(values) - LBound(values) + 1
+  Exit Function
+Unallocated:
+End Function
+
+Private Sub Guarded(ByRef payload() As Byte)
+  moduleBytes = payload
+  If ByteArrayLength(moduleBytes) = 0 Then Exit Sub
+  Debug.Print moduleBytes(0)
+End Sub
+
+Public Sub Run()
+  Dim payload() As Byte
+  ReDim payload(0 To 0)
+  Guarded payload
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocation probe with an implicit zero recovery return should establish allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

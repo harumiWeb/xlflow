@@ -181,8 +181,10 @@ calls remain unknown.
 A unique project-local scalar `Function` or `Property Get` with one array or
 `Variant` parameter may also be recognized as an allocation probe when its
 normal return is exactly `UBound(parameter) - LBound(parameter) + 1` or
-`UBound(parameter) + 1` and its error-recovery label returns zero. The probe's
-own bound reads are covered by that recovery contract and are not reported as
+`UBound(parameter) + 1` and its error-recovery label returns zero. For a typed
+VBA function, falling through from that recovery label to the implicit default
+return of zero is equivalent to an explicit zero assignment. The probe's own
+bound reads are covered by that recovery contract and are not reported as
 unallocated-array findings. A direct call comparison such as
 `CountBytes(values) > 0`, `CountBytes(values) >= 1`, `CountBytes(values) <> 0`,
 or the false branch of `CountBytes(values) = 0` then proves `values` allocated

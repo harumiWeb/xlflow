@@ -6,7 +6,9 @@ All notable changes to xlflow will be documented in this file.
 
 - Reduced `VBA227` false positives when a project-local array-length helper
   returns `UBound(values) - LBound(values) + 1` on success and zero from its
-  error-recovery path. The same proof now recognizes `UBound(values) + 1`
+  error-recovery path, including a typed VBA function that falls through from
+  its recovery label to the implicit zero return. The same proof now recognizes
+  `UBound(values) + 1`
   helpers and Variant parameters, so positive-length branches establish array
   allocation, including when the positive result is first stored in a scalar
   local and compared later. The helper's handled probe and invalid allocations remain

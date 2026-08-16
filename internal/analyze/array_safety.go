@@ -2732,6 +2732,7 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 	errorLabel := ""
 	recovery := false
 	hasRecovery := false
+	foundRecoveryLabel := false
 	positiveReturns := 0
 	recoveryZeroReturns := 0
 	invalidReturn := false
@@ -2743,6 +2744,9 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 		}
 		if match := arrayLabelRe.FindStringSubmatch(text); len(match) == 2 {
 			recovery = errorLabel != "" && strings.EqualFold(match[1], errorLabel)
+			if recovery {
+				foundRecoveryLabel = true
+			}
 		}
 		lhs, rhs, indexed, assigned := arrayAssignment(text)
 		if !assigned || indexed || !strings.EqualFold(lhs, proc.Name) {
@@ -2757,7 +2761,12 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 			invalidReturn = true
 		}
 	}
-	if !hasRecovery || positiveReturns != 1 || recoveryZeroReturns != 1 || invalidReturn {
+	// A typed VBA Function defaults its return value to zero.  A recovery
+	// label that falls through to End Function therefore has the same
+	// allocation-probe contract as an explicit `FunctionName = 0` assignment,
+	// provided the recovery label was actually found and no other return
+	// assignment invalidated the shape above.
+	if !hasRecovery || !foundRecoveryLabel || positiveReturns != 1 || recoveryZeroReturns > 1 || invalidReturn {
 		return "", false
 	}
 	return strings.ToLower(parameter.Name), true
