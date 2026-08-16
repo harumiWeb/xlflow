@@ -4385,6 +4385,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA202CarriesAllocatedObjectThroughLineContinuationCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Append(ByVal target As Collection, ByVal value As String)
+  target.Add value
+End Sub
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = New Collection
+  Append values, _
+    "value"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an allocated object should remain non-Nothing through a line-continuation call: %+v", got)
+	}
+}
+
 func TestAnalyzerRuntimeRiskRules(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -5092,6 +5117,31 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("an allocated array passed to a unique private ByRef helper should remain allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesAllocatedArrayThroughLineContinuationByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef values() As Byte, ByVal count As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim values() As Byte
+  ReDim values(0 To 1)
+  Consume values, _
+    2
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an allocated array should remain allocated through a line-continuation ByRef call: %+v", got)
 	}
 }
 

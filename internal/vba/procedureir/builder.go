@@ -1121,7 +1121,7 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 	out := Arguments{Named: []NamedArgument{}}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child == nil {
+		if !isSemanticArgumentNode(child) {
 			continue
 		}
 		out.Count++
@@ -1130,6 +1130,10 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 		}
 	}
 	return out
+}
+
+func isSemanticArgumentNode(node *tree_sitter.Node) bool {
+	return node != nil && node.Kind() != "line_continuation"
 }
 
 func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {

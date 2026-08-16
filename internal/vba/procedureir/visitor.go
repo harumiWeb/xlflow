@@ -542,7 +542,7 @@ func (v *singleVisitor) argumentsForCall(node *tree_sitter.Node) (Arguments, []a
 	facts := make([]argumentFact, 0, list.NamedChildCount())
 	for i := uint(0); i < list.NamedChildCount(); i++ {
 		child := list.NamedChild(i)
-		if child == nil {
+		if !isSemanticArgumentNode(child) {
 			continue
 		}
 		fact := argumentFact{rng: vbaast.NodeRange(child)}

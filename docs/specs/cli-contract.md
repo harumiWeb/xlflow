@@ -1283,7 +1283,9 @@ edges, branch joins, early exits, error-handler paths, explicit `Set obj =
 Nothing` resets, and `ByRef` mutations. Locals, parameters, module-level
 objects, and persistent `Static` locals are included; each scope starts in its
 appropriate `Nothing`/maybe-`Nothing` state rather than being assumed
-initialized. `As New` declarations, constructor expressions, intrinsic object
+initialized. Explicit VBA line-continuation markers in a call are syntax-only
+and do not create argument slots, so object state follows the actual argument
+positions across such calls. `As New` declarations, constructor expressions, intrinsic object
 factories rooted at `ThisWorkbook` or `Application`, `Controls.Add` factories
 reached through a proven non-`Nothing` receiver, and unique project-local
 function/property summaries that guarantee a non-`Nothing` return establish

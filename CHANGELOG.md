@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Procedure IR argument slots for explicit VBA line continuations so
+  interprocedural `VBA202` object-state and `VBA227` array-allocation proofs
+  follow the actual arguments.
+
 - Reduced `VBA227` false positives when a project-local array-length helper
   returns `UBound(values) - LBound(values) + 1` on success and zero from its
   error-recovery path, including a typed VBA function that falls through from

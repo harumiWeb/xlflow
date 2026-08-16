@@ -546,6 +546,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `let_value_type`
 - `like_pattern`
 - `likely_cause`
+- `line_continuation`
 - `line_number_label`
 - `line_number_literal`
 - `line_number_statement`
