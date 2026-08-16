@@ -5250,6 +5250,72 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesArrayLengthFromPairedByRefOutput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub CoerceHashInput(ByVal value As Variant, ByRef bytes() As Byte, ByRef byteLength As Long)
+  bytes = value
+  If UBound(bytes) < LBound(bytes) Then
+    byteLength = 0
+  Else
+    byteLength = UBound(bytes) - LBound(bytes) + 1
+  End If
+End Sub
+
+Private Sub BcryptHashBytes(ByVal useHmac As Boolean, ByRef keyBytes() As Byte, ByVal keyLength As Long, ByRef dataBytes() As Byte, ByVal dataLength As Long)
+  If useHmac And keyLength > 0 Then
+    Debug.Print keyBytes(LBound(keyBytes))
+  End If
+  If dataLength > 0 Then
+    Debug.Print dataBytes(LBound(dataBytes))
+  End If
+End Sub
+
+Private Sub HmacHash(ByVal value As Variant)
+  Dim keyBytes() As Byte
+  Dim keyLength As Long
+  Dim dataBytes() As Byte
+  Dim dataLength As Long
+  CoerceHashInput value, keyBytes, keyLength
+  CoerceHashInput value, dataBytes, dataLength
+  BcryptHashBytes True, keyBytes, keyLength, dataBytes, dataLength
+End Sub
+
+Private Sub PlainHash(ByVal value As Variant)
+  Dim dataBytes() As Byte
+  Dim dataLength As Long
+  Dim keyBytes() As Byte
+  CoerceHashInput value, dataBytes, dataLength
+  BcryptHashBytes False, keyBytes, 0, dataBytes, dataLength
+End Sub
+
+Public Sub Run()
+  Dim source() As Byte
+  ReDim source(0 To 1)
+  HmacHash source
+  PlainHash source
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenCoerce := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "CoerceHashInput" {
+			seenCoerce = true
+		}
+		if finding.Procedure == "BcryptHashBytes" {
+			t.Fatalf("paired ByRef array/length outputs should satisfy guarded helper accesses: %+v", finding)
+		}
+	}
+	if !seenCoerce {
+		t.Fatalf("the fixture should still analyze the helper's direct bound probes")
+	}
+}
+
 func TestAnalyzerVBA227ProcessesArrayAllocationsInMultilineCFGBlocks(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

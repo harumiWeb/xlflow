@@ -114,6 +114,16 @@ expressions or arbitrary conditional `ReDim` statements do not establish this
 fact. `Select Case` headers and their case bodies are evaluated through their
 own CFG blocks so a case-local access receives the selected branch state.
 
+A private `ByRef` helper may also return an array and its successful element
+length through separate `ByRef` parameters. The assignment
+`length = UBound(values) - LBound(values) + 1` establishes a conditional
+allocation contract only when the helper's zero-length branch is explicit and
+the caller tests that paired length positively. A call that passes an
+unallocated array to a guarded helper is ignored for entry-state evidence when
+the helper's array use is unreachable under literal `False` or non-positive
+arguments; this prevents an intentionally unused optional array from
+invalidating a reachable positive-length proof.
+
 A non-empty `String` assigned directly to a dynamic `Byte` array is recognized
 as an allocation for a non-empty literal, or for a statically typed `String`
 whose syntactic non-empty guard is visible. An unguarded String assignment

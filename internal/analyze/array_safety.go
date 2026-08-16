@@ -123,6 +123,7 @@ var (
 	arrayForZeroToCountRe     = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
 	arrayLabelRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
 	arrayCountComparisonRe    = regexp.MustCompile(`(?i)^\s*(.*?)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
+	arrayConditionAndRe       = regexp.MustCompile(`(?i)\s+and\s+`)
 	arraySelectCaseRe         = regexp.MustCompile(`(?i)^select\s+case\s+(.+)$`)
 	arrayPositiveCaseRe       = regexp.MustCompile(`(?i)^case\s+(-?\d+)\s*$`)
 )
@@ -796,22 +797,26 @@ func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.G
 	} else {
 		condition = block.Statement.Text
 	}
-	lhs, operator, literal, ok := arrayCountComparison(condition)
-	if !ok {
-		return state
-	}
-	positiveBranch, ok := positiveArrayCountBranch(operator, literal)
-	if !ok || edge.Kind != positiveBranch {
-		return state
+	comparisons := []string{condition}
+	if arrayConditionAndRe.MatchString(condition) {
+		comparisons = arrayConditionAndRe.Split(condition, -1)
 	}
 	for name, value := range state {
-		if value.allocationCountSource == "" || !arrayCountExpressionMatches(lhs, value.allocationCountSource) {
-			continue
+		for _, comparison := range comparisons {
+			lhs, operator, literal, ok := arrayCountComparison(comparison)
+			if !ok {
+				continue
+			}
+			positiveBranch, ok := positiveArrayCountBranch(operator, literal)
+			if !ok || edge.Kind != positiveBranch || value.allocationCountSource == "" || !arrayCountExpressionMatches(lhs, value.allocationCountSource) {
+				continue
+			}
+			value.kind = arrayAllocated
+			value.knownArray = true
+			value.allocationCountSource = ""
+			state[name] = value
+			break
 		}
-		value.kind = arrayAllocated
-		value.knownArray = true
-		value.allocationCountSource = ""
-		state[name] = value
 	}
 	return state
 }
@@ -1298,9 +1303,16 @@ type arrayByRefAllocationSummaries map[string]map[int]bool
 // count-bearing input parameter index.
 type arrayByRefConditionalAllocations map[string]map[int]int
 
+// arrayByRefLengthAllocations records a ByRef array output whose paired
+// ByRef scalar output is assigned a successful array length. A positive value
+// of that scalar is therefore a conditional allocation proof for the array.
+type arrayByRefLengthAllocations map[string]map[int]int
+
 var (
-	arrayByRefCountExitRe  = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*\.\s*count\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
-	arrayByRefCountRedimRe = regexp.MustCompile(`(?i)^\s*redim\s+([A-Za-z_]\w*)\s*\(\s*0\s+to\s+([A-Za-z_]\w*)\s*\.\s*count\s*-\s*1\s*\)\s*$`)
+	arrayByRefCountExitRe   = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*\.\s*count\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
+	arrayByRefCountRedimRe  = regexp.MustCompile(`(?i)^\s*redim\s+([A-Za-z_]\w*)\s*\(\s*0\s+to\s+([A-Za-z_]\w*)\s*\.\s*count\s*-\s*1\s*\)\s*$`)
+	arrayByRefLengthFullRe  = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*-\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
+	arrayByRefLengthUpperRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
 )
 
 type arrayModuleAllocationSummaries map[string]map[string]bool
@@ -1534,6 +1546,114 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 	return summaries
 }
 
+// inferArrayByRefLengthAllocations recognizes a helper that returns the
+// successful length of a ByRef array through a paired ByRef scalar output:
+//
+// \tbyteLength = UBound(bytes) - LBound(bytes) + 1
+//
+// The assignment must dominate the procedure's normal exit, or be the normal
+// branch of an explicit zero-length guard whose sibling assigns zero. A
+// positive length at a caller then proves that the array-bound query completed
+// successfully, without making the array unconditionally allocated on other
+// paths.
+func inferArrayByRefLengthAllocations(files []parsedFile) arrayByRefLengthAllocations {
+	summaries := arrayByRefLengthAllocations{}
+	for _, file := range files {
+		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+			if proc.Graph == nil {
+				continue
+			}
+			parameters := map[string]int{}
+			for index, parameter := range proc.Params {
+				parameters[strings.ToLower(cleanIdentifier(parameter.Name))] = index
+			}
+			if len(parameters) == 0 {
+				continue
+			}
+			dominators := arrayProcedureNormalExitDominators(proc)
+			for _, statement := range proc.Statements {
+				text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+				match := arrayByRefLengthFullRe.FindStringSubmatch(text)
+				if len(match) == 4 && !strings.EqualFold(cleanIdentifier(match[2]), cleanIdentifier(match[3])) {
+					match = nil
+				}
+				if len(match) == 0 {
+					upper := arrayByRefLengthUpperRe.FindStringSubmatch(text)
+					if len(upper) == 3 {
+						match = []string{upper[0], upper[1], upper[2], upper[2]}
+					}
+				}
+				if len(match) != 4 {
+					continue
+				}
+				lengthIndex, lengthOK := parameters[strings.ToLower(cleanIdentifier(match[1]))]
+				arrayIndex, arrayOK := parameters[strings.ToLower(cleanIdentifier(match[2]))]
+				if !lengthOK || !arrayOK || lengthIndex == arrayIndex || !parameterIsByRefScalar(proc.Params[lengthIndex]) || !parameterIsByRefArray(proc.Params[arrayIndex]) {
+					continue
+				}
+				dominatesExit := arrayProcedureBlockDominatesNormalExit(proc, statement.ID, dominators)
+				if !dominatesExit {
+					parent, parentOK := arrayByRefLengthGuard(proc, statement.ID)
+					if !parentOK || !arrayProcedureBlockDominatesNormalExit(proc, parent.ID, dominators) || !arrayByRefLengthHasZeroBranch(proc, parent.ID, statement.ID, match[1]) {
+						continue
+					}
+				}
+				key := arrayProcedureKey(proc)
+				if summaries[key] == nil {
+					summaries[key] = map[int]int{}
+				}
+				if previous, exists := summaries[key][arrayIndex]; exists && previous != lengthIndex {
+					delete(summaries[key], arrayIndex)
+					continue
+				}
+				summaries[key][arrayIndex] = lengthIndex
+			}
+			if len(summaries[arrayProcedureKey(proc)]) == 0 {
+				delete(summaries, arrayProcedureKey(proc))
+			}
+		}
+	}
+	return summaries
+}
+
+func arrayProcedureStatementByID(proc sourceProcedure, id int) (procedureir.Statement, bool) {
+	for _, statement := range proc.Statements {
+		if statement.ID == id {
+			return statement, true
+		}
+	}
+	return procedureir.Statement{}, false
+}
+
+func arrayByRefLengthGuard(proc sourceProcedure, statementID int) (procedureir.Statement, bool) {
+	seen := map[int]bool{}
+	for statementID != 0 && !seen[statementID] {
+		seen[statementID] = true
+		statement, ok := arrayProcedureStatementByID(proc, statementID)
+		if !ok {
+			return procedureir.Statement{}, false
+		}
+		if statement.Kind == procedureir.StatementIf {
+			return statement, true
+		}
+		statementID = statement.ParentID
+	}
+	return procedureir.Statement{}, false
+}
+
+func arrayByRefLengthHasZeroBranch(proc sourceProcedure, parentID, formulaID int, lengthName string) bool {
+	for _, statement := range proc.Statements {
+		if statement.ID == formulaID || statement.ParentID != parentID {
+			continue
+		}
+		lhs, rhs, indexed, ok := arrayAssignment(normalizedCodeLine(statement.Text))
+		if ok && !indexed && strings.EqualFold(cleanIdentifier(lhs), cleanIdentifier(lengthName)) && strings.TrimSpace(rhs) == "0" {
+			return true
+		}
+	}
+	return false
+}
+
 func arrayFalseBranchRequiresBlock(graph vbacfg.Graph, guardBlock, requiredBlock vbacfg.BlockID) bool {
 	queue := make([]vbacfg.BlockID, 0, 1)
 	for _, edge := range graph.Edges {
@@ -1707,6 +1827,30 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 				continue
 			}
 			value.allocationCountSource = countSource
+			updated[name] = value
+		}
+		for outputIndex, lengthIndex := range ctx.arrayByRefLengthAllocations[key] {
+			if outputIndex >= len(arguments) || lengthIndex < 0 || lengthIndex >= len(arguments) {
+				continue
+			}
+			outputName := directArrayArgumentName(arguments[outputIndex])
+			lengthSource := directArrayArgumentName(arguments[lengthIndex])
+			if outputName == "" || lengthSource == "" {
+				continue
+			}
+			name := strings.ToLower(outputName)
+			variable, known := variables[name]
+			if !known || !variable.isArray {
+				continue
+			}
+			value := updated[name]
+			if value.kind == arrayAllocated && value.knownArray {
+				continue
+			}
+			if value.allocationCountSource != "" && !strings.EqualFold(value.allocationCountSource, lengthSource) {
+				continue
+			}
+			value.allocationCountSource = lengthSource
 			updated[name] = value
 		}
 	}
@@ -2276,6 +2420,13 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 		if known && !allocated && value.allocationCountSource != "" {
 			condition = arrayConditionalEntrySource(target, arguments, index, value.allocationCountSource)
 		}
+		if known && !allocated && condition == "" && arrayByRefCallArrayVacuouslyUnused(target, index, arguments) {
+			// A call may intentionally pass an unallocated optional array to a
+			// helper whose only uses are behind a false literal guard. It must not
+			// poison the conditional-entry evidence collected from calls that do
+			// reach those uses.
+			continue
+		}
 		parameters := evidence[targetKey]
 		if parameters == nil {
 			parameters = map[int]arrayByRefEntryEvidence{}
@@ -2301,6 +2452,116 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 		fact.seen = true
 		parameters[index] = fact
 		evidence[targetKey] = parameters
+	}
+}
+
+func arrayByRefCallArrayVacuouslyUnused(target sourceProcedure, arrayIndex int, arguments []string) bool {
+	if arrayIndex < 0 || arrayIndex >= len(target.Params) {
+		return false
+	}
+	arrayName := strings.ToLower(cleanIdentifier(target.Params[arrayIndex].Name))
+	if arrayName == "" {
+		return false
+	}
+	statements := make(map[int]procedureir.Statement, len(target.Statements))
+	for _, statement := range target.Statements {
+		statements[statement.ID] = statement
+	}
+	variables := map[string]arrayVariable{
+		arrayName: {name: arrayName, isArray: true},
+	}
+	found := false
+	for _, statement := range target.Statements {
+		if !arrayStatementReferencesArray(statement.Text, arrayName, variables) {
+			continue
+		}
+		found = true
+		if !arrayStatementHasFalseCallGuard(statement, statements, target, arguments) {
+			return false
+		}
+	}
+	return found
+}
+
+func arrayStatementReferencesArray(text, arrayName string, variables map[string]arrayVariable) bool {
+	for _, use := range arrayIndexedUses(text, variables) {
+		if strings.EqualFold(cleanIdentifier(use.name), arrayName) && len(use.args) > 0 {
+			return true
+		}
+	}
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		if strings.EqualFold(cleanIdentifier(bound[2]), arrayName) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayStatementHasFalseCallGuard(statement procedureir.Statement, statements map[int]procedureir.Statement, target sourceProcedure, arguments []string) bool {
+	seen := map[int]bool{}
+	for current := statement; current.ParentID != 0 && !seen[current.ParentID]; {
+		seen[current.ParentID] = true
+		parent, ok := statements[current.ParentID]
+		if !ok {
+			return false
+		}
+		if parent.Kind == procedureir.StatementIf && parent.Condition != nil && arrayConditionHasFalseCallArgument(parent.Condition.Text, target, arguments) {
+			return true
+		}
+		current = parent
+	}
+	return false
+}
+
+func arrayConditionHasFalseCallArgument(condition string, target sourceProcedure, arguments []string) bool {
+	for _, comparison := range arrayConditionAndRe.Split(condition, -1) {
+		comparison = strings.TrimSpace(comparison)
+		if index, ok := arrayProcedureParameterIndex(target, comparison); ok && index < len(arguments) && strings.EqualFold(strings.TrimSpace(arguments[index]), "false") {
+			return true
+		}
+		lhs, operator, literal, ok := arrayCountComparison(comparison)
+		if !ok {
+			continue
+		}
+		index, ok := arrayProcedureParameterIndex(target, lhs)
+		if !ok || index >= len(arguments) {
+			continue
+		}
+		value, valueOK := integerLiteral(arguments[index])
+		bound, boundOK := integerLiteral(literal)
+		if valueOK && boundOK && arrayIntegerComparisonFalse(value, operator, bound) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayProcedureParameterIndex(proc sourceProcedure, name string) (int, bool) {
+	name = strings.ToLower(cleanIdentifier(name))
+	for index, parameter := range proc.Params {
+		if strings.ToLower(cleanIdentifier(parameter.Name)) == name {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func arrayIntegerComparisonFalse(value int, operator string, bound int) bool {
+	switch operator {
+	case "=":
+		return value != bound
+	case "<>":
+		return value == bound
+	case ">":
+		return value <= bound
+	case ">=":
+		return value < bound
+	case "<":
+		return value >= bound
+	case "<=":
+		return value > bound
+	default:
+		return false
 	}
 }
 
@@ -2354,6 +2615,10 @@ func directArrayArgumentName(text string) string {
 
 func parameterIsByRefArray(parameter parameterInfo) bool {
 	return parameterIsArray(parameter) && !strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal")
+}
+
+func parameterIsByRefScalar(parameter parameterInfo) bool {
+	return !parameterIsArray(parameter) && !strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal")
 }
 
 func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) (arrayFlowState, []Finding) {

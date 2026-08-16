@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives when a private helper returns a dynamic
+  array and its successful length through paired `ByRef` outputs. Positive
+  length guards now carry the array allocation proof into downstream helpers,
+  while calls whose guarded array use is unreachable under literal `False` or
+  zero arguments no longer poison that proof.
+
 - Reduced `VBA227` false positives for invocation adapters that allocate a
   `ByRef` output array only when a collection has a positive count. The proof
   now preserves that conditional state through positive-count branches and
