@@ -95,6 +95,7 @@ var (
 	arrayGuardValueRe         = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
 	arrayGuardValueReversedRe = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*)\s*$`)
 	arrayIsArrayGuardRe       = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
+	arraySetupGuardRe         = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
 	arrayOnErrorGotoRe        = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
 	arrayLabelRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
 )
@@ -897,6 +898,252 @@ func arrayProcedureKey(proc sourceProcedure) string {
 	return strings.ToLower(module + "." + name)
 }
 
+type arrayModuleAllocationSummaries map[string]map[string]bool
+
+func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext, targets map[string]sourceProcedure) arrayModuleAllocationSummaries {
+	summaries := arrayModuleAllocationSummaries{}
+	procedures := make([]struct {
+		file        parsedFile
+		proc        sourceProcedure
+		moduleDecls map[string]sourceDeclaration
+	}, 0)
+	for _, file := range files {
+		procs := sourceProceduresFromIR(file.IR, file.CFG)
+		moduleDecls := moduleDeclarations(file.Lines, procs)
+		for _, proc := range procs {
+			procedures = append(procedures, struct {
+				file        parsedFile
+				proc        sourceProcedure
+				moduleDecls map[string]sourceDeclaration
+			}{file: file, proc: proc, moduleDecls: moduleDecls})
+		}
+	}
+	if len(procedures) == 0 {
+		return summaries
+	}
+
+	for iteration := 0; iteration <= len(procedures); iteration++ {
+		next := arrayModuleAllocationSummaries{}
+		for _, procedure := range procedures {
+			key := arrayProcedureKey(procedure.proc)
+			value := arrayModuleAllocationSummaryForProcedure(procedure.file, procedure.proc, procedure.moduleDecls, targets, summaries, ctx)
+			if len(value) > 0 {
+				next[key] = value
+			}
+		}
+		if arrayModuleAllocationSummariesEqual(summaries, next) {
+			return next
+		}
+		summaries = next
+	}
+	return summaries
+}
+
+func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, targets map[string]sourceProcedure, summaries arrayModuleAllocationSummaries, ctx analysisContext) map[string]bool {
+	moduleArrays := map[string]bool{}
+	for name, declaration := range moduleDecls {
+		if declaration.Array && !declaration.Parameter {
+			moduleArrays[strings.ToLower(name)] = true
+		}
+	}
+	if len(moduleArrays) == 0 || proc.Graph == nil {
+		return nil
+	}
+	localDeclarations := procedureDeclarations(file.Lines, proc)
+	for name := range localDeclarations {
+		delete(moduleArrays, name)
+	}
+	allocated := map[string]bool{}
+	addDirectAllocation := func(statementID int, name string) {
+		name = strings.ToLower(cleanIdentifier(name))
+		if !moduleArrays[name] || !arrayProcedureAllocationPointDominatesNormalExit(proc, statementID) {
+			return
+		}
+		allocated[name] = true
+	}
+	for _, statement := range proc.Statements {
+		text := strings.TrimSpace(statement.Text)
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct && !arrayProcedureLineHasInlineConditional(file, statement.Range.StartLine) {
+					addDirectAllocation(statement.ID, redim.name)
+				}
+			}
+		}
+		if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed {
+			name := strings.ToLower(cleanIdentifier(lhs))
+			if moduleArrays[name] {
+				if value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx); known && value.kind == arrayAllocated && value.knownArray {
+					if !arrayProcedureLineHasInlineConditional(file, statement.Range.StartLine) {
+						addDirectAllocation(statement.ID, name)
+					}
+				}
+			}
+		}
+	}
+	for _, call := range proc.Calls {
+		key, _, ok := arrayPrivateTargetForCall(ctx, targets, call)
+		if !ok {
+			continue
+		}
+		calleeArrays := summaries[key]
+		if len(calleeArrays) == 0 {
+			continue
+		}
+		guaranteed := !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) && arrayProcedureAllocationPointDominatesNormalExit(proc, call.StatementID)
+		if !guaranteed && arrayProcedureHasIdempotentSetupGuard(file, proc, call.Range.StartLine, moduleDecls) {
+			guaranteed = true
+		}
+		if !guaranteed {
+			continue
+		}
+		for name := range calleeArrays {
+			if moduleArrays[name] {
+				allocated[name] = true
+			}
+		}
+	}
+	return allocated
+}
+
+func arrayProcedureLineHasInlineConditional(file parsedFile, line int) bool {
+	if line < 1 || line > len(file.Lines) {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(file.Lines[line-1])))
+	return strings.HasPrefix(text, "if ") && strings.Contains(text, " then ")
+}
+
+func arrayProcedureAllocationPointDominatesNormalExit(proc sourceProcedure, statementID int) bool {
+	if proc.Graph == nil || statementID <= 0 {
+		return false
+	}
+	block, ok := proc.Graph.BlockForStatement(statementID)
+	if !ok {
+		return false
+	}
+	dominators := proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[proc.Graph.NormalExit]
+	for _, id := range dominators {
+		if id == block.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayProcedureHasIdempotentSetupGuard(file parsedFile, proc sourceProcedure, candidateLine int, moduleDecls map[string]sourceDeclaration) bool {
+	if candidateLine <= proc.StartLine {
+		return false
+	}
+	guard := ""
+	for line := proc.StartLine; line < candidateLine && line <= len(file.Lines); line++ {
+		match := arraySetupGuardRe.FindStringSubmatch(normalizedCodeLine(file.Lines[line-1]))
+		if len(match) != 2 {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(match[1]))
+		declaration, ok := moduleDecls[name]
+		if !ok || declaration.Array || declaration.Parameter || !strings.EqualFold(strings.TrimSpace(declaration.Type), "Boolean") {
+			continue
+		}
+		guard = name
+	}
+	if guard == "" {
+		return false
+	}
+	for line := candidateLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		lhs, rhs, indexed, ok := arrayAssignment(normalizedCodeLine(file.Lines[line-1]))
+		if ok && !indexed && strings.EqualFold(cleanIdentifier(lhs), guard) && strings.EqualFold(strings.TrimSpace(rhs), "true") {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayModuleAllocationSummariesEqual(left, right arrayModuleAllocationSummaries) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for procedure, arrays := range left {
+		other, ok := right[procedure]
+		if !ok || len(arrays) != len(other) {
+			return false
+		}
+		for name := range arrays {
+			if !other[name] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func arrayModuleInitializationStates(files []parsedFile, summaries arrayModuleAllocationSummaries) map[string]map[string]bool {
+	states := map[string]map[string]bool{}
+	for _, file := range files {
+		moduleKind := strings.ToLower(strings.TrimSpace(file.ModuleKind))
+		if moduleKind != "form" && moduleKind != "class" {
+			continue
+		}
+		procs := sourceProceduresFromIR(file.IR, file.CFG)
+		moduleDecls := moduleDeclarations(file.Lines, procs)
+		initializer := arrayModuleInitializerName(moduleKind)
+		for _, proc := range procs {
+			if !strings.EqualFold(strings.TrimSpace(proc.Name), initializer) {
+				continue
+			}
+			for name := range summaries[arrayProcedureKey(proc)] {
+				if declaration, ok := moduleDecls[name]; ok && declaration.Array && !declaration.Parameter {
+					if states[file.Path] == nil {
+						states[file.Path] = map[string]bool{}
+					}
+					states[file.Path][name] = true
+				}
+			}
+		}
+	}
+	return states
+}
+
+func applyArrayModuleInitializationState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, initializationStates map[string]map[string]bool) arrayFlowState {
+	if len(initializationStates[file.Path]) == 0 {
+		return state
+	}
+	moduleKind := strings.ToLower(strings.TrimSpace(file.ModuleKind))
+	if moduleKind != "form" && moduleKind != "class" {
+		return state
+	}
+	initializer := arrayModuleInitializerName(moduleKind)
+	if strings.EqualFold(strings.TrimSpace(proc.Name), initializer) {
+		return state
+	}
+	localDeclarations := procedureDeclarations(file.Lines, proc)
+	updated := cloneArrayState(state)
+	for name := range initializationStates[file.Path] {
+		if _, shadowed := localDeclarations[name]; shadowed {
+			continue
+		}
+		declaration, ok := moduleDecls[name]
+		variable, known := variables[name]
+		if !ok || !known || !declaration.Array || !variable.isArray {
+			continue
+		}
+		value := updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	return updated
+}
+
+func arrayModuleInitializerName(moduleKind string) string {
+	if moduleKind == "form" {
+		return "userform" + "_initialize"
+	}
+	return "class" + "_initialize"
+}
+
 type arrayByRefEntryEvidence struct {
 	seen      bool
 	allocated bool
@@ -917,6 +1164,8 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 	if len(targets) == 0 {
 		return map[string]map[int]bool{}
 	}
+	moduleAllocationSummaries := inferArrayModuleAllocationSummaries(files, ctx, targets)
+	moduleInitializationStates := arrayModuleInitializationStates(files, moduleAllocationSummaries)
 
 	entries := map[string]map[int]bool{}
 	for {
@@ -936,8 +1185,10 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 					continue
 				}
 				variables := arrayVariables(file, caller, moduleDecls)
+				localDeclarations := procedureDeclarations(file.Lines, caller)
 				constants := arrayIntegerConstants(file, caller, a.visibleConstantValues, a.visibleConstants)
 				initial := arrayInitialState(variables)
+				initial = applyArrayModuleInitializationState(initial, file, caller, variables, moduleDecls, moduleInitializationStates)
 				initial = applyArrayByRefEntryStates(initial, caller, variables, entries)
 				visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 					var eligible []struct {
@@ -972,6 +1223,27 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 						}
 					}
 					out, _ := a.arrayTransfer(file, caller, ctx, variables, in, text, line, constants)
+					for _, call := range arrayCallsAtLine(caller.Calls, line) {
+						if arrayProcedureLineHasInlineConditional(file, line) {
+							continue
+						}
+						key, _, ok := arrayPrivateTargetForCall(ctx, targets, call)
+						if !ok {
+							continue
+						}
+						for name := range moduleAllocationSummaries[key] {
+							if _, shadowed := localDeclarations[name]; shadowed {
+								continue
+							}
+							declaration, moduleVariable := moduleDecls[name]
+							if variable, known := variables[name]; moduleVariable && declaration.Array && known && variable.isArray {
+								value := out[name]
+								value.kind = arrayAllocated
+								value.knownArray = true
+								out[name] = value
+							}
+						}
+					}
 					return out
 				}
 				if caller.Graph == nil {

@@ -5189,6 +5189,162 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesModuleArrayAllocationThroughPrivateSetupCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  If UBound(items) > 0 Then Debug.Print items(0)
+End Sub
+
+Private Sub RunInternal()
+  SetupValues
+  Consume values
+End Sub
+
+Public Sub Run()
+  RunInternal
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a module-level array allocated by a private setup call should remain allocated for a private ByRef helper: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesFormInitializationArrayState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private values() As Long
+
+Private Sub UserForm_Initialize()
+  SetupValues
+End Sub
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  If UBound(items) > 0 Then Debug.Print items(0)
+End Sub
+
+Private Sub cmdStart_Click()
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a form-initialized module array should remain allocated for later private ByRef helpers: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesClassInitializationArrayState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Dialog.cls", `Option Explicit
+Private values() As Long
+
+Private Sub Class_Initialize()
+  SetupValues
+End Sub
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  If UBound(items) > 0 Then Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a class-initialized module array should remain allocated for later private ByRef helpers: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsConditionalModuleSetupConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  If UBound(items) > 0 Then Debug.Print items(0)
+End Sub
+
+Public Sub Run(ByVal shouldSetup As Boolean)
+  If shouldSetup Then SetupValues
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 2 {
+		t.Fatalf("a conditional setup call must not prove a module-level array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotPropagateShadowedSetupArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub SetupValues()
+  Dim values() As Long
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  If UBound(items) > 0 Then Debug.Print items(0)
+End Sub
+
+Public Sub Run()
+  SetupValues
+  Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 2 {
+		t.Fatalf("a local array shadowing the module target must not prove the module allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227KeepsPublicByRefArrayCallsConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

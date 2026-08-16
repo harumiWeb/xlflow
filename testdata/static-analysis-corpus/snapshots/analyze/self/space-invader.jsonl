@@ -102,9 +102,6 @@
 {"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA249","severity":"error","line":835,"column":0}
 {"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA249","severity":"error","line":850,"column":0}
 {"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA249","severity":"error","line":850,"column":0}
-{"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA227","severity":"warning","line":865,"column":0}
-{"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA227","severity":"warning","line":866,"column":0}
-{"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA227","severity":"warning","line":867,"column":0}
 {"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA249","severity":"error","line":880,"column":0}
 {"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA249","severity":"error","line":882,"column":0}
 {"project":"self/space-invader","file":"src/forms/code/frmInvader.bas","surface":"analyze","code":"VBA249","severity":"error","line":885,"column":0}

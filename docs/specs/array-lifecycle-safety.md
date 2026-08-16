@@ -86,10 +86,13 @@ are normalized into this shape before operation checks run. Assignments,
 incoming path. For a unique project-local `Private` procedure, or a procedure
 in an `Option Private Module`, a direct array argument may seed a `ByRef` array
 parameter only when every observed call site passes an allocated array. These
-entry facts are solved across the same restricted helper chain. Public,
-ambiguous, dynamic, and unresolved calls remain unknown. An unresolved or
-external value, and a `Variant` whose array nature is not proven, remains
-`unknown`.
+entry facts are solved across the same restricted helper chain. A module-level
+array may also carry allocation through a dominating, unique project-local
+setup call, and form/class procedures inherit arrays proven by
+`UserForm_Initialize` / `Class_Initialize`; an inline conditional setup call is
+not sufficient. Public, ambiguous, dynamic, and unresolved calls remain
+unknown. An unresolved or external value, and a `Variant` whose array nature
+is not proven, remains `unknown`.
 
 ## Diagnostics and ownership
 

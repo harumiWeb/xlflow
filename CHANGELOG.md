@@ -28,7 +28,10 @@ All notable changes to xlflow will be documented in this file.
   `ConvertToJson(values(), 4)` are no longer treated as indexed accesses at the
   call site; `IsArray(variant)` true branches now establish allocation for
   guarded whole-array assignments; `ReDim Preserve` remains conservative when
-  its prior allocation or shape is unknown.
+  its prior allocation or shape is unknown. Module-level arrays initialized by
+  a dominating private setup call, including form/class initialization, now
+  retain their allocated state when passed through private `ByRef` helpers;
+  conditional setup calls remain conservative.
 
 - Fixed `VBA225` false positives when a local, parameter, or module-level VBA
   binding such as `cells` shadows Excel's unqualified `Cells` function. The
