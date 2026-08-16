@@ -98,6 +98,12 @@ dynamic, and unresolved calls remain
 unknown. An unresolved or external value, and a `Variant` whose array nature
 is not proven, remains `unknown`.
 
+A non-empty `String` assigned directly to a dynamic `Byte` array is recognized
+as an allocation for a non-empty literal, or for a statically typed `String`
+whose syntactic non-empty guard is visible. An unguarded String assignment
+remains unknown because an empty string can still leave no usable element
+bounds; arbitrary `Variant` and function-return assignments remain unknown.
+
 ## Diagnostics and ownership
 
 `VBA227` reports only possible or partially known cases of:

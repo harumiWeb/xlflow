@@ -4984,6 +4984,46 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesStringAssignmentToByteArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub WriteEscaped(ByVal text As String)
+  Dim bytes() As Byte
+  Dim index As Long
+  Dim length As Long
+
+  length = Len(text)
+  If length = 0 Then Exit Sub
+  bytes = text
+  For index = 1 To length
+    If bytes((index - 1) * 2 + 1) = 0 Then
+      Debug.Print bytes((index - 1) * 2)
+    End If
+  Next index
+End Sub
+
+Private Sub Unsafe(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = text
+  Debug.Print bytes(0)
+End Sub
+
+Public Sub Run()
+  WriteEscaped "text"
+  Unsafe "text"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Unsafe" {
+		t.Fatalf("only an unguarded String-to-Byte-array access should remain diagnosed: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesQualifiedAndNestedArrayFactoryCalls(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

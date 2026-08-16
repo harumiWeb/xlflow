@@ -1989,6 +1989,8 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}
+			} else if variable, exists := variables[name]; exists && byteArrayStringAssignment(file, proc, line, variable, rhs, variables) {
+				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}
 			} else if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 				state[name] = arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginUnknown}
 			}
@@ -2570,6 +2572,73 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 		return arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}, true
 	}
 	return arrayValue{}, false
+}
+
+var (
+	arrayStringNonEmptyBlockRe = regexp.MustCompile(`(?i)^\s*if\s+(?:[a-z_]\w*\.)?len\s*\(\s*([a-z_]\w*)\s*\)\s*>\s*0\s+then\s*$`)
+	arrayStringLengthAssignRe  = regexp.MustCompile(`(?i)^\s*([a-z_]\w*)\s*=\s*(?:[a-z_]\w*\.)?len\s*\(\s*([a-z_]\w*)\s*\)\s*$`)
+	arrayStringEmptyExitRe     = regexp.MustCompile(`(?i)^\s*if\s+([a-z_]\w*)\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
+)
+
+// VBA copies a non-empty String into a Byte array. Require a source-level
+// non-empty proof before treating that assignment as usable allocation, so an
+// unguarded empty-string path remains conservative.
+func byteArrayStringAssignment(file parsedFile, proc sourceProcedure, line int, variable arrayVariable, rhs string, variables map[string]arrayVariable) bool {
+	if !variable.isArray || !strings.EqualFold(strings.TrimSpace(variable.typ), "Byte") {
+		return false
+	}
+	rhs = strings.TrimSpace(rhs)
+	if strings.HasPrefix(rhs, `"`) {
+		return len(rhs) > 1 && !strings.HasPrefix(rhs, `""`)
+	}
+	if !arrayEraseNameRe.MatchString(rhs) {
+		return false
+	}
+	source, ok := variables[strings.ToLower(rhs)]
+	if !ok || source.isArray || source.isVariant || !strings.EqualFold(strings.TrimSpace(source.typ), "String") {
+		return false
+	}
+	return arrayStringIsKnownNonEmpty(file, proc, line, rhs)
+}
+
+func arrayStringIsKnownNonEmpty(file parsedFile, proc sourceProcedure, line int, source string) bool {
+	start := max(0, proc.StartLine-1)
+	end := min(len(file.Lines), line-1)
+	lengthVariables := map[string]bool{}
+	for index := start; index < end; index++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		if match := arrayStringLengthAssignRe.FindStringSubmatch(text); len(match) == 3 && strings.EqualFold(match[2], source) {
+			lengthVariables[strings.ToLower(match[1])] = true
+		}
+		if match := arrayStringEmptyExitRe.FindStringSubmatch(text); len(match) == 2 && lengthVariables[strings.ToLower(match[1])] {
+			return true
+		}
+	}
+
+	depth := 0
+	guardDepth := 0
+	for index := start; index < end; index++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		lower := strings.ToLower(text)
+		if lower == "end if" {
+			if guardDepth == depth {
+				guardDepth = 0
+			}
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if match := arrayStringNonEmptyBlockRe.FindStringSubmatch(text); len(match) == 2 && strings.EqualFold(match[1], source) {
+			depth++
+			guardDepth = depth
+			continue
+		}
+		if strings.HasPrefix(lower, "if ") && strings.HasSuffix(lower, " then") {
+			depth++
+		}
+	}
+	return guardDepth > 0
 }
 
 func arrayCallName(text string) string {
