@@ -5970,6 +5970,46 @@ End Sub
 	assertGuardResults("realtime", realtime)
 }
 
+func TestAnalyzerVBA227UsesSuccessfulArrayLengthGuardForModuleArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Private moduleBytes() As Byte
+
+Private Function CountBytes(ByRef values() As Byte) As Long
+  On Error GoTo EmptyValues
+  CountBytes = UBound(values) - LBound(values) + 1
+  Exit Function
+EmptyValues:
+  CountBytes = 0
+End Function
+
+Private Sub WriteFileOverlapped(ByVal handle As Long, ByVal address As Long, ByVal count As Long, ByVal flags As Long, ByVal extra As Long)
+End Sub
+
+Private Sub Guarded(ByRef payload() As Byte)
+  moduleBytes = payload
+  If CountBytes(moduleBytes) = 0 Then Exit Sub
+  WriteFileOverlapped 0, VarPtr(moduleBytes(0)), CountBytes(moduleBytes), 0, 0
+End Sub
+
+Public Sub Run()
+  Dim payload() As Byte
+  ReDim payload(0 To 0)
+  Guarded payload
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a successful array-length guard should establish allocation for a module array: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
