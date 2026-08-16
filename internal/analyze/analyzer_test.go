@@ -5286,6 +5286,141 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesConfiguredClassArrayStateThroughGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Configured.cls", `Option Explicit
+Private items() As Long
+Private configured As Boolean
+
+Private Sub ConfigureItems()
+  configured = True
+  ResetArray items
+End Sub
+
+Private Sub ResetArray(ByRef target() As Long)
+  ReDim target(1 To 2)
+End Sub
+
+Private Sub Consume(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub RequireItems(ByVal memberName As String)
+  If Not configured Then Err.Raise 5
+End Sub
+
+Public Sub Run()
+  ConfigureItems
+  RequireItems "Run"
+  Consume items
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a configured class array should remain allocated through a ByRef reset and guard: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesConfiguredClassArrayGuards(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Configured.cls", `Option Explicit
+Private items() As Long
+Private keys() As Long
+Private priorities() As Long
+Private roleValue As Long
+Private collectionKind As Long
+
+Friend Sub ConfigureDataTable()
+  roleValue = 1
+  ResetArray items
+  ResetArray keys
+End Sub
+
+Friend Sub ConfigureGenericCollection()
+  roleValue = 2
+  collectionKind = 3
+  ResetArray items
+  ResetArray keys
+  ResetArray priorities
+End Sub
+
+Private Sub ResetArray(ByRef target() As Long)
+  ReDim target(1 To 2)
+End Sub
+
+Private Sub Consume(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub RequireDataTable(ByVal memberName As String)
+  If roleValue <> 1 Then Err.Raise 5
+End Sub
+
+Private Function IsPriorityQueueKind(ByVal value As Long) As Boolean
+  IsPriorityQueueKind = (value = 3)
+End Function
+
+Private Sub RequirePriorityQueue(ByVal memberName As String)
+  If Not IsPriorityQueueKind(collectionKind) Then Err.Raise 5
+End Sub
+
+Private Function IsGenericCollectionRole(ByVal value As Long) As Boolean
+  IsGenericCollectionRole = (value = 2)
+End Function
+
+Public Sub DataTableRead()
+  RequireDataTable "DataTableRead"
+  Consume items
+  Consume keys
+End Sub
+
+Public Sub PriorityRead()
+  RequirePriorityQueue "PriorityRead"
+  Consume items
+  Consume priorities
+End Sub
+
+Public Sub GenericRead()
+  If IsGenericCollectionRole(roleValue) Then
+    Consume items
+    Consume keys
+    Consume priorities
+  End If
+End Sub
+
+Public Sub UnsafeRead()
+  Consume items
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, procedure := range []string{"DataTableRead", "PriorityRead", "GenericRead"} {
+		for _, finding := range findingsByCode(findings, "VBA227") {
+			if finding.Procedure == procedure {
+				t.Fatalf("configured %s array guard should establish allocation: %+v", procedure, finding)
+			}
+		}
+	}
+	unsafe := 0
+	for _, finding := range findings {
+		if finding.Procedure == "Consume" && finding.Code == "VBA227" {
+			unsafe++
+		}
+	}
+	if unsafe == 0 {
+		t.Fatalf("an unguarded configured-class array access must remain reportable: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA227KeepsConditionalModuleSetupConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

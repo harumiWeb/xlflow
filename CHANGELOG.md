@@ -33,6 +33,10 @@ All notable changes to xlflow will be documented in this file.
   retain their allocated state when passed through private `ByRef` helpers;
   conditional setup calls remain conservative.
 
+- Reduced `VBA227` false positives for class-level dynamic arrays configured by
+  project-local `Friend`/`Private` helpers: proven `ByRef` `ReDim` effects now
+  flow through matching rejecting role guards and validated role branches.
+
 - Fixed `VBA225` false positives when a local, parameter, or module-level VBA
   binding such as `cells` shadows Excel's unqualified `Cells` function. The
   Procedure IR now gates the textual fallback, including propagated helper

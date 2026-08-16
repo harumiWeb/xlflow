@@ -104,6 +104,7 @@ const excludedErrorInventoryLiterals = new Set([
   "binding_note",
   "license_file",
   "regression_exception",
+  "role_data_table",
   "third_party",
 ]);
 const errors = [
