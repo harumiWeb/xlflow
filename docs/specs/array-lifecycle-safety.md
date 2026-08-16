@@ -104,6 +104,16 @@ dynamic, and unresolved calls remain
 unknown. An unresolved or external value, and a `Variant` whose array nature
 is not proven, remains `unknown`.
 
+A private `ByRef` output helper may establish a conditional allocation when it
+exits for a zero `Collection.Count` (or equivalent count) and performs a
+`ReDim` from that count on the remaining normal path. The caller must retain
+that condition: a positive count branch or a positive numeric `Select Case`
+clause proves the output array allocated only within that branch. The helper
+does not make the array unconditionally allocated, and unrelated count
+expressions or arbitrary conditional `ReDim` statements do not establish this
+fact. `Select Case` headers and their case bodies are evaluated through their
+own CFG blocks so a case-local access receives the selected branch state.
+
 A non-empty `String` assigned directly to a dynamic `Byte` array is recognized
 as an allocation for a non-empty literal, or for a statically typed `String`
 whose syntactic non-empty guard is visible. An unguarded String assignment

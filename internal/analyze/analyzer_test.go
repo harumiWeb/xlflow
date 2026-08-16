@@ -5201,6 +5201,55 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesAllocationFromByRefOutputWithCollectionCount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub PrepareInvocationValues(ByVal arguments As Collection, ByRef values() As Variant)
+  If arguments.Count = 0 Then Exit Sub
+  ReDim values(0 To arguments.Count - 1)
+End Sub
+
+Private Function InvokeMethod(ByVal arguments As Collection) As Variant
+  Dim values() As Variant
+  PrepareInvocationValues arguments, values
+  If arguments.Count > 0 Then Debug.Print values(0)
+  Debug.Print RunValues(values, arguments.Count)
+  Select Case arguments.Count
+    Case 0
+      InvokeMethod = CallByName(arguments, "Value", VbMethod)
+    Case 1
+      InvokeMethod = CallByName( _
+        arguments, "Value", VbMethod, values(0))
+  End Select
+End Function
+
+Private Function RunValues(ByRef values() As Variant, ByVal argumentCount As Long) As Variant
+  Select Case argumentCount
+    Case 0
+      RunValues = Empty
+    Case 1
+      RunValues = Application.Run("Value", values(0))
+  End Select
+End Function
+
+Public Sub Run()
+  Dim arguments As Collection
+  Set arguments = New Collection
+  arguments.Add "value"
+  Debug.Print InvokeMethod(arguments)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a positive-count dispatch should not report its case-local array access: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227ProcessesArrayAllocationsInMultilineCFGBlocks(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

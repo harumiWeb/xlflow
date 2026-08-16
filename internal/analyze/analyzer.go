@@ -210,23 +210,25 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 }
 
 type analysisContext struct {
-	functionReturns           map[string]string
-	functionShapes            map[string]procedureir.ValueShapeKind
-	functionNamesSeen         map[string]bool
-	functionAmbiguous         map[string]bool
-	arrayReturns              map[string]arrayValue
-	arrayAllocationGuards     map[string]bool
-	arrayByRefAllocations     arrayByRefAllocationSummaries
-	arrayModuleAllocations    arrayModuleAllocationSummaries
-	arrayModuleConfigurations map[string]arrayModuleConfigurationState
-	arrayPrivateTargets       map[string]sourceProcedure
-	arrayByRefEntryStates     map[string]map[int]bool
-	procedures                map[string]procedureSignature
-	procedureResolver         procedureir.SymbolResolver
-	objectSummaries           map[string]objectProcedureSummary
-	objectEntryStates         map[string]map[string]bool
-	worksheetCodenames        map[string]string
-	projectEffects            effects.ProjectSummary
+	functionReturns                  map[string]string
+	functionShapes                   map[string]procedureir.ValueShapeKind
+	functionNamesSeen                map[string]bool
+	functionAmbiguous                map[string]bool
+	arrayReturns                     map[string]arrayValue
+	arrayAllocationGuards            map[string]bool
+	arrayByRefAllocations            arrayByRefAllocationSummaries
+	arrayByRefConditionalAllocations arrayByRefConditionalAllocations
+	arrayModuleAllocations           arrayModuleAllocationSummaries
+	arrayModuleConfigurations        map[string]arrayModuleConfigurationState
+	arrayPrivateTargets              map[string]sourceProcedure
+	arrayByRefEntryStates            map[string]map[int]bool
+	arrayByRefEntryConditions        map[string]map[int]string
+	procedures                       map[string]procedureSignature
+	procedureResolver                procedureir.SymbolResolver
+	objectSummaries                  map[string]objectProcedureSummary
+	objectEntryStates                map[string]map[string]bool
+	worksheetCodenames               map[string]string
+	projectEffects                   effects.ProjectSummary
 }
 
 type procedureSignature struct {
@@ -1409,20 +1411,22 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx := analysisContext{
-		functionReturns:           map[string]string{},
-		functionShapes:            map[string]procedureir.ValueShapeKind{},
-		functionNamesSeen:         map[string]bool{},
-		functionAmbiguous:         map[string]bool{},
-		arrayReturns:              map[string]arrayValue{},
-		arrayAllocationGuards:     map[string]bool{},
-		arrayByRefAllocations:     arrayByRefAllocationSummaries{},
-		arrayModuleAllocations:    arrayModuleAllocationSummaries{},
-		arrayModuleConfigurations: map[string]arrayModuleConfigurationState{},
-		arrayPrivateTargets:       map[string]sourceProcedure{},
-		arrayByRefEntryStates:     map[string]map[int]bool{},
-		procedures:                map[string]procedureSignature{},
-		objectSummaries:           buildObjectProcedureSummaries(files),
-		worksheetCodenames:        map[string]string{},
+		functionReturns:                  map[string]string{},
+		functionShapes:                   map[string]procedureir.ValueShapeKind{},
+		functionNamesSeen:                map[string]bool{},
+		functionAmbiguous:                map[string]bool{},
+		arrayReturns:                     map[string]arrayValue{},
+		arrayAllocationGuards:            map[string]bool{},
+		arrayByRefAllocations:            arrayByRefAllocationSummaries{},
+		arrayByRefConditionalAllocations: arrayByRefConditionalAllocations{},
+		arrayModuleAllocations:           arrayModuleAllocationSummaries{},
+		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
+		arrayPrivateTargets:              map[string]sourceProcedure{},
+		arrayByRefEntryStates:            map[string]map[int]bool{},
+		arrayByRefEntryConditions:        map[string]map[int]string{},
+		procedures:                       map[string]procedureSignature{},
+		objectSummaries:                  buildObjectProcedureSummaries(files),
+		worksheetCodenames:               map[string]string{},
 	}
 	ctx.objectEntryStates = buildObjectProcedureEntryStates(files, ctx.objectSummaries)
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
@@ -1485,9 +1489,10 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards)
 	ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 	ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
+	ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)
 	ctx.arrayModuleAllocations = inferArrayModuleAllocationSummaries(files, ctx, ctx.arrayPrivateTargets, ctx.arrayByRefAllocations)
 	ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)
-	ctx.arrayByRefEntryStates = inferArrayByRefEntryStates(a, files, ctx)
+	ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	return ctx
 }
 

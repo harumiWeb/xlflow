@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives for invocation adapters that allocate a
+  `ByRef` output array only when a collection has a positive count. The proof
+  now preserves that conditional state through positive-count branches and
+  numeric `Select Case` dispatches, including nested project-local helpers.
+
 - Fixed Procedure IR argument slots for explicit VBA line continuations so
   interprocedural `VBA202` object-state and `VBA227` array-allocation proofs
   follow the actual arguments.
