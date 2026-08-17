@@ -9,6 +9,10 @@ All notable changes to xlflow will be documented in this file.
   final `True` assignment now carries its allocation into downstream private
   helpers, while externally writable guards and resettable arrays remain
   conservative.
+- Reduced `VBA227` false positives when a private `ByRef` array-output helper
+  allocates a caller-local array that is then passed to another private helper.
+  Proven output allocation now follows local array arguments without widening
+  module-array propagation.
 
 - Reduced `VBA227` false positives when a module-level array is allocated by a
   public entry or class initializer and then read through a same-module

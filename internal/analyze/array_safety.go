@@ -1900,14 +1900,10 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	}
 	localDeclarations := procedureDeclarations(file.Lines, proc)
 	updated := cloneArrayState(state)
-	mark := func(name string) {
+	markArgument := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
-		if _, shadowed := localDeclarations[name]; shadowed {
-			return
-		}
-		declaration, declared := moduleDecls[name]
 		variable, known := variables[name]
-		if !declared || !declaration.Array || declaration.Parameter || !known || !variable.isArray {
+		if !known || !variable.isArray {
 			return
 		}
 		value := updated[name]
@@ -1915,8 +1911,19 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 		value.knownArray = true
 		updated[name] = value
 	}
+	markModule := func(name string) {
+		name = strings.ToLower(cleanIdentifier(name))
+		if _, shadowed := localDeclarations[name]; shadowed {
+			return
+		}
+		declaration, declared := moduleDecls[name]
+		if !declared || !declaration.Array || declaration.Parameter {
+			return
+		}
+		markArgument(name)
+	}
 	for name := range ctx.arrayModuleAllocations[key] {
-		mark(name)
+		markModule(name)
 	}
 	arguments := arrayCallArgumentTexts(proc, call)
 	if len(call.Arguments.Named) == 0 && len(arguments) == call.Arguments.Count {
@@ -1924,7 +1931,7 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 			if index >= len(arguments) || index >= len(target.Params) || !parameterIsByRefArray(target.Params[index]) {
 				continue
 			}
-			mark(arguments[index])
+			markArgument(arguments[index])
 		}
 		for outputIndex, countIndex := range ctx.arrayByRefConditionalAllocations[key] {
 			if outputIndex >= len(arguments) || countIndex < 0 || countIndex >= len(arguments) {
@@ -1976,7 +1983,7 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 		}
 	}
 	for name := range arrayConfigurationArraysForGuard(file, target, arguments, ctx.arrayModuleConfigurations[file.Path]) {
-		mark(name)
+		markModule(name)
 	}
 	return updated
 }

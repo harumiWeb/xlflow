@@ -134,6 +134,13 @@ expressions or arbitrary conditional `ReDim` statements do not establish this
 fact. `Select Case` headers and their case bodies are evaluated through their
 own CFG blocks so a case-local access receives the selected branch state.
 
+When a private `ByRef` output helper has an unconditional allocation summary,
+that allocation is also applied to a caller-local array argument. This allows a
+second private `ByRef` helper to consume the locally allocated result without
+losing its entry state. Module-array effects remain shadow-safe: a module
+allocation is not transferred into a same-named local variable, and unresolved
+or public helper calls remain unknown.
+
 A private `ByRef` helper may also return an array and its successful element
 length through separate `ByRef` parameters. The assignment
 `length = UBound(values) - LBound(values) + 1` establishes a conditional

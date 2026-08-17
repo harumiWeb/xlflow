@@ -5607,6 +5607,48 @@ End Sub`)
 	}
 }
 
+func TestAnalyzerVBA227PropagatesByRefOutputToLocalCaller(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private fixed() As Long
+
+Private Sub Setup()
+  ReDim fixed(0 To 1)
+End Sub
+
+Private Sub Construct(ByRef output() As Long)
+  ReDim output(0 To 1)
+End Sub
+
+Private Sub Decode(ByRef values() As Long)
+  Debug.Print values(0)
+End Sub
+
+Private Sub FromModule()
+  Decode fixed
+End Sub
+
+Private Sub FromLocal()
+  Dim local() As Long
+  Construct local
+  Decode local
+End Sub
+
+Public Sub Run()
+ Setup
+ FromModule
+ FromLocal
+End Sub`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) > 0 {
+		t.Fatalf("VBA227 findings: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotTrustExternallySetModuleSetupGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
