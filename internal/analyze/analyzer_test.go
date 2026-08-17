@@ -5096,6 +5096,127 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesVariantByteArrayTransfer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Function EmptyByteArray() As Variant
+  Dim bytes() As Byte
+  bytes = vbNullString
+  EmptyByteArray = bytes
+End Function
+
+Private Function ReadByteArray() As Variant
+  Dim stream As Object
+  Dim encoded As Variant
+  Set stream = CreateObject("ADODB.Stream")
+  encoded = stream.Read(-1)
+  ReadByteArray = encoded
+End Function
+
+Private Function EncodeText(ByVal text As String) As Variant
+  If Len(text) = 0 Then
+    EncodeText = EmptyByteArray()
+  Else
+    EncodeText = ReadByteArray()
+  End If
+End Function
+
+Private Sub RaiseContractError()
+  Err.Raise 5
+End Sub
+
+Private Sub Coerce(ByVal value As Variant, ByRef bytes() As Byte)
+  If VarTypeOf(value) = vbString Then
+    bytes = EncodeText(CStr(value))
+  ElseIf VarTypeOf(value) = (vbArray Or vbByte) Then
+    bytes = value
+  Else
+    RaiseContractError
+  End If
+  If UBound(bytes) < LBound(bytes) Then Debug.Print "empty"
+End Sub
+
+Public Sub Run(ByVal value As Variant)
+  Dim bytes() As Byte
+  Coerce value, bytes
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a Variant Byte-array transfer and zero-length array should make the bounds query safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsEmptyByteArrayElementAccessUnsafe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Public Sub Run()
+  Dim bytes() As Byte
+  bytes = vbNullString
+  If UBound(bytes) < LBound(bytes) Then Debug.Print "empty"
+  bytes(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("expected only the empty-array element access to be reported, got %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsPotentiallyEmptyVariantByteArrayElementAccessUnsafe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Function EmptyByteArray() As Variant
+  Dim bytes() As Byte
+  bytes = vbNullString
+  EmptyByteArray = bytes
+End Function
+
+Private Function ReadByteArray() As Variant
+  Dim stream As Object
+  ReadByteArray = stream.Read(-1)
+End Function
+
+Private Function EncodeText(ByVal text As String) As Variant
+  If Len(text) = 0 Then
+    EncodeText = EmptyByteArray()
+  Else
+    EncodeText = ReadByteArray()
+  End If
+End Function
+
+Public Sub Run(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = EncodeText(text)
+  bytes(0) = 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 25 {
+		t.Fatalf("expected the possibly empty Variant array element access to be reported, got %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesAllocatedArrayThroughPrivateByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

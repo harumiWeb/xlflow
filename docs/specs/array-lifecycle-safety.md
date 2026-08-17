@@ -60,6 +60,16 @@ whole-array assignment from the guarded Variant can establish the target's
 allocation. The false branch remains unknown until a recognized array factory
 or other allocation operation establishes its state.
 
+A `VarType` / `VarTypeOf` comparison with `(vbArray Or vbByte)` provides the
+same array proof for a guarded Variant Byte-array assignment. Variant results
+from a binary stream `Read(-1)` expression and the `vbNullString`-to-Byte-array
+idiom are recognized as Byte-array transfers. The latter is a known empty
+array: `LBound` / `UBound` queries are valid, but element access remains a
+`VBA227` finding. A private `ByRef` output helper that fills the output on each
+accepted branch and routes rejected inputs through a project-local procedure
+with no normal exit is summarized at its normal exits; the rejecting branch
+does not poison the allocation proof.
+
 The same allocation-probe contract also applies when the positive length is
 first assigned to a scalar local and that local is compared with zero or a
 positive threshold. The proof remains path-sensitive; unrelated scalar

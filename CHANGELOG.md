@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives in Variant-to-Byte-array `ByRef` adapters.
+  `(vbArray Or vbByte)` guards, binary-stream `Read(-1)` results, and the
+  `vbNullString` empty-array idiom now flow through normal CFG exits while
+  project-local non-returning error helpers are excluded from normal state;
+  element access on a known empty Byte array remains diagnosed.
+
 - Reduced `VBA227` false positives when a private helper returns a dynamic
   array and its successful length through paired `ByRef` outputs. Positive
   length guards now carry the array allocation proof into downstream helpers,

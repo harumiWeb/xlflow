@@ -62,6 +62,7 @@ type arrayVariable struct {
 type arrayValue struct {
 	kind            arrayAllocation
 	knownArray      bool
+	mayBeEmpty      bool
 	dimensions      []arrayDimension
 	preserveShape   []arrayDimension
 	origin          arrayOrigin
@@ -113,6 +114,8 @@ var (
 	arrayGuardValueRe         = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
 	arrayGuardValueReversedRe = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*)\s*$`)
 	arrayIsArrayGuardRe       = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
+	arrayByteArrayGuardRe     = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
+	arrayByteArrayReadRe      = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
 	arraySetupGuardRe         = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
 	arrayOnErrorGotoRe        = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
 	arrayOnErrorResumeNextRe  = regexp.MustCompile(`(?i)^\s*on\s+error\s+resume\s+next\s*$`)
@@ -206,7 +209,8 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 	})
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
-		walkArrayCFGWithSourceLines(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
+		vba227Graph := arrayVBA227Graph(proc, ctx)
+		walkArrayCFGWithSourceLines(&vba227Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
 			out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
 				out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
@@ -223,7 +227,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 			}
 			return out
 		}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-			out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
+			out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 		})
@@ -969,14 +973,63 @@ func arrayIsArrayGuardCondition(text string) (string, vbacfg.EdgeKind, bool) {
 		text = strings.TrimSpace(text[4:])
 	}
 	match := arrayIsArrayGuardRe.FindStringSubmatch(text)
-	if len(match) != 2 {
+	if len(match) == 2 {
+		branch := vbacfg.EdgeBranchTrue
+		if negated {
+			branch = vbacfg.EdgeBranchFalse
+		}
+		return match[1], branch, true
+	}
+	if negated {
 		return "", "", false
 	}
-	branch := vbacfg.EdgeBranchTrue
-	if negated {
-		branch = vbacfg.EdgeBranchFalse
+	if match := arrayByteArrayGuardRe.FindStringSubmatch(text); len(match) == 2 {
+		return match[1], vbacfg.EdgeBranchTrue, true
 	}
-	return match[1], branch, true
+	return "", "", false
+}
+
+// arrayVBA227Graph removes normal-flow edges after direct raises and after
+// private helpers whose normal CFG has no path to the procedure exit.  The
+// latter covers project-local error wrappers such as RaiseContractError:
+// their call sites must not poison the normal allocation state with an
+// impossible fall-through branch.
+func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.Graph {
+	if proc.Graph == nil {
+		return vbacfg.Graph{}
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
+	removed := map[vbacfg.BlockID]bool{}
+	for _, call := range proc.Calls {
+		_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if !ok || !arrayProcedureAlwaysRaises(target) {
+			continue
+		}
+		block, ok := graph.BlockForStatement(call.StatementID)
+		if ok {
+			removed[block.ID] = true
+		}
+	}
+	if len(removed) == 0 {
+		return graph
+	}
+	edges := make([]vbacfg.Edge, 0, len(graph.Edges))
+	for _, edge := range graph.Edges {
+		if edge.Class == vbacfg.EdgeNormal && removed[edge.From] {
+			continue
+		}
+		edges = append(edges, edge)
+	}
+	graph.Edges = edges
+	return graph
+}
+
+func arrayProcedureAlwaysRaises(proc sourceProcedure) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
+	return !graph.IsReachable(graph.NormalExit, vbacfg.EdgeFilter{NormalOnly: true})
 }
 
 func arrayAllocationGuardCondition(text string, guards map[string]bool, state arrayFlowState) (string, vbacfg.EdgeKind, bool) {
@@ -1122,6 +1175,7 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	out := arrayValue{
 		kind:                  left.kind,
 		knownArray:            left.knownArray,
+		mayBeEmpty:            left.mayBeEmpty,
 		origin:                left.origin,
 		dimensions:            append([]arrayDimension(nil), left.dimensions...),
 		preserveShape:         append([]arrayDimension(nil), left.preserveShape...),
@@ -1133,6 +1187,7 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	if left.knownArray != right.knownArray {
 		out.knownArray = false
 	}
+	out.mayBeEmpty = left.mayBeEmpty || right.mayBeEmpty
 	if left.origin != right.origin {
 		out.origin = arrayOriginUnknown
 	}
@@ -1188,7 +1243,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.allocationCountSource != r.allocationCountSource || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.allocationCountSource != r.allocationCountSource || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}
@@ -1443,6 +1498,64 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 			if parameterIndex, ok := parameters[directArrayArgumentName(arguments[index])]; ok {
 				allocated[parameterIndex] = true
 			}
+		}
+	}
+	flowCtx := ctx
+	flowCtx.arrayByRefAllocations = summaries
+	moduleDecls := moduleDeclarations(file.Lines, sourceProceduresFromIR(file.IR, file.CFG))
+	for index := range arrayByRefFlowAllocations(file, proc, flowCtx, moduleDecls) {
+		allocated[index] = true
+	}
+	return allocated
+}
+
+// arrayByRefFlowAllocations proves ByRef array outputs at normal procedure
+// exits. Unlike the direct-assignment summary above, this pass keeps the
+// branch-local state established by an IsArray/type guard and meets it at the
+// normal exit. It therefore recognizes helpers that fill the same output on
+// multiple accepted input branches while excluding paths that terminate in a
+// direct or project-local error raiser.
+func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) map[int]bool {
+	if proc.Graph == nil {
+		return nil
+	}
+	variables := arrayVariables(file, proc, moduleDecls)
+	initial := arrayInitialState(variables)
+	graph := arrayVBA227Graph(proc, ctx)
+	var normalExit arrayFlowState
+	hasNormalExit := false
+	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+		out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, nil, nil)
+		for _, call := range arrayCallsAtLine(proc.Calls, line) {
+			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+		}
+		return out
+	}
+	edgeState := func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
+		out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+		if edge.To == graph.NormalExit {
+			if !hasNormalExit {
+				normalExit = cloneArrayState(out)
+				hasNormalExit = true
+			} else {
+				normalExit = meetArrayState(normalExit, out)
+			}
+		}
+		return out
+	}
+	walkArrayCFGWithSourceLines(&graph, file.Lines, initial, visit, edgeState)
+	if !hasNormalExit {
+		return nil
+	}
+	allocated := map[int]bool{}
+	for index, parameter := range proc.Params {
+		if !parameterIsByRefArray(parameter) {
+			continue
+		}
+		value, ok := normalExit[strings.ToLower(parameter.Name)]
+		if ok && value.kind == arrayAllocated && value.knownArray {
+			allocated[index] = true
 		}
 	}
 	return allocated
@@ -2826,6 +2939,10 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			addWithKey(arrayIndexOperationKey(use.name, "unallocated"), "VBA227", use.name+" is indexed before its array allocation is guaranteed.", "An array access can fail after Erase, before ReDim, or on a branch where allocation is not established.", "Allocate the array on every path before indexing it, or guard the access with a proven allocation check.")
 			continue
 		}
+		if value.mayBeEmpty {
+			addWithKey(arrayIndexOperationKey(use.name, "empty"), "VBA227", use.name+" is indexed while its Byte array may be empty.", "A zero-length Byte array has valid bounds queries but no element that can be indexed.", "Guard the element access with a positive length or allocate a non-empty Byte array first.")
+			continue
+		}
 		if len(value.dimensions) > 0 && len(use.args) != len(value.dimensions) {
 			addWithKey(arrayIndexOperationKey(use.name, "dimension"), "VBA227", use.name+" is indexed with "+strconv.Itoa(len(use.args))+" dimension(s), but its known shape has "+strconv.Itoa(len(value.dimensions))+".", "The number of subscripts must match the array dimensions known to the analyzer.", "Use the correct number of subscripts or revise the declared array shape.")
 			continue
@@ -2881,13 +2998,18 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		}
 		if !indexed {
 			if value, known := arrayExpressionState(rhs, state, ctx); known {
+				if value.mayBeEmpty && arrayExpressionKnownNonEmpty(file, proc, line, rhs, variables) {
+					value.mayBeEmpty = false
+				}
 				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
 					state[name] = value
 				}
-			} else if variable, exists := variables[name]; exists && byteArrayStringAssignment(file, proc, line, variable, rhs, variables) {
-				state[name] = arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}
-			} else if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
-				state[name] = arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginUnknown}
+			} else if variable, exists := variables[name]; exists {
+				if value, assigned := byteArrayStringAssignment(file, proc, line, variable, rhs, variables); assigned {
+					state[name] = value
+				} else if variable.isArray || variable.isVariant {
+					state[name] = arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginUnknown}
+				}
 			}
 		}
 	}
@@ -3454,6 +3576,9 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 		shape := []arrayDimension{{}}
 		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: shape, preserveShape: shape, origin: arrayOriginLocal}, true
 	}
+	if arrayByteArrayReadRe.MatchString(rhs) {
+		return arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}, true
+	}
 	if value, ok := state[name]; ok && value.kind == arrayAllocated && value.knownArray {
 		return value, true
 	}
@@ -3473,27 +3598,62 @@ var (
 	arrayStringNonEmptyBlockRe = regexp.MustCompile(`(?i)^\s*if\s+(?:[a-z_]\w*\.)?len\s*\(\s*([a-z_]\w*)\s*\)\s*>\s*0\s+then\s*$`)
 	arrayStringLengthAssignRe  = regexp.MustCompile(`(?i)^\s*([a-z_]\w*)\s*=\s*(?:[a-z_]\w*\.)?len\s*\(\s*([a-z_]\w*)\s*\)\s*$`)
 	arrayStringEmptyExitRe     = regexp.MustCompile(`(?i)^\s*if\s+([a-z_]\w*)\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
+	arrayStringEmptyLenExitRe  = regexp.MustCompile(`(?i)^\s*if\s+(?:[a-z_]\w*\.)?len\s*\(\s*([a-z_]\w*)\s*\)\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
 )
 
-// VBA copies a non-empty String into a Byte array. Require a source-level
-// non-empty proof before treating that assignment as usable allocation, so an
-// unguarded empty-string path remains conservative.
-func byteArrayStringAssignment(file parsedFile, proc sourceProcedure, line int, variable arrayVariable, rhs string, variables map[string]arrayVariable) bool {
-	if !variable.isArray || !strings.EqualFold(strings.TrimSpace(variable.typ), "Byte") {
+func arrayExpressionKnownNonEmpty(file parsedFile, proc sourceProcedure, line int, rhs string, variables map[string]arrayVariable) bool {
+	open := firstParenOutsideString(strings.TrimSpace(rhs))
+	if open < 0 {
 		return false
+	}
+	close := matchingParen(rhs, open)
+	if close < 0 || strings.TrimSpace(rhs[close+1:]) != "" {
+		return false
+	}
+	for _, argument := range splitArgs(rhs[open+1 : close]) {
+		name := strings.ToLower(cleanIdentifier(strings.TrimSpace(argument)))
+		variable, ok := variables[name]
+		if !ok || variable.isArray || variable.isVariant || !strings.EqualFold(strings.TrimSpace(variable.typ), "String") {
+			continue
+		}
+		if arrayStringIsKnownNonEmpty(file, proc, line, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// VBA copies a String into a Byte array. A non-empty source establishes a
+// usable allocation; vbNullString establishes a known empty allocation whose
+// bounds may be queried but whose elements must not be indexed.
+func byteArrayStringAssignment(file parsedFile, proc sourceProcedure, line int, variable arrayVariable, rhs string, variables map[string]arrayVariable) (arrayValue, bool) {
+	allocated := func(mayBeEmpty bool) (arrayValue, bool) {
+		return arrayValue{kind: arrayAllocated, knownArray: true, mayBeEmpty: mayBeEmpty, origin: arrayOriginLocal}, true
+	}
+	if !variable.isArray || !strings.EqualFold(strings.TrimSpace(variable.typ), "Byte") {
+		return arrayValue{}, false
 	}
 	rhs = strings.TrimSpace(rhs)
+	if strings.EqualFold(rhs, "vbNullString") {
+		return allocated(true)
+	}
 	if strings.HasPrefix(rhs, `"`) {
-		return len(rhs) > 1 && !strings.HasPrefix(rhs, `""`)
+		if len(rhs) <= 1 || strings.HasPrefix(rhs, `""`) {
+			return arrayValue{}, false
+		}
+		return allocated(false)
 	}
 	if !arrayEraseNameRe.MatchString(rhs) {
-		return false
+		return arrayValue{}, false
 	}
 	source, ok := variables[strings.ToLower(rhs)]
 	if !ok || source.isArray || source.isVariant || !strings.EqualFold(strings.TrimSpace(source.typ), "String") {
-		return false
+		return arrayValue{}, false
 	}
-	return arrayStringIsKnownNonEmpty(file, proc, line, rhs)
+	if !arrayStringIsKnownNonEmpty(file, proc, line, rhs) {
+		return arrayValue{}, false
+	}
+	return allocated(false)
 }
 
 func arrayStringIsKnownNonEmpty(file parsedFile, proc sourceProcedure, line int, source string) bool {
@@ -3502,6 +3662,9 @@ func arrayStringIsKnownNonEmpty(file parsedFile, proc sourceProcedure, line int,
 	lengthVariables := map[string]bool{}
 	for index := start; index < end; index++ {
 		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		if match := arrayStringEmptyLenExitRe.FindStringSubmatch(text); len(match) == 2 && strings.EqualFold(match[1], source) {
+			return true
+		}
 		if match := arrayStringLengthAssignRe.FindStringSubmatch(text); len(match) == 3 && strings.EqualFold(match[2], source) {
 			lengthVariables[strings.ToLower(match[1])] = true
 		}
@@ -3765,10 +3928,11 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			valid := returns[0].ok
 			value := returns[0].value
 			for _, returned := range returns[1:] {
-				if !returned.ok || !arrayValueEqual(value, returned.value) {
+				if !returned.ok || !arrayValueCompatible(value, returned.value) {
 					valid = false
 					break
 				}
+				value = meetArrayValue(value, returned.value)
 			}
 			name := strings.ToLower(proc.Name)
 			candidates[name] = append(candidates[name], candidate{value: value, ok: valid})
@@ -3826,5 +3990,9 @@ func arrayReturnSummariesEqual(left, right map[string]arrayValue) bool {
 }
 
 func arrayValueEqual(left, right arrayValue) bool {
+	return arrayValueCompatible(left, right) && left.mayBeEmpty == right.mayBeEmpty
+}
+
+func arrayValueCompatible(left, right arrayValue) bool {
 	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
 }
