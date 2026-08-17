@@ -25,27 +25,25 @@ End Sub
 		{Name: "xlContinuous", Parent: "XlLineStyle", Module: "Excel", ModuleKind: "external", Kind: "enum_member"},
 		{Name: "xlContinuous", Parent: "XlBorderStyle", Module: "Excel", ModuleKind: "external", Kind: "enum_member"},
 	}))
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	for _, procedure := range resolved.Procedures {
 		for _, access := range procedure.Accesses {
 			switch access.Name {
 			case "xlCenter", "xlThin", "xlContinuous":
-				seen[access.Name] = true
-				if access.Resolution.Status == ResolutionAmbiguous {
-					t.Fatalf("TypeLib constant %s resolved ambiguously: %#v", access.Name, access.Resolution)
+				seen[access.Name]++
+				if access.Resolution.Status != ResolutionExternal {
+					t.Fatalf("TypeLib constant %s status = %s, want external: %#v", access.Name, access.Resolution.Status, access.Resolution)
 				}
 			}
 		}
 	}
-	for _, name := range []string{"xlCenter", "xlThin", "xlContinuous"} {
-		if !seen[name] {
-			t.Fatalf("source did not retain enum-member access for %s: %#v", name, resolved.Procedures)
+	for name, want := range map[string]int{"xlCenter": 2, "xlThin": 2, "xlContinuous": 1} {
+		if got := seen[name]; got != want {
+			t.Fatalf("enum-member accesses for %s = %d, want %d: %#v", name, got, want, resolved.Procedures)
 		}
 	}
-	for _, diagnostic := range Diagnostics(resolved, true) {
-		if diagnostic.Code == "VB053" {
-			t.Fatalf("TypeLib constants produced VB053: %#v", diagnostic)
-		}
+	if diagnostics := Diagnostics(resolved, true); len(diagnostics) != 0 {
+		t.Fatalf("TypeLib constants produced diagnostics: %#v", diagnostics)
 	}
 }
 
