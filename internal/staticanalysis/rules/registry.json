@@ -1786,7 +1786,7 @@
     {
       "id": "VB053",
       "title": "Ambiguous Enum member",
-      "description": "A bare Enum member reference has multiple visible project or type-library candidates and no unique lexical winner.",
+      "description": "A bare Enum member reference has multiple visible project candidates and no unique lexical winner.",
       "family": "lint",
       "category": "correctness",
       "evidence_class": "compile-equivalent",

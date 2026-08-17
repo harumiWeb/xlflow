@@ -76,7 +76,7 @@ The summary below explains the lint findings in workflow terms.
 | `VB050` | error    | Declaration is invalid for the canonical module kind or has an invalid WithEvents/public-member shape; blocks source preflight.            |
 | `VB051` | error    | `Me` is used in a standard module; blocks source preflight.                                                                                |
 | `VB052` | error    | Project-local call target is provably missing or known non-callable; blocks source preflight.                                              |
-| `VB053` | error    | Bare Enum member has multiple visible candidates with no lexical winner; blocks source preflight.                                          |
+| `VB053` | error    | Bare Enum member has multiple visible project candidates with no lexical winner; blocks source preflight.                                  |
 | `VB054` | error    | `RaiseEvent` target is undeclared in the same object module; blocks source preflight.                                                      |
 | `VB059` | error    | Invalid explicit/standalone call parentheses, Function-expression call parentheses, or explicit Call target; blocks source preflight.      |
 | `VB060` | error    | Assignment to a `Const` value; blocks source preflight.                                                                                    |
@@ -139,12 +139,13 @@ target is local and either missing or a known non-callable declaration. Bare
 names that may bind to external libraries, built-ins, late-bound receivers,
 dynamic invocation (`Application.Run` / `CallByName`), or incomplete snapshots
 remain quiet. `VB053` reports an unqualified Enum member only when multiple
-complete visible candidates remain ambiguous; qualification, a unique lexical
-winner, and incomplete TypeLib/project state are fail-open. `VB054` reports an
-undeclared `RaiseEvent` identifier only against the complete event declarations
-of its containing object module. These three diagnostics are unsuppressible
-errors, block source preflight, and use the same resolver snapshot as `analyze`
-and LSP Full diagnostics.
+complete project candidates remain ambiguous; duplicate TypeLib records for a
+globally exposed constant are an external fallback and remain fail-open.
+Qualification, a unique lexical winner, and incomplete TypeLib/project state
+are also fail-open. `VB054` reports an undeclared `RaiseEvent` identifier only
+against the complete event declarations of its containing object module. These
+three diagnostics are unsuppressible errors, block source preflight, and use
+the same resolver snapshot as `analyze` and LSP Full diagnostics.
 
 `VB059` uses the CST and procedure context to separate compile-invalid call
 forms from `VB022`'s legal-but-confusing style warning. It reports missing

@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.30.1
+
+- Fixed `VB053` false positives for valid unqualified Excel/TypeLib enum
+  constants such as `xlCenter`, `xlThin`, and `xlContinuous` when metadata
+  contains the same name under multiple enum definitions.
 - Fixed `VBA225` false positives when a local, parameter, or module-level VBA
   binding such as `cells` shadows Excel's unqualified `Cells` function. The
   Procedure IR now gates the textual fallback, including propagated helper
