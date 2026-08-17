@@ -2050,7 +2050,7 @@ func applyArrayModuleConfigurationBranch(state arrayFlowState, statement *proced
 	condition := strings.ToLower(strings.TrimSpace(statement.Condition.Text))
 	var arrays map[string]bool
 	switch {
-	case strings.Contains(condition, "isgenericcollectionrole") && !strings.Contains(condition, "not isgenericcollectionrole"):
+	case arrayPositiveGenericCollectionKindBranch(condition):
 		arrays = configurations.genericCollection
 	case strings.Contains(condition, "role_data_table") && !strings.Contains(condition, "<> role_data_table"):
 		arrays = configurations.dataTable
@@ -2076,6 +2076,20 @@ func applyArrayModuleConfigurationBranch(state arrayFlowState, statement *proced
 		updated[name] = value
 	}
 	return updated
+}
+
+func arrayPositiveGenericCollectionKindBranch(condition string) bool {
+	for _, marker := range []string{
+		"isgenericcollectionrole",
+		"ispriorityqueuekind",
+		"issortedmapkind",
+		"issortedsetkind",
+	} {
+		if strings.Contains(condition, marker) && !strings.Contains(condition, "not "+marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext, targets map[string]sourceProcedure, byRefSummaries arrayByRefAllocationSummaries) arrayModuleAllocationSummaries {

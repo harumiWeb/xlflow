@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives in sorted collection helpers. Sorted map
+  and sorted set kind branches now carry generic collection array allocation
+  into their private `ByRef` helpers.
+
 - Reduced `VBA227` false positives in class collection helpers. Rejecting
   guards that validate a configured collection role or kind now carry the
   corresponding generic collection array allocation into private `ByRef`

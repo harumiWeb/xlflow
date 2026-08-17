@@ -5741,6 +5741,57 @@ End Sub`)
 	}
 }
 
+func TestAnalyzerVBA227UsesSortedCollectionKindBranchForByRefHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const COLLECTION_SORTED_SET As Long = 1
+Private collectionKind As Long
+Private items() As Long
+
+Private Sub ConfigureGenericCollection()
+  collectionKind = COLLECTION_SORTED_SET
+  ReDim items(0 To 1)
+End Sub
+
+Private Function IsSortedSetKind(ByVal value As Long) As Boolean
+  IsSortedSetKind = (value = COLLECTION_SORTED_SET)
+End Function
+
+Private Sub Consume(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub SortedRead()
+  If IsSortedSetKind(collectionKind) Then
+    Consume items
+  End If
+End Sub
+
+Public Sub UnsafeRead()
+  Consume items
+End Sub`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "SortedRead" {
+			t.Fatalf("a sorted-collection kind branch should establish the configured array for its ByRef helper: %+v", findings)
+		}
+	}
+	unsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			unsafe = true
+		}
+	}
+	if !unsafe {
+		t.Fatalf("an unguarded collection array access must remain reportable: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotTrustExternallySetModuleSetupGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

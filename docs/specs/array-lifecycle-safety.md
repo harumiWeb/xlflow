@@ -113,7 +113,8 @@ project-local configuration helper through a `ByRef` array parameter may also
 be carried through a rejecting role guard or a matching role branch. A guard
 that validates a configured collection role or kind—such as
 `IsGenericCollectionRole`, `IsDictionaryCollection`, `IsSetCollection`,
-`IsPriorityQueueKind`, a recognized collection-role constant, or
+`IsPriorityQueueKind`, `IsSortedMapKind`, `IsSortedSetKind`, a recognized
+collection-role constant, or
 `mCollectionKind`—may establish the arrays belonging to that generic
 collection configuration. A helper name or guard without a proven allocation
 is not sufficient. Public, ambiguous, dynamic, and unresolved calls remain
