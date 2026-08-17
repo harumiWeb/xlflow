@@ -2108,10 +2108,11 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 	for name := range localDeclarations {
 		delete(moduleArrays, name)
 	}
+	idempotentSetupArrays := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls)
 	allocated := map[string]bool{}
 	addDirectAllocation := func(statementID int, name string) {
 		name = strings.ToLower(cleanIdentifier(name))
-		if !moduleArrays[name] || !arrayProcedureBlockDominatesNormalExit(proc, statementID, dominators) {
+		if !moduleArrays[name] || (!arrayProcedureBlockDominatesNormalExit(proc, statementID, dominators) && !idempotentSetupArrays[name]) {
 			return
 		}
 		allocated[name] = true
@@ -2175,6 +2176,139 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		}
 	}
 	return allocated
+}
+
+// arrayModuleIdempotentSetupArrays recognizes the narrow one-time module
+// initialization idiom used by private helper routines:
+//
+//	If ready Then Exit Sub
+//	ReDim values(...)
+//	ready = True
+//
+// The direct ReDim does not dominate the procedure's normal exit because the
+// already-initialized branch exits early.  The summary can nevertheless carry
+// the allocation when the Boolean guard is module-scoped, is written only to
+// True by this procedure, is not written elsewhere in the module, and is the
+// final executable statement.  These constraints keep an arbitrary Boolean
+// branch from becoming an allocation proof.
+func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]bool {
+	if proc.StartLine < 1 || proc.EndLine < proc.StartLine || proc.StartLine > len(file.Lines) {
+		return nil
+	}
+	end := min(len(file.Lines), proc.EndLine)
+	start := max(0, proc.StartLine-1)
+	type setupGuard struct {
+		name    string
+		checkAt int
+	}
+	guards := make([]setupGuard, 0)
+	for index := start; index < end; index++ {
+		match := arraySetupGuardRe.FindStringSubmatch(normalizedCodeLine(file.Lines[index]))
+		if len(match) != 2 {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(match[1]))
+		declaration, ok := moduleDecls[name]
+		if !ok || declaration.Array || declaration.Parameter || !strings.EqualFold(strings.TrimSpace(declaration.Type), "Boolean") {
+			continue
+		}
+		guards = append(guards, setupGuard{name: name, checkAt: index})
+	}
+	if len(guards) == 0 {
+		return nil
+	}
+
+	lastExecutable := -1
+	for index := start; index < end; index++ {
+		text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(file.Lines[index])))
+		if text != "" && text != "end sub" && text != "end function" && text != "end property" {
+			lastExecutable = index
+		}
+	}
+	if lastExecutable < start {
+		return nil
+	}
+
+	guardWrites := map[string][]struct {
+		line int
+		rhs  string
+	}{}
+	for index, line := range file.Lines {
+		lhs, rhs, indexed, assigned := arrayAssignment(normalizedCodeLine(line))
+		if !assigned || indexed {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(lhs))
+		for _, guard := range guards {
+			if name == guard.name {
+				guardWrites[name] = append(guardWrites[name], struct {
+					line int
+					rhs  string
+				}{line: index, rhs: strings.TrimSpace(rhs)})
+			}
+		}
+	}
+
+	result := map[string]bool{}
+	for _, guard := range guards {
+		writes := guardWrites[guard.name]
+		if len(writes) != 1 || writes[0].line != lastExecutable || !strings.EqualFold(writes[0].rhs, "true") {
+			continue
+		}
+		setAt := writes[0].line
+		for index := guard.checkAt + 1; index < setAt; index++ {
+			match := arrayRedimRe.FindStringSubmatch(normalizedCodeLine(file.Lines[index]))
+			if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+				continue
+			}
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if !direct {
+					continue
+				}
+				name := strings.ToLower(cleanIdentifier(redim.name))
+				declaration, declared := moduleDecls[name]
+				if !declared || !declaration.Array || declaration.Parameter {
+					continue
+				}
+				if arrayModuleIdempotentSetupArrayHasOtherWrite(file, name, index) {
+					continue
+				}
+				result[name] = true
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func arrayModuleIdempotentSetupArrayHasOtherWrite(file parsedFile, name string, setupLine int) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	for index, line := range file.Lines {
+		text := normalizedCodeLine(line)
+		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+			for _, target := range splitArgs(match[1]) {
+				if strings.EqualFold(strings.TrimSpace(target), name) {
+					return true
+				}
+			}
+		}
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct && strings.EqualFold(cleanIdentifier(redim.name), name) && index != setupLine {
+					return true
+				}
+			}
+		}
+		lhs, _, indexed, assigned := arrayAssignment(text)
+		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayProcedureLineHasInlineConditional(file parsedFile, line int) bool {

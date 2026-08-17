@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives for private, idempotent module-array setup
+  helpers. A module-scoped Boolean ready guard followed by plain `ReDim` and a
+  final `True` assignment now carries its allocation into downstream private
+  helpers, while externally writable guards and resettable arrays remain
+  conservative.
+
 - Reduced `VBA227` false positives when a module-level array is allocated by a
   public entry or class initializer and then read through a same-module
   private helper chain. The entry-state proof requires every resolved caller

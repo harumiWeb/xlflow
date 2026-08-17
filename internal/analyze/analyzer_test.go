@@ -5576,6 +5576,73 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesIdempotentModuleSetup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ready As Boolean
+Private values() As Long
+
+Private Sub EnsureValues()
+  If ready Then Exit Sub
+  ReDim values(0 To 1)
+  ready = True
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  items(0) = 1
+End Sub
+
+Public Sub Run()
+  EnsureValues
+  Consume values
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a one-time module setup helper should establish allocation after its ready guard: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustExternallySetModuleSetupGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private ready As Boolean
+Private values() As Long
+
+Private Sub EnsureValues()
+  If ready Then Exit Sub
+  ReDim values(0 To 1)
+  ready = True
+End Sub
+
+Private Sub Consume(ByRef items() As Long)
+  items(0) = 1
+End Sub
+
+Public Sub SpoofReady()
+  ready = True
+End Sub
+
+Public Sub Run()
+  SpoofReady
+  EnsureValues
+  Consume values
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("an externally writable setup guard must not establish allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesFormInitializationArrayState(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

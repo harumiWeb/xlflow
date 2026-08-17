@@ -116,6 +116,14 @@ dynamic, and unresolved calls remain
 unknown. An unresolved or external value, and a `Variant` whose array nature
 is not proven, remains `unknown`.
 
+A private module setup helper may also establish its direct module-array
+allocations when it uses the narrow idempotent form `If ready Then Exit Sub`,
+performs plain `ReDim` statements, and assigns the module-scoped Boolean guard
+to `True` as its final executable statement. The guard must have no other
+assignment in the module and the array must have no other whole-array write or
+`Erase`; arbitrary readiness flags, `ReDim Preserve`, externally writable
+guards, and resettable buffers remain unknown.
+
 A private `ByRef` output helper may establish a conditional allocation when it
 exits for a zero `Collection.Count` (or equivalent count) and performs a
 `ReDim` from that count on the remaining normal path. The caller must retain
