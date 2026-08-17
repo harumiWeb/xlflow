@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives in class collection helpers. Rejecting
+  guards that validate a configured collection role or kind now carry the
+  corresponding generic collection array allocation into private `ByRef`
+  helpers, while unguarded collection access remains reported.
+
 - Reduced `VBA227` false positives for private, idempotent module-array setup
   helpers. A module-scoped Boolean ready guard followed by plain `ReDim` and a
   final `True` assignment now carries its allocation into downstream private

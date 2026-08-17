@@ -5688,6 +5688,59 @@ End Sub`)
 	}
 }
 
+func TestAnalyzerVBA227UsesCollectionKindGuardForByRefHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private mCollectionKind As Long
+Private keys() As Long
+
+Private Sub ConfigureGenericCollection()
+  mCollectionKind = 3
+  ReDim keys(0 To 1)
+End Sub
+
+Private Sub RequireKeyedCollection(ByVal memberName As String)
+  If mCollectionKind <> 3 Then Err.Raise 5
+End Sub
+
+Private Sub ConsumeKeys(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub ConsumeUnsafe(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub KeyedRead()
+  RequireKeyedCollection "KeyedRead"
+  ConsumeKeys keys
+End Sub
+
+Public Sub UnsafeRead()
+  ConsumeUnsafe keys
+End Sub`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "ConsumeKeys" {
+			t.Fatalf("a collection-kind guard should establish the configured array for its ByRef helper: %+v", findings)
+		}
+	}
+	unsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "ConsumeUnsafe" {
+			unsafe = true
+		}
+	}
+	if !unsafe {
+		t.Fatalf("an unguarded collection array access must remain reportable: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotTrustExternallySetModuleSetupGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

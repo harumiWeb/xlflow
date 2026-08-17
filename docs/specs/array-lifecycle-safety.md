@@ -110,9 +110,13 @@ procedures also inherit arrays proven by `UserForm_Initialize` /
 unproven callers remain unknown. An inline conditional setup call is not
 sufficient. In a class module, a proven allocation performed by a
 project-local configuration helper through a `ByRef` array parameter may also
-be carried through a rejecting role guard or a matching role branch; a helper
-name or guard without a proven allocation is not sufficient. Public, ambiguous,
-dynamic, and unresolved calls remain
+be carried through a rejecting role guard or a matching role branch. A guard
+that validates a configured collection role or kind—such as
+`IsGenericCollectionRole`, `IsDictionaryCollection`, `IsSetCollection`,
+`IsPriorityQueueKind`, a recognized collection-role constant, or
+`mCollectionKind`—may establish the arrays belonging to that generic
+collection configuration. A helper name or guard without a proven allocation
+is not sufficient. Public, ambiguous, dynamic, and unresolved calls remain
 unknown. An unresolved or external value, and a `Variant` whose array nature
 is not proven, remains `unknown`.
 

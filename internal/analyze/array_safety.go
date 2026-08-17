@@ -2000,13 +2000,30 @@ func arrayConfigurationArraysForGuard(file parsedFile, target sourceProcedure, a
 	if strings.Contains(body, "role_data_table") {
 		return configurations.dataTable
 	}
-	if strings.Contains(body, "isgenericcollectionrole") {
-		return configurations.genericCollection
-	}
-	if strings.Contains(body, "ispriorityqueuekind") {
+	if arrayGuardUsesGenericCollectionConfiguration(body) {
 		return configurations.genericCollection
 	}
 	return nil
+}
+
+func arrayGuardUsesGenericCollectionConfiguration(body string) bool {
+	for _, marker := range []string{
+		"isgenericcollectionrole",
+		"ispriorityqueuekind",
+		"isdictionarycollection",
+		"issetcollection",
+		"mcollectionkind",
+		"ROLE_DICTIONARY",
+		"ROLE_HASH_SET",
+		"ROLE_COLLECTION",
+		"ROLE_IMMUTABLE",
+		"ROLE_CONCURRENT",
+	} {
+		if strings.Contains(body, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayGuardProcedureRejectsInvalidState(file parsedFile, target sourceProcedure) bool {
