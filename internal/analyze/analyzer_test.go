@@ -5649,6 +5649,45 @@ End Sub`)
 	}
 }
 
+func TestAnalyzerVBA227UsesGenericConfigurationGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const ROLE_COLLECTION As Long = 1
+Private mRole As Long
+Private mItems() As Long
+
+Friend Sub ConfigureGenericCollection()
+  mRole = ROLE_COLLECTION
+  ReDim mItems(0 To 1)
+End Sub
+
+Private Function IsGenericCollectionRole(ByVal roleValue As Long) As Boolean
+  IsGenericCollectionRole = (roleValue = ROLE_COLLECTION)
+End Function
+
+Private Sub RequireMutableCollection(ByVal memberName As String)
+  If Not IsGenericCollectionRole(mRole) Then Err.Raise 5
+End Sub
+
+Private Sub Append(ByRef values() As Long)
+  values(0) = 1
+End Sub
+
+Public Sub Add()
+  RequireMutableCollection "Add"
+  Append mItems
+End Sub`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a generic collection configuration guard should establish module-array allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotTrustExternallySetModuleSetupGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

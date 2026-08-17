@@ -2000,6 +2000,9 @@ func arrayConfigurationArraysForGuard(file parsedFile, target sourceProcedure, a
 	if strings.Contains(body, "role_data_table") {
 		return configurations.dataTable
 	}
+	if strings.Contains(body, "isgenericcollectionrole") {
+		return configurations.genericCollection
+	}
 	if strings.Contains(body, "ispriorityqueuekind") {
 		return configurations.genericCollection
 	}
