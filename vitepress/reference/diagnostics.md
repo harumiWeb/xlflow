@@ -1184,7 +1184,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB053
 
-**Ambiguous Enum member.** A bare Enum member reference has multiple visible project or type-library candidates and no unique lexical winner.
+**Ambiguous Enum member.** A bare Enum member reference has multiple visible project candidates and no unique lexical winner.
 
 | Property                    | Value                    |
 | --------------------------- | ------------------------ |

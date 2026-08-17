@@ -1127,10 +1127,12 @@ Module` directives are also reported as duplicate same-kind declarations.
   or otherwise incomplete remain quiet. The canonical procedure resolver is
   shared by lint, analyze, LSP, Call Hierarchy, impact, and effect analysis;
   only a complete, certain project-local outcome is diagnosed.
-- `VB053`: a bare Enum member has multiple visible project or TypeLib
-  candidates with no lexical winner. Qualified members, unique candidates,
-  incomplete TypeLib/project snapshots, and unresolved conditional branches
-  remain quiet. The member identifier is the primary range.
+- `VB053`: a bare Enum member has multiple visible project candidates with no
+  lexical winner. TypeLib metadata is an external fallback, so duplicate
+  records for one globally exposed constant do not establish ambiguity.
+  Qualified members, unique candidates, incomplete TypeLib/project snapshots,
+  and unresolved conditional branches remain quiet. The member identifier is
+  the primary range.
 - `VB054`: `RaiseEvent` names an event that is not declared in the same object
   module. Only a complete object-module event set is considered; external or
   incomplete references remain quiet, and the event identifier is the primary

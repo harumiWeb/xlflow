@@ -761,9 +761,11 @@ func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
 }
 
 // ResolveEnumMember resolves a bare or qualified enum constant while
-// preserving all candidates. A bare lookup with more than one visible member
-// is ambiguous; callers should report that only when Complete is true and no
-// lexical winner exists.
+// preserving all candidates. Project enum declarations take precedence over
+// TypeLib metadata because only project declarations provide lexical evidence
+// that a bare name is ambiguous. External enum metadata can associate one
+// globally exposed constant with multiple enum groups, so external-only
+// multiplicity is reported as an external resolution rather than VB053.
 func (r SymbolResolver) ResolveEnumMember(ref EnumMemberReference) EnumResolution {
 	caller := callerModule(ref.Caller)
 	if caller == "" {
@@ -800,6 +802,14 @@ func (r SymbolResolver) ResolveEnumMember(ref EnumMemberReference) EnumResolutio
 			filtered = local
 		}
 	}
+	// Referenced-library constants are a fallback after project symbols. A
+	// TypeLib may describe the same globally usable name under several enum
+	// groups (or several generated library records); those records do not prove
+	// a source-level ambiguity. Keep project candidates when present and leave
+	// external-only collisions as an external, fail-open resolution.
+	if project := nonExternalEnumMembers(filtered); len(project) > 0 {
+		filtered = project
+	}
 	sort.SliceStable(filtered, func(i, j int) bool {
 		return resolverCandidateLess(filtered[i].Candidate, filtered[j].Candidate)
 	})
@@ -811,13 +821,43 @@ func (r SymbolResolver) ResolveEnumMember(ref EnumMemberReference) EnumResolutio
 		result.Status = ResolutionMatched
 		result.Candidates = entriesToCandidates(filtered)
 	default:
-		result.Status = ResolutionAmbiguous
+		if allExternalEnumMembers(filtered) {
+			result.Status = ResolutionExternal
+		} else {
+			result.Status = ResolutionAmbiguous
+		}
 		result.Candidates = entriesToCandidates(filtered)
 	}
 	if (!r.complete || hasUncertainEntries(filtered)) && result.Status != ResolutionMatched {
 		result.Status = ResolutionIncomplete
 	}
 	return result
+}
+
+func nonExternalEnumMembers(entries []resolverEntry) []resolverEntry {
+	result := make([]resolverEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !isExternalEnumMember(entry) {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+func allExternalEnumMembers(entries []resolverEntry) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	for _, entry := range entries {
+		if !isExternalEnumMember(entry) {
+			return false
+		}
+	}
+	return true
+}
+
+func isExternalEnumMember(entry resolverEntry) bool {
+	return isEnumMemberKind(entry.Kind) && strings.EqualFold(strings.TrimSpace(entry.moduleKind), "external")
 }
 
 func resolverCandidateLess(a, b Candidate) bool {

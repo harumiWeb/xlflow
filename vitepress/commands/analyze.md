@@ -110,7 +110,7 @@ default state, scope, precision, preflight behavior, and inline suppression.
 | `VBA243` | information / warning | A bulk or repeated `Range.Value` transfer may benefit from `Range.Value2` when Date/Currency coercion is not required.                        |
 | `VBA244` | information / warning | A confirmed recursive or cyclic procedure dependency was found; cycles with dangerous effects are elevated to `warning`.                      |
 | `VB052`  | error                 | Project-local call target is provably missing or known non-callable; blocks source preflight.                                                 |
-| `VB053`  | error                 | Bare Enum member has multiple visible candidates with no lexical winner; blocks source preflight.                                             |
+| `VB053`  | error                 | Bare Enum member has multiple visible project candidates with no lexical winner; blocks source preflight.                                     |
 | `VB054`  | error                 | `RaiseEvent` target is undeclared in the same object module; blocks source preflight.                                                         |
 | `VBA245` | warning               | A destructive or state-dependent file operation may receive an unsafe, relative, wildcard, overwritten, traversing, or external-input path.   |
 | `VBA246` | warning               | A recognized HTTP client may expose credentials, weaken TLS validation, log authorization data, or download and launch executable content.    |
