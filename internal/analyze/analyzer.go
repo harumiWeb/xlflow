@@ -221,6 +221,7 @@ type analysisContext struct {
 	arrayByRefLengthAllocations      arrayByRefLengthAllocations
 	arrayModuleAllocations           arrayModuleAllocationSummaries
 	arrayModuleConfigurations        map[string]arrayModuleConfigurationState
+	arrayModuleEntryStates           arrayModuleEntryStates
 	arrayPrivateTargets              map[string]sourceProcedure
 	arrayByRefEntryStates            map[string]map[int]bool
 	arrayByRefEntryConditions        map[string]map[int]string
@@ -1423,6 +1424,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 		arrayByRefLengthAllocations:      arrayByRefLengthAllocations{},
 		arrayModuleAllocations:           arrayModuleAllocationSummaries{},
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
+		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},
@@ -1495,6 +1497,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)
 	ctx.arrayModuleAllocations = inferArrayModuleAllocationSummaries(files, ctx, ctx.arrayPrivateTargets, ctx.arrayByRefAllocations)
 	ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)
+	ctx.arrayModuleEntryStates = inferArrayModuleEntryStates(a, files, ctx)
 	ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	return ctx
 }

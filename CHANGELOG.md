@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives when a module-level array is allocated by a
+  public entry or class initializer and then read through a same-module
+  private helper chain. The entry-state proof requires every resolved caller
+  to establish the allocation and remains conservative for cross-module or
+  unresolved calls.
+
 - Reduced `VBA227` false positives in Variant-to-Byte-array `ByRef` adapters.
   `(vbArray Or vbByte)` guards, binary-stream `Read(-1)` results, and the
   `vbNullString` empty-array idiom now flow through normal CFG exits while

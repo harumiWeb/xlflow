@@ -8386,6 +8386,71 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesModuleArrayThroughPrivateHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Archive.cls", `Attribute VB_Name = "Archive"
+Option Explicit
+
+Private mBytes() As Byte
+
+Private Function ReadBytes() As Variant
+    Dim values() As Byte
+    ReDim values(0 To 0)
+    ReadBytes = values
+End Function
+
+Public Sub Run()
+    mBytes = ReadBytes()
+    ConsumeBytes
+End Sub
+
+Private Sub ConsumeBytes()
+    If mBytes(0) = 0 Then Debug.Print "ok"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("allocated module array passed through a private helper should not report VBA227: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesClassInitializerArrayThroughPrivateHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Archive.cls", `Attribute VB_Name = "Archive"
+Option Explicit
+
+Private mBytes() As Byte
+
+Private Sub Class_Initialize()
+    ReDim mBytes(0 To 0)
+End Sub
+
+Public Sub Run()
+    ConsumeBytes
+End Sub
+
+Private Sub ConsumeBytes()
+    If mBytes(0) = 0 Then Debug.Print "ok"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("class-initialized module array passed through a private helper should not report VBA227: %+v", got)
+	}
+}
+
 func useCompleteTestTypeDB(t *testing.T) {
 	t.Helper()
 	typeDBDir := t.TempDir()

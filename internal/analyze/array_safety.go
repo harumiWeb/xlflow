@@ -169,6 +169,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
 	initial := arrayInitialState(variables)
 	initial = applyArrayByRefEntryStates(initial, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
+	initial = applyArrayModuleEntryState(initial, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
 	// Constant bounds are scoped to the current procedure. Resolve them once
 	// for this CFG walk so every ReDim transfer shares the same table without
 	// repeatedly reparsing the module and procedure declarations.
@@ -1380,6 +1381,13 @@ type arrayModuleConfigurationState struct {
 	genericCollection map[string]bool
 }
 
+// arrayModuleEntryStates records module-level arrays that are allocated at
+// every known entry into a project-local helper. A private helper is analyzed
+// independently from its callers, so without this summary an allocation made
+// by a public entry procedure is lost as soon as the call crosses a procedure
+// boundary.
+type arrayModuleEntryStates map[string]map[string]bool
+
 func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure {
 	targets := map[string]sourceProcedure{}
 	for _, file := range files {
@@ -2312,6 +2320,169 @@ func arrayModuleInitializerName(moduleKind string) string {
 	return "class" + "_initialize"
 }
 
+// inferArrayModuleEntryStates propagates a module-array allocation from a
+// known caller to a project-local helper. Private procedures are analyzed as
+// standalone procedures, so their initial state cannot otherwise reflect an
+// assignment performed by the caller. A fact is retained only when every
+// resolved call from the same module reaches the helper with that array
+// allocated. The fixed point also covers chains of private helpers.
+func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisContext) arrayModuleEntryStates {
+	if len(ctx.arrayPrivateTargets) == 0 {
+		return arrayModuleEntryStates{}
+	}
+
+	type procedureInfo struct {
+		file        parsedFile
+		proc        sourceProcedure
+		moduleDecls map[string]sourceDeclaration
+	}
+	procedures := make([]procedureInfo, 0)
+	moduleArrays := map[string]map[string]bool{}
+	moduleFiles := map[string]string{}
+	for _, file := range files {
+		procs := sourceProceduresFromIR(file.IR, file.CFG)
+		moduleDecls := moduleDeclarations(file.Lines, procs)
+		for _, proc := range procs {
+			key := arrayProcedureKey(proc)
+			procedures = append(procedures, procedureInfo{file: file, proc: proc, moduleDecls: moduleDecls})
+			moduleArrays[key] = arrayModuleNamesForProcedure(file, proc, moduleDecls)
+			moduleFiles[key] = file.Path
+		}
+	}
+	if len(procedures) == 0 {
+		return arrayModuleEntryStates{}
+	}
+
+	initializationStates := arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
+	entries := arrayModuleEntryStates{}
+	for iteration := 0; iteration <= len(procedures)+len(ctx.arrayPrivateTargets); iteration++ {
+		candidates := map[string]map[string]bool{}
+		for _, procedure := range procedures {
+			variables := arrayVariables(procedure.file, procedure.proc, procedure.moduleDecls)
+			initial := arrayInitialState(variables)
+			initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
+			initial = applyArrayModuleEntryState(initial, procedure.proc, variables, procedure.moduleDecls, entries)
+
+			recordCall := func(call procedureir.CallSite, state arrayFlowState) {
+				key, _, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+				if !ok || moduleFiles[key] != procedure.file.Path {
+					// A module-level array is not shared across modules. Keep
+					// cross-module calls conservative even when the target is
+					// visible through Option Private Module.
+					return
+				}
+				names := moduleArrays[key]
+				if len(names) == 0 {
+					return
+				}
+				candidate, exists := candidates[key]
+				if !exists {
+					candidate = cloneArrayNameSet(names)
+					candidates[key] = candidate
+				}
+				for name := range names {
+					value, known := state[name]
+					if !known || value.kind != arrayAllocated || !value.knownArray {
+						candidate[name] = false
+					}
+				}
+			}
+
+			visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+				for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
+					recordCall(call, in)
+				}
+				out, _ := a.arrayTransfer(procedure.file, procedure.proc, ctx, variables, in, text, line, nil, nil)
+				for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
+					out = applyArrayModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
+				}
+				return out
+			}
+			if procedure.proc.Graph == nil {
+				state := initial
+				for line := procedure.proc.StartLine; line <= procedure.proc.EndLine && line <= len(procedure.file.Lines); line++ {
+					state = visit(normalizedCodeLine(procedure.file.Lines[line-1]), line, state)
+				}
+				continue
+			}
+			graph := arrayVBA227Graph(procedure.proc, ctx)
+			walkArrayCFGWithEdges(&graph, procedure.file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+				out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
+				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[procedure.file.Path], variables, procedure.file, procedure.proc, procedure.moduleDecls)
+			})
+		}
+
+		next := arrayModuleEntryStates{}
+		for key, names := range candidates {
+			for name, allocated := range names {
+				if allocated {
+					if next[key] == nil {
+						next[key] = map[string]bool{}
+					}
+					next[key][name] = true
+				}
+			}
+		}
+		if arrayModuleEntryStatesEqual(entries, next) {
+			return next
+		}
+		entries = next
+	}
+	return entries
+}
+
+func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]bool {
+	moduleArrays := map[string]bool{}
+	for name, declaration := range moduleDecls {
+		if declaration.Array && !declaration.Parameter {
+			moduleArrays[strings.ToLower(name)] = true
+		}
+	}
+	for name := range procedureDeclarations(file.Lines, proc) {
+		delete(moduleArrays, name)
+	}
+	return moduleArrays
+}
+
+func applyArrayModuleEntryState(state arrayFlowState, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates) arrayFlowState {
+	allocated := entries[arrayProcedureKey(proc)]
+	if len(allocated) == 0 {
+		return state
+	}
+	updated := cloneArrayState(state)
+	for name := range allocated {
+		declaration, declared := moduleDecls[name]
+		variable, known := variables[name]
+		if !declared || !declaration.Array || declaration.Parameter || !known || !variable.isArray {
+			continue
+		}
+		value := updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	return updated
+}
+
+func arrayModuleEntryStatesEqual(left, right arrayModuleEntryStates) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, names := range left {
+		other, ok := right[key]
+		if !ok || len(names) != len(other) {
+			return false
+		}
+		for name := range names {
+			if !other[name] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 type arrayByRefEntryEvidence struct {
 	seen                bool
 	allocated           bool
@@ -2349,6 +2520,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				initial := arrayInitialState(variables)
 				initial = applyArrayModuleInitializationState(initial, file, caller, variables, moduleDecls, moduleInitializationStates)
 				initial = applyArrayByRefEntryStates(initial, caller, variables, entries, ctx.arrayByRefEntryConditions)
+				initial = applyArrayModuleEntryState(initial, caller, variables, moduleDecls, ctx.arrayModuleEntryStates)
 				visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 					var eligible []struct {
 						key    string
