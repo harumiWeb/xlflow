@@ -15,6 +15,9 @@ All notable changes to xlflow will be documented in this file.
   `--json` stdout envelope. Added deterministic 100/500/1000-procedure scaling
   and real-world corpus benchmark guidance for comparing stage costs and
   allocations.
+- Improved batch ByRef call resolution by reusing parsed project symbols and
+  indexing exact and qualified-name lookups, avoiding a full project-symbol
+  scan for every call site while preserving ambiguity and visibility behavior.
 
 ## v0.30.1
 

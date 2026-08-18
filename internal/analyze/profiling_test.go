@@ -75,7 +75,6 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 		t.Fatalf("workload counters = %+v", counters)
 	}
 }
-
 func TestBatchAnalysisSkipsVBA202ContextWhenDisabled(t *testing.T) {
 	root := t.TempDir()
 	modules := filepath.Join(root, "src", "modules")
