@@ -5466,6 +5466,53 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotFlagIntrinsicArrayFactoryInCollectionCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private scheduledCallbacks As Collection
+
+Public Function ScheduleCallback(ByVal cb As stdICallable, ByVal seconds As Long) As Long
+  If scheduledCallbacks Is Nothing Then Set scheduledCallbacks = New Collection
+  Dim onTime As Date: onTime = Now() + TimeSerial(0, 0, 5)
+  Call scheduledCallbacks.Add(Array(cb, onTime))
+  Call Application.OnTime(onTime, "protCallScheduledCallbacks")
+  ScheduleCallback = scheduledCallbacks.Count
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the intrinsic Array factory in a Collection call is not an indexed access: %+v", got)
+	}
+}
+
+func TestAnalyzerArrayRulesIgnoreQualifiedMemberNames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Function TableToArray(ByVal driver As Object) As Variant()
+  Dim values() As Variant
+  TableToArray = driver.TableToArray("body")
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"VBA227", "VBA249"} {
+		if got := findingsByCode(findings, code); len(got) != 0 {
+			t.Fatalf("a qualified member call must not be treated as indexing the same-named local array (%s): %+v", code, got)
+		}
+	}
+}
+
 func TestAnalyzerVBA227CarriesAllocatedArrayThroughRecursivePrivateByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

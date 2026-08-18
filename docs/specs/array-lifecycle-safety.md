@@ -68,6 +68,13 @@ establish allocation when the VBA expression spans continuation lines. The
 and `Filter` whole-array assignments before applying the allocation state; an
 unrelated multiline call remains conservative.
 
+The indexed-use scan shared by `VBA227` and `VBA249` considers only
+unqualified local identifiers. A member call such as
+`Application.OnTime(onTime, ...)` is not an access to a local array named
+`OnTime`, even when a scalar with that name is declared in the same procedure.
+Likewise, `driver_.TableToArray(...)` is a member call and not an indexed use
+of the array-returning `TableToArray` procedure.
+
 An `IsArray(variant)` true branch establishes array-ness for that Variant, so a
 whole-array assignment from the guarded Variant can establish the target's
 allocation. The false branch remains unknown until a recognized array factory

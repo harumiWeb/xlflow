@@ -4138,6 +4138,13 @@ func arrayIndexedUses(text string, variables map[string]arrayVariable) []arrayUs
 			i++
 		}
 		name := text[start:i]
+		// A qualified member call such as Application.OnTime(...) can
+		// coincide with a local scalar named OnTime.  The member name is not
+		// an array variable access; only unqualified identifiers participate
+		// in this source-level array scan.
+		if start > 0 && (text[start-1] == '.' || text[start-1] == '!') {
+			continue
+		}
 		key := strings.ToLower(name)
 		variable, ok := variables[key]
 		if !ok || !variable.isArray && !variable.isVariant {

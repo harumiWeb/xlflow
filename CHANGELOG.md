@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed false positives in the shared `VBA227`/`VBA249` array-use scan when a
+  qualified member call such as `Application.OnTime(...)` or
+  `driver_.TableToArray(...)` shares its name with a local scalar or
+  array-returning procedure. Member names are no longer mistaken for local
+  array indexing.
+
 - Reduced `VBA227` false positives after line-continuation `Split` assignments
   inside conditional and `With` blocks. Recognized array-factory assignments
   now establish allocation before subsequent bounds and indexed accesses.
