@@ -2665,6 +2665,12 @@ type arrayByRefEntryEvidence struct {
 	condition           string
 }
 
+type arrayByRefCallCandidate struct {
+	key    string
+	target sourceProcedure
+	call   procedureir.CallSite
+}
+
 func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisContext) (map[string]map[int]bool, map[string]map[int]string) {
 	targets := ctx.arrayPrivateTargets
 	if len(targets) == 0 {
@@ -2697,21 +2703,13 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				initial = applyArrayByRefEntryStates(initial, caller, variables, entries, ctx.arrayByRefEntryConditions)
 				initial = applyArrayModuleEntryState(initial, caller, variables, moduleDecls, ctx.arrayModuleEntryStates)
 				visit := func(text string, line int, in arrayFlowState) arrayFlowState {
-					var eligible []struct {
-						key    string
-						target sourceProcedure
-						call   procedureir.CallSite
-					}
+					var eligible []arrayByRefCallCandidate
 					for _, call := range arrayCallsAtLine(caller.Calls, line) {
 						key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
 						if !ok || !procedureHasByRefArrayParameter(target) {
 							continue
 						}
-						eligible = append(eligible, struct {
-							key    string
-							target sourceProcedure
-							call   procedureir.CallSite
-						}{key: key, target: target, call: call})
+						eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
 					}
 					if len(eligible) > 0 {
 						targetKey := eligible[0].key
@@ -2724,7 +2722,22 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 						}
 						if sameTarget {
 							for _, entry := range eligible {
-								arrayRecordByRefCall(evidence, entry.key, entry.target, caller, entry.call, in)
+								arrayRecordByRefCall(evidence, entry.key, entry.target, caller, entry.call, in, ctx)
+							}
+						} else {
+							// Nested calls on one source line are normally kept
+							// conservative because the pre-line state cannot describe
+							// mutations from an earlier, different helper. An outer
+							// ByRef call whose array argument is a proven allocated
+							// expression is independent of that ordering, however
+							// (for example, Consume MakeValues()). Record only that
+							// narrow case and require every ByRef array argument to be
+							// proven allocated.
+							for _, entry := range eligible {
+								allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, caller, entry.call, in, ctx)
+								if allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible)) {
+									arrayRecordByRefCall(evidence, entry.key, entry.target, caller, entry.call, in, ctx)
+								}
 							}
 						}
 					}
@@ -2854,7 +2867,7 @@ func procedureHasByRefArrayParameter(proc sourceProcedure) bool {
 	return false
 }
 
-func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, targetKey string, target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState) {
+func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, targetKey string, target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState, ctx analysisContext) {
 	// A self-recursive ByRef helper preserves the entry array state supplied by
 	// its caller. Treating the recursive edge as an independent unknown entry
 	// would poison the evidence from the allocated external call and keep the
@@ -2876,6 +2889,20 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 		}
 		value, known := state[name]
 		allocated := known && value.kind == arrayAllocated && value.knownArray
+		if !allocated && index < len(arguments) {
+			// A function returning a dynamic array is a valid ByRef array
+			// argument in VBA.  The identifier-only path above cannot attach
+			// that expression to a caller state entry, so consult the existing
+			// array-return summaries before treating the callee entry as
+			// unallocated.  Unknown or conditionally allocated returns remain
+			// conservative because arrayExpressionState returns no allocated
+			// proof for them.
+			if returned, returnedKnown := arrayExpressionState(arguments[index], state, ctx); returnedKnown && returned.kind == arrayAllocated && returned.knownArray {
+				value = returned
+				known = true
+				allocated = true
+			}
+		}
 		condition := ""
 		if known && !allocated && value.allocationCountSource != "" {
 			condition = arrayConditionalEntrySource(target, arguments, index, value.allocationCountSource)
@@ -2913,6 +2940,59 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 		parameters[index] = fact
 		evidence[targetKey] = parameters
 	}
+}
+
+func arrayByRefCallHasProvenArrayArguments(target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState, ctx analysisContext) (bool, bool) {
+	arguments := arrayCallArgumentTexts(caller, call)
+	if len(call.Arguments.Named) > 0 || len(arguments) != call.Arguments.Count {
+		return false, false
+	}
+	foundExpression := false
+	for index, parameter := range target.Params {
+		if !parameterIsByRefArray(parameter) {
+			continue
+		}
+		if index >= len(arguments) {
+			return false, false
+		}
+		argument := arguments[index]
+		if name := directArrayArgumentName(argument); name != "" {
+			value, known := state[name]
+			if !known || value.kind != arrayAllocated || !value.knownArray {
+				return false, false
+			}
+			continue
+		}
+		value, known := arrayExpressionState(argument, state, ctx)
+		if !known || value.kind != arrayAllocated || !value.knownArray {
+			return false, false
+		}
+		foundExpression = true
+	}
+	return true, foundExpression
+}
+
+func arrayByRefCallIsInnermostNested(call procedureir.CallSite, calls []arrayByRefCallCandidate) bool {
+	nested := false
+	for _, other := range calls {
+		if arrayCallRangeContains(other.call, call) {
+			nested = true
+		}
+		if arrayCallRangeContains(call, other.call) {
+			return false
+		}
+	}
+	return nested
+}
+
+func arrayCallRangeContains(outer, inner procedureir.CallSite) bool {
+	if outer.ID == inner.ID {
+		return false
+	}
+	if outer.Range.StartByte != 0 || outer.Range.EndByte != 0 || inner.Range.StartByte != 0 || inner.Range.EndByte != 0 {
+		return outer.Range.StartByte <= inner.Range.StartByte && inner.Range.EndByte <= outer.Range.EndByte && (outer.Range.StartByte < inner.Range.StartByte || inner.Range.EndByte < outer.Range.EndByte)
+	}
+	return outer.Range.StartLine == inner.Range.StartLine && outer.Range.StartColumn <= inner.Range.StartColumn && inner.Range.EndColumn <= outer.Range.EndColumn && (outer.Range.StartColumn < inner.Range.StartColumn || inner.Range.EndColumn < outer.Range.EndColumn)
 }
 
 func arrayByRefCallArrayVacuouslyUnused(target sourceProcedure, arrayIndex int, arguments []string) bool {

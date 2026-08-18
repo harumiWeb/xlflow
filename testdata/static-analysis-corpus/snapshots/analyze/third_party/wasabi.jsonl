@@ -42,10 +42,6 @@
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA240","severity":"warning","line":968,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA240","severity":"warning","line":969,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA240","severity":"warning","line":970,"column":0}
-{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1255,"column":0}
-{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1255,"column":0}
-{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1260,"column":0}
-{"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA227","severity":"warning","line":1260,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA249","severity":"error","line":1395,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA249","severity":"error","line":1396,"column":0}
 {"project":"third_party/wasabi","file":"package/Wasabi.bas","surface":"analyze","code":"VBA249","severity":"error","line":1404,"column":0}

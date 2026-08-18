@@ -5049,6 +5049,114 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesArrayReturnIntoByRefParameter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Function MakeValues() As String()
+  Dim values() As String
+  ReDim values(0 To 1)
+  MakeValues = values
+End Function
+
+Private Function EmptyValues() As String()
+  Dim values() As String
+  EmptyValues = values
+End Function
+
+Private Sub Consume(ByRef values() As String)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub ConsumeUnsafe(ByRef values() As String)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Consume MakeValues()
+  ConsumeUnsafe EmptyValues()
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Procedure != "ConsumeUnsafe" || got[1].Procedure != "ConsumeUnsafe" {
+		t.Fatalf("only the unknown array-returning expression should remain diagnosed: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesParamArrayReturnIntoByRefParameter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Function paramListToStringArray(parmList() As Variant) As String()
+  Dim values() As String
+  ReDim values(1 To 1)
+  values(1) = CStr(parmList(LBound(parmList)))
+  paramListToStringArray = values
+End Function
+
+Private Sub addToOptionList(ByVal optionName As String, addList() As String)
+  Dim i As Long
+  For i = LBound(addList) To UBound(addList)
+    If Len(addList(i)) > 0 Then Debug.Print optionName
+  Next i
+End Sub
+
+Public Sub AddArguments(ParamArray addList() As Variant)
+  Dim varry() As Variant
+  varry = addList
+  addToOptionList "args", paramListToStringArray(varry)
+End Sub
+
+Public Sub Run()
+  AddArguments "value"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a ParamArray-derived allocated array return should remain safe as a ByRef argument: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227KeepsUnrelatedByRefCallsOnOneLineConservative(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+
+Private Sub ClearValues(ByRef values() As String)
+  Erase values
+End Sub
+
+Private Sub Consume(ByRef values() As String)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim values(0 To 1) As String
+  ClearValues values: Consume values
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Procedure != "Consume" || got[1].Procedure != "Consume" {
+		t.Fatalf("a later helper after an unrelated same-line mutation must remain conservative: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesQualifiedAndNestedArrayFactoryCalls(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

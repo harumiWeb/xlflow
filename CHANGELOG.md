@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives when an allocated project-local array return
+  is passed directly to a private `ByRef` array helper, including nested calls
+  on one source line. Unknown and conditionally allocated returns remain
+  conservative.
+
 - Reduced `VBA227` false positives in sorted collection helpers. Sorted map
   and sorted set kind branches now carry generic collection array allocation
   into their private `ByRef` helpers.

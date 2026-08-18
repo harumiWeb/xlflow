@@ -103,7 +103,12 @@ incoming path. For a unique project-local `Private` procedure, or a procedure
 in an `Option Private Module`, a direct array argument may seed a `ByRef` array
 parameter only when every observed call site passes an allocated array. These
 entry facts are solved across the same restricted helper chain. A module-level
-array may also carry allocation from a dominating, unique project-local
+array-returning expression passed directly as a `ByRef` array argument may
+also seed the parameter from its allocated return summary; unknown or
+conditional returns remain unknown. Nested `ByRef` calls on one physical line
+are handled only when their source ranges establish a safe evaluation order;
+unrelated calls on the same line remain conservative. A module-level array may
+also carry allocation from a dominating, unique project-local
 caller into every resolved same-module `Private` helper entry. Class and form
 procedures also inherit arrays proven by `UserForm_Initialize` /
 `Class_Initialize`; cross-module, ambiguous, dynamic, unresolved, and otherwise
