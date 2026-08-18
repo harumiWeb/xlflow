@@ -413,7 +413,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		var intelDocument intel.Document
 		if needsTypedExcelAnalysis {
 			intelDocument = intel.Document{Path: file, Source: string(source), ModuleKind: moduleKind}
-			intelDocument.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(intelDocument, parsed)
+			intelDocument = batchIntelDocument(intelDocument, parsed, ir, controlFlow)
 		}
 		lines := normalizedSourceLines(string(source))
 		var rangeValueConstants map[string]int
@@ -1047,6 +1047,18 @@ func (file parsedFile) intelDocument() intel.Document {
 		return file.IntelDocument
 	}
 	return intel.Document{Path: file.Path, Source: string(file.Source), ModuleKind: file.ModuleKind}
+}
+
+// batchIntelDocument transfers the parser and already-built immutable
+// artifacts into the Intel snapshot used by batch diagnostics. Keeping this
+// boundary in one helper makes it explicit that batch preparation and Intel
+// analysis operate on the same document revision.
+func batchIntelDocument(doc intel.Document, parsed *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) intel.Document {
+	doc.Snapshot = intel.NewAnalysisSnapshotWithArtifacts(doc, parsed, intel.AnalysisArtifacts{
+		ProcedureIR: ir,
+		ControlFlow: controlFlow,
+	})
+	return doc
 }
 
 func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {

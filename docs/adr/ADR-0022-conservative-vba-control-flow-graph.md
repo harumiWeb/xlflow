@@ -59,9 +59,11 @@ unresolved path. Consumers may request an explicit view, such as normal flow
 without exceptional edges, when the rule's contract calls for it; uncertainty
 within that selected view still participates.
 
-Cache the document CFG lazily on the immutable `AnalysisSnapshot`, using the
-same ownership, concurrency, retryable-cancellation, and defensive-copy
-contract as procedure IR. A successor in the same lifecycle may reuse a
+Cache the document CFG on the immutable `AnalysisSnapshot`, using the same
+ownership, concurrency, retryable-cancellation, and defensive-copy contract as
+procedure IR. Editor snapshots build it lazily from cached IR; batch snapshots
+may seed it with an already-built CFG for the exact immutable revision. A
+successor in the same lifecycle may reuse a
 completed procedure graph fragment when both its procedure source and module
 semantic context match. The module-context component is required because CFG
 assignment facts contain resolved symbol scopes. Source ranges are rebased to

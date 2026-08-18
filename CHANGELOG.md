@@ -21,6 +21,8 @@ All notable changes to xlflow will be documented in this file.
 - Improved batch ByRef call resolution by reusing parsed project symbols and
   indexing exact and qualified-name lookups, avoiding a full project-symbol
   scan for every call site while preserving ambiguity and visibility behavior.
+- Reused batch-built procedure IR and CFG artifacts in Intel diagnostics to
+  avoid rebuilding the same immutable file revision during `xlflow analyze`.
 
 ## v0.30.1
 
