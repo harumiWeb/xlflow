@@ -5757,6 +5757,339 @@ End Sub`)
 	}
 }
 
+func TestAnalyzerVBA227CarriesClassArrayThroughResetHelper(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const ROLE_LIST As Long = 1
+Private mRole As Long
+Private mItems() As Main
+Private mItemsCount As Long
+
+Friend Sub ConfigureList()
+  mRole = ROLE_LIST
+  ArrReset mItems, mItemsCount
+End Sub
+
+Private Sub ArrReset(ByRef values() As Main, ByRef count As Long)
+  ReDim values(0 To 1)
+  count = 0
+End Sub
+
+Private Sub ArrAppend(ByRef values() As Main, ByRef count As Long, ByVal item As Main)
+  count = count + 1
+  Set values(count - 1) = item
+End Sub
+
+Public Sub Add(ByVal item As Main)
+  If mRole = ROLE_LIST Then
+    ArrAppend mItems, mItemsCount, item
+  Else
+    Err.Raise 5
+  End If
+End Sub
+
+Public Sub Run()
+  Dim item As Main
+  Set item = New Main
+  ConfigureList
+  Add item
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a configured class array should remain allocated through ArrReset and ArrAppend: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesAggregateErrorConfigurationGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const ROLE_ERROR As Long = 1
+Private mRole As Long
+Private mItems() As Main
+Private mItemsCount As Long
+
+Friend Sub ConfigureAggregateError()
+  mRole = ROLE_ERROR
+  ArrReset mItems, mItemsCount
+End Sub
+
+Private Sub ArrReset(ByRef values() As Main, ByRef count As Long)
+  ReDim values(0 To 1)
+  count = 0
+End Sub
+
+Private Function ArrSnapshot(ByRef values() As Main, ByVal count As Long) As Collection
+  Dim result As Collection
+  Dim index As Long
+  Set result = New Collection
+  For index = 0 To count - 1
+    result.Add values(index)
+  Next index
+  Set ArrSnapshot = result
+End Function
+
+Private Sub RequireError(ByVal candidate As Main, ByVal context As String)
+  If mRole = ROLE_ERROR Then Exit Sub
+  Err.Raise 5
+End Sub
+
+Friend Property Get InternalInnerExceptions() As Collection
+  Set InternalInnerExceptions = ArrSnapshot(mItems, mItemsCount)
+End Property
+
+Public Function InnerExceptions() As Collection
+  RequireError Me, "InnerExceptions"
+  If mItemsCount = 0 Then
+    Set InnerExceptions = New Collection
+  Else
+    Set InnerExceptions = InternalInnerExceptions
+  End If
+End Function
+
+Public Sub Run()
+  Dim values As Collection
+  ConfigureAggregateError
+  Set values = InnerExceptions
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a configured aggregate error array should remain allocated through RequireError and ArrSnapshot: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesImmutableRoleBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const ROLE_IMMUTABLE As Long = 1
+Private mRole As Long
+Private mItems() As Main
+
+Friend Sub ConfigureGenericCollection()
+  mRole = ROLE_IMMUTABLE
+  ReDim mItems(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef values() As Main)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Snapshot()
+  If mRole = ROLE_IMMUTABLE Then
+    Consume mItems
+  Else
+    Err.Raise 5
+  End If
+End Sub
+
+Public Sub Run()
+  ConfigureGenericCollection
+  Snapshot
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an immutable-role branch should preserve the configured class array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesConfiguredArrayThroughFriendObjectAccessor(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private mItems() As Main
+Private mItemsCount As Long
+
+Friend Sub ConfigureGenericCollection()
+  ReDim mItems(0 To 1)
+  mItemsCount = 0
+End Sub
+
+Private Function ArrSnapshot(ByRef values() As Main, ByVal count As Long) As Collection
+  Dim result As Collection
+  Dim index As Long
+  Set result = New Collection
+  For index = 0 To count - 1
+    result.Add values(index)
+  Next index
+  Set ArrSnapshot = result
+End Function
+
+Friend Property Get InternalCollectionItems() As Collection
+  Set InternalCollectionItems = ArrSnapshot(mItems, mItemsCount)
+End Property
+
+Private Function CloneGenericCollection(ByVal source As Main) As Main
+  Dim clone As Main
+  Dim wrapped As Main
+  Set clone = New Main
+  clone.ConfigureGenericCollection
+  For Each wrapped In source.InternalCollectionItems
+    clone.AddWrapped wrapped
+  Next wrapped
+  Set CloneGenericCollection = clone
+End Function
+
+Friend Sub AddWrapped(ByVal wrapped As Main)
+  mItemsCount = mItemsCount + 1
+  Set mItems(mItemsCount - 1) = wrapped
+End Sub
+
+Public Sub Run()
+  Dim clone As Main
+  ConfigureGenericCollection
+  Set clone = CloneGenericCollection(Me)
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a configured array should remain allocated through a Friend receiver accessor: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesConfiguredArrayThroughInternalStorageMembers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const ROLE_COLLECTION As Long = 1
+Private mRole As Long
+Private mItems() As Main
+Private mItemsCount As Long
+
+Friend Sub ConfigureGenericCollection()
+  mRole = ROLE_COLLECTION
+  ReDim mItems(0 To 2)
+  mItemsCount = 0
+End Sub
+
+Private Sub ArrAppend(ByRef values() As Main, ByRef count As Long, ByVal item As Main)
+  count = count + 1
+  Set values(count - 1) = item
+End Sub
+
+Private Sub ArrInsert(ByRef values() As Main, ByRef count As Long, ByVal position As Long, ByVal item As Main)
+  Set values(position) = item
+  count = count + 1
+End Sub
+
+Private Function ArrSnapshot(ByRef values() As Main, ByVal count As Long) As Collection
+  Dim result As Collection
+  Dim index As Long
+  Set result = New Collection
+  For index = 0 To count - 1
+    result.Add values(index)
+  Next index
+  Set ArrSnapshot = result
+End Function
+
+Friend Sub InternalAppendCollectionItem(ByVal wrapped As Main)
+  ArrAppend mItems, mItemsCount, wrapped
+End Sub
+
+Friend Sub InternalPushValue(ByVal wrapped As Main)
+  ArrInsert mItems, mItemsCount, 0, wrapped
+End Sub
+
+Friend Property Get InternalCollectionItems() As Collection
+  Set InternalCollectionItems = ArrSnapshot(mItems, mItemsCount)
+End Property
+
+Public Sub Run()
+  Dim item As Main
+  Dim values As Collection
+  Set item = New Main
+  ConfigureGenericCollection
+  InternalAppendCollectionItem item
+  InternalPushValue item
+  Set values = InternalCollectionItems
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("configured internal storage members should preserve their class array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesConfiguredDataRowArrayThroughRoleBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const ROLE_DATA_ROW As Long = 1
+Private mRole As Long
+Private mItems() As Main
+Private mOriginalItems() As Main
+
+Friend Sub ConfigureDataRow()
+  mRole = ROLE_DATA_ROW
+  ReDim mItems(0 To 1)
+  ReDim mOriginalItems(0 To 1)
+End Sub
+
+Private Sub ArrReset(ByRef values() As Main)
+  ReDim values(0 To 1)
+End Sub
+
+Private Function ArrSnapshot(ByRef values() As Main) As Collection
+  Dim result As Collection
+  Set result = New Collection
+  result.Add values(0)
+  Set ArrSnapshot = result
+End Function
+
+Private Sub AcceptRowChanges()
+  Dim snapshot As Collection
+  ArrReset mOriginalItems
+  Set snapshot = ArrSnapshot(mItems)
+  Set mOriginalItems(0) = snapshot.Item(1)
+End Sub
+
+Public Sub AcceptChanges()
+  If mRole = ROLE_DATA_ROW Then
+    AcceptRowChanges
+  Else
+    Err.Raise 5
+  End If
+End Sub
+
+Public Sub Run()
+  ConfigureDataRow
+  AcceptChanges
+End Sub`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a data-row role branch should preserve configured row arrays: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227UsesGenericConfigurationGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

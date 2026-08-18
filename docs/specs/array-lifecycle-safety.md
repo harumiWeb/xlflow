@@ -126,6 +126,14 @@ is not sufficient. Public, ambiguous, dynamic, and unresolved calls remain
 unknown. An unresolved or external value, and a `Variant` whose array nature
 is not proven, remains `unknown`.
 
+For class modules, the recognized `Friend` / `Private` collection, data-row,
+and aggregate-error storage members inherit the matching `Configure*`
+allocation contract when they are reached through a configured receiver. This
+models internal storage accessors and mutators that deliberately rely on their
+caller having established the owning instance's role; it does not establish
+allocation for unrelated helpers or for public, ambiguous, dynamic, or
+unresolved calls.
+
 A private module setup helper may also establish its direct module-array
 allocations when it uses the narrow idempotent form `If ready Then Exit Sub`,
 performs plain `ReDim` statements, and assigns the module-scoped Boolean guard

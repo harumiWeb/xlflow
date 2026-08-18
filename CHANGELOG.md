@@ -18,6 +18,11 @@ All notable changes to xlflow will be documented in this file.
   corresponding generic collection array allocation into private `ByRef`
   helpers, while unguarded collection access remains reported.
 
+- Reduced `VBA227` false positives in configured class storage members. Internal
+  collection, data-row, and aggregate-error accessors/mutators now retain the
+  owning instance's proven array allocation when they call private `ByRef`
+  helpers.
+
 - Reduced `VBA227` false positives for private, idempotent module-array setup
   helpers. A module-scoped Boolean ready guard followed by plain `ReDim` and a
   final `True` assignment now carries its allocation into downstream private

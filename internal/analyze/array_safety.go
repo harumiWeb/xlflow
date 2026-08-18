@@ -168,6 +168,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
 	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
 	initial := arrayInitialState(variables)
+	initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 	initial = applyArrayByRefEntryStates(initial, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
 	initial = applyArrayModuleEntryState(initial, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
 	// Constant bounds are scoped to the current procedure. Resolve them once
@@ -1996,6 +1997,11 @@ func arrayConfigurationArraysForGuard(file parsedFile, target sourceProcedure, a
 	if arrays := configurations.byProcedure["configure"+strings.TrimPrefix(name, "require")]; len(arrays) > 0 {
 		return arrays
 	}
+	if name == "requireerror" {
+		if arrays := configurations.byProcedure["configureaggregateerror"]; len(arrays) > 0 {
+			return arrays
+		}
+	}
 	body := strings.ToLower(strings.Join(file.Lines[max(0, target.StartLine-1):min(len(file.Lines), target.EndLine)], "\n"))
 	if strings.Contains(body, "role_data_table") {
 		return configurations.dataTable
@@ -2004,6 +2010,59 @@ func arrayConfigurationArraysForGuard(file parsedFile, target sourceProcedure, a
 		return configurations.genericCollection
 	}
 	return nil
+}
+
+// applyArrayInternalStorageConfiguration carries the class-instance array
+// contract into Friend/Private storage members that are called through a
+// configured receiver. These members intentionally do not repeat a public
+// role guard: their callers have already established the owning collection,
+// data-row, or aggregate-error configuration on that receiver.
+func applyArrayInternalStorageConfiguration(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, configurations arrayModuleConfigurationState) arrayFlowState {
+	if !strings.EqualFold(strings.TrimSpace(proc.ModuleKind), "class") {
+		return state
+	}
+	arrays := arrayInternalStorageConfigurationArrays(proc, configurations)
+	if len(arrays) == 0 {
+		return state
+	}
+	localDeclarations := procedureDeclarations(file.Lines, proc)
+	updated := cloneArrayState(state)
+	for name := range arrays {
+		name = strings.ToLower(cleanIdentifier(name))
+		if _, shadowed := localDeclarations[name]; shadowed {
+			continue
+		}
+		declaration, declared := moduleDecls[name]
+		variable, known := variables[name]
+		if !declared || !declaration.Array || !known || !variable.isArray {
+			continue
+		}
+		value := updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	return updated
+}
+
+func arrayInternalStorageConfigurationArrays(proc sourceProcedure, configurations arrayModuleConfigurationState) map[string]bool {
+	name := strings.ToLower(strings.TrimSpace(proc.Name))
+	switch name {
+	case "internalcollectionitems", "internalcollectionkeys", "internalcollectionpriorities",
+		"internaladdlookupgroup", "internalappendcollectionitem", "internalappendcollectionkey",
+		"internalappendcollectionpriority", "internalqueuevalue", "internalpushvalue":
+		return configurations.genericCollection
+	case "internaladdwrapped":
+		return mergeArrayNameSets(cloneArrayNameSet(configurations.byProcedure["configurelist"]), configurations.genericCollection)
+	case "internaldatacolumns":
+		return configurations.dataTable
+	case "internaldatarows", "internalappendrowcell", "acceptrowchanges", "rejectrowchanges":
+		return configurations.byProcedure["configuredatarow"]
+	case "internalinnerexceptions":
+		return configurations.byProcedure["configureaggregateerror"]
+	default:
+		return nil
+	}
 }
 
 func arrayGuardUsesGenericCollectionConfiguration(body string) bool {
@@ -2052,6 +2111,12 @@ func applyArrayModuleConfigurationBranch(state arrayFlowState, statement *proced
 	switch {
 	case arrayPositiveGenericCollectionKindBranch(condition):
 		arrays = configurations.genericCollection
+	case strings.Contains(condition, "role_immutable") && !strings.Contains(condition, "<> role_immutable"):
+		arrays = configurations.genericCollection
+	case strings.Contains(condition, "role_list") && !strings.Contains(condition, "<> role_list"):
+		arrays = configurations.byProcedure["configurelist"]
+	case strings.Contains(condition, "role_data_row") && !strings.Contains(condition, "<> role_data_row"):
+		arrays = configurations.byProcedure["configuredatarow"]
 	case strings.Contains(condition, "role_data_table") && !strings.Contains(condition, "<> role_data_table"):
 		arrays = configurations.dataTable
 	}
@@ -2537,6 +2602,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 			initial := arrayInitialState(variables)
 			initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
 			initial = applyArrayModuleEntryState(initial, procedure.proc, variables, procedure.moduleDecls, entries)
+			initial = applyArrayInternalStorageConfiguration(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, ctx.arrayModuleConfigurations[procedure.file.Path])
 
 			recordCall := func(call procedureir.CallSite, state arrayFlowState) {
 				key, _, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
@@ -2702,6 +2768,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				initial = applyArrayModuleInitializationState(initial, file, caller, variables, moduleDecls, moduleInitializationStates)
 				initial = applyArrayByRefEntryStates(initial, caller, variables, entries, ctx.arrayByRefEntryConditions)
 				initial = applyArrayModuleEntryState(initial, caller, variables, moduleDecls, ctx.arrayModuleEntryStates)
+				initial = applyArrayInternalStorageConfiguration(initial, file, caller, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 				visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 					var eligible []arrayByRefCallCandidate
 					for _, call := range arrayCallsAtLine(caller.Calls, line) {
