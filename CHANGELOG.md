@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Improved `VBA202` batch analysis scalability by gating object analysis behind
+  the rule, reusing per-procedure CFG/object-flow artifacts, and propagating
+  interprocedural summaries and entry states through dependency worklists.
+  Diagnostic output and conservative propagation semantics are unchanged.
+
 - Added opt-in `xlflow analyze --performance-log` batch-analyzer profiling.
   Stage timings, result counts, outcomes, and stable workload counters are
   written to stderr without changing analyzer findings, exit codes, or the

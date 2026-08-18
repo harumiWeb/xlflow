@@ -680,8 +680,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `nothing_literal`
 - `number_format`
 - `numeric_type_mismatch`
+- `object_entry_flow_evaluations`
 - `object_entry_states`
 - `object_procedure_summaries`
+- `object_summary_evaluations`
 - `obsolete_tls_protocol`
 - `old_name`
 - `older_than`
