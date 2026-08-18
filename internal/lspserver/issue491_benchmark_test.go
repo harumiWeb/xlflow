@@ -21,6 +21,10 @@ import (
 const (
 	issue491ProcedureCount = 1200
 	issue491CallsPerProc   = 4
+	// Building the 1,200-procedure catalog can exceed five seconds on a
+	// contended Linux CI runner. The behavior under test is prompt cancellation
+	// after the checkpoint, not a fixed upper bound on catalog construction.
+	issue491CheckpointWait = 30 * time.Second
 )
 
 // issue491LargeClassSource is deliberately generated rather than checked in:
@@ -168,7 +172,7 @@ func TestIssue491DiagnosticsStopsWithinBudgetAfterCancellationCheckpoint(t *test
 	go func() { done <- s.analyzer.DiagnosticsContext(ctx, doc) }()
 	select {
 	case <-ctx.reached:
-	case <-time.After(5 * time.Second):
+	case <-time.After(issue491CheckpointWait):
 		t.Fatal("diagnostics did not reach a cancellation checkpoint")
 	}
 	select {
