@@ -96,7 +96,7 @@ func TestBatchAnalysisSkipsVBA202ContextWhenDisabled(t *testing.T) {
 	if got := findingsByCode(result.Findings, "VBA202"); len(got) != 0 {
 		t.Fatalf("disabled VBA202 produced findings: %+v", got)
 	}
-	stages, _ := recorder.Totals()
+	stages, counters := recorder.Totals()
 	byName := make(map[string]analysisstats.Stage, len(stages))
 	for _, stage := range stages {
 		byName[stage.Name] = stage
@@ -108,6 +108,16 @@ func TestBatchAnalysisSkipsVBA202ContextWhenDisabled(t *testing.T) {
 		}
 		if stage.ResultCount != 0 {
 			t.Fatalf("disabled VBA202 stage %q performed object analysis: %+v", name, stage)
+		}
+	}
+	counterByName := make(map[string]uint64, len(counters))
+	for _, counter := range counters {
+		counterByName[counter.Name] = counter.Value
+	}
+	for _, name := range []string{"object_summary_evaluations", "object_entry_flow_evaluations"} {
+		value, ok := counterByName[name]
+		if !ok || value != 0 {
+			t.Fatalf("disabled VBA202 counter %q = %d (present=%t), want zero", name, value, ok)
 		}
 	}
 }

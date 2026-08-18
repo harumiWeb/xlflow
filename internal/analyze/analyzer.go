@@ -469,6 +469,10 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		finishStage(len(objectAnalysis.summaries), nil)
 	} else {
 		finishStage(0, nil)
+		if recorder := analysisstats.FromContext(ctx); recorder != nil {
+			recorder.Add("object_summary_evaluations", 0)
+			recorder.Add("object_entry_flow_evaluations", 0)
+		}
 	}
 	finishStage = analysisstats.Measure(ctx, "object_entry_states")
 	if objectAnalysis != nil {

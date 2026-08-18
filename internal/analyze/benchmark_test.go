@@ -85,9 +85,11 @@ func BenchmarkObjectAnalysisWorklist(b *testing.B) {
 	}
 }
 
+const objectWorklistBenchmarkModuleFile = "Chain.bas"
+
 func loadObjectWorklistBenchmarkFiles(tb testing.TB, root string) []parsedFile {
 	tb.Helper()
-	path := filepath.Join(root, "src", "modules", "Chain.bas")
+	path := filepath.Join(root, "src", "modules", objectWorklistBenchmarkModuleFile)
 	source, err := os.ReadFile(path)
 	if err != nil {
 		tb.Fatalf("read object benchmark source: %v", err)
@@ -96,9 +98,9 @@ func loadObjectWorklistBenchmarkFiles(tb testing.TB, root string) []parsedFile {
 	if err != nil {
 		tb.Fatalf("parse object benchmark source: %v", err)
 	}
+	defer doc.Close()
 	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: root, Path: path, ModuleKind: "standard"}, doc)
 	if err != nil {
-		doc.Close()
 		tb.Fatalf("build object benchmark IR: %v", err)
 	}
 	module := strings.TrimSpace(ir.ModuleName)
@@ -119,13 +121,12 @@ func loadObjectWorklistBenchmarkFiles(tb testing.TB, root string) []parsedFile {
 	file := parsedFile{
 		Path:       path,
 		Lines:      normalizedSourceLines(string(source)),
-		Module:     "Chain",
+		Module:     module,
 		ModuleKind: "standard",
 		Source:     source,
 		IR:         ir,
 		CFG:        controlFlow,
 	}
-	doc.Close()
 	return []parsedFile{file}
 }
 
@@ -150,7 +151,7 @@ func writeObjectWorklistBenchmarkProject(tb testing.TB, root string, procedureCo
 		source.WriteString("End Function\n\n")
 	}
 	source.WriteString("Public Sub Run()\n  Dim target As Worksheet\n  Set target = Proc000()\n  Debug.Print target.Name\nEnd Sub\n")
-	if err := os.WriteFile(filepath.Join(modules, "Chain.bas"), []byte(source.String()), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(modules, objectWorklistBenchmarkModuleFile), []byte(source.String()), 0o644); err != nil {
 		tb.Fatalf("write object benchmark source: %v", err)
 	}
 }

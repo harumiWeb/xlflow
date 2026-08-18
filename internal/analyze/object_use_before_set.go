@@ -68,6 +68,7 @@ type objectProcedurePlan struct {
 	// fixed-point iterations O(1) instead of rescanning every procedure.
 	receiverSummaryKeys  map[string][]string
 	classInitializerKeys []string
+	classIndexBuilt      bool
 	unknownFlow          bool
 	relevant             bool
 }
@@ -92,9 +93,10 @@ type objectAnalysisContext struct {
 	summaries map[string]objectProcedureSummary
 	entries   map[string]map[string]bool
 
-	summaryDependents map[string][]string
-	entryOutgoing     map[string][]*objectEntryCall
-	entryIncoming     map[string][]*objectEntryCall
+	summaryDependents   map[string][]string
+	entryOutgoing       map[string][]*objectEntryCall
+	entryIncoming       map[string][]*objectEntryCall
+	moduleProcedureKeys map[string][]string
 
 	summaryEvaluations   int
 	entryFlowEvaluations int
@@ -102,12 +104,13 @@ type objectAnalysisContext struct {
 
 func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 	analysis := &objectAnalysisContext{
-		plans:             map[string]*objectProcedurePlan{},
-		summaries:         map[string]objectProcedureSummary{},
-		entries:           map[string]map[string]bool{},
-		summaryDependents: map[string][]string{},
-		entryOutgoing:     map[string][]*objectEntryCall{},
-		entryIncoming:     map[string][]*objectEntryCall{},
+		plans:               map[string]*objectProcedurePlan{},
+		summaries:           map[string]objectProcedureSummary{},
+		entries:             map[string]map[string]bool{},
+		summaryDependents:   map[string][]string{},
+		entryOutgoing:       map[string][]*objectEntryCall{},
+		entryIncoming:       map[string][]*objectEntryCall{},
+		moduleProcedureKeys: map[string][]string{},
 	}
 	for _, file := range files {
 		procedures := sourceProceduresFromIR(file.IR, file.CFG)
@@ -129,11 +132,14 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 func (analysis *objectAnalysisContext) buildObjectIndexes() {
 	receiverKeys := map[string][]string{}
 	initializerKeys := map[string][]string{}
+	moduleKeys := map[string][]string{}
 	for _, key := range analysis.order {
 		plan := analysis.plans[key]
 		if plan == nil {
 			continue
 		}
+		moduleKey := strings.ToLower(cleanIdentifier(plan.proc.Module))
+		moduleKeys[moduleKey] = append(moduleKeys[moduleKey], key)
 		receiverIndexKey := objectReceiverSummaryIndexKey(plan.proc.Module, plan.proc.Name)
 		receiverKeys[receiverIndexKey] = append(receiverKeys[receiverIndexKey], key)
 		if strings.EqualFold(plan.proc.ModuleKind, "class") && strings.EqualFold(plan.proc.Name, "Class_Initialize") {
@@ -149,6 +155,11 @@ func (analysis *objectAnalysisContext) buildObjectIndexes() {
 		sort.Strings(keys)
 		initializerKeys[key] = uniqueStrings(keys)
 	}
+	for key, keys := range moduleKeys {
+		sort.Strings(keys)
+		moduleKeys[key] = uniqueStrings(keys)
+	}
+	analysis.moduleProcedureKeys = moduleKeys
 	for _, key := range analysis.order {
 		plan := analysis.plans[key]
 		if plan == nil {
@@ -156,6 +167,7 @@ func (analysis *objectAnalysisContext) buildObjectIndexes() {
 		}
 		plan.receiverSummaryKeys = receiverKeys
 		plan.classInitializerKeys = append([]string(nil), initializerKeys[strings.ToLower(cleanIdentifier(plan.proc.Module))]...)
+		plan.classIndexBuilt = true
 	}
 }
 
@@ -315,7 +327,8 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 		if initializer == nil || !strings.EqualFold(initializer.proc.ModuleKind, "class") || !strings.EqualFold(initializer.proc.Name, "Class_Initialize") {
 			continue
 		}
-		for _, dependentKey := range analysis.order {
+		moduleKey := strings.ToLower(cleanIdentifier(initializer.proc.Module))
+		for _, dependentKey := range analysis.moduleProcedureKeys[moduleKey] {
 			dependent := analysis.plans[dependentKey]
 			if dependentKey != initializerKey && dependent != nil && strings.EqualFold(dependent.proc.Module, initializer.proc.Module) {
 				addSummaryDependency(initializerKey, dependentKey)
@@ -365,6 +378,9 @@ func objectReceiverSummaryIndexKey(module, member string) string {
 	return strings.ToLower(cleanIdentifier(module)) + "|" + strings.ToLower(cleanIdentifier(lastName(member)))
 }
 
+// uniqueStrings expects values to be sorted and removes adjacent duplicates
+// in place. Callers must provide an owned slice because the input backing
+// array is reused.
 func uniqueStrings(values []string) []string {
 	if len(values) < 2 {
 		return values
@@ -422,7 +438,7 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 		}
 		analysis.summaryEvaluations++
 		previous := analysis.summaries[key]
-		flow := objectStateFlowPlan(plan, analysis.summaries, objectFlowOptions{Summary: true})
+		flow := objectStateFlowPlan(plan, analysis.summaries, objectFlowOptions{})
 		updated := previous
 		updated.ByRefAssigned = cloneIntBoolMap(previous.ByRefAssigned)
 		updated.ByRefWritten = cloneIntBoolMap(previous.ByRefWritten)
@@ -477,15 +493,21 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 		}
 		analysis.entryFlowEvaluations++
 		flow := objectStateFlowPlan(caller, analysis.summaries, objectFlowOptions{Entry: analysis.entries[key]})
+		flowContext := caller.flowContext
+		flowContext.receiverSummaryKeys = caller.receiverSummaryKeys
 		for _, entryCall := range analysis.entryOutgoing[key] {
 			contributions := map[string]bool{}
 			callee := entryCall.callee
 			state := flow.in
 			if caller.proc.Graph == nil {
+				entryCall.evaluated = true
+				entryCall.contributions = map[string]bool{}
 				continue
 			}
 			block, ok := caller.proc.Graph.BlockForStatement(entryCall.call.StatementID)
 			if !ok || !caller.reachable[block.ID] {
+				entryCall.evaluated = true
+				entryCall.contributions = map[string]bool{}
 				continue
 			}
 			blockState := state[block.ID]
@@ -496,7 +518,7 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 						continue
 					}
 					parameterKey := (objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()
-					assigned, present := objectCallParameterAssigned(caller.proc, caller.declarations, entryCall.call, calleeSummary, index, entryCall.actuals, blockState, flow.vars, caller.flowContext.expressions, analysis.summaries)
+					assigned, present := objectCallParameterAssigned(caller.proc, caller.declarations, entryCall.call, calleeSummary, index, entryCall.actuals, blockState, flow.vars, flowContext, analysis.summaries)
 					contributions[parameterKey] = assigned && present
 				}
 			}
@@ -559,33 +581,6 @@ func (analysis *objectAnalysisContext) recomputeEntry(key string) bool {
 	}
 	analysis.entries[key] = next
 	return true
-}
-
-// buildObjectProcedureSummaries is retained as a small compatibility helper
-// for tests and internal callers that need only the summary projection. Batch
-// analysis uses buildObjectAnalysisPlans so summaries and entry states share
-// one run-local cache.
-//
-//nolint:unused // kept for package-local compatibility callers
-func buildObjectProcedureSummaries(files []parsedFile) map[string]objectProcedureSummary {
-	analysis := buildObjectAnalysisPlans(files)
-	return analysis.buildSummaries()
-}
-
-// buildObjectProcedureEntryStates computes module-field and private-procedure
-// parameter state at procedure entries from resolved call sites. A value is
-// admitted only when every reachable call site into that procedure proves a
-// definitely non-Nothing value immediately before the call. Uncalled,
-// ambiguous, external, and recursive procedures therefore retain the
-// conservative MaybeNothing entry state. Public procedures are excluded from
-// parameter-entry inference because callers outside the analyzed project can
-// still pass Nothing.
-//
-//nolint:unused // kept for package-local compatibility callers
-func buildObjectProcedureEntryStates(files []parsedFile, summaries map[string]objectProcedureSummary) map[string]map[string]bool {
-	analysis := buildObjectAnalysisPlans(files)
-	analysis.summaries = summaries
-	return analysis.buildEntryStates()
 }
 
 func objectBoolMapEqual(a, b map[string]bool) bool {
@@ -685,19 +680,6 @@ func objectProcedureUsesModuleObject(proc sourceProcedure, moduleDecls map[strin
 	return false
 }
 
-//nolint:unused // compatibility projection; indexed callers use the cached maps
-func objectProcedureWritesModuleField(proc sourceProcedure, name string) bool {
-	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
-		expressions[expression.ID] = expression
-	}
-	statements := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		statements[statement.ID] = statement
-	}
-	return objectProcedureWritesModuleFieldIndexed(proc, name, expressions, statements)
-}
-
 func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, expressions map[int]procedureir.Expression, statements map[int]procedureir.Statement) bool {
 	for _, access := range proc.Accesses {
 		if access.Scope != procedureir.ScopeModule || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) || !strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
@@ -709,19 +691,6 @@ func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, 
 		return true
 	}
 	return false
-}
-
-//nolint:unused // compatibility projection; indexed callers use the cached maps
-func objectProcedureWritesParameter(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary) bool {
-	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
-		expressions[expression.ID] = expression
-	}
-	statements := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		statements[statement.ID] = statement
-	}
-	return objectProcedureWritesParameterIndexed(proc, name, summaries, expressions, statements)
 }
 
 func objectProcedureWritesParameterIndexed(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary, expressions map[int]procedureir.Expression, statements map[int]procedureir.Statement) bool {
@@ -764,21 +733,13 @@ func objectProcedureWritesParameterIndexed(proc sourceProcedure, name string, su
 }
 
 type objectFlowOptions struct {
-	Summary bool
-	Entry   map[string]bool
+	Entry map[string]bool
 }
 
-// objectUseBeforeSetIRFindings reports the first unsafe member/collection use
+// objectUseBeforeSetIRFindingsPlan reports the first unsafe member/collection use
 // of each object variable.  The state at a use comes from the CFG entry fact,
 // not from source-line order, so branches, early exits, loops and error edges
 // are all represented by the same must-analysis.
-//
-//nolint:unused // compatibility projection; batch analysis uses the cached plan
-func (a Analyzer) objectUseBeforeSetIRFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, entry map[string]bool) []Finding {
-	plan := newObjectProcedurePlan(file, proc, moduleDecls, objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine))
-	return a.objectUseBeforeSetIRFindingsPlan(plan, summaries, entry)
-}
-
 func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, summaries map[string]objectProcedureSummary, entry map[string]bool) []Finding {
 	if plan == nil || plan.proc.Graph == nil {
 		return nil
@@ -1199,33 +1160,6 @@ func objectDeclarationFor(name string, scope procedureir.SymbolScope, declaratio
 	return declaration, ok
 }
 
-//nolint:unused // compatibility projection; batch analysis uses objectStateFlowPlan
-func objectStateFlow(file parsedFile, proc sourceProcedure, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, options objectFlowOptions) objectFlowResult {
-	moduleDecls := moduleDeclarations(file.Lines, []sourceProcedure{proc})
-	plan := newObjectProcedurePlan(file, proc, moduleDecls, objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine))
-	plan.declarations = declarations
-	plan.vars = map[string]objectVariable{}
-	for key, declaration := range declarations {
-		if !declaration.Object {
-			continue
-		}
-		scope := procedureir.ScopeModule
-		if declaration.Parameter {
-			scope = procedureir.ScopeParameter
-		} else if _, local := plan.procedureDecls[key]; local {
-			scope = procedureir.ScopeLocal
-		}
-		variable := objectVariable{Scope: scope, Name: declaration.Name}
-		plan.vars[variable.key()] = variable
-	}
-	if isObjectType(proc.ReturnType) {
-		variable := objectVariable{Scope: procedureir.ScopeLocal, Name: proc.Name}
-		plan.vars[variable.key()] = variable
-	}
-	plan.flowContext.vars = plan.vars
-	return objectStateFlowPlan(plan, summaries, options)
-}
-
 func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectProcedureSummary, options objectFlowOptions) objectFlowResult {
 	result := objectFlowResult{in: map[vbacfg.BlockID]map[string]bool{}, out: map[vbacfg.BlockID]map[string]bool{}, vars: map[string]objectVariable{}}
 	if plan == nil || plan.proc.Graph == nil || len(plan.vars) == 0 {
@@ -1323,7 +1257,7 @@ func objectClassLifecycleAssignedPlan(plan *objectProcedurePlan, variable object
 	if plan == nil || variable.Scope != procedureir.ScopeModule || !strings.EqualFold(plan.proc.ModuleKind, "class") || strings.EqualFold(plan.proc.Name, "Class_Initialize") {
 		return false
 	}
-	if len(plan.classInitializerKeys) == 0 {
+	if !plan.classIndexBuilt {
 		// Compatibility callers may construct a standalone plan without the
 		// batch index. Preserve the previous summary-scan behavior there.
 		return objectClassLifecycleAssigned(plan.proc, variable, summaries)
@@ -1993,14 +1927,14 @@ func objectProcedureAllowsParameterEntry(proc sourceProcedure) bool {
 	return strings.EqualFold(strings.TrimSpace(proc.Visibility), "private")
 }
 
-func objectCallParameterAssigned(proc sourceProcedure, declarations map[string]sourceDeclaration, call procedureir.CallSite, summary objectProcedureSummary, formalIndex int, actuals []objectCallActual, state map[string]bool, vars map[string]objectVariable, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) (bool, bool) {
+func objectCallParameterAssigned(proc sourceProcedure, declarations map[string]sourceDeclaration, call procedureir.CallSite, summary objectProcedureSummary, formalIndex int, actuals []objectCallActual, state map[string]bool, vars map[string]objectVariable, flowContext objectFlowContext, summaries map[string]objectProcedureSummary) (bool, bool) {
 	for actualIndex, actual := range actuals {
 		if objectFormalIndex(call, summary, actualIndex) != formalIndex {
 			continue
 		}
 		if actual.expressionID != 0 {
-			if expression, ok := expressions[actual.expressionID]; ok && expression.Kind != procedureir.ExpressionIdentifier {
-				return objectExpressionAssigned(proc, expression, state, objectFlowContext{expressions: expressions}, declarations, summaries, call.StatementID), true
+			if expression, ok := flowContext.expressions[actual.expressionID]; ok && expression.Kind != procedureir.ExpressionIdentifier {
+				return objectExpressionAssigned(proc, expression, state, flowContext, declarations, summaries, call.StatementID), true
 			}
 		}
 		name := cleanIdentifier(actual.text)
