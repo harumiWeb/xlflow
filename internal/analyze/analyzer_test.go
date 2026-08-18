@@ -3,10 +3,13 @@ package analyze
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -4677,6 +4680,115 @@ End Sub
 	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
 		t.Fatalf("named project-local ByRef finding = %+v", got)
 	}
+}
+
+func TestAnalyzerByRefPathFilterRetainsExcludedProjectCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Receiver.bas", `Option Explicit
+Public Sub ReplaceText(ByRef target As String)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  receiver.ReplaceText count
+End Sub
+`)
+
+	findings, err := (Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return strings.EqualFold(filepath.Base(path), "Main.bas")
+		},
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA228")
+	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
+		t.Fatalf("path-filtered ByRef resolution lost excluded project candidate: %+v", got)
+	}
+}
+
+func TestAnalyzerByRefDoesNotIndexTestsAsProjectCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  TestHelper count
+End Sub
+`)
+	testsDir := filepath.Join(dir, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testsDir, "Helper.bas"), []byte(`Option Explicit
+Public Sub TestHelper(ByRef target As String)
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA228"); len(got) != 0 {
+		t.Fatalf("test-only procedure became a project ByRef candidate: %+v", got)
+	}
+}
+
+func TestProjectByRefSymbolIndexHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, count, err := projectByRefSymbolIndex(ctx, t.TempDir(), config.Default(), nil, nil)
+	if !errors.Is(err, context.Canceled) || count != 0 {
+		t.Fatalf("canceled ByRef index build = (%d, %v), want (0, context.Canceled)", count, err)
+	}
+}
+
+func TestProjectByRefSymbolIndexHonorsCancellationDuringWorkspaceCollection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for i := 0; i < 32; i++ {
+		writeModule(t, dir, fmt.Sprintf("Module%02d.bas", i), "Public Sub Run()\nEnd Sub\n")
+	}
+	ctx := newCancelAfterContext(10)
+	_, count, err := projectByRefSymbolIndex(ctx, dir, config.Default(), func(string) bool { return true }, nil)
+	if !errors.Is(err, context.Canceled) || count != 0 {
+		t.Fatalf("canceled workspace collection = (%d, %v), want (0, context.Canceled)", count, err)
+	}
+}
+
+type cancelAfterContext struct {
+	context.Context
+	remaining atomic.Int32
+	done      chan struct{}
+	once      sync.Once
+}
+
+func newCancelAfterContext(checks int32) *cancelAfterContext {
+	ctx := &cancelAfterContext{Context: context.Background(), done: make(chan struct{})}
+	ctx.remaining.Store(checks)
+	return ctx
+}
+
+func (ctx *cancelAfterContext) Done() <-chan struct{} {
+	return ctx.done
+}
+
+func (ctx *cancelAfterContext) Err() error {
+	if err := ctx.Context.Err(); err != nil {
+		return err
+	}
+	if ctx.remaining.Add(-1) <= 0 {
+		ctx.once.Do(func() { close(ctx.done) })
+		return context.Canceled
+	}
+	return nil
 }
 
 func TestAnalyzerByRefSkipsAmbiguousCallsAndHonorsSuppression(t *testing.T) {

@@ -132,6 +132,18 @@ type extractor struct {
 var attrRe = regexp.MustCompile(`(?i)^\s*Attribute\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$`)
 
 func Inspect(opts Options) (*Result, error) {
+	return InspectContext(context.Background(), opts)
+}
+
+// InspectContext is the cancellable variant of Inspect. Cancellation is
+// checked while discovering files, parsing each document, and walking symbols.
+func InspectContext(ctx context.Context, opts Options) (*Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	rootDir := opts.RootDir
 	if rootDir == "" {
 		rootDir = "."
@@ -146,7 +158,7 @@ func Inspect(opts Options) (*Result, error) {
 		displayRoot = "src"
 	}
 
-	files, err := discoverFiles(opts)
+	files, err := discoverFilesContext(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +174,15 @@ func Inspect(opts Options) (*Result, error) {
 	}
 	moduleFilter := strings.TrimSpace(opts.Module)
 	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		parsed, err := parser.ParseFile(file.path)
 		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			parsed.Close()
 			return nil, err
 		}
 		rel := displayPath(rootDir, file.path)
@@ -173,6 +192,7 @@ func Inspect(opts Options) (*Result, error) {
 			continue
 		}
 		ext := extractor{
+			ctx:         ctx,
 			opts:        opts,
 			rootDir:     rootDir,
 			source:      parsed.Source,
@@ -201,9 +221,12 @@ func Inspect(opts Options) (*Result, error) {
 			result.Summary.MissingNodes++
 		}
 		parsed.Close()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	result.Summary.Files = len(result.Files)
-	return result, nil
+	return result, ctx.Err()
 }
 
 // DiscoverSourceFiles returns the VBA files included by the configured source
@@ -415,9 +438,19 @@ func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.P
 }
 
 func discoverFiles(opts Options) ([]fileCandidate, error) {
+	return discoverFilesContext(context.Background(), opts)
+}
+
+func discoverFilesContext(ctx context.Context, opts Options) ([]fileCandidate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(opts.Path) != "" {
 		root := resolvePath(opts.RootDir, opts.Path)
-		return collectFiles(root, opts)
+		return collectFilesContext(ctx, root, opts)
 	}
 	cfg := opts.Config
 	dirs := []struct {
@@ -435,7 +468,7 @@ func discoverFiles(opts Options) ([]fileCandidate, error) {
 		if strings.TrimSpace(dir.path) == "" {
 			continue
 		}
-		collected, err := collectFiles(filepath.Join(opts.RootDir, dir.path), opts)
+		collected, err := collectFilesContext(ctx, filepath.Join(opts.RootDir, dir.path), opts)
 		if err != nil {
 			return nil, err
 		}
@@ -456,13 +489,22 @@ func discoverFiles(opts Options) ([]fileCandidate, error) {
 			files = append(files, file)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].path < files[j].path
 	})
 	return files, nil
 }
 
-func collectFiles(root string, opts Options) ([]fileCandidate, error) {
+func collectFilesContext(ctx context.Context, root string, opts Options) ([]fileCandidate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -479,6 +521,9 @@ func collectFiles(root string, opts Options) ([]fileCandidate, error) {
 	}
 	files := make([]fileCandidate, 0)
 	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -496,6 +541,9 @@ func collectFiles(root string, opts Options) ([]fileCandidate, error) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	sort.Slice(files, func(i, j int) bool {

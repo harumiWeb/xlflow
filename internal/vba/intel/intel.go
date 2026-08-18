@@ -689,7 +689,33 @@ func (a Analyzer) RunnableProcedures(doc Document, cfg CodeLensConfig) ([]Runnab
 }
 
 func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, error) {
-	return a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+	return a.WorkspaceSymbolsContext(context.Background(), open, query)
+}
+
+// WorkspaceSymbolsContext is the cancellable variant of WorkspaceSymbols.
+// Cancellation is propagated through workspace discovery and symbol extraction.
+func (a Analyzer) WorkspaceSymbolsContext(ctx context.Context, open []Document, query string) ([]Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.WorkspaceSymbolQueryFunc != nil {
+		out, err := a.WorkspaceSymbolQueryFunc(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	if a.WorkspaceSymbolsFunc != nil {
+		out, err := a.WorkspaceSymbolsFunc(open, query)
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	return a.workspaceSymbolsContext(ctx, open, query)
 }
 
 func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
@@ -703,7 +729,17 @@ func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQu
 }
 
 func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, error) {
-	result, err := symbols.Inspect(symbols.Options{
+	return a.workspaceSymbolsContext(context.Background(), open, query)
+}
+
+func (a Analyzer) workspaceSymbolsContext(ctx context.Context, open []Document, query string) ([]Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result, err := symbols.InspectContext(ctx, symbols.Options{
 		RootDir:        a.RootDir,
 		Config:         a.Config,
 		IncludePrivate: true,
@@ -714,19 +750,28 @@ func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, err
 	}
 	openKeys := make(map[string]bool, len(open))
 	for _, doc := range open {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for _, key := range a.workspacePathKeys(doc.Path) {
 			openKeys[key] = true
 		}
 	}
 	var out []Symbol
 	for _, file := range result.Files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if hasAnyPathKey(openKeys, a.workspacePathKeys(file.Path)) {
 			continue
 		}
 		out = append(out, symbolsFromFile(file, "")...)
 	}
 	for _, doc := range open {
-		docSyms, err := a.DocumentSymbols(doc)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		docSyms, err := a.DocumentSymbolsContext(ctx, doc)
 		if err != nil {
 			continue
 		}
@@ -751,7 +796,7 @@ func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, err
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out, ctx.Err()
 }
 
 func (a Analyzer) workspacePathKeys(path string) []string {
