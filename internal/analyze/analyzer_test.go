@@ -3,10 +3,13 @@ package analyze
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -4745,6 +4748,47 @@ func TestProjectByRefSymbolIndexHonorsCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || count != 0 {
 		t.Fatalf("canceled ByRef index build = (%d, %v), want (0, context.Canceled)", count, err)
 	}
+}
+
+func TestProjectByRefSymbolIndexHonorsCancellationDuringWorkspaceCollection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for i := 0; i < 32; i++ {
+		writeModule(t, dir, fmt.Sprintf("Module%02d.bas", i), "Public Sub Run()\nEnd Sub\n")
+	}
+	ctx := newCancelAfterContext(10)
+	_, count, err := projectByRefSymbolIndex(ctx, dir, config.Default(), func(string) bool { return true }, nil)
+	if !errors.Is(err, context.Canceled) || count != 0 {
+		t.Fatalf("canceled workspace collection = (%d, %v), want (0, context.Canceled)", count, err)
+	}
+}
+
+type cancelAfterContext struct {
+	context.Context
+	remaining atomic.Int32
+	done      chan struct{}
+	once      sync.Once
+}
+
+func newCancelAfterContext(checks int32) *cancelAfterContext {
+	ctx := &cancelAfterContext{Context: context.Background(), done: make(chan struct{})}
+	ctx.remaining.Store(checks)
+	return ctx
+}
+
+func (ctx *cancelAfterContext) Done() <-chan struct{} {
+	return ctx.done
+}
+
+func (ctx *cancelAfterContext) Err() error {
+	if err := ctx.Context.Err(); err != nil {
+		return err
+	}
+	if ctx.remaining.Add(-1) <= 0 {
+		ctx.once.Do(func() { close(ctx.done) })
+		return context.Canceled
+	}
+	return nil
 }
 
 func TestAnalyzerByRefSkipsAmbiguousCallsAndHonorsSuppression(t *testing.T) {

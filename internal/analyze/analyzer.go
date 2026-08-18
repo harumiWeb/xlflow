@@ -797,7 +797,7 @@ func projectByRefSymbolIndex(ctx context.Context, rootDir string, cfg config.Con
 	var projectSymbols []intel.Symbol
 	if pathFilter != nil {
 		var err error
-		projectSymbols, err = (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
+		projectSymbols, err = (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbolsContext(ctx, nil, "")
 		if err != nil {
 			return nil, 0, err
 		}
