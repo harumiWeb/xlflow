@@ -2,6 +2,7 @@ package intel
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,10 +10,13 @@ import (
 )
 
 func TestWorkspaceResolutionViewQueriesIndexedSnapshot(t *testing.T) {
-	view := NewWorkspaceResolutionView([]Symbol{
-		{Name: "Run", Module: "Alpha", Kind: "sub", File: "a.bas"},
+	symbols := []Symbol{
+		{Name: "Run", Module: "Alpha", Kind: "sub", File: "a.bas", Parameters: []Parameter{{Name: "value", Type: "Long"}}},
 		{Name: "Runner", Module: "Beta", Kind: "function", File: "b.bas"},
-	})
+	}
+	view := NewWorkspaceResolutionView(symbols)
+	symbols[0].Name = "mutated input"
+	symbols[0].Parameters[0].Name = "mutated input"
 	tests := []struct {
 		query WorkspaceSymbolQuery
 		want  string
@@ -30,6 +34,46 @@ func TestWorkspaceResolutionViewQueriesIndexedSnapshot(t *testing.T) {
 	}
 	if got := view.Query(WorkspaceSymbolQuery{Text: "run", Mode: WorkspaceSymbolQueryPrefix}); len(got) != 2 {
 		t.Fatalf("prefix query returned %d symbols, want 2", len(got))
+	}
+	got := view.Query(WorkspaceSymbolQuery{Text: "run", Mode: WorkspaceSymbolQueryExact})
+	got[0].Name = "mutated"
+	got[0].Parameters[0].Name = "mutated"
+	got = view.Query(WorkspaceSymbolQuery{Text: "run", Mode: WorkspaceSymbolQueryExact})
+	if len(got) != 1 || got[0].Name != "Run" || got[0].Parameters[0].Name != "value" {
+		t.Fatalf("query result mutation changed immutable view: %+v", got)
+	}
+	duplicates := NewWorkspaceResolutionView([]Symbol{
+		{Name: "Run", Module: "Second", Kind: "sub", File: "z.bas"},
+		{Name: "Run", Module: "First", Kind: "sub", File: "a.bas"},
+	})
+	ordered := duplicates.Query(WorkspaceSymbolQuery{Text: "run", Mode: WorkspaceSymbolQueryExact})
+	if len(ordered) != 2 || ordered[0].File != "a.bas" || ordered[1].File != "z.bas" {
+		t.Fatalf("duplicate candidates are not deterministic: %+v", ordered)
+	}
+}
+
+func BenchmarkWorkspaceResolutionViewLookup(b *testing.B) {
+	for _, symbolCount := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprintf("%d-symbols", symbolCount), func(b *testing.B) {
+			symbols := make([]Symbol, 0, symbolCount)
+			for i := 0; i < symbolCount; i++ {
+				symbols = append(symbols, Symbol{
+					Name:   fmt.Sprintf("Procedure%05d", i),
+					Module: fmt.Sprintf("Module%03d", i%100),
+					Kind:   "sub",
+					File:   fmt.Sprintf("Module%03d.bas", i%100),
+				})
+			}
+			view := NewWorkspaceResolutionView(symbols)
+			b.ReportAllocs()
+			b.ResetTimer()
+			resultCount := 0
+			for i := 0; i < b.N; i++ {
+				resultCount += len(view.Query(WorkspaceSymbolQuery{Text: "procedure00042", Mode: WorkspaceSymbolQueryExact}))
+				resultCount += len(view.Query(WorkspaceSymbolQuery{Text: "module042.procedure00042", Mode: WorkspaceSymbolQueryQualified}))
+			}
+			b.ReportMetric(float64(resultCount)/float64(b.N), "results/op")
+		})
 	}
 }
 

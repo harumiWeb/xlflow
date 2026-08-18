@@ -4679,6 +4679,74 @@ End Sub
 	}
 }
 
+func TestAnalyzerByRefPathFilterRetainsExcludedProjectCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Receiver.bas", `Option Explicit
+Public Sub ReplaceText(ByRef target As String)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  receiver.ReplaceText count
+End Sub
+`)
+
+	findings, err := (Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return strings.EqualFold(filepath.Base(path), "Main.bas")
+		},
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA228")
+	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
+		t.Fatalf("path-filtered ByRef resolution lost excluded project candidate: %+v", got)
+	}
+}
+
+func TestAnalyzerByRefDoesNotIndexTestsAsProjectCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  TestHelper count
+End Sub
+`)
+	testsDir := filepath.Join(dir, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testsDir, "Helper.bas"), []byte(`Option Explicit
+Public Sub TestHelper(ByRef target As String)
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA228"); len(got) != 0 {
+		t.Fatalf("test-only procedure became a project ByRef candidate: %+v", got)
+	}
+}
+
+func TestProjectByRefSymbolIndexHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, count, err := projectByRefSymbolIndex(ctx, t.TempDir(), config.Default(), nil, nil)
+	if !errors.Is(err, context.Canceled) || count != 0 {
+		t.Fatalf("canceled ByRef index build = (%d, %v), want (0, context.Canceled)", count, err)
+	}
+}
+
 func TestAnalyzerByRefSkipsAmbiguousCallsAndHonorsSuppression(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

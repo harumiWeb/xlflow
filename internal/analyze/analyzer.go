@@ -109,7 +109,7 @@ type Analyzer struct {
 	typeDBResolutionIncomplete bool
 	visibleConstants           map[string]bool
 	visibleConstantValues      map[string]constexpr.Value
-	byRefSymbols               []intel.Symbol
+	byRefSymbolIndex           *intel.WorkspaceResolutionView
 	errorGuardAliases          map[string]bool
 	errorValueWrappers         map[string]bool
 	eventSafeProcedures        map[string]bool
@@ -518,14 +518,14 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	}
 	if needsByRefAnalysis {
 		finishStage = analysisstats.Measure(ctx, "project_symbols")
-		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
-		finishStage(len(byRefSymbols), err)
+		byRefSymbolIndex, symbolCount, err := projectByRefSymbolIndex(ctx, a.RootDir, a.Config, a.PathFilter, parsedFiles)
+		finishStage(symbolCount, err)
 		if err != nil {
 			return Result{}, err
 		}
-		analysis.byRefSymbols = byRefSymbols
+		analysis.byRefSymbolIndex = byRefSymbolIndex
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
-			recorder.Add("project_symbol_count", uint64(len(byRefSymbols)))
+			recorder.Add("project_symbol_count", uint64(symbolCount))
 		}
 	}
 	findings := cycleFindings
@@ -782,35 +782,93 @@ func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.Reso
 	return finding
 }
 
-// projectByRefSymbols builds the batch project's procedure index once. ByRef
-// diagnostics resolve every call through this immutable slice instead of
-// rediscovering the entire source tree through symbols.Inspect for each call
-// site.
-func projectByRefSymbols(rootDir string, cfg config.Config) ([]intel.Symbol, error) {
-	return (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
+// projectByRefSymbolIndex builds the batch project's immutable symbol index
+// once. A normal full-project analysis can reuse the already parsed documents;
+// a path-filtered analysis intentionally falls back to the complete workspace
+// collection because excluded modules remain valid project-local call targets.
+func projectByRefSymbolIndex(ctx context.Context, rootDir string, cfg config.Config, pathFilter func(string) bool, parsedFiles []parsedFile) (*intel.WorkspaceResolutionView, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	var projectSymbols []intel.Symbol
+	if pathFilter != nil {
+		var err error
+		projectSymbols, err = (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
+		if err != nil {
+			return nil, 0, err
+		}
+	} else {
+		symbolAnalyzer := intel.Analyzer{RootDir: rootDir, Config: cfg}
+		seen := make(map[string]struct{}, len(parsedFiles))
+		for _, file := range parsedFiles {
+			if err := ctx.Err(); err != nil {
+				return nil, len(projectSymbols), err
+			}
+			_, included, err := symbols.SourceFileForPath(rootDir, cfg, file.Path)
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			if !included {
+				continue
+			}
+			key, err := projectByRefSourcePathKey(file.Path)
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			fileSymbols, err := symbolAnalyzer.DocumentSymbolsContext(ctx, file.intelDocument())
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			for _, symbol := range fileSymbols {
+				// WorkspaceSymbols uses IncludeLabels=false. Keep labels out of
+				// the batch index so the parsed-document reuse path preserves
+				// that historical candidate set.
+				switch strings.ToLower(strings.TrimSpace(symbol.Kind)) {
+				case "label", "line_number_label":
+					continue
+				}
+				// DocumentSymbolsContext also projects UserForm designer
+				// controls as field symbols. The workspace collection used by
+				// the old batch path contains source fields, but not those
+				// designer-only projections.
+				if strings.EqualFold(strings.TrimSpace(symbol.Kind), "field") && symbol.ModuleKind == "" && symbol.Visibility == "" && symbol.Parent == "" {
+					continue
+				}
+				projectSymbols = append(projectSymbols, symbol)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, len(projectSymbols), err
+	}
+	return intel.NewWorkspaceResolutionView(projectSymbols), len(projectSymbols), nil
+}
+
+func projectByRefSourcePathKey(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	key := filepath.Clean(abs)
+	if os.PathSeparator == '\\' {
+		key = strings.ToLower(key)
+	}
+	return key, nil
 }
 
 func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
-	needle := strings.ToLower(strings.TrimSpace(query.Text))
-	if needle == "" || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
+	if a.byRefSymbolIndex == nil || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
 		return nil, nil
 	}
-	out := make([]intel.Symbol, 0)
-	for _, sym := range a.byRefSymbols {
-		match := strings.EqualFold(sym.Name, needle)
-		if query.Mode == intel.WorkspaceSymbolQueryQualified {
-			qualified := strings.TrimSpace(sym.Module)
-			if qualified != "" {
-				qualified += "."
-			}
-			qualified += sym.Name
-			match = strings.EqualFold(qualified, needle)
-		}
-		if match {
-			out = append(out, sym)
-		}
-	}
-	return out, nil
+	return a.byRefSymbolIndex.Query(query), nil
 }
 
 func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
