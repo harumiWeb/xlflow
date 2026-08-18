@@ -59,6 +59,14 @@ unresolved path. Consumers may request an explicit view, such as normal flow
 without exceptional edges, when the rule's contract calls for it; uncertainty
 within that selected view still participates.
 
+Each immutable graph revision owns reusable query indexes for statement-to-block
+lookup and incoming/outgoing edge traversal. The index also retains the
+conservative reachability sets for the supported edge-filter views. Graph value
+copies may share these read-only indexes, while defensive clones and graph
+transformations rebuild them together with their copied or changed slices.
+Graphs constructed directly by internal callers without an index use a
+correctness-preserving fallback index.
+
 Cache the document CFG on the immutable `AnalysisSnapshot`, using the same
 ownership, concurrency, retryable-cancellation, and defensive-copy contract as
 procedure IR. Editor snapshots build it lazily from cached IR; batch snapshots
@@ -106,10 +114,14 @@ introduced in an adapter.
   false confidence on malformed or dynamically targeted control flow.
 - Positive: the graph remains protocol-neutral and safe after parser retirement
   because it contains only Go-owned IR values and ranges.
+- Positive: repeated analyzer queries reuse immutable lookup, adjacency, and
+  reachability data instead of rebuilding maps or scanning all edges.
 - Negative: treating every executable statement as a potential fault site adds
   edges and can reduce precision; ADR-0023 does not narrow this fallback.
 - Negative: path-sensitive error modes and conservative unknown flow make graph
   construction and query testing more complex than a structured-only CFG.
+- Negative: each built graph retains additional index memory, and transformed
+  graphs must rebuild the index when their edge set changes.
 - Negative: callers must choose a flow view deliberately; using a normal-only
   view for a general guarantee would be unsound.
 - Limitation: graph IDs are stable only for the same document revision and are

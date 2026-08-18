@@ -756,4 +756,5 @@ func (b *builder) finish() {
 		out = append(out, edge)
 	}
 	b.graph.Edges = out
+	b.graph.query = buildQueryIndex(b.graph)
 }
