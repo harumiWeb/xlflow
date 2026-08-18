@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives for valid colon-separated dynamic-array
+  declarations such as `Dim values(): ReDim values(...)`. The dedicated
+  lifecycle pass now carries that allocation into subsequent array operations
+  while preserving fixed-array `ReDim` diagnostics.
+
 - Reduced `VBA227` false positives when an allocated project-local array return
   is passed directly to a private `ByRef` array helper, including nested calls
   on one source line. Unknown and conditionally allocated returns remain

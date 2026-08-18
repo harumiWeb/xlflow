@@ -5009,6 +5009,44 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227TreatsInlineDimReDimAsAllocation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal lower As Long, ByVal upper As Long)
+  Dim values() As String: ReDim values(lower To upper)
+  Dim i As Long
+  For i = lower To upper: values(i) = "ok": Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an inline plain ReDim should establish allocation before indexing: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227StillRejectsInlineReDimOfFixedArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values(0 To 1) As Long: ReDim values(0 To 2)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("an inline ReDim must still reject a fixed array: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesStringAssignmentToByteArray(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -5177,6 +5215,31 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("qualified and nested Split calls should establish array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227TracksModuleArrayAfterSplitOnBothBranches(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As String
+
+Public Sub Run(ByVal text As String, ByVal alternate As Boolean)
+  If alternate Then
+    values() = Split(text, ",")
+  Else
+    values() = Split(text, ",")
+  End If
+  If UBound(values) >= 0 Then Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a module array assigned from Split on every branch should remain allocated: %+v", got)
 	}
 }
 

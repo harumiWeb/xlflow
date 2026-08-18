@@ -55,6 +55,13 @@ element-access diagnostics. `ParamArray` values begin allocated even when the
 caller supplies no arguments; their extent and bounds may remain unknown.
 Unknown Variant and external values do not establish allocation.
 
+A colon-separated declaration followed by an allocation, such as
+`Dim values(): ReDim values(lower To upper)`, is one valid dynamic-array
+allocation boundary. `VBA227` evaluates the `ReDim` before later source lines
+and must not infer a fixed shape from the later `ReDim` bounds. A plain `ReDim`
+therefore establishes the allocation before subsequent bounds and indexed
+accesses are checked.
+
 An `IsArray(variant)` true branch establishes array-ness for that Variant, so a
 whole-array assignment from the guarded Variant can establish the target's
 allocation. The false branch remains unknown until a recognized array factory

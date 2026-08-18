@@ -165,6 +165,10 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison && !objectArrayDiagnosticsApplicable {
 		return nil
 	}
+	vba227Variables := variables
+	if a.Config.Analyze.DetectArrayLifecycleSafety {
+		vba227Variables = arrayVBA227Variables(variables, file, proc)
+	}
 	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
 	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
 	initial := arrayInitialState(variables)
@@ -177,7 +181,25 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	constants := arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants)
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
-		findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants, capacityGuards)...)
+		legacyFindings := a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants, capacityGuards)
+		if !a.Config.Analyze.DetectArrayLifecycleSafety {
+			findings = append(findings, legacyFindings...)
+			return uniqueArrayFindings(findings)
+		}
+		for _, finding := range legacyFindings {
+			if finding.Code != "VBA227" {
+				findings = append(findings, finding)
+			}
+		}
+		vba227Initial := arrayInitialState(vba227Variables)
+		vba227Initial = applyArrayInternalStorageConfiguration(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
+		vba227Initial = applyArrayByRefEntryStates(vba227Initial, proc, vba227Variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
+		vba227Initial = applyArrayModuleEntryState(vba227Initial, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
+		for _, finding := range a.arrayVBA227LinearFindings(file, proc, ctx, vba227Variables, vba227Initial, constants, capacityGuards) {
+			if finding.Code == "VBA227" {
+				findings = append(findings, finding)
+			}
+		}
 		return uniqueArrayFindings(findings)
 	}
 
@@ -212,10 +234,15 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	})
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
 		vba227Graph := arrayVBA227Graph(proc, ctx)
-		walkArrayCFGWithSourceLines(&vba227Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-			out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
+		vba227Initial := arrayInitialState(vba227Variables)
+		vba227Initial = applyArrayInternalStorageConfiguration(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
+		vba227Initial = applyArrayByRefEntryStates(vba227Initial, proc, vba227Variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
+		vba227Initial = applyArrayModuleEntryState(vba227Initial, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
+		vba227CapacityGuards := arrayResumeNextCapacityGuards(file, proc, vba227Variables)
+		walkArrayCFGWithSourceLines(&vba227Graph, file.Lines, vba227Initial, func(text string, line int, in arrayFlowState) arrayFlowState {
+			out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, vba227CapacityGuards)
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
-				out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+				out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 			}
 			for _, finding := range issues {
 				if finding.Code != "VBA227" {
@@ -230,8 +257,8 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 			return out
 		}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 			out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
-			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
+			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
+			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
 		})
 	}
 	sortFindings(findings)
@@ -391,6 +418,50 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 	}
 	sortFindings(findings)
 	return findings
+}
+
+func (a Analyzer) arrayVBA227LinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) []Finding {
+	var findings []Finding
+	seen := map[string]bool{}
+	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		var issues []Finding
+		state, issues = a.arrayVBA227Transfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants, capacityGuards)
+		for _, finding := range issues {
+			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
+			if !seen[key] {
+				seen[key] = true
+				findings = append(findings, finding)
+			}
+		}
+	}
+	sortFindings(findings)
+	return findings
+}
+
+func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) (arrayFlowState, []Finding) {
+	if redim, ok := inlineArrayRedimText(text); ok {
+		text = redim
+	}
+	return a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
+}
+
+func inlineArrayRedimText(text string) (string, bool) {
+	colon := strings.IndexByte(text, ':')
+	if colon < 0 {
+		return "", false
+	}
+	prefix := strings.TrimSpace(strings.ToLower(text[:colon]))
+	if !strings.HasPrefix(prefix, "dim ") && !strings.HasPrefix(prefix, "static ") {
+		return "", false
+	}
+	redim := strings.TrimSpace(text[colon+1:])
+	if next := strings.IndexByte(redim, ':'); next >= 0 {
+		redim = strings.TrimSpace(redim[:next])
+	}
+	if !strings.HasPrefix(strings.ToLower(redim), "redim ") {
+		return "", false
+	}
+	return redim, true
 }
 
 func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable) []arrayResumeNextCapacityGuard {
@@ -3566,6 +3637,60 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 		variables[key] = variable
 	}
 	return variables
+}
+
+// arrayVBA227Variables overlays the narrow declaration facts needed by the
+// source-line VBA227 pass. The legacy declaration scanner is intentionally
+// retained for the historical array rules, but it can span a colon-separated
+// `Dim ...: ReDim ...` line and mistake the ReDim bounds for declaration
+// bounds. Procedure IR identifies the declaration's dynamic shape without
+// that ambiguity.
+func arrayVBA227Variables(baseVariables map[string]arrayVariable, file parsedFile, proc sourceProcedure) map[string]arrayVariable {
+	variables := make(map[string]arrayVariable, len(baseVariables))
+	for key, variable := range baseVariables {
+		variable.dimensions = append([]arrayDimension(nil), variable.dimensions...)
+		variables[key] = variable
+	}
+	base := optionBase(file.Lines)
+	for _, declaration := range proc.Declarations {
+		key := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if key == "" || !declaration.IsArray || declaration.ValueShape != procedureir.ValueShapeDynamicArray || !arrayDeclarationHasInlineRedim(file.Lines, declaration) {
+			continue
+		}
+		variable, ok := variables[key]
+		if !ok {
+			variable = arrayVariable{
+				name:        declaration.Name,
+				typ:         declaration.Type,
+				isArray:     true,
+				isVariant:   strings.EqualFold(strings.TrimSpace(declaration.Type), "Variant"),
+				isObject:    declaration.IsObject,
+				knownScalar: false,
+			}
+		}
+		variable.name = declaration.Name
+		variable.typ = declaration.Type
+		variable.isArray = true
+		variable.isVariant = strings.EqualFold(strings.TrimSpace(declaration.Type), "Variant")
+		variable.isObject = declaration.IsObject
+		variable.dimensions = parameterArrayDimensions(declaration.ArrayBounds, base)
+		variable.fixed = declaration.ValueShape == procedureir.ValueShapeFixedArray || len(variable.dimensions) > 0
+		variables[key] = variable
+	}
+	return variables
+}
+
+func arrayDeclarationHasInlineRedim(lines []string, declaration procedureir.Declaration) bool {
+	line := declaration.Range.StartLine
+	if line < 1 || line > len(lines) {
+		return false
+	}
+	text := strings.ToLower(normalizedCodeLine(lines[line-1]))
+	colon := strings.IndexByte(text, ':')
+	if colon < 0 {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(text[colon+1:]), "redim ")
 }
 
 func parameterArrayDimensions(bounds []procedureir.ArrayBound, base int) []arrayDimension {
