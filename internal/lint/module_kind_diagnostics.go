@@ -73,9 +73,8 @@ func (w *moduleKindDiagnosticWalker) walk(node *tree_sitter.Node, state moduleWa
 		if strings.HasPrefix(kind, "conditional_") {
 			header = procedureHeaderNode(node)
 		}
-		if state.module && header != nil && strings.EqualFold(visibilityText(header, w.source), "Friend") &&
-			(w.moduleKind == "standard" || w.moduleKind == "document") {
-			w.add(header, declarationNameNode(header), "VB050", "invalid_friend_module", declarationNodeName(header, w.source), "Friend procedures are not valid in standard or document modules.")
+		if state.module && header != nil && strings.EqualFold(visibilityText(header, w.source), "Friend") && w.moduleKind == "standard" {
+			w.add(header, declarationNameNode(header), "VB050", "invalid_friend_module", declarationNodeName(header, w.source), "Friend procedures are not valid in standard modules.")
 		}
 		if strings.HasPrefix(kind, "conditional_") {
 			// The conditional procedure helper owns branch traversal. Its body

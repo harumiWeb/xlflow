@@ -9,6 +9,9 @@ All notable changes to xlflow will be documented in this file.
   interprocedural summaries and entry states through dependency worklists.
   Diagnostic output and conservative propagation semantics are unchanged.
 
+- Fixed `VB050` false positives for `Friend` procedures in worksheet and
+  `ThisWorkbook` document modules. `Friend` remains rejected in standard
+  modules, matching Excel/VBE behavior and issue #656.
 - Added opt-in `xlflow analyze --performance-log` batch-analyzer profiling.
   Stage timings, result counts, outcomes, and stable workload counters are
   written to stderr without changing analyzer findings, exit codes, or the
