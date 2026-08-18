@@ -19,7 +19,9 @@ func CloneDocument(in Document) Document {
 // Clone returns a deep copy of a graph.
 func Clone(in Graph) Graph {
 	out := in
-	out.Procedure.Parameters = append([]procedureir.Parameter(nil), in.Procedure.Parameters...)
+	out.Procedure.Parameters = cloneParameters(in.Procedure.Parameters)
+	out.Procedure.ArrayBounds = cloneArrayBounds(in.Procedure.ArrayBounds)
+	out.Procedure.ConditionalBranches = append([]procedureir.ConditionalBranch(nil), in.Procedure.ConditionalBranches...)
 	out.Blocks = make([]Block, len(in.Blocks))
 	for i := range in.Blocks {
 		out.Blocks[i] = in.Blocks[i]
@@ -44,6 +46,33 @@ func Clone(in Graph) Graph {
 	out.UnknownFlowSources = append([]BlockID(nil), in.UnknownFlowSources...)
 	out.ValidationFacts = append([]ValidationFact(nil), in.ValidationFacts...)
 	return out
+}
+
+func cloneParameters(in []procedureir.Parameter) []procedureir.Parameter {
+	out := append([]procedureir.Parameter(nil), in...)
+	for i := range out {
+		out[i].DefaultRange = cloneRangePointer(in[i].DefaultRange)
+		out[i].BoundsRange = cloneRangePointer(in[i].BoundsRange)
+		out[i].ArrayBounds = cloneArrayBounds(in[i].ArrayBounds)
+	}
+	return out
+}
+
+func cloneArrayBounds(in []procedureir.ArrayBound) []procedureir.ArrayBound {
+	out := append([]procedureir.ArrayBound(nil), in...)
+	for i := range out {
+		out[i].LowerRange = cloneRangePointer(in[i].LowerRange)
+		out[i].UpperRange = cloneRangePointer(in[i].UpperRange)
+	}
+	return out
+}
+
+func cloneRangePointer(in *vbaast.Range) *vbaast.Range {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func cloneExpression(in *procedureir.Expression) *procedureir.Expression {

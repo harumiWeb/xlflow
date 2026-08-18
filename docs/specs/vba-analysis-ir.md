@@ -227,7 +227,8 @@ Recovery acceptance belongs to the consumer:
 An `internal/vba/intel.AnalysisSnapshot` owns the syntax IR for one immutable
 document revision. The cache:
 
-- builds lazily from the snapshot-owned `ParsedDocument`;
+- builds lazily from the snapshot-owned `ParsedDocument`, or accepts a
+  caller-supplied immutable IR for the exact batch revision;
 - is safe for concurrent readers and performs at most one IR build per
   snapshot;
 - shares the same parsed document already used by snapshot symbols,
@@ -235,6 +236,10 @@ document revision. The cache:
 - returns defensive copies so callers cannot mutate cached slices or nested
   candidate data; and
 - is retired with the snapshot and never closes the parsed document itself.
+
+Batch analysis may construct the IR before creating the snapshot and seed it
+through `intel.NewAnalysisSnapshotWithArtifacts`. The snapshot deep-copies the
+IR at that boundary; parsed-document ownership remains unchanged.
 
 An incremental edit creates a new parsed-document snapshot and a new
 single-flight document result, but a successor within the same open lifecycle

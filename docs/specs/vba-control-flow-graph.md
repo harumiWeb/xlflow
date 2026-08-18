@@ -240,14 +240,18 @@ new public diagnostic ID.
 
 ## Snapshot Cache
 
-An `internal/vba/intel.AnalysisSnapshot` owns one lazy document CFG cache for
-its immutable revision. The cache:
+An `internal/vba/intel.AnalysisSnapshot` owns one document CFG cache for its
+immutable revision. Editor snapshots initialize it lazily; batch snapshots
+may seed it with a CFG built from the same revision's IR. The cache:
 
-- builds from the snapshot's cached procedure IR;
+- builds from the snapshot's cached procedure IR when it is not pre-seeded;
 - performs at most one build and caches either its result or error;
 - is safe for concurrent readers;
 - returns defensive copies; and
 - retires with the snapshot without retaining parser state.
+
+`NewAnalysisSnapshotWithArtifacts` deep-copies a supplied CFG at the snapshot
+boundary and keeps the existing cancellation and defensive-copy behavior.
 
 An incremental successor may reuse completed procedure graph fragments when the
 procedure source hash and module-context hash both match. Cached ranges are

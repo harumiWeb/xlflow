@@ -3883,7 +3883,7 @@ End Sub
 	}
 }
 
-func TestBatchTypedExcelRulesReusePreparedParsedDocument(t *testing.T) {
+func TestBatchTypedExcelRulesReusePreparedAnalysisArtifacts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
@@ -3901,8 +3901,13 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: dir, Path: path}, parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlFlow := vbacfg.BuildDocument(ir)
 	document := intel.Document{Path: path, Source: string(source)}
-	document.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(document, parsed)
+	document = batchIntelDocument(document, parsed, ir, controlFlow)
 	defer document.Snapshot.Retire()
 	db, err := vbadb.LoadBuiltin()
 	if err != nil {
@@ -3923,6 +3928,18 @@ End Sub
 	}
 	if got := document.Snapshot.ParseCount(); got != 1 {
 		t.Fatalf("shared VBA215/VBA218 snapshot parse count = %d, want 1", got)
+	}
+	if _, hit, err := document.Snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		t.Fatal("seeded batch snapshot rebuilt procedure IR")
+		return procedureir.DocumentIR{}, nil
+	}); err != nil || !hit {
+		t.Fatalf("seeded procedure IR cache = (hit=%v, err=%v)", hit, err)
+	}
+	if _, hit, err := document.Snapshot.ControlFlowGraphs(func() (vbacfg.Document, error) {
+		t.Fatal("seeded batch snapshot rebuilt CFG")
+		return vbacfg.Document{}, nil
+	}); err != nil || !hit {
+		t.Fatalf("seeded CFG cache = (hit=%v, err=%v)", hit, err)
 	}
 }
 

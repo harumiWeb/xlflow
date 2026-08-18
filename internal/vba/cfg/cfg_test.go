@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -113,6 +114,44 @@ End Sub
 	if len(first.Graphs[0].Procedure.Parameters) != 0 ||
 		first.Graphs[0].Blocks[5].Statement.Text == "mutated input" {
 		t.Fatal("BuildDocument retained mutable input storage")
+	}
+}
+
+func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
+	defaultRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 2, EndByte: 4}
+	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 5, EndByte: 8}
+	lowerRange := vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 9, EndByte: 10}
+	upperRange := vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 11, EndByte: 12}
+	procedureRange := vbaast.Range{StartLine: 1, EndLine: 4, StartByte: 0, EndByte: 20}
+	graph := Graph{Procedure: procedureir.ProcedureSymbol{
+		Parameters: []procedureir.Parameter{{
+			DefaultRange: &defaultRange,
+			BoundsRange:  &boundsRange,
+			ArrayBounds:  []procedureir.ArrayBound{{LowerRange: &lowerRange, UpperRange: &upperRange}},
+		}},
+		ArrayBounds:      []procedureir.ArrayBound{{LowerRange: &lowerRange, UpperRange: &upperRange}},
+		DeclarationRange: procedureRange,
+	}}
+	wantDefaultStart := graph.Procedure.Parameters[0].DefaultRange.StartByte
+	wantBoundsEnd := graph.Procedure.Parameters[0].BoundsRange.EndByte
+	wantParameterLowerStart := graph.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte
+	wantParameterUpperEnd := graph.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte
+	wantProcedureLowerStart := graph.Procedure.ArrayBounds[0].LowerRange.StartByte
+	wantProcedureUpperEnd := graph.Procedure.ArrayBounds[0].UpperRange.EndByte
+	clone := Clone(graph)
+	clone.Procedure.Parameters[0].DefaultRange.StartByte++
+	clone.Procedure.Parameters[0].BoundsRange.EndByte++
+	clone.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte++
+	clone.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte++
+	clone.Procedure.ArrayBounds[0].LowerRange.StartByte++
+	clone.Procedure.ArrayBounds[0].UpperRange.EndByte++
+	if graph.Procedure.Parameters[0].DefaultRange.StartByte != wantDefaultStart ||
+		graph.Procedure.Parameters[0].BoundsRange.EndByte != wantBoundsEnd ||
+		graph.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte != wantParameterLowerStart ||
+		graph.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte != wantParameterUpperEnd ||
+		graph.Procedure.ArrayBounds[0].LowerRange.StartByte != wantProcedureLowerStart ||
+		graph.Procedure.ArrayBounds[0].UpperRange.EndByte != wantProcedureUpperEnd {
+		t.Fatal("Clone shares procedure signature range storage")
 	}
 }
 
