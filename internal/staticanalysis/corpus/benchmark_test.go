@@ -94,11 +94,11 @@ func benchmarkRealWorldCorpusAnalyzeOnly(b *testing.B, corpusRoot string, projec
 		b.Fatalf("load config for %q: %v", project.ID, err)
 	}
 
+	recorder := analysisstats.NewRecorder()
+	ctx := analysisstats.WithRecorder(context.Background(), recorder)
 	b.ReportAllocs()
 	b.ResetTimer()
 	var findings, warnings int
-	recorder := analysisstats.NewRecorder()
-	ctx := analysisstats.WithRecorder(context.Background(), recorder)
 	for i := 0; i < b.N; i++ {
 		result, err := (analyze.Analyzer{RootDir: workspace.Root, Config: cfg}).RunResultContext(ctx)
 		if err != nil {

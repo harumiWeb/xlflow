@@ -804,7 +804,9 @@ existing `BenchmarkRealWorldCorpus` `std-vba` and `ronecone` analyze-only
 sub-benchmarks. Both tasks use `-benchmem -benchtime=1x`; on Windows they run
 through `scripts/dev/go.ps1` to keep CGO and tree-sitter toolchain selection
 consistent. The benchmark output should retain `ns/op`, allocations, findings,
-and the performance-log stage/counter records.
+and the `stage_*` / `counter_*` benchmark metrics derived from the attached
+analysis recorder; these are Go benchmark metrics, not stderr records from
+`analyze --performance-log`.
 
 Do not use absolute elapsed-time assertions to fail CI. For a useful before /
 after comparison, keep the Go version, machine, power state, benchmark filter,
