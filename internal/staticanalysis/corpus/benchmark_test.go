@@ -1,10 +1,14 @@
 package corpus
 
 import (
+	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/analyze"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 )
 
 var realWorldCorpusBenchmarkProjectIDs = []string{"std-vba", "ronecone"}
@@ -93,8 +97,10 @@ func benchmarkRealWorldCorpusAnalyzeOnly(b *testing.B, corpusRoot string, projec
 	b.ReportAllocs()
 	b.ResetTimer()
 	var findings, warnings int
+	recorder := analysisstats.NewRecorder()
+	ctx := analysisstats.WithRecorder(context.Background(), recorder)
 	for i := 0; i < b.N; i++ {
-		result, err := exec.runAnalyze(workspace.Root, cfg)
+		result, err := (analyze.Analyzer{RootDir: workspace.Root, Config: cfg}).RunResultContext(ctx)
 		if err != nil {
 			b.Fatalf("analyze %q: %v", project.ID, err)
 		}
@@ -104,4 +110,23 @@ func benchmarkRealWorldCorpusAnalyzeOnly(b *testing.B, corpusRoot string, projec
 	b.ReportMetric(float64(findings)/float64(b.N), "findings/op")
 	b.ReportMetric(float64(project.SourceCounts.Total()), "source-files/op")
 	b.ReportMetric(float64(warnings)/float64(b.N), "warnings/op")
+	reportCorpusAnalysisRecorderMetrics(b, recorder, b.N)
+}
+
+func reportCorpusAnalysisRecorderMetrics(b *testing.B, recorder *analysisstats.Recorder, iterations int) {
+	b.Helper()
+	if recorder == nil || iterations <= 0 {
+		return
+	}
+	stages, counters := recorder.Totals()
+	for _, stage := range stages {
+		metricName := "stage_" + strings.ReplaceAll(stage.Name, "-", "_")
+		b.ReportMetric(float64(stage.Elapsed.Nanoseconds())/float64(iterations), metricName+"-ns/op")
+		b.ReportMetric(float64(stage.Calls)/float64(iterations), metricName+"-calls/op")
+		b.ReportMetric(float64(stage.ResultCount)/float64(iterations), metricName+"-results/op")
+	}
+	for _, counter := range counters {
+		metricName := "counter_" + strings.ReplaceAll(counter.Name, "-", "_")
+		b.ReportMetric(float64(counter.Value)/float64(iterations), metricName+"/op")
+	}
 }

@@ -778,6 +778,41 @@ Do not parallelize VBE cases or infer a hang from the broad `go test ./...`
 duration; Excel/COM tests have a materially different runtime profile from
 the Excel-free corpus checks.
 
+### Batch analyzer stage profiling and scaling benchmarks
+
+Issue #647 adds a separate batch-analyzer profiling path. The opt-in
+`xlflow analyze --performance-log` flag emits stage timings, result counts, and
+workload counters to stderr while leaving analyzer findings and JSON stdout
+unchanged. The records are intended for same-machine comparisons and are not
+CI timing thresholds. The stage names and counter names are stable so a profile
+can be compared across analyzer changes; use the `outcome` field to distinguish
+successful, failed, and canceled stages.
+
+Run the deterministic synthetic scaling benchmark and the real-world corpus
+hotspot benchmark with the repository tasks:
+
+```powershell
+rtk task bench:analyze
+rtk task bench:corpus
+```
+
+`bench:analyze` generates its 100-, 500-, and 1,000-procedure projects outside
+the timed region. The generated projects use multiple modules, project-local
+calls, ByRef-heavy calls, object state flow, and branching CFGs so stage
+scaling can be compared against a known workload. `bench:corpus` runs the
+existing `BenchmarkRealWorldCorpus` `std-vba` and `ronecone` analyze-only
+sub-benchmarks. Both tasks use `-benchmem -benchtime=1x`; on Windows they run
+through `scripts/dev/go.ps1` to keep CGO and tree-sitter toolchain selection
+consistent. The benchmark output should retain `ns/op`, allocations, findings,
+and the performance-log stage/counter records.
+
+Do not use absolute elapsed-time assertions to fail CI. For a useful before /
+after comparison, keep the Go version, machine, power state, benchmark filter,
+and sample count constant, and report any unusually slow run with its complete
+command and environment. Benchmark generation is test-only infrastructure and
+must not run from ordinary `analyze`, `check`, corpus snapshot, or Excel/VBE
+oracle workflows.
+
 ## Verification requirements
 
 Manifest tests cover valid v2 data and rejection of unknown fields, unsupported

@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in `xlflow analyze --performance-log` batch-analyzer profiling.
+  Stage timings, result counts, outcomes, and stable workload counters are
+  written to stderr without changing analyzer findings, exit codes, or the
+  `--json` stdout envelope. Added deterministic 100/500/1000-procedure scaling
+  and real-world corpus benchmark guidance for comparing stage costs and
+  allocations.
+
 ## v0.30.1
 
 - Fixed `VB053` false positives for valid unqualified Excel/TypeLib enum

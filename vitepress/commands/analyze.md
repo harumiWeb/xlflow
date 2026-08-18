@@ -5,20 +5,23 @@ Analyze VBA source for runtime-risk patterns without Excel COM.
 ## Usage
 
 ```bash
-xlflow analyze
+xlflow analyze [--performance-log]
 ```
 
 ## Options and Arguments
 
-| Option / argument | Description                          | Default |
-| ----------------- | ------------------------------------ | ------- |
-| `--json`          | Return structured analysis findings. | false   |
+| Option / argument   | Description                                                   | Default |
+| ------------------- | ------------------------------------------------------------- | ------- |
+| `--json`            | Return structured analysis findings.                          | false   |
+| `--performance-log` | Write analyzer stage timings and workload counters to stderr. | false   |
 
 ## Examples
 
 ```bash
 xlflow analyze
 xlflow analyze --json
+xlflow analyze --performance-log
+xlflow analyze --json --performance-log
 ```
 
 ## Notes
@@ -50,6 +53,27 @@ fields to JSON output or report new caller-level diagnostics.
 
 > [!IMPORTANT]
 > Findings that block automation return a failure status and exit code `1`.
+
+### Performance logging
+
+`--performance-log` is an opt-in developer aid for understanding batch analyzer
+cost. It writes line-oriented records to stderr, so it is safe to combine with
+`--json` and pipe stdout to a single JSON decoder. Records use
+`operation="analyze/stage"` and include the stage name, elapsed duration, call
+count, result count, and an `ok`, `error`, or `canceled` outcome. The measured
+stages cover source discovery and reading, parsing, procedure IR and CFG
+construction, effect and object summaries, project context and symbols,
+TypeLib loading, project-wide and file/procedure diagnostics, ByRef and
+compile-equivalent diagnostics, suppression finalization, and the complete
+`analyze_total` operation.
+
+The performance output includes stable workload counters: `file_count`,
+`procedure_count`, `statement_count`, `expression_count`, `call_site_count`,
+`cfg_block_count`, `cfg_edge_count`, and `project_symbol_count`. Counters are
+workload measurements, not findings. Timings vary by machine and Go toolchain;
+use them for same-environment comparisons rather than fixed pass/fail limits.
+The flag does not change findings, their order, exit status, or the JSON schema.
+`check` has no performance-log option.
 
 ## Rules
 

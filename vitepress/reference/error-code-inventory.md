@@ -15,6 +15,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `analysis_metrics`
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
+- `analyze_total`
 - `args_invalid`
 - `argument_count`
 - `argument_diagnostics`
@@ -95,6 +96,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `call_expression`
 - `call_fan_in`
 - `call_fan_out`
+- `call_site_count`
 - `call_statement`
 - `capability_version`
 - `capture_state`
@@ -109,7 +111,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cell_diffs`
 - `cells_updated`
 - `certificate_validation_bypass`
+- `cfg_block_count`
 - `cfg_builds`
+- `cfg_edge_count`
 - `cfg_reuses`
 - `cfg_singleflight`
 - `changed_only`
@@ -146,6 +150,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `command_text`
 - `comparison_expression`
 - `compile_equivalent`
+- `compile_equivalent_diagnostics`
 - `compile_invoked`
 - `compile_vba`
 - `complexity_max`
@@ -315,6 +320,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dynamic_identifier`
 - `edit_args_invalid`
 - `edit_coordinates_unreconciled`
+- `effect_summaries`
 - `else_clause`
 - `else_fragment`
 - `else_if`
@@ -381,6 +387,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `expected_error`
 - `explicit_call_requires_parentheses`
 - `export_image_args_invalid`
+- `expression_count`
 - `expression_statement`
 - `external_dependency_count`
 - `external_function_declaration`
@@ -392,9 +399,12 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `fail_fast_with_max_failures`
 - `failed_entries`
 - `field_count`
+- `file_count`
 - `file_input`
 - `file_operation`
 - `file_picker`
+- `file_procedure_diagnostics`
+- `file_read`
 - `files_changed`
 - `files_to_change`
 - `fixed_array_parameter`
@@ -670,6 +680,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `nothing_literal`
 - `number_format`
 - `numeric_type_mismatch`
+- `object_entry_states`
+- `object_procedure_summaries`
 - `obsolete_tls_protocol`
 - `old_name`
 - `older_than`
@@ -756,6 +768,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `preprocessor_if`
 - `probe_mode`
 - `procedure_call`
+- `procedure_count`
 - `procedure_declaration`
 - `procedure_exit`
 - `procedure_ir`
@@ -780,10 +793,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `prog_id`
 - `project_config`
 - `project_config_missing`
+- `project_context`
 - `project_count`
 - `project_create`
 - `project_init`
 - `project_name`
+- `project_symbol_count`
+- `project_symbols`
+- `project_wide_diagnostics`
 - `promotion_invalid`
 - `property_declaration`
 - `property_diagnostics`
@@ -944,6 +961,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_artifacts`
 - `source_bytes`
 - `source_counts`
+- `source_discovery`
 - `source_file`
 - `source_files`
 - `source_line_count`
@@ -981,6 +999,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `sub_declaration`
 - `supported_severities`
 - `suppresses_errors`
+- `suppression_finalization`
 - `symbols_singleflight`
 - `sync_source`
 - `systemprofile_desktop`
@@ -1035,6 +1054,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_preprocessor_else`
 - `type_preprocessor_elseif`
 - `type_preprocessor_if`
+- `typedb_load`
 - `udt_byval`
 - `udt_optional`
 - `ui_button_args_invalid`
