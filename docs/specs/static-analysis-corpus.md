@@ -799,7 +799,11 @@ rtk task bench:corpus
 `bench:analyze` generates its 100-, 500-, and 1,000-procedure projects outside
 the timed region. The generated projects use multiple modules, project-local
 calls, ByRef-heavy calls, object state flow, and branching CFGs so stage
-scaling can be compared against a known workload. `bench:corpus` runs the
+scaling can be compared against a known workload. It also runs the
+`BenchmarkObjectAnalysisWorklist` reverse-ordered object-return chain, whose
+`counter_object_summary_evaluations` and `counter_object_entry_flow_evaluations`
+metrics expose propagation work separately from parsing and diagnostics.
+`bench:corpus` runs the
 existing `BenchmarkRealWorldCorpus` `std-vba` and `ronecone` analyze-only
 sub-benchmarks. Both tasks use `-benchmem -benchtime=1x`; on Windows they run
 through `scripts/dev/go.ps1` to keep CGO and tree-sitter toolchain selection

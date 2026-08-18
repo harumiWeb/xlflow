@@ -222,8 +222,7 @@ type analysisContext struct {
 	arrayReturns       map[string]arrayValue
 	procedures         map[string]procedureSignature
 	procedureResolver  procedureir.SymbolResolver
-	objectSummaries    map[string]objectProcedureSummary
-	objectEntryStates  map[string]map[string]bool
+	objectAnalysis     *objectAnalysisContext
 	worksheetCodenames map[string]string
 	projectEffects     effects.ProjectSummary
 }
@@ -463,13 +462,27 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		}
 	}
 	finishStage = analysisstats.Measure(ctx, "object_procedure_summaries")
-	objectSummaries := buildObjectProcedureSummaries(parsedFiles)
-	finishStage(len(objectSummaries), nil)
+	var objectAnalysis *objectAnalysisContext
+	if a.Config.Analyze.DetectObjectUseBeforeSet {
+		objectAnalysis = buildObjectAnalysisPlans(parsedFiles)
+		objectAnalysis.buildSummaries()
+		finishStage(len(objectAnalysis.summaries), nil)
+	} else {
+		finishStage(0, nil)
+	}
 	finishStage = analysisstats.Measure(ctx, "object_entry_states")
-	objectEntryStates := buildObjectProcedureEntryStates(parsedFiles, objectSummaries)
-	finishStage(len(objectEntryStates), nil)
+	if objectAnalysis != nil {
+		objectAnalysis.buildEntryStates()
+		finishStage(len(objectAnalysis.entries), nil)
+		if recorder := analysisstats.FromContext(ctx); recorder != nil {
+			recorder.Add("object_summary_evaluations", uint64(objectAnalysis.summaryEvaluations))
+			recorder.Add("object_entry_flow_evaluations", uint64(objectAnalysis.entryFlowEvaluations))
+		}
+	} else {
+		finishStage(0, nil)
+	}
 	finishStage = analysisstats.Measure(ctx, "project_context")
-	analysisCtx := a.buildContextWithObjectAnalysis(parsedFiles, objectSummaries, objectEntryStates)
+	analysisCtx := a.buildContextWithObjectAnalysis(parsedFiles, objectAnalysis)
 	finishStage(len(analysisCtx.procedures), nil)
 	analysis := a
 	var warnings []map[string]any
@@ -1491,11 +1504,10 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 }
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
-	objectSummaries := buildObjectProcedureSummaries(files)
-	return a.buildContextWithObjectAnalysis(files, objectSummaries, buildObjectProcedureEntryStates(files, objectSummaries))
+	return a.buildContextWithObjectAnalysis(files, nil)
 }
 
-func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectSummaries map[string]objectProcedureSummary, objectEntryStates map[string]map[string]bool) analysisContext {
+func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnalysis *objectAnalysisContext) analysisContext {
 	ctx := analysisContext{
 		functionReturns:    map[string]string{},
 		functionShapes:     map[string]procedureir.ValueShapeKind{},
@@ -1503,8 +1515,7 @@ func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectSumma
 		functionAmbiguous:  map[string]bool{},
 		arrayReturns:       map[string]arrayValue{},
 		procedures:         map[string]procedureSignature{},
-		objectSummaries:    objectSummaries,
-		objectEntryStates:  objectEntryStates,
+		objectAnalysis:     objectAnalysis,
 		worksheetCodenames: map[string]string{},
 	}
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
@@ -1740,9 +1751,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		}
 		_ = lower
 	}
-	if a.Config.Analyze.DetectObjectUseBeforeSet {
+	if a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
 		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
-		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries, ctx.objectEntryStates[key])...)
+		if plan := ctx.objectAnalysis.plans[key]; plan != nil {
+			findings = append(findings, a.objectUseBeforeSetIRFindingsPlan(plan, ctx.objectAnalysis.summaries, ctx.objectAnalysis.entries[key])...)
+		}
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	findings = suppressDeterministicArrayWarningDuplicates(findings)

@@ -187,11 +187,11 @@ tasks:
         platforms: [linux, darwin]
 
   bench:analyze:
-    desc: Benchmark synthetic batch analysis scaling and report recorder stage metrics
+    desc: Benchmark synthetic batch analysis scaling and object worklist metrics
     cmds:
-      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^BenchmarkSyntheticProject$' -benchmem -benchtime=1x -count 1
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^Benchmark(SyntheticProject|ObjectAnalysisWorklist)$' -benchmem -benchtime=1x -count 1
         platforms: [windows]
-      - cmd: rtk go test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^BenchmarkSyntheticProject$' -benchmem -benchtime=1x -count 1
+      - cmd: rtk go test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^Benchmark(SyntheticProject|ObjectAnalysisWorklist)$' -benchmem -benchtime=1x -count 1
         platforms: [linux, darwin]
 
   verify:security:
