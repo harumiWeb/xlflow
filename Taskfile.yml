@@ -186,6 +186,14 @@ tasks:
       - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only$' -benchmem -benchtime=1x -count 2
         platforms: [linux, darwin]
 
+  bench:analyze:
+    desc: Benchmark synthetic batch analysis scaling and report recorder stage metrics
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^BenchmarkSyntheticProject$' -benchmem -benchtime=1x -count 1
+        platforms: [windows]
+      - cmd: rtk go test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^BenchmarkSyntheticProject$' -benchmem -benchtime=1x -count 1
+        platforms: [linux, darwin]
+
   verify:security:
     desc: Run vulnerability and third-party licence inventory checks
     cmds:

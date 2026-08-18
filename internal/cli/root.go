@@ -47,6 +47,7 @@ import (
 	staticpreflight "github.com/harumiWeb/xlflow/internal/staticanalysis/preflight"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
@@ -7350,7 +7351,8 @@ func (a *app) writeLSPStderr(format string, args ...any) {
 }
 
 func (a *app) analyzeCommand() *cobra.Command {
-	return &cobra.Command{
+	var performanceLog bool
+	cmd := &cobra.Command{
 		Use:   "analyze",
 		Short: "Analyze VBA source for runtime-risk patterns",
 		Args:  cobra.NoArgs,
@@ -7359,7 +7361,16 @@ func (a *app) analyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(cmd.Context())
+			runCtx := cmd.Context()
+			var recorder *analysisstats.Recorder
+			if performanceLog {
+				recorder = analysisstats.NewRecorder()
+				runCtx = analysisstats.WithRecorder(runCtx, recorder)
+			}
+			analyzeResult, err := analyze.Analyzer{RootDir: a.cwd, Config: cfg}.RunResultContext(runCtx)
+			if recorder != nil {
+				writeAnalyzePerformance(a.stderrWriter(), recorder)
+			}
 			if err != nil {
 				return a.writeFailure("analyze", output.ExitEnvironment, "analyze_failed", err)
 			}
@@ -7376,6 +7387,31 @@ func (a *app) analyzeCommand() *cobra.Command {
 			env.Logs = []string{"no analysis findings found"}
 			return a.write(env, output.ExitSuccess)
 		},
+	}
+	cmd.Flags().BoolVar(&performanceLog, "performance-log", false, "log batch analysis stage performance metrics")
+	return cmd
+}
+
+func writeAnalyzePerformance(w io.Writer, recorder *analysisstats.Recorder) {
+	if w == nil || recorder == nil {
+		return
+	}
+	stages, counters := recorder.Totals()
+	for _, stage := range stages {
+		_, _ = fmt.Fprintf(
+			w,
+			"performance operation=%q stage=%q elapsed_ms=%.3f wait_ms=%.3f calls=%d result_count=%d outcome=%q\n",
+			"analyze/stage", stage.Name,
+			float64(stage.Elapsed)/float64(time.Millisecond), float64(stage.Wait)/float64(time.Millisecond),
+			stage.Calls, stage.ResultCount, stage.Outcome,
+		)
+	}
+	for _, counter := range counters {
+		_, _ = fmt.Fprintf(
+			w,
+			"performance operation=%q counter=%q value=%d outcome=%q\n",
+			"analyze/counter", counter.Name, counter.Value, "counter",
+		)
 	}
 }
 
