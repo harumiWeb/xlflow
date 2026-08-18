@@ -105,8 +105,8 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 1272 {
-		t.Fatalf("committed reviews = %d, want 1272", len(reviews))
+	if len(reviews) != 1280 {
+		t.Fatalf("committed reviews = %d, want 1280", len(reviews))
 	}
 	if err := ValidateReviewSources(repoRoot, corpusRoot, reviews); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 1376 || metrics.TP != 682 || metrics.FP != 694 {
+	if metrics.Reviewed != 1384 || metrics.TP != 690 || metrics.FP != 694 {
 		t.Fatalf("committed review metrics = %#v", metrics)
 	}
 	t.Log(FormatReviewMetrics(metrics))
