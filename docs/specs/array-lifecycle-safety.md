@@ -62,6 +62,12 @@ and must not infer a fixed shape from the later `ReDim` bounds. A plain `ReDim`
 therefore establishes the allocation before subsequent bounds and indexed
 accesses are checked.
 
+Known array-factory assignments such as `values() = Split(text, ",")` also
+establish allocation when the VBA expression spans continuation lines. The
+`VBA227` lifecycle pass joins those lines only for recognized `Array`, `Split`,
+and `Filter` whole-array assignments before applying the allocation state; an
+unrelated multiline call remains conservative.
+
 An `IsArray(variant)` true branch establishes array-ness for that Variant, so a
 whole-array assignment from the guarded Variant can establish the target's
 allocation. The false branch remains unknown until a recognized array factory

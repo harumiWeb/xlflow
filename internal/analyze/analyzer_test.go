@@ -5243,6 +5243,35 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227TracksSplitAcrossConditionalLineContinuation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As String
+Private stream As Object
+
+Public Sub Run(ByVal text As String, ByVal useAlternate As Boolean)
+  With stream
+    If useAlternate Then
+      values() = Split(.bufferString, _
+                       ",")
+    Else
+      values() = Split(.bufferString, ",")
+    End If
+  End With
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a Split assignment on every conditional branch should establish allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesIsArrayGuardToVariantAssignment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

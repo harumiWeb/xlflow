@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced `VBA227` false positives after line-continuation `Split` assignments
+  inside conditional and `With` blocks. Recognized array-factory assignments
+  now establish allocation before subsequent bounds and indexed accesses.
+
 - Reduced `VBA227` false positives for valid colon-separated dynamic-array
   declarations such as `Dim values(): ReDim values(...)`. The dedicated
   lifecycle pass now carries that allocation into subsequent array operations

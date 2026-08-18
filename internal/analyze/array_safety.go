@@ -439,10 +439,46 @@ func (a Analyzer) arrayVBA227LinearFindings(file parsedFile, proc sourceProcedur
 }
 
 func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) (arrayFlowState, []Finding) {
+	if line >= 1 && line <= len(file.Lines) && vbaLineContinues(file.Lines[line-1]) && arrayVBA227HasArrayFactoryAssignment(text) {
+		text = arrayLogicalCodeLine(file.Lines, line)
+	}
 	if redim, ok := inlineArrayRedimText(text); ok {
 		text = redim
 	}
 	return a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
+}
+
+func arrayVBA227HasArrayFactoryAssignment(text string) bool {
+	_, rhs, indexed, ok := arrayAssignment(text)
+	if !ok || indexed {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(rhs))
+	return strings.HasPrefix(lower, "array(") || strings.HasPrefix(lower, "split(") || strings.HasPrefix(lower, "filter(")
+}
+
+func arrayLogicalCodeLine(lines []string, line int) string {
+	if line < 1 || line > len(lines) {
+		return ""
+	}
+	logical := ""
+	for index := line; index <= len(lines); index++ {
+		raw := lines[index-1]
+		part := strings.TrimSpace(normalizedCodeLine(raw))
+		if strings.HasSuffix(part, "_") {
+			part = strings.TrimSpace(strings.TrimSuffix(part, "_"))
+		}
+		if part != "" {
+			if logical != "" {
+				logical += " "
+			}
+			logical += part
+		}
+		if !vbaLineContinues(raw) {
+			break
+		}
+	}
+	return logical
 }
 
 func inlineArrayRedimText(text string) (string, bool) {
