@@ -272,6 +272,8 @@ type parsedFileAnalysisResult struct {
 	err       error
 }
 
+type boundedFileAnalyzer func(context.Context, parsedFile, analysisContext, effects.ProjectSummary, *apiTypeIndex) ([]Finding, []Finding, error)
+
 // batchByRefDiagnostics records the result of the one ByRef analysis pass
 // performed for a file revision. The computed bit distinguishes an analyzed
 // file with no findings from callers that still need the Intel fallback.
@@ -623,6 +625,10 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 }
 
 func (a Analyzer) analyzeFilesBounded(ctx context.Context, files []parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]parsedFileAnalysisResult, error) {
+	return a.analyzeFilesBoundedWith(ctx, files, analysisCtx, projectEffects, publicAPITypeIndex, a.analyzeParsedFileBounded)
+}
+
+func (a Analyzer) analyzeFilesBoundedWith(ctx context.Context, files []parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex, analyzeFile boundedFileAnalyzer) ([]parsedFileAnalysisResult, error) {
 	if len(files) == 0 {
 		return nil, nil
 	}
@@ -641,7 +647,11 @@ func (a Analyzer) analyzeFilesBounded(ctx context.Context, files []parsedFile, a
 	defer cancel()
 	jobs := make(chan int)
 	results := make([]parsedFileAnalysisResult, len(files))
-	var workers sync.WaitGroup
+	var (
+		workers       sync.WaitGroup
+		workerErr     error
+		workerErrOnce sync.Once
+	)
 	workers.Add(workerLimit)
 	for worker := 0; worker < workerLimit; worker++ {
 		go func() {
@@ -654,10 +664,13 @@ func (a Analyzer) analyzeFilesBounded(ctx context.Context, files []parsedFile, a
 					if !ok {
 						return
 					}
-					fileFindings, filePreflight, err := a.analyzeParsedFileBounded(workCtx, files[index], analysisCtx, projectEffects, publicAPITypeIndex)
+					fileFindings, filePreflight, err := analyzeFile(workCtx, files[index], analysisCtx, projectEffects, publicAPITypeIndex)
 					results[index] = parsedFileAnalysisResult{findings: fileFindings, preflight: filePreflight, err: err}
 					if err != nil {
-						cancel()
+						workerErrOnce.Do(func() {
+							workerErr = err
+							cancel()
+						})
 						return
 					}
 				}
@@ -680,10 +693,8 @@ sendJobs:
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	for _, result := range results {
-		if result.err != nil {
-			return nil, result.err
-		}
+	if workerErr != nil {
+		return nil, workerErr
 	}
 	return results, nil
 }

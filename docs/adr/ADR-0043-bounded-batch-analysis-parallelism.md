@@ -8,8 +8,8 @@ Accepted
 
 Issue #646 established shared parsing, IR/CFG, project indexes, and reusable
 analysis artifacts as the scalability baseline for `xlflow analyze`. Issue
-#654 follows those changes because parallelizing duplicated or quadratic work
-would amplify the original problem rather than solve it.
+`#654` follows those changes because parallelizing duplicated or quadratic
+work would amplify the original problem rather than solve it.
 
 The batch pipeline constructs project-wide immutable context first, then runs
 multiple independent diagnostics for each parsed source file. That file phase
