@@ -4,7 +4,7 @@ package cfg
 // are copied frequently, so the index is shared by value copies while Clone
 // and graph transformations rebuild it for their independent slice storage.
 type queryIndex struct {
-	blocksByStatement map[int]BlockID
+	blocksByStatement map[int]int
 	outgoing          map[BlockID][]Edge
 	incoming          map[BlockID][]Edge
 	reachableAll      map[BlockID]bool
@@ -13,13 +13,15 @@ type queryIndex struct {
 
 func buildQueryIndex(g Graph) *queryIndex {
 	index := &queryIndex{
-		blocksByStatement: make(map[int]BlockID),
+		blocksByStatement: make(map[int]int),
 		outgoing:          make(map[BlockID][]Edge),
 		incoming:          make(map[BlockID][]Edge),
 	}
-	for _, block := range g.Blocks {
+	for blockIndex, block := range g.Blocks {
 		if block.Kind == BlockStatement && block.StatementID > 0 {
-			index.blocksByStatement[block.StatementID] = block.ID
+			if _, exists := index.blocksByStatement[block.StatementID]; !exists {
+				index.blocksByStatement[block.StatementID] = blockIndex
+			}
 		}
 	}
 	for _, edge := range g.Edges {

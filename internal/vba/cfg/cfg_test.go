@@ -117,6 +117,22 @@ End Sub
 	}
 }
 
+func TestBlockForStatementIndexUsesSlicePositionAndFirstMatch(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 40, Kind: BlockEntry},
+			{ID: 90, Kind: BlockStatement, StatementID: 10},
+			{ID: 120, Kind: BlockStatement, StatementID: 10},
+		},
+	}
+	graph.query = buildQueryIndex(graph)
+	block, ok := graph.BlockForStatement(10)
+	if !ok || block.ID != 90 {
+		t.Fatalf("BlockForStatement(10) = (%+v, %v), want first sparse-ID block", block, ok)
+	}
+}
+
 func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 	defaultRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 2, EndByte: 4}
 	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 5, EndByte: 8}

@@ -48,9 +48,19 @@ func (g Graph) BlockForStatement(statementID int) (Block, bool) {
 	if statementID <= 0 {
 		return Block{}, false
 	}
-	blockID, ok := g.queryIndexes().blocksByStatement[statementID]
-	if ok {
-		return g.block(blockID), true
+	blockIndex, ok := g.queryIndexes().blocksByStatement[statementID]
+	if ok && blockIndex >= 0 && blockIndex < len(g.Blocks) {
+		block := g.Blocks[blockIndex]
+		if block.Kind == BlockStatement && block.StatementID == statementID {
+			return block, true
+		}
+	}
+	// Keep the original scan as a defensive fallback for graph values that
+	// were changed after their index was built or have no indexed statement.
+	for _, block := range g.Blocks {
+		if block.Kind == BlockStatement && block.StatementID == statementID {
+			return block, true
+		}
 	}
 	return Block{}, false
 }
