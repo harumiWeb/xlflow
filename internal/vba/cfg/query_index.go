@@ -4,24 +4,30 @@ package cfg
 // are copied frequently, so the index is shared by value copies while Clone
 // and graph transformations rebuild it for their independent slice storage.
 type queryIndex struct {
-	blocksByStatement map[int]int
-	outgoing          map[BlockID][]Edge
-	incoming          map[BlockID][]Edge
-	reachableAll      map[BlockID]bool
-	reachableNormal   map[BlockID]bool
-	blocksBase        *Block
-	blocksLen         int
-	edgesBase         *Edge
-	edgesLen          int
+	blocksByStatement  map[int]int
+	outgoing           map[BlockID][]Edge
+	incoming           map[BlockID][]Edge
+	reachableAll       map[BlockID]bool
+	reachableNormal    map[BlockID]bool
+	blocksBase         *Block
+	blocksLen          int
+	edgesBase          *Edge
+	edgesLen           int
+	entry              BlockID
+	unknownExit        BlockID
+	unknownFlowSources []BlockID
 }
 
 func buildQueryIndex(g Graph) *queryIndex {
 	index := &queryIndex{
-		blocksByStatement: make(map[int]int),
-		outgoing:          make(map[BlockID][]Edge),
-		incoming:          make(map[BlockID][]Edge),
-		blocksLen:         len(g.Blocks),
-		edgesLen:          len(g.Edges),
+		blocksByStatement:  make(map[int]int),
+		outgoing:           make(map[BlockID][]Edge),
+		incoming:           make(map[BlockID][]Edge),
+		blocksLen:          len(g.Blocks),
+		edgesLen:           len(g.Edges),
+		entry:              g.Entry,
+		unknownExit:        g.UnknownExit,
+		unknownFlowSources: append([]BlockID(nil), g.UnknownFlowSources...),
 	}
 	if len(g.Blocks) > 0 {
 		index.blocksBase = &g.Blocks[0]
@@ -65,6 +71,19 @@ func (index *queryIndex) matches(g Graph) bool {
 	}
 	if len(g.Edges) > 0 && index.edgesBase != &g.Edges[0] {
 		return false
+	}
+	return index.entry == g.Entry && index.unknownExit == g.UnknownExit &&
+		sameBlockIDs(index.unknownFlowSources, g.UnknownFlowSources)
+}
+
+func sameBlockIDs(a, b []BlockID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, id := range a {
+		if b[i] != id {
+			return false
+		}
 	}
 	return true
 }

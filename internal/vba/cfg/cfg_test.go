@@ -149,6 +149,40 @@ func TestBlockForStatementIndexPreservesFirstMatchAfterEarlierMutation(t *testin
 	}
 }
 
+func TestQueryIndexInvalidatesReachabilityInputs(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 1, Kind: BlockEntry},
+			{ID: 2, Kind: BlockStatement, StatementID: 1},
+			{ID: 3, Kind: BlockUnknownExit},
+			{ID: 4, Kind: BlockStatement, StatementID: 2},
+			{ID: 5, Kind: BlockUnknownExit},
+		},
+		Edges: []Edge{{ID: 1, From: 1, To: 2, Class: EdgeNormal}},
+		Entry: 1, UnknownExit: 3,
+	}
+	graph.query = buildQueryIndex(graph)
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{1, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("initial Reachable() = %v, want %v", got, want)
+	}
+
+	graph.Entry = 4
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Reachable() after Entry change = %v, want %v", got, want)
+	}
+
+	graph.UnknownFlowSources = []BlockID{4}
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{2, 3, 4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Reachable() after UnknownFlowSources change = %v, want %v", got, want)
+	}
+
+	graph.UnknownExit = 5
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{2, 4, 5}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Reachable() after UnknownExit change = %v, want %v", got, want)
+	}
+}
+
 func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 	defaultRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 2, EndByte: 4}
 	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 5, EndByte: 8}
