@@ -2323,16 +2323,17 @@ func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context
 			return nil
 		}
 		code := stripLineComment(line)
+		offset := byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})
 		for _, call := range callsOnLine(code) {
 			receiver, _, ok := splitCallTarget(call.Target)
 			if !ok || strings.TrimSpace(receiver) == "" || strings.HasPrefix(strings.TrimSpace(receiver), ".") {
 				continue
 			}
-			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, offset); ok {
 				continue
 			}
 			base := memberReceiverBase(receiver)
-			if base == "" || strings.EqualFold(base, "Me") || a.knownModuleOrNamespaceReceiver(doc, base) {
+			if base == "" || strings.EqualFold(base, "Me") || a.knownMemberReceiverBase(doc, base, offset) {
 				continue
 			}
 			key := fmt.Sprintf("%d:%s", lineNo, strings.ToLower(base))
@@ -2344,6 +2345,23 @@ func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context
 		}
 	}
 	return out
+}
+
+// knownMemberReceiverBase separates an unresolved member chain from an
+// actually undeclared receiver. VB029 only has enough evidence to report the
+// latter: a declared UDT/Object variable may have members that this analyzer
+// cannot resolve, and a VBA.Global function may return a late-bound object.
+func (a Analyzer) knownMemberReceiverBase(doc Document, base string, offset int) bool {
+	if a.knownModuleOrNamespaceReceiver(doc, base) {
+		return true
+	}
+	if a.DB != nil {
+		if _, ok := a.DB.ResolveMember("VBA.Global", base); ok {
+			return true
+		}
+	}
+	_, ok := a.visibleSymbolTypeInfoAtContext(doc, base, offset, nil)
+	return ok
 }
 
 func (a Analyzer) unknownMemberDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {

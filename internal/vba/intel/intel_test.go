@@ -2180,6 +2180,54 @@ End Sub
 	}
 }
 
+func TestDiagnosticsDoNotReportDeclaredUDTMemberReceiver(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "CDPContext.cls"),
+		ModuleKind: "class",
+		Source: `Option Explicit
+
+Private Type cacheResultCDP
+    response As Object
+    Limit As Long
+End Type
+
+Private ResultCDP_Tab As cacheResultCDP
+
+Private Sub AddResult(ByVal id As Long, ByVal RawJson As String)
+    If ResultCDP_Tab.response.Count + 1 > ResultCDP_Tab.Limit Then
+        ResultCDP_Tab.response.RemoveAll
+    End If
+    ResultCDP_Tab.response.Add id, RawJson
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB029"); len(diagnostics) != 0 {
+		t.Fatalf("declared UDT member receiver should not produce VB029: %+v", diagnostics)
+	}
+}
+
+func TestDiagnosticsTreatBuiltinFunctionAsKnownMemberReceiver(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path: filepath.Join(t.TempDir(), "Main.bas"),
+		Source: `Option Explicit
+
+Private Sub FindProcess()
+    Dim proc As Object
+    For Each proc In GetObject("winmgmts:").ExecQuery("Select * from Win32_Process")
+        Debug.Print proc.Name
+    Next proc
+End Sub
+`,
+	}
+
+	if diagnostics := diagnosticsByCode(analyzer.Diagnostics(doc), "VB029"); len(diagnostics) != 0 {
+		t.Fatalf("VBA.GetObject member chain should not produce VB029: %+v", diagnostics)
+	}
+}
+
 func TestDiagnosticsResolveMeInWorkbookDocumentModules(t *testing.T) {
 	root := t.TempDir()
 	analyzer := newTestAnalyzer(t)
