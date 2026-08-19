@@ -259,9 +259,11 @@ type parsedFile struct {
 	Root       *tree_sitter.Node
 	IR         procedureir.DocumentIR
 	CFG        vbacfg.Document
-	// Procedures is the immutable analyzer-facing projection of IR for this
-	// file revision. It is materialized once during batch/realtime file setup
-	// and shared by all rule stages.
+	// Procedures owns the analyzer-facing projection of IR for this file
+	// revision. It is materialized once during batch/realtime file setup and
+	// reused by all rule stages. Callers must treat the sourceProcedure values
+	// and their nested IR/CFG data as read-only; procedures returns an
+	// independent outer slice so field updates cannot mutate this cache.
 	Procedures                []sourceProcedure
 	Parsed                    *vbaast.ParsedDocument
 	IntelDocument             intel.Document
@@ -2066,7 +2068,7 @@ func findingReceiver(finding Finding) string {
 }
 
 func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {
-	procedures := append([]sourceProcedure(nil), file.procedures()...)
+	procedures := file.procedures()
 	for i := range procedures {
 		if i >= len(file.IR.Procedures) {
 			break
@@ -2081,7 +2083,7 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 
 func (file parsedFile) procedures() []sourceProcedure {
 	if file.Procedures != nil {
-		return file.Procedures
+		return append([]sourceProcedure(nil), file.Procedures...)
 	}
 	return sourceProceduresFromIR(file.IR, file.CFG)
 }
