@@ -133,6 +133,22 @@ func TestBlockForStatementIndexUsesSlicePositionAndFirstMatch(t *testing.T) {
 	}
 }
 
+func TestBlockForStatementIndexPreservesFirstMatchAfterEarlierMutation(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 40, Kind: BlockEntry},
+			{ID: 90, Kind: BlockStatement, StatementID: 10},
+		},
+	}
+	graph.query = buildQueryIndex(graph)
+	graph.Blocks = append([]Block{{ID: 5, Kind: BlockStatement, StatementID: 10}}, graph.Blocks...)
+	block, ok := graph.BlockForStatement(10)
+	if !ok || block.ID != 5 {
+		t.Fatalf("BlockForStatement(10) after earlier mutation = (%+v, %v), want inserted block", block, ok)
+	}
+}
+
 func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
 	defaultRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 2, EndByte: 4}
 	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 5, EndByte: 8}

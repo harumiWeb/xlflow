@@ -50,6 +50,14 @@ func (g Graph) BlockForStatement(statementID int) (Block, bool) {
 	}
 	blockIndex, ok := g.queryIndexes().blocksByStatement[statementID]
 	if ok && blockIndex >= 0 && blockIndex < len(g.Blocks) {
+		// A caller may have inserted an earlier matching block after the
+		// index was built. Preserve the original scan's first-match order
+		// before accepting the cached position.
+		for _, block := range g.Blocks[:blockIndex] {
+			if block.Kind == BlockStatement && block.StatementID == statementID {
+				return block, true
+			}
+		}
 		block := g.Blocks[blockIndex]
 		if block.Kind == BlockStatement && block.StatementID == statementID {
 			return block, true
