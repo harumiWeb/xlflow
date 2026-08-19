@@ -21,6 +21,7 @@ func (g Graph) WithoutNormalErrRaiseContinuation() Graph {
 		}
 		g.Edges = append(g.Edges, edge)
 	}
+	g.query = buildQueryIndex(g)
 	return g
 }
 
@@ -47,6 +48,15 @@ func (g Graph) BlockForStatement(statementID int) (Block, bool) {
 	if statementID <= 0 {
 		return Block{}, false
 	}
+	blockIndex, ok := g.queryIndexes().blocksByStatement[statementID]
+	if ok && blockIndex >= 0 && blockIndex < len(g.Blocks) {
+		block := g.Blocks[blockIndex]
+		if block.Kind == BlockStatement && block.StatementID == statementID {
+			return block, true
+		}
+	}
+	// Keep the original scan as a defensive fallback for graph values that
+	// were changed after their index was built or have no indexed statement.
 	for _, block := range g.Blocks {
 		if block.Kind == BlockStatement && block.StatementID == statementID {
 			return block, true
@@ -341,7 +351,14 @@ func (g Graph) CleanupGuaranteed(cleanupStatementIDs []int, selection ExitSelect
 }
 
 func (g Graph) reachableWithout(filter EdgeFilter, removed map[BlockID]bool) map[BlockID]bool {
-	seen := g.physicalReachable(filter, removed)
+	index := g.queryIndexes()
+	if removed == nil {
+		if filter.NormalOnly {
+			return cloneBlockSet(index.reachableNormal)
+		}
+		return cloneBlockSet(index.reachableAll)
+	}
+	seen := physicalReachableWithIndex(g, index, filter, removed)
 	if g.unknownFlowReached(seen) {
 		for _, block := range g.Blocks {
 			if block.Kind == BlockStatement && !removed[block.ID] {
@@ -351,45 +368,7 @@ func (g Graph) reachableWithout(filter EdgeFilter, removed map[BlockID]bool) map
 		if !removed[g.UnknownExit] {
 			seen[g.UnknownExit] = true
 		}
-		seen = g.expandReachable(filter, removed, seen)
-	}
-	return seen
-}
-
-func (g Graph) physicalReachable(filter EdgeFilter, removed map[BlockID]bool) map[BlockID]bool {
-	seen := map[BlockID]bool{}
-	if removed[g.Entry] {
-		return seen
-	}
-	seen[g.Entry] = true
-	return g.expandReachable(filter, removed, seen)
-}
-
-func (g Graph) expandReachable(
-	filter EdgeFilter,
-	removed map[BlockID]bool,
-	seen map[BlockID]bool,
-) map[BlockID]bool {
-	successors := map[BlockID][]BlockID{}
-	for _, edge := range g.Edges {
-		if filter.accepts(edge) && !removed[edge.To] {
-			successors[edge.From] = append(successors[edge.From], edge.To)
-		}
-	}
-	queue := make([]BlockID, 0, len(seen))
-	for id := range seen {
-		queue = append(queue, id)
-	}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, target := range successors[current] {
-			if seen[target] {
-				continue
-			}
-			seen[target] = true
-			queue = append(queue, target)
-		}
+		seen = expandReachableWithIndex(index, filter, removed, seen)
 	}
 	return seen
 }
@@ -406,8 +385,8 @@ func (g Graph) unknownFlowReached(reachable map[BlockID]bool) bool {
 func (g Graph) predecessors(id BlockID, filter EdgeFilter, reachable map[BlockID]bool) []BlockID {
 	var out []BlockID
 	seen := map[BlockID]bool{}
-	for _, edge := range g.Edges {
-		if edge.To == id && filter.accepts(edge) && reachable[edge.From] && !seen[edge.From] {
+	for _, edge := range g.queryIndexes().incoming[id] {
+		if filter.accepts(edge) && reachable[edge.From] && !seen[edge.From] {
 			seen[edge.From] = true
 			out = append(out, edge.From)
 		}

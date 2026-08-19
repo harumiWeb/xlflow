@@ -170,6 +170,20 @@ cleanup use the same conservative reachability. A path through unknown flow or
 `UnknownExit` prevents a guarantee unless the queried property is already
 established before that path diverges.
 
+Built graphs retain immutable per-revision query indexes. Statement-to-block
+lookups and incoming/outgoing edge traversal use these indexes, and the default
+and `NormalOnly` reachability sets are computed once when the graph is built.
+Graph value copies may share the index because it is read-only. `Clone`, graph
+rebasing, and edge-changing transformations rebuild the index with their
+independent graph storage. A Graph literal without an index builds a temporary
+fallback index, preserving the same query semantics for internal callers. The
+`Blocks`, `Edges`, `Entry`, `UnknownExit`, and `UnknownFlowSources` values are
+immutable for an indexed graph revision. If a caller replaces either slice or
+changes any reachability input on a copied graph, the index validity check
+discards the old index and rebuilds it before querying. In-place mutation of
+indexed slice elements is not a supported graph revision; callers should use
+`Clone` or a graph transformation before changing graph contents.
+
 The default guarantee view includes normal and exceptional flow. A consumer may
 explicitly request a narrower view when its rule defines one. Narrowing by flow
 class does not remove uncertain edges of the retained class.
