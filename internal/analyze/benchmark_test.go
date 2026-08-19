@@ -56,6 +56,51 @@ func BenchmarkSyntheticProject(b *testing.B) {
 	}
 }
 
+// BenchmarkSingleModuleSynthetic measures the pathological single-file shapes
+// that do not get represented by project-scale fixtures with many modules.
+// Every source file and its workload metadata are prepared before the timer
+// starts so the timed region contains only analyzer work.
+func BenchmarkSingleModuleSynthetic(b *testing.B) {
+	for _, workload := range singleModuleBenchmarkWorkloads() {
+		workload := workload
+		b.Run(workload.benchmarkName(), func(b *testing.B) {
+			root := b.TempDir()
+			fixture := writeSingleModuleBenchmarkProject(b, root, workload)
+
+			// Keep the benchmark independent of any developer-generated TypeLib
+			// database. A missing database is a valid, deterministic analyzer
+			// configuration for this fixture.
+			b.Setenv(typedb.EnvDir, filepath.Join(b.TempDir(), "typelib"))
+			cfg := config.Default()
+			recorder := analysisstats.NewRecorder()
+			recordSingleModuleBenchmarkDimensions(recorder, fixture)
+			ctx := analysisstats.WithRecorder(context.Background(), recorder)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			findings := 0
+			warnings := 0
+			for i := 0; i < b.N; i++ {
+				result, err := (Analyzer{RootDir: root, Config: cfg}).RunResultContext(ctx)
+				if err != nil {
+					b.Fatalf("analyze single-module %s fixture: %v", workload.benchmarkName(), err)
+				}
+				findings += len(result.Findings)
+				warnings += len(result.Warnings)
+			}
+			b.StopTimer()
+
+			b.ReportMetric(float64(fixture.lines), "lines/op")
+			b.ReportMetric(float64(fixture.procedures), "procedures/op")
+			b.ReportMetric(float64(fixture.moduleDeclarations), "module-declarations/op")
+			b.ReportMetric(float64(fixture.calls), "calls/op")
+			b.ReportMetric(float64(findings)/float64(b.N), "findings/op")
+			b.ReportMetric(float64(warnings)/float64(b.N), "warnings/op")
+			reportAnalysisRecorderMetrics(b, recorder, b.N)
+		})
+	}
+}
+
 // BenchmarkObjectAnalysisWorklist isolates the object-summary and entry-state
 // stages on a deliberately reverse-ordered object-return chain. The source is
 // parsed and its IR/CFG are constructed before timing starts so the benchmark
@@ -172,6 +217,238 @@ func TestSyntheticBenchmarkFixtureScale(t *testing.T) {
 	}
 }
 
+// TestSingleModuleBenchmarkFixtureScale keeps the single-file workload matrix
+// visible to ordinary tests without running the expensive analyzer benchmark.
+func TestSingleModuleBenchmarkFixtureScale(t *testing.T) {
+	for _, workload := range singleModuleBenchmarkWorkloads() {
+		workload := workload
+		t.Run(workload.benchmarkName(), func(t *testing.T) {
+			fixture := writeSingleModuleBenchmarkProject(t, t.TempDir(), workload)
+			if fixture.sourcePath == "" || fixture.lines == 0 {
+				t.Fatalf("single-module %s fixture has no source metadata: %+v", workload.benchmarkName(), fixture)
+			}
+			if fixture.procedures == 0 {
+				t.Fatalf("single-module %s fixture has no procedures", workload.benchmarkName())
+			}
+			if fixture.moduleCount != 1 {
+				t.Fatalf("single-module %s fixture contains %d modules, want 1", workload.benchmarkName(), fixture.moduleCount)
+			}
+			if fixture.procedures != workload.expectedProcedures() {
+				t.Fatalf("single-module %s procedures = %d, want %d", workload.benchmarkName(), fixture.procedures, workload.expectedProcedures())
+			}
+			if fixture.moduleDeclarations != workload.expectedModuleDeclarations() {
+				t.Fatalf("single-module %s declarations = %d, want %d", workload.benchmarkName(), fixture.moduleDeclarations, workload.expectedModuleDeclarations())
+			}
+			if fixture.calls != workload.expectedCalls() {
+				t.Fatalf("single-module %s calls = %d, want %d", workload.benchmarkName(), fixture.calls, workload.expectedCalls())
+			}
+		})
+	}
+}
+
+type singleModuleBenchmarkWorkload struct {
+	shape string
+	size  int
+}
+
+func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
+	workloads := make([]singleModuleBenchmarkWorkload, 0, 17)
+	for _, shape := range []string{"independent", "chain", "declarations"} {
+		for _, size := range []int{500, 1000, 2000} {
+			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
+		}
+	}
+	for _, shape := range []string{"dense", "cyclic"} {
+		for _, size := range []int{500, 1000} {
+			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
+		}
+	}
+	for _, size := range []int{100, 500, 1000, 2000} {
+		workloads = append(workloads, singleModuleBenchmarkWorkload{shape: "cfg-independent", size: size})
+	}
+	return workloads
+}
+
+func (w singleModuleBenchmarkWorkload) benchmarkName() string {
+	unit := "procedures"
+	switch w.shape {
+	case "declarations":
+		unit = "declarations"
+	case "cfg-independent":
+		unit = "branches"
+	}
+	return fmt.Sprintf("%s/%d-%s", w.shape, w.size, unit)
+}
+
+func (w singleModuleBenchmarkWorkload) expectedProcedures() int {
+	switch w.shape {
+	case "declarations", "cfg-independent":
+		return 1
+	default:
+		return w.size
+	}
+}
+
+func (w singleModuleBenchmarkWorkload) expectedModuleDeclarations() int {
+	switch w.shape {
+	case "declarations":
+		return w.size
+	default:
+		return 0
+	}
+}
+
+func (w singleModuleBenchmarkWorkload) expectedCalls() int {
+	switch w.shape {
+	case "chain":
+		return w.size - 1
+	case "dense":
+		const fanout = 8
+		calls := 0
+		for index := 0; index < w.size; index++ {
+			remaining := w.size - index - 1
+			if remaining > fanout {
+				remaining = fanout
+			}
+			calls += remaining
+		}
+		return calls
+	case "cyclic":
+		return w.size
+	default:
+		return 0
+	}
+}
+
+type singleModuleBenchmarkFixture struct {
+	sourcePath         string
+	moduleCount        int
+	lines              int
+	procedures         int
+	moduleDeclarations int
+	calls              int
+	maxStatements      int
+	maxCFGBlocks       int
+	maxCFGEdges        int
+}
+
+func writeSingleModuleBenchmarkProject(tb testing.TB, root string, workload singleModuleBenchmarkWorkload) singleModuleBenchmarkFixture {
+	tb.Helper()
+	srcDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		tb.Fatalf("create single-module benchmark source directory: %v", err)
+	}
+	path := filepath.Join(srcDir, "Monster.bas")
+	source := singleModuleBenchmarkSource(workload)
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		tb.Fatalf("write single-module %s fixture: %v", workload.benchmarkName(), err)
+	}
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		tb.Fatalf("read single-module benchmark source directory: %v", err)
+	}
+
+	fixture := singleModuleBenchmarkFixture{sourcePath: path, moduleCount: len(entries)}
+	inspectSingleModuleBenchmarkFixture(tb, root, path, source, &fixture)
+	return fixture
+}
+
+func singleModuleBenchmarkSource(workload singleModuleBenchmarkWorkload) string {
+	var source strings.Builder
+	source.WriteString("Option Explicit\n\n")
+	switch workload.shape {
+	case "independent":
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Independent%04d()\n    Dim value As Long\n    value = %d\nEnd Sub\n\n", index, index)
+		}
+	case "chain":
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Chain%04d()\n", index)
+			if index+1 < workload.size {
+				fmt.Fprintf(&source, "    Call Chain%04d\n", index+1)
+			} else {
+				source.WriteString("    Dim value As Long\n    value = 1\n")
+			}
+			source.WriteString("End Sub\n\n")
+		}
+	case "dense":
+		const fanout = 8
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Dense%04d()\n", index)
+			for offset := 1; offset <= fanout && index+offset < workload.size; offset++ {
+				fmt.Fprintf(&source, "    Call Dense%04d\n", index+offset)
+			}
+			if index+1 >= workload.size {
+				source.WriteString("    Dim value As Long\n    value = 1\n")
+			}
+			source.WriteString("End Sub\n\n")
+		}
+	case "cyclic":
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Cyclic%04d()\n    Call Cyclic%04d\nEnd Sub\n\n", index, (index+1)%workload.size)
+		}
+	case "declarations":
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Const ModuleConst%04d As Long = %d\n", index, index)
+		}
+		source.WriteString("\nPrivate Sub ReadModuleDeclaration()\n    Dim value As Long\n    value = ModuleConst0000\nEnd Sub\n")
+	case "cfg-independent":
+		source.WriteString("Private Sub IndependentLargeCFG(ByRef value As Long)\n")
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "    If value = %d Then\n        value = value + 1\n    Else\n        value = value - 1\n    End If\n", index)
+		}
+		source.WriteString("End Sub\n")
+	}
+	return source.String()
+}
+
+func inspectSingleModuleBenchmarkFixture(tb testing.TB, root, path, source string, fixture *singleModuleBenchmarkFixture) {
+	tb.Helper()
+	doc, err := vbaast.ParseDocument(path, []byte(source))
+	if err != nil {
+		tb.Fatalf("parse single-module benchmark source: %v", err)
+	}
+	defer doc.Close()
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: root, Path: path, ModuleKind: "standard"}, doc)
+	if err != nil {
+		tb.Fatalf("build single-module benchmark IR: %v", err)
+	}
+	fixture.lines = physicalSourceLineCount(normalizedSourceLines(source))
+	fixture.procedures = len(ir.Procedures)
+	for _, declaration := range ir.Declarations {
+		if declaration.Scope == procedureir.ScopeModule || declaration.Scope == procedureir.ScopeProject {
+			fixture.moduleDeclarations++
+		}
+	}
+	for _, procedure := range ir.Procedures {
+		if len(procedure.Statements) > fixture.maxStatements {
+			fixture.maxStatements = len(procedure.Statements)
+		}
+		fixture.calls += len(procedure.Calls)
+	}
+	controlFlow := vbacfg.BuildDocument(ir)
+	for _, graph := range controlFlow.Graphs {
+		if len(graph.Blocks) > fixture.maxCFGBlocks {
+			fixture.maxCFGBlocks = len(graph.Blocks)
+		}
+		if len(graph.Edges) > fixture.maxCFGEdges {
+			fixture.maxCFGEdges = len(graph.Edges)
+		}
+	}
+}
+
+func recordSingleModuleBenchmarkDimensions(recorder *analysisstats.Recorder, fixture singleModuleBenchmarkFixture) {
+	if recorder == nil {
+		return
+	}
+	recorder.AddMax("max_lines_per_file", uint64(fixture.lines))
+	recorder.AddMax("max_procedures_per_file", uint64(fixture.procedures))
+	recorder.AddMax("max_calls_per_file", uint64(fixture.calls))
+	recorder.AddMax("max_statements_per_procedure", uint64(fixture.maxStatements))
+	recorder.AddMax("max_cfg_blocks_per_procedure", uint64(fixture.maxCFGBlocks))
+	recorder.AddMax("max_cfg_edges_per_procedure", uint64(fixture.maxCFGEdges))
+}
+
 type syntheticBenchmarkModule struct {
 	name       string
 	source     string
@@ -285,6 +562,10 @@ func reportAnalysisRecorderMetrics(b *testing.B, recorder *analysisstats.Recorde
 	}
 	for _, counter := range counters {
 		metricName := "counter_" + strings.ReplaceAll(counter.Name, "-", "_")
+		if strings.HasPrefix(counter.Name, "max_") {
+			b.ReportMetric(float64(counter.Value), metricName)
+			continue
+		}
 		b.ReportMetric(float64(counter.Value)/float64(iterations), metricName+"/op")
 	}
 }

@@ -63,17 +63,35 @@ cost. It writes line-oriented records to stderr, so it is safe to combine with
 count, result count, and an `ok`, `error`, or `canceled` outcome. The measured
 stages cover source discovery and reading, parsing, procedure IR and CFG
 construction, effect and object summaries, project context and symbols,
-TypeLib loading, project-wide and file/procedure diagnostics, ByRef and
-compile-equivalent diagnostics, suppression finalization, and the complete
-`analyze_total` operation.
+TypeLib loading, project-wide and procedure-local diagnostics, typed Excel,
+ByRef, and compile-equivalent diagnostics, suppression/finalization, and the
+complete `analyze_total` operation. The canonical stage labels include
+`project_context_indexes`, `procedure_local_diagnostics`,
+`typed_excel_diagnostics`, and `suppression_and_finalize`.
 
-The performance output includes stable workload counters: `file_count`,
-`procedure_count`, `statement_count`, `expression_count`, `call_site_count`,
-`cfg_block_count`, `cfg_edge_count`, and `project_symbol_count`. Counters are
-workload measurements, not findings. Timings vary by machine and Go toolchain;
-use them for same-environment comparisons rather than fixed pass/fail limits.
+The performance output includes stable aggregate workload counters:
+`file_count`, `procedure_count`, `statement_count`, `expression_count`,
+`call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
+`project_symbol_count`, `line_count`, and `module_declaration_count`.
+`line_count` uses physical source lines and excludes a terminal newline from the
+count.
+Subsystem worklist counters such as `object_summary_evaluations`,
+`object_entry_flow_evaluations`, and `byref_diagnostic_passes` may also appear.
+Large-module profiles also expose maximum dimensions:
+`max_lines_per_file`, `max_procedures_per_file`, `max_calls_per_file`,
+`max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and
+`max_cfg_edges_per_procedure`. Counters are workload measurements, not
+findings. Timings vary by machine and Go toolchain; use them for same-
+environment comparisons rather than fixed pass/fail limits.
 The flag does not change findings, their order, exit status, or the JSON schema.
 `check` has no performance-log option.
+
+For reproducible developer measurements, use `rtk task bench:analyze-single-module`
+for the synthetic large-module workloads, `rtk task bench:analyze` for the
+existing multi-module baselines, and `rtk task bench:corpus` for the checked-in
+real-world corpus. The explicit ROneCOne leaf benchmark command and its
+developer-only execution boundary are documented in the
+[static-analysis corpus specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/static-analysis-corpus.md).
 
 ## Rules
 

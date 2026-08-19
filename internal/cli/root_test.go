@@ -25,6 +25,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/lint"
 	"github.com/harumiWeb/xlflow/internal/output"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vbafmt"
 	"github.com/xuri/excelize/v2"
 )
@@ -753,14 +754,56 @@ func TestAnalyzePerformanceLogFlagIsOptInAndPreservesJSON(t *testing.T) {
 		`operation="analyze/stage"`, `stage="source_discovery"`, `stage="parse"`,
 		`stage="procedure_ir"`, `stage="cfg"`, `stage="effect_summaries"`,
 		`stage="object_procedure_summaries"`, `stage="object_entry_states"`,
-		`stage="project_context"`, `stage="typedb_load"`, `stage="project_symbols"`,
-		`stage="project_wide_diagnostics"`, `stage="file_procedure_diagnostics"`,
-		`stage="byref_diagnostics"`, `stage="compile_equivalent_diagnostics"`,
-		`stage="suppression_finalization"`, `stage="analyze_total"`,
-		`operation="analyze/counter"`, `counter="file_count"`, `counter="procedure_count"`,
+		`stage="project_context"`, `stage="typedb_load"`, `stage="project_context_indexes"`,
+		`stage="project_symbols"`,
+		`stage="project_wide_diagnostics"`, `stage="procedure_local_diagnostics"`,
+		`stage="typed_excel_diagnostics"`, `stage="byref_diagnostics"`,
+		`stage="compile_equivalent_diagnostics"`,
+		`stage="suppression_and_finalize"`, `stage="analyze_total"`,
+		`operation="analyze/counter"`, `counter="file_count"`, `counter="line_count"`,
+		`counter="module_declaration_count"`, `counter="procedure_count"`,
+		`counter="max_lines_per_file"`, `counter="max_procedures_per_file"`,
+		`counter="max_calls_per_file"`, `counter="max_statements_per_procedure"`,
+		`counter="max_cfg_blocks_per_procedure"`, `counter="max_cfg_edges_per_procedure"`,
 	} {
 		if !strings.Contains(profiledStderr, expected) {
 			t.Fatalf("performance output missing %q:\n%s", expected, profiledStderr)
+		}
+	}
+}
+
+func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
+	recorder := analysisstats.NewRecorder()
+	recorder.Record(analysisstats.Stage{Name: "procedure_local_diagnostics", Elapsed: time.Millisecond, Outcome: "ok", ResultCount: 2})
+	recorder.Record(analysisstats.Stage{Name: "procedure_local_diagnostics", Elapsed: 2 * time.Millisecond, Outcome: "error", ResultCount: 3})
+	recorder.Record(analysisstats.Stage{Name: "suppression_and_finalize", Elapsed: time.Millisecond, Outcome: "ok", ResultCount: 1})
+	for _, name := range []string{
+		"file_count", "procedure_count", "statement_count", "expression_count",
+		"call_site_count", "cfg_block_count", "cfg_edge_count", "project_symbol_count",
+	} {
+		recorder.AddSum(name, 1)
+	}
+	for _, name := range []string{
+		"max_lines_per_file", "max_procedures_per_file", "max_calls_per_file",
+		"max_statements_per_procedure", "max_cfg_blocks_per_procedure", "max_cfg_edges_per_procedure",
+	} {
+		recorder.AddMax(name, 1)
+	}
+
+	var stderr bytes.Buffer
+	writeAnalyzePerformance(&stderr, recorder)
+	output := stderr.String()
+	for _, expected := range []string{
+		`stage="procedure_local_diagnostics" elapsed_ms=3.000`,
+		`calls=2 result_count=5 outcome="error"`,
+		`stage="suppression_and_finalize"`,
+		`counter="file_count"`, `counter="procedure_count"`,
+		`counter="max_lines_per_file"`, `counter="max_procedures_per_file"`,
+		`counter="max_calls_per_file"`, `counter="max_statements_per_procedure"`,
+		`counter="max_cfg_blocks_per_procedure"`, `counter="max_cfg_edges_per_procedure"`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("performance output missing %q:\n%s", expected, output)
 		}
 	}
 }

@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added canonical large-single-module analyzer performance telemetry for
+  `xlflow analyze --performance-log`, including aggregate workload counters and
+  maximum file/procedure dimensions. Profiling remains opt-in and stderr-only;
+  analyzer findings, exit codes, and `--json` output remain compatible. Added
+  developer-only synthetic and ROneCOne benchmark guidance.
+
 - Fixed false positives in the shared `VBA227`/`VBA249` array-use scan when a
   qualified member call such as `Application.OnTime(...)` or
   `driver_.TableToArray(...)` shares its name with a local scalar or

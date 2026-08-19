@@ -186,12 +186,28 @@ tasks:
       - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only$' -benchmem -benchtime=1x -count 2
         platforms: [linux, darwin]
 
+  bench:corpus-ronecone:
+    desc: Benchmark the single-project ROneCOne analyzer stress fixture
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 2
+        platforms: [windows]
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 2
+        platforms: [linux, darwin]
+
   bench:analyze:
     desc: Benchmark synthetic batch analysis scaling and object worklist metrics
     cmds:
       - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^Benchmark(SyntheticProject|ObjectAnalysisWorklist)$' -benchmem -benchtime=1x -count 1
         platforms: [windows]
       - cmd: rtk go test ./internal/analyze -run '^TestSyntheticBenchmarkFixtureScale$' -bench '^Benchmark(SyntheticProject|ObjectAnalysisWorklist)$' -benchmem -benchtime=1x -count 1
+        platforms: [linux, darwin]
+
+  bench:analyze-single-module:
+    desc: Benchmark deterministic large single-module analyzer workloads
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/analyze -run '^TestSingleModuleBenchmarkFixtureScale$' -bench '^BenchmarkSingleModuleSynthetic$' -benchmem -benchtime=1x -count 1
+        platforms: [windows]
+      - cmd: rtk go test ./internal/analyze -run '^TestSingleModuleBenchmarkFixtureScale$' -bench '^BenchmarkSingleModuleSynthetic$' -benchmem -benchtime=1x -count 1
         platforms: [linux, darwin]
 
   verify:security:

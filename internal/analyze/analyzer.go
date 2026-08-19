@@ -526,8 +526,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	} else {
 		finishStage(0, nil)
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
-			recorder.Add("object_summary_evaluations", 0)
-			recorder.Add("object_entry_flow_evaluations", 0)
+			recorder.AddSum("object_summary_evaluations", 0)
+			recorder.AddSum("object_entry_flow_evaluations", 0)
 		}
 	}
 	finishStage = analysisstats.Measure(ctx, "object_entry_states")
@@ -535,8 +535,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		objectAnalysis.buildEntryStates()
 		finishStage(len(objectAnalysis.entries), nil)
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
-			recorder.Add("object_summary_evaluations", uint64(objectAnalysis.summaryEvaluations))
-			recorder.Add("object_entry_flow_evaluations", uint64(objectAnalysis.entryFlowEvaluations))
+			recorder.AddSum("object_summary_evaluations", uint64(objectAnalysis.summaryEvaluations))
+			recorder.AddSum("object_entry_flow_evaluations", uint64(objectAnalysis.entryFlowEvaluations))
 		}
 	} else {
 		finishStage(0, nil)
@@ -561,7 +561,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 			})
 		}
 	}
-	finishStage = analysisstats.Measure(ctx, "project_context")
+	finishStage = analysisstats.Measure(ctx, "project_context_indexes")
 	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
 	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
@@ -598,7 +598,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		}
 		analysis.byRefSymbolIndex = byRefSymbolIndex
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
-			recorder.Add("project_symbol_count", uint64(symbolCount))
+			recorder.AddSum("project_symbol_count", uint64(symbolCount))
 		}
 	}
 	findings := cycleFindings
@@ -644,7 +644,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		findings = append(findings, fileResult.findings...)
 		preflightFindings = append(preflightFindings, fileResult.preflight...)
 	}
-	finishStage = analysisstats.Measure(ctx, "suppression_finalization")
+	finishStage = analysisstats.Measure(ctx, "suppression_and_finalize")
 	sortFindings(findings)
 	directives, directiveWarnings, err := suppression.DirectivesForFiles(a.RootDir, files)
 	if err != nil {
@@ -735,7 +735,7 @@ sendJobs:
 }
 
 func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]Finding, []Finding, error) {
-	finishStage := analysisstats.Measure(ctx, "file_procedure_diagnostics")
+	finishStage := analysisstats.Measure(ctx, "procedure_local_diagnostics")
 	var findings []Finding
 	readErr := file.Parsed.Read(func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
@@ -761,7 +761,7 @@ func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile,
 	// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
 	// document. Run it after the tree callback releases its exclusive read
 	// lease so the snapshot can reuse that parse without re-entering it.
-	finishStage = analysisstats.Measure(ctx, "file_procedure_diagnostics")
+	finishStage = analysisstats.Measure(ctx, "typed_excel_diagnostics")
 	statefulFindings, err := a.statefulExcelCallArgumentFindingsContext(ctx, file)
 	if err != nil {
 		finishStage(0, err)
@@ -1841,17 +1841,39 @@ func recordBatchWorkload(ctx context.Context, files []parsedFile) {
 	if recorder == nil {
 		return
 	}
-	recorder.Add("file_count", uint64(len(files)))
+	recorder.AddSum("file_count", uint64(len(files)))
+	// Seed maximum dimensions so an empty project still reports a complete
+	// workload shape with zero values.
+	for _, name := range []string{
+		"max_lines_per_file", "max_procedures_per_file", "max_calls_per_file",
+		"max_statements_per_procedure", "max_cfg_blocks_per_procedure",
+		"max_cfg_edges_per_procedure",
+	} {
+		recorder.AddMax(name, 0)
+	}
 	for _, file := range files {
-		recorder.Add("procedure_count", uint64(len(file.IR.Procedures)))
+		lineCount := physicalSourceLineCount(file.Lines)
+		recorder.AddSum("line_count", uint64(lineCount))
+		recorder.AddSum("module_declaration_count", uint64(len(file.IR.Declarations)))
+		procedureCount := len(file.IR.Procedures)
+		recorder.AddSum("procedure_count", uint64(procedureCount))
+		recorder.AddMax("max_lines_per_file", uint64(lineCount))
+		recorder.AddMax("max_procedures_per_file", uint64(procedureCount))
+		callsPerFile := 0
 		for _, procedure := range file.IR.Procedures {
-			recorder.Add("statement_count", uint64(len(procedure.Statements)))
-			recorder.Add("expression_count", uint64(len(procedure.Expressions)))
-			recorder.Add("call_site_count", uint64(len(procedure.Calls)))
+			statementCount := len(procedure.Statements)
+			recorder.AddSum("statement_count", uint64(statementCount))
+			recorder.AddSum("expression_count", uint64(len(procedure.Expressions)))
+			callsPerFile += len(procedure.Calls)
+			recorder.AddSum("call_site_count", uint64(len(procedure.Calls)))
+			recorder.AddMax("max_statements_per_procedure", uint64(statementCount))
 		}
+		recorder.AddMax("max_calls_per_file", uint64(callsPerFile))
 		for _, graph := range file.CFG.Graphs {
-			recorder.Add("cfg_block_count", uint64(len(graph.Blocks)))
-			recorder.Add("cfg_edge_count", uint64(len(graph.Edges)))
+			recorder.AddMax("max_cfg_blocks_per_procedure", uint64(len(graph.Blocks)))
+			recorder.AddMax("max_cfg_edges_per_procedure", uint64(len(graph.Edges)))
+			recorder.AddSum("cfg_block_count", uint64(len(graph.Blocks)))
+			recorder.AddSum("cfg_edge_count", uint64(len(graph.Edges)))
 		}
 	}
 }
@@ -3842,6 +3864,14 @@ func normalizedSourceLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
 	return strings.Split(source, "\n")
+}
+
+func physicalSourceLineCount(lines []string) int {
+	count := len(lines)
+	if count > 0 && lines[count-1] == "" {
+		count--
+	}
+	return count
 }
 
 // worksheetLogicalStatement joins only explicit continuation lines for the

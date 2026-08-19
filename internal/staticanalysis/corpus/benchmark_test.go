@@ -127,6 +127,10 @@ func reportCorpusAnalysisRecorderMetrics(b *testing.B, recorder *analysisstats.R
 	}
 	for _, counter := range counters {
 		metricName := "counter_" + strings.ReplaceAll(counter.Name, "-", "_")
+		if strings.HasPrefix(counter.Name, "max_") {
+			b.ReportMetric(float64(counter.Value), metricName)
+			continue
+		}
 		b.ReportMetric(float64(counter.Value)/float64(iterations), metricName+"/op")
 	}
 }

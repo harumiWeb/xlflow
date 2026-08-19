@@ -34,8 +34,12 @@ func TestTotalsAggregateStagesAndSortCounters(t *testing.T) {
 	recorder.Record(Stage{Name: "cfg", Elapsed: 2 * time.Millisecond, Outcome: "ok", ResultCount: 2})
 	recorder.Record(Stage{Name: "parse", Elapsed: 3 * time.Millisecond, Outcome: "error", ResultCount: 4})
 	recorder.Add("procedure_count", 3)
-	recorder.Add("file_count", 1)
-	recorder.Add("procedure_count", 2)
+	recorder.AddSum("file_count", 1)
+	recorder.AddSum("procedure_count", 2)
+	recorder.AddMax("max_lines_per_file", 11)
+	recorder.AddMax("max_lines_per_file", 7)
+	recorder.AddMax("max_procedures_per_file", 2)
+	recorder.AddMax("max_procedures_per_file", 5)
 
 	stages, counters := recorder.Totals()
 	if len(stages) != 2 {
@@ -47,7 +51,12 @@ func TestTotalsAggregateStagesAndSortCounters(t *testing.T) {
 	if got := stages[1]; got.Name != "cfg" || got.Calls != 1 || got.Outcome != "ok" {
 		t.Fatalf("cfg total = %+v", got)
 	}
-	wantCounters := []Counter{{Name: "file_count", Value: 1}, {Name: "procedure_count", Value: 5}}
+	wantCounters := []Counter{
+		{Name: "file_count", Value: 1},
+		{Name: "max_lines_per_file", Value: 11},
+		{Name: "max_procedures_per_file", Value: 5},
+		{Name: "procedure_count", Value: 5},
+	}
 	if !reflect.DeepEqual(counters, wantCounters) {
 		t.Fatalf("counters = %+v, want %+v", counters, wantCounters)
 	}
