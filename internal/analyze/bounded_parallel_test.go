@@ -35,7 +35,6 @@ func TestAnalyzerBoundedFileAnalysisIsDeterministic(t *testing.T) {
 func TestAnalyzeFilesBoundedPreservesWorkerError(t *testing.T) {
 	lowStarted := make(chan struct{})
 	highStarted := make(chan struct{})
-	releaseLow := make(chan struct{})
 	workerFailure := errors.New("worker failure")
 
 	resultCh := make(chan error, 1)
@@ -48,7 +47,7 @@ func TestAnalyzeFilesBoundedPreservesWorkerError(t *testing.T) {
 				switch file.Path {
 				case "low":
 					close(lowStarted)
-					<-releaseLow
+					<-ctx.Done()
 					return nil, nil, ctx.Err()
 				case "high":
 					close(highStarted)
@@ -63,7 +62,6 @@ func TestAnalyzeFilesBoundedPreservesWorkerError(t *testing.T) {
 
 	<-lowStarted
 	<-highStarted
-	close(releaseLow)
 	if err := <-resultCh; !errors.Is(err, workerFailure) {
 		t.Fatalf("bounded analysis error = %v, want originating worker error %v", err, workerFailure)
 	}
