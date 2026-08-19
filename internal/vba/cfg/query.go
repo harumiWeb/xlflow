@@ -79,6 +79,10 @@ func (g Graph) Reachable(filter EdgeFilter) []BlockID {
 
 // IsReachable reports whether target is reachable from Entry.
 func (g Graph) IsReachable(target BlockID, filter EdgeFilter) bool {
+	index := g.queryIndexes()
+	if reachable, ok := index.cachedReachable(filter); ok {
+		return reachable[target]
+	}
 	return g.reachableWithout(filter, nil)[target]
 }
 
@@ -353,10 +357,9 @@ func (g Graph) CleanupGuaranteed(cleanupStatementIDs []int, selection ExitSelect
 func (g Graph) reachableWithout(filter EdgeFilter, removed map[BlockID]bool) map[BlockID]bool {
 	index := g.queryIndexes()
 	if removed == nil {
-		if filter.NormalOnly {
-			return cloneBlockSet(index.reachableNormal)
+		if reachable, ok := index.cachedReachable(filter); ok {
+			return cloneBlockSet(reachable)
 		}
-		return cloneBlockSet(index.reachableAll)
 	}
 	seen := physicalReachableWithIndex(g, index, filter, removed)
 	if g.unknownFlowReached(seen) {
