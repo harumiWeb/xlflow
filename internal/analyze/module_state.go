@@ -275,7 +275,7 @@ func moduleStateFields(files []parsedFile) ([]*moduleStateField, map[string]*mod
 	byFileName := map[string]*moduleStateField{}
 	byName := map[string][]*moduleStateField{}
 	for _, file := range files {
-		textDeclarations := moduleDeclarations(file.Lines, file.procedures())
+		textDeclarations := file.moduleDecls()
 		for _, declaration := range file.IR.Declarations {
 			if declaration.Scope != procedureir.ScopeModule && declaration.Scope != procedureir.ScopeProject {
 				continue

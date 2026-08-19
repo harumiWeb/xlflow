@@ -66,6 +66,18 @@ func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	}
 }
 
+func TestSortFindingsUsesProcedureTieBreaker(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "Main.bas", Line: 4, Column: 2, Code: "VBA227", Procedure: "Zeta"},
+		{File: "Main.bas", Line: 4, Column: 2, Code: "VBA227", Procedure: "Alpha"},
+	}
+	sortFindings(findings)
+	if findings[0].Procedure != "Alpha" || findings[1].Procedure != "Zeta" {
+		t.Fatalf("findings with equal source keys were not ordered by procedure: %+v", findings)
+	}
+}
+
 func TestParsedFileProceduresReusesMaterializedProjection(t *testing.T) {
 	t.Parallel()
 	file := parsedFile{
@@ -6526,6 +6538,10 @@ Private Sub Consume(ByRef values() As Long)
   If UBound(values) > 0 Then Debug.Print values(0)
 End Sub
 
+Private Sub ConsumeUnsafe(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
 Public Sub SortedRead()
   If IsSortedSetKind(collectionKind) Then
     Consume items
@@ -6533,20 +6549,20 @@ Public Sub SortedRead()
 End Sub
 
 Public Sub UnsafeRead()
-  Consume items
+  ConsumeUnsafe items
 End Sub`)
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, finding := range findingsByCode(findings, "VBA227") {
-		if finding.Procedure == "SortedRead" {
+		if finding.Procedure == "Consume" {
 			t.Fatalf("a sorted-collection kind branch should establish the configured array for its ByRef helper: %+v", findings)
 		}
 	}
 	unsafe := false
 	for _, finding := range findingsByCode(findings, "VBA227") {
-		if finding.Procedure == "Consume" {
+		if finding.Procedure == "ConsumeUnsafe" {
 			unsafe = true
 		}
 	}
@@ -6727,6 +6743,10 @@ Private Sub Consume(ByRef values() As Long)
   If UBound(values) > 0 Then Debug.Print values(0)
 End Sub
 
+Private Sub ConsumeUnsafe(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
 Private Sub RequireDataTable(ByVal memberName As String)
   If roleValue <> 1 Then Err.Raise 5
 End Sub
@@ -6764,7 +6784,7 @@ Public Sub GenericRead()
 End Sub
 
 Public Sub UnsafeRead()
-  Consume items
+  ConsumeUnsafe items
 End Sub
 `)
 
@@ -6772,20 +6792,18 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, procedure := range []string{"DataTableRead", "PriorityRead", "GenericRead"} {
-		for _, finding := range findingsByCode(findings, "VBA227") {
-			if finding.Procedure == procedure {
-				t.Fatalf("configured %s array guard should establish allocation: %+v", procedure, finding)
-			}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Consume" {
+			t.Fatalf("configured class guards should establish allocation for the guarded helper: %+v", finding)
 		}
 	}
-	unsafe := 0
-	for _, finding := range findings {
-		if finding.Procedure == "Consume" && finding.Code == "VBA227" {
-			unsafe++
+	unsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "ConsumeUnsafe" {
+			unsafe = true
 		}
 	}
-	if unsafe == 0 {
+	if !unsafe {
 		t.Fatalf("an unguarded configured-class array access must remain reportable: %+v", findings)
 	}
 }

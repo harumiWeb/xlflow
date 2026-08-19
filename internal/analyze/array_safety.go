@@ -1499,7 +1499,7 @@ type arrayModuleEntryStates map[string]map[string]bool
 func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure {
 	targets := map[string]sourceProcedure{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		for _, proc := range file.procedureProjection() {
 			visibility := strings.TrimSpace(proc.Visibility)
 			private := strings.EqualFold(visibility, "Private") || strings.EqualFold(visibility, "Friend")
 			modulePrivate := strings.EqualFold(visibility, "Public") && arrayOptionPrivateModule(file.Lines)
@@ -1520,8 +1520,8 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 		moduleDecls map[string]sourceDeclaration
 	}, 0)
 	for _, file := range files {
-		procs := sourceProceduresFromIR(file.IR, file.CFG)
-		moduleDecls := moduleDeclarations(file.Lines, procs)
+		procs := file.procedureProjection()
+		moduleDecls := file.moduleDecls()
 		for _, proc := range procs {
 			if !procedureHasByRefArrayParameter(proc) {
 				continue
@@ -1618,7 +1618,7 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 	}
 	flowCtx := ctx
 	flowCtx.arrayByRefAllocations = summaries
-	moduleDecls := moduleDeclarations(file.Lines, sourceProceduresFromIR(file.IR, file.CFG))
+	moduleDecls := file.moduleDecls()
 	for index := range arrayByRefFlowAllocations(file, proc, flowCtx, moduleDecls) {
 		allocated[index] = true
 	}
@@ -1690,7 +1690,7 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditionalAllocations {
 	summaries := arrayByRefConditionalAllocations{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		for _, proc := range file.procedureProjection() {
 			if proc.Graph == nil {
 				continue
 			}
@@ -1788,7 +1788,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 func inferArrayByRefLengthAllocations(files []parsedFile) arrayByRefLengthAllocations {
 	summaries := arrayByRefLengthAllocations{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		for _, proc := range file.procedureProjection() {
 			if proc.Graph == nil {
 				continue
 			}
@@ -1950,7 +1950,7 @@ func inferArrayModuleConfigurationStates(files []parsedFile, summaries arrayModu
 	states := map[string]arrayModuleConfigurationState{}
 	for _, file := range files {
 		state := arrayModuleConfigurationState{byProcedure: map[string]map[string]bool{}}
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		for _, proc := range file.procedureProjection() {
 			name := strings.ToLower(strings.TrimSpace(proc.Name))
 			if !strings.HasPrefix(name, "configure") {
 				continue
@@ -2272,8 +2272,8 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 		moduleDecls map[string]sourceDeclaration
 	}, 0)
 	for _, file := range files {
-		procs := sourceProceduresFromIR(file.IR, file.CFG)
-		moduleDecls := moduleDeclarations(file.Lines, procs)
+		procs := file.procedureProjection()
+		moduleDecls := file.moduleDecls()
 		for _, proc := range procs {
 			procedures = append(procedures, struct {
 				file        parsedFile
@@ -2609,8 +2609,8 @@ func arrayModuleInitializationStates(files []parsedFile, summaries arrayModuleAl
 		if moduleKind != "form" && moduleKind != "class" {
 			continue
 		}
-		procs := sourceProceduresFromIR(file.IR, file.CFG)
-		moduleDecls := moduleDeclarations(file.Lines, procs)
+		procs := file.procedureProjection()
+		moduleDecls := file.moduleDecls()
 		initializer := arrayModuleInitializerName(moduleKind)
 		for _, proc := range procs {
 			if !strings.EqualFold(strings.TrimSpace(proc.Name), initializer) {
@@ -2682,16 +2682,20 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		file        parsedFile
 		proc        sourceProcedure
 		moduleDecls map[string]sourceDeclaration
+		variables   map[string]arrayVariable
 	}
 	procedures := make([]procedureInfo, 0)
 	moduleArrays := map[string]map[string]bool{}
 	moduleFiles := map[string]string{}
 	for _, file := range files {
-		procs := sourceProceduresFromIR(file.IR, file.CFG)
-		moduleDecls := moduleDeclarations(file.Lines, procs)
+		procs := file.procedureProjection()
+		moduleDecls := file.moduleDecls()
 		for _, proc := range procs {
 			key := arrayProcedureKey(proc)
-			procedures = append(procedures, procedureInfo{file: file, proc: proc, moduleDecls: moduleDecls})
+			procedures = append(procedures, procedureInfo{
+				file: file, proc: proc, moduleDecls: moduleDecls,
+				variables: arrayVariables(file, proc, moduleDecls),
+			})
 			moduleArrays[key] = arrayModuleNamesForProcedure(file, proc, moduleDecls)
 			moduleFiles[key] = file.Path
 		}
@@ -2705,7 +2709,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	for iteration := 0; iteration <= len(procedures)+len(ctx.arrayPrivateTargets); iteration++ {
 		candidates := map[string]map[string]bool{}
 		for _, procedure := range procedures {
-			variables := arrayVariables(procedure.file, procedure.proc, procedure.moduleDecls)
+			variables := procedure.variables
 			initial := arrayInitialState(variables)
 			initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
 			initial = applyArrayModuleEntryState(initial, procedure.proc, variables, procedure.moduleDecls, entries)
@@ -2852,89 +2856,108 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 	moduleAllocationSummaries := ctx.arrayModuleAllocations
 	moduleInitializationStates := arrayModuleInitializationStates(files, moduleAllocationSummaries)
 
+	type callerInfo struct {
+		file        parsedFile
+		proc        sourceProcedure
+		moduleDecls map[string]sourceDeclaration
+		variables   map[string]arrayVariable
+		constants   map[string]int
+	}
+	callers := make([]callerInfo, 0)
+	for _, file := range files {
+		moduleDecls := file.moduleDecls()
+		for _, caller := range file.procedureProjection() {
+			eligibleCaller := false
+			for _, call := range caller.Calls {
+				_, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
+				if ok && procedureHasByRefArrayParameter(target) {
+					eligibleCaller = true
+					break
+				}
+			}
+			if !eligibleCaller {
+				continue
+			}
+			callers = append(callers, callerInfo{
+				file: file, proc: caller, moduleDecls: moduleDecls,
+				variables: arrayVariables(file, caller, moduleDecls),
+				constants: arrayIntegerConstants(file, caller, a.visibleConstantValues, a.visibleConstants),
+			})
+		}
+	}
+
 	entries := map[string]map[int]bool{}
 	for {
 		evidence := map[string]map[int]arrayByRefEntryEvidence{}
-		for _, file := range files {
-			moduleDecls := moduleDeclarations(file.Lines, sourceProceduresFromIR(file.IR, file.CFG))
-			for _, caller := range sourceProceduresFromIR(file.IR, file.CFG) {
-				eligibleCaller := false
-				for _, call := range caller.Calls {
-					_, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
-					if ok && procedureHasByRefArrayParameter(target) {
-						eligibleCaller = true
-						break
+		for _, caller := range callers {
+			file := caller.file
+			proc := caller.proc
+			moduleDecls := caller.moduleDecls
+			variables := caller.variables
+			constants := caller.constants
+			initial := arrayInitialState(variables)
+			initial = applyArrayModuleInitializationState(initial, file, proc, variables, moduleDecls, moduleInitializationStates)
+			initial = applyArrayByRefEntryStates(initial, proc, variables, entries, ctx.arrayByRefEntryConditions)
+			initial = applyArrayModuleEntryState(initial, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
+			initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
+			visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+				var eligible []arrayByRefCallCandidate
+				for _, call := range arrayCallsAtLine(proc.Calls, line) {
+					key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
+					if !ok || !procedureHasByRefArrayParameter(target) {
+						continue
 					}
+					eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
 				}
-				if !eligibleCaller {
-					continue
-				}
-				variables := arrayVariables(file, caller, moduleDecls)
-				constants := arrayIntegerConstants(file, caller, a.visibleConstantValues, a.visibleConstants)
-				initial := arrayInitialState(variables)
-				initial = applyArrayModuleInitializationState(initial, file, caller, variables, moduleDecls, moduleInitializationStates)
-				initial = applyArrayByRefEntryStates(initial, caller, variables, entries, ctx.arrayByRefEntryConditions)
-				initial = applyArrayModuleEntryState(initial, caller, variables, moduleDecls, ctx.arrayModuleEntryStates)
-				initial = applyArrayInternalStorageConfiguration(initial, file, caller, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
-				visit := func(text string, line int, in arrayFlowState) arrayFlowState {
-					var eligible []arrayByRefCallCandidate
-					for _, call := range arrayCallsAtLine(caller.Calls, line) {
-						key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
-						if !ok || !procedureHasByRefArrayParameter(target) {
-							continue
+				if len(eligible) > 0 {
+					targetKey := eligible[0].key
+					sameTarget := true
+					for _, entry := range eligible[1:] {
+						if entry.key != targetKey {
+							sameTarget = false
+							break
 						}
-						eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
 					}
-					if len(eligible) > 0 {
-						targetKey := eligible[0].key
-						sameTarget := true
-						for _, entry := range eligible[1:] {
-							if entry.key != targetKey {
-								sameTarget = false
-								break
-							}
+					if sameTarget {
+						for _, entry := range eligible {
+							arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, ctx)
 						}
-						if sameTarget {
-							for _, entry := range eligible {
-								arrayRecordByRefCall(evidence, entry.key, entry.target, caller, entry.call, in, ctx)
-							}
-						} else {
-							// Nested calls on one source line are normally kept
-							// conservative because the pre-line state cannot describe
-							// mutations from an earlier, different helper. An outer
-							// ByRef call whose array argument is a proven allocated
-							// expression is independent of that ordering, however
-							// (for example, Consume MakeValues()). Record only that
-							// narrow case and require every ByRef array argument to be
-							// proven allocated.
-							for _, entry := range eligible {
-								allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, caller, entry.call, in, ctx)
-								if allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible)) {
-									arrayRecordByRefCall(evidence, entry.key, entry.target, caller, entry.call, in, ctx)
-								}
+					} else {
+						// Nested calls on one source line are normally kept
+						// conservative because the pre-line state cannot describe
+						// mutations from an earlier, different helper. An outer
+						// ByRef call whose array argument is a proven allocated
+						// expression is independent of that ordering, however
+						// (for example, Consume MakeValues()). Record only that
+						// narrow case and require every ByRef array argument to be
+						// proven allocated.
+						for _, entry := range eligible {
+							allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, proc, entry.call, in, ctx)
+							if allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible)) {
+								arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, ctx)
 							}
 						}
 					}
-					out, _ := a.arrayTransfer(file, caller, ctx, variables, in, text, line, constants, nil)
-					for _, call := range arrayCallsAtLine(caller.Calls, line) {
-						out = applyArrayModuleCallEffects(out, file, caller, call, ctx, variables, moduleDecls)
-					}
-					return out
 				}
-				if caller.Graph == nil {
-					state := initial
-					for line := caller.StartLine; line <= caller.EndLine && line <= len(file.Lines); line++ {
-						text := normalizedCodeLine(file.Lines[line-1])
-						state = visit(text, line, state)
-					}
-					continue
+				out, _ := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
+				for _, call := range arrayCallsAtLine(proc.Calls, line) {
+					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 				}
-				walkArrayCFGWithEdges(caller.Graph, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-					out = applyArrayConditionalAllocationBranch(out, caller.Graph, block, edge)
-					out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-					return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, caller, moduleDecls)
-				})
+				return out
 			}
+			if proc.Graph == nil {
+				state := initial
+				for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+					text := normalizedCodeLine(file.Lines[line-1])
+					state = visit(text, line, state)
+				}
+				continue
+			}
+			walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+				out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
+				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
+			})
 		}
 
 		result := map[string]map[int]bool{}
@@ -4407,7 +4430,7 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 	candidates := map[string][]string{}
 	procedureNames := map[string]int{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		for _, proc := range file.procedureProjection() {
 			name := strings.ToLower(proc.Name)
 			if name != "" {
 				procedureNames[name]++
@@ -4516,8 +4539,8 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	}
 	procedures := make([]returnProcedure, 0)
 	for _, file := range files {
-		fileProcedures := file.procedures()
-		moduleDecls := moduleDeclarations(file.Lines, fileProcedures)
+		fileProcedures := file.procedureProjection()
+		moduleDecls := file.moduleDecls()
 		for _, proc := range fileProcedures {
 			if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 				continue

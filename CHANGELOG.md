@@ -10,6 +10,10 @@ All notable changes to xlflow will be documented in this file.
   array-returning procedure. Member names are no longer mistaken for local
   array indexing.
 
+- Improved large-project `VBA227` analysis throughput by materializing each
+  file's Procedure IR and module declaration projections once and reusing the
+  immutable inputs across array fixed-point solvers.
+
 - Reduced `VBA227` false positives after line-continuation `Split` assignments
   inside conditional and `With` blocks. Recognized array-factory assignments
   now establish allocation before subsequent bounds and indexed accesses.
@@ -43,6 +47,7 @@ All notable changes to xlflow will be documented in this file.
   final `True` assignment now carries its allocation into downstream private
   helpers, while externally writable guards and resettable arrays remain
   conservative.
+
 - Reduced `VBA227` false positives when a private `ByRef` array-output helper
   allocates a caller-local array that is then passed to another private helper.
   Proven output allocation now follows local array arguments without widening
@@ -79,32 +84,41 @@ All notable changes to xlflow will be documented in this file.
   returns `UBound(values) - LBound(values) + 1` on success and zero from its
   error-recovery path, including a typed VBA function that falls through from
   its recovery label to the implicit zero return. The same proof now recognizes
-  `UBound(values) + 1`
-  helpers and Variant parameters, so positive-length branches establish array
-  allocation, including when the positive result is first stored in a scalar
-  local and compared later. The helper's handled probe and invalid allocations remain
-  diagnosed conservatively. Whole-array `arr() = ...` assignments, `ParamArray`
-  allocation, qualified/nested array factory calls, and proven allocated arrays
-  passed through unique project-local `ByRef` helpers no longer produce
-  allocation-state false positives. Unique project-local array-return helper
-  chains are also resolved independent of declaration order; public and
-  ambiguous calls remain conservative. The same restricted proof now carries
-  allocated arrays through nested project-local `ByRef` helper chains, and
-  excludes definitely failing constant `ReDim` branches from normal array
-  return summaries when no local error handler can recover them. The corrected
-  whole-array state also removes the corresponding deterministic `VBA249`
-  duplicate runtime findings. Within a multiline CFG block, `VBA227` now
-  evaluates lifecycle operations in source order, while `VBA208` and `VBA249`
-  retain their existing CFG-block semantics. Deterministic plain `ReDim` and
-  recognized array-factory assignments also retain their established state on
-  `On Error Resume Next` exceptional edges; whole-array arguments such as
-  `ConvertToJson(values(), 4)` are no longer treated as indexed accesses at the
-  call site; `IsArray(variant)` true branches now establish allocation for
-  guarded whole-array assignments; `ReDim Preserve` remains conservative when
-  its prior allocation or shape is unknown. Module-level arrays initialized by
-  a dominating private setup call, including form/class initialization, now
-  retain their allocated state when passed through private `ByRef` helpers;
-  conditional setup calls remain conservative.
+  `UBound(values) + 1` helpers and Variant parameters, so positive-length
+  branches establish array allocation, including when the positive result is
+  first stored in a scalar local and compared later. The helper's handled probe
+  and invalid allocations remain diagnosed conservatively.
+
+- Reduced `VBA227` false positives for whole-array `arr() = ...` assignments,
+  `ParamArray` allocation, qualified/nested array factory calls, and proven
+  allocated arrays passed through unique project-local `ByRef` helpers.
+
+- Reduced `VBA227` false positives for unique project-local array-return helper
+  chains. Chains are now resolved independent of declaration order; public and
+  ambiguous calls remain conservative. The same restricted proof carries
+  allocated arrays through nested project-local `ByRef` helper chains.
+
+- Reduced `VBA227` false positives by excluding definitely failing constant
+  `ReDim` branches from normal array return summaries when no local error
+  handler can recover them. The corrected whole-array state also removes the
+  corresponding deterministic `VBA249` duplicate runtime findings.
+
+- Fixed lifecycle ordering within a multiline CFG block: `VBA227` now evaluates
+  operations in source order, while `VBA208` and `VBA249` retain their existing
+  CFG-block semantics.
+
+- Reduced `VBA227` false positives for deterministic plain `ReDim` and
+  recognized array-factory assignments on `On Error Resume Next` exceptional
+  edges. Whole-array arguments such as `ConvertToJson(values(), 4)` are no
+  longer treated as indexed accesses at the call site; `IsArray(variant)` true
+  branches now establish allocation for guarded whole-array assignments; and
+  `ReDim Preserve` remains conservative when its prior allocation or shape is
+  unknown.
+
+- Reduced `VBA227` false positives when module-level arrays initialized by a
+  dominating private setup call, including form/class initialization, are
+  passed through private `ByRef` helpers. Conditional setup calls remain
+  conservative.
 
 - Reduced `VBA227` false positives for growable Byte buffers that use a guarded
   `UBound` capacity probe under `On Error Resume Next` followed by conditional
@@ -118,6 +132,7 @@ All notable changes to xlflow will be documented in this file.
 - Reduced `VBA227` false positives for guarded non-empty `String` assignments
   to dynamic `Byte` arrays, while keeping unguarded empty-string paths
   conservative.
+
 - Reduced `VBA227` false positives for private recursive `ByRef` array helpers
   when an allocated external entry is proven.
 
@@ -164,6 +179,12 @@ All notable changes to xlflow will be documented in this file.
 - Fixed `VB053` false positives for valid unqualified Excel/TypeLib enum
   constants such as `xlCenter`, `xlThin`, and `xlContinuous` when metadata
   contains the same name under multiple enum definitions.
+
+- Fixed `VBA225` false positives when a local, parameter, or module-level VBA
+  binding such as `cells` shadows Excel's unqualified `Cells` function. The
+  Procedure IR now gates the textual fallback, including propagated helper
+  summaries, while explicitly typed `Range` and `Worksheet` bindings remain
+  eligible.
 
 ## v0.30.0
 

@@ -80,8 +80,10 @@ whole-array assignment from the guarded Variant can establish the target's
 allocation. The false branch remains unknown until a recognized array factory
 or other allocation operation establishes its state.
 
-A `VarType` / `VarTypeOf` comparison with `(vbArray Or vbByte)` provides the
-same array proof for a guarded Variant Byte-array assignment. Variant results
+A `VarType` comparison (the VBA intrinsic) or the analyzer-supported
+`VarTypeOf` guard name (which is not resolved as a project-defined wrapper)
+with `(vbArray Or vbByte)` provides the same array proof for a guarded Variant
+Byte-array assignment. Variant results
 from a binary stream `Read(-1)` expression and the `vbNullString`-to-Byte-array
 idiom are recognized as Byte-array transfers. The latter is a known empty
 array: `LBound` / `UBound` queries are valid, but element access remains a

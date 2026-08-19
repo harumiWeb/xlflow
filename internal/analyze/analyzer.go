@@ -274,7 +274,11 @@ type parsedFile struct {
 	// reused by all rule stages. Callers must treat the sourceProcedure values
 	// and their nested IR/CFG data as read-only; procedures returns an
 	// independent outer slice so field updates cannot mutate this cache.
-	Procedures                []sourceProcedure
+	Procedures []sourceProcedure
+	// ModuleDeclarations is the module-scope declaration projection paired with
+	// Procedures. It is materialized once during batch/realtime file setup and
+	// reused by rule stages that solve array and object state.
+	ModuleDeclarations        map[string]sourceDeclaration
 	Parsed                    *vbaast.ParsedDocument
 	IntelDocument             intel.Document
 	RangeValueModuleConstants map[string]int
@@ -488,7 +492,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	projectEffects := buildProjectEffects(parsedFiles)
 	finishStage(len(projectEffects.All()), nil)
 	for i := range parsedFiles {
-		parsedFiles[i].Procedures = sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
+		procedures := sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
+		parsedFiles[i].Procedures = procedures
+		parsedFiles[i].ModuleDeclarations = moduleDeclarations(parsedFiles[i].Lines, procedures)
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -1235,6 +1241,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 	}
 	var findings []Finding
 	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
+		procedures := sourceProceduresFromIR(ir)
 		file := parsedFile{
 			Path:       view.Path,
 			Lines:      normalizedSourceLines(string(view.Source)),
@@ -1242,10 +1249,9 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 			Source:     view.Source,
 			Root:       view.Root,
 			IR:         ir,
-			Procedures: sourceProceduresFromIR(ir),
+			Procedures: procedures,
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-		procedures := file.procedures()
 		var scanErr error
 		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
 		if scanErr != nil {
@@ -1384,6 +1390,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
+		procedures := sourceProceduresFromIR(ir, controlFlow)
 		file := parsedFile{
 			Path:                      view.Path,
 			Lines:                     lines,
@@ -1393,6 +1400,8 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			Root:                      view.Root,
 			IR:                        ir,
 			CFG:                       controlFlow,
+			Procedures:                procedures,
+			ModuleDeclarations:        moduleDeclarations(lines, procedures),
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
@@ -1409,8 +1418,8 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			analyzer.dictionaryCollection = buildDictionaryCollectionIndex([]parsedFile{file})
 		}
 		worksheetCodenames := realtimeWorksheetCodenames(rootDir, cfg.Src.Workbook, view.Path)
-		procedures := sourceProceduresWithEffects(file, projectEffects)
-		moduleDecls := moduleDeclarations(file.Lines, procedures)
+		procedures = sourceProceduresWithEffects(file, projectEffects)
+		moduleDecls := file.moduleDecls()
 		findings = append(findings, analyzer.hardcodedSecretFindings(file, procedures)...)
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
@@ -1765,7 +1774,7 @@ func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnaly
 				Line:       procedure.Symbol.DeclarationRange.StartLine,
 			})
 		}
-		for _, proc := range file.procedures() {
+		for _, proc := range file.procedureProjection() {
 			functionName := strings.ToLower(proc.Name)
 			if functionName != "" {
 				if ctx.functionNamesSeen[functionName] {
@@ -1840,7 +1849,7 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
 	procedures := sourceProceduresWithEffects(file, projectEffects)
-	moduleDecls := moduleDeclarations(file.Lines, procedures)
+	moduleDecls := file.moduleDecls()
 	findings = append(findings, a.hardcodedSecretFindings(file, procedures)...)
 	for _, proc := range procedures {
 		if err := cancelCtx.Err(); err != nil {
@@ -2112,10 +2121,24 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 }
 
 func (file parsedFile) procedures() []sourceProcedure {
+	return append([]sourceProcedure(nil), file.procedureProjection()...)
+}
+
+// procedureProjection returns the materialized source-procedure view for
+// read-only analysis stages. Unlike procedures, it does not copy the outer
+// slice; callers must not mutate the returned projection.
+func (file parsedFile) procedureProjection() []sourceProcedure {
 	if file.Procedures != nil {
-		return append([]sourceProcedure(nil), file.Procedures...)
+		return file.Procedures
 	}
 	return sourceProceduresFromIR(file.IR, file.CFG)
+}
+
+func (file parsedFile) moduleDecls() map[string]sourceDeclaration {
+	if file.ModuleDeclarations != nil {
+		return file.ModuleDeclarations
+	}
+	return moduleDeclarations(file.Lines, file.procedureProjection())
 }
 
 func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir.ProcedureSymbol) effects.ProcedureIdentity {
@@ -4335,6 +4358,9 @@ func sortFindings(findings []Finding) {
 		}
 		if a.Code != b.Code {
 			return a.Code < b.Code
+		}
+		if a.Procedure != b.Procedure {
+			return a.Procedure < b.Procedure
 		}
 		return findingCycleSortKey(a) < findingCycleSortKey(b)
 	})
