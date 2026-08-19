@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.30.2
+
 - Fixed LSP `VB029` false positives for declared UDT member receivers and VBA
   built-in functions used in member chains such as `GetObject(...).ExecQuery(...)`.
 
