@@ -160,7 +160,7 @@ func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string,
 		return index
 	}
 	for _, file := range files {
-		procedures := sourceProceduresFromIR(file.IR, file.CFG)
+		procedures := file.procedures()
 		for i, proc := range procedures {
 			if i >= len(file.IR.Procedures) {
 				continue
@@ -424,7 +424,7 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 	if rootBindings == nil {
 		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	for i, candidate := range file.IR.Procedures {
 		if i >= len(procedures) {
 			continue

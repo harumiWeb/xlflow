@@ -66,6 +66,50 @@ func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	}
 }
 
+func TestParsedFileProceduresReusesMaterializedProjection(t *testing.T) {
+	t.Parallel()
+	file := parsedFile{
+		IR:         procedureir.DocumentIR{Path: "Main.bas"},
+		Procedures: []sourceProcedure{{Name: "Run", StartLine: 1, EndLine: 2}},
+	}
+	first := file.procedures()
+	second := file.procedures()
+	if len(first) != 1 || &first[0] != &second[0] {
+		t.Fatal("parsed file did not reuse its materialized procedure projection")
+	}
+	first[0].Name = "Changed"
+	if second[0].Name != "Changed" {
+		t.Fatal("cached procedure projection was unexpectedly rebuilt")
+	}
+}
+
+var benchmarkProcedureProjectionSink []sourceProcedure
+
+func BenchmarkParsedFileProcedureProjection(b *testing.B) {
+	ir := procedureir.DocumentIR{Path: "Benchmark.bas", ModuleName: "Benchmark"}
+	for i := 0; i < 500; i++ {
+		ir.Procedures = append(ir.Procedures, procedureir.ProcedureIR{Symbol: procedureir.ProcedureSymbol{
+			Name:             fmt.Sprintf("Procedure%03d", i),
+			Kind:             procedureir.ProcedureSub,
+			DeclarationRange: vbaast.Range{StartLine: i*4 + 1, EndLine: i*4 + 3},
+		}})
+	}
+
+	b.Run("rebuild", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			benchmarkProcedureProjectionSink = sourceProceduresFromIR(ir)
+		}
+	})
+	b.Run("cached", func(b *testing.B) {
+		file := parsedFile{IR: ir, Procedures: sourceProceduresFromIR(ir)}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			benchmarkProcedureProjectionSink = file.procedures()
+		}
+	})
+}
+
 func TestVBA225DetectsIndexedCellReadsWritesAndFormatting(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

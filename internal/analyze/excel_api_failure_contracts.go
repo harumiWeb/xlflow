@@ -34,7 +34,7 @@ func (a Analyzer) excelAPIFailureContractFindingsContext(ctx context.Context, fi
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	aliases := a.errorGuardAliases
 	if aliases == nil {
 		aliases = isErrorGuardAliases(file.Lines)
@@ -203,7 +203,7 @@ func (a Analyzer) errorValueWrapperFindingsContext(ctx context.Context, file par
 	if len(wrappers) == 0 {
 		return nil, nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	aliases := a.errorGuardAliases
 	if aliases == nil {
 		aliases = isErrorGuardAliases(file.Lines)
