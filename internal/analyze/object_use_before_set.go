@@ -113,7 +113,7 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 		moduleProcedureKeys: map[string][]string{},
 	}
 	for _, file := range files {
-		procedures := sourceProceduresFromIR(file.IR, file.CFG)
+		procedures := file.procedures()
 		moduleDecls := moduleDeclarations(file.Lines, procedures)
 		for _, proc := range procedures {
 			key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)

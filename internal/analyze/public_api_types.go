@@ -86,7 +86,7 @@ func (a Analyzer) publicAPITypeFindings(file parsedFile, index *apiTypeIndex) []
 	if !publicAPIModule(file.IR) {
 		return nil
 	}
-	procedures := sourceProceduresFromIR(file.IR)
+	procedures := file.procedures()
 	var findings []Finding
 	for i, procedure := range file.IR.Procedures {
 		if i >= len(procedures) || !publicAPIProcedure(procedure.Symbol) || procedure.Symbol.IsEventHandler {

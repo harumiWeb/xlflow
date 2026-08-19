@@ -251,14 +251,20 @@ type parameterInfo struct {
 }
 
 type parsedFile struct {
-	Path                      string
-	Lines                     []string
-	Module                    string
-	ModuleKind                string
-	Source                    []byte
-	Root                      *tree_sitter.Node
-	IR                        procedureir.DocumentIR
-	CFG                       vbacfg.Document
+	Path       string
+	Lines      []string
+	Module     string
+	ModuleKind string
+	Source     []byte
+	Root       *tree_sitter.Node
+	IR         procedureir.DocumentIR
+	CFG        vbacfg.Document
+	// Procedures owns the analyzer-facing projection of IR for this file
+	// revision. It is materialized once during batch/realtime file setup and
+	// reused by all rule stages. Callers must treat the sourceProcedure values
+	// and their nested IR/CFG data as read-only; procedures returns an
+	// independent outer slice so field updates cannot mutate this cache.
+	Procedures                []sourceProcedure
 	Parsed                    *vbaast.ParsedDocument
 	IntelDocument             intel.Document
 	RangeValueModuleConstants map[string]int
@@ -470,6 +476,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishStage = analysisstats.Measure(ctx, "effect_summaries")
 	projectEffects := buildProjectEffects(parsedFiles)
 	finishStage(len(projectEffects.All()), nil)
+	for i := range parsedFiles {
+		parsedFiles[i].Procedures = sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -775,7 +784,7 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile, diagnostics []intel.Dia
 	if len(diagnostics) == 0 {
 		return nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	out := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code != "VBA206" {
@@ -830,7 +839,7 @@ func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file par
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	out := make([]Finding, 0, len(diagnostics))
 	preflight := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
@@ -893,7 +902,7 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
 	line := diagnostic.Range.StartLine
 	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-	for _, candidate := range sourceProceduresFromIR(file.IR, file.CFG) {
+	for _, candidate := range file.procedures() {
 		if line >= candidate.StartLine && line <= candidate.EndLine {
 			proc = candidate
 			break
@@ -1025,7 +1034,7 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	out := make([]Finding, 0, len(diagnostics))
 	for i, diagnostic := range diagnostics {
 		if i&0x3f == 0 {
@@ -1216,15 +1225,16 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 	var findings []Finding
 	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		file := parsedFile{
-			Path:   view.Path,
-			Lines:  normalizedSourceLines(string(view.Source)),
-			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
-			Source: view.Source,
-			Root:   view.Root,
-			IR:     ir,
+			Path:       view.Path,
+			Lines:      normalizedSourceLines(string(view.Source)),
+			Module:     strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			Source:     view.Source,
+			Root:       view.Root,
+			IR:         ir,
+			Procedures: sourceProceduresFromIR(ir),
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-		procedures := sourceProceduresFromIR(ir)
+		procedures := file.procedures()
 		var scanErr error
 		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
 		if scanErr != nil {
@@ -1734,7 +1744,7 @@ func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnaly
 				Line:       procedure.Symbol.DeclarationRange.StartLine,
 			})
 		}
-		for _, proc := range sourceProceduresFromIR(file.IR) {
+		for _, proc := range file.procedures() {
 			functionName := strings.ToLower(proc.Name)
 			if functionName != "" {
 				if ctx.functionNamesSeen[functionName] {
@@ -2058,7 +2068,7 @@ func findingReceiver(finding Finding) string {
 }
 
 func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	for i := range procedures {
 		if i >= len(file.IR.Procedures) {
 			break
@@ -2069,6 +2079,13 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 		}
 	}
 	return procedures
+}
+
+func (file parsedFile) procedures() []sourceProcedure {
+	if file.Procedures != nil {
+		return append([]sourceProcedure(nil), file.Procedures...)
+	}
+	return sourceProceduresFromIR(file.IR, file.CFG)
 }
 
 func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir.ProcedureSymbol) effects.ProcedureIdentity {

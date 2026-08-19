@@ -85,7 +85,7 @@ func buildDictionaryCollectionIndex(files []parsedFile) *dictionaryCollectionInd
 	}
 	sources := map[string]source{}
 	for _, file := range files {
-		for _, proc := range sourceProceduresFromIR(file.IR, file.CFG) {
+		for _, proc := range file.procedures() {
 			if proc.Name == "" {
 				continue
 			}
