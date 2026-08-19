@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced repeated canonical CFG `IsReachable` query cost by reading cached
+  reachability membership directly instead of cloning the full reachable set;
+  default and `NormalOnly` semantics are unchanged.
+
 ## v0.30.2
 
 - Fixed LSP `VB029` false positives for declared UDT member receivers and VBA

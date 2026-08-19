@@ -173,6 +173,10 @@ established before that path diverges.
 Built graphs retain immutable per-revision query indexes. Statement-to-block
 lookups and incoming/outgoing edge traversal use these indexes, and the default
 and `NormalOnly` reachability sets are computed once when the graph is built.
+`IsReachable` reads membership directly from the matching cached set for these
+canonical views without materializing a defensive copy. APIs that materialize
+reachability data continue to receive independently owned copies, and a future
+filter view without a cached set must use the general reachability path.
 Graph value copies may share the index because it is read-only. `Clone`, graph
 rebasing, and edge-changing transformations rebuild the index with their
 independent graph storage. A Graph literal without an index builds a temporary
