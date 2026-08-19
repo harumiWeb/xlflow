@@ -1372,7 +1372,9 @@ edges, branch joins, early exits, error-handler paths, explicit `Set obj =
 Nothing` resets, and `ByRef` mutations. Locals, parameters, module-level
 objects, and persistent `Static` locals are included; each scope starts in its
 appropriate `Nothing`/maybe-`Nothing` state rather than being assumed
-initialized. `As New` declarations, constructor expressions, intrinsic object
+initialized. Explicit VBA line-continuation markers in a call are syntax-only
+and do not create argument slots, so object state follows the actual argument
+positions across such calls. `As New` declarations, constructor expressions, intrinsic object
 factories rooted at `ThisWorkbook` or `Application`, `Controls.Add` factories
 reached through a proven non-`Nothing` receiver, and unique project-local
 function/property summaries that guarantee a non-`Nothing` return establish
@@ -1425,6 +1427,11 @@ and standalone getter predicates, remain allowed.
 
 For `VBA226`, the configurable analyzer mapping is `VBA226 = detect_range_value_array_shape`.
 `VBA227` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. It uses a conservative CFG allocation lattice (`allocated`, `unallocated`, and `unknown`) for fixed, dynamic, multidimensional, object, and Variant arrays. It reports unallocated bound/access operations, invalid dimensions or known bounds, fixed-array `ReDim`, incompatible `Erase`, known scalar bound/iterable sources, and impossible constant `ReDim` bounds. Unknown Variant operations remain fail-open. The shared state supplies `VBA208` `ReDim Preserve` findings and object-array missing-`Set` findings under `VBA101` / `VBA102`, which retain their existing ownership and configuration contracts. Unique project-local Function and Property Get return assignments may establish an array value; mixed, recursive, ambiguous, and external returns remain unknown. Batch summaries may use project-local files, while real-time summaries are limited to the active document. `Range.Value` / `Value2` shape findings remain owned by `VBA226` and are not duplicated. Disable it with `[analyze].disabled_rules = ["VBA227"]` or use `detect_array_lifecycle_safety`.
+Conditional `ByRef` output helpers that exit on a zero collection/count and
+`ReDim` from that count are carried only into matching positive-count branches,
+including numeric `Select Case` clauses; the helper does not establish an
+unconditional allocation. `Select Case` case-local accesses receive the
+case-specific CFG state.
 For `VBA227`, the configurable analyzer mapping is `VBA227 = detect_array_lifecycle_safety`.
 The shared state also exposes operation shapes (`scalar`, fixed-array rank,
 dynamic-array rank/unknown, `Variant`, and `unknown`) to array-sensitive

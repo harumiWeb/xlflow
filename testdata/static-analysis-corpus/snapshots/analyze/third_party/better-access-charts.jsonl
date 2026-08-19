@@ -6,7 +6,6 @@
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA249","severity":"error","line":71,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA249","severity":"error","line":80,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA249","severity":"error","line":81,"column":0}
-{"project":"third_party/better-access-charts","file":"Modules/BAC_Data.cls","surface":"analyze","code":"VBA227","severity":"warning","line":116,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_DataSource.cls","surface":"analyze","code":"VBA239","severity":"warning","line":139,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_DataSource.cls","surface":"analyze","code":"VBA239","severity":"warning","line":141,"column":0}
 {"project":"third_party/better-access-charts","file":"Modules/BAC_DataSource.cls","surface":"analyze","code":"VBA202","severity":"warning","line":157,"column":0}

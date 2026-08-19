@@ -47,21 +47,160 @@ Fixed-size arrays begin allocated. Dynamic arrays begin unallocated. `ReDim`
 records its statically known dimensions and allocates a dynamic array. `Erase`
 deallocates a dynamic array but preserves fixed-array allocation; Erase on a
 fixed array is an element reset. Array literals, known array-returning
-functions, and known array assignments establish allocation. Unknown Variant
-and external values do not.
+functions, and known array assignments establish allocation. An explicit
+whole-array assignment such as `values() = Split(text, "|")` is an assignment,
+not an indexed access. A whole-array argument such as `ConvertToJson(values(),
+4)` is likewise not an indexed access at the call site; the callee owns any
+element-access diagnostics. `ParamArray` values begin allocated even when the
+caller supplies no arguments; their extent and bounds may remain unknown.
+Unknown Variant and external values do not establish allocation.
+
+A colon-separated declaration followed by an allocation, such as
+`Dim values(): ReDim values(lower To upper)`, is one valid dynamic-array
+allocation boundary. `VBA227` evaluates the `ReDim` before later source lines
+and must not infer a fixed shape from the later `ReDim` bounds. A plain `ReDim`
+therefore establishes the allocation before subsequent bounds and indexed
+accesses are checked.
+
+Known array-factory assignments such as `values() = Split(text, ",")` also
+establish allocation when the VBA expression spans continuation lines. The
+`VBA227` lifecycle pass joins those lines only for recognized `Array`, `Split`,
+and `Filter` whole-array assignments before applying the allocation state; an
+unrelated multiline call remains conservative.
+
+The indexed-use scan shared by `VBA227` and `VBA249` considers only
+unqualified local identifiers. A member call such as
+`Application.OnTime(onTime, ...)` is not an access to a local array named
+`OnTime`, even when a scalar with that name is declared in the same procedure.
+Likewise, `driver_.TableToArray(...)` is a member call and not an indexed use
+of the array-returning `TableToArray` procedure.
+
+An `IsArray(variant)` true branch establishes array-ness for that Variant, so a
+whole-array assignment from the guarded Variant can establish the target's
+allocation. The false branch remains unknown until a recognized array factory
+or other allocation operation establishes its state.
+
+A `VarType` comparison (the VBA intrinsic) or the analyzer-supported
+`VarTypeOf` guard name (which is not resolved as a project-defined wrapper)
+with `(vbArray Or vbByte)` provides the same array proof for a guarded Variant
+Byte-array assignment. Variant results
+from a binary stream `Read(-1)` expression and the `vbNullString`-to-Byte-array
+idiom are recognized as Byte-array transfers. The latter is a known empty
+array: `LBound` / `UBound` queries are valid, but element access remains a
+`VBA227` finding. A private `ByRef` output helper that fills the output on each
+accepted branch and routes rejected inputs through a project-local procedure
+with no normal exit is summarized at its normal exits; the rejecting branch
+does not poison the allocation proof.
+
+The same allocation-probe contract also applies when the positive length is
+first assigned to a scalar local and that local is compared with zero or a
+positive threshold. The proof remains path-sensitive; unrelated scalar
+assignments do not establish allocation.
 
 At a join, allocation and dimensions are retained only when all incoming paths
 agree. Exceptional and uncertain CFG edges use the pre-statement state. This
 means an indexed access after an allocation on only one branch remains a
 warning.
+Within a multiline CFG block, the `VBA227` lifecycle pass evaluates physical
+source lines in order so an allocation earlier in the block is visible to a
+later bound query or indexed access. This ordering refinement is local to
+`VBA227`; `VBA208` and `VBA249` retain their existing CFG-block evaluation
+semantics. On `On Error Resume Next` exceptional edges, a deterministic plain
+`ReDim` or recognized array-factory assignment retains its established
+allocation state; `ReDim Preserve` remains conservative when its prior
+allocation or shape is unknown.
+The rule also recognizes the narrow growable-buffer idiom that probes
+`UBound(target) + 1` under `On Error Resume Next`, clears `Err`, restores error
+handling, and conditionally performs `ReDim Preserve target(...)` before a
+bounded write loop. The probe and that loop's indexed writes are treated as
+covered by the fallback allocation; an unrelated `Resume Next` bounds query or
+indexed access remains conservative.
 
 The operation-facing shape is `scalar`, `fixed-array(rank)`,
 `dynamic-array(rank/unknown)`, `Variant`, or `unknown`. Declaration metadata,
 procedure signatures, array-return summaries, `Array(...)`, and `ParamArray`
 are normalized into this shape before operation checks run. Assignments,
 `ByRef` calls, and branch joins retain a shape only when it is proven on every
-incoming path. An unresolved or external value, and a `Variant` whose array
-nature is not proven, remains `unknown`.
+incoming path. For a unique project-local `Private` procedure, or a procedure
+in an `Option Private Module`, a direct array argument may seed a `ByRef` array
+parameter only when every observed call site passes an allocated array. These
+entry facts are solved across the same restricted helper chain. A module-level
+array-returning expression passed directly as a `ByRef` array argument may
+also seed the parameter from its allocated return summary; unknown or
+conditional returns remain unknown. Nested `ByRef` calls on one physical line
+are handled only when their source ranges establish a safe evaluation order;
+unrelated calls on the same line remain conservative. A module-level array may
+also carry allocation from a dominating, unique project-local
+caller into every resolved same-module `Private` helper entry. Class and form
+procedures also inherit arrays proven by `UserForm_Initialize` /
+`Class_Initialize`; cross-module, ambiguous, dynamic, unresolved, and otherwise
+unproven callers remain unknown. An inline conditional setup call is not
+sufficient. In a class module, a proven allocation performed by a
+project-local configuration helper through a `ByRef` array parameter may also
+be carried through a rejecting role guard or a matching role branch. A guard
+that validates a configured collection role or kind—such as
+`IsGenericCollectionRole`, `IsDictionaryCollection`, `IsSetCollection`,
+`IsPriorityQueueKind`, `IsSortedMapKind`, `IsSortedSetKind`, a recognized
+collection-role constant, or
+`mCollectionKind`—may establish the arrays belonging to that generic
+collection configuration. A helper name or guard without a proven allocation
+is not sufficient. Public, ambiguous, dynamic, and unresolved calls remain
+unknown. An unresolved or external value, and a `Variant` whose array nature
+is not proven, remains `unknown`.
+
+For class modules, the recognized `Friend` / `Private` collection, data-row,
+and aggregate-error storage members inherit the matching `Configure*`
+allocation contract when they are reached through a configured receiver. This
+models internal storage accessors and mutators that deliberately rely on their
+caller having established the owning instance's role; it does not establish
+allocation for unrelated helpers or for public, ambiguous, dynamic, or
+unresolved calls.
+
+A private module setup helper may also establish its direct module-array
+allocations when it uses the narrow idempotent form `If ready Then Exit Sub`,
+performs plain `ReDim` statements, and assigns the module-scoped Boolean guard
+to `True` as its final executable statement. The guard must have no other
+assignment in the module and the array must have no other whole-array write or
+`Erase`; arbitrary readiness flags, `ReDim Preserve`, externally writable
+guards, and resettable buffers remain unknown.
+
+A private `ByRef` output helper may establish a conditional allocation when it
+exits for a zero `Collection.Count` (or equivalent count) and performs a
+`ReDim` from that count on the remaining normal path. The caller must retain
+that condition: a positive count branch or a positive numeric `Select Case`
+clause proves the output array allocated only within that branch. The helper
+does not make the array unconditionally allocated, and unrelated count
+expressions or arbitrary conditional `ReDim` statements do not establish this
+fact. `Select Case` headers and their case bodies are evaluated through their
+own CFG blocks so a case-local access receives the selected branch state.
+
+When a private `ByRef` output helper has an unconditional allocation summary,
+that allocation is also applied to a caller-local array argument. This allows a
+second private `ByRef` helper to consume the locally allocated result without
+losing its entry state. Module-array effects remain shadow-safe: a module
+allocation is not transferred into a same-named local variable, and unresolved
+or public helper calls remain unknown.
+
+A private `ByRef` helper may also return an array and its successful element
+length through separate `ByRef` parameters. The assignment
+`length = UBound(values) - LBound(values) + 1` establishes a conditional
+allocation contract only when the helper's zero-length branch is explicit and
+the caller tests that paired length positively. A call that passes an
+unallocated array to a guarded helper is ignored for entry-state evidence when
+the helper's array use is unreachable under literal `False` or non-positive
+arguments; this prevents an intentionally unused optional array from
+invalidating a reachable positive-length proof.
+
+A non-empty `String` assigned directly to a dynamic `Byte` array is recognized
+as an allocation for a non-empty literal, or for a statically typed `String`
+whose syntactic non-empty guard is visible. An unguarded String assignment
+remains unknown because an empty string can still leave no usable element
+bounds; arbitrary `Variant` and function-return assignments remain unknown.
+
+A private `ByRef` array helper that calls itself recursively preserves the
+allocation state established by a proven external entry call. The recursive
+edge is not treated as an independent unknown entry; public or otherwise
+unresolved callers remain conservative.
 
 ## Diagnostics and ownership
 
@@ -125,16 +264,36 @@ Batch analysis may use a unique project-local `Function` or `Property Get`
 summary when every observed normal return assignment returns an allocated
 array with a consistent shape. Real-time analysis restricts this summary to
 the active document; it does not resolve array-return summaries from another
-module. Mixed return kinds, missing assignments, recursion, ambiguous names,
-and external calls remain unknown.
+module. Batch summaries are solved to a fixed point across unique helper chains,
+so declaration order does not change a proven result. Recognized allocation
+guards refine the normal branch, and a definitely failing constant `ReDim`
+without local error handling is excluded from normal-return evidence. Mixed
+return kinds, missing assignments, recursive or ambiguous chains, and external
+calls remain unknown.
+
+A unique project-local scalar `Function` or `Property Get` with one array or
+`Variant` parameter may also be recognized as an allocation probe when its
+normal return is exactly `UBound(parameter) - LBound(parameter) + 1` or
+`UBound(parameter) + 1` and its error-recovery label returns zero. For a typed
+VBA function, falling through from that recovery label to the implicit default
+return of zero is equivalent to an explicit zero assignment. The probe's own
+bound reads are covered by that recovery contract and are not reported as
+unallocated-array findings. A direct call comparison such as
+`CountBytes(values) > 0`, `CountBytes(values) >= 1`, `CountBytes(values) <> 0`,
+or the false branch of `CountBytes(values) = 0` then proves `values` allocated
+on that branch, including when the helper accepts the value through a Variant
+parameter. The rule does not infer allocation from arbitrary Boolean helpers,
+compound conditions, or the opposite branch.
 
 ## Boundaries
 
-The rule does not open Excel or claim that `IsArray` proves allocation or a
-dimension count. It accepts literal numeric bounds and the small shared
-integer-constant subset (Const/Enum references with arithmetic) only when they
-are statically visible; dynamic expressions remain unknown. It does not change
-the `Finding` JSON envelope or preflight blocking behavior.
+The rule does not open Excel or claim that `IsArray` proves a dimension count.
+Its true branch establishes only array-ness for a Variant whole-array
+assignment, while a positive recognized allocation-probe result establishes
+allocation for the guarded value. It accepts literal numeric bounds and the
+small shared integer-constant subset (Const/Enum references with arithmetic)
+only when they are statically visible; dynamic expressions remain unknown. It
+does not change the `Finding` JSON envelope or preflight blocking behavior.
 
 ## Related
 

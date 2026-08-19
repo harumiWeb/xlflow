@@ -33,15 +33,8 @@
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTable.cls","surface":"analyze","code":"VBA217","severity":"warning","line":77,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTableCollection.cls","surface":"analyze","code":"VBA225","severity":"warning","line":17,"column":0}
 {"project":"third_party/webxcel","file":"src/Classes/WorksheetTableCollection.cls","surface":"analyze","code":"VBA205","severity":"warning","line":19,"column":0}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":12,"column":0}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":12,"column":0}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":12,"column":0}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":13,"column":0}
 {"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":14,"column":20}
 {"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":15,"column":20}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":20,"column":0}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":20,"column":0}
-{"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA227","severity":"warning","line":22,"column":0}
 {"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":23,"column":20}
 {"project":"third_party/webxcel","file":"src/Modules/PathExtensions.bas","surface":"analyze","code":"VBA206","severity":"warning","line":24,"column":20}
 {"project":"third_party/webxcel","file":"src/Modules/TestMarshal.bas","surface":"analyze","code":"VBA206","severity":"warning","line":6,"column":27}

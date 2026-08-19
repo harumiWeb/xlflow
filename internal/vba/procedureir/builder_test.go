@@ -962,6 +962,31 @@ End Sub
 	}
 }
 
+func TestCallArgumentsIgnoreLineContinuationNodes(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Private Sub Consume(ByRef values() As Byte, ByVal count As Long)
+End Sub
+
+Public Sub Run()
+    Dim values() As Byte
+    ReDim values(0 To 1)
+    Consume values, _
+        2
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 || len(doc.Procedures[1].Calls) != 1 {
+		t.Fatalf("line-continuation call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[1].Calls[0]
+	if call.Arguments.Count != 2 || len(call.Arguments.ExpressionIDs) != 2 ||
+		call.Arguments.ExpressionIDs[0] == 0 || call.Arguments.ExpressionIDs[1] == 0 {
+		t.Fatalf("line continuation must not become an argument slot: %+v", call.Arguments)
+	}
+}
+
 func TestFunctionAndPropertyGetNamesResolveAsLocalReturnSlots(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, []byte(`Public Function Compute(ByVal input As Long) As Long
