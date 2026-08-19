@@ -104,11 +104,33 @@ func combinedOutcome(current, next string) string {
 }
 
 func (r *Recorder) Add(name string, value uint64) {
+	r.AddSum(name, value)
+}
+
+// AddSum adds value to an additive counter. Add is retained as a compatibility
+// alias for existing instrumentation callers.
+func (r *Recorder) AddSum(name string, value uint64) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	r.counters[name] += value
+	r.mu.Unlock()
+}
+
+// AddMax records the greatest value observed for a maximum counter. Maximum
+// workload dimensions are intentionally separate from additive counters so
+// repeated observations do not turn a per-file or per-procedure maximum into
+// a sum.
+func (r *Recorder) AddMax(name string, value uint64) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	current, ok := r.counters[name]
+	if !ok || value > current {
+		r.counters[name] = value
+	}
 	r.mu.Unlock()
 }
 

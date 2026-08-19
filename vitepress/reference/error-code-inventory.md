@@ -404,7 +404,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `file_input`
 - `file_operation`
 - `file_picker`
-- `file_procedure_diagnostics`
 - `file_read`
 - `files_changed`
 - `files_to_change`
@@ -558,6 +557,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `like_pattern`
 - `likely_cause`
 - `line_continuation`
+- `line_count`
 - `line_number_label`
 - `line_number_literal`
 - `line_number_statement`
@@ -603,11 +603,17 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `manifest_path`
 - `manual_quoting`
 - `max_age_days`
+- `max_calls_per_file`
+- `max_cfg_blocks_per_procedure`
+- `max_cfg_edges_per_procedure`
 - `max_cols`
 - `max_concurrent`
 - `max_count`
+- `max_lines_per_file`
 - `max_nesting_depth`
+- `max_procedures_per_file`
 - `max_rows`
+- `max_statements_per_procedure`
 - `max_total_size_mb`
 - `may_raise`
 - `member_access`
@@ -636,6 +642,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_already_exists`
 - `module_ambiguous`
 - `module_declaration_after_procedure`
+- `module_declaration_count`
 - `module_install_failed`
 - `module_kind`
 - `module_mutation_failed`
@@ -780,6 +787,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_ir_reuses`
 - `procedure_ir_singleflight`
 - `procedure_kind`
+- `procedure_local_diagnostics`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -798,6 +806,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `project_config`
 - `project_config_missing`
 - `project_context`
+- `project_context_indexes`
 - `project_count`
 - `project_create`
 - `project_init`
@@ -1003,7 +1012,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `sub_declaration`
 - `supported_severities`
 - `suppresses_errors`
-- `suppression_finalization`
+- `suppression_and_finalize`
 - `symbols_singleflight`
 - `sync_source`
 - `systemprofile_desktop`
@@ -1058,6 +1067,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `type_preprocessor_else`
 - `type_preprocessor_elseif`
 - `type_preprocessor_if`
+- `typed_excel_diagnostics`
 - `typedb_load`
 - `udt_byval`
 - `udt_optional`

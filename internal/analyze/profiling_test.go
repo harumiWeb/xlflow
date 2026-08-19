@@ -18,7 +18,7 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	if err := os.MkdirAll(modules, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := "Option Explicit\nPublic Sub Run(ByRef target As Long)\n  Dim value As Long\n  value = 1\n  target = value\nEnd Sub\n"
+	source := "Option Explicit\nPrivate moduleValue As Long\nPublic Sub Run(ByRef target As Long)\n  Dim value As Long\n  value = 1\n  target = value\nEnd Sub\n"
 	if err := os.WriteFile(filepath.Join(modules, "Main.bas"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -47,9 +47,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	for _, name := range []string{
 		"source_discovery", "file_read", "parse", "procedure_ir", "cfg",
 		"effect_summaries", "object_procedure_summaries", "object_entry_states",
-		"project_context", "typedb_load", "project_symbols", "project_wide_diagnostics",
-		"file_procedure_diagnostics", "byref_diagnostics", "compile_equivalent_diagnostics",
-		"suppression_finalization", "analyze_total",
+		"project_context", "project_context_indexes", "typedb_load", "project_symbols", "project_wide_diagnostics",
+		"procedure_local_diagnostics", "typed_excel_diagnostics", "byref_diagnostics", "compile_equivalent_diagnostics",
+		"suppression_and_finalize", "analyze_total",
 	} {
 		stage, ok := stageByName[name]
 		if !ok {
@@ -66,7 +66,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	for _, name := range []string{
 		"file_count", "procedure_count", "statement_count", "expression_count",
 		"call_site_count", "cfg_block_count", "cfg_edge_count", "project_symbol_count",
-		"byref_diagnostic_passes",
+		"byref_diagnostic_passes", "line_count", "module_declaration_count",
+		"max_lines_per_file", "max_procedures_per_file", "max_calls_per_file",
+		"max_statements_per_procedure", "max_cfg_blocks_per_procedure", "max_cfg_edges_per_procedure",
 	} {
 		if _, ok := counterByName[name]; !ok {
 			t.Fatalf("missing counter %q: %+v", name, counters)
@@ -74,6 +76,18 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	}
 	if counterByName["file_count"] != 1 || counterByName["procedure_count"] != 1 {
 		t.Fatalf("workload counters = %+v", counters)
+	}
+	if counterByName["line_count"] != uint64(len(normalizedSourceLines(source))) ||
+		counterByName["max_lines_per_file"] != uint64(len(normalizedSourceLines(source))) ||
+		counterByName["module_declaration_count"] != 1 ||
+		counterByName["max_procedures_per_file"] != 1 ||
+		counterByName["max_calls_per_file"] != 0 {
+		t.Fatalf("line/module maximum counters = %+v", counters)
+	}
+	if counterByName["max_statements_per_procedure"] == 0 ||
+		counterByName["max_cfg_blocks_per_procedure"] == 0 ||
+		counterByName["max_cfg_edges_per_procedure"] == 0 {
+		t.Fatalf("procedure maximum counters = %+v", counters)
 	}
 	if counterByName["byref_diagnostic_passes"] != 1 {
 		t.Fatalf("ByRef analysis passes = %d, want one per file revision", counterByName["byref_diagnostic_passes"])

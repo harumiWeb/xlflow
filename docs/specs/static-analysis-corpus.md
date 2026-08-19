@@ -778,46 +778,61 @@ Do not parallelize VBE cases or infer a hang from the broad `go test ./...`
 duration; Excel/COM tests have a materially different runtime profile from
 the Excel-free corpus checks.
 
-### Batch analyzer stage profiling and scaling benchmarks
+### Batch analyzer stage profiling and large single-module benchmarks
 
-Issue #647 adds a separate batch-analyzer profiling path. The opt-in
-`xlflow analyze --performance-log` flag emits stage timings, result counts, and
-workload counters to stderr while leaving analyzer findings and JSON stdout
-unchanged. The records are intended for same-machine comparisons and are not
-CI timing thresholds. The stage names and counter names are stable so a profile
-can be compared across analyzer changes; use the `outcome` field to distinguish
+Issue #671 adds a separate profiling path for unusually large VBA modules. The
+opt-in `xlflow analyze --performance-log` flag emits canonical stage timings,
+result counts, outcomes, and workload counters to stderr while leaving analyzer
+findings and JSON stdout unchanged. The records are intended for same-machine
+comparisons and are not CI timing thresholds. Use `outcome` to distinguish
 successful, failed, and canceled stages.
 
-Run the deterministic synthetic scaling benchmark and the real-world corpus
-hotspot benchmark with the repository tasks:
+The aggregate counters describe total project work, including files,
+procedures, statements, expressions, call sites, CFG blocks/edges, and project
+symbols, lines, and module declarations. Subsystem worklist counters may also
+be present when object or ByRef analysis runs. The maximum counters describe
+the largest single-file or single-procedure dimensions: `max_lines_per_file`,
+`max_procedures_per_file`, `max_calls_per_file`,
+`max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and
+`max_cfg_edges_per_procedure`. These counters are workload measurements, not
+diagnostics. The canonical stage labels include `parse`, `procedure_ir`, `cfg`,
+`effect_summaries`, `project_context`, `project_wide_diagnostics`,
+`procedure_local_diagnostics`, and `suppression_and_finalize`.
+
+Run the deterministic synthetic benchmark and the real-world corpus hotspot
+benchmark with the repository tasks:
 
 ```powershell
 rtk task bench:analyze
+rtk task bench:analyze-single-module
 rtk task bench:corpus
 ```
 
-`bench:analyze` generates its 100-, 500-, and 1,000-procedure projects outside
-the timed region. The generated projects use multiple modules, project-local
-calls, ByRef-heavy calls, object state flow, and branching CFGs so stage
-scaling can be compared against a known workload. It also runs the
-`BenchmarkObjectAnalysisWorklist` reverse-ordered object-return chain, whose
-`counter_object_summary_evaluations` and `counter_object_entry_flow_evaluations`
-metrics expose propagation work separately from parsing and diagnostics.
-`bench:corpus` runs the
-existing `BenchmarkRealWorldCorpus` `std-vba` and `ronecone` analyze-only
-sub-benchmarks. Both tasks use `-benchmem -benchtime=1x`; on Windows they run
-through `scripts/dev/go.ps1` to keep CGO and tree-sitter toolchain selection
-consistent. The benchmark output should retain `ns/op`, allocations, findings,
-and the `stage_*` / `counter_*` benchmark metrics derived from the attached
-analysis recorder; these are Go benchmark metrics, not stderr records from
+`bench:analyze` retains the existing multi-module and object-worklist baselines.
+`bench:analyze-single-module` keeps fixture generation outside the timed region
+and covers single-module scales around 500, 1,000, and 2,000 procedures,
+including large call graphs, declaration sets, and CFGs. `bench:corpus` runs the checked-in
+`std-vba` and `ronecone` analyze-only sub-benchmarks. These tasks use
+`-benchmem -benchtime=1x`; on Windows they run through `scripts/dev/go.ps1` to
+keep CGO and tree-sitter toolchain selection consistent. Benchmark output should
+retain wall time (`ns/op`), allocations, findings, workload dimensions, and the
+`stage_*` / `counter_*` metrics derived from the attached analysis recorder;
+these are Go benchmark metrics, not stderr records from
 `analyze --performance-log`.
 
-Do not use absolute elapsed-time assertions to fail CI. For a useful before /
-after comparison, keep the Go version, machine, power state, benchmark filter,
-and sample count constant, and report any unusually slow run with its complete
-command and environment. Benchmark generation is test-only infrastructure and
-must not run from ordinary `analyze`, `check`, corpus snapshot, or Excel/VBE
-oracle workflows.
+ROneCOne profiling is developer-only and must be selected explicitly as a leaf
+benchmark; it is Excel/COM-free and is not part of ordinary `go test ./...`:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 2
+```
+
+On Linux or macOS, use the same command with `rtk go test` instead of the
+Windows wrapper. Keep the Go version, machine, power state, benchmark filter,
+and sample count constant for before/after comparisons, and report unusually
+slow runs with the complete command and environment. Benchmark generation is
+test-only infrastructure and must not run from ordinary `analyze`, `check`,
+corpus snapshot, or Excel/VBE oracle workflows.
 
 ## Verification requirements
 

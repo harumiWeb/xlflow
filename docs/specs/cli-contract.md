@@ -274,19 +274,28 @@ data to the `--json` stdout envelope. A record uses the fixed operation name
 count, result count, and outcome (`ok`, `error`, or `canceled`). The measured
 stages are `source_discovery`, `file_read`, `parse`, `procedure_ir`, `cfg`,
 `effect_summaries`, `object_procedure_summaries`, `object_entry_states`,
-`project_context`, `project_symbols`, `typedb_load`,
-`project_wide_diagnostics`, `file_procedure_diagnostics`, `byref_diagnostics`,
-`compile_equivalent_diagnostics`, and `suppression_finalization`; the complete
-operation is reported as `analyze_total`.
+`project_context`, `project_context_indexes`, `project_symbols`, `typedb_load`,
+`project_wide_diagnostics`, `procedure_local_diagnostics`, `byref_diagnostics`,
+`typed_excel_diagnostics`, `compile_equivalent_diagnostics`, and
+`suppression_and_finalize`; the complete operation is reported as
+`analyze_total`. These are the canonical CLI labels.
 
-The performance output also reports workload counters in stable order:
-`file_count`, `procedure_count`, `statement_count`, `expression_count`,
-`call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
-`project_symbol_count`. Counters describe the analyzed workload and are not
-diagnostics. When the flag is absent, analysis does not start a timer or emit
-performance records. The flag is valid only on `analyze`; `check` does not
-forward or expose analyzer profiling. Findings, warning order, preflight
-results, exit codes, and JSON output are identical with and without the flag.
+The performance output also reports workload counters in stable order. Aggregate
+workload counters are `file_count`, `procedure_count`, `statement_count`,
+`expression_count`, `call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
+`project_symbol_count`, `line_count`, and `module_declaration_count`.
+Analyzer worklist counters such as `object_summary_evaluations`,
+`object_entry_flow_evaluations`, and `byref_diagnostic_passes` may also be
+reported when those subsystems run.
+Large-single-module dimensions are reported by the maximum counters
+`max_lines_per_file`, `max_procedures_per_file`,
+`max_calls_per_file`, `max_statements_per_procedure`,
+`max_cfg_blocks_per_procedure`, and `max_cfg_edges_per_procedure`. Counters
+describe the analyzed workload and are not diagnostics. When the flag is
+absent, analysis does not start a timer or emit performance records. The flag
+is valid only on `analyze`; `check` does not forward or expose analyzer
+profiling. Findings, warning order, preflight results, exit codes, and JSON
+output are identical with and without the flag.
 
 For `VBA222`, an unresolved external type is reported only when the project and
 TypeLib resolution view is complete. Missing, empty, malformed, or partial
