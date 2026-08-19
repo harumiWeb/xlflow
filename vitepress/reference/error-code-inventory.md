@@ -87,6 +87,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `builtin_like`
 - `button_not_found`
 - `by_kind`
+- `byref_diagnostic_passes`
 - `byref_diagnostics`
 - `byref_modifier`
 - `byref_parameter_count`

@@ -8,6 +8,11 @@ All notable changes to xlflow will be documented in this file.
   adjacency, and reachability indexes for analyzer graph queries. CFG semantics
   and diagnostic output are unchanged.
 
+- Improved batch ByRef analysis by computing each file revision once and
+  reusing the typed diagnostics for both runtime-safety and compile-equivalent
+  projections. Diagnostic output and the `VBA206`/`VBA228` contracts are
+  unchanged.
+
 - Improved `VBA202` batch analysis scalability by gating object analysis behind
   the rule, reusing per-procedure CFG/object-flow artifacts, and propagating
   interprocedural summaries and entry states through dependency worklists.

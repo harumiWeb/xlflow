@@ -66,6 +66,7 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	for _, name := range []string{
 		"file_count", "procedure_count", "statement_count", "expression_count",
 		"call_site_count", "cfg_block_count", "cfg_edge_count", "project_symbol_count",
+		"byref_diagnostic_passes",
 	} {
 		if _, ok := counterByName[name]; !ok {
 			t.Fatalf("missing counter %q: %+v", name, counters)
@@ -73,6 +74,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	}
 	if counterByName["file_count"] != 1 || counterByName["procedure_count"] != 1 {
 		t.Fatalf("workload counters = %+v", counters)
+	}
+	if counterByName["byref_diagnostic_passes"] != 1 {
+		t.Fatalf("ByRef analysis passes = %d, want one per file revision", counterByName["byref_diagnostic_passes"])
 	}
 }
 func TestBatchAnalysisSkipsVBA202ContextWhenDisabled(t *testing.T) {
