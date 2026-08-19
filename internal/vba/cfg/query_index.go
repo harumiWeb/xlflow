@@ -62,6 +62,20 @@ func (g Graph) queryIndexes() *queryIndex {
 	return buildQueryIndex(g)
 }
 
+// cachedReachable returns the immutable reachability set for a canonical
+// filter view. Keep the filter cases explicit so a future filter variant does
+// not accidentally reuse the conservative default set.
+func (index *queryIndex) cachedReachable(filter EdgeFilter) (map[BlockID]bool, bool) {
+	switch filter {
+	case EdgeFilter{}:
+		return index.reachableAll, true
+	case EdgeFilter{NormalOnly: true}:
+		return index.reachableNormal, true
+	default:
+		return nil, false
+	}
+}
+
 func (index *queryIndex) matches(g Graph) bool {
 	if index.blocksLen != len(g.Blocks) || index.edgesLen != len(g.Edges) {
 		return false

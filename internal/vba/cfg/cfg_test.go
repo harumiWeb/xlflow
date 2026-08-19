@@ -166,20 +166,90 @@ func TestQueryIndexInvalidatesReachabilityInputs(t *testing.T) {
 	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{1, 2}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("initial Reachable() = %v, want %v", got, want)
 	}
+	if !graph.IsReachable(2, EdgeFilter{}) || graph.IsReachable(4, EdgeFilter{}) {
+		t.Fatal("initial IsReachable() did not use the initial index")
+	}
 
 	graph.Entry = 4
 	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{4}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Reachable() after Entry change = %v, want %v", got, want)
+	}
+	if !graph.IsReachable(4, EdgeFilter{}) || graph.IsReachable(2, EdgeFilter{}) {
+		t.Fatal("IsReachable() used stale Entry reachability")
 	}
 
 	graph.UnknownFlowSources = []BlockID{4}
 	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{2, 3, 4}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Reachable() after UnknownFlowSources change = %v, want %v", got, want)
 	}
+	if !graph.IsReachable(3, EdgeFilter{}) {
+		t.Fatal("IsReachable() used stale UnknownFlowSources reachability")
+	}
 
 	graph.UnknownExit = 5
 	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{2, 4, 5}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Reachable() after UnknownExit change = %v, want %v", got, want)
+	}
+	if !graph.IsReachable(5, EdgeFilter{}) || graph.IsReachable(3, EdgeFilter{}) {
+		t.Fatal("IsReachable() used stale UnknownExit reachability")
+	}
+}
+
+func TestIsReachableUsesCanonicalFilterViews(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 1, Kind: BlockEntry},
+			{ID: 2, Kind: BlockStatement},
+			{ID: 3, Kind: BlockExceptionalExit},
+		},
+		Edges: []Edge{
+			{ID: 1, From: 1, To: 2, Class: EdgeNormal},
+			{ID: 2, From: 1, To: 3, Class: EdgeExceptional},
+		},
+		Entry: 1,
+	}
+	graph.query = buildQueryIndex(graph)
+
+	if !graph.IsReachable(2, EdgeFilter{}) {
+		t.Fatal("default reachability lost normal flow")
+	}
+	if !graph.IsReachable(3, EdgeFilter{}) {
+		t.Fatal("default reachability lost exceptional flow")
+	}
+	if graph.IsReachable(3, EdgeFilter{NormalOnly: true}) {
+		t.Fatal("NormalOnly reachability included exceptional flow")
+	}
+	if graph.IsReachable(99, EdgeFilter{}) {
+		t.Fatal("unknown block was reported reachable")
+	}
+}
+
+func TestIsReachableCanonicalQueriesDoNotAllocate(t *testing.T) {
+	graph := benchmarkQueryGraph(1000)
+	tests := []struct {
+		name   string
+		target BlockID
+		filter EdgeFilter
+		want   bool
+	}{
+		{name: "default/true", target: 1000, filter: EdgeFilter{}, want: true},
+		{name: "normal-only/false", target: 3, filter: EdgeFilter{NormalOnly: true}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			var got bool
+			allocations := testing.AllocsPerRun(1000, func() {
+				got = graph.IsReachable(test.target, test.filter)
+			})
+			if allocations != 0 {
+				t.Fatalf("IsReachable(%d, %+v) allocated %.2f times, want zero", test.target, test.filter, allocations)
+			}
+			if got != test.want {
+				t.Fatalf("IsReachable(%d, %+v) = %v, want %v", test.target, test.filter, got, test.want)
+			}
+		})
 	}
 }
 

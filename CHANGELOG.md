@@ -135,6 +135,9 @@ All notable changes to xlflow will be documented in this file.
 
 - Reduced `VBA227` false positives for private recursive `ByRef` array helpers
   when an allocated external entry is proven.
+- Reduced repeated canonical CFG `IsReachable` query cost by reading cached
+  reachability membership directly instead of cloning the full reachable set;
+  default and `NormalOnly` semantics are unchanged.
 
 ## v0.30.2
 

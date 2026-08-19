@@ -7,6 +7,7 @@ import (
 
 var (
 	benchmarkBlockSink       Block
+	benchmarkIsReachableSink bool
 	benchmarkReachableSink   []BlockID
 	benchmarkPredecessorSink []BlockID
 )
@@ -32,6 +33,37 @@ func BenchmarkCFGQuery(b *testing.B) {
 				benchmarkPredecessorSink = legacyPredecessors(graph, BlockID(size+5), EdgeFilter{}, benchmarkSet(benchmarkReachableSink))
 			}
 		})
+	}
+}
+
+func BenchmarkCFGIsReachable(b *testing.B) {
+	for _, size := range []int{100, 1000, 5000} {
+		graph := benchmarkQueryGraph(size)
+		for _, test := range []struct {
+			name   string
+			filter EdgeFilter
+		}{
+			{name: "default", filter: EdgeFilter{}},
+			{name: "normal-only", filter: EdgeFilter{NormalOnly: true}},
+		} {
+			test := test
+			b.Run("indexed/"+test.name+"/"+benchmarkSizeName(size), func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					target := BlockID(i%size + 6)
+					benchmarkIsReachableSink = graph.IsReachable(target, test.filter)
+				}
+			})
+			b.Run("defensive-copy/"+test.name+"/"+benchmarkSizeName(size), func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					target := BlockID(i%size + 6)
+					benchmarkIsReachableSink = legacyIsReachable(graph, target, test.filter)
+				}
+			})
+		}
 	}
 }
 
@@ -70,7 +102,10 @@ func benchmarkQueryGraph(size int) Graph {
 	for i := 0; i < size; i++ {
 		blocks = append(blocks, Block{ID: BlockID(i + 6), Kind: BlockStatement, StatementID: i + 1})
 	}
-	edges := []Edge{{From: 1, To: 6, Class: EdgeNormal}}
+	edges := []Edge{
+		{From: 1, To: 6, Class: EdgeNormal},
+		{From: 6, To: 3, Class: EdgeExceptional},
+	}
 	for i := 0; i < size; i++ {
 		from := BlockID(i + 6)
 		if i+1 < size {
@@ -84,6 +119,10 @@ func benchmarkQueryGraph(size int) Graph {
 	graph := Graph{Blocks: blocks, Edges: edges, Entry: 1, NormalExit: 2, ExceptionalExit: 3, TerminationExit: 4, UnknownExit: 5}
 	graph.query = buildQueryIndex(graph)
 	return graph
+}
+
+func legacyIsReachable(g Graph, target BlockID, filter EdgeFilter) bool {
+	return g.reachableWithout(filter, nil)[target]
 }
 
 func benchmarkSet(ids []BlockID) map[BlockID]bool {
