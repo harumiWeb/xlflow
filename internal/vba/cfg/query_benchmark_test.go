@@ -35,6 +35,25 @@ func BenchmarkCFGQuery(b *testing.B) {
 	}
 }
 
+func BenchmarkCFGBlockForStatement(b *testing.B) {
+	const size = 5000
+	graph := benchmarkQueryGraph(size)
+	b.Run("indexed", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchmarkBlockSink, _ = graph.BlockForStatement(i%size + 1)
+		}
+	})
+	b.Run("legacy", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchmarkBlockSink, _ = legacyBlockForStatement(graph, i%size+1)
+		}
+	})
+}
+
 func benchmarkSizeName(size int) string {
 	return strconv.Itoa(size)
 }

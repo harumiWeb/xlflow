@@ -9,6 +9,10 @@ type queryIndex struct {
 	incoming          map[BlockID][]Edge
 	reachableAll      map[BlockID]bool
 	reachableNormal   map[BlockID]bool
+	blocksBase        *Block
+	blocksLen         int
+	edgesBase         *Edge
+	edgesLen          int
 }
 
 func buildQueryIndex(g Graph) *queryIndex {
@@ -16,6 +20,14 @@ func buildQueryIndex(g Graph) *queryIndex {
 		blocksByStatement: make(map[int]int),
 		outgoing:          make(map[BlockID][]Edge),
 		incoming:          make(map[BlockID][]Edge),
+		blocksLen:         len(g.Blocks),
+		edgesLen:          len(g.Edges),
+	}
+	if len(g.Blocks) > 0 {
+		index.blocksBase = &g.Blocks[0]
+	}
+	if len(g.Edges) > 0 {
+		index.edgesBase = &g.Edges[0]
 	}
 	for blockIndex, block := range g.Blocks {
 		if block.Kind == BlockStatement && block.StatementID > 0 {
@@ -34,12 +46,27 @@ func buildQueryIndex(g Graph) *queryIndex {
 }
 
 func (g Graph) queryIndexes() *queryIndex {
-	if g.query != nil {
+	if g.query != nil && g.query.matches(g) {
 		return g.query
 	}
-	// Some internal tests construct Graph literals directly. Keep those values
-	// correct without requiring every caller to know the index contract.
+	// Some internal tests construct Graph literals directly, and callers may
+	// replace the public block/edge slices on a copied graph. Rebuild when the
+	// slice storage changes so the fallback remains correct without penalizing
+	// stable graph revisions.
 	return buildQueryIndex(g)
+}
+
+func (index *queryIndex) matches(g Graph) bool {
+	if index.blocksLen != len(g.Blocks) || index.edgesLen != len(g.Edges) {
+		return false
+	}
+	if len(g.Blocks) > 0 && index.blocksBase != &g.Blocks[0] {
+		return false
+	}
+	if len(g.Edges) > 0 && index.edgesBase != &g.Edges[0] {
+		return false
+	}
+	return true
 }
 
 func computeReachable(g Graph, index *queryIndex, filter EdgeFilter) map[BlockID]bool {

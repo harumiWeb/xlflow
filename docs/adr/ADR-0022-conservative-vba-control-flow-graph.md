@@ -65,7 +65,10 @@ conservative reachability sets for the supported edge-filter views. Graph value
 copies may share these read-only indexes, while defensive clones and graph
 transformations rebuild them together with their copied or changed slices.
 Graphs constructed directly by internal callers without an index use a
-correctness-preserving fallback index.
+correctness-preserving fallback index. Indexed graph revisions treat the block
+and edge slices as immutable; replacing those slices on a copied graph causes
+the storage identity/length guard to rebuild the index, while content changes
+must go through defensive cloning or a graph transformation.
 
 Cache the document CFG on the immutable `AnalysisSnapshot`, using the same
 ownership, concurrency, retryable-cancellation, and defensive-copy contract as
