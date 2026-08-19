@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added bounded parallel execution for independent per-file batch analysis
+  stages. Findings remain deterministic, cancellation is preserved, and large
+  synthetic projects show substantial wall-clock reductions.
+
 - Improved repeated CFG query performance by reusing immutable statement,
   adjacency, and reachability indexes for analyzer graph queries. CFG semantics
   and diagnostic output are unchanged.
