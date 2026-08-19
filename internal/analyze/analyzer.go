@@ -261,6 +261,14 @@ type parsedFile struct {
 	DataFlowModuleBindings    map[string]bool
 }
 
+// batchByRefDiagnostics records the result of the one ByRef analysis pass
+// performed for a file revision. The computed bit distinguishes an analyzed
+// file with no findings from callers that still need the Intel fallback.
+type batchByRefDiagnostics struct {
+	computed    bool
+	diagnostics []intel.Diagnostic
+}
+
 type sourceProcedure struct {
 	Kind             string
 	ProcedureKind    procedureir.ProcedureKind
@@ -619,11 +627,12 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		findings = append(findings, contractFindings...)
 		finishStage(len(statefulFindings)+len(contractFindings), nil)
 		finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
-		byRefFindings := analysis.byRefArgumentFindings(file)
+		byRefDiagnostics := analysis.byRefArgumentDiagnosticsContext(ctx, file)
+		byRefFindings := analysis.byRefArgumentFindings(file, byRefDiagnostics.diagnostics)
 		findings = append(findings, byRefFindings...)
 		finishStage(len(byRefFindings), nil)
 		finishStage = analysisstats.Measure(ctx, "compile_equivalent_diagnostics")
-		compileFindings, filePreflightFindings := analysis.compileEquivalentFindingsContext(ctx, file)
+		compileFindings, filePreflightFindings := analysis.compileEquivalentFindingsContext(ctx, file, byRefDiagnostics)
 		finishStage(len(compileFindings)+len(filePreflightFindings), ctx.Err())
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
@@ -646,9 +655,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	return result, nil
 }
 
-func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
-	if a.typeDB == nil {
-		return nil
+func (a Analyzer) byRefArgumentDiagnosticsContext(ctx context.Context, file parsedFile) batchByRefDiagnostics {
+	if a.typeDB == nil || ctx.Err() != nil {
+		return batchByRefDiagnostics{computed: true}
 	}
 	diagnostics := (intel.Analyzer{
 		RootDir:                    a.RootDir,
@@ -656,7 +665,11 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 		DB:                         a.typeDB,
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
-	}).ByRefArgumentDiagnostics(file.intelDocument())
+	}).ByRefArgumentDiagnosticsContext(ctx, file.intelDocument())
+	return batchByRefDiagnostics{computed: true, diagnostics: diagnostics}
+}
+
+func (a Analyzer) byRefArgumentFindings(file parsedFile, diagnostics []intel.Diagnostic) []Finding {
 	if len(diagnostics) == 0 {
 		return nil
 	}
@@ -693,11 +706,11 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 }
 
 func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Finding) {
-	return a.compileEquivalentFindingsContext(context.Background(), file)
+	return a.compileEquivalentFindingsContext(context.Background(), file, batchByRefDiagnostics{})
 }
 
-func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file parsedFile) ([]Finding, []Finding) {
-	diagnostics := (intel.Analyzer{
+func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file parsedFile, byRefDiagnostics batchByRefDiagnostics) ([]Finding, []Finding) {
+	intelAnalyzer := intel.Analyzer{
 		RootDir:                    a.RootDir,
 		Config:                     a.Config,
 		DB:                         a.typeDB,
@@ -705,7 +718,13 @@ func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file par
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 		VisibleConstants:           a.visibleConstants,
 		ConstantValues:             a.visibleConstantValues,
-	}).CompileEquivalentDiagnosticsContext(ctx, file.intelDocument())
+	}
+	var diagnostics []intel.Diagnostic
+	if byRefDiagnostics.computed {
+		diagnostics = intelAnalyzer.CompileEquivalentDiagnosticsContextWithByRefDiagnostics(ctx, file.intelDocument(), byRefDiagnostics.diagnostics)
+	} else {
+		diagnostics = intelAnalyzer.CompileEquivalentDiagnosticsContext(ctx, file.intelDocument())
+	}
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}

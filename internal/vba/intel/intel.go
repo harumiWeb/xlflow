@@ -240,30 +240,38 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 // project the same semantic findings that the LSP exposes, without importing
 // the full editor diagnostic pipeline a second time.
 func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	return a.compileEquivalentDiagnosticsContext(ctx, doc, nil, false)
+}
+
+// CompileEquivalentDiagnosticsContextWithByRefDiagnostics projects compile-
+// equivalent diagnostics using a ByRef result that was already computed for
+// the same document revision. Batch analysis uses this entry point so the
+// expensive project-local call resolution is shared with the normal ByRef
+// diagnostic projection.
+func (a Analyzer) CompileEquivalentDiagnosticsContextWithByRefDiagnostics(ctx context.Context, doc Document, byRefDiagnostics []Diagnostic) []Diagnostic {
+	return a.compileEquivalentDiagnosticsContext(ctx, doc, byRefDiagnostics, true)
+}
+
+func (a Analyzer) compileEquivalentDiagnosticsContext(ctx context.Context, doc Document, byRefDiagnostics []Diagnostic, byRefDiagnosticsReady bool) []Diagnostic {
 	if ctx.Err() != nil {
 		return nil
 	}
 	var out []Diagnostic
-	for _, diagnostic := range a.argumentDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
+	appendCompileEquivalent := func(diagnostics []Diagnostic) {
+		for _, diagnostic := range diagnostics {
+			if isCompileEquivalentDiagnostic(diagnostic.Code) {
+				out = append(out, diagnostic)
+			}
 		}
 	}
-	for _, diagnostic := range a.ByRefArgumentDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
-		}
+	appendCompileEquivalent(a.argumentDiagnosticsContext(ctx, doc))
+	if byRefDiagnosticsReady {
+		appendCompileEquivalent(byRefDiagnostics)
+	} else {
+		appendCompileEquivalent(a.ByRefArgumentDiagnosticsContext(ctx, doc))
 	}
-	for _, diagnostic := range a.assignmentDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
-		}
-	}
-	for _, diagnostic := range a.LocalTypeNameDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
-		}
-	}
+	appendCompileEquivalent(a.assignmentDiagnosticsContext(ctx, doc))
+	appendCompileEquivalent(a.LocalTypeNameDiagnosticsContext(ctx, doc))
 	// Control-flow legality is projected from the same procedure IR/CFG used
 	// by lint. Batch analyze/preflight does not run the full lint adapter, so
 	// build the shared artifacts here and retain the exact byte ranges.
