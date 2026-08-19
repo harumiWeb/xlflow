@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
@@ -34,6 +35,7 @@ func TestAnalyzerBoundedFileAnalysisIsDeterministic(t *testing.T) {
 
 func TestAnalyzeFilesBoundedPreservesWorkerError(t *testing.T) {
 	lowStarted := make(chan struct{})
+	lowCanceled := make(chan struct{})
 	highStarted := make(chan struct{})
 	workerFailure := errors.New("worker failure")
 
@@ -48,6 +50,7 @@ func TestAnalyzeFilesBoundedPreservesWorkerError(t *testing.T) {
 				case "low":
 					close(lowStarted)
 					<-ctx.Done()
+					close(lowCanceled)
 					return nil, nil, ctx.Err()
 				case "high":
 					close(highStarted)
@@ -60,9 +63,29 @@ func TestAnalyzeFilesBoundedPreservesWorkerError(t *testing.T) {
 		resultCh <- err
 	}()
 
-	<-lowStarted
-	<-highStarted
-	if err := <-resultCh; !errors.Is(err, workerFailure) {
-		t.Fatalf("bounded analysis error = %v, want originating worker error %v", err, workerFailure)
+	const waitTimeout = 5 * time.Second
+	waitForSignal := func(name string, signal <-chan struct{}) {
+		t.Helper()
+		timer := time.NewTimer(waitTimeout)
+		defer timer.Stop()
+		select {
+		case <-signal:
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %s", name)
+		}
+	}
+	waitForSignal("low worker start", lowStarted)
+	waitForSignal("high worker start", highStarted)
+	waitForSignal("low worker cancellation", lowCanceled)
+
+	timer := time.NewTimer(waitTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, workerFailure) {
+			t.Fatalf("bounded analysis error = %v, want originating worker error %v", err, workerFailure)
+		}
+	case <-timer.C:
+		t.Fatal("timed out waiting for bounded analysis result")
 	}
 }
