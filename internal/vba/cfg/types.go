@@ -118,6 +118,7 @@ type Graph struct {
 	ExceptionalExit    BlockID                     `json:"exceptionalExit"`
 	TerminationExit    BlockID                     `json:"terminationExit"`
 	UnknownExit        BlockID                     `json:"unknownExit"`
+	query              *queryIndex
 }
 
 type Document struct {

@@ -45,6 +45,7 @@ func Clone(in Graph) Graph {
 	out.Edges = append([]Edge(nil), in.Edges...)
 	out.UnknownFlowSources = append([]BlockID(nil), in.UnknownFlowSources...)
 	out.ValidationFacts = append([]ValidationFact(nil), in.ValidationFacts...)
+	out.query = buildQueryIndex(out)
 	return out
 }
 
