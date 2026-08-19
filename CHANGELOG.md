@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added bounded parallel execution for independent per-file batch analysis
+  stages. Findings remain deterministic, cancellation is preserved, and large
+  synthetic projects show substantial wall-clock reductions.
+
 - Improved `VBA202` batch analysis scalability by gating object analysis behind
   the rule, reusing per-procedure CFG/object-flow artifacts, and propagating
   interprocedural summaries and entry states through dependency worklists.

@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -117,6 +119,9 @@ type Analyzer struct {
 	excelLoopAccess            *excelLoopAccessIndex
 	excelRootBindings          excelRootBindingIndex
 	dictionaryCollection       *dictionaryCollectionIndex
+	// analysisWorkerLimit is test-only tuning for the bounded file analysis
+	// pool. A zero value derives the limit from GOMAXPROCS and project size.
+	analysisWorkerLimit int
 }
 
 var (
@@ -259,6 +264,12 @@ type parsedFile struct {
 	RangeValueModuleConstants map[string]int
 	ConstantValues            map[string]constexpr.Value
 	DataFlowModuleBindings    map[string]bool
+}
+
+type parsedFileAnalysisResult struct {
+	findings  []Finding
+	preflight []Finding
+	err       error
 }
 
 type sourceProcedure struct {
@@ -580,56 +591,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		findings = append(findings, moduleState.Findings...)
 		analysisMetrics = moduleState.Metrics
 	}
-	for _, file := range parsedFiles {
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		fileFindingStart := len(findings)
-		finishStage = analysisstats.Measure(ctx, "file_procedure_diagnostics")
-		readErr := file.Parsed.Read(func(view vbaast.ParsedView) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			file.Root = view.Root
-			fileFindings, analyzeErr := analysis.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
-			if analyzeErr != nil {
-				return analyzeErr
-			}
-			findings = append(findings, fileFindings...)
-			if publicAPITypeIndex != nil {
-				findings = append(findings, analysis.publicAPITypeFindings(file, publicAPITypeIndex)...)
-			}
-			findings = append(findings, analysis.errorValueWrapperFindings(file)...)
-			return nil
-		})
-		finishStage(len(findings)-fileFindingStart, readErr)
-		if readErr != nil {
-			return Result{}, readErr
-		}
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
-		// document. Run it after the tree callback releases its exclusive read
-		// lease so the snapshot can reuse that parse without re-entering it.
-		finishStage = analysisstats.Measure(ctx, "file_procedure_diagnostics")
-		statefulFindings := analysis.statefulExcelCallArgumentFindings(file)
-		contractFindings := analysis.excelAPIFailureContractFindings(file)
-		findings = append(findings, statefulFindings...)
-		findings = append(findings, contractFindings...)
-		finishStage(len(statefulFindings)+len(contractFindings), nil)
-		finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
-		byRefFindings := analysis.byRefArgumentFindings(file)
-		findings = append(findings, byRefFindings...)
-		finishStage(len(byRefFindings), nil)
-		finishStage = analysisstats.Measure(ctx, "compile_equivalent_diagnostics")
-		compileFindings, filePreflightFindings := analysis.compileEquivalentFindingsContext(ctx, file)
-		finishStage(len(compileFindings)+len(filePreflightFindings), ctx.Err())
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		findings = append(findings, compileFindings...)
-		preflightFindings = append(preflightFindings, filePreflightFindings...)
+	fileResults, err := analysis.analyzeFilesBounded(ctx, parsedFiles, analysisCtx, projectEffects, publicAPITypeIndex)
+	if err != nil {
+		return Result{}, err
+	}
+	for _, fileResult := range fileResults {
+		findings = append(findings, fileResult.findings...)
+		preflightFindings = append(preflightFindings, fileResult.preflight...)
 	}
 	finishStage = analysisstats.Measure(ctx, "suppression_finalization")
 	sortFindings(findings)
@@ -644,6 +612,129 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishStage(len(findings), nil)
 	result = Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics, PreflightFindings: preflightFindings, AnalyzedFiles: len(parsedFiles)}
 	return result, nil
+}
+
+func (a Analyzer) analyzeFilesBounded(ctx context.Context, files []parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]parsedFileAnalysisResult, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	workerLimit := a.analysisWorkerLimit
+	if workerLimit <= 0 {
+		workerLimit = runtime.GOMAXPROCS(0)
+	}
+	if workerLimit < 1 {
+		workerLimit = 1
+	}
+	if workerLimit > len(files) {
+		workerLimit = len(files)
+	}
+
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan int)
+	results := make([]parsedFileAnalysisResult, len(files))
+	var workers sync.WaitGroup
+	workers.Add(workerLimit)
+	for worker := 0; worker < workerLimit; worker++ {
+		go func() {
+			defer workers.Done()
+			for {
+				select {
+				case <-workCtx.Done():
+					return
+				case index, ok := <-jobs:
+					if !ok {
+						return
+					}
+					fileFindings, filePreflight, err := a.analyzeParsedFileBounded(workCtx, files[index], analysisCtx, projectEffects, publicAPITypeIndex)
+					results[index] = parsedFileAnalysisResult{findings: fileFindings, preflight: filePreflight, err: err}
+					if err != nil {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+	}
+sendJobs:
+	for index := range files {
+		select {
+		case <-workCtx.Done():
+			break sendJobs
+		case jobs <- index:
+		}
+		if workCtx.Err() != nil {
+			break
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, result := range results {
+		if result.err != nil {
+			return nil, result.err
+		}
+	}
+	return results, nil
+}
+
+func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]Finding, []Finding, error) {
+	finishStage := analysisstats.Measure(ctx, "file_procedure_diagnostics")
+	var findings []Finding
+	readErr := file.Parsed.Read(func(view vbaast.ParsedView) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		file.Root = view.Root
+		fileFindings, err := a.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, fileFindings...)
+		if publicAPITypeIndex != nil {
+			findings = append(findings, a.publicAPITypeFindings(file, publicAPITypeIndex)...)
+		}
+		findings = append(findings, a.errorValueWrapperFindings(file)...)
+		return nil
+	})
+	finishStage(len(findings), readErr)
+	if readErr != nil {
+		return nil, nil, readErr
+	}
+
+	// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
+	// document. Run it after the tree callback releases its exclusive read
+	// lease so the snapshot can reuse that parse without re-entering it.
+	finishStage = analysisstats.Measure(ctx, "file_procedure_diagnostics")
+	statefulFindings, err := a.statefulExcelCallArgumentFindingsContext(ctx, file)
+	if err != nil {
+		finishStage(0, err)
+		return nil, nil, err
+	}
+	contractFindings, err := a.excelAPIFailureContractFindingsContext(ctx, file)
+	if err != nil {
+		finishStage(0, err)
+		return nil, nil, err
+	}
+	findings = append(findings, statefulFindings...)
+	findings = append(findings, contractFindings...)
+	finishStage(len(statefulFindings)+len(contractFindings), nil)
+
+	finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
+	byRefFindings := a.byRefArgumentFindings(file)
+	findings = append(findings, byRefFindings...)
+	finishStage(len(byRefFindings), nil)
+
+	finishStage = analysisstats.Measure(ctx, "compile_equivalent_diagnostics")
+	compileFindings, filePreflightFindings := a.compileEquivalentFindingsContext(ctx, file)
+	findings = append(findings, compileFindings...)
+	finishStage(len(compileFindings)+len(filePreflightFindings), ctx.Err())
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	return findings, filePreflightFindings, nil
 }
 
 func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
