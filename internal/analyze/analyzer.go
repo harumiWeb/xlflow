@@ -1852,11 +1852,12 @@ func recordBatchWorkload(ctx context.Context, files []parsedFile) {
 		recorder.AddMax(name, 0)
 	}
 	for _, file := range files {
-		recorder.AddSum("line_count", uint64(len(file.Lines)))
+		lineCount := physicalSourceLineCount(file.Lines)
+		recorder.AddSum("line_count", uint64(lineCount))
 		recorder.AddSum("module_declaration_count", uint64(len(file.IR.Declarations)))
 		procedureCount := len(file.IR.Procedures)
 		recorder.AddSum("procedure_count", uint64(procedureCount))
-		recorder.AddMax("max_lines_per_file", uint64(len(file.Lines)))
+		recorder.AddMax("max_lines_per_file", uint64(lineCount))
 		recorder.AddMax("max_procedures_per_file", uint64(procedureCount))
 		callsPerFile := 0
 		for _, procedure := range file.IR.Procedures {
@@ -3863,6 +3864,14 @@ func normalizedSourceLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
 	return strings.Split(source, "\n")
+}
+
+func physicalSourceLineCount(lines []string) int {
+	count := len(lines)
+	if count > 0 && lines[count-1] == "" {
+		count--
+	}
+	return count
 }
 
 // worksheetLogicalStatement joins only explicit continuation lines for the

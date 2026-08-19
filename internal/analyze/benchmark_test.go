@@ -413,7 +413,7 @@ func inspectSingleModuleBenchmarkFixture(tb testing.TB, root, path, source strin
 	if err != nil {
 		tb.Fatalf("build single-module benchmark IR: %v", err)
 	}
-	fixture.lines = len(normalizedSourceLines(source))
+	fixture.lines = physicalSourceLineCount(normalizedSourceLines(source))
 	fixture.procedures = len(ir.Procedures)
 	for _, declaration := range ir.Declarations {
 		if declaration.Scope == procedureir.ScopeModule || declaration.Scope == procedureir.ScopeProject {

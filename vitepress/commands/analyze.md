@@ -73,6 +73,8 @@ The performance output includes stable aggregate workload counters:
 `file_count`, `procedure_count`, `statement_count`, `expression_count`,
 `call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
 `project_symbol_count`, `line_count`, and `module_declaration_count`.
+`line_count` uses physical source lines and excludes a terminal newline from the
+count.
 Subsystem worklist counters such as `object_summary_evaluations`,
 `object_entry_flow_evaluations`, and `byref_diagnostic_passes` may also appear.
 Large-module profiles also expose maximum dimensions:

@@ -12,6 +12,25 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 )
 
+func TestPhysicalSourceLineCount(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   int
+	}{
+		{name: "empty", source: "", want: 0},
+		{name: "without terminal newline", source: "Option Explicit", want: 1},
+		{name: "with terminal newline", source: "Option Explicit\n", want: 1},
+		{name: "with trailing blank line", source: "Option Explicit\n\n", want: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := physicalSourceLineCount(normalizedSourceLines(test.source)); got != test.want {
+				t.Fatalf("physicalSourceLineCount(%q) = %d, want %d", test.source, got, test.want)
+			}
+		})
+	}
+}
+
 func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) {
 	root := t.TempDir()
 	modules := filepath.Join(root, "src", "modules")
@@ -77,8 +96,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	if counterByName["file_count"] != 1 || counterByName["procedure_count"] != 1 {
 		t.Fatalf("workload counters = %+v", counters)
 	}
-	if counterByName["line_count"] != uint64(len(normalizedSourceLines(source))) ||
-		counterByName["max_lines_per_file"] != uint64(len(normalizedSourceLines(source))) ||
+	wantLineCount := uint64(len(normalizedSourceLines(source)) - 1)
+	if counterByName["line_count"] != wantLineCount ||
+		counterByName["max_lines_per_file"] != wantLineCount ||
 		counterByName["module_declaration_count"] != 1 ||
 		counterByName["max_procedures_per_file"] != 1 ||
 		counterByName["max_calls_per_file"] != 0 {
