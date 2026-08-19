@@ -737,7 +737,10 @@ func walkArrayCFGWorklist(graph *vbacfg.Graph, lines []string, initial arrayFlow
 		if !ok {
 			continue
 		}
-		out := in
+		// Keep the predecessor state intact for exceptional/uncertain edges.
+		// Transfer functions mutate their input state, so give the current
+		// block its own copy once instead of cloning again in every transfer.
+		out := cloneArrayState(in)
 		if block.Statement != nil {
 			if !sourceLines {
 				line := block.Statement.Range.StartLine
@@ -1374,6 +1377,13 @@ func arrayDimensionsEqual(left, right []arrayDimension) bool {
 func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 	state := arrayFlowState{}
 	for name, variable := range variables {
+		// Only arrays and Variants can contribute to the allocation lattice.
+		// Scalar/object entries remain available in `variables` for declaration
+		// diagnostics, but carrying them through every CFG state is prohibitively
+		// expensive for large modules.
+		if !variable.isArray && !variable.isVariant {
+			continue
+		}
 		if variable.isVariant && !variable.isArray {
 			state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
 			continue
@@ -3359,7 +3369,9 @@ func parameterIsByRefScalar(parameter parameterInfo) bool {
 }
 
 func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) (arrayFlowState, []Finding) {
-	state = cloneArrayState(state)
+	if state == nil {
+		state = arrayFlowState{}
+	}
 	var findings []Finding
 	addWithKey := func(operationKey, code, message, reason, suggestion string) {
 		if code == "VBA227" && !a.Config.Analyze.DetectArrayLifecycleSafety {
@@ -3389,7 +3401,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		allocationProbeParameter, _ = arrayAllocationGuardParameter(proc)
 	}
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
-		base := optionBase(file.Lines)
+		base := arrayOptionBase(file)
 		for _, clause := range splitArgs(match[2]) {
 			redim, direct := parseDirectArrayRedimClause(clause)
 			if !direct {
@@ -3645,7 +3657,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 	for key, decl := range procedureDeclarations(file.Lines, proc) {
 		decls[key] = decl
 	}
-	base := optionBase(file.Lines)
+	base := arrayOptionBase(file)
 	// The legacy line scanner intentionally ignores Const and Enum syntax.
 	// Fill those gaps from the shared procedure IR so a known scalar constant
 	// can still be classified as a non-iterable/non-array operation target.
@@ -3705,17 +3717,25 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 // bounds. Procedure IR identifies the declaration's dynamic shape without
 // that ambiguity.
 func arrayVBA227Variables(baseVariables map[string]arrayVariable, file parsedFile, proc sourceProcedure) map[string]arrayVariable {
-	variables := make(map[string]arrayVariable, len(baseVariables))
-	for key, variable := range baseVariables {
-		variable.dimensions = append([]arrayDimension(nil), variable.dimensions...)
-		variables[key] = variable
-	}
-	base := optionBase(file.Lines)
+	overlays := make([]procedureir.Declaration, 0)
+	base := arrayOptionBase(file)
 	for _, declaration := range proc.Declarations {
 		key := strings.ToLower(strings.TrimSpace(declaration.Name))
 		if key == "" || !declaration.IsArray || declaration.ValueShape != procedureir.ValueShapeDynamicArray || !arrayDeclarationHasInlineRedim(file.Lines, declaration) {
 			continue
 		}
+		overlays = append(overlays, declaration)
+	}
+	if len(overlays) == 0 {
+		return baseVariables
+	}
+	variables := make(map[string]arrayVariable, len(baseVariables))
+	for key, variable := range baseVariables {
+		variable.dimensions = append([]arrayDimension(nil), variable.dimensions...)
+		variables[key] = variable
+	}
+	for _, declaration := range overlays {
+		key := strings.ToLower(strings.TrimSpace(declaration.Name))
 		variable, ok := variables[key]
 		if !ok {
 			variable = arrayVariable{
@@ -3780,6 +3800,13 @@ func optionBase(lines []string) int {
 		}
 	}
 	return 0
+}
+
+func arrayOptionBase(file parsedFile) int {
+	if file.ArrayOptionBaseSet {
+		return file.ArrayOptionBase
+	}
+	return optionBase(file.Lines)
 }
 
 func declarationDimensions(lines []string, line int, name string, base int) ([]arrayDimension, bool) {
@@ -3850,39 +3877,53 @@ func parseArrayDimensionsWithConstants(text string, base int, constants map[stri
 // intentionally small and fail-open: unresolved expressions simply do not
 // enter the table, so dynamic bounds remain unclassified.
 func arrayIntegerConstants(file parsedFile, proc sourceProcedure, projectValues map[string]constexpr.Value, visibleNames map[string]bool) map[string]int {
-	constants := rangeValueIntegerConstants(rangeValueModuleIntegerConstants(file.Lines, file.IR), proc)
-	// Seed the ReDim evaluator from the shared typed projection so arithmetic,
-	// Enum references, and qualified project constants follow the same rules as
-	// declaration and Optional-default validation. Non-integral and unresolved
-	// values intentionally stay out of this integer-only adapter.
+	constants := rangeValueIntegerConstants(arrayIntegerModuleConstants(file), proc)
+	// Project constants fill names that are not already provided by the module
+	// projection, preserving the historical module-over-project precedence.
+	for name, value := range projectValues {
+		visibleKey := strings.ToLower(cleanIdentifier(name))
+		if visibleNames != nil && !visibleNames[visibleKey] {
+			continue
+		}
+		if value.Kind != constexpr.ValueInteger && value.Kind != constexpr.ValueLong && value.Kind != constexpr.ValueLongLong {
+			continue
+		}
+		if integer, ok := constexpr.IntegerAsInt(value); ok {
+			key := strings.ToLower(name)
+			if _, exists := constants[key]; !exists {
+				constants[key] = integer
+			}
+		}
+	}
+	return constants
+}
+
+func arrayIntegerModuleConstants(file parsedFile) map[string]int {
+	if file.ArrayIntegerModuleConstants != nil {
+		return file.ArrayIntegerModuleConstants
+	}
+	base := file.RangeValueModuleConstants
+	if base == nil {
+		base = rangeValueModuleIntegerConstants(file.Lines, file.IR)
+	}
+	constants := make(map[string]int, len(base))
+	for name, value := range base {
+		constants[name] = value
+	}
 	sharedValues := file.ConstantValues
 	if sharedValues == nil {
 		sharedValues = lint.ConstantValuesFromSource(string(file.Source), &file.IR, nil)
-	}
-	if len(projectValues) > 0 {
-		merged := make(map[string]constexpr.Value, len(sharedValues)+len(projectValues))
-		for name, value := range projectValues {
-			key := strings.ToLower(cleanIdentifier(name))
-			if visibleNames != nil && !visibleNames[key] {
-				continue
-			}
-			merged[name] = value
-		}
-		for name, value := range sharedValues {
-			merged[name] = value
-		}
-		sharedValues = merged
 	}
 	for name, value := range sharedValues {
 		if value.Kind != constexpr.ValueInteger && value.Kind != constexpr.ValueLong && value.Kind != constexpr.ValueLongLong {
 			continue
 		}
-		integer, ok := constexpr.IntegerAsInt(value)
-		if !ok {
-			continue
+		if integer, ok := constexpr.IntegerAsInt(value); ok {
+			constants[strings.ToLower(name)] = integer
 		}
-		constants[strings.ToLower(name)] = integer
 	}
+	// Keep the legacy enum fallback for hand-built parsedFile values whose
+	// ConstantValues projection is absent or incomplete.
 	inEnum := false
 	var next *int
 	conditionalDepth := 0
@@ -4581,7 +4622,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			}
 			ctx := analysisContext{arrayReturns: arrayReturns}
 			returnCandidates := map[int]candidate{}
-			base := optionBase(procedure.file.Lines)
+			base := arrayOptionBase(procedure.file)
 			procedureHasErrorHandling := arrayProcedureHasErrorHandling(proc)
 			walkArrayCFGWithStop(proc.Graph, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {

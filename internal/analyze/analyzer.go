@@ -278,12 +278,15 @@ type parsedFile struct {
 	// ModuleDeclarations is the module-scope declaration projection paired with
 	// Procedures. It is materialized once during batch/realtime file setup and
 	// reused by rule stages that solve array and object state.
-	ModuleDeclarations        map[string]sourceDeclaration
-	Parsed                    *vbaast.ParsedDocument
-	IntelDocument             intel.Document
-	RangeValueModuleConstants map[string]int
-	ConstantValues            map[string]constexpr.Value
-	DataFlowModuleBindings    map[string]bool
+	ModuleDeclarations          map[string]sourceDeclaration
+	Parsed                      *vbaast.ParsedDocument
+	IntelDocument               intel.Document
+	RangeValueModuleConstants   map[string]int
+	ArrayIntegerModuleConstants map[string]int
+	ArrayOptionBase             int
+	ArrayOptionBaseSet          bool
+	ConstantValues              map[string]constexpr.Value
+	DataFlowModuleBindings      map[string]bool
 }
 
 type parsedFileAnalysisResult struct {
@@ -470,7 +473,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		if a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
-		parsedFiles = append(parsedFiles, parsedFile{
+		parsedFile := parsedFile{
 			Path:                      file,
 			Lines:                     lines,
 			Module:                    strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)),
@@ -483,7 +486,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
-		})
+		}
+		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
+			parsedFile.ArrayOptionBase = optionBase(lines)
+			parsedFile.ArrayOptionBaseSet = true
+			parsedFile.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(parsedFile)
+		}
+		parsedFiles = append(parsedFiles, parsedFile)
 	}
 	defer closeParsedFiles(parsedFiles)
 	recordBatchWorkload(ctx, parsedFiles)
@@ -1405,6 +1414,11 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
+		}
+		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
+			file.ArrayOptionBase = optionBase(lines)
+			file.ArrayOptionBaseSet = true
+			file.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(file)
 		}
 		var excelRootBindings excelRootBindingIndex
 		if cfg.Analyze.DetectExcelCellAccessInLoops {
