@@ -52,6 +52,16 @@ func TestRulesCommandWritesV1JSONEnvelope(t *testing.T) {
 			t.Fatalf("rules metadata missing %s", id)
 		}
 	}
+	var style staticrules.RuleMetadata
+	for _, item := range got.Rules.Items {
+		if item.ID == "VB066" {
+			style = item
+			break
+		}
+	}
+	if style.ID != "VB066" || style.CompileEquivalent || style.DefaultSeverity != staticrules.SeverityWarning || style.PreflightBlocking || !style.InlineSuppressible || !style.DefaultEnabled || style.Category != staticrules.CategoryMaintainability {
+		t.Fatalf("VB066 style metadata = %#v", style)
+	}
 }
 
 func TestRulesCommandWritesDeterministicHumanInventory(t *testing.T) {

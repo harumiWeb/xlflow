@@ -92,8 +92,10 @@ keeps type-dependent `WithEvents` checks fail-open.
 
 The LSP publishes `VB052` for project-local calls whose canonical resolver
 proves a missing or known non-callable target, `VB053` for a bare Enum member
-with multiple complete visible candidates and no lexical winner, and `VB054`
-for an undeclared `RaiseEvent` target in the containing object module. These
+with multiple complete project candidates and no lexical winner, and `VB054`
+for an undeclared `RaiseEvent` target in the containing object module. Duplicate
+TypeLib records for one globally exposed constant remain an external,
+fail-open resolution. These
 compile-equivalent errors share the resolver snapshot and exact candidate and
 visibility rules used by batch `lint`/`analyze`, Call Hierarchy, impact, and
 effect propagation. Full diagnostics withhold them while the workspace index,
@@ -111,8 +113,7 @@ unsuppressible, preflight-blocking error.
 
 The LSP also publishes `VB062` for provably invalid conditional branch forms,
 `VB063` for `Case` outside `Select Case`, duplicate `Case Else`, or a branch
-after `Case Else`, `VB064` for parser-confirmed malformed `Open ... For
-<mode>` shapes, and `VB065` for provably malformed `TypeOf` expressions. These
+after `Case Else`, `VB064` for parser-confirmed malformed `Open ... For <mode>` shapes, and `VB065` for provably malformed `TypeOf` expressions. These
 compile-equivalent syntax diagnostics are unsuppressible and preflight-blocking;
 ambiguous parser recovery remains the generic `VB014` finding.
 

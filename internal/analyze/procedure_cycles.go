@@ -135,7 +135,7 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 		if !ok {
 			continue
 		}
-		procedures := sourceProceduresFromIR(file.IR, file.CFG)
+		procedures := file.procedures()
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		for _, candidate := range procedures {
 			if strings.EqualFold(candidate.Name, cycleNodeName(cycle.Nodes[0].QualifiedName)) && candidate.StartLine == cycle.Nodes[0].Line {

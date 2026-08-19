@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -18,6 +20,7 @@ import (
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/suppression"
 	"github.com/harumiWeb/xlflow/internal/typedb"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
@@ -94,6 +97,10 @@ type Result struct {
 	Warnings          []map[string]any
 	AnalysisMetrics   any       `json:"analysis_metrics,omitempty"`
 	PreflightFindings []Finding `json:"-"`
+	// AnalyzedFiles lets regression tests and callers distinguish a successful
+	// no-finding run from a run that did not discover any source files. It is
+	// intentionally omitted from serialized CLI payloads.
+	AnalyzedFiles int `json:"-"`
 }
 
 type Analyzer struct {
@@ -104,7 +111,7 @@ type Analyzer struct {
 	typeDBResolutionIncomplete bool
 	visibleConstants           map[string]bool
 	visibleConstantValues      map[string]constexpr.Value
-	byRefSymbols               []intel.Symbol
+	byRefSymbolIndex           *intel.WorkspaceResolutionView
 	errorGuardAliases          map[string]bool
 	errorValueWrappers         map[string]bool
 	eventSafeProcedures        map[string]bool
@@ -112,6 +119,9 @@ type Analyzer struct {
 	excelLoopAccess            *excelLoopAccessIndex
 	excelRootBindings          excelRootBindingIndex
 	dictionaryCollection       *dictionaryCollectionIndex
+	// analysisWorkerLimit is test-only tuning for the bounded file analysis
+	// pool. A zero value derives the limit from GOMAXPROCS and project size.
+	analysisWorkerLimit int
 }
 
 var (
@@ -227,8 +237,7 @@ type analysisContext struct {
 	arrayByRefEntryConditions        map[string]map[int]string
 	procedures                       map[string]procedureSignature
 	procedureResolver                procedureir.SymbolResolver
-	objectSummaries                  map[string]objectProcedureSummary
-	objectEntryStates                map[string]map[string]bool
+	objectAnalysis                   *objectAnalysisContext
 	worksheetCodenames               map[string]string
 	projectEffects                   effects.ProjectSummary
 }
@@ -252,19 +261,41 @@ type parameterInfo struct {
 }
 
 type parsedFile struct {
-	Path                      string
-	Lines                     []string
-	Module                    string
-	ModuleKind                string
-	Source                    []byte
-	Root                      *tree_sitter.Node
-	IR                        procedureir.DocumentIR
-	CFG                       vbacfg.Document
+	Path       string
+	Lines      []string
+	Module     string
+	ModuleKind string
+	Source     []byte
+	Root       *tree_sitter.Node
+	IR         procedureir.DocumentIR
+	CFG        vbacfg.Document
+	// Procedures owns the analyzer-facing projection of IR for this file
+	// revision. It is materialized once during batch/realtime file setup and
+	// reused by all rule stages. Callers must treat the sourceProcedure values
+	// and their nested IR/CFG data as read-only; procedures returns an
+	// independent outer slice so field updates cannot mutate this cache.
+	Procedures                []sourceProcedure
 	Parsed                    *vbaast.ParsedDocument
 	IntelDocument             intel.Document
 	RangeValueModuleConstants map[string]int
 	ConstantValues            map[string]constexpr.Value
 	DataFlowModuleBindings    map[string]bool
+}
+
+type parsedFileAnalysisResult struct {
+	findings  []Finding
+	preflight []Finding
+	err       error
+}
+
+type boundedFileAnalyzer func(context.Context, parsedFile, analysisContext, effects.ProjectSummary, *apiTypeIndex) ([]Finding, []Finding, error)
+
+// batchByRefDiagnostics records the result of the one ByRef analysis pass
+// performed for a file revision. The computed bit distinguishes an analyzed
+// file with no findings from callers that still need the Intel fallback.
+type batchByRefDiagnostics struct {
+	computed    bool
+	diagnostics []intel.Diagnostic
 }
 
 type sourceProcedure struct {
@@ -334,14 +365,18 @@ func (a Analyzer) RunContext(ctx context.Context) ([]Finding, error) {
 // RunResultContext is the cancellable variant of RunResult. Cancellation is
 // returned explicitly so callers can distinguish it from analysis findings or
 // a project-specific timeout policy.
-func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
+func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	finishTotal := analysisstats.Measure(ctx, "analyze_total")
+	defer func() { finishTotal(len(result.Findings), err) }()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	finishStage := analysisstats.Measure(ctx, "source_discovery")
 	files, err := a.files()
+	finishStage(len(files), err)
 	if err != nil {
 		return Result{}, err
 	}
@@ -357,12 +392,16 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
+		finishStage = analysisstats.Measure(ctx, "file_read")
 		source, err := os.ReadFile(file)
+		finishStage(len(source), err)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
+		finishStage = analysisstats.Measure(ctx, "parse")
 		parsed, err := vbaast.ParseDocument(file, source)
+		finishStage(1, err)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
@@ -375,11 +414,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		} else if included {
 			moduleKind = sourceFile.ModuleKind
 		}
+		finishStage = analysisstats.Measure(ctx, "procedure_ir")
 		ir, err := procedureir.BuildParsed(procedureir.BuildOptions{
 			RootDir:    a.RootDir,
 			Path:       file,
 			ModuleKind: moduleKind,
 		}, parsed)
+		finishStage(len(ir.Procedures), err)
 		if err != nil {
 			parsed.Close()
 			closeParsedFiles(parsedFiles)
@@ -390,7 +431,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			if readErr := parsed.Read(func(view vbaast.ParsedView) error {
 				declarationRecovery = vbaast.IsDeclarationKeywordRecovery(view.Root, view.Source) ||
 					vbaast.IsIdentifierTypeCharacterRecovery(view.Root, view.Source) ||
-					vbaast.IsNumericLiteralRecovery(view.Root, view.Source)
+					vbaast.IsNumericLiteralRecovery(view.Root, view.Source) ||
+					lint.IsAcceptedProcedureBoundaryRecovery(view.Root, view.Source, moduleKind)
 				return nil
 			}); readErr != nil {
 				parsed.Close()
@@ -403,11 +445,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			closeParsedFiles(parsedFiles)
 			return Result{}, &ParseError{Path: file, HasError: ir.Parse.HasError, HasMissing: ir.Parse.HasMissing}
 		}
+		finishStage = analysisstats.Measure(ctx, "cfg")
 		controlFlow := vbacfg.BuildDocument(ir)
+		finishStage(len(controlFlow.Graphs), nil)
 		var intelDocument intel.Document
 		if needsTypedExcelAnalysis {
 			intelDocument = intel.Document{Path: file, Source: string(source), ModuleKind: moduleKind}
-			intelDocument.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(intelDocument, parsed)
+			intelDocument = batchIntelDocument(intelDocument, parsed, ir, controlFlow)
 		}
 		lines := normalizedSourceLines(string(source))
 		var rangeValueConstants map[string]int
@@ -438,23 +482,59 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		})
 	}
 	defer closeParsedFiles(parsedFiles)
+	recordBatchWorkload(ctx, parsedFiles)
 
+	finishStage = analysisstats.Measure(ctx, "effect_summaries")
 	projectEffects := buildProjectEffects(parsedFiles)
+	finishStage(len(projectEffects.All()), nil)
+	for i := range parsedFiles {
+		parsedFiles[i].Procedures = sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	var cycleFindings []Finding
 	if analysisEnabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA244"); known && analysisEnabled {
+		finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 		cycleFindings, err = a.procedureCallCycleFindings(ctx, parsedFiles, projectEffects)
+		finishStage(len(cycleFindings), err)
 		if err != nil {
 			return Result{}, err
 		}
 	}
-	analysisCtx := a.buildContext(parsedFiles)
+	finishStage = analysisstats.Measure(ctx, "object_procedure_summaries")
+	var objectAnalysis *objectAnalysisContext
+	if a.Config.Analyze.DetectObjectUseBeforeSet {
+		objectAnalysis = buildObjectAnalysisPlans(parsedFiles)
+		objectAnalysis.buildSummaries()
+		finishStage(len(objectAnalysis.summaries), nil)
+	} else {
+		finishStage(0, nil)
+		if recorder := analysisstats.FromContext(ctx); recorder != nil {
+			recorder.Add("object_summary_evaluations", 0)
+			recorder.Add("object_entry_flow_evaluations", 0)
+		}
+	}
+	finishStage = analysisstats.Measure(ctx, "object_entry_states")
+	if objectAnalysis != nil {
+		objectAnalysis.buildEntryStates()
+		finishStage(len(objectAnalysis.entries), nil)
+		if recorder := analysisstats.FromContext(ctx); recorder != nil {
+			recorder.Add("object_summary_evaluations", uint64(objectAnalysis.summaryEvaluations))
+			recorder.Add("object_entry_flow_evaluations", uint64(objectAnalysis.entryFlowEvaluations))
+		}
+	} else {
+		finishStage(0, nil)
+	}
+	finishStage = analysisstats.Measure(ctx, "project_context")
+	analysisCtx := a.buildContextWithObjectAnalysis(parsedFiles, objectAnalysis)
+	finishStage(len(analysisCtx.procedures), nil)
 	analysis := a
 	var warnings []map[string]any
 	if needsTypeDB {
+		finishStage = analysisstats.Measure(ctx, "typedb_load")
 		loaded, err := typedb.LoadForRuntime("")
+		finishStage(1, err)
 		if err != nil {
 			return Result{}, err
 		}
@@ -466,6 +546,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			})
 		}
 	}
+	finishStage = analysisstats.Measure(ctx, "project_context")
 	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
 	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) {
@@ -477,6 +558,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	if analysis.Config.Analyze.DetectEventHandlerReentry {
 		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
 	}
+	finishStage(1, nil)
 	// Resolution completeness must include the generated TypeLib view. Load it
 	// before constructing the resolver so incomplete external symbols fail open
 	// consistently across every source file.
@@ -488,18 +570,28 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 		}
 	}
 	if analysis.Config.Analyze.DetectExcelCellAccessInLoops {
+		finishStage = analysisstats.Measure(ctx, "project_symbols")
 		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
+		finishStage(1, nil)
 	}
 	if needsByRefAnalysis {
-		byRefSymbols, err := projectByRefSymbols(a.RootDir, a.Config)
+		finishStage = analysisstats.Measure(ctx, "project_symbols")
+		byRefSymbolIndex, symbolCount, err := projectByRefSymbolIndex(ctx, a.RootDir, a.Config, a.PathFilter, parsedFiles)
+		finishStage(symbolCount, err)
 		if err != nil {
 			return Result{}, err
 		}
-		analysis.byRefSymbols = byRefSymbols
+		analysis.byRefSymbolIndex = byRefSymbolIndex
+		if recorder := analysisstats.FromContext(ctx); recorder != nil {
+			recorder.Add("project_symbol_count", uint64(symbolCount))
+		}
 	}
 	findings := cycleFindings
+	finishStage = analysisstats.Measure(ctx, "project_symbols")
 	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, analysis.typeDB)
+	finishStage(1, nil)
 	var resolutionPreflight []Finding
+	finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 	for i := range parsedFiles {
 		resolvedForDiagnostics := procedureir.Resolve(parsedFiles[i].IR, resolutionResolver)
 		for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, resolutionComplete) {
@@ -508,6 +600,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 			resolutionPreflight = append(resolutionPreflight, finding)
 		}
 	}
+	finishStage(len(resolutionPreflight), nil)
 	var preflightFindings []Finding
 	preflightFindings = append(preflightFindings, resolutionPreflight...)
 	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
@@ -516,63 +609,177 @@ func (a Analyzer) RunResultContext(ctx context.Context) (Result, error) {
 	}
 	var publicAPITypeIndex *apiTypeIndex
 	if analysis.Config.Analyze.DetectPublicAPITypeSafety {
+		finishStage = analysisstats.Measure(ctx, "project_symbols")
 		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB, resolutionComplete)
+		finishStage(1, nil)
 	}
 	var analysisMetrics any
 	if analysis.Config.Analyze.DetectRiskyModuleState {
+		finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 		moduleState := buildModuleStateAnalysis(a.RootDir, a.Config, parsedFiles)
+		finishStage(len(moduleState.Findings), nil)
 		findings = append(findings, moduleState.Findings...)
 		analysisMetrics = moduleState.Metrics
 	}
-	for _, file := range parsedFiles {
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		if err := file.Parsed.Read(func(view vbaast.ParsedView) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			file.Root = view.Root
-			fileFindings, analyzeErr := analysis.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
-			if analyzeErr != nil {
-				return analyzeErr
-			}
-			findings = append(findings, fileFindings...)
-			if publicAPITypeIndex != nil {
-				findings = append(findings, analysis.publicAPITypeFindings(file, publicAPITypeIndex)...)
-			}
-			findings = append(findings, analysis.errorValueWrapperFindings(file)...)
-			return nil
-		}); err != nil {
-			return Result{}, err
-		}
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
-		// document. Run it after the tree callback releases its exclusive read
-		// lease so the snapshot can reuse that parse without re-entering it.
-		findings = append(findings, analysis.statefulExcelCallArgumentFindings(file)...)
-		findings = append(findings, analysis.excelAPIFailureContractFindings(file)...)
-		findings = append(findings, analysis.byRefArgumentFindings(file)...)
-		compileFindings, filePreflightFindings := analysis.compileEquivalentFindings(file)
-		findings = append(findings, compileFindings...)
-		preflightFindings = append(preflightFindings, filePreflightFindings...)
+	fileResults, err := analysis.analyzeFilesBounded(ctx, parsedFiles, analysisCtx, projectEffects, publicAPITypeIndex)
+	if err != nil {
+		return Result{}, err
 	}
+	for _, fileResult := range fileResults {
+		findings = append(findings, fileResult.findings...)
+		preflightFindings = append(preflightFindings, fileResult.preflight...)
+	}
+	finishStage = analysisstats.Measure(ctx, "suppression_finalization")
 	sortFindings(findings)
 	directives, directiveWarnings, err := suppression.DirectivesForFiles(a.RootDir, files)
 	if err != nil {
+		finishStage(0, err)
 		return Result{}, err
 	}
 	warnings = append(warnings, directiveWarnings...)
 	findings, suppressionWarnings := applyInlineSuppressions(findings, directives)
 	warnings = append(warnings, suppressionWarnings...)
-	return Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics, PreflightFindings: preflightFindings}, nil
+	finishStage(len(findings), nil)
+	result = Result{Findings: findings, Warnings: warnings, AnalysisMetrics: analysisMetrics, PreflightFindings: preflightFindings, AnalyzedFiles: len(parsedFiles)}
+	return result, nil
 }
 
-func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
-	if a.typeDB == nil {
+func (a Analyzer) analyzeFilesBounded(ctx context.Context, files []parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]parsedFileAnalysisResult, error) {
+	return a.analyzeFilesBoundedWith(ctx, files, analysisCtx, projectEffects, publicAPITypeIndex, a.analyzeParsedFileBounded)
+}
+
+func (a Analyzer) analyzeFilesBoundedWith(ctx context.Context, files []parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex, analyzeFile boundedFileAnalyzer) ([]parsedFileAnalysisResult, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	workerLimit := a.analysisWorkerLimit
+	if workerLimit <= 0 {
+		workerLimit = runtime.GOMAXPROCS(0)
+	}
+	if workerLimit < 1 {
+		workerLimit = 1
+	}
+	if workerLimit > len(files) {
+		workerLimit = len(files)
+	}
+
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan int)
+	results := make([]parsedFileAnalysisResult, len(files))
+	var (
+		workers       sync.WaitGroup
+		workerErr     error
+		workerErrOnce sync.Once
+	)
+	workers.Add(workerLimit)
+	for worker := 0; worker < workerLimit; worker++ {
+		go func() {
+			defer workers.Done()
+			for {
+				select {
+				case <-workCtx.Done():
+					return
+				case index, ok := <-jobs:
+					if !ok {
+						return
+					}
+					fileFindings, filePreflight, err := analyzeFile(workCtx, files[index], analysisCtx, projectEffects, publicAPITypeIndex)
+					results[index] = parsedFileAnalysisResult{findings: fileFindings, preflight: filePreflight, err: err}
+					if err != nil {
+						workerErrOnce.Do(func() {
+							workerErr = err
+							cancel()
+						})
+						return
+					}
+				}
+			}
+		}()
+	}
+sendJobs:
+	for index := range files {
+		select {
+		case <-workCtx.Done():
+			break sendJobs
+		case jobs <- index:
+		}
+		if workCtx.Err() != nil {
+			break
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if workerErr != nil {
+		return nil, workerErr
+	}
+	return results, nil
+}
+
+func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]Finding, []Finding, error) {
+	finishStage := analysisstats.Measure(ctx, "file_procedure_diagnostics")
+	var findings []Finding
+	readErr := file.Parsed.Read(func(view vbaast.ParsedView) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		file.Root = view.Root
+		fileFindings, err := a.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
+		if err != nil {
+			return err
+		}
+		findings = append(findings, fileFindings...)
+		if publicAPITypeIndex != nil {
+			findings = append(findings, a.publicAPITypeFindings(file, publicAPITypeIndex)...)
+		}
+		findings = append(findings, a.errorValueWrapperFindings(file)...)
 		return nil
+	})
+	finishStage(len(findings), readErr)
+	if readErr != nil {
+		return nil, nil, readErr
+	}
+
+	// The typed VBA215/VBA218 analysis uses the same snapshot-owned parsed
+	// document. Run it after the tree callback releases its exclusive read
+	// lease so the snapshot can reuse that parse without re-entering it.
+	finishStage = analysisstats.Measure(ctx, "file_procedure_diagnostics")
+	statefulFindings, err := a.statefulExcelCallArgumentFindingsContext(ctx, file)
+	if err != nil {
+		finishStage(0, err)
+		return nil, nil, err
+	}
+	contractFindings, err := a.excelAPIFailureContractFindingsContext(ctx, file)
+	if err != nil {
+		finishStage(0, err)
+		return nil, nil, err
+	}
+	findings = append(findings, statefulFindings...)
+	findings = append(findings, contractFindings...)
+	finishStage(len(statefulFindings)+len(contractFindings), nil)
+
+	finishStage = analysisstats.Measure(ctx, "byref_diagnostics")
+	byRefDiagnostics := a.byRefArgumentDiagnosticsContext(ctx, file)
+	byRefFindings := a.byRefArgumentFindings(file, byRefDiagnostics.diagnostics)
+	findings = append(findings, byRefFindings...)
+	finishStage(len(byRefFindings), nil)
+
+	finishStage = analysisstats.Measure(ctx, "compile_equivalent_diagnostics")
+	compileFindings, filePreflightFindings := a.compileEquivalentFindingsContext(ctx, file, byRefDiagnostics)
+	findings = append(findings, compileFindings...)
+	finishStage(len(compileFindings)+len(filePreflightFindings), ctx.Err())
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	return findings, filePreflightFindings, nil
+}
+
+func (a Analyzer) byRefArgumentDiagnosticsContext(ctx context.Context, file parsedFile) batchByRefDiagnostics {
+	if a.typeDB == nil || ctx.Err() != nil {
+		return batchByRefDiagnostics{computed: true}
 	}
 	diagnostics := (intel.Analyzer{
 		RootDir:                    a.RootDir,
@@ -580,11 +787,15 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 		DB:                         a.typeDB,
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
-	}).ByRefArgumentDiagnostics(file.intelDocument())
+	}).ByRefArgumentDiagnosticsContext(ctx, file.intelDocument())
+	return batchByRefDiagnostics{computed: true, diagnostics: diagnostics}
+}
+
+func (a Analyzer) byRefArgumentFindings(file parsedFile, diagnostics []intel.Diagnostic) []Finding {
 	if len(diagnostics) == 0 {
 		return nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	out := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code != "VBA206" {
@@ -617,7 +828,11 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile) []Finding {
 }
 
 func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Finding) {
-	diagnostics := (intel.Analyzer{
+	return a.compileEquivalentFindingsContext(context.Background(), file, batchByRefDiagnostics{})
+}
+
+func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file parsedFile, byRefDiagnostics batchByRefDiagnostics) ([]Finding, []Finding) {
+	intelAnalyzer := intel.Analyzer{
 		RootDir:                    a.RootDir,
 		Config:                     a.Config,
 		DB:                         a.typeDB,
@@ -625,11 +840,17 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Findi
 		WorkspaceSymbolQueryFunc:   a.byRefWorkspaceSymbolQuery,
 		VisibleConstants:           a.visibleConstants,
 		ConstantValues:             a.visibleConstantValues,
-	}).CompileEquivalentDiagnosticsContext(context.Background(), file.intelDocument())
+	}
+	var diagnostics []intel.Diagnostic
+	if byRefDiagnostics.computed {
+		diagnostics = intelAnalyzer.CompileEquivalentDiagnosticsContextWithByRefDiagnostics(ctx, file.intelDocument(), byRefDiagnostics.diagnostics)
+	} else {
+		diagnostics = intelAnalyzer.CompileEquivalentDiagnosticsContext(ctx, file.intelDocument())
+	}
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	out := make([]Finding, 0, len(diagnostics))
 	preflight := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
@@ -692,7 +913,7 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
 	line := diagnostic.Range.StartLine
 	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-	for _, candidate := range sourceProceduresFromIR(file.IR, file.CFG) {
+	for _, candidate := range file.procedures() {
 		if line >= candidate.StartLine && line <= candidate.EndLine {
 			proc = candidate
 			break
@@ -719,35 +940,93 @@ func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.Reso
 	return finding
 }
 
-// projectByRefSymbols builds the batch project's procedure index once. ByRef
-// diagnostics resolve every call through this immutable slice instead of
-// rediscovering the entire source tree through symbols.Inspect for each call
-// site.
-func projectByRefSymbols(rootDir string, cfg config.Config) ([]intel.Symbol, error) {
-	return (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbols(nil, "")
+// projectByRefSymbolIndex builds the batch project's immutable symbol index
+// once. A normal full-project analysis can reuse the already parsed documents;
+// a path-filtered analysis intentionally falls back to the complete workspace
+// collection because excluded modules remain valid project-local call targets.
+func projectByRefSymbolIndex(ctx context.Context, rootDir string, cfg config.Config, pathFilter func(string) bool, parsedFiles []parsedFile) (*intel.WorkspaceResolutionView, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	var projectSymbols []intel.Symbol
+	if pathFilter != nil {
+		var err error
+		projectSymbols, err = (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbolsContext(ctx, nil, "")
+		if err != nil {
+			return nil, 0, err
+		}
+	} else {
+		symbolAnalyzer := intel.Analyzer{RootDir: rootDir, Config: cfg}
+		seen := make(map[string]struct{}, len(parsedFiles))
+		for _, file := range parsedFiles {
+			if err := ctx.Err(); err != nil {
+				return nil, len(projectSymbols), err
+			}
+			_, included, err := symbols.SourceFileForPath(rootDir, cfg, file.Path)
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			if !included {
+				continue
+			}
+			key, err := projectByRefSourcePathKey(file.Path)
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			fileSymbols, err := symbolAnalyzer.DocumentSymbolsContext(ctx, file.intelDocument())
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			for _, symbol := range fileSymbols {
+				// WorkspaceSymbols uses IncludeLabels=false. Keep labels out of
+				// the batch index so the parsed-document reuse path preserves
+				// that historical candidate set.
+				switch strings.ToLower(strings.TrimSpace(symbol.Kind)) {
+				case "label", "line_number_label":
+					continue
+				}
+				// DocumentSymbolsContext also projects UserForm designer
+				// controls as field symbols. The workspace collection used by
+				// the old batch path contains source fields, but not those
+				// designer-only projections.
+				if strings.EqualFold(strings.TrimSpace(symbol.Kind), "field") && symbol.ModuleKind == "" && symbol.Visibility == "" && symbol.Parent == "" {
+					continue
+				}
+				projectSymbols = append(projectSymbols, symbol)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, len(projectSymbols), err
+	}
+	return intel.NewWorkspaceResolutionView(projectSymbols), len(projectSymbols), nil
+}
+
+func projectByRefSourcePathKey(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	key := filepath.Clean(abs)
+	if os.PathSeparator == '\\' {
+		key = strings.ToLower(key)
+	}
+	return key, nil
 }
 
 func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
-	needle := strings.ToLower(strings.TrimSpace(query.Text))
-	if needle == "" || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
+	if a.byRefSymbolIndex == nil || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
 		return nil, nil
 	}
-	out := make([]intel.Symbol, 0)
-	for _, sym := range a.byRefSymbols {
-		match := strings.EqualFold(sym.Name, needle)
-		if query.Mode == intel.WorkspaceSymbolQueryQualified {
-			qualified := strings.TrimSpace(sym.Module)
-			if qualified != "" {
-				qualified += "."
-			}
-			qualified += sym.Name
-			match = strings.EqualFold(qualified, needle)
-		}
-		if match {
-			out = append(out, sym)
-		}
-	}
-	return out, nil
+	return a.byRefSymbolIndex.Query(query), nil
 }
 
 func (a Analyzer) statefulExcelCallArgumentFindings(file parsedFile) []Finding {
@@ -766,7 +1045,7 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	out := make([]Finding, 0, len(diagnostics))
 	for i, diagnostic := range diagnostics {
 		if i&0x3f == 0 {
@@ -911,6 +1190,18 @@ func (file parsedFile) intelDocument() intel.Document {
 	return intel.Document{Path: file.Path, Source: string(file.Source), ModuleKind: file.ModuleKind}
 }
 
+// batchIntelDocument transfers the parser and already-built immutable
+// artifacts into the Intel snapshot used by batch diagnostics. Keeping this
+// boundary in one helper makes it explicit that batch preparation and Intel
+// analysis operate on the same document revision.
+func batchIntelDocument(doc intel.Document, parsed *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) intel.Document {
+	doc.Snapshot = intel.NewAnalysisSnapshotWithArtifacts(doc, parsed, intel.AnalysisArtifacts{
+		ProcedureIR: ir,
+		ControlFlow: controlFlow,
+	})
+	return doc
+}
+
 func SourceNonShortCircuitObjectGuardFindings(rootDir, path string, cfg config.Config, source []byte) ([]Finding, error) {
 	return SourceNonShortCircuitObjectGuardFindingsContext(context.Background(), rootDir, path, cfg, source)
 }
@@ -945,15 +1236,16 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 	var findings []Finding
 	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		file := parsedFile{
-			Path:   view.Path,
-			Lines:  normalizedSourceLines(string(view.Source)),
-			Module: strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
-			Source: view.Source,
-			Root:   view.Root,
-			IR:     ir,
+			Path:       view.Path,
+			Lines:      normalizedSourceLines(string(view.Source)),
+			Module:     strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			Source:     view.Source,
+			Root:       view.Root,
+			IR:         ir,
+			Procedures: sourceProceduresFromIR(ir),
 		}
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
-		procedures := sourceProceduresFromIR(ir)
+		procedures := file.procedures()
 		var scanErr error
 		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
 		if scanErr != nil {
@@ -1075,6 +1367,10 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		moduleKind, classifyErr := realtimeModuleKind(rootDir, cfg, view.Path)
+		if classifyErr != nil {
+			return classifyErr
+		}
 		lines := normalizedSourceLines(string(view.Source))
 		var rangeValueConstants map[string]int
 		if cfg.Analyze.DetectRangeValueArrayShape {
@@ -1092,6 +1388,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			Path:                      view.Path,
 			Lines:                     lines,
 			Module:                    strings.TrimSuffix(filepath.Base(view.Path), filepath.Ext(view.Path)),
+			ModuleKind:                moduleKind,
 			Source:                    view.Source,
 			Root:                      view.Root,
 			IR:                        ir,
@@ -1186,6 +1483,17 @@ func sourceRealtimeAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 		}
 	}
 	return false
+}
+
+func realtimeModuleKind(rootDir string, cfg config.Config, path string) (string, error) {
+	sourceFile, included, err := symbols.SourceFileForPath(rootDir, cfg, path)
+	if err != nil {
+		return "", err
+	}
+	if !included {
+		return "", nil
+	}
+	return sourceFile.ModuleKind, nil
 }
 
 func realtimeFindings(findings []Finding) []Finding {
@@ -1412,6 +1720,10 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 }
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
+	return a.buildContextWithObjectAnalysis(files, nil)
+}
+
+func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnalysis *objectAnalysisContext) analysisContext {
 	ctx := analysisContext{
 		functionReturns:                  map[string]string{},
 		functionShapes:                   map[string]procedureir.ValueShapeKind{},
@@ -1429,10 +1741,9 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},
 		procedures:                       map[string]procedureSignature{},
-		objectSummaries:                  buildObjectProcedureSummaries(files),
+		objectAnalysis:                   objectAnalysis,
 		worksheetCodenames:               map[string]string{},
 	}
-	ctx.objectEntryStates = buildObjectProcedureEntryStates(files, ctx.objectSummaries)
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
 	workbookRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Workbook))
 	for _, file := range files {
@@ -1454,7 +1765,7 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 				Line:       procedure.Symbol.DeclarationRange.StartLine,
 			})
 		}
-		for _, proc := range sourceProceduresFromIR(file.IR) {
+		for _, proc := range file.procedures() {
 			functionName := strings.ToLower(proc.Name)
 			if functionName != "" {
 				if ctx.functionNamesSeen[functionName] {
@@ -1500,6 +1811,26 @@ func (a Analyzer) buildContext(files []parsedFile) analysisContext {
 	ctx.arrayModuleEntryStates = inferArrayModuleEntryStates(a, files, ctx)
 	ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	return ctx
+}
+
+func recordBatchWorkload(ctx context.Context, files []parsedFile) {
+	recorder := analysisstats.FromContext(ctx)
+	if recorder == nil {
+		return
+	}
+	recorder.Add("file_count", uint64(len(files)))
+	for _, file := range files {
+		recorder.Add("procedure_count", uint64(len(file.IR.Procedures)))
+		for _, procedure := range file.IR.Procedures {
+			recorder.Add("statement_count", uint64(len(procedure.Statements)))
+			recorder.Add("expression_count", uint64(len(procedure.Expressions)))
+			recorder.Add("call_site_count", uint64(len(procedure.Calls)))
+		}
+		for _, graph := range file.CFG.Graphs {
+			recorder.Add("cfg_block_count", uint64(len(graph.Blocks)))
+			recorder.Add("cfg_edge_count", uint64(len(graph.Edges)))
+		}
+	}
 }
 
 func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analysisContext, file parsedFile, projectEffects effects.ProjectSummary) ([]Finding, error) {
@@ -1655,9 +1986,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		}
 		_ = lower
 	}
-	if a.Config.Analyze.DetectObjectUseBeforeSet {
+	if a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
 		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
-		findings = append(findings, a.objectUseBeforeSetIRFindings(file, proc, moduleDecls, ctx.objectSummaries, ctx.objectEntryStates[key])...)
+		if plan := ctx.objectAnalysis.plans[key]; plan != nil {
+			findings = append(findings, a.objectUseBeforeSetIRFindingsPlan(plan, ctx.objectAnalysis.summaries, ctx.objectAnalysis.entries[key])...)
+		}
 	}
 	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
 	findings = suppressDeterministicArrayWarningDuplicates(findings)
@@ -1765,7 +2098,7 @@ func findingReceiver(finding Finding) string {
 }
 
 func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary) []sourceProcedure {
-	procedures := sourceProceduresFromIR(file.IR, file.CFG)
+	procedures := file.procedures()
 	for i := range procedures {
 		if i >= len(file.IR.Procedures) {
 			break
@@ -1776,6 +2109,13 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 		}
 	}
 	return procedures
+}
+
+func (file parsedFile) procedures() []sourceProcedure {
+	if file.Procedures != nil {
+		return append([]sourceProcedure(nil), file.Procedures...)
+	}
+	return sourceProceduresFromIR(file.IR, file.CFG)
 }
 
 func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir.ProcedureSymbol) effects.ProcedureIdentity {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 )
 
 var (
@@ -25,6 +26,9 @@ func (a Analyzer) ByRefArgumentDiagnostics(doc Document) []Diagnostic {
 
 // ByRefArgumentDiagnosticsContext is the cancellable form used by realtime LSP analysis.
 func (a Analyzer) ByRefArgumentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	if recorder := analysisstats.FromContext(ctx); recorder != nil {
+		recorder.Add("byref_diagnostic_passes", 1)
+	}
 	// Resolve calls in the current module directly from its immutable snapshot.
 	// A newly opened document's workspace overlay is intentionally absent while
 	// background analysis is pending, but file-local diagnostics must still be

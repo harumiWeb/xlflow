@@ -4516,7 +4516,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	}
 	procedures := make([]returnProcedure, 0)
 	for _, file := range files {
-		fileProcedures := sourceProceduresFromIR(file.IR, file.CFG)
+		fileProcedures := file.procedures()
 		moduleDecls := moduleDeclarations(file.Lines, fileProcedures)
 		for _, proc := range fileProcedures {
 			if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {

@@ -709,6 +709,62 @@ func TestLSPPerformanceLogFlagIsOptIn(t *testing.T) {
 	}
 }
 
+func TestAnalyzePerformanceLogFlagIsOptInAndPreservesJSON(t *testing.T) {
+	flagApp := &app{}
+	cmd, _, err := flagApp.rootCommand().Find([]string{"analyze"})
+	if err != nil {
+		t.Fatalf("find analyze command: %v", err)
+	}
+	flag := cmd.Flags().Lookup("performance-log")
+	if flag == nil {
+		t.Fatal("analyze --performance-log flag is not registered")
+		return
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("performance-log default = %q, want false", flag.DefValue)
+	}
+
+	dir := writeCLIWarningAnalyzeProject(t, "")
+	run := func(args ...string) (string, string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		a := &app{
+			cwd: dir, stdout: &stdout, stderr: &stderr,
+			stdoutTerminal: func() bool { return false },
+			stderrTerminal: func() bool { return false },
+		}
+		root := a.rootCommand()
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("analyze command error = %v, exit = %d", err, output.ExitCode(err))
+		}
+		return stdout.String(), stderr.String()
+	}
+
+	plainJSON, plainStderr := run("--json", "analyze")
+	profiledJSON, profiledStderr := run("--json", "analyze", "--performance-log")
+	if plainJSON != profiledJSON {
+		t.Fatalf("profiling changed JSON output:\nplain: %s\nprofiled: %s", plainJSON, profiledJSON)
+	}
+	if strings.Contains(plainStderr, `operation="analyze/stage"`) {
+		t.Fatalf("performance output emitted without opt-in:\n%s", plainStderr)
+	}
+	for _, expected := range []string{
+		`operation="analyze/stage"`, `stage="source_discovery"`, `stage="parse"`,
+		`stage="procedure_ir"`, `stage="cfg"`, `stage="effect_summaries"`,
+		`stage="object_procedure_summaries"`, `stage="object_entry_states"`,
+		`stage="project_context"`, `stage="typedb_load"`, `stage="project_symbols"`,
+		`stage="project_wide_diagnostics"`, `stage="file_procedure_diagnostics"`,
+		`stage="byref_diagnostics"`, `stage="compile_equivalent_diagnostics"`,
+		`stage="suppression_finalization"`, `stage="analyze_total"`,
+		`operation="analyze/counter"`, `counter="file_count"`, `counter="procedure_count"`,
+	} {
+		if !strings.Contains(profiledStderr, expected) {
+			t.Fatalf("performance output missing %q:\n%s", expected, profiledStderr)
+		}
+	}
+}
+
 func TestLintCommandJSONIncludesConfigWarnings(t *testing.T) {
 	dir := writeCLIWarningLintProject(t, `forbid_select = false`)
 	var stdout bytes.Buffer

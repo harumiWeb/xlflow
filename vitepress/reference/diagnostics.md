@@ -69,6 +69,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | [`VB063`](#vb063)   | lint    | error       | procedure-local | yes     | Invalid Select/Case branch syntax                  |
 | [`VB064`](#vb064)   | lint    | error       | procedure-local | yes     | Invalid Open mode syntax                           |
 | [`VB065`](#vb065)   | lint    | error       | procedure-local | yes     | Invalid TypeOf syntax                              |
+| [`VB066`](#vb066)   | lint    | warning     | file-local      | yes     | Procedure terminator style mismatch                |
 | [`VBA101`](#vba101) | analyze | warning     | procedure-local | yes     | Object assignment missing Set                      |
 | [`VBA102`](#vba102) | analyze | warning     | procedure-local | yes     | Object-returning call assignment missing Set       |
 | [`VBA103`](#vba103) | analyze | warning     | procedure-local | yes     | Object function return missing Set                 |
@@ -369,7 +370,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB012
 
-**Mismatched procedure terminator.** A procedure is closed with the wrong End statement kind.
+**Mismatched procedure terminator.** A procedure is closed with an End statement kind that VBA's VBE rejects.
 
 | Property                    | Value                |
 | --------------------------- | -------------------- |
@@ -1183,7 +1184,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VB053
 
-**Ambiguous Enum member.** A bare Enum member reference has multiple visible project or type-library candidates and no unique lexical winner.
+**Ambiguous Enum member.** A bare Enum member reference has multiple visible project candidates and no unique lexical winner.
 
 | Property                    | Value                    |
 | --------------------------- | ------------------------ |
@@ -1466,6 +1467,28 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 | Blocks source preflight     | yes                  |
 | Real-time editor diagnostic | yes                  |
 | Fix available               | no                   |
+
+## VB066
+
+**Procedure terminator style mismatch.** A VBE-accepted procedure uses a noncanonical End statement kind.
+
+| Property                    | Value             |
+| --------------------------- | ----------------- |
+| Family                      | `lint`            |
+| Category                    | `maintainability` |
+| Evidence class              | `maintainability` |
+| Compile-equivalent          | no                |
+| Default severity            | `warning`         |
+| Supported severities        | `warning`         |
+| Surfaces                    | `lint`, `lsp`     |
+| Scope                       | `file-local`      |
+| Precision                   | `high`            |
+| Enabled by default          | yes               |
+| Configuration               | not configurable  |
+| Inline suppression          | yes               |
+| Blocks source preflight     | no                |
+| Real-time editor diagnostic | yes               |
+| Fix available               | no                |
 
 ## VBA101
 

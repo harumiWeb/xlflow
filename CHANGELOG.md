@@ -121,12 +121,60 @@ All notable changes to xlflow will be documented in this file.
 - Reduced `VBA227` false positives for private recursive `ByRef` array helpers
   when an allocated external entry is proven.
 
-- Fixed `VBA225` false positives when a local, parameter, or module-level VBA
-  binding such as `cells` shadows Excel's unqualified `Cells` function. The
-  Procedure IR now gates the textual fallback, including propagated helper
-  summaries, while explicitly typed `Range` and `Worksheet` bindings remain
-  eligible.
+## v0.30.2
 
+- Fixed LSP `VB029` false positives for declared UDT member receivers and VBA
+  built-in functions used in member chains such as `GetObject(...).ExecQuery(...)`.
+
+- Added bounded parallel execution for independent per-file batch analysis
+  stages. Findings remain deterministic, cancellation is preserved, and large
+  synthetic projects show substantial wall-clock reductions.
+
+- Improved repeated CFG query performance by reusing immutable statement,
+  adjacency, and reachability indexes for analyzer graph queries. CFG semantics
+  and diagnostic output are unchanged.
+
+- Improved batch ByRef analysis by computing each file revision once and
+  reusing the typed diagnostics for both runtime-safety and compile-equivalent
+  projections. Diagnostic output and the `VBA206`/`VBA228` contracts are
+  unchanged.
+
+- Improved `VBA202` batch analysis scalability by gating object analysis behind
+  the rule, reusing per-procedure CFG/object-flow artifacts, and propagating
+  interprocedural summaries and entry states through dependency worklists.
+  Diagnostic output and conservative propagation semantics are unchanged.
+
+- Fixed `VB050` false positives for `Friend` procedures in worksheet and
+  `ThisWorkbook` document modules. `Friend` remains rejected in standard
+  modules, matching Excel/VBE behavior and issue #656.
+- Added opt-in `xlflow analyze --performance-log` batch-analyzer profiling.
+  Stage timings, result counts, outcomes, and stable workload counters are
+  written to stderr without changing analyzer findings, exit codes, or the
+  `--json` stdout envelope. Added deterministic 100/500/1000-procedure scaling
+  and real-world corpus benchmark guidance for comparing stage costs and
+  allocations.
+- Improved batch ByRef call resolution by reusing parsed project symbols and
+  indexing exact and qualified-name lookups, avoiding a full project-symbol
+  scan for every call site while preserving ambiguity and visibility behavior.
+- Reused batch-built procedure IR and CFG artifacts in Intel diagnostics to
+  avoid rebuilding the same immutable file revision during `xlflow analyze`.
+
+## v0.30.1
+
+- Fixed `VB053` false positives for valid unqualified Excel/TypeLib enum
+  constants such as `xlCenter`, `xlThin`, and `xlContinuous` when metadata
+  contains the same name under multiple enum definitions.
+
+## v0.30.0
+
+- Completed the `VB012` procedure-terminator compatibility audit across the
+  `Sub`, `Function`, `Property Get`, `Property Let`, and `Property Set` opener
+  matrix in standard, class, `ThisWorkbook`, and worksheet document modules.
+  Excel 16.0 build 17932 accepts `Property Get` with `End Sub` or
+  `End Function`; those accepted forms now use non-blocking, suppressible `VB066`
+  style warnings, while VBE-rejected mismatches remain `VB012` compile errors
+  that block source preflight. Parser structure, VBE validity, and style policy
+  are documented and covered separately.
 - Fixed `VBA214` false positives when a narrow `On Error Resume Next`
   compatibility probe captures `Err.Description` before clearing the error and
   restoring normal error handling.

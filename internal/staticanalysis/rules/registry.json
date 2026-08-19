@@ -246,7 +246,7 @@
     {
       "id": "VB012",
       "title": "Mismatched procedure terminator",
-      "description": "A procedure is closed with the wrong End statement kind.",
+      "description": "A procedure is closed with an End statement kind that VBA's VBE rejects.",
       "family": "lint",
       "category": "correctness",
       "evidence_class": "compile-equivalent",
@@ -1786,7 +1786,7 @@
     {
       "id": "VB053",
       "title": "Ambiguous Enum member",
-      "description": "A bare Enum member reference has multiple visible project or type-library candidates and no unique lexical winner.",
+      "description": "A bare Enum member reference has multiple visible project candidates and no unique lexical winner.",
       "family": "lint",
       "category": "correctness",
       "evidence_class": "compile-equivalent",
@@ -2068,6 +2068,28 @@
       "configuration_key": "",
       "inline_suppressible": false,
       "preflight_blocking": true
+    },
+    {
+      "id": "VB066",
+      "title": "Procedure terminator style mismatch",
+      "description": "A VBE-accepted procedure uses a noncanonical End statement kind.",
+      "family": "lint",
+      "category": "maintainability",
+      "evidence_class": "maintainability",
+      "compile_equivalent": false,
+      "default_severity": "warning",
+      "supported_severities": ["warning"],
+      "surfaces": ["lint", "lsp"],
+      "default_enabled": true,
+      "scope": "file-local",
+      "realtime": true,
+      "precision": "high",
+      "fix_available": false,
+      "documentation_url": "https://harumiweb.github.io/xlflow/reference/diagnostics#vb066",
+      "configurable": false,
+      "configuration_key": "",
+      "inline_suppressible": true,
+      "preflight_blocking": false
     },
     {
       "id": "VBA228",

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -113,6 +114,110 @@ End Sub
 	if len(first.Graphs[0].Procedure.Parameters) != 0 ||
 		first.Graphs[0].Blocks[5].Statement.Text == "mutated input" {
 		t.Fatal("BuildDocument retained mutable input storage")
+	}
+}
+
+func TestBlockForStatementIndexUsesSlicePositionAndFirstMatch(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 40, Kind: BlockEntry},
+			{ID: 90, Kind: BlockStatement, StatementID: 10},
+			{ID: 120, Kind: BlockStatement, StatementID: 10},
+		},
+	}
+	graph.query = buildQueryIndex(graph)
+	block, ok := graph.BlockForStatement(10)
+	if !ok || block.ID != 90 {
+		t.Fatalf("BlockForStatement(10) = (%+v, %v), want first sparse-ID block", block, ok)
+	}
+}
+
+func TestBlockForStatementIndexPreservesFirstMatchAfterEarlierMutation(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 40, Kind: BlockEntry},
+			{ID: 90, Kind: BlockStatement, StatementID: 10},
+		},
+	}
+	graph.query = buildQueryIndex(graph)
+	graph.Blocks = append([]Block{{ID: 5, Kind: BlockStatement, StatementID: 10}}, graph.Blocks...)
+	block, ok := graph.BlockForStatement(10)
+	if !ok || block.ID != 5 {
+		t.Fatalf("BlockForStatement(10) after earlier mutation = (%+v, %v), want inserted block", block, ok)
+	}
+}
+
+func TestQueryIndexInvalidatesReachabilityInputs(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 1, Kind: BlockEntry},
+			{ID: 2, Kind: BlockStatement, StatementID: 1},
+			{ID: 3, Kind: BlockUnknownExit},
+			{ID: 4, Kind: BlockStatement, StatementID: 2},
+			{ID: 5, Kind: BlockUnknownExit},
+		},
+		Edges: []Edge{{ID: 1, From: 1, To: 2, Class: EdgeNormal}},
+		Entry: 1, UnknownExit: 3,
+	}
+	graph.query = buildQueryIndex(graph)
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{1, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("initial Reachable() = %v, want %v", got, want)
+	}
+
+	graph.Entry = 4
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Reachable() after Entry change = %v, want %v", got, want)
+	}
+
+	graph.UnknownFlowSources = []BlockID{4}
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{2, 3, 4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Reachable() after UnknownFlowSources change = %v, want %v", got, want)
+	}
+
+	graph.UnknownExit = 5
+	if got, want := graph.Reachable(EdgeFilter{}), []BlockID{2, 4, 5}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Reachable() after UnknownExit change = %v, want %v", got, want)
+	}
+}
+
+func TestCloneDeepCopiesProcedureSignatureRanges(t *testing.T) {
+	defaultRange := vbaast.Range{StartLine: 1, EndLine: 1, StartByte: 2, EndByte: 4}
+	boundsRange := vbaast.Range{StartLine: 2, EndLine: 2, StartByte: 5, EndByte: 8}
+	lowerRange := vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 9, EndByte: 10}
+	upperRange := vbaast.Range{StartLine: 3, EndLine: 3, StartByte: 11, EndByte: 12}
+	procedureRange := vbaast.Range{StartLine: 1, EndLine: 4, StartByte: 0, EndByte: 20}
+	graph := Graph{Procedure: procedureir.ProcedureSymbol{
+		Parameters: []procedureir.Parameter{{
+			DefaultRange: &defaultRange,
+			BoundsRange:  &boundsRange,
+			ArrayBounds:  []procedureir.ArrayBound{{LowerRange: &lowerRange, UpperRange: &upperRange}},
+		}},
+		ArrayBounds:      []procedureir.ArrayBound{{LowerRange: &lowerRange, UpperRange: &upperRange}},
+		DeclarationRange: procedureRange,
+	}}
+	wantDefaultStart := graph.Procedure.Parameters[0].DefaultRange.StartByte
+	wantBoundsEnd := graph.Procedure.Parameters[0].BoundsRange.EndByte
+	wantParameterLowerStart := graph.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte
+	wantParameterUpperEnd := graph.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte
+	wantProcedureLowerStart := graph.Procedure.ArrayBounds[0].LowerRange.StartByte
+	wantProcedureUpperEnd := graph.Procedure.ArrayBounds[0].UpperRange.EndByte
+	clone := Clone(graph)
+	clone.Procedure.Parameters[0].DefaultRange.StartByte++
+	clone.Procedure.Parameters[0].BoundsRange.EndByte++
+	clone.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte++
+	clone.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte++
+	clone.Procedure.ArrayBounds[0].LowerRange.StartByte++
+	clone.Procedure.ArrayBounds[0].UpperRange.EndByte++
+	if graph.Procedure.Parameters[0].DefaultRange.StartByte != wantDefaultStart ||
+		graph.Procedure.Parameters[0].BoundsRange.EndByte != wantBoundsEnd ||
+		graph.Procedure.Parameters[0].ArrayBounds[0].LowerRange.StartByte != wantParameterLowerStart ||
+		graph.Procedure.Parameters[0].ArrayBounds[0].UpperRange.EndByte != wantParameterUpperEnd ||
+		graph.Procedure.ArrayBounds[0].LowerRange.StartByte != wantProcedureLowerStart ||
+		graph.Procedure.ArrayBounds[0].UpperRange.EndByte != wantProcedureUpperEnd {
+		t.Fatal("Clone shares procedure signature range storage")
 	}
 }
 

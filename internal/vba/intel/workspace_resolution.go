@@ -21,7 +21,7 @@ type WorkspaceResolutionView struct {
 
 func NewWorkspaceResolutionView(symbols []Symbol) *WorkspaceResolutionView {
 	view := &WorkspaceResolutionView{
-		all:       append([]Symbol(nil), symbols...),
+		all:       cloneAnalysisSymbols(symbols),
 		exact:     make(map[string][]int),
 		qualified: make(map[string][]int),
 		module:    make(map[string][]int),
@@ -59,7 +59,7 @@ func (v *WorkspaceResolutionView) Query(query WorkspaceSymbolQuery) []Symbol {
 		indexes = v.kind[key]
 	case WorkspaceSymbolQueryPrefix:
 		if key == "" {
-			return append([]Symbol(nil), v.all...)
+			return cloneAnalysisSymbols(v.all)
 		}
 		start := sort.SearchStrings(v.exactKeys, key)
 		for i := start; i < len(v.exactKeys) && strings.HasPrefix(v.exactKeys[i], key); i++ {
@@ -67,7 +67,7 @@ func (v *WorkspaceResolutionView) Query(query WorkspaceSymbolQuery) []Symbol {
 		}
 	default:
 		if key == "" {
-			return append([]Symbol(nil), v.all...)
+			return cloneAnalysisSymbols(v.all)
 		}
 		for i, symbol := range v.all {
 			if strings.Contains(strings.ToLower(symbol.Name), key) || strings.Contains(strings.ToLower(qualifiedName(symbol.Module, symbol.Name)), key) {
@@ -91,7 +91,7 @@ func (v *WorkspaceResolutionView) Query(query WorkspaceSymbolQuery) []Symbol {
 		}
 		return result[i].Name < result[j].Name
 	})
-	return result
+	return cloneAnalysisSymbols(result)
 }
 
 func (a Analyzer) withRequestWorkspaceResolution(ctx context.Context, open []Document) Analyzer {

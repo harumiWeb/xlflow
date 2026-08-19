@@ -3,10 +3,13 @@ package analyze
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -61,6 +64,60 @@ func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	if got.File != want {
 		t.Fatalf("canonical file = %q, want %q", got.File, want)
 	}
+}
+
+func TestParsedFileProceduresReusesMaterializedProjection(t *testing.T) {
+	t.Parallel()
+	file := parsedFile{
+		IR:         procedureir.DocumentIR{Path: "Main.bas"},
+		Procedures: []sourceProcedure{{Name: "Run", StartLine: 1, EndLine: 2, Declarations: []procedureir.Declaration{{Name: "cached"}}}},
+	}
+	first := file.procedures()
+	second := file.procedures()
+	if len(first) != 1 || len(second) != 1 || &first[0] == &second[0] {
+		t.Fatal("parsed file exposed or failed to copy its cached procedure projection")
+	}
+	first[0].Name = "Changed"
+	if second[0].Name != "Run" || file.Procedures[0].Name != "Run" {
+		t.Fatal("procedure field mutation leaked into the cached projection")
+	}
+	if &first[0].Declarations[0] != &file.Procedures[0].Declarations[0] {
+		t.Fatal("cached procedure metadata was unnecessarily rebuilt")
+	}
+}
+
+var benchmarkProcedureProjectionSink []sourceProcedure
+
+func BenchmarkParsedFileProcedureProjection(b *testing.B) {
+	ir := procedureir.DocumentIR{Path: "Benchmark.bas", ModuleName: "Benchmark"}
+	for i := 0; i < 500; i++ {
+		ir.Procedures = append(ir.Procedures, procedureir.ProcedureIR{
+			Symbol: procedureir.ProcedureSymbol{
+				Name:             fmt.Sprintf("Procedure%03d", i),
+				Kind:             procedureir.ProcedureSub,
+				DeclarationRange: vbaast.Range{StartLine: i*4 + 1, EndLine: i*4 + 3},
+			},
+			Declarations: []procedureir.Declaration{{ID: i + 1, Name: fmt.Sprintf("value%03d", i), Type: "Long"}},
+			Statements:   []procedureir.Statement{{ID: i + 1, Kind: procedureir.StatementAssignment, Text: "value = 1"}},
+			Expressions:  []procedureir.Expression{{ID: i + 1, Kind: procedureir.ExpressionLiteral, Text: "1"}},
+			Calls:        []procedureir.CallSite{{ID: i + 1, Callee: procedureir.Callee{BaseName: "Helper"}}},
+			Accesses:     []procedureir.VariableAccess{{Name: fmt.Sprintf("value%03d", i), Mode: procedureir.AccessWrite}},
+		})
+	}
+
+	b.Run("rebuild", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			benchmarkProcedureProjectionSink = sourceProceduresFromIR(ir)
+		}
+	})
+	b.Run("cached", func(b *testing.B) {
+		file := parsedFile{IR: ir, Procedures: sourceProceduresFromIR(ir)}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			benchmarkProcedureProjectionSink = file.procedures()
+		}
+	})
 }
 
 func TestVBA225DetectsIndexedCellReadsWritesAndFormatting(t *testing.T) {
@@ -3880,7 +3937,7 @@ End Sub
 	}
 }
 
-func TestBatchTypedExcelRulesReusePreparedParsedDocument(t *testing.T) {
+func TestBatchTypedExcelRulesReusePreparedAnalysisArtifacts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Main.bas")
@@ -3898,8 +3955,13 @@ End Sub
 	if err != nil {
 		t.Fatal(err)
 	}
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{RootDir: dir, Path: path}, parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlFlow := vbacfg.BuildDocument(ir)
 	document := intel.Document{Path: path, Source: string(source)}
-	document.Snapshot = intel.NewAnalysisSnapshotWithParsedDocument(document, parsed)
+	document = batchIntelDocument(document, parsed, ir, controlFlow)
 	defer document.Snapshot.Retire()
 	db, err := vbadb.LoadBuiltin()
 	if err != nil {
@@ -3920,6 +3982,18 @@ End Sub
 	}
 	if got := document.Snapshot.ParseCount(); got != 1 {
 		t.Fatalf("shared VBA215/VBA218 snapshot parse count = %d, want 1", got)
+	}
+	if _, hit, err := document.Snapshot.ProcedureIR(func() (procedureir.DocumentIR, error) {
+		t.Fatal("seeded batch snapshot rebuilt procedure IR")
+		return procedureir.DocumentIR{}, nil
+	}); err != nil || !hit {
+		t.Fatalf("seeded procedure IR cache = (hit=%v, err=%v)", hit, err)
+	}
+	if _, hit, err := document.Snapshot.ControlFlowGraphs(func() (vbacfg.Document, error) {
+		t.Fatal("seeded batch snapshot rebuilt CFG")
+		return vbacfg.Document{}, nil
+	}); err != nil || !hit {
+		t.Fatalf("seeded CFG cache = (hit=%v, err=%v)", hit, err)
 	}
 }
 
@@ -4702,6 +4776,115 @@ End Sub
 	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
 		t.Fatalf("named project-local ByRef finding = %+v", got)
 	}
+}
+
+func TestAnalyzerByRefPathFilterRetainsExcludedProjectCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Receiver.bas", `Option Explicit
+Public Sub ReplaceText(ByRef target As String)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  receiver.ReplaceText count
+End Sub
+`)
+
+	findings, err := (Analyzer{
+		RootDir: dir,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			return strings.EqualFold(filepath.Base(path), "Main.bas")
+		},
+	}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA228")
+	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "requires String") {
+		t.Fatalf("path-filtered ByRef resolution lost excluded project candidate: %+v", got)
+	}
+}
+
+func TestAnalyzerByRefDoesNotIndexTestsAsProjectCandidates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  TestHelper count
+End Sub
+`)
+	testsDir := filepath.Join(dir, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testsDir, "Helper.bas"), []byte(`Option Explicit
+Public Sub TestHelper(ByRef target As String)
+End Sub
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA228"); len(got) != 0 {
+		t.Fatalf("test-only procedure became a project ByRef candidate: %+v", got)
+	}
+}
+
+func TestProjectByRefSymbolIndexHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, count, err := projectByRefSymbolIndex(ctx, t.TempDir(), config.Default(), nil, nil)
+	if !errors.Is(err, context.Canceled) || count != 0 {
+		t.Fatalf("canceled ByRef index build = (%d, %v), want (0, context.Canceled)", count, err)
+	}
+}
+
+func TestProjectByRefSymbolIndexHonorsCancellationDuringWorkspaceCollection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for i := 0; i < 32; i++ {
+		writeModule(t, dir, fmt.Sprintf("Module%02d.bas", i), "Public Sub Run()\nEnd Sub\n")
+	}
+	ctx := newCancelAfterContext(10)
+	_, count, err := projectByRefSymbolIndex(ctx, dir, config.Default(), func(string) bool { return true }, nil)
+	if !errors.Is(err, context.Canceled) || count != 0 {
+		t.Fatalf("canceled workspace collection = (%d, %v), want (0, context.Canceled)", count, err)
+	}
+}
+
+type cancelAfterContext struct {
+	context.Context
+	remaining atomic.Int32
+	done      chan struct{}
+	once      sync.Once
+}
+
+func newCancelAfterContext(checks int32) *cancelAfterContext {
+	ctx := &cancelAfterContext{Context: context.Background(), done: make(chan struct{})}
+	ctx.remaining.Store(checks)
+	return ctx
+}
+
+func (ctx *cancelAfterContext) Done() <-chan struct{} {
+	return ctx.done
+}
+
+func (ctx *cancelAfterContext) Err() error {
+	if err := ctx.Context.Err(); err != nil {
+		return err
+	}
+	if ctx.remaining.Add(-1) <= 0 {
+		ctx.once.Do(func() { close(ctx.done) })
+		return context.Canceled
+	}
+	return nil
 }
 
 func TestAnalyzerByRefSkipsAmbiguousCallsAndHonorsSuppression(t *testing.T) {

@@ -57,6 +57,18 @@ func astBase(entry ProcedureCatalogEntry) vbaast.Range {
 }
 
 func (s *AnalysisSnapshot) seedProcedureArtifacts(ir procedureir.DocumentIR) {
+	s.seedProcedureArtifactsWithClone(ir, true)
+}
+
+// seedProcedureArtifactsOwned indexes values already owned by the snapshot.
+// The document-level cache has performed the required deep copy at the
+// constructor boundary, so the private fragment store can reference those
+// immutable values without cloning every procedure a second time.
+func (s *AnalysisSnapshot) seedProcedureArtifactsOwned(ir procedureir.DocumentIR) {
+	s.seedProcedureArtifactsWithClone(ir, false)
+}
+
+func (s *AnalysisSnapshot) seedProcedureArtifactsWithClone(ir procedureir.DocumentIR, clone bool) {
 	if s == nil || s.artifacts == nil || ir.Parse.HasError || ir.Parse.HasMissing {
 		return
 	}
@@ -85,7 +97,10 @@ func (s *AnalysisSnapshot) seedProcedureArtifacts(ir procedureir.DocumentIR) {
 		if !ok {
 			continue
 		}
-		fragment := procedureIRFragment{base: procedure.Symbol.DeclarationRange, procedure: procedureir.CloneProcedureIR(procedure)}
+		if clone {
+			procedure = procedureir.CloneProcedureIR(procedure)
+		}
+		fragment := procedureIRFragment{base: procedure.Symbol.DeclarationRange, procedure: procedure}
 		for _, reference := range ir.TypeReferences {
 			if reference.Caller != nil && reference.Range.StartByte >= procedure.Symbol.DeclarationRange.StartByte && reference.Range.EndByte <= procedure.Symbol.DeclarationRange.EndByte {
 				fragment.typeReferences = append(fragment.typeReferences, reference)
@@ -196,6 +211,17 @@ func maskProcedureSet(source string, catalog ProcedureCatalog, keep map[Procedur
 }
 
 func (s *AnalysisSnapshot) seedCFGArtifacts(ir procedureir.DocumentIR, document vbacfg.Document) {
+	s.seedCFGArtifactsWithClone(ir, document, true)
+}
+
+// seedCFGArtifactsOwned indexes graphs already owned by the snapshot. Those
+// graphs are immutable behind the snapshot's completed cache, and every
+// incremental consumer clones before rebasing or returning them.
+func (s *AnalysisSnapshot) seedCFGArtifactsOwned(ir procedureir.DocumentIR, document vbacfg.Document) {
+	s.seedCFGArtifactsWithClone(ir, document, false)
+}
+
+func (s *AnalysisSnapshot) seedCFGArtifactsWithClone(ir procedureir.DocumentIR, document vbacfg.Document, clone bool) {
 	if s == nil || s.artifacts == nil || len(ir.Procedures) != len(document.Graphs) {
 		return
 	}
@@ -224,7 +250,10 @@ func (s *AnalysisSnapshot) seedCFGArtifacts(ir procedureir.DocumentIR, document 
 		if !ok {
 			continue
 		}
-		s.artifacts.cfg[key] = vbacfg.Clone(graph)
+		if clone {
+			graph = vbacfg.Clone(graph)
+		}
+		s.artifacts.cfg[key] = graph
 	}
 }
 

@@ -240,30 +240,38 @@ func (a Analyzer) DiagnosticsContext(ctx context.Context, doc Document) []Diagno
 // project the same semantic findings that the LSP exposes, without importing
 // the full editor diagnostic pipeline a second time.
 func (a Analyzer) CompileEquivalentDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {
+	return a.compileEquivalentDiagnosticsContext(ctx, doc, nil, false)
+}
+
+// CompileEquivalentDiagnosticsContextWithByRefDiagnostics projects compile-
+// equivalent diagnostics using a ByRef result that was already computed for
+// the same document revision. Batch analysis uses this entry point so the
+// expensive project-local call resolution is shared with the normal ByRef
+// diagnostic projection.
+func (a Analyzer) CompileEquivalentDiagnosticsContextWithByRefDiagnostics(ctx context.Context, doc Document, byRefDiagnostics []Diagnostic) []Diagnostic {
+	return a.compileEquivalentDiagnosticsContext(ctx, doc, byRefDiagnostics, true)
+}
+
+func (a Analyzer) compileEquivalentDiagnosticsContext(ctx context.Context, doc Document, byRefDiagnostics []Diagnostic, byRefDiagnosticsReady bool) []Diagnostic {
 	if ctx.Err() != nil {
 		return nil
 	}
 	var out []Diagnostic
-	for _, diagnostic := range a.argumentDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
+	appendCompileEquivalent := func(diagnostics []Diagnostic) {
+		for _, diagnostic := range diagnostics {
+			if isCompileEquivalentDiagnostic(diagnostic.Code) {
+				out = append(out, diagnostic)
+			}
 		}
 	}
-	for _, diagnostic := range a.ByRefArgumentDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
-		}
+	appendCompileEquivalent(a.argumentDiagnosticsContext(ctx, doc))
+	if byRefDiagnosticsReady {
+		appendCompileEquivalent(byRefDiagnostics)
+	} else {
+		appendCompileEquivalent(a.ByRefArgumentDiagnosticsContext(ctx, doc))
 	}
-	for _, diagnostic := range a.assignmentDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
-		}
-	}
-	for _, diagnostic := range a.LocalTypeNameDiagnosticsContext(ctx, doc) {
-		if isCompileEquivalentDiagnostic(diagnostic.Code) {
-			out = append(out, diagnostic)
-		}
-	}
+	appendCompileEquivalent(a.assignmentDiagnosticsContext(ctx, doc))
+	appendCompileEquivalent(a.LocalTypeNameDiagnosticsContext(ctx, doc))
 	// Control-flow legality is projected from the same procedure IR/CFG used
 	// by lint. Batch analyze/preflight does not run the full lint adapter, so
 	// build the shared artifacts here and retain the exact byte ranges.
@@ -689,7 +697,33 @@ func (a Analyzer) RunnableProcedures(doc Document, cfg CodeLensConfig) ([]Runnab
 }
 
 func (a Analyzer) WorkspaceSymbols(open []Document, query string) ([]Symbol, error) {
-	return a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+	return a.WorkspaceSymbolsContext(context.Background(), open, query)
+}
+
+// WorkspaceSymbolsContext is the cancellable variant of WorkspaceSymbols.
+// Cancellation is propagated through workspace discovery and symbol extraction.
+func (a Analyzer) WorkspaceSymbolsContext(ctx context.Context, open []Document, query string) ([]Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.WorkspaceSymbolQueryFunc != nil {
+		out, err := a.WorkspaceSymbolQueryFunc(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	if a.WorkspaceSymbolsFunc != nil {
+		out, err := a.WorkspaceSymbolsFunc(open, query)
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
+	return a.workspaceSymbolsContext(ctx, open, query)
 }
 
 func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
@@ -703,7 +737,17 @@ func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQu
 }
 
 func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, error) {
-	result, err := symbols.Inspect(symbols.Options{
+	return a.workspaceSymbolsContext(context.Background(), open, query)
+}
+
+func (a Analyzer) workspaceSymbolsContext(ctx context.Context, open []Document, query string) ([]Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result, err := symbols.InspectContext(ctx, symbols.Options{
 		RootDir:        a.RootDir,
 		Config:         a.Config,
 		IncludePrivate: true,
@@ -714,19 +758,28 @@ func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, err
 	}
 	openKeys := make(map[string]bool, len(open))
 	for _, doc := range open {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for _, key := range a.workspacePathKeys(doc.Path) {
 			openKeys[key] = true
 		}
 	}
 	var out []Symbol
 	for _, file := range result.Files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if hasAnyPathKey(openKeys, a.workspacePathKeys(file.Path)) {
 			continue
 		}
 		out = append(out, symbolsFromFile(file, "")...)
 	}
 	for _, doc := range open {
-		docSyms, err := a.DocumentSymbols(doc)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		docSyms, err := a.DocumentSymbolsContext(ctx, doc)
 		if err != nil {
 			continue
 		}
@@ -751,7 +804,7 @@ func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, err
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out, ctx.Err()
 }
 
 func (a Analyzer) workspacePathKeys(path string) []string {
@@ -2270,16 +2323,17 @@ func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context
 			return nil
 		}
 		code := stripLineComment(line)
+		offset := byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})
 		for _, call := range callsOnLine(code) {
 			receiver, _, ok := splitCallTarget(call.Target)
 			if !ok || strings.TrimSpace(receiver) == "" || strings.HasPrefix(strings.TrimSpace(receiver), ".") {
 				continue
 			}
-			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, byteOffsetForDocumentPosition(doc, Position{Line: lineNo, Character: utf16Len(line)})); ok {
+			if _, ok := a.resolveDocumentExpressionTypeAt(doc, receiver, offset); ok {
 				continue
 			}
 			base := memberReceiverBase(receiver)
-			if base == "" || strings.EqualFold(base, "Me") || a.knownModuleOrNamespaceReceiver(doc, base) {
+			if base == "" || strings.EqualFold(base, "Me") || a.knownMemberReceiverBase(doc, base, offset) {
 				continue
 			}
 			key := fmt.Sprintf("%d:%s", lineNo, strings.ToLower(base))
@@ -2291,6 +2345,23 @@ func (a Analyzer) unresolvedMemberReceiverDiagnosticsContext(ctx context.Context
 		}
 	}
 	return out
+}
+
+// knownMemberReceiverBase separates an unresolved member chain from an
+// actually undeclared receiver. VB029 only has enough evidence to report the
+// latter: a declared UDT/Object variable may have members that this analyzer
+// cannot resolve, and a VBA.Global function may return a late-bound object.
+func (a Analyzer) knownMemberReceiverBase(doc Document, base string, offset int) bool {
+	if a.knownModuleOrNamespaceReceiver(doc, base) {
+		return true
+	}
+	if a.DB != nil {
+		if _, ok := a.DB.ResolveMember("VBA.Global", base); ok {
+			return true
+		}
+	}
+	_, ok := a.visibleSymbolTypeInfoAtContext(doc, base, offset, nil)
+	return ok
 }
 
 func (a Analyzer) unknownMemberDiagnosticsContext(ctx context.Context, doc Document) []Diagnostic {

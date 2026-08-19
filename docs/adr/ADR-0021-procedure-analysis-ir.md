@@ -51,10 +51,12 @@ Use `ast.Range` as the canonical source coordinate contract. LSP UTF-16
 conversion remains in the LSP adapter; the IR does not import LSP protocol
 types.
 
-Make the immutable `AnalysisSnapshot` the LSP ownership and cache boundary.
-Each snapshot lazily constructs syntax IR from its owned parsed document,
-supports concurrent readers, and returns defensive copies. A successor in the
-same open-document lifecycle may inherit completed Go-owned procedure fragments
+Make the immutable `AnalysisSnapshot` the ownership and cache boundary for
+editor and batch consumers. An editor snapshot lazily constructs syntax IR
+from its owned parsed document, while a batch snapshot may seed the same cache
+with an already-built IR for the exact immutable revision. Both paths support
+concurrent readers and return defensive copies. A successor in the same
+open-document lifecycle may inherit completed Go-owned procedure fragments
 keyed by procedure kind/name/ordinal, exact source hash, and module-context
 hash. Ranges are rebased from the fragment declaration start and document-wide
 declaration IDs are deterministically reassigned when materialized. In-flight,

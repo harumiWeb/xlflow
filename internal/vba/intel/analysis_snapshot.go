@@ -97,6 +97,20 @@ type AnalysisSnapshot struct {
 	retired atomic.Bool
 }
 
+// AnalysisArtifacts contains derived values that were built for the exact
+// document revision captured by an AnalysisSnapshot.  Batch analysis can
+// provide these values when it has already built them while preparing its
+// parsed input, allowing the snapshot to publish the same immutable values
+// without rebuilding them through its lazy loaders.
+//
+// The snapshot takes ownership of neither value: both are cloned at the
+// constructor boundary.  This keeps the caller free to continue using or
+// releasing its preparation buffers after construction.
+type AnalysisArtifacts struct {
+	ProcedureIR procedureir.DocumentIR
+	ControlFlow vbacfg.Document
+}
+
 // NewAnalysisSnapshot captures doc as an immutable analysis revision.
 func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 	source := doc.Source
@@ -187,6 +201,26 @@ func NewAnalysisSnapshotWithParsedDocument(doc Document, parsed *ast.ParsedDocum
 		snapshot.parsedDocument = parsed
 		snapshot.parseCount.Add(1)
 	}
+	return snapshot
+}
+
+// NewAnalysisSnapshotWithArtifacts captures doc and seeds it with a parsed
+// document, procedure IR, and control-flow graphs produced while preparing
+// this exact revision.  The parsed document is owned by the returned
+// snapshot, as with NewAnalysisSnapshotWithParsedDocument.  IR and CFG are
+// deep-copied at the snapshot boundary, then cached as completed values so
+// their first access is a cache hit and does not invoke its loader.
+func NewAnalysisSnapshotWithArtifacts(doc Document, parsed *ast.ParsedDocument, artifacts AnalysisArtifacts) *AnalysisSnapshot {
+	snapshot := NewAnalysisSnapshotWithParsedDocument(doc, parsed)
+	snapshot.procedureIR = procedureir.Clone(artifacts.ProcedureIR)
+	snapshot.procedureIRDone = true
+	snapshot.controlFlow = vbacfg.CloneDocument(artifacts.ControlFlow)
+	snapshot.controlFlowDone = true
+	// Seed the procedure-level store from the same cloned document values used
+	// by the completed caches.  This is what lets successor snapshots reuse
+	// unchanged fragments without rebuilding the batch's artifacts.
+	snapshot.seedProcedureArtifactsOwned(snapshot.procedureIR)
+	snapshot.seedCFGArtifactsOwned(snapshot.procedureIR, snapshot.controlFlow)
 	return snapshot
 }
 

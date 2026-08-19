@@ -213,12 +213,18 @@ Every declared rule code is resolved against the authoritative static-analysis
 rule registry. The registry validates the canonical diagnostic ID, supported
 `lint`/`analyze`/`lsp` surfaces, and supported severities; fixture validation
 rejects unknown or non-canonical codes, unsupported surfaces, and unsupported
-severities. A `compile-equivalent` fixture binding must reference only registry
+severities. A `compile-equivalent` fixture binding must reference registry
 rules with `compile_equivalent: true`; rejected bound expectations for those
-rules must use `severity: "error"`. Bound and partially-bound fixtures require every contract code to
-be listed in `rule_codes`; bound fixtures additionally require every declared
-rule code to appear in the contract that matches the VBE result (`expected`
-for rejected cases, `forbidden` for accepted cases). Until a fixture is
+rules must use `severity: "error"`. Bound and partially-bound fixtures require
+every compile-equivalent contract code to be listed in `rule_codes`; bound
+fixtures additionally require every declared
+compile-equivalent rule code to appear in the contract that matches the VBE
+result (`expected` for rejected cases, `forbidden` for accepted cases). A
+bound accepted compile-equivalent fixture may additionally list a registered
+non-compile-equivalent, non-blocking style or maintainability rule (for
+example, `VB066`) and put it in the explicit `expected` warning contract. That
+supplemental rule is not treated as VBE compiler evidence or a
+preflight-blocking binding. Until a fixture is
 connected to an implemented rule, keep it `unbound` and do not alter the VBE
 expectation to satisfy an analyzer test. Binding notes must be omitted when
 unnecessary; an explicitly empty or whitespace-only note is invalid.
@@ -324,6 +330,62 @@ maintainability advice. A rule must distinguish compile-equivalent errors from
 deterministic runtime-risk warnings and non-VBE policy/maintainability
 warnings. Normal Go and .NET tests consume committed fixture expectations and
 never launch Excel.
+
+### Procedure terminator compatibility audits
+
+Procedure-boundary audits keep three observations separate: the parser/CST and
+xlflow boundary tracker describe source structure, a real VBE Compile probe
+answers whether Excel accepts that source, and the registry describes xlflow's
+style/preflight policy. A parser mismatch is therefore not sufficient evidence
+for a compile-equivalent error, and VBE acceptance does not prohibit an
+independent non-blocking style warning.
+
+Issue #597 audits the complete 5-by-3 opener/terminator matrix for each of the
+four supported module targets. The five openers are `Sub`, `Function`,
+`Property Get`, `Property Let`, and `Property Set`; the three terminators are
+`End Sub`, `End Function`, and `End Property`. The module targets are a
+standard module, a class module, `ThisWorkbook`, and a worksheet document
+module. Each matrix cell is an independent fixture with exactly one procedure
+boundary, so a second syntax or declaration error cannot decide the compile
+result.
+
+Before Excel is run, every matrix fixture is `vbe.expected = "observe"`,
+`provenance.status = "pending"`, and `analysis.binding_status = "unbound"`
+with `analysis.evidence_role = "compile-equivalent"`. The fixture records the
+parser/CST result and current diagnostic projection separately from the oracle
+result. Known accepted and rejected harness controls run first; the focused
+cases then run sequentially. Only confirmed `accepted` or `rejected` outcomes
+may be promoted. A timeout, unknown modal, failed Compile invocation,
+source mutation, COM/worker failure, or unconfirmed cleanup is infrastructure
+failure and cannot be promoted or used to change analyzer severity.
+
+Promotion and binding follow the result, rather than the parser's expectation:
+
+| Evidence result                | Contract after promotion                                                                                                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VBE rejects the mismatch       | Bind the rejected fixture to the compile-equivalent error contract and require `error` severity; it may block source preflight.                                                   |
+| VBE accepts the mismatch       | Forbid the compile-equivalent error on `lint` and `lsp`; any retained parser/style concern must be an explicitly non-blocking policy or maintainability observation.              |
+| Mixed accepted/rejected matrix | Split only the confirmed rejected subset into the compile-equivalent contract and use a separately registered, non-blocking style rule for any retained accepted-form preference. |
+| Infrastructure failure         | Keep the fixture observational and stop the batch; do not infer VBA validity.                                                                                                     |
+
+The promoted issue #597 run used Excel 16.0, build 17932, x64, `ja-JP`, and
+completed all 60 cases after the known controls. All four module targets had
+the same result: matching `Sub`, `Function`, and `Property Get/Let/Set`
+terminators were accepted; `Property Get` with `End Sub` or `End Function`
+was also accepted; every other mismatched pair was rejected with the expected
+`End Sub`, `End Function`, or `End Property` compile dialog. Rejected fixtures
+are bound to `VB012` with `error` contracts on `lint` and LSP and matching
+accepted baselines are negative controls. Accepted mismatches forbid `VB012`
+and are covered by `VB066` style regressions; they are not compile-equivalent
+bindings. The accepted source contracts also verify that the confirmed
+structure does not leave a duplicate blocking `VB014` recovery finding.
+
+The registry and generated diagnostics reference now reflect that split:
+`VB012` remains compile-equivalent and preflight-blocking for VBE-rejected
+forms, while `VB066` is a default-enabled, high-precision, file-local,
+inline-suppressible warning that is not compile-equivalent and never blocks
+preflight. Parser structure, compiler validity, and xlflow style preference
+must remain documented and tested as separate contracts.
 
 When changing static-analysis semantics (including call/argument validation,
 type inference, object/`Set` diagnostics, parser interpretation, severity, or

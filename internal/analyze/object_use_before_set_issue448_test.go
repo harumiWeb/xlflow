@@ -518,6 +518,31 @@ End Sub
 	}
 }
 
+func TestVBA202Issue448UsesClassInitializeFieldSummary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Widget.cls", `Attribute VB_Name = "Widget"
+Option Explicit
+Private cached As Object
+
+Private Sub Class_Initialize()
+  Set cached = CreateObject("Scripting.Dictionary")
+End Sub
+
+Public Sub UseCached()
+  Debug.Print cached.Count
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Class_Initialize assignment should establish the class field: %+v", got)
+	}
+}
+
 func TestVBA202Issue448TracksExcelMemberFactoriesAndTypeNameGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

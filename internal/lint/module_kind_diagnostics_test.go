@@ -17,7 +17,7 @@ func TestModuleKindDiagnosticsMatrix(t *testing.T) {
 		{"event standard", "standard", "Public Event Changed()\n", "VB050", 1},
 		{"event class", "class", "Public Event Changed()\n", "VB050", 0},
 		{"friend standard", "standard", "Friend Sub Run()\nEnd Sub\n", "VB050", 1},
-		{"friend document", "document", "Friend Sub Run()\nEnd Sub\n", "VB050", 1},
+		{"friend document", "document", "Friend Sub Run()\nEnd Sub\n", "VB050", 0},
 		{"friend class", "class", "Friend Sub Run()\nEnd Sub\n", "VB050", 0},
 		{"implements standard", "standard", "Implements IFoo\n", "VB050", 1},
 		{"implements class", "class", "Implements IFoo\n", "VB050", 0},

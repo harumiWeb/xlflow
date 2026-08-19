@@ -2,6 +2,7 @@ package analysisstats
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 )
@@ -12,6 +13,7 @@ type Stage struct {
 	Wait        time.Duration
 	Outcome     string
 	ResultCount int
+	Calls       int
 }
 
 type Recorder struct {
@@ -27,8 +29,78 @@ func (r *Recorder) Record(stage Stage) {
 		return
 	}
 	r.mu.Lock()
+	if stage.Calls == 0 {
+		stage.Calls = 1
+	}
 	r.stages = append(r.stages, stage)
 	r.mu.Unlock()
+}
+
+// Totals returns stages aggregated by name and counters sorted by name. Stage
+// order follows the first observation so callers can render the analysis
+// pipeline in execution order while repeated per-file measurements collapse
+// into one stable record.
+func (r *Recorder) Totals() ([]Stage, []Counter) {
+	stages, counters := r.Snapshot()
+	if len(stages) == 0 && len(counters) == 0 {
+		return nil, nil
+	}
+	indexes := make(map[string]int, len(stages))
+	totals := make([]Stage, 0, len(stages))
+	for _, stage := range stages {
+		index, ok := indexes[stage.Name]
+		if !ok {
+			indexes[stage.Name] = len(totals)
+			if stage.Calls == 0 {
+				stage.Calls = 1
+			}
+			totals = append(totals, stage)
+			continue
+		}
+		total := &totals[index]
+		total.Elapsed += stage.Elapsed
+		total.Wait += stage.Wait
+		total.ResultCount += stage.ResultCount
+		if stage.Calls == 0 {
+			stage.Calls = 1
+		}
+		total.Calls += stage.Calls
+		total.Outcome = combinedOutcome(total.Outcome, stage.Outcome)
+	}
+	names := make([]string, 0, len(counters))
+	for name := range counters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	orderedCounters := make([]Counter, 0, len(names))
+	for _, name := range names {
+		orderedCounters = append(orderedCounters, Counter{Name: name, Value: counters[name]})
+	}
+	return totals, orderedCounters
+}
+
+type Counter struct {
+	Name  string
+	Value uint64
+}
+
+func combinedOutcome(current, next string) string {
+	rank := func(outcome string) int {
+		switch outcome {
+		case "canceled":
+			return 3
+		case "error":
+			return 2
+		case "ok":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(next) > rank(current) {
+		return next
+	}
+	return current
 }
 
 func (r *Recorder) Add(name string, value uint64) {
@@ -72,6 +144,10 @@ func FromContext(ctx context.Context) *Recorder {
 }
 
 func Measure(ctx context.Context, name string) func(int, error) {
+	recorder := FromContext(ctx)
+	if recorder == nil {
+		return func(int, error) {}
+	}
 	started := time.Now()
 	return func(count int, err error) {
 		outcome := "ok"
@@ -81,9 +157,7 @@ func Measure(ctx context.Context, name string) func(int, error) {
 		if ctx != nil && ctx.Err() != nil {
 			outcome = "canceled"
 		}
-		if recorder := FromContext(ctx); recorder != nil {
-			recorder.Record(Stage{Name: name, Elapsed: time.Since(started), Outcome: outcome, ResultCount: count})
-		}
+		recorder.Record(Stage{Name: name, Elapsed: time.Since(started), Outcome: outcome, ResultCount: count})
 	}
 }
 
@@ -91,6 +165,10 @@ func Measure(ctx context.Context, name string) func(int, error) {
 // another analysis request. It is separate from compute elapsed time so stage
 // logs can distinguish contention from actual analysis work.
 func MeasureWait(ctx context.Context, name string) func(error) {
+	recorder := FromContext(ctx)
+	if recorder == nil {
+		return func(error) {}
+	}
 	started := time.Now()
 	return func(err error) {
 		outcome := "ok"
@@ -100,8 +178,6 @@ func MeasureWait(ctx context.Context, name string) func(error) {
 		if ctx != nil && ctx.Err() != nil {
 			outcome = "canceled"
 		}
-		if recorder := FromContext(ctx); recorder != nil {
-			recorder.Record(Stage{Name: name, Wait: time.Since(started), Outcome: outcome})
-		}
+		recorder.Record(Stage{Name: name, Wait: time.Since(started), Outcome: outcome})
 	}
 }

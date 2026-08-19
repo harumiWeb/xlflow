@@ -64,7 +64,7 @@ xlflow [--json] inspect-gui
 xlflow [--json] lint
 xlflow lsp (--stdio | --check | --version) [--log-file <path>] [--performance-log]
 xlflow [--json] fmt [--write|--check|--diff] [--line-numbers <preserve|add|remove|renumber>] [--stdin] [<path>...]
-xlflow [--json] analyze
+xlflow [--json] analyze [--performance-log]
 xlflow [--json] metrics
 xlflow [--json] check
 xlflow [--json] generate test <module-name>
@@ -266,6 +266,27 @@ or another explicit recovery path rather than saving the uncertain workbook.
 `fmt` is a source-only, conservative, non-destructive VBA formatter backed by `tree-sitter-vba` structure analysis. It targets `.bas` and `.cls` files under configured project source directories and `tests/`; `.frm` files are skipped. At most one mode flag (`--write`, `--check`, or `--diff`) is allowed per invocation. When no mode flag is set, `fmt` runs in inspect mode and reports whether files would be changed without modifying them. `--stdin` reads VBA source from stdin (`.bas` assumed) and writes formatted output to stdout; it cannot be combined with other mode flags or `--line-numbers`. When `--stdin` is combined with `--json`, the JSON envelope is written to stdout instead of formatted text; the envelope contains `output.changed` / `output.unchanged` summary fields but does not include the formatted source body. Parser errors in `--stdin` return `fmt_failed`. `--check` returns exit code `1` when unformatted files are detected. `--diff` writes unified diffs to the logs and returns exit code `0` even when changes exist. `--write` persists formatted output back to source files. Operator spacing is enabled by default through `[fmt].operator_spacing = true`; it normalizes spacing around safe binary assignment, comparison, arithmetic, string-concatenation, and logical operators using parser/token context. The operator pass must preserve `:=` named arguments, type-declaration suffixes, strings, comments, class metadata, attributes, preprocessor directives, and line-continuation statements. Unsafe or ambiguous operator contexts are skipped rather than guessed. Declaration spacing is enabled by default through `[fmt].declaration_spacing = true`; it normalizes supported `Dim`, `Private`, `Public`, `Friend`, `Static`, `Const`, `Sub`, `Function`, and `Property Get`/`Let`/`Set` declaration whitespace, including `As`, `As New`, declaration commas, parameter commas, procedure return `As`, and declaration/default initializer `=` spacing. The declaration pass must preserve type-declaration suffixes, strings, comments, class metadata, attributes, preprocessor directives, `Declare` statements, fixed-length string declarations, and line-continuation statements. Unsupported or ambiguous declaration shapes are skipped rather than guessed. Keyword casing is enabled by default through `[fmt].keyword_casing = true`; it normalizes curated VBA keywords such as `Option`, `Dim`, `If`, `Then`, `End`, and logical/operator keywords while leaving member-access identifiers to the built-in pass. Built-in casing is enabled by default through `[fmt].builtin_casing = true`; it normalizes curated known VBA/Excel/Office globals, constants, types, and safely resolved member names such as `MsgBox`, `vbExclamation`, `Worksheet`, `Cells`, `End`, `Row`, and `xlUp`. The casing passes must preserve strings, comments, class metadata, attributes, preprocessor directives, `Declare` statements, explicit line-continuation statements, unsupported `.frm` designer sections, user-defined identifiers, and ambiguous member names. `--line-numbers` follows the same contract: without `--write`, `fmt --line-numbers ...` only reports the prospective numbering changes; with `--write`, it applies them to disk. `--line-numbers` controls explicit VBA line-number handling with `preserve`, `add`, `remove`, and `renumber`; the default policy is `preserve`, so plain `fmt` does not inject line numbers automatically. `add` numbers supported executable statements with a stable `10`/`10` sequence, but it must not number `Select Case`, `Case` / `Case Else`, or `End Select` control lines, and it must only number the first physical line of an explicit line-continuation statement. `remove` strips supported numeric line prefixes, and `renumber` normalizes supported numbered statements to the same stable sequence. When numeric `GoTo`/`Gosub`/`Resume` label targets make removal or renumbering ambiguous, the formatter must leave the source unchanged for that transformation and report a warning instead of guessing. Success JSON includes top-level `target` with `kind="source"`, `path` reflecting the resolved search scope, and `description="source files"`, plus `output` with `mode`, `changed`, `unchanged`, `skipped`, `total`, optional `changed_paths`, `skipped_paths`, `skipped_reasons`, and nested `line_numbers`. `output.line_numbers` always contains `mode` and `applied`; in `write` mode it also contains optional `files_changed`, `lines_added`, `lines_removed`, and `lines_renumbered`, while inspect/check/diff modes use the prospective fields `files_to_change`, `lines_to_add`, `lines_to_remove`, and `lines_to_renumber`. `output.line_numbers.warnings` remains optional in every mode. Skipped files produce warnings, including unsupported extensions and parser-error skips for files that cannot be formatted safely. Formatting is deterministic and idempotent: running `fmt` twice produces the same result. The formatter uses 4-space indentation derived from VBA block structure, strips trailing whitespace, normalizes blank lines, preserves class module metadata (`VERSION`, `BEGIN`/`END`, `MultiUse`, and `Attribute VB_*` lines) verbatim, and preserves existing line numbers where possible under the default policy. `.frm` files specified by explicit path are skipped rather than formatted.
 
 `analyze` scans configured source directories without Excel COM for runtime-risk patterns. Its internal procedure-effect summary follows uniquely resolved, reachable project-local calls; ambiguous, unresolved, external, and dynamically bound calls do not establish propagated effects. `VBA203` prefers a matching same-module Push/Pop or Push/Restore helper pair and may use a direct or propagated restore from either same-module alias. A cross-module pair is accepted only when exactly one candidate is a non-private procedure in a standard module; class, document, and UserForm procedures do not establish a receiver-less cross-module pair. Ambiguous or missing pairs remain findings. Batch-only `VBA221` adds one caller-context warning per Application property when a direct resolved callee has a direct `VBA203` leak origin; it names the origin and callee uncertainty but does not repeat a transitive leak at ancestor callers. Batch-only `VBA222` checks public function/property return types, parameters, and custom event parameters against project declarations plus the embedded/generated TypeLib database. Standard modules and `VB_Exposed=True` classes/interfaces are public API surfaces; private or unexposed project types, ambiguous types, and unresolved external types are reported conservatively. Host-required event handlers are excluded. `VBA224` performs conservative procedure-local source-to-sink analysis for non-process APIs and adds optional `data_flow` context. `VBA225` reports confirmed cell-by-cell Excel object-model work inside non-trivial loops, while bulk transfers and statically provable short loops are exempt. `VBA228` reports only definite project-local ByRef type or array-shape mismatches rejected by the VBE; it is unsuppressible and blocks source preflight. `VBA236` owns process-launch safety and adds optional `command_execution` context; unknown origins remain general process-launch risk rather than a confirmed injection claim. `VBA238` reports loop-invariant Excel member-chain resolution that can be hoisted into a cached local, `VBA239` reports procedure-local unsafe SQL construction, `VBA241` reports repeated `ReDim Preserve` copies inside reachable loops, and opt-in `VBA242` reports expensive operations over full-row, full-column, full-sheet, or unbounded `UsedRange` targets. Opt-in `VBA240` indexes module-level mutable state across standard, class, document, and UserForm modules, reports structural lifecycle coupling, and adds informational `analysis_metrics.module_state`; fan-in counts alone do not trigger a finding. It returns top-level `analysis`, optional `analysis_metrics`, findings with the standard fields and rule-specific contexts, and exit code `1` when findings are present; analysis metrics do not affect the exit code.
+
+`analyze --performance-log` is an opt-in, developer-facing observability flag.
+It writes line-oriented performance records to stderr and never adds profiling
+data to the `--json` stdout envelope. A record uses the fixed operation name
+`operation="analyze/stage"` and includes the stage, elapsed duration, call
+count, result count, and outcome (`ok`, `error`, or `canceled`). The measured
+stages are `source_discovery`, `file_read`, `parse`, `procedure_ir`, `cfg`,
+`effect_summaries`, `object_procedure_summaries`, `object_entry_states`,
+`project_context`, `project_symbols`, `typedb_load`,
+`project_wide_diagnostics`, `file_procedure_diagnostics`, `byref_diagnostics`,
+`compile_equivalent_diagnostics`, and `suppression_finalization`; the complete
+operation is reported as `analyze_total`.
+
+The performance output also reports workload counters in stable order:
+`file_count`, `procedure_count`, `statement_count`, `expression_count`,
+`call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
+`project_symbol_count`. Counters describe the analyzed workload and are not
+diagnostics. When the flag is absent, analysis does not start a timer or emit
+performance records. The flag is valid only on `analyze`; `check` does not
+forward or expose analyzer profiling. Findings, warning order, preflight
+results, exit codes, and JSON output are identical with and without the flag.
 
 For `VBA222`, an unresolved external type is reported only when the project and
 TypeLib resolution view is complete. Missing, empty, malformed, or partial
@@ -942,6 +963,66 @@ real-time eligibility for the lint and analyzer rules described below. The
 generated diagnostic catalog and `xlflow rules --json` are projections of that
 registry; this section defines command behavior and compatibility.
 
+### Procedure terminator compatibility evidence
+
+`VB010`, `VB011`, `VB012`, and the procedure-boundary cases of `VB014` describe
+source structure around procedure boundaries, but their evidence layers are not
+interchangeable. In particular,
+tree-sitter structure or the boundary tracker is an xlflow parser observation;
+it is not, by itself, proof that Excel's VBE rejects the source. The local VBE
+oracle is authoritative for compile acceptance, while xlflow may retain a
+separate style or maintainability preference for an accepted form.
+
+The procedure-terminator audit for issue #597 uses one isolated oracle fixture
+for each opener/terminator pair in the following matrix, repeated for standard,
+class, ThisWorkbook, and worksheet modules (60 fixtures in total):
+
+| Opener         | Terminators under test                    |
+| -------------- | ----------------------------------------- |
+| `Sub`          | `End Sub`, `End Function`, `End Property` |
+| `Function`     | `End Sub`, `End Function`, `End Property` |
+| `Property Get` | `End Sub`, `End Function`, `End Property` |
+| `Property Let` | `End Sub`, `End Function`, `End Property` |
+| `Property Set` | `End Sub`, `End Function`, `End Property` |
+
+Each fixture contains exactly one procedure boundary and records three
+independent results:
+
+- parser/CST and boundary-tracker interpretation;
+- observed VBE Compile acceptance or rejection, with Excel version/build,
+  bitness, locale, and cleanup provenance; and
+- the xlflow diagnostic policy, including severity and source-preflight
+  blocking.
+
+The promoted issue #597 run used Excel 16.0, build 17932, x64, `ja-JP`, and
+covered all 60 fixtures sequentially after the known accept/reject controls.
+The result was consistent for standard modules, class modules, `ThisWorkbook`,
+and worksheet document modules:
+
+| Opener         | `End Sub`                              | `End Function`                         | `End Property`                   |
+| -------------- | -------------------------------------- | -------------------------------------- | -------------------------------- |
+| `Sub`          | accepted baseline                      | rejected: `VB012` error/blocking       | rejected: `VB012` error/blocking |
+| `Function`     | rejected: `VB012` error/blocking       | accepted baseline                      | rejected: `VB012` error/blocking |
+| `Property Get` | accepted by VBE: `VB066` style warning | accepted by VBE: `VB066` style warning | accepted baseline                |
+| `Property Let` | rejected: `VB012` error/blocking       | rejected: `VB012` error/blocking       | accepted baseline                |
+| `Property Set` | rejected: `VB012` error/blocking       | rejected: `VB012` error/blocking       | accepted baseline                |
+
+`VB012` therefore remains a correctness, compile-equivalent, unsuppressible
+`error` and source-preflight blocker only for the rejected combinations. `VB066`
+(`Procedure terminator style mismatch`) represents the accepted `Property Get`
+forms. It is a default-enabled, high-precision, file-local `warning` on `lint`
+and LSP, is inline-suppressible, and is never compile-equivalent or
+preflight-blocking. The accepted fixtures forbid `VB012` on both public
+surfaces, so a parser/CST mismatch cannot block `push` or `run` merely because
+the source uses a noncanonical closer. The focused regression contract also
+ensures that the confirmed accepted forms do not retain a duplicate `VB014`
+recovery blocker.
+
+The `lint` and LSP projections must use the same classification. A VBE-accepted
+terminator form must not block `push`, `run`, or another source-preflight gate
+because of `VB012`; parser-recovery findings remain a separate contract and
+must be tested explicitly for the same accepted fixture.
+
 Lint issue objects contain `code`, `severity`, `file`, `line`, `message`, and may include `column`, `kind`, `symbol`, and `suggestion`. `column` is 1-based when available and omitted for legacy line-only findings. `VB014` recovery findings additionally use `kind="parser_recovery"` and may include `parser_node` (`"ERROR"` or `"MISSING"`), `parser_token` (short normalized recovery text), and `context` (a short source-line excerpt). `VB021` may use the same optional `context` field on one representative declaration of an unreachable private call cluster; the value lists the cluster's qualified procedure names while each declaration retains its own issue location. When xlflow can confidently identify an unclosed block, VB014 also includes `block_kind`, `expected_closer`, `opening_line`, and `opening_column`; its primary location is the point where the closer is expected, while the metadata identifies the unmatched opener. Human lint output renders available positions as `file:line:column` and includes VB014 recovery detail.
 
 Analyzer finding objects use the same core location and remediation fields. Their public severity is `error`, `warning`, or `information`; human output preserves all three values, JSON uses the lowercase string, and LSP projects `information` as `DiagnosticSeverity.Information`. `VBA214` additionally includes `scope_end_line`: `line` identifies the `On Error Resume Next` start, and `scope_end_line` identifies the path-specific restoration or exit boundary.
@@ -1067,10 +1148,12 @@ Module` directives are also reported as duplicate same-kind declarations.
   or otherwise incomplete remain quiet. The canonical procedure resolver is
   shared by lint, analyze, LSP, Call Hierarchy, impact, and effect analysis;
   only a complete, certain project-local outcome is diagnosed.
-- `VB053`: a bare Enum member has multiple visible project or TypeLib
-  candidates with no lexical winner. Qualified members, unique candidates,
-  incomplete TypeLib/project snapshots, and unresolved conditional branches
-  remain quiet. The member identifier is the primary range.
+- `VB053`: a bare Enum member has multiple visible project candidates with no
+  lexical winner. TypeLib metadata is an external fallback, so duplicate
+  records for one globally exposed constant do not establish ambiguity.
+  Qualified members, unique candidates, incomplete TypeLib/project snapshots,
+  and unresolved conditional branches remain quiet. The member identifier is
+  the primary range.
 - `VB054`: `RaiseEvent` names an event that is not declared in the same object
   module. Only a complete object-module event set is considered; external or
   incomplete references remain quiet, and the event identifier is the primary
@@ -1101,6 +1184,12 @@ Module` directives are also reported as duplicate same-kind declarations.
 - `VB065`: a `TypeOf` expression has a provably malformed syntax shape. The
   finding is an unsuppressible compile-equivalent error and blocks source
   preflight; ambiguous recovery remains `VB014`.
+- `VB066`: a `Property Get` uses `End Sub` or `End Function`. Excel's VBE
+  accepts these forms, but `End Property` remains xlflow's canonical style.
+  The finding is a default-enabled, high-precision, file-local warning on
+  `lint` and LSP, supports inline suppression, and never blocks source
+  preflight. This style preference is intentionally separate from `VB012`,
+  which is reserved for VBE-rejected terminator combinations.
 - `VB031`: standard `.bas` module is missing `Attribute VB_Name`
 - `VB032`: repeated `?` Debug.Print shorthand such as `?? "hoge"`
 - `VB033`: member is not present on the resolved receiver type
@@ -1119,7 +1208,7 @@ Module` directives are also reported as duplicate same-kind declarations.
 
 Projects that intentionally use interactive GUI entrypoints may set `[lint].disabled_rules = ["VB007"]` to suppress `VB007`. This changes lint behavior only; `run --headless` still rejects GUI boundaries during preflight.
 
-Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB065` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible.
+Compile-dialog prevention findings `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, and `VB045` through `VB065` are always enabled and block source preflight before `push` or `run` opens Excel. These diagnostics are not inline-suppressible. `VB066` is deliberately outside this safety range: it is a suppressible style warning for VBE-accepted `Property Get` terminators and never blocks preflight.
 
 `[preflight].allowed_diagnostics` is an empty-by-default project policy for the
 shared source-preflight gate used by `push`, configured-workbook `run`,
@@ -1156,7 +1245,7 @@ over legacy booleans and `[lint.procedure_name_constant]` remains unchanged.
 
 Source files may also suppress specific line-bound diagnostics locally with apostrophe comments. `xlflow:disable-next-line <ID...>` suppresses the listed IDs on the following source line, and `xlflow:disable-line <ID...>` suppresses the listed IDs on the same source line. IDs are the same stable codes shown in CLI output, for example `VB002` or `VBA205`, and multiple IDs are separated by whitespace. Inline suppression only hides matching IDs at the annotated line; unrelated diagnostics on that line are still emitted.
 
-Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB065`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
+Preflight-blocking diagnostics cannot be suppressed inline: `VB008` through `VB015`, `VB028`, `VB029`, `VB031`, `VB032`, `VB037`, `VB045` through `VB065`, and analyzer errors such as `VBA104`, `VBA105`, `VBA106`, `VBA211`, `VBA228`, and `VBA229` must remain visible before `push` or `run` opens Excel. `VB066` is not in this list because it is an inline-suppressible, non-blocking style warning. Unsupported inline suppressions are reported in command `warnings` as `unsupported_inline_suppression_rule`.
 
 `VBA249` is intentionally excluded from this preflight-blocking set. Its
 `error` severity records a deterministic runtime failure, while its

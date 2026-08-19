@@ -604,6 +604,10 @@ func TestDiagnosticsDiscardsGenerationChangedImmediatelyBeforePublish(t *testing
 	ctx := diagnosticTestContext(notifications)
 	s.diagnostics = diagnosticVersionResult
 	uri := openDiagnosticsTestDocument(t, s, ctx, 1)
+	// didOpen launches diagnostics asynchronously. Wait for the initial
+	// publication before clearing the recorder so it cannot race with the
+	// generation-discard assertion below.
+	notifications.waitForCount(t, 1)
 	notifications.clear()
 
 	hookStarted := make(chan struct{})

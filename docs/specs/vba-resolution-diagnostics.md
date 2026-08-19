@@ -14,8 +14,11 @@ external, built-in, dynamic, and incomplete outcomes. `VB052` reports only a
 provably project-local missing or non-callable call target. Bare unresolved
 names remain quiet because they may bind to a referenced library or late-bound
 value. `VB053` reports only an unqualified Enum member with multiple visible
-candidates and no same-module lexical winner. `VB054` reports an event name
-that is not declared in the same object module as the `RaiseEvent` statement.
+project declarations and no same-module lexical winner. TypeLib enum metadata
+is treated as an external fallback: duplicate records for one globally exposed
+constant do not establish a source-level ambiguity. `VB054` reports an event
+name that is not declared in the same object module as the `RaiseEvent`
+statement.
 
 All three rules are compile-equivalent errors, block source preflight, and are
 not inline-suppressible. They fail open for parser recovery, unresolved

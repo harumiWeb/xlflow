@@ -276,6 +276,246 @@
       "id": "issue594-typeof-trailing-token",
       "path": "cases/issue594-typeof-trailing-token/case.json"
     },
-    { "id": "issue594-typeof-valid", "path": "cases/issue594-typeof-valid/case.json" }
+    { "id": "issue594-typeof-valid", "path": "cases/issue594-typeof-valid/case.json" },
+    {
+      "id": "vb012-terminator-function-end-function-class",
+      "path": "cases/vb012-terminator-function-end-function-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-function-document-workbook",
+      "path": "cases/vb012-terminator-function-end-function-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-function-document-worksheet",
+      "path": "cases/vb012-terminator-function-end-function-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-function-standard",
+      "path": "cases/vb012-terminator-function-end-function-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-property-class",
+      "path": "cases/vb012-terminator-function-end-property-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-property-document-workbook",
+      "path": "cases/vb012-terminator-function-end-property-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-property-document-worksheet",
+      "path": "cases/vb012-terminator-function-end-property-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-property-standard",
+      "path": "cases/vb012-terminator-function-end-property-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-sub-class",
+      "path": "cases/vb012-terminator-function-end-sub-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-sub-document-workbook",
+      "path": "cases/vb012-terminator-function-end-sub-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-sub-document-worksheet",
+      "path": "cases/vb012-terminator-function-end-sub-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-function-end-sub-standard",
+      "path": "cases/vb012-terminator-function-end-sub-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-function-class",
+      "path": "cases/vb012-terminator-property-get-end-function-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-function-document-workbook",
+      "path": "cases/vb012-terminator-property-get-end-function-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-function-document-worksheet",
+      "path": "cases/vb012-terminator-property-get-end-function-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-function-standard",
+      "path": "cases/vb012-terminator-property-get-end-function-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-property-class",
+      "path": "cases/vb012-terminator-property-get-end-property-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-property-document-workbook",
+      "path": "cases/vb012-terminator-property-get-end-property-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-property-document-worksheet",
+      "path": "cases/vb012-terminator-property-get-end-property-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-property-standard",
+      "path": "cases/vb012-terminator-property-get-end-property-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-sub-class",
+      "path": "cases/vb012-terminator-property-get-end-sub-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-sub-document-workbook",
+      "path": "cases/vb012-terminator-property-get-end-sub-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-sub-document-worksheet",
+      "path": "cases/vb012-terminator-property-get-end-sub-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-get-end-sub-standard",
+      "path": "cases/vb012-terminator-property-get-end-sub-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-function-class",
+      "path": "cases/vb012-terminator-property-let-end-function-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-function-document-workbook",
+      "path": "cases/vb012-terminator-property-let-end-function-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-function-document-worksheet",
+      "path": "cases/vb012-terminator-property-let-end-function-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-function-standard",
+      "path": "cases/vb012-terminator-property-let-end-function-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-property-class",
+      "path": "cases/vb012-terminator-property-let-end-property-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-property-document-workbook",
+      "path": "cases/vb012-terminator-property-let-end-property-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-property-document-worksheet",
+      "path": "cases/vb012-terminator-property-let-end-property-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-property-standard",
+      "path": "cases/vb012-terminator-property-let-end-property-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-sub-class",
+      "path": "cases/vb012-terminator-property-let-end-sub-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-sub-document-workbook",
+      "path": "cases/vb012-terminator-property-let-end-sub-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-sub-document-worksheet",
+      "path": "cases/vb012-terminator-property-let-end-sub-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-let-end-sub-standard",
+      "path": "cases/vb012-terminator-property-let-end-sub-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-function-class",
+      "path": "cases/vb012-terminator-property-set-end-function-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-function-document-workbook",
+      "path": "cases/vb012-terminator-property-set-end-function-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-function-document-worksheet",
+      "path": "cases/vb012-terminator-property-set-end-function-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-function-standard",
+      "path": "cases/vb012-terminator-property-set-end-function-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-property-class",
+      "path": "cases/vb012-terminator-property-set-end-property-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-property-document-workbook",
+      "path": "cases/vb012-terminator-property-set-end-property-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-property-document-worksheet",
+      "path": "cases/vb012-terminator-property-set-end-property-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-property-standard",
+      "path": "cases/vb012-terminator-property-set-end-property-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-sub-class",
+      "path": "cases/vb012-terminator-property-set-end-sub-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-sub-document-workbook",
+      "path": "cases/vb012-terminator-property-set-end-sub-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-sub-document-worksheet",
+      "path": "cases/vb012-terminator-property-set-end-sub-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-property-set-end-sub-standard",
+      "path": "cases/vb012-terminator-property-set-end-sub-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-function-class",
+      "path": "cases/vb012-terminator-sub-end-function-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-function-document-workbook",
+      "path": "cases/vb012-terminator-sub-end-function-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-function-document-worksheet",
+      "path": "cases/vb012-terminator-sub-end-function-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-function-standard",
+      "path": "cases/vb012-terminator-sub-end-function-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-property-class",
+      "path": "cases/vb012-terminator-sub-end-property-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-property-document-workbook",
+      "path": "cases/vb012-terminator-sub-end-property-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-property-document-worksheet",
+      "path": "cases/vb012-terminator-sub-end-property-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-property-standard",
+      "path": "cases/vb012-terminator-sub-end-property-standard/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-sub-class",
+      "path": "cases/vb012-terminator-sub-end-sub-class/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-sub-document-workbook",
+      "path": "cases/vb012-terminator-sub-end-sub-document-workbook/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-sub-document-worksheet",
+      "path": "cases/vb012-terminator-sub-end-sub-document-worksheet/case.json"
+    },
+    {
+      "id": "vb012-terminator-sub-end-sub-standard",
+      "path": "cases/vb012-terminator-sub-end-sub-standard/case.json"
+    }
   ]
 }
