@@ -149,8 +149,11 @@ calls do not prove suppression or success. Their existing `CallUncertainty`
 provenance is retained in the error summary and may be included as context in
 another confirmed finding. Uncertainty alone never emits `VBA237`.
 
-A representative call chain is selected deterministically by stable procedure
-identity and source location. When a failure-loss boundary is reachable from a
+A representative call chain is selected deterministically by the legacy global
+procedure worklist over stable procedure and edge identity. The lazy witness
+replay is shared by a `ProjectSummary` materialization cache; it must not run an
+isolated worklist per error origin because cross-origin requeues are part of
+the compatibility ordering. When a failure-loss boundary is reachable from a
 public procedure or host event, that entry point may be named in the finding's
 reason, but no second diagnostic is emitted at the entry point.
 

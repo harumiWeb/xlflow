@@ -44,12 +44,15 @@ graphs therefore converge without repeatedly growing equivalent transitive
 origin state.
 
 Detailed diagnostic evidence and representative call paths are materialized
-from the retained witness seeds and the stable call graph when needed. The
-materialized result uses the same procedure/edge/source ordering as the
-pre-optimization projection. If a consumer requires an origin, uncertainty,
-or error path, the implementation must retain enough seed information to
-reconstruct it deterministically; it may not replace a required witness with
-an arbitrary representative.
+from the retained witness seeds and the stable call graph when needed. Error
+witnesses use one replay of the legacy global procedure worklist per shared
+`ProjectSummary` materialization cache; an isolated per-origin search is not
+allowed because another origin can requeue a branch and affect the first path
+that reaches an owner. The materialized result uses the same
+procedure/edge/source ordering as the pre-optimization projection. If a
+consumer requires an origin, uncertainty, or error path, the implementation
+must retain enough seed information to reconstruct it deterministically; it
+may not replace a required witness with an arbitrary representative.
 
 The effects package exposes `BuildWithStats(documents)`, returning the same
 `ProjectSummary` as `Build` plus developer-facing `BuildStats`. `Build` remains

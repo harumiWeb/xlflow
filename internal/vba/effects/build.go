@@ -95,6 +95,15 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 	})
 	callers, callees := buildAdjacency(edges)
 	stats := propagateBounded(summaries, callers)
+	witnessSummaries := make(map[string]ProcedureSummary, len(summaries))
+	for key, summary := range summaries {
+		if summary != nil {
+			// Keep extraction order for lazy compatibility replay. The public
+			// summaries are sorted below, but the legacy propagation worklist saw
+			// these direct slices before that presentation-only sort.
+			witnessSummaries[key] = cloneProcedureSummary(*summary)
+		}
+	}
 	out := ProjectSummary{
 		byKey:           map[string]int{},
 		byCandidateLine: map[int][]int{},
@@ -103,6 +112,7 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 			callers:   callers,
 			callees:   callees,
 			summaries: map[string]ProcedureSummary{},
+			witness:   witnessSummaries,
 		},
 	}
 	for _, summary := range summaries {
@@ -119,6 +129,7 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 	for _, summary := range out.procedures {
 		out.provenance.keys = append(out.provenance.keys, summary.Identity.Key())
 	}
+	out.materialization = newMaterializationCache(out)
 	return out, stats
 }
 

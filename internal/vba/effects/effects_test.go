@@ -618,6 +618,58 @@ func TestErrorSummaryRepresentativePathMatchesWorklistOnDiamondAndLongShort(t *t
 	}
 }
 
+func TestErrorWitnessReplayUsesGlobalWorklistOrdering(t *testing.T) {
+	identity := func(name string) ProcedureIdentity {
+		return ProcedureIdentity{File: name + ".bas", Module: name, QualifiedName: name + ".Run", Name: "Run", Kind: procedureir.ProcedureSub}
+	}
+	ids := map[string]ProcedureIdentity{}
+	for _, name := range []string{"A", "B", "C", "D", "E"} {
+		ids[name] = identity(name)
+	}
+	key := func(name string) string { return ids[name].Key() }
+	edges := []edge{
+		{from: key("A"), to: key("C")}, {from: key("A"), to: key("E")}, {from: key("B"), to: key("D")},
+		{from: key("B"), to: key("E")}, {from: key("C"), to: key("A")}, {from: key("C"), to: key("B")},
+		{from: key("D"), to: key("B")}, {from: key("E"), to: key("B")}, {from: key("E"), to: key("C")},
+		{from: key("E"), to: key("D")},
+	}
+	callers, callees := buildAdjacency(edges)
+	witness := map[string]ProcedureSummary{}
+	for _, name := range []string{"A", "C", "D", "E"} {
+		origin := ids[name]
+		witness[name] = ProcedureSummary{
+			Identity: origin,
+			Error: ErrorSummary{Direct: []ErrorEvidence{{
+				Behavior: ErrorSuppresses, Origin: origin, CallChain: []ProcedureIdentity{origin},
+			}}},
+		}
+	}
+	witnessByKey := map[string]ProcedureSummary{}
+	for name, summary := range witness {
+		witnessByKey[key(name)] = summary
+	}
+	project := ProjectSummary{provenance: &provenanceGraph{
+		callers: callers, callees: callees, summaries: witnessByKey, witness: witnessByKey,
+		keys: []string{key("A"), key("B"), key("C"), key("D"), key("E")},
+	}}
+	replay := buildErrorWitnessReplay(project)
+	var got []ProcedureIdentity
+	for _, evidence := range replay.propagated[key("C")] {
+		if evidence.Origin.Key() == ids["D"].Key() {
+			got = evidence.CallChain
+			break
+		}
+	}
+	var names []string
+	for _, item := range got {
+		names = append(names, item.Module)
+	}
+	want := []string{"C", "A", "E", "D"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("global witness path = %v, want %v", names, want)
+	}
+}
+
 func TestErrorSummaryPreservesExternalCallUncertainty(t *testing.T) {
 	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
 		manualProcedure("Calls.Root", 1, []procedureir.CallSite{manualCall(1, procedureir.ResolutionExternal)}),
@@ -977,6 +1029,32 @@ func TestRecoveredStatementsDoNotProduceEffects(t *testing.T) {
 	run := find(t, Build([]Document{{IR: doc, CFG: cfg.BuildDocument(doc)}}), "M.Run")
 	if len(run.Direct) != 0 {
 		t.Fatalf("recovered effect = %#v", run.Direct)
+	}
+}
+
+func TestProjectSummarySharesFullMaterializationCacheAcrossLookups(t *testing.T) {
+	project := buildSources(t,
+		sourceFile{"Entry.bas", "Entry", "Public Sub Run()\n Leaf\nEnd Sub\n"},
+		sourceFile{"Leaf.bas", "Leaf", "Public Sub Leaf()\n On Error GoTo Cleanup\n Workbooks.Open \"missing.xlsx\"\nCleanup:\nEnd Sub\n"},
+	)
+	direct := project.AllDirect()
+	if len(direct) == 0 {
+		t.Fatal("project has no procedures")
+	}
+	id := direct[0].Identity
+	candidate := procedureir.Candidate{File: id.File, QualifiedName: id.QualifiedName, Kind: string(id.Kind), Line: id.DeclarationLine}
+	if _, ok := project.LookupCandidate(candidate); !ok {
+		t.Fatal("candidate lookup failed")
+	}
+	if project.materialization == nil || len(project.materialization.byIndex) != 1 || project.materialization.materializer.errorReplay == nil {
+		t.Fatalf("candidate lookup did not populate shared materialization cache: %#v", project.materialization)
+	}
+	replay := project.materialization.materializer.errorReplay
+	if _, ok := project.Lookup(id); !ok {
+		t.Fatal("identity lookup failed")
+	}
+	if len(project.materialization.byIndex) != 1 || project.materialization.materializer.errorReplay != replay {
+		t.Fatal("identity lookup discarded or repeated the shared materialization cache")
 	}
 }
 

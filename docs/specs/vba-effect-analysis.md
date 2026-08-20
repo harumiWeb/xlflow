@@ -183,8 +183,10 @@ Error outcomes follow the same bounded-state boundary. The finite outcome
 membership (`suppresses_errors`, `rethrows_errors`, `returns_success_flag`,
 `may_raise`, and `logs_and_continues`) converges independently from detailed
 `ErrorEvidence`. Error witnesses retain the handler, cleanup, return, or call
-boundary needed by `VBA237`; representative chains are reconstructed using
-the stable call graph and do not depend on map or worklist timing.
+boundary needed by `VBA237`. A shared materialization cache replays the legacy
+global procedure worklist once for error witnesses, including cross-origin
+requeues, so representative chains preserve the pre-optimization first-arrival
+ordering and do not depend on map iteration timing.
 
 ## `VBA203` Integration
 

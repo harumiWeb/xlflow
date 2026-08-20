@@ -67,7 +67,7 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 || !applicationStateCallReachable(proc, call) {
 			continue
 		}
-		callee, ok := project.LookupCandidate(call.Resolution.Candidates[0])
+		callee, ok := project.LookupCandidateDirect(call.Resolution.Candidates[0])
 		statement := statements[call.StatementID]
 		if !ok || !directSuccessFlag(callee) || errorFailureOutputObserved(proc, call, callee) || errorSuccessResultUseUncertain(proc, call, statement) || errorSuccessResultChecked(proc, call, statement) {
 			continue

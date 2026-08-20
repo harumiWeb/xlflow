@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -178,6 +179,7 @@ type ProjectSummary struct {
 	byKey           map[string]int
 	byCandidateLine map[int][]int
 	provenance      *provenanceGraph
+	materialization *materializationCache
 	stats           BuildStats
 }
 
@@ -228,21 +230,54 @@ type provenanceGraph struct {
 	callers   map[string][]string
 	callees   map[string][]string
 	summaries map[string]ProcedureSummary
+	witness   map[string]ProcedureSummary
 	keys      []string
 }
 
 type provenanceMaterialization struct {
-	project ProjectSummary
-	// errorPaths is scoped to one Lookup or All pass so lazy provenance does not
-	// become a permanent project-wide cache.
-	errorPaths map[string]map[string][]string
+	project     ProjectSummary
+	errorReplay *errorWitnessReplay
+}
+
+type materializationCache struct {
+	mu           sync.Mutex
+	materializer *provenanceMaterialization
+	byIndex      map[int]ProcedureSummary
 }
 
 func newProvenanceMaterialization(project ProjectSummary) *provenanceMaterialization {
 	return &provenanceMaterialization{
-		project:    project,
-		errorPaths: map[string]map[string][]string{},
+		project: project,
 	}
+}
+
+func newMaterializationCache(project ProjectSummary) *materializationCache {
+	return &materializationCache{
+		materializer: newProvenanceMaterialization(project),
+		byIndex:      map[int]ProcedureSummary{},
+	}
+}
+
+func (p ProjectSummary) materializeCached(index int) ProcedureSummary {
+	if p.materialization == nil {
+		return p.materialize(index)
+	}
+	cache := p.materialization
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if summary, ok := cache.byIndex[index]; ok {
+		return cloneProcedureSummary(summary)
+	}
+	summary := cache.materializer.materialize(index)
+	cache.byIndex[index] = summary
+	return cloneProcedureSummary(summary)
+}
+
+func (m *provenanceMaterialization) errorWitnessReplay() *errorWitnessReplay {
+	if m.errorReplay == nil {
+		m.errorReplay = buildErrorWitnessReplay(m.project)
+	}
+	return m.errorReplay
 }
 
 func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
@@ -250,7 +285,7 @@ func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
 	if !ok {
 		return ProcedureSummary{}, false
 	}
-	return p.materialize(i), true
+	return p.materializeCached(i), true
 }
 
 // LookupDirect returns one defensive direct-only summary while retaining its
@@ -275,7 +310,7 @@ func (p ProjectSummary) LookupCandidate(candidate procedureir.Candidate) (Proced
 			strings.EqualFold(id.QualifiedName, candidate.QualifiedName) &&
 			strings.EqualFold(string(id.Kind), candidate.Kind) &&
 			id.DeclarationLine == candidate.Line {
-			return p.materialize(i), true
+			return p.materializeCached(i), true
 		}
 	}
 	return ProcedureSummary{}, false
@@ -310,9 +345,15 @@ func (p ProjectSummary) AllDirect() []ProcedureSummary {
 // All returns a defensive copy in deterministic procedure order.
 func (p ProjectSummary) All() []ProcedureSummary {
 	out := make([]ProcedureSummary, len(p.procedures))
-	materializer := newProvenanceMaterialization(p)
+	if p.materialization == nil {
+		materializer := newProvenanceMaterialization(p)
+		for i := range p.procedures {
+			out[i] = materializer.materialize(i)
+		}
+		return out
+	}
 	for i := range p.procedures {
-		out[i] = materializer.materialize(i)
+		out[i] = p.materializeCached(i)
 	}
 	return out
 }
@@ -341,7 +382,7 @@ func (m *provenanceMaterialization) materialize(index int) ProcedureSummary {
 	reachable := p.reachableProcedureKeys(key)
 	out.Propagated = p.propagatedEvidence(key, reachable)
 	out.PropagatedUncertainty = p.propagatedUncertainty(key, reachable)
-	out.Error.Propagated = p.propagatedErrors(key, reachable, m.errorPaths)
+	out.Error.Propagated = p.propagatedErrors(key, m.errorWitnessReplay())
 	if out.semantic != nil {
 		out.Error = errorSummaryWithState(out.Error, out.semantic)
 	}
