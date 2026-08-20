@@ -278,7 +278,10 @@ type parsedFile struct {
 	// ModuleDeclarations is the module-scope declaration projection paired with
 	// Procedures. It is materialized once during batch/realtime file setup and
 	// reused by rule stages that solve array and object state.
-	ModuleDeclarations          map[string]sourceDeclaration
+	ModuleDeclarations map[string]sourceDeclaration
+	// ModuleFacts owns the immutable module declaration and procedure ownership
+	// indexes shared by all rule stages for this file revision.
+	ModuleFacts                 *moduleAnalysisFacts
 	Parsed                      *vbaast.ParsedDocument
 	IntelDocument               intel.Document
 	RangeValueModuleConstants   map[string]int
@@ -503,7 +506,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	for i := range parsedFiles {
 		procedures := sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
-		parsedFiles[i].ModuleDeclarations = moduleDeclarations(parsedFiles[i].Lines, procedures)
+		parsedFiles[i].ModuleFacts = buildModuleAnalysisFacts(parsedFiles[i].Lines, parsedFiles[i].IR, procedures)
+		parsedFiles[i].ModuleDeclarations = parsedFiles[i].ModuleFacts.moduleDeclarations
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -1260,6 +1264,8 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 			IR:         ir,
 			Procedures: procedures,
 		}
+		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
+		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
 		var scanErr error
 		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
@@ -1410,11 +1416,12 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			IR:                        ir,
 			CFG:                       controlFlow,
 			Procedures:                procedures,
-			ModuleDeclarations:        moduleDeclarations(lines, procedures),
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
+		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
+		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
 		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
 			file.ArrayOptionBase = optionBase(lines)
 			file.ArrayOptionBaseSet = true
@@ -1534,13 +1541,8 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	decls := cloneDeclarations(moduleDecls)
-	for key, decl := range procedureDeclarations(file.Lines, proc) {
-		decls[key] = decl
-	}
-	for _, param := range proc.Params {
-		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
-	}
+	decls := newDeclarationScope(file, proc)
+	decls.module = moduleDecls
 	findAssignments := map[string]rangeFindAssignmentInfo{}
 	guardedFinds := map[string]bool{}
 	withStack := make([]withInfo, 0)
@@ -1919,13 +1921,8 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	if err := cancelCtx.Err(); err != nil {
 		return nil, err
 	}
-	decls := cloneDeclarations(moduleDecls)
-	for key, decl := range procedureDeclarations(file.Lines, proc) {
-		decls[key] = decl
-	}
-	for _, param := range proc.Params {
-		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
-	}
+	decls := newDeclarationScope(file, proc)
+	decls.module = moduleDecls
 	shadowedVBA205 := vba205ShadowedIdentifiers(proc, decls, ctx)
 	withStack := make([]withInfo, 0)
 	findAssignments := map[string]rangeFindAssignmentInfo{}
@@ -2014,19 +2011,19 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			}
 			if cm := callAssignRe.FindStringSubmatch(stmt); len(cm) > 0 {
 				callee := strings.ToLower(lastName(cm[2]))
-				if typ, ok := decls[target]; ok && typ.Object && isObjectType(ctx.functionReturns[callee]) {
+				if typ, ok := decls.lookup(target); ok && typ.Object && isObjectType(ctx.functionReturns[callee]) {
 					findings = append(findings, a.objectSetFinding(file, proc, lineNo, "VBA102", m[1], ctx.functionReturns[callee]))
 					continue
 				}
 			}
-			if decl, ok := decls[target]; ok && decl.Object {
+			if decl, ok := decls.lookup(target); ok && decl.Object {
 				findings = append(findings, a.objectSetFinding(file, proc, lineNo, "VBA101", m[1], decl.Type))
 			}
 		}
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
 		}
-		if a.Config.Analyze.DetectObjectArrayComparison {
+		if a.Config.Analyze.DetectObjectArrayComparison && objectNothingEqualityLineIsExecutable(proc, lineNo, stmt) {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
 		_ = lower
@@ -2174,7 +2171,10 @@ func (file parsedFile) moduleDecls() map[string]sourceDeclaration {
 	if file.ModuleDeclarations != nil {
 		return file.ModuleDeclarations
 	}
-	return moduleDeclarations(file.Lines, file.procedureProjection())
+	if facts := file.moduleAnalysisFacts(); facts != nil {
+		return facts.moduleDeclarations
+	}
+	return nil
 }
 
 func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir.ProcedureSymbol) effects.ProcedureIdentity {
@@ -2276,47 +2276,39 @@ func isProcedureHeaderLine(lower string) bool {
 }
 
 func moduleDeclarations(lines []string, procedures []sourceProcedure) map[string]sourceDeclaration {
-	decls := map[string]sourceDeclaration{}
-	for i := 0; i < len(lines); i++ {
-		lineNo := i + 1
-		if lineInAnyProcedure(lineNo, procedures) {
-			continue
-		}
-		stmt := normalizedCodeLine(lines[i])
-		lower := strings.ToLower(stmt)
-		if !strings.HasPrefix(lower, "dim ") && !strings.HasPrefix(lower, "static ") && !strings.HasPrefix(lower, "private ") && !strings.HasPrefix(lower, "public ") {
-			continue
-		}
-		m := declRe.FindStringSubmatch(stmt)
-		if len(m) == 0 {
-			continue
-		}
-		for _, part := range splitArgs(m[1]) {
-			name, typ, array, newExpr := declarationNameAndType(part)
-			if name == "" {
-				continue
-			}
-			decls[strings.ToLower(name)] = sourceDeclaration{Name: name, Type: typ, Line: lineNo, Object: isObjectType(typ), Array: array, NewExpression: newExpr}
-		}
-	}
-	return decls
+	facts := buildModuleAnalysisFacts(lines, procedureir.DocumentIR{}, procedures)
+	return facts.moduleDeclarations
 }
 
+// lineInAnyProcedure is retained for package-local compatibility. Normal
+// analysis uses moduleAnalysisFacts.procedureLineOwners; this helper handles
+// the already-sorted procedure projection with a binary search and preserves
+// the old behavior for synthetic unsorted callers.
 func lineInAnyProcedure(line int, procedures []sourceProcedure) bool {
-	for _, proc := range procedures {
-		if proc.StartLine <= line && line <= proc.EndLine {
-			return true
+	if len(procedures) == 0 {
+		return false
+	}
+	sorted := true
+	for index := 1; index < len(procedures); index++ {
+		if procedures[index].StartLine < procedures[index-1].StartLine {
+			sorted = false
+			break
 		}
 	}
-	return false
-}
-
-func cloneDeclarations(decls map[string]sourceDeclaration) map[string]sourceDeclaration {
-	clone := make(map[string]sourceDeclaration, len(decls))
-	for key, decl := range decls {
-		clone[key] = decl
+	if !sorted {
+		for _, procedure := range procedures {
+			if procedure.StartLine <= line && line <= procedure.EndLine {
+				return true
+			}
+		}
+		return false
 	}
-	return clone
+	index := sort.Search(len(procedures), func(index int) bool { return procedures[index].StartLine > line })
+	if index == 0 {
+		return false
+	}
+	procedure := procedures[index-1]
+	return procedure.StartLine <= line && line <= procedure.EndLine
 }
 
 func declarationNameAndType(text string) (string, string, bool, bool) {
@@ -2347,7 +2339,7 @@ func declarationNameAndType(text string) (string, string, bool, bool) {
 	return cleanIdentifier(nameFields[0]), typ, array, newExpr
 }
 
-func (a Analyzer) legacyMemberMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration, withStack []withInfo) []Finding {
+func (a Analyzer) legacyMemberMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls declarationScope, withStack []withInfo) []Finding {
 	all := a.memberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)
 	filtered := all[:0]
 	for _, finding := range all {
@@ -2358,7 +2350,7 @@ func (a Analyzer) legacyMemberMismatchFindings(file parsedFile, proc sourceProce
 	return filtered
 }
 
-func (a Analyzer) memberMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration, withStack []withInfo) []Finding {
+func (a Analyzer) memberMismatchFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls declarationScope, withStack []withInfo) []Finding {
 	var findings []Finding
 	if currentWith, ok := currentWithInfo(withStack); ok {
 		if m := withMemberRe.FindStringSubmatch(stmt); len(m) > 0 {
@@ -2368,7 +2360,7 @@ func (a Analyzer) memberMismatchFindings(file parsedFile, proc sourceProcedure, 
 		}
 	}
 	for _, m := range memberRe.FindAllStringSubmatch(stmt, -1) {
-		if decl, ok := decls[strings.ToLower(m[1])]; ok {
+		if decl, ok := decls.lookup(m[1]); ok {
 			if rule, ok := invalidMemberRuleFor(decl.Type, m[2]); ok {
 				findings = append(findings, a.memberFinding(file, proc, lineNo, m[1], decl.Type, m[2], rule))
 			}
@@ -2475,11 +2467,11 @@ func vba205NonExecutableStatement(stmt string) bool {
 		strings.HasPrefix(lower, "declare ")
 }
 
-func vba205ShadowedIdentifiers(proc sourceProcedure, decls map[string]sourceDeclaration, ctx analysisContext) map[string]bool {
-	shadowed := make(map[string]bool, len(decls)+len(proc.Accesses)+len(proc.Declarations)+len(ctx.procedures))
-	for name := range decls {
+func vba205ShadowedIdentifiers(proc sourceProcedure, decls declarationScope, ctx analysisContext) map[string]bool {
+	shadowed := make(map[string]bool, decls.len()+len(proc.Accesses)+len(proc.Declarations)+len(ctx.procedures))
+	decls.forEach(func(name string, _ sourceDeclaration) {
 		shadowed[strings.ToLower(name)] = true
-	}
+	})
 	for _, declaration := range proc.Declarations {
 		switch declaration.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
@@ -2551,20 +2543,15 @@ type dictionaryIterationLoop struct {
 // iteration whose control variable is subsequently used as an object. VBA
 // iterates Dictionary keys, so ordinary key usage must remain silent.
 func (a Analyzer) dictionaryIterationValueUsageFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
-	decls := cloneDeclarations(moduleDecls)
-	for key, decl := range procedureDeclarations(file.Lines, proc) {
-		decls[key] = decl
-	}
-	for _, param := range proc.Params {
-		decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Line: proc.StartLine, Object: isObjectType(param.Type), Parameter: true}
-	}
+	decls := newDeclarationScope(file, proc)
+	decls.module = moduleDecls
 
 	declaredDictionaries := map[string]bool{}
-	for key, decl := range decls {
+	decls.forEach(func(key string, decl sourceDeclaration) {
 		if isDictionaryType(decl.Type) {
 			declaredDictionaries[key] = true
 		}
-	}
+	})
 	inferredDictionaries := map[string]bool{}
 	var loops []*dictionaryIterationLoop
 	var findings []Finding
@@ -2650,7 +2637,7 @@ func isDictionaryType(typ string) bool {
 	}
 }
 
-func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDeclaration) bool {
+func dictionaryIterationValueUse(stmt, item string, decls declarationScope) bool {
 	if match := withRe.FindStringSubmatch(stmt); len(match) > 1 && strings.EqualFold(cleanIdentifier(match[1]), item) {
 		return true
 	}
@@ -2664,7 +2651,7 @@ func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDecla
 	if len(match) == 0 {
 		return false
 	}
-	target, ok := decls[strings.ToLower(match[1])]
+	target, ok := decls.lookup(match[1])
 	if !ok || !target.Object {
 		return false
 	}
@@ -2672,14 +2659,44 @@ func dictionaryIterationValueUse(stmt, item string, decls map[string]sourceDecla
 	return strings.EqualFold(cleanIdentifier(rhs), itemKey)
 }
 
-func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls map[string]sourceDeclaration) []Finding {
+func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls declarationScope) []Finding {
 	var findings []Finding
-	for key, decl := range decls {
+	reported := make(map[string]bool)
+	decls.forEach(func(key string, decl sourceDeclaration) {
 		if decl.Object && objectNothingEqualityComparisonExists(stmt, key) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+decl.Name+" Is Nothing Then` or `If Not "+decl.Name+" Is Nothing Then`."))
+			reported[key] = true
 		}
+	})
+	for _, declaration := range proc.Declarations {
+		if declaration.Scope != procedureir.ScopeParameter || !sourceDeclarationIsObject(declaration, declaration.Type) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if reported[key] || !objectNothingEqualityComparisonExists(stmt, key) {
+			continue
+		}
+		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", declaration.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+declaration.Name+" Is Nothing Then` or `If Not "+declaration.Name+" Is Nothing Then`."))
+		reported[key] = true
 	}
 	return findings
+}
+
+func objectNothingEqualityLineIsExecutable(proc sourceProcedure, lineNo int, stmt string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stmt))
+	if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
+		return false
+	}
+	for _, parameter := range proc.Params {
+		if !parameter.Optional || parameter.Range.StartLine == 0 || lineNo < parameter.Range.StartLine || lineNo > parameter.Range.EndLine {
+			continue
+		}
+		// Optional defaults belong to the procedure declaration, not to an
+		// executable object comparison. Keep the later `If ad = Nothing` line
+		// eligible by limiting this to the parameter's source range.
+		return false
+	}
+	return true
 }
 
 func objectNothingEqualityComparisonExists(stmt, name string) bool {
@@ -3979,7 +3996,7 @@ func referencedTraceHelpers(code string) []string {
 	return helpers
 }
 
-func resolveWithInfo(expr string, decls map[string]sourceDeclaration) withInfo {
+func resolveWithInfo(expr string, decls declarationScope) withInfo {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return withInfo{}
@@ -3990,7 +4007,7 @@ func resolveWithInfo(expr string, decls map[string]sourceDeclaration) withInfo {
 		base = base[:idx]
 	}
 	base = lastName(strings.TrimSpace(strings.TrimPrefix(base, "Set ")))
-	if decl, ok := decls[strings.ToLower(base)]; ok {
+	if decl, ok := decls.lookup(base); ok {
 		info.Target = base
 		info.Type = decl.Type
 	}

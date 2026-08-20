@@ -5090,6 +5090,28 @@ End Sub
 	}
 }
 
+func TestAnalyzerObjectNothingComparisonIgnoresOptionalParameterDefault(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Load(Optional ad As mscorlib.AppDomain = Nothing) As Object
+  If ad = Nothing Then
+    Set ad = New Collection
+  End If
+  Set Load = ad
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 1 || got[0].Line != 3 || !strings.Contains(got[0].Message, "ad") {
+		t.Fatalf("optional default must be ignored while executable comparison remains reported: %+v", got)
+	}
+}
+
 func TestVBA209BatchAndRealtimeResultsMatch(t *testing.T) {
 	dir := t.TempDir()
 	source := `Option Explicit
@@ -6867,6 +6889,57 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotPropagateModuleSetupIntoShadowedArrayParameter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private values() As Long
+
+Private Sub SetupValues()
+  ReDim values(0 To 1)
+End Sub
+
+Private Sub Consume(ByRef values() As Long)
+  If UBound(values) > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Dim other() As Long
+  SetupValues
+  Consume other
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 2 || got[0].Procedure != "Consume" || got[1].Procedure != "Consume" {
+		t.Fatalf("module allocation must not initialize a shadowing array parameter: %+v", got)
+	}
+}
+
+func TestArrayModuleEntryStateDoesNotInitializeShadowingParameter(t *testing.T) {
+	t.Parallel()
+	moduleDecls := map[string]sourceDeclaration{
+		"values": {Name: "values", Type: "Byte", Array: true},
+	}
+	proc := sourceProcedure{
+		Name: "Consume", Module: "Main", StartLine: 1, EndLine: 2,
+		Params: []parameterInfo{{Name: "values", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}},
+	}
+	file := parsedFile{
+		Lines:              []string{"Private Sub Consume(ByRef values() As Byte)", "End Sub"},
+		ModuleDeclarations: moduleDecls,
+	}
+	variables := arrayVariables(file, proc, moduleDecls)
+	entries := arrayModuleEntryStates{arrayProcedureKey(proc): {"values": true}}
+	state := applyArrayModuleEntryState(arrayInitialState(variables), file, proc, variables, moduleDecls, entries)
+	if state["values"].kind == arrayAllocated {
+		t.Fatalf("module entry allocation must not initialize a shadowing parameter: %+v", state["values"])
+	}
+}
+
 func TestAnalyzerVBA227KeepsPublicByRefArrayCallsConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -7414,6 +7487,116 @@ End Sub
 	got := findingsByCode(findings, "VBA227")
 	if len(got) != 2 || got[0].Procedure != "Unsafe" || got[1].Procedure != "Unsafe" {
 		t.Fatalf("only the unguarded Resume Next probe should remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesCheckedResumeNextBoundsProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByVal body As Variant)
+  Dim bytes() As Byte
+  If IsArray(body) Then
+    bytes = body
+  Else
+    bytes = StrConv(CStr(body), vbFromUnicode)
+  End If
+  Dim cb As Long
+  cb = 0
+  On Error Resume Next
+  cb = UBound(bytes) - LBound(bytes) + 1
+  On Error GoTo fail
+  If cb <= 0 Then Exit Sub
+  Debug.Print bytes(LBound(bytes))
+  Exit Sub
+fail:
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a successful bounds probe must prove the later indexed access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsUnprovenResumeNextCapacityGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Stale(ByRef values() As Byte)
+  Dim capacity As Long
+  capacity = 1
+  On Error Resume Next
+  capacity = UBound(values) - LBound(values) + 1
+  On Error GoTo 0
+  If capacity <= 0 Then Exit Sub
+  Debug.Print values(LBound(values))
+End Sub
+
+Private Sub GotoGuard(ByRef values() As Byte)
+  Dim capacity As Long
+  capacity = 0
+  On Error Resume Next
+  capacity = UBound(values) - LBound(values) + 1
+  On Error GoTo 0
+  If capacity <= 0 Then GoTo done
+  Debug.Print values(LBound(values))
+done:
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	seen := map[string]bool{}
+	for _, finding := range got {
+		seen[finding.Procedure] = true
+	}
+	if !seen["Stale"] || !seen["GotoGuard"] {
+		t.Fatalf("unproven Resume Next guards must not suppress indexed access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsStaticCapacityAfterFailedProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub StaticCapacity(ByRef values() As Byte)
+  Static capacity As Long
+  On Error Resume Next
+  capacity = UBound(values) - LBound(values) + 1
+  On Error GoTo 0
+  If capacity <= 0 Then Exit Sub
+  Debug.Print values(LBound(values))
+End Sub
+
+Public Sub Run()
+  Dim allocated() As Byte
+  Dim unallocated() As Byte
+  ReDim allocated(0 To 0)
+  StaticCapacity allocated
+  StaticCapacity unallocated
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "StaticCapacity" {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatalf("a Static capacity value must not validate a later failed UBound probe: %+v", findings)
 	}
 }
 

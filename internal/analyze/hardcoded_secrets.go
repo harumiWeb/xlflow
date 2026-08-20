@@ -65,9 +65,10 @@ func (a Analyzer) hardcodedSecretFindings(file parsedFile, procedures []sourcePr
 		}
 	}
 
+	facts := file.moduleAnalysisFacts()
 	for lineNo, rawLine := range file.Lines {
 		line := lineNo + 1
-		if lineInAnyProcedure(line, procedures) {
+		if facts != nil && facts.lineInProcedure(line) {
 			continue
 		}
 		code := strings.TrimSpace(gui.StripComment(rawLine))

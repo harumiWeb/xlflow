@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestVBA202Issue448TracksObjectStateAcrossCFGAndCalls(t *testing.T) {
@@ -319,6 +320,31 @@ End Sub
 	got := findingsByCode(findings, "VBA202")
 	if len(got) != 1 || got[0].Procedure != "Shadow" {
 		t.Fatalf("shadowing local should remain nullable despite module initialization: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseModuleObjectForVariantShadow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedSheet As Worksheet
+
+Public Sub LocalShadow()
+  Dim sharedSheet As Variant
+  Debug.Print sharedSheet.Cells(1, 1)
+End Sub
+
+Public Sub ParameterShadow(ByVal sharedSheet As Variant)
+  Debug.Print sharedSheet.Cells(1, 1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Variant shadows must not resolve to the module object: %+v", got)
 	}
 }
 
@@ -725,5 +751,224 @@ End Sub
 	got := findingsByCode(findings, "VBA202")
 	if len(got) != 2 || got[0].Procedure != "ErrorPath" || got[1].Procedure != "EarlyGoto" {
 		t.Fatalf("error and early-exit paths should warn while initialized indexed writes stay safe: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesExcelFactoryFunctionResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private remoteWorkbook As Workbook
+
+Private Function createRemoteWorkbook() As Workbook
+  Dim app As Application: Set app = CreateObject("Excel.Application")
+  Set createRemoteWorkbook = app.Workbooks.Add
+End Function
+
+Public Sub Run()
+  Set remoteWorkbook = createRemoteWorkbook()
+  Call remoteWorkbook.Application.Run("TimerMain.StartTimer")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Excel factory function result should establish the object before use: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksInitializedFunctionReturnThroughByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Append(ByRef output As Collection, ByVal input As Collection)
+  Call output.Add(input)
+End Sub
+
+Private Function Values() As Collection
+  Dim input As Collection
+  Set input = New Collection
+  Set Values = New Collection
+  Call Append(Values, input)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an initialized function return passed to a private ByRef helper should be safe: %+v", got)
+	}
+}
+
+func TestObjectDirectCallSummaryUsesCallFileForDuplicateModules(t *testing.T) {
+	t.Parallel()
+	call := procedureir.CallSite{
+		File:   "../../src/stdTimer.cls",
+		Module: "stdTimer",
+		Callee: procedureir.Callee{BaseName: "createRemoteWorkbook"},
+	}
+	summary, ok := objectDirectCallSummary(sourceProcedure{Module: "stdTimer"}, call, map[string]objectProcedureSummary{
+		"primary": {
+			File:           "src/stdTimer.cls",
+			Module:         "stdTimer",
+			QualifiedName:  "stdTimer.createRemoteWorkbook",
+			ReturnAssigned: true,
+		},
+		"wip": {
+			File:           "src/WIP/stdTimer.cls",
+			Module:         "stdTimer",
+			QualifiedName:  "stdTimer.createRemoteWorkbook",
+			ReturnAssigned: false,
+		},
+	})
+	if !ok || !summary.ReturnAssigned {
+		t.Fatalf("same-file function summary = %+v, ok=%v; want assigned primary summary", summary, ok)
+	}
+}
+
+func TestObjectCallEffectsSkipsAmbiguousDirectSummaries(t *testing.T) {
+	t.Parallel()
+	value := objectVariable{Scope: procedureir.ScopeParameter, Name: "value"}
+	call := procedureir.CallSite{
+		File: "src/Main.bas", Module: "Main",
+		Caller:    procedureir.ProcedureRef{QualifiedName: "Main.Run"},
+		Callee:    procedureir.Callee{BaseName: "Touch"},
+		Arguments: procedureir.Arguments{Count: 1, ExpressionIDs: []int{1}},
+	}
+	declarations := declarationScope{parameters: map[string]sourceDeclaration{
+		"value": {Name: "value", Type: "Collection", Object: true, Parameter: true},
+	}}
+	vars := map[string]objectVariable{value.key(): value}
+	expressions := map[int]procedureir.Expression{
+		1: {ID: 1, Kind: procedureir.ExpressionIdentifier, Text: "value"},
+	}
+	summary := func() objectProcedureSummary {
+		return objectProcedureSummary{
+			File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Touch",
+			Params: []objectParameterSummary{{Name: "value", Object: true, ByRef: true}},
+		}
+	}
+	summaries := map[string]objectProcedureSummary{"first": summary(), "second": summary()}
+	state := map[string]bool{value.key(): true}
+	applyObjectCallEffects(call, state, vars, declarations, expressions, summaries)
+	if state[value.key()] {
+		t.Fatalf("ambiguous direct summaries must not preserve a nullable ByRef object state: %+v", state)
+	}
+}
+
+func TestObjectFlowUsesLexicalBindingForVariantShadows(t *testing.T) {
+	t.Parallel()
+	module := map[string]sourceDeclaration{
+		"sharedsheet": {Name: "sharedSheet", Type: "Worksheet", Object: true},
+	}
+	moduleVariable := objectVariable{Scope: procedureir.ScopeModule, Name: "sharedSheet"}
+	moduleSummary := objectProcedureSummary{
+		File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Initialize",
+		ModuleAssigned: map[string]bool{"sharedsheet": false},
+		ModuleWritten:  map[string]bool{"sharedsheet": true},
+	}
+	actualSummary := objectProcedureSummary{
+		File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Touch",
+		Params:        []objectParameterSummary{{Name: "value", Object: true, ByRef: true}},
+		ByRefAssigned: map[int]bool{0: false},
+		ByRefWritten:  map[int]bool{0: true},
+	}
+	expressions := map[int]procedureir.Expression{
+		1: {ID: 1, Kind: procedureir.ExpressionIdentifier, Text: "sharedSheet"},
+	}
+	call := procedureir.CallSite{
+		File: "src/Main.bas", Module: "Main", Caller: procedureir.ProcedureRef{QualifiedName: "Main.Run"},
+		Callee: procedureir.Callee{BaseName: "Initialize"},
+	}
+	actualCall := procedureir.CallSite{
+		File: "src/Main.bas", Module: "Main", Caller: procedureir.ProcedureRef{QualifiedName: "Main.Run"},
+		Callee:    procedureir.Callee{BaseName: "Touch"},
+		Arguments: procedureir.Arguments{Count: 1, ExpressionIDs: []int{1}},
+	}
+	for _, test := range []struct {
+		name       string
+		local      map[string]sourceDeclaration
+		parameters map[string]sourceDeclaration
+	}{
+		{name: "local", local: map[string]sourceDeclaration{"sharedsheet": {Name: "sharedSheet", Type: "Variant"}}},
+		{name: "parameter", parameters: map[string]sourceDeclaration{"sharedsheet": {Name: "sharedSheet", Type: "Variant", Parameter: true}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			declarations := declarationScope{module: module, local: test.local, parameters: test.parameters}
+			state := map[string]bool{moduleVariable.key(): true}
+			vars := map[string]objectVariable{moduleVariable.key(): moduleVariable}
+			applyObjectCallEffects(call, state, vars, declarations, nil, map[string]objectProcedureSummary{"initialize": moduleSummary})
+			if !state[moduleVariable.key()] {
+				t.Fatalf("initialized module object was changed through a shadowed Variant: %+v", state)
+			}
+			applyObjectCallEffects(actualCall, state, vars, declarations, expressions, map[string]objectProcedureSummary{"touch": actualSummary})
+			if !state[moduleVariable.key()] {
+				t.Fatalf("ByRef actual resolution selected the module object through a shadowed Variant: %+v", state)
+			}
+			assigned, present := objectCallParameterAssigned(sourceProcedure{Name: "Run"}, declarations, actualCall, actualSummary, 0, objectCallActuals(actualCall, expressions), state, vars, objectFlowContext{expressions: expressions}, map[string]objectProcedureSummary{})
+			if assigned || present {
+				t.Fatalf("entry-call actual resolution selected a shadowed Variant: assigned=%v present=%v", assigned, present)
+			}
+		})
+	}
+}
+
+func TestVBA202Issue448PreservesObjectStateAcrossUnresolvedPrivateByValCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Touch(ByVal values As Collection)
+  Call values.Add("callee")
+End Sub
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = New Collection
+  Call Touch(values)
+  Call values.Add("caller")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a private ByVal object call must preserve the caller's reference: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksModuleInitializationThroughMeCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private target As Worksheet
+
+Private Sub InitializeTarget()
+  Set target = ThisWorkbook.Worksheets(1)
+End Sub
+
+Private Sub UseTarget()
+  Debug.Print target.Name
+End Sub
+
+Public Sub Run()
+  If target Is Nothing Then Me.InitializeTarget
+  Call UseTarget
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Me initializer should establish the module object before the private helper: %+v", got)
 	}
 }

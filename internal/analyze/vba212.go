@@ -19,7 +19,7 @@ type vba212Context struct {
 	projectEffects effects.ProjectSummary
 	userDefined    map[string]bool
 	getterEffects  map[string]bool
-	declarations   map[int]map[string]sourceDeclaration
+	declarations   map[int]declarationScope
 }
 
 type vba212Guard struct {
@@ -58,7 +58,7 @@ func (a Analyzer) vba212ScanWithContext(ctx context.Context, file parsedFile, pr
 	procedures = append([]sourceProcedure(nil), procedures...)
 	sortSourceProcedures(procedures)
 	if scanCtx.declarations == nil {
-		scanCtx.declarations = vba212DeclarationIndexes(file.Lines, procedures)
+		scanCtx.declarations = vba212DeclarationIndexesForFile(file, procedures)
 	}
 	summaries := scanCtx.projectEffects.All()
 	if len(summaries) == 0 && file.Root != nil && vba212SourceMayHaveGetter(file) {
@@ -169,23 +169,57 @@ func sortSourceProcedures(procedures []sourceProcedure) {
 	}
 }
 
-func vba212DeclarationIndexes(lines []string, procedures []sourceProcedure) map[int]map[string]sourceDeclaration {
-	moduleDecls := moduleDeclarations(lines, procedures)
-	indexes := make(map[int]map[string]sourceDeclaration, len(procedures))
+func vba212DeclarationScopes(lines []string, procedures []sourceProcedure) map[int]declarationScope {
+	facts := buildModuleAnalysisFacts(lines, procedureir.DocumentIR{}, procedures)
+	indexes := make(map[int]declarationScope, len(procedures))
 	for _, proc := range procedures {
-		decls := make(map[string]sourceDeclaration, len(moduleDecls)+len(proc.Declarations)+len(proc.Params))
-		for name, decl := range moduleDecls {
-			decls[name] = decl
-		}
-		for _, decl := range proc.Declarations {
-			decls[strings.ToLower(decl.Name)] = sourceDeclaration{Name: decl.Name, Type: decl.Type}
-		}
-		for _, param := range proc.Params {
-			decls[strings.ToLower(param.Name)] = sourceDeclaration{Name: param.Name, Type: param.Type, Parameter: true}
-		}
-		indexes[proc.StartByte] = decls
+		scope := declarationScope{module: facts.moduleDeclarations, local: facts.procedureDeclarations(proc), parameters: vba212Parameters(proc)}
+		addVBA212ProcedureIRDeclarations(&scope, proc)
+		indexes[proc.StartByte] = scope
 	}
 	return indexes
+}
+
+// vba212DeclarationIndexes retains the historical merged-map helper for
+// package-local callers. The analyzer itself uses vba212DeclarationScopes so
+// module declarations remain shared across procedures.
+func vba212DeclarationIndexes(lines []string, procedures []sourceProcedure) map[int]map[string]sourceDeclaration {
+	scopes := vba212DeclarationScopes(lines, procedures)
+	indexes := make(map[int]map[string]sourceDeclaration, len(scopes))
+	for start, scope := range scopes {
+		merged := make(map[string]sourceDeclaration, scope.len())
+		scope.forEach(func(key string, declaration sourceDeclaration) { merged[key] = declaration })
+		indexes[start] = merged
+	}
+	return indexes
+}
+
+func vba212DeclarationIndexesForFile(file parsedFile, procedures []sourceProcedure) map[int]declarationScope {
+	indexes := make(map[int]declarationScope, len(procedures))
+	for _, proc := range procedures {
+		scope := newDeclarationScope(file, proc)
+		addVBA212ProcedureIRDeclarations(&scope, proc)
+		indexes[proc.StartByte] = scope
+	}
+	return indexes
+}
+
+func addVBA212ProcedureIRDeclarations(scope *declarationScope, proc sourceProcedure) {
+	for _, declaration := range proc.Declarations {
+		scope.addProcedureIRDeclaration(sourceDeclaration{Name: declaration.Name, Type: declaration.Type})
+	}
+}
+
+func vba212Parameters(proc sourceProcedure) map[string]sourceDeclaration {
+	parameters := make(map[string]sourceDeclaration, len(proc.Params))
+	for _, parameter := range proc.Params {
+		key := strings.ToLower(strings.TrimSpace(parameter.Name))
+		if key == "" {
+			continue
+		}
+		parameters[key] = sourceDeclaration{Name: parameter.Name, Type: parameter.Type, Parameter: true}
+	}
+	return parameters
 }
 
 type vba212NodeKey struct {
@@ -507,7 +541,7 @@ func vba212ResolvedGetter(node *tree_sitter.Node, source []byte, file parsedFile
 	return scanCtx.getterEffects[strings.ToLower(typ)+"\x00"+memberName]
 }
 
-func vba212ReceiverType(receiver *tree_sitter.Node, source []byte, file parsedFile, proc sourceProcedure, declarationIndexes map[int]map[string]sourceDeclaration) string {
+func vba212ReceiverType(receiver *tree_sitter.Node, source []byte, file parsedFile, proc sourceProcedure, declarationIndexes map[int]declarationScope) string {
 	path := vba212AccessPath(receiver, source)
 	if path == "" {
 		return ""
@@ -523,7 +557,7 @@ func vba212ReceiverType(receiver *tree_sitter.Node, source []byte, file parsedFi
 		return file.Module
 	}
 	decls := declarationIndexes[proc.StartByte]
-	if decl, ok := decls[strings.ToLower(root)]; ok {
+	if decl, ok := decls.lookup(root); ok {
 		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(decl.Type), "New "))
 	}
 	return ""
