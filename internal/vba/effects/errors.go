@@ -216,14 +216,6 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 		return handlerOutcome{swallows: true}
 	}
 	byID := statementIndex(proc)
-	blocks := make(map[cfg.BlockID]cfg.Block, len(graph.Blocks))
-	outgoing := make(map[cfg.BlockID][]cfg.Edge)
-	for _, block := range graph.Blocks {
-		blocks[block.ID] = block
-	}
-	for _, edge := range graph.Edges {
-		outgoing[edge.From] = append(outgoing[edge.From], edge)
-	}
 	type state struct {
 		block       cfg.BlockID
 		returned    bool
@@ -251,7 +243,7 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 		if current.block == graph.ExceptionalExit || current.block == graph.TerminationExit || current.block == graph.UnknownExit {
 			continue
 		}
-		block := blocks[current.block]
+		block, _ := graph.BlockByID(current.block)
 		errorGuard := errorGuardUnknown
 		if block.Statement != nil {
 			statement := byID[block.StatementID]
@@ -291,7 +283,7 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 			}
 			errorGuard = errorPresentCondition(statement)
 		}
-		for _, edge := range outgoing[current.block] {
+		for _, edge := range graph.OutgoingEdges(current.block) {
 			// Fault transitions from statements in the handler describe a new
 			// error, not an outcome of the original exceptional path.
 			if edge.Kind == cfg.EdgeError && edge.Class == cfg.EdgeExceptional {
@@ -381,8 +373,8 @@ func procedureAlwaysTerminates(proc procedureir.ProcedureIR, graph cfg.Graph, ca
 				continue
 			}
 		}
-		for _, edge := range graph.Edges {
-			if edge.From == current && edge.Class == cfg.EdgeNormal {
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Class == cfg.EdgeNormal {
 				queue = append(queue, edge.To)
 			}
 		}
@@ -416,8 +408,8 @@ func procedureAlwaysRethrows(proc procedureir.ProcedureIR, graph cfg.Graph, cand
 				continue
 			}
 		}
-		for _, edge := range graph.Edges {
-			if edge.From == current && edge.Class == cfg.EdgeNormal {
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Class == cfg.EdgeNormal {
 				queue = append(queue, edge.To)
 			}
 		}
@@ -452,8 +444,8 @@ func handlerSubgraphHasRaise(proc procedureir.ProcedureIR, graph cfg.Graph, star
 		if block.Statement != nil && isRaiseStatement(proc, byID[block.StatementID]) {
 			return true
 		}
-		for _, edge := range graph.Edges {
-			if edge.From == current && edge.Kind != cfg.EdgeError {
+		for _, edge := range graph.OutgoingEdges(current) {
+			if edge.Kind != cfg.EdgeError {
 				queue = append(queue, edge.To)
 			}
 		}
@@ -525,7 +517,7 @@ func loggerProcedureIndex(inputs []procedureInput, candidateKeys map[string]stri
 		procedures[input.id.Key()] = input.proc
 	}
 	for _, input := range inputs {
-		reachable := reachableStatements(input.proc, input.graph)
+		reachable := input.reachable
 		for _, statement := range input.proc.Statements {
 			if reachable[statement.ID] && !statement.Recovered && recognizedLogSink(statement.Text) {
 				contract := loggers[input.id.Key()]
@@ -550,7 +542,7 @@ func loggerProcedureIndex(inputs []procedureInput, candidateKeys map[string]stri
 			if len(loggers[input.id.Key()]) > 0 {
 				continue
 			}
-			reachable := reachableStatements(input.proc, input.graph)
+			reachable := input.reachable
 			for _, call := range input.proc.Calls {
 				if !reachable[call.StatementID] || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
 					continue
@@ -921,12 +913,8 @@ func stripVBStringLiterals(text string) string {
 }
 
 func graphBlock(graph cfg.Graph, id cfg.BlockID) cfg.Block {
-	for _, block := range graph.Blocks {
-		if block.ID == id {
-			return block
-		}
-	}
-	return cfg.Block{}
+	block, _ := graph.BlockByID(id)
+	return block
 }
 
 func normalizedErrorLabel(value string) string {
@@ -939,30 +927,4 @@ func addErrorEvidence(summary *ProcedureSummary, sourceRange vbaast.Range, state
 		StatementID: statementID, CallID: callID, Target: target, Value: value,
 	})
 	return len(summary.Error.Direct) - 1
-}
-
-func refreshErrorFlags(summary *ErrorSummary) {
-	*summary = ErrorSummary{
-		Direct: append([]ErrorEvidence(nil), summary.Direct...), Propagated: append([]ErrorEvidence(nil), summary.Propagated...),
-	}
-	for _, facts := range [][]ErrorEvidence{summary.Direct, summary.Propagated} {
-		for _, fact := range facts {
-			switch fact.Behavior {
-			case ErrorHasHandler:
-				summary.HasErrorHandler = true
-			case ErrorUsesResumeNext:
-				summary.UsesResumeNext = true
-			case ErrorSuppresses:
-				summary.SuppressesErrors = true
-			case ErrorRethrows:
-				summary.RethrowsErrors = true
-			case ErrorReturnsSuccess:
-				summary.ReturnsSuccessFlag = true
-			case ErrorMayRaise:
-				summary.MayRaise = true
-			case ErrorLogsAndContinues:
-				summary.LogsAndContinues = true
-			}
-		}
-	}
 }

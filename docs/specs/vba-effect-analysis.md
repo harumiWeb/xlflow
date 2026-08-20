@@ -1,7 +1,8 @@
 # VBA Procedure Effect Analysis
 
 This specification defines xlflow's deterministic, protocol-neutral procedure
-effect summaries. ADR-0023 records the rationale. The summaries are an internal
+effect summaries. ADR-0023 records the original rationale and ADR-0044 amends
+the fixed-point implementation strategy. The summaries are an internal
 analysis contract built from resolved procedure IR and conservative CFG facts.
 They add no public CLI option or LSP capability by themselves. `VBA221` and
 `VBA244` consume the summaries through their own diagnostic contracts;
@@ -63,6 +64,21 @@ Each `ProcedureSummary` separates `Direct` from `Propagated` evidence and
 internally, are derived from these deduplicated collections rather than stored
 as independently mutable totals. `ProjectSummary` contains the sorted procedure
 summaries and supports exact stable-identity lookup.
+
+The fixed-point builder keeps a compact semantic state separately from this
+compatibility projection. Semantic membership is bounded by the finite effect,
+error-outcome, and uncertainty domains. Direct evidence and deterministic
+witness seeds are retained for facts that may need an explanation; equivalent
+transitive origins, uncertainty entries, and call-chain prefixes are not
+eagerly copied through every caller. The projection still exposes the same
+direct/propagated distinction and materializes any requested evidence in stable
+procedure, source, and edge order.
+
+`BuildWithStats(documents)` returns the project summary and developer-facing
+`BuildStats`; `Build(documents)` remains the compatibility wrapper. The stats
+fields are `WorklistEvaluations`, `MaxPropagatedFactsPerProcedure`, and
+`TotalPropagatedFacts`. They count compact propagated semantic facts, not the
+number of entries created when a consumer requests a full provenance view.
 
 For issue #446, `ProcedureSummary` additionally carries an `ErrorSummary`
 derived from reachable CFG outcomes. It records provenance for handler
@@ -143,10 +159,17 @@ or affirmative effects.
 ## Fixed-Point Propagation
 
 Propagation is finite set-union over the confirmed project-local call edges.
-The worklist and every adjacency/evidence collection use stable identity and
-source-order keys. A caller receives the callee's direct and propagated effect
-evidence as propagated evidence, and likewise receives its uncertainty as
-propagated uncertainty.
+The fixed-point state uses bounded semantic membership and indexed,
+deduplicated adjacency. The worklist re-evaluates a caller only when a new
+semantic fact, uncertainty member, or required witness seed is observed. The
+worklist and every adjacency/evidence collection use stable identity and
+source-order keys.
+
+The compatibility projection preserves the existing rule: a caller receives
+the callee's direct and propagated effect evidence as propagated evidence, and
+likewise receives its uncertainty as propagated uncertainty. That projection
+is materialized from compact state and witness seeds when requested; it is not
+the state used to decide fixed-point convergence.
 
 Evidence is keyed by its origin procedure and source occurrence, including the
 effect or uncertainty kind and relevant target. Consequently, a shared leaf in
@@ -155,6 +178,13 @@ reaches a fixed point without count growth. A procedure's own direct evidence
 is never added to that same procedure's propagated collection through a cycle.
 Direct and propagated collections remain separate even when they contain the
 same effect kind from different origins.
+
+Error outcomes follow the same bounded-state boundary. The finite outcome
+membership (`suppresses_errors`, `rethrows_errors`, `returns_success_flag`,
+`may_raise`, and `logs_and_continues`) converges independently from detailed
+`ErrorEvidence`. Error witnesses retain the handler, cleanup, return, or call
+boundary needed by `VBA237`; representative chains are reconstructed using
+the stable call graph and do not depend on map or worklist timing.
 
 ## `VBA203` Integration
 

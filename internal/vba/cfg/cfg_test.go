@@ -149,6 +149,70 @@ func TestBlockForStatementIndexPreservesFirstMatchAfterEarlierMutation(t *testin
 	}
 }
 
+func TestBlockByIDUsesSparseIDs(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 40, Kind: BlockEntry},
+			{ID: 90, Kind: BlockStatement, StatementID: 10},
+			{ID: 120, Kind: BlockNormalExit},
+		},
+	}
+	graph.query = buildQueryIndex(graph)
+	block, ok := graph.BlockByID(120)
+	if !ok || block.Kind != BlockNormalExit {
+		t.Fatalf("BlockByID(120) = (%+v, %v), want sparse-ID exit block", block, ok)
+	}
+	if _, ok := graph.BlockByID(2); ok {
+		t.Fatal("BlockByID(2) resolved a non-existent contiguous slice index")
+	}
+}
+
+func TestWithoutNormalErrRaiseContinuationUsesSparseBlockIndex(t *testing.T) {
+	t.Parallel()
+	statement := &procedureir.Statement{ID: 7, Kind: procedureir.StatementCall, Text: "Err.Raise 5"}
+	graph := Graph{
+		Blocks: []Block{
+			{ID: 40, Kind: BlockEntry},
+			{ID: 90, Kind: BlockStatement, StatementID: statement.ID, Statement: statement},
+			{ID: 120, Kind: BlockNormalExit},
+			{ID: 150, Kind: BlockExceptionalExit},
+		},
+		Edges: []Edge{
+			{From: 40, To: 90, Class: EdgeNormal},
+			{From: 90, To: 120, Class: EdgeNormal},
+			{From: 90, To: 150, Class: EdgeExceptional},
+		},
+		Entry: 40, NormalExit: 120, ExceptionalExit: 150,
+	}
+	filtered := graph.WithoutNormalErrRaiseContinuation()
+	for _, edge := range filtered.Edges {
+		if edge.From == 90 && edge.Class == EdgeNormal {
+			t.Fatalf("sparse Err.Raise block retained normal edge: %+v", edge)
+		}
+	}
+}
+
+func TestOutgoingEdgesUsesIndexedOrder(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{{ID: 40, Kind: BlockEntry}, {ID: 90, Kind: BlockNormalExit}},
+		Edges: []Edge{
+			{ID: 1, From: 40, To: 90, Kind: EdgeFallthrough},
+			{ID: 2, From: 40, To: 40, Kind: EdgeLoopBack},
+			{ID: 3, From: 90, To: 40, Kind: EdgeUnknown},
+		},
+	}
+	graph.query = buildQueryIndex(graph)
+	edges := graph.OutgoingEdges(40)
+	if len(edges) != 2 || edges[0].ID != 1 || edges[1].ID != 2 {
+		t.Fatalf("OutgoingEdges(40) = %+v, want graph-order edges 1 and 2", edges)
+	}
+	if got := graph.OutgoingEdges(120); got != nil {
+		t.Fatalf("OutgoingEdges(120) = %+v, want nil for unknown block", got)
+	}
+}
+
 func TestQueryIndexInvalidatesReachabilityInputs(t *testing.T) {
 	t.Parallel()
 	graph := Graph{

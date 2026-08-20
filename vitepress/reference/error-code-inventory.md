@@ -322,6 +322,9 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `edit_args_invalid`
 - `edit_coordinates_unreconciled`
 - `effect_summaries`
+- `effect_summary_max_propagated_facts_per_procedure`
+- `effect_summary_total_propagated_facts`
+- `effect_summary_worklist_evaluations`
 - `else_clause`
 - `else_fragment`
 - `else_if`

@@ -595,6 +595,29 @@ End Sub
 	}
 }
 
+func TestErrorSummaryRepresentativePathMatchesWorklistOnDiamondAndLongShort(t *testing.T) {
+	summary := buildSources(t,
+		sourceFile{"A_Root.bas", "Root", "Public Sub Root()\n    LongPath\n    ShortPath\nEnd Sub\n"},
+		sourceFile{"B_Long.bas", "LongPath", "Public Sub LongPath()\n    MidPath\nEnd Sub\n"},
+		sourceFile{"C_Mid.bas", "MidPath", "Public Sub MidPath()\n    Leaf\nEnd Sub\n"},
+		sourceFile{"D_Short.bas", "ShortPath", "Public Sub ShortPath()\n    Leaf\nEnd Sub\n"},
+		sourceFile{"E_Leaf.bas", "Leaf", "Public Sub Leaf()\n    On Error GoTo Cleanup\n    Workbooks.Open \"missing.xlsx\"\n    Exit Sub\nCleanup:\n    Root\nEnd Sub\n"},
+	)
+	root := find(t, summary, "Root.Root")
+	evidence := firstErrorEvidence(root.Error.Propagated, ErrorSuppresses)
+	if evidence.Origin.QualifiedName != "Leaf.Leaf" {
+		t.Fatalf("diamond error origin = %#v", evidence)
+	}
+	got := make([]string, 0, len(evidence.CallChain))
+	for _, identity := range evidence.CallChain {
+		got = append(got, identity.QualifiedName)
+	}
+	want := []string{"Root.Root", "ShortPath.ShortPath", "Leaf.Leaf"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("representative long/short diamond path = %v, want %v", got, want)
+	}
+}
+
 func TestErrorSummaryPreservesExternalCallUncertainty(t *testing.T) {
 	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
 		manualProcedure("Calls.Root", 1, []procedureir.CallSite{manualCall(1, procedureir.ResolutionExternal)}),
@@ -710,6 +733,25 @@ func TestPropagationConvergesAndDeduplicatesDiamondAndCycles(t *testing.T) {
 	}
 }
 
+func TestBuildKeepsFixedPointStateBoundedUntilProvenanceIsRequested(t *testing.T) {
+	project, stats := BuildWithStats(buildEffectBenchmarkDocuments(effectBenchmarkChain, 128))
+	if stats.WorklistEvaluations == 0 {
+		t.Fatal("bounded propagation did not evaluate the worklist")
+	}
+	if stats.MaxPropagatedFactsPerProcedure > 64 {
+		t.Fatalf("semantic state grew beyond the finite domain: %+v", stats)
+	}
+	for _, summary := range project.procedures {
+		if len(summary.Propagated) != 0 || len(summary.PropagatedUncertainty) != 0 || len(summary.Error.Propagated) != 0 {
+			t.Fatalf("eager provenance remained in fixed-point state for %s: %#v", summary.Identity.QualifiedName, summary)
+		}
+	}
+	materialized := project.All()
+	if len(materialized[0].Propagated) == 0 {
+		t.Fatalf("lazy provenance did not reconstruct the chain: %#v", materialized[0])
+	}
+}
+
 func TestMembershipIndexComputesOneKeyPerAdd(t *testing.T) {
 	const size = 4096
 	keyCalls := 0
@@ -732,32 +774,6 @@ func TestMembershipIndexComputesOneKeyPerAdd(t *testing.T) {
 	}
 }
 
-func TestPropagationMembershipPreservesFirstSeenOrderAndExactSlices(t *testing.T) {
-	callerID := ProcedureIdentity{File: "Caller.bas", Module: "Caller", QualifiedName: "Caller.Run", Kind: procedureir.ProcedureSub, DeclarationLine: 1}
-	calleeID := ProcedureIdentity{File: "Callee.bas", Module: "Callee", QualifiedName: "Callee.Run", Kind: procedureir.ProcedureSub, DeclarationLine: 1}
-	uncertainties := []CallUncertainty{
-		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 3, Callee: "Third"},
-		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 2, Callee: "Second"},
-		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 1, Callee: "First"},
-	}
-	summaries := map[string]*ProcedureSummary{
-		callerID.Key(): {Identity: callerID},
-		calleeID.Key(): {Identity: calleeID, DirectUncertainty: uncertainties},
-	}
-	propagate(summaries, []edge{
-		{from: callerID.Key(), to: calleeID.Key()},
-		{from: callerID.Key(), to: calleeID.Key()},
-	})
-
-	caller := summaries[callerID.Key()]
-	if !reflect.DeepEqual(caller.PropagatedUncertainty, uncertainties) {
-		t.Fatalf("propagated uncertainty changed order or contents:\ngot  %#v\nwant %#v", caller.PropagatedUncertainty, uncertainties)
-	}
-	if caller.DirectUncertainty != nil {
-		t.Fatalf("direct uncertainty was mutated: %#v", caller.DirectUncertainty)
-	}
-}
-
 func TestCallUncertaintyClassificationAndPropagation(t *testing.T) {
 	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
 		manualProcedure("Calls.Root", 1, []procedureir.CallSite{{ID: 1, StatementID: 1, Callee: procedureir.Callee{Text: "Child", BaseName: "Child"}, Resolution: procedureir.CallResolution{Status: procedureir.ResolutionMatched, Candidates: []procedureir.Candidate{{QualifiedName: "Calls.Child", Kind: "sub", File: "Calls.bas", Line: 10}}}}}),
@@ -775,6 +791,12 @@ func TestCallUncertaintyClassificationAndPropagation(t *testing.T) {
 	root := find(t, project, "Calls.Root")
 	if len(root.PropagatedUncertainty) != 4 {
 		t.Fatalf("propagated uncertainty = %#v", root.PropagatedUncertainty)
+	}
+	wantCallIDs := []int{1, 4, 3, 2}
+	for index, uncertainty := range root.PropagatedUncertainty {
+		if uncertainty.CallID != wantCallIDs[index] {
+			t.Fatalf("propagated uncertainty order = %#v, want call IDs %v", root.PropagatedUncertainty, wantCallIDs)
+		}
 	}
 }
 

@@ -1,7 +1,8 @@
 # VBA Error Suppression and Propagation Analysis
 
 This specification defines the direct and interprocedural error-outcome model
-used by `VBA237`. ADR-0033 records the architectural rationale. The analysis is
+used by `VBA237`. ADR-0033 records the architectural rationale and ADR-0044
+defines the bounded fixed-point implementation boundary. The analysis is
 protocol-neutral and consumes resolved procedure IR, conservative CFGs, and
 the deterministic procedure-effect call graph.
 
@@ -48,10 +49,14 @@ example, one `Err.Raise` does not make `rethrows_errors` true if another
 handled-error path falls through, and a procedure named `TryOpen` is not a
 success-return helper unless its Boolean outcomes satisfy the CFG contract.
 
-Evidence identifies the originating procedure, canonical source range,
-statement or call identity, outcome kind, and relevant handler, cleanup, or
-return slot. Evidence identity is stable and finite so fixed-point propagation
-does not inflate recursive or diamond-shaped paths.
+The fixed-point implementation stores the finite outcome membership separately
+from the detailed evidence. Evidence identifies the originating procedure,
+canonical source range, statement or call identity, outcome kind, and relevant
+handler, cleanup, or return slot. A minimal deterministic witness seed is kept
+for every outcome that can be projected into a diagnostic; transitive error
+evidence and call-chain prefixes are reconstructed lazily. Evidence identity is
+stable and finite so fixed-point propagation does not inflate recursive or
+diamond-shaped paths.
 
 ## CFG Outcome Classification
 
@@ -131,10 +136,13 @@ normally without rethrowing or returning failure, it is
 ## Call Propagation and Uncertainty
 
 An outcome propagates only across a reachable call whose resolution is
-`matched` with exactly one current project-local procedure. Direct and
-propagated evidence remain distinct and are combined by deterministic set
-union to a fixed point. Recursion, mutual recursion, and diamond graphs must
-converge without duplicating origin evidence.
+`matched` with exactly one current project-local procedure. The semantic
+outcome membership and uncertainty sets are combined by deterministic set
+union to a fixed point; indexed adjacency prevents duplicate edge work. Direct
+and propagated evidence remain distinct in the compatibility projection, while
+the fixed-point implementation keeps only bounded membership plus the witness
+seeds required to materialize that projection. Recursion, mutual recursion,
+and diamond graphs must converge without duplicating origin evidence.
 
 Ambiguous, unresolved, external, built-in-unclassified, and dynamically bound
 calls do not prove suppression or success. Their existing `CallUncertainty`
@@ -145,6 +153,13 @@ A representative call chain is selected deterministically by stable procedure
 identity and source location. When a failure-loss boundary is reachable from a
 public procedure or host event, that entry point may be named in the finding's
 reason, but no second diagnostic is emitted at the entry point.
+
+Path reconstruction is an explanation step, not part of semantic convergence.
+It uses the same stable procedure/edge ordering as the pre-optimization
+implementation and must preserve the selected representative chain for equal
+input. A missing witness, changed path, or changed uncertainty classification
+is a compatibility failure even when the finite outcome membership is the
+same.
 
 ## Success Result Observation
 
@@ -226,7 +241,10 @@ general LSP contract.
 The analysis is source-only and does not open Excel, access COM or VBIDE, or
 change VBE compilation behavior. It does not change analyzer Finding JSON, LSP
 Diagnostic fields, the Fast/Full publication ordering, or the public
-procedure-effect summary surface (which remains internal).
+procedure-effect summary surface (which remains internal). Effect-summary
+worklist and compact-fact counters are developer-facing observability only;
+they are emitted through the existing opt-in performance log and do not alter
+diagnostic semantics.
 
 Unknown behavior is reported conservatively by withholding a definite
 `VBA237`, not by assuming success or treating every handler as incorrect.

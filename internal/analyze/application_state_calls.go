@@ -176,10 +176,9 @@ func applicationStateCallReachable(proc sourceProcedure, call procedureir.CallSi
 		return true
 	}
 	for _, blockID := range proc.Graph.Reachable(vbacfg.EdgeFilter{}) {
-		for _, block := range proc.Graph.Blocks {
-			if block.ID == blockID && block.Kind == vbacfg.BlockStatement && block.StatementID == call.StatementID {
-				return true
-			}
+		block, ok := proc.Graph.BlockByID(blockID)
+		if ok && block.Kind == vbacfg.BlockStatement && block.StatementID == call.StatementID {
+			return true
 		}
 	}
 	return false

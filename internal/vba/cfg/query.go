@@ -26,10 +26,11 @@ func (g Graph) WithoutNormalErrRaiseContinuation() Graph {
 }
 
 func (g Graph) isNonReturningRaiseBlock(id BlockID) bool {
-	if id <= 0 || int(id) > len(g.Blocks) {
+	block, ok := g.BlockByID(id)
+	if !ok {
 		return false
 	}
-	statement := g.Blocks[int(id)-1].Statement
+	statement := block.Statement
 	if statement == nil {
 		return false
 	}
@@ -63,6 +64,41 @@ func (g Graph) BlockForStatement(statementID int) (Block, bool) {
 		}
 	}
 	return Block{}, false
+}
+
+// BlockByID returns the block identified by id. Block IDs are graph-local and
+// are not required to be contiguous, so callers must not use an ID as a slice
+// index. The lookup is backed by the graph query index and is O(1) on average.
+func (g Graph) BlockByID(id BlockID) (Block, bool) {
+	if id <= 0 {
+		return Block{}, false
+	}
+	index := g.queryIndexes()
+	blockIndex, ok := index.blocksByID[id]
+	if ok && blockIndex >= 0 && blockIndex < len(g.Blocks) {
+		block := g.Blocks[blockIndex]
+		if block.ID == id {
+			return block, true
+		}
+	}
+	// Keep a defensive fallback for graph values whose public block slice was
+	// changed after the index was built.
+	for _, block := range g.Blocks {
+		if block.ID == id {
+			return block, true
+		}
+	}
+	return Block{}, false
+}
+
+// OutgoingEdges returns edges leaving from. Edges retain their graph order and
+// the returned slice is owned by the graph query index; callers must treat it
+// as read-only. The lookup is O(1) on average.
+func (g Graph) OutgoingEdges(from BlockID) []Edge {
+	if from <= 0 {
+		return nil
+	}
+	return g.queryIndexes().outgoing[from]
 }
 
 // Reachable returns reachable block IDs in stable ID order.
@@ -399,10 +435,8 @@ func (g Graph) predecessors(id BlockID, filter EdgeFilter, reachable map[BlockID
 }
 
 func (g Graph) block(id BlockID) Block {
-	if id > 0 && int(id) <= len(g.Blocks) {
-		return g.Blocks[int(id)-1]
-	}
-	return Block{}
+	block, _ := g.BlockByID(id)
+	return block
 }
 
 func idSet(ids []BlockID) map[BlockID]bool {

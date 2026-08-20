@@ -229,8 +229,12 @@ func errorEvidenceAt(items []effects.ErrorEvidence, behavior effects.ErrorBehavi
 }
 
 func representativePublicErrorChain(project effects.ProjectSummary, loss effects.ErrorEvidence) string {
-	for _, summary := range project.All() {
-		if !errorEntryProcedure(summary.Identity) {
+	for _, direct := range project.AllDirect() {
+		if !errorEntryProcedure(direct.Identity) {
+			continue
+		}
+		summary, ok := project.Lookup(direct.Identity)
+		if !ok {
 			continue
 		}
 		for _, evidence := range summary.Error.Propagated {
