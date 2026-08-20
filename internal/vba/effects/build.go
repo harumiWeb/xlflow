@@ -100,10 +100,9 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 		byCandidateLine: map[int][]int{},
 		stats:           stats,
 		provenance: &provenanceGraph{
-			callers:    callers,
-			callees:    callees,
-			summaries:  map[string]ProcedureSummary{},
-			errorPaths: map[string]map[string][]string{},
+			callers:   callers,
+			callees:   callees,
+			summaries: map[string]ProcedureSummary{},
 		},
 	}
 	for _, summary := range summaries {

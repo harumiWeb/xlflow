@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -226,12 +225,24 @@ func (s *semanticState) factCount() uint64 {
 }
 
 type provenanceGraph struct {
-	callers    map[string][]string
-	callees    map[string][]string
-	summaries  map[string]ProcedureSummary
-	keys       []string
-	pathMu     sync.Mutex
+	callers   map[string][]string
+	callees   map[string][]string
+	summaries map[string]ProcedureSummary
+	keys      []string
+}
+
+type provenanceMaterialization struct {
+	project ProjectSummary
+	// errorPaths is scoped to one Lookup or All pass so lazy provenance does not
+	// become a permanent project-wide cache.
 	errorPaths map[string]map[string][]string
+}
+
+func newProvenanceMaterialization(project ProjectSummary) *provenanceMaterialization {
+	return &provenanceMaterialization{
+		project:    project,
+		errorPaths: map[string]map[string][]string{},
+	}
 }
 
 func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
@@ -299,8 +310,9 @@ func (p ProjectSummary) AllDirect() []ProcedureSummary {
 // All returns a defensive copy in deterministic procedure order.
 func (p ProjectSummary) All() []ProcedureSummary {
 	out := make([]ProcedureSummary, len(p.procedures))
+	materializer := newProvenanceMaterialization(p)
 	for i := range p.procedures {
-		out[i] = p.materialize(i)
+		out[i] = materializer.materialize(i)
 	}
 	return out
 }
@@ -313,6 +325,11 @@ func (p ProjectSummary) ProcedureCount() int { return len(p.procedures) }
 func (p ProjectSummary) Stats() BuildStats { return p.stats }
 
 func (p ProjectSummary) materialize(index int) ProcedureSummary {
+	return newProvenanceMaterialization(p).materialize(index)
+}
+
+func (m *provenanceMaterialization) materialize(index int) ProcedureSummary {
+	p := m.project
 	if index < 0 || index >= len(p.procedures) {
 		return ProcedureSummary{}
 	}
@@ -324,7 +341,7 @@ func (p ProjectSummary) materialize(index int) ProcedureSummary {
 	reachable := p.reachableProcedureKeys(key)
 	out.Propagated = p.propagatedEvidence(key, reachable)
 	out.PropagatedUncertainty = p.propagatedUncertainty(key, reachable)
-	out.Error.Propagated = p.propagatedErrors(key, reachable)
+	out.Error.Propagated = p.propagatedErrors(key, reachable, m.errorPaths)
 	if out.semantic != nil {
 		out.Error = errorSummaryWithState(out.Error, out.semantic)
 	}

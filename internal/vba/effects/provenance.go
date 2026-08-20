@@ -169,12 +169,11 @@ func (p ProjectSummary) propagatedUncertainty(owner string, reachable []string) 
 	return out
 }
 
-func (p ProjectSummary) propagatedErrors(owner string, reachable []string) []ErrorEvidence {
+func (p ProjectSummary) propagatedErrors(owner string, reachable []string, pathCache map[string]map[string][]string) []ErrorEvidence {
 	if p.provenance == nil {
 		return nil
 	}
 	index := newMembershipIndex[ErrorEvidence](0, errorEvidenceKey)
-	pathCache := map[string]map[string][]string{}
 	var out []ErrorEvidence
 	for _, key := range reachable {
 		for _, evidence := range p.provenance.summaries[key].Error.Direct {
@@ -184,7 +183,7 @@ func (p ProjectSummary) propagatedErrors(owner string, reachable []string) []Err
 			origin := evidence.Origin.Key()
 			paths, ok := pathCache[origin]
 			if !ok {
-				paths = p.cachedErrorPaths(origin)
+				paths = p.errorPathsFromOrigin(origin)
 				pathCache[origin] = paths
 			}
 			path, ok := paths[owner]
@@ -211,23 +210,6 @@ func (p ProjectSummary) propagatedErrors(owner string, reachable []string) []Err
 	}
 	sort.Slice(out, func(i, j int) bool { return errorEvidenceKey(out[i]) < errorEvidenceKey(out[j]) })
 	return out
-}
-
-func (p ProjectSummary) cachedErrorPaths(origin string) map[string][]string {
-	if p.provenance == nil {
-		return nil
-	}
-	p.provenance.pathMu.Lock()
-	defer p.provenance.pathMu.Unlock()
-	if p.provenance.errorPaths == nil {
-		p.provenance.errorPaths = map[string]map[string][]string{}
-	}
-	if paths, ok := p.provenance.errorPaths[origin]; ok {
-		return paths
-	}
-	paths := p.errorPathsFromOrigin(origin)
-	p.provenance.errorPaths[origin] = paths
-	return paths
 }
 
 func (p ProjectSummary) errorPathsFromOrigin(origin string) map[string][]string {
