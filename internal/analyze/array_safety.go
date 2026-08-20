@@ -122,6 +122,8 @@ var (
 	arrayOnErrorGotoZeroRe    = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+0\s*$`)
 	arrayErrNumberFailureRe   = regexp.MustCompile(`(?i)^\s*if\s+err\.number\s*<>\s*0\s+then\s*$`)
 	arrayCapacityProbeRe      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
+	arrayBoundsProbeRe        = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*-\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
+	arrayCheckedProbeExitRe   = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*(?:<=|=)\s*0\s+then\s+(?:exit\s+(?:sub|function|property)|goto\s+[A-Za-z_]\w*)\s*$`)
 	arrayCapacityIfRe         = regexp.MustCompile(`(?i)^\s*if\s+.+\s*>\s*([A-Za-z_]\w*)\s+then\s*$`)
 	arrayForZeroToCountRe     = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
 	arrayLabelRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
@@ -517,6 +519,12 @@ func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variab
 				targetName = strings.ToLower(match[2])
 				break
 			}
+			if match := arrayBoundsProbeRe.FindStringSubmatch(text); len(match) == 4 && strings.EqualFold(match[2], match[3]) {
+				probeIndex = candidate
+				capacityName = strings.ToLower(match[1])
+				targetName = strings.ToLower(match[2])
+				break
+			}
 		}
 		if probeIndex < 0 {
 			continue
@@ -524,6 +532,29 @@ func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variab
 		variable, known := variables[targetName]
 		if !known || !variable.isArray {
 			continue
+		}
+		if restoreIndex, restoreText, ok := nextNonEmpty(probeIndex + 1); ok &&
+			(arrayOnErrorGotoZeroRe.MatchString(restoreText) || arrayOnErrorGotoRe.MatchString(restoreText)) {
+			if checkIndex, checkText, ok := nextNonEmpty(restoreIndex + 1); ok {
+				if match := arrayCheckedProbeExitRe.FindStringSubmatch(checkText); len(match) == 2 && strings.EqualFold(match[1], capacityName) {
+					indexStartLine := checkIndex + 2
+					indexEndLine := end
+					for candidate := indexStartLine - 1; candidate < end; candidate++ {
+						text := lineText(candidate)
+						if erase := arrayEraseRe.FindStringSubmatch(text); len(erase) == 2 && strings.EqualFold(strings.TrimSpace(erase[1]), targetName) {
+							indexEndLine = candidate
+							break
+						}
+					}
+					guards = append(guards, arrayResumeNextCapacityGuard{
+						target:         targetName,
+						probeLine:      probeIndex + 1,
+						indexStartLine: indexStartLine,
+						indexEndLine:   indexEndLine,
+					})
+					continue
+				}
+			}
 		}
 		errIndex, errText, ok := nextNonEmpty(probeIndex + 1)
 		if !ok || !arrayErrNumberFailureRe.MatchString(errText) {
@@ -658,6 +689,10 @@ func arrayResumeNextCapacityIndexApplies(guards []arrayResumeNextCapacityGuard, 
 		}
 	}
 	return false
+}
+
+func arrayResumeNextCapacityProofApplies(guards []arrayResumeNextCapacityGuard, name string, line int) bool {
+	return arrayResumeNextCapacityProbeApplies(guards, name, line) || arrayResumeNextCapacityIndexApplies(guards, name, line)
 }
 
 // walkArrayCFG owns the common allocation-state worklist used by both the
@@ -1995,7 +2030,8 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	if !ok {
 		return state
 	}
-	localDeclarations := file.procedureDeclarationsFor(proc)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
 	markArgument := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
@@ -2010,7 +2046,7 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	}
 	markModule := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
-		if _, shadowed := localDeclarations[name]; shadowed {
+		if declarations.shadowsModule(name) {
 			return
 		}
 		declaration, declared := moduleDecls[name]
@@ -2121,11 +2157,12 @@ func applyArrayInternalStorageConfiguration(state arrayFlowState, file parsedFil
 	if len(arrays) == 0 {
 		return state
 	}
-	localDeclarations := file.procedureDeclarationsFor(proc)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
 	for name := range arrays {
 		name = strings.ToLower(cleanIdentifier(name))
-		if _, shadowed := localDeclarations[name]; shadowed {
+		if declarations.shadowsModule(name) {
 			continue
 		}
 		declaration, declared := moduleDecls[name]
@@ -2219,11 +2256,12 @@ func applyArrayModuleConfigurationBranch(state arrayFlowState, statement *proced
 	if len(arrays) == 0 {
 		return state
 	}
-	localDeclarations := file.procedureDeclarationsFor(proc)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
 	for name := range arrays {
 		name = strings.ToLower(cleanIdentifier(name))
-		if _, shadowed := localDeclarations[name]; shadowed {
+		if declarations.shadowsModule(name) {
 			continue
 		}
 		declaration, declared := moduleDecls[name]
@@ -2306,9 +2344,12 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 	if len(moduleArrays) == 0 || proc.Graph == nil {
 		return nil
 	}
-	localDeclarations := file.procedureDeclarationsFor(proc)
-	for name := range localDeclarations {
-		delete(moduleArrays, name)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
+	for name := range moduleArrays {
+		if declarations.shadowsModule(name) {
+			delete(moduleArrays, name)
+		}
 	}
 	idempotentSetupArrays := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls)
 	allocated := map[string]bool{}
@@ -2630,10 +2671,11 @@ func applyArrayModuleInitializationState(state arrayFlowState, file parsedFile, 
 	if strings.EqualFold(strings.TrimSpace(proc.Name), initializer) {
 		return state
 	}
-	localDeclarations := file.procedureDeclarationsFor(proc)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
 	for name := range initializationStates[file.Path] {
-		if _, shadowed := localDeclarations[name]; shadowed {
+		if declarations.shadowsModule(name) {
 			continue
 		}
 		declaration, ok := moduleDecls[name]
@@ -2780,8 +2822,12 @@ func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleD
 			moduleArrays[strings.ToLower(name)] = true
 		}
 	}
-	for name := range file.procedureDeclarationsFor(proc) {
-		delete(moduleArrays, name)
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
+	for name := range moduleArrays {
+		if declarations.shadowsModule(name) {
+			delete(moduleArrays, name)
+		}
 	}
 	return moduleArrays
 }
@@ -3499,7 +3545,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			continue
 		}
 		if value.kind != arrayAllocated || !value.knownArray {
-			if arrayResumeNextCapacityProbeApplies(capacityGuards, name, line) {
+			if arrayResumeNextCapacityProofApplies(capacityGuards, name, line) {
 				// A recognized Resume Next capacity probe deliberately catches
 				// this bounds failure before its fallback allocation branch.
 				continue

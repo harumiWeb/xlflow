@@ -303,9 +303,6 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 				// propagation keeps the self edge so recursive summaries converge.
 				continue
 			}
-			if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
-				continue
-			}
 			callee := analysis.plans[calleeKey]
 			if callee == nil || caller.proc.Graph == nil {
 				continue
@@ -398,23 +395,43 @@ func uniqueStrings(values []string) []string {
 }
 
 func (analysis *objectAnalysisContext) objectCalleeKey(call procedureir.CallSite) (string, bool) {
-	if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
+		candidate := call.Resolution.Candidates[0]
+		key := objectSummaryKey(candidate.File, candidate.QualifiedName, candidate.Kind, candidate.Line)
+		if _, ok := analysis.plans[key]; ok {
+			return key, true
+		}
+		var match string
+		for candidateKey, plan := range analysis.plans {
+			if !strings.EqualFold(plan.proc.Module+"."+plan.proc.Name, candidate.QualifiedName) && !strings.EqualFold(objectProcedureQualifiedName(plan.proc), candidate.QualifiedName) {
+				continue
+			}
+			if candidate.Kind != "" && !strings.EqualFold(string(plan.proc.ProcedureKind), candidate.Kind) {
+				continue
+			}
+			if candidate.Line > 0 && plan.proc.StartLine != candidate.Line {
+				continue
+			}
+			if match != "" {
+				return "", false
+			}
+			match = candidateKey
+		}
+		return match, match != ""
+	}
+	if call.Callee.Receiver != nil && !objectIsCurrentModuleReceiver(call) {
 		return "", false
 	}
-	candidate := call.Resolution.Candidates[0]
-	key := objectSummaryKey(candidate.File, candidate.QualifiedName, candidate.Kind, candidate.Line)
-	if _, ok := analysis.plans[key]; ok {
-		return key, true
+	name := strings.TrimSpace(call.Callee.BaseName)
+	if name == "" {
+		name = strings.TrimSpace(call.Callee.Member)
+	}
+	if name == "" || strings.TrimSpace(call.Module) == "" {
+		return "", false
 	}
 	var match string
 	for candidateKey, plan := range analysis.plans {
-		if !strings.EqualFold(plan.proc.Module+"."+plan.proc.Name, candidate.QualifiedName) && !strings.EqualFold(objectProcedureQualifiedName(plan.proc), candidate.QualifiedName) {
-			continue
-		}
-		if candidate.Kind != "" && !strings.EqualFold(string(plan.proc.ProcedureKind), candidate.Kind) {
-			continue
-		}
-		if candidate.Line > 0 && plan.proc.StartLine != candidate.Line {
+		if !strings.EqualFold(strings.TrimSpace(plan.proc.Module), strings.TrimSpace(call.Module)) || !strings.EqualFold(cleanIdentifier(plan.proc.Name), cleanIdentifier(name)) {
 			continue
 		}
 		if match != "" {
@@ -423,6 +440,10 @@ func (analysis *objectAnalysisContext) objectCalleeKey(call procedureir.CallSite
 		match = candidateKey
 	}
 	return match, match != ""
+}
+
+func objectIsCurrentModuleReceiver(call procedureir.CallSite) bool {
+	return call.Callee.Receiver != nil && strings.EqualFold(cleanIdentifier(strings.TrimSpace(*call.Callee.Receiver)), "me")
 }
 
 func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedureSummary {
@@ -838,10 +859,16 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 		if name == "" {
 			continue
 		}
-		variable := objectFlowVariableForName(name, flow.vars)
+		declaration, scope, ok := objectDeclarationBinding(name, declarations)
+		if !ok || !declaration.Object || declaration.NewExpression || declaration.Array {
+			continue
+		}
+		variable := objectVariable{Scope: scope, Name: name}
 		key := variable.key()
-		declaration, ok := objectDeclarationFor(name, variable.Scope, declarations)
-		if !ok || !declaration.Object || declaration.NewExpression || declaration.Array || reported[key] {
+		if reported[key] {
+			continue
+		}
+		if _, exists := flow.vars[key]; !exists {
 			continue
 		}
 		block, ok := plan.flowGraph.BlockForStatement(call.StatementID)
@@ -1137,6 +1164,26 @@ func objectDeclarationFor(name string, scope procedureir.SymbolScope, declaratio
 		}
 	}
 	return declarations.lookup(key)
+}
+
+func objectDeclarationBinding(name string, declarations declarationScope) (sourceDeclaration, procedureir.SymbolScope, bool) {
+	key := strings.ToLower(cleanIdentifier(name))
+	if key == "" {
+		return sourceDeclaration{}, procedureir.ScopeUnresolved, false
+	}
+	if declaration, ok := declarations.parameters[key]; ok {
+		return declaration, procedureir.ScopeParameter, true
+	}
+	if declaration, ok := declarations.local[key]; ok {
+		return declaration, procedureir.ScopeLocal, true
+	}
+	if declaration, ok := declarations.extra[key]; ok {
+		return declaration, procedureir.ScopeLocal, true
+	}
+	if declaration, ok := declarations.module[key]; ok {
+		return declaration, procedureir.ScopeModule, true
+	}
+	return sourceDeclaration{}, procedureir.ScopeUnresolved, false
 }
 
 func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectProcedureSummary, options objectFlowOptions) objectFlowResult {
@@ -1483,23 +1530,23 @@ func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, dec
 		if objectIndexedReceiverWrite(flowContext.calls[statement.ID], access) {
 			continue
 		}
-		declaration, ok := objectDeclarationFor(access.Name, access.Scope, declarations)
+		var declaration sourceDeclaration
+		var scope procedureir.SymbolScope
+		var ok bool
+		if access.Scope == procedureir.ScopeUnresolved {
+			declaration, scope, ok = objectDeclarationBinding(access.Name, declarations)
+		} else {
+			declaration, ok = objectDeclarationFor(access.Name, access.Scope, declarations)
+			scope = access.Scope
+		}
 		if !ok || !declaration.Object {
 			continue
-		}
-		scope := access.Scope
-		if scope == procedureir.ScopeUnresolved {
-			scope = procedureir.ScopeLocal
 		}
 		return objectVariable{Scope: scope, Name: access.Name}, true
 	}
 	if statement.Target != nil && statement.Target.Kind != procedureir.ExpressionCall && statement.Target.Kind != procedureir.ExpressionMember && !objectIndexedTargetCall(flowContext.calls[statement.ID], statement.Target.Text) {
 		name := cleanIdentifier(strings.TrimSpace(statement.Target.Text))
-		if declaration, ok := objectDeclarationFor(name, procedureir.ScopeLocal, declarations); ok && declaration.Object {
-			scope := procedureir.ScopeLocal
-			if declaration.Parameter {
-				scope = procedureir.ScopeParameter
-			}
+		if declaration, scope, ok := objectDeclarationBinding(name, declarations); ok && declaration.Object {
 			return objectVariable{Scope: scope, Name: name}, true
 		}
 	}
@@ -1554,14 +1601,14 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		}
 	case procedureir.ExpressionIdentifier:
 		name := cleanIdentifier(text)
-		for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
-			if value, exists := state[objectVariable{Scope: scope, Name: name}.key()]; exists {
-				// Stop at the first lexical binding even when it is currently
-				// Nothing; a same-named module field must not initialize a shadowing
-				// local object.
-				return value
+		declaration, scope, ok := objectDeclarationBinding(name, declarations)
+		if !ok || !declaration.Object {
+			if isObjectType(proc.ReturnType) && strings.EqualFold(name, cleanIdentifier(proc.Name)) {
+				return state[(objectVariable{Scope: procedureir.ScopeLocal, Name: name}).key()]
 			}
+			return false
 		}
+		return state[(objectVariable{Scope: scope, Name: name}).key()]
 	case procedureir.ExpressionCall:
 		for _, call := range proc.Calls {
 			if call.StatementID != statementID || (call.ExpressionID != 0 && call.ExpressionID != expression.ID) {
@@ -1573,6 +1620,9 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		}
 		return objectConstructorCallText(lower)
 	case procedureir.ExpressionMember:
+		if objectExcelMemberExpressionAssigned(expression.Text, proc, declarations) {
+			return true
+		}
 		// A member rooted at an intrinsic workbook/application object is a
 		// non-Nothing factory value.  For a user object, the member may itself be
 		// Nothing; keep the assignment nullable and report a later dereference.
@@ -1601,6 +1651,11 @@ func objectConstructorCallText(text string) bool {
 func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
 	if objectConstructorCallText(strings.ToLower(call.Callee.Text)) || strings.EqualFold(call.Callee.BaseName, "CreateObject") || strings.EqualFold(call.Callee.BaseName, "GetObject") {
 		return true
+	}
+	if call.Callee.Receiver == nil {
+		if summary, ok := objectDirectCallSummary(proc, call, summaries); ok {
+			return summary.ReturnAssigned
+		}
 	}
 	if call.Callee.Receiver != nil {
 		// Excel object factories such as Worksheets(1) and Range("A1") are
@@ -1653,6 +1708,80 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	return ok && summary.ReturnAssigned
 }
 
+func objectDirectCallSummary(proc sourceProcedure, call procedureir.CallSite, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
+	if call.Callee.Receiver != nil || strings.TrimSpace(call.Callee.BaseName) == "" {
+		return objectProcedureSummary{}, false
+	}
+	matches := objectSummaryCandidatesForDirectCall(proc.Module, call.Callee.BaseName, call.File, summaries)
+	if len(matches) == 0 {
+		return objectProcedureSummary{}, false
+	}
+	returnAssigned := true
+	for _, summary := range matches {
+		returnAssigned = returnAssigned && summary.ReturnAssigned
+	}
+	return objectProcedureSummary{ReturnAssigned: returnAssigned}, true
+}
+
+func objectSummaryCandidatesForDirectCall(module, name, callFile string, summaries map[string]objectProcedureSummary) []objectProcedureSummary {
+	name = strings.TrimSpace(name)
+	if strings.TrimSpace(module) == "" || name == "" {
+		return nil
+	}
+	allMatches := make([]objectProcedureSummary, 0, 1)
+	for _, summary := range summaries {
+		if !strings.EqualFold(strings.TrimSpace(summary.Module), strings.TrimSpace(module)) || !strings.EqualFold(lastName(summary.QualifiedName), name) {
+			continue
+		}
+		allMatches = append(allMatches, summary)
+	}
+	if len(allMatches) == 0 {
+		return nil
+	}
+	// A project may contain a WIP copy of a module with the same VB_Name. The
+	// call site file identifies the lexical function in that case; do not let
+	// an unrelated duplicate affect object state. If the file is unavailable,
+	// only a unique module/name match is safe to use.
+	if normalizedCallFile := normalizedObjectSummaryFile(callFile); normalizedCallFile != "" {
+		fileMatches := make([]objectProcedureSummary, 0, len(allMatches))
+		for _, summary := range allMatches {
+			if objectSummaryFilesMatch(normalizedCallFile, summary.File) {
+				fileMatches = append(fileMatches, summary)
+			}
+		}
+		if len(fileMatches) > 0 {
+			return fileMatches
+		}
+	}
+	if len(allMatches) == 1 {
+		return allMatches
+	}
+	return nil
+}
+
+func normalizedObjectSummaryFile(file string) string {
+	file = filepath.ToSlash(filepath.Clean(strings.TrimSpace(file)))
+	file = strings.TrimPrefix(file, "./")
+	if file == "." {
+		return ""
+	}
+	return file
+}
+
+func objectSummaryFilesMatch(callFile, summaryFile string) bool {
+	callFile = normalizedObjectSummaryFile(callFile)
+	summaryFile = normalizedObjectSummaryFile(summaryFile)
+	if callFile == "" || summaryFile == "" {
+		return false
+	}
+	if strings.EqualFold(callFile, summaryFile) {
+		return true
+	}
+	callFile = strings.ToLower(callFile)
+	summaryFile = strings.ToLower(summaryFile)
+	return strings.HasSuffix(callFile, "/"+summaryFile) || strings.HasSuffix(summaryFile, "/"+callFile)
+}
+
 func objectReceiverReturnSummary(call procedureir.CallSite, declarations declarationScope, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
 	return objectReceiverReturnSummaryIndexed(call, declarations, summaries, nil)
 }
@@ -1701,11 +1830,14 @@ func objectExcelMemberChainAssigned(call procedureir.CallSite, state map[string]
 		return false
 	}
 	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(parts[0], "(", 2)[0]))
-	if root == "" || !objectNameDefinitelyAssigned(root, state) {
+	if root == "" {
 		return false
 	}
-	declaration, ok := objectDeclarationByName(root, declarations)
+	declaration, scope, ok := objectDeclarationBinding(root, declarations)
 	if !ok || !excelObjectUseType(declaration.Type) {
+		return false
+	}
+	if !state[(objectVariable{Scope: scope, Name: root}).key()] {
 		return false
 	}
 	for _, part := range parts[1:] {
@@ -1714,6 +1846,36 @@ func objectExcelMemberChainAssigned(call procedureir.CallSite, state map[string]
 		}
 	}
 	return excelObjectUseMember(call.Callee.Member)
+}
+
+func objectExcelMemberExpressionAssigned(text string, proc sourceProcedure, declarations declarationScope) bool {
+	parts := strings.Split(strings.TrimSpace(text), ".")
+	if len(parts) < 2 {
+		return false
+	}
+	root := cleanIdentifier(strings.TrimSpace(strings.SplitN(parts[0], "(", 2)[0]))
+	if root == "" {
+		return false
+	}
+	declaration, _, ok := objectDeclarationBinding(root, declarations)
+	if !ok || !excelObjectUseType(declaration.Type) {
+		for _, irDeclaration := range proc.Declarations {
+			if strings.EqualFold(cleanIdentifier(irDeclaration.Name), root) && isObjectType(irDeclaration.Type) {
+				declaration = sourceDeclaration{Type: irDeclaration.Type}
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok || !excelObjectUseType(declaration.Type) {
+		return false
+	}
+	for _, part := range parts[1:] {
+		if !excelObjectFactoryMember(part) {
+			return false
+		}
+	}
+	return true
 }
 
 func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations declarationScope) bool {
@@ -1738,17 +1900,6 @@ func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations de
 	return excelObjectFactoryMember(call.Callee.Member)
 }
 
-func objectNameDefinitelyAssigned(name string, state map[string]bool) bool {
-	name = cleanIdentifier(strings.TrimSpace(name))
-	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
-		key := (objectVariable{Scope: scope, Name: name}).key()
-		if value, exists := state[key]; exists {
-			return value
-		}
-	}
-	return false
-}
-
 func objectDeclarationByName(name string, declarations declarationScope) (sourceDeclaration, bool) {
 	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
 		if declaration, ok := objectDeclarationFor(name, scope, declarations); ok {
@@ -1771,7 +1922,7 @@ func excelObjectUseType(typ string) bool {
 func excelObjectUseMember(member string) bool {
 	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(strings.SplitN(member, "(", 2)[0])))
 	switch member {
-	case "application", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "parent", "resize", "offset", "addshape", "selection", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add":
+	case "application", "workbooks", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "parent", "resize", "offset", "addshape", "selection", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add":
 		return true
 	default:
 		return false
@@ -1781,7 +1932,7 @@ func excelObjectUseMember(member string) bool {
 func excelObjectFactoryMember(member string) bool {
 	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(strings.SplitN(member, "(", 2)[0])))
 	switch member {
-	case "application", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add", "addshape", "parent", "resize", "offset":
+	case "application", "workbooks", "worksheets", "sheets", "range", "cells", "rows", "columns", "shapes", "usedrange", "interior", "borders", "font", "textframe", "characters", "fill", "line", "controls", "add", "addshape", "parent", "resize", "offset":
 		return true
 	default:
 		return false
@@ -1800,6 +1951,16 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 	var candidates []objectProcedureSummary
 	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
 		if summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries); ok {
+			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
+				candidates = append(candidates, summary)
+			}
+		}
+	} else if call.ExpressionID == 0 && (call.Callee.Receiver == nil || objectIsCurrentModuleReceiver(call)) {
+		name := call.Callee.BaseName
+		if strings.TrimSpace(name) == "" {
+			name = call.Callee.Member
+		}
+		for _, summary := range objectSummaryCandidatesForDirectCall(call.Module, name, call.File, summaries) {
 			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
 				candidates = append(candidates, summary)
 			}
@@ -1831,14 +1992,11 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 		if name == "" {
 			continue
 		}
-		variable := objectVariable{Scope: actual.scope, Name: name}
-		if variable.Scope == procedureir.ScopeUnresolved {
-			variable = objectFlowVariableForName(name, vars)
-		}
-		declaration, ok := objectDeclarationFor(name, variable.Scope, declarations)
+		declaration, scope, ok := objectDeclarationBinding(name, declarations)
 		if !ok || !declaration.Object {
 			continue
 		}
+		variable := objectVariable{Scope: scope, Name: name}
 		if _, exists := vars[variable.key()]; !exists {
 			continue
 		}
@@ -1898,7 +2056,6 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 type objectCallActual struct {
 	expressionID  int
 	text          string
-	scope         procedureir.SymbolScope
 	parenthesized bool
 }
 
@@ -1920,7 +2077,20 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 		if name == "" {
 			return false, true
 		}
-		variable := objectFlowVariableForName(name, vars)
+		declaration, scope, ok := objectDeclarationBinding(name, declarations)
+		if !ok && proc.Name != "" && strings.EqualFold(name, cleanIdentifier(proc.Name)) && isObjectType(proc.ReturnType) {
+			// A function's return slot is an object binding even though it is not
+			// represented by a source Dim declaration. Keep it aligned with the
+			// special return-slot handling in objectFlowTarget.
+			variable := objectVariable{Scope: procedureir.ScopeLocal, Name: name}
+			if _, exists := vars[variable.key()]; exists {
+				return state[variable.key()], true
+			}
+		}
+		if !ok || !declaration.Object {
+			return false, false
+		}
+		variable := objectVariable{Scope: scope, Name: name}
 		if _, exists := vars[variable.key()]; !exists {
 			return false, false
 		}
@@ -1948,19 +2118,9 @@ func objectCallActuals(call procedureir.CallSite, expressions map[int]procedurei
 			}
 			expression = nested
 		}
-		actuals = append(actuals, objectCallActual{expressionID: expression.ID, text: expression.Text, scope: procedureir.ScopeUnresolved, parenthesized: parenthesized})
+		actuals = append(actuals, objectCallActual{expressionID: expression.ID, text: expression.Text, parenthesized: parenthesized})
 	}
 	return actuals
-}
-
-func objectFlowVariableForName(name string, vars map[string]objectVariable) objectVariable {
-	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
-		variable := objectVariable{Scope: scope, Name: name}
-		if _, ok := vars[variable.key()]; ok {
-			return variable
-		}
-	}
-	return objectVariable{Scope: procedureir.ScopeLocal, Name: name}
 }
 
 func objectFormalIndex(call procedureir.CallSite, summary objectProcedureSummary, actualIndex int) int {

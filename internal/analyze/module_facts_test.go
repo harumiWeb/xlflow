@@ -21,6 +21,26 @@ func TestModuleAnalysisFactsUsesIRDeclarationsAndIndexedProcedureOwnership(t *te
 			Name: "moduleObject", Type: "Object", IsObject: true,
 			Scope: procedureir.ScopeModule, Kind: "variable",
 			Range: vbaast.Range{StartLine: 1, EndLine: 1},
+		}, {
+			Name: "newWorksheet", Type: " New Worksheet ", IsObject: true,
+			Scope: procedureir.ScopeModule, Kind: "variable",
+			Range: vbaast.Range{StartLine: 1, EndLine: 1},
+		}, {
+			Name: "table", Type: "ListObject",
+			Scope: procedureir.ScopeModule, Kind: "variable",
+			Range: vbaast.Range{StartLine: 1, EndLine: 1},
+		}, {
+			Name: "control", Type: "MSForms.Label", IsObject: true,
+			Scope: procedureir.ScopeModule, Kind: "variable",
+			Range: vbaast.Range{StartLine: 1, EndLine: 1},
+		}, {
+			Name: "customObject", Type: "TThis", IsObject: true,
+			Scope: procedureir.ScopeModule, Kind: "variable",
+			Range: vbaast.Range{StartLine: 1, EndLine: 1},
+		}, {
+			Name: "externalObject", Type: "mscorlib.AppDomain", IsObject: true,
+			Scope: procedureir.ScopeModule, Kind: "variable",
+			Range: vbaast.Range{StartLine: 1, EndLine: 1},
 		}},
 	}
 
@@ -33,6 +53,21 @@ func TestModuleAnalysisFactsUsesIRDeclarationsAndIndexedProcedureOwnership(t *te
 	}
 	if _, ok := facts.moduleDeclarations["moduleobject"]; !ok {
 		t.Fatalf("module declarations = %#v, want moduleObject", facts.moduleDeclarations)
+	}
+	if declaration := facts.moduleDeclarations["newworksheet"]; declaration.Type != "Worksheet" || !declaration.NewExpression {
+		t.Fatalf("normalized As New declaration = %#v, want Worksheet/NewExpression", declaration)
+	}
+	if declaration := facts.moduleDeclarations["table"]; !declaration.Object {
+		t.Fatalf("IR ListObject declaration = %#v, want object declaration", declaration)
+	}
+	if declaration := facts.moduleDeclarations["control"]; declaration.Object {
+		t.Fatalf("dotted form-control declaration = %#v, want non-object declaration", declaration)
+	}
+	if declaration := facts.moduleDeclarations["customobject"]; !declaration.Object {
+		t.Fatalf("unqualified custom declaration = %#v, want object declaration", declaration)
+	}
+	if declaration := facts.moduleDeclarations["externalobject"]; !declaration.Object {
+		t.Fatalf("qualified external declaration = %#v, want object declaration", declaration)
 	}
 	if _, ok := facts.moduleDeclarations["localvalue"]; ok {
 		t.Fatalf("procedure-local declaration leaked into module declarations: %#v", facts.moduleDeclarations)
@@ -80,10 +115,22 @@ func TestDeclarationScopeLayersWithoutModuleMapCopy(t *testing.T) {
 	if declaration, ok := scope.lookup("VALUE"); !ok || declaration.Type != "String" || !declaration.Parameter {
 		t.Fatalf("parameter overlay = %#v, %v", declaration, ok)
 	}
+	module["moduleonly"] = sourceDeclaration{Name: "moduleOnly", Type: "String"}
+	if declaration, ok := scope.lookup("moduleOnly"); !ok || declaration.Type != "String" {
+		t.Fatalf("scope must retain module map reference: %#v, %v", declaration, ok)
+	}
 	seen := map[string]sourceDeclaration{}
 	scope.forEach(func(key string, declaration sourceDeclaration) { seen[key] = declaration })
-	if len(seen) != 2 || seen["value"].Type != "String" || seen["moduleonly"].Type != "Long" {
+	if len(seen) != 2 || seen["value"].Type != "String" || seen["moduleonly"].Type != "String" {
 		t.Fatalf("effective declaration scope = %#v, want parameter shadowing without duplication", seen)
+	}
+	arrayScope := newDeclarationScope(file, sourceProcedure{
+		StartLine: 1,
+		EndLine:   1,
+		Params:    []parameterInfo{{Name: "moduleOnly", Type: "Long()"}},
+	})
+	if !arrayScope.shadowsModule("moduleOnly") {
+		t.Fatalf("parameter declaration should shadow module array names")
 	}
 }
 

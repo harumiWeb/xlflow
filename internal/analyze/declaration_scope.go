@@ -47,6 +47,23 @@ func (scope declarationScope) lookup(name string) (sourceDeclaration, bool) {
 	return declaration, ok
 }
 
+func (scope declarationScope) shadowsModule(name string) bool {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if key == "" {
+		return false
+	}
+	if _, ok := scope.parameters[key]; ok {
+		return true
+	}
+	if _, ok := scope.local[key]; ok {
+		return true
+	}
+	if _, ok := scope.extra[key]; ok {
+		return true
+	}
+	return false
+}
+
 func (scope *declarationScope) addExtraIfMissing(name string, declaration sourceDeclaration) {
 	if scope == nil {
 		return

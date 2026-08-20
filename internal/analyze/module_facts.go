@@ -88,15 +88,33 @@ func sourceDeclarationFromIR(declaration procedureir.Declaration) (sourceDeclara
 	if name == "" {
 		return sourceDeclaration{}, false
 	}
+	typ := strings.TrimSpace(declaration.Type)
+	newExpression := strings.HasPrefix(strings.ToLower(typ), "new ")
+	if newExpression {
+		typ = strings.TrimSpace(typ[4:])
+	}
 	return sourceDeclaration{
-		Name:          name,
-		Type:          declaration.Type,
-		Line:          declaration.Range.StartLine,
-		Object:        declaration.IsObject,
+		Name: name,
+		Type: typ,
+		Line: declaration.Range.StartLine,
+		// Preserve known object types and IR object classifications, except for
+		// MSForms controls. Form controls are initialized by the form runtime and
+		// are not reliable roots for this rule; treating them as ordinary nullable
+		// objects caused false positives in the corpus.
+		Object:        sourceDeclarationIsObject(declaration, typ),
 		Array:         declaration.IsArray,
 		Fixed:         declaration.ValueShape == procedureir.ValueShapeFixedArray,
-		NewExpression: strings.HasPrefix(strings.ToLower(strings.TrimSpace(declaration.Type)), "new "),
+		NewExpression: newExpression,
 	}, true
+}
+
+func sourceDeclarationIsObject(declaration procedureir.Declaration, typ string) bool {
+	return (declaration.IsObject || isObjectType(typ)) && !isMSFormsControlType(typ)
+}
+
+func isMSFormsControlType(typ string) bool {
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	return strings.HasPrefix(typ, "msforms.")
 }
 
 func (facts *moduleAnalysisFacts) lineInProcedure(line int) bool {

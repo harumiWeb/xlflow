@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestVBA202Issue448TracksObjectStateAcrossCFGAndCalls(t *testing.T) {
@@ -319,6 +320,31 @@ End Sub
 	got := findingsByCode(findings, "VBA202")
 	if len(got) != 1 || got[0].Procedure != "Shadow" {
 		t.Fatalf("shadowing local should remain nullable despite module initialization: %+v", got)
+	}
+}
+
+func TestVBA202Issue448DoesNotUseModuleObjectForVariantShadow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private sharedSheet As Worksheet
+
+Public Sub LocalShadow()
+  Dim sharedSheet As Variant
+  Debug.Print sharedSheet.Cells(1, 1)
+End Sub
+
+Public Sub ParameterShadow(ByVal sharedSheet As Variant)
+  Debug.Print sharedSheet.Cells(1, 1)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Variant shadows must not resolve to the module object: %+v", got)
 	}
 }
 
@@ -725,5 +751,137 @@ End Sub
 	got := findingsByCode(findings, "VBA202")
 	if len(got) != 2 || got[0].Procedure != "ErrorPath" || got[1].Procedure != "EarlyGoto" {
 		t.Fatalf("error and early-exit paths should warn while initialized indexed writes stay safe: %+v", got)
+	}
+}
+
+func TestVBA202Issue448RecognizesExcelFactoryFunctionResult(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private remoteWorkbook As Workbook
+
+Private Function createRemoteWorkbook() As Workbook
+  Dim app As Application: Set app = CreateObject("Excel.Application")
+  Set createRemoteWorkbook = app.Workbooks.Add
+End Function
+
+Public Sub Run()
+  Set remoteWorkbook = createRemoteWorkbook()
+  Call remoteWorkbook.Application.Run("TimerMain.StartTimer")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Excel factory function result should establish the object before use: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksInitializedFunctionReturnThroughByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Append(ByRef output As Collection, ByVal input As Collection)
+  Call output.Add(input)
+End Sub
+
+Private Function Values() As Collection
+  Dim input As Collection
+  Set input = New Collection
+  Set Values = New Collection
+  Call Append(Values, input)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("an initialized function return passed to a private ByRef helper should be safe: %+v", got)
+	}
+}
+
+func TestObjectDirectCallSummaryUsesCallFileForDuplicateModules(t *testing.T) {
+	t.Parallel()
+	call := procedureir.CallSite{
+		File:   "../../src/stdTimer.cls",
+		Module: "stdTimer",
+		Callee: procedureir.Callee{BaseName: "createRemoteWorkbook"},
+	}
+	summary, ok := objectDirectCallSummary(sourceProcedure{Module: "stdTimer"}, call, map[string]objectProcedureSummary{
+		"primary": {
+			File:           "src/stdTimer.cls",
+			Module:         "stdTimer",
+			QualifiedName:  "stdTimer.createRemoteWorkbook",
+			ReturnAssigned: true,
+		},
+		"wip": {
+			File:           "src/WIP/stdTimer.cls",
+			Module:         "stdTimer",
+			QualifiedName:  "stdTimer.createRemoteWorkbook",
+			ReturnAssigned: false,
+		},
+	})
+	if !ok || !summary.ReturnAssigned {
+		t.Fatalf("same-file function summary = %+v, ok=%v; want assigned primary summary", summary, ok)
+	}
+}
+
+func TestVBA202Issue448PreservesObjectStateAcrossUnresolvedPrivateByValCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Touch(ByVal values As Collection)
+  Call values.Add("callee")
+End Sub
+
+Public Sub Run()
+  Dim values As Collection
+  Set values = New Collection
+  Call Touch(values)
+  Call values.Add("caller")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("a private ByVal object call must preserve the caller's reference: %+v", got)
+	}
+}
+
+func TestVBA202Issue448TracksModuleInitializationThroughMeCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Main.cls", `Attribute VB_Name = "Main"
+Option Explicit
+Private target As Worksheet
+
+Private Sub InitializeTarget()
+  Set target = ThisWorkbook.Worksheets(1)
+End Sub
+
+Private Sub UseTarget()
+  Debug.Print target.Name
+End Sub
+
+Public Sub Run()
+  If target Is Nothing Then Me.InitializeTarget
+  Call UseTarget
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA202"); len(got) != 0 {
+		t.Fatalf("Me initializer should establish the module object before the private helper: %+v", got)
 	}
 }
