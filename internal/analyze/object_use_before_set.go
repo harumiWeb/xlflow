@@ -548,10 +548,15 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 			}
 			if strings.EqualFold(callee.proc.Module, caller.proc.Module) {
 				for name, declaration := range callee.moduleDecls {
-					if declaration.Object {
-						fieldKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
-						contributions[fieldKey] = blockState[fieldKey]
+					if !declaration.Object {
+						continue
 					}
+					binding, scope, ok := objectDeclarationBinding(name, caller.declarations)
+					if !ok || scope != procedureir.ScopeModule || !binding.Object {
+						continue
+					}
+					fieldKey := (objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()
+					contributions[fieldKey] = blockState[fieldKey]
 				}
 			}
 			if !entryCall.evaluated || !objectBoolMapEqual(entryCall.contributions, contributions) {
@@ -801,7 +806,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 		if !objectMemberReceiver(expressions, statements, access) {
 			continue
 		}
-		declaration, ok := objectDeclarationFor(access.Name, access.Scope, declarations)
+		declaration, scope, ok := objectDeclarationBinding(access.Name, declarations)
 		// `As New` is guaranteed to produce a value on first use.  A normal
 		// Static declaration, however, has module-lifetime state and may still
 		// be Nothing on its first read; it therefore remains in the analysis.
@@ -815,10 +820,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 		if declaration.Array && access.Mode == procedureir.AccessWrite {
 			continue
 		}
-		variable := objectVariable{Scope: access.Scope, Name: access.Name}
-		if access.Scope == procedureir.ScopeUnresolved {
-			variable.Scope = procedureir.ScopeLocal
-		}
+		variable := objectVariable{Scope: scope, Name: access.Name}
 		key := variable.key()
 		block, ok := plan.flowGraph.BlockForStatement(access.StatementID)
 		if !ok || !plan.reachable[block.ID] {
@@ -1234,7 +1236,7 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 				if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain || objectFlowForEachZeroIteration(flowContext, edge) {
 					state = result.in[edge.From]
 				}
-				state = objectFlowApplyGuard(state, flowContext, edge)
+				state = objectFlowApplyGuard(state, flowContext, edge, plan.declarations)
 				incoming = append(incoming, state)
 			}
 			if len(incoming) == 0 {
@@ -1300,7 +1302,7 @@ func objectClassLifecycleAssignedPlan(plan *objectProcedurePlan, variable object
 // `obj Is Nothing`/`Not obj Is Nothing` condition.  Compound boolean
 // expressions are deliberately ignored; VBA212 remains responsible for
 // short-circuit/eager Boolean diagnostics and this analysis stays conservative.
-func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge) map[string]bool {
+func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, edge vbacfg.Edge, declarations declarationScope) map[string]bool {
 	if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
 		return state
 	}
@@ -1321,7 +1323,7 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 		}
 	}
 	if name, expected, equals, ok := objectTypeNameGuard(text); ok {
-		key := objectGuardVariableKey(name, state)
+		key := objectGuardVariableKey(name, state, declarations)
 		if key == "" {
 			return state
 		}
@@ -1351,7 +1353,7 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 	if name == "" || strings.ContainsAny(name, " .()") {
 		return state
 	}
-	key := objectGuardVariableKey(name, state)
+	key := objectGuardVariableKey(name, state, declarations)
 	if key == "" {
 		return state
 	}
@@ -1407,9 +1409,19 @@ func objectFlowExceptionalOnlyFrom(flowContext objectFlowContext, blockID vbacfg
 	return true
 }
 
-func objectGuardVariableKey(name string, state map[string]bool) string {
+func objectGuardVariableKey(name string, state map[string]bool, declarations declarationScope) string {
 	name = cleanIdentifier(strings.TrimSpace(name))
 	if name == "" {
+		return ""
+	}
+	if declaration, scope, ok := objectDeclarationBinding(name, declarations); ok {
+		if !declaration.Object {
+			return ""
+		}
+		key := (objectVariable{Scope: scope, Name: name}).key()
+		if _, exists := state[key]; exists {
+			return key
+		}
 		return ""
 	}
 	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
@@ -1530,15 +1542,7 @@ func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, dec
 		if objectIndexedReceiverWrite(flowContext.calls[statement.ID], access) {
 			continue
 		}
-		var declaration sourceDeclaration
-		var scope procedureir.SymbolScope
-		var ok bool
-		if access.Scope == procedureir.ScopeUnresolved {
-			declaration, scope, ok = objectDeclarationBinding(access.Name, declarations)
-		} else {
-			declaration, ok = objectDeclarationFor(access.Name, access.Scope, declarations)
-			scope = access.Scope
-		}
+		declaration, scope, ok := objectDeclarationBinding(access.Name, declarations)
 		if !ok || !declaration.Object {
 			continue
 		}
@@ -1901,12 +1905,8 @@ func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations de
 }
 
 func objectDeclarationByName(name string, declarations declarationScope) (sourceDeclaration, bool) {
-	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
-		if declaration, ok := objectDeclarationFor(name, scope, declarations); ok {
-			return declaration, true
-		}
-	}
-	return sourceDeclaration{}, false
+	declaration, _, ok := objectDeclarationBinding(name, declarations)
+	return declaration, ok
 }
 
 func excelObjectUseType(typ string) bool {
@@ -1980,6 +1980,10 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 		}
 		for name, assigned := range summary.ModuleAssigned {
 			if !summary.ModuleWritten[name] {
+				continue
+			}
+			binding, scope, ok := objectDeclarationBinding(name, declarations)
+			if !ok || scope != procedureir.ScopeModule || !binding.Object {
 				continue
 			}
 			variable := objectVariable{Scope: procedureir.ScopeModule, Name: name}

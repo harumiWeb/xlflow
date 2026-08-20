@@ -6919,6 +6919,27 @@ End Sub
 	}
 }
 
+func TestArrayModuleEntryStateDoesNotInitializeShadowingParameter(t *testing.T) {
+	t.Parallel()
+	moduleDecls := map[string]sourceDeclaration{
+		"values": {Name: "values", Type: "Byte", Array: true},
+	}
+	proc := sourceProcedure{
+		Name: "Consume", Module: "Main", StartLine: 1, EndLine: 2,
+		Params: []parameterInfo{{Name: "values", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}},
+	}
+	file := parsedFile{
+		Lines:              []string{"Private Sub Consume(ByRef values() As Byte)", "End Sub"},
+		ModuleDeclarations: moduleDecls,
+	}
+	variables := arrayVariables(file, proc, moduleDecls)
+	entries := arrayModuleEntryStates{arrayProcedureKey(proc): {"values": true}}
+	state := applyArrayModuleEntryState(arrayInitialState(variables), file, proc, variables, moduleDecls, entries)
+	if state["values"].kind == arrayAllocated {
+		t.Fatalf("module entry allocation must not initialize a shadowing parameter: %+v", state["values"])
+	}
+}
+
 func TestAnalyzerVBA227KeepsPublicByRefArrayCallsConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -7538,6 +7559,44 @@ End Sub
 	}
 	if !seen["Stale"] || !seen["GotoGuard"] {
 		t.Fatalf("unproven Resume Next guards must not suppress indexed access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsStaticCapacityAfterFailedProbe(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub StaticCapacity(ByRef values() As Byte)
+  Static capacity As Long
+  On Error Resume Next
+  capacity = UBound(values) - LBound(values) + 1
+  On Error GoTo 0
+  If capacity <= 0 Then Exit Sub
+  Debug.Print values(LBound(values))
+End Sub
+
+Public Sub Run()
+  Dim allocated() As Byte
+  Dim unallocated() As Byte
+  ReDim allocated(0 To 0)
+  StaticCapacity allocated
+  StaticCapacity unallocated
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "StaticCapacity" {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatalf("a Static capacity value must not validate a later failed UBound probe: %+v", findings)
 	}
 }
 

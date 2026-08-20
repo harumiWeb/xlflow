@@ -55,6 +55,7 @@ type arrayVariable struct {
 	knownScalar bool
 	fixed       bool
 	parameter   bool
+	static      bool
 	paramArray  bool
 	dimensions  []arrayDimension
 }
@@ -155,7 +156,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	initial := arrayInitialState(variables)
 	initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 	initial = applyArrayByRefEntryStates(initial, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
-	initial = applyArrayModuleEntryState(initial, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
+	initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
 	// Constant bounds are scoped to the current procedure. Resolve them once
 	// for this CFG walk so every ReDim transfer shares the same table without
 	// repeatedly reparsing the module and procedure declarations.
@@ -175,7 +176,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		vba227Initial := arrayInitialState(vba227Variables)
 		vba227Initial = applyArrayInternalStorageConfiguration(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 		vba227Initial = applyArrayByRefEntryStates(vba227Initial, proc, vba227Variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
-		vba227Initial = applyArrayModuleEntryState(vba227Initial, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
+		vba227Initial = applyArrayModuleEntryState(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
 		for _, finding := range a.arrayVBA227LinearFindings(file, proc, ctx, vba227Variables, vba227Initial, constants, capacityGuards) {
 			if finding.Code == "VBA227" {
 				findings = append(findings, finding)
@@ -218,7 +219,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 		vba227Initial := arrayInitialState(vba227Variables)
 		vba227Initial = applyArrayInternalStorageConfiguration(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 		vba227Initial = applyArrayByRefEntryStates(vba227Initial, proc, vba227Variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
-		vba227Initial = applyArrayModuleEntryState(vba227Initial, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
+		vba227Initial = applyArrayModuleEntryState(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
 		vba227CapacityGuards := arrayResumeNextCapacityGuards(file, proc, vba227Variables)
 		walkArrayCFGWithSourceLines(&vba227Graph, file.Lines, vba227Initial, func(text string, line int, in arrayFlowState) arrayFlowState {
 			out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, vba227CapacityGuards)
@@ -655,6 +656,10 @@ func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variab
 // leave the capacity at zero. A stale positive value would make `If capacity
 // <= 0 Then Exit ...` incorrectly accept an unallocated array.
 func arrayResumeNextCapacityStartsAtZero(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, resumeIndex int, capacityName string) bool {
+	variable, known := variables[strings.ToLower(cleanIdentifier(capacityName))]
+	if known && variable.static {
+		return false
+	}
 	start := max(0, proc.StartLine-1)
 	lineText := func(index int) string {
 		if index < 0 || index >= len(file.Lines) {
@@ -673,7 +678,6 @@ func arrayResumeNextCapacityStartsAtZero(file parsedFile, proc sourceProcedure, 
 		break
 	}
 
-	variable, known := variables[strings.ToLower(cleanIdentifier(capacityName))]
 	if !known || variable.parameter || variable.isArray || variable.isVariant || !variable.knownScalar {
 		return false
 	}
@@ -2815,7 +2819,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 			variables := procedure.variables
 			initial := arrayInitialState(variables)
 			initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
-			initial = applyArrayModuleEntryState(initial, procedure.proc, variables, procedure.moduleDecls, entries)
+			initial = applyArrayModuleEntryState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, entries)
 			initial = applyArrayInternalStorageConfiguration(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, ctx.arrayModuleConfigurations[procedure.file.Path])
 
 			recordCall := func(call procedureir.CallSite, state arrayFlowState) {
@@ -2904,13 +2908,18 @@ func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleD
 	return moduleArrays
 }
 
-func applyArrayModuleEntryState(state arrayFlowState, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates) arrayFlowState {
+func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates) arrayFlowState {
 	allocated := entries[arrayProcedureKey(proc)]
 	if len(allocated) == 0 {
 		return state
 	}
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
 	for name := range allocated {
+		if declarations.shadowsModule(name) {
+			continue
+		}
 		declaration, declared := moduleDecls[name]
 		variable, known := variables[name]
 		if !declared || !declaration.Array || declaration.Parameter || !known || !variable.isArray {
@@ -3005,7 +3014,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			initial := arrayInitialState(variables)
 			initial = applyArrayModuleInitializationState(initial, file, proc, variables, moduleDecls, moduleInitializationStates)
 			initial = applyArrayByRefEntryStates(initial, proc, variables, entries, ctx.arrayByRefEntryConditions)
-			initial = applyArrayModuleEntryState(initial, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
+			initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
 			initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 			visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 				var eligible []arrayByRefCallCandidate
@@ -3784,7 +3793,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 		// Treat them exactly like an explicit Variant so array-sensitive rules
 		// do not turn an unresolved value into a false scalar proof.
 		isVariant := typeName == "" || strings.EqualFold(typeName, "Variant")
-		variable := arrayVariable{name: decl.Name, typ: decl.Type, isArray: decl.Array, isVariant: isVariant, isObject: decl.Object, knownScalar: !isVariant && arrayKnownScalarType(typeName), parameter: decl.Parameter, paramArray: decl.ParamArray}
+		variable := arrayVariable{name: decl.Name, typ: decl.Type, isArray: decl.Array, isVariant: isVariant, isObject: decl.Object, knownScalar: !isVariant && arrayKnownScalarType(typeName), parameter: decl.Parameter, static: decl.Static, paramArray: decl.ParamArray}
 		if decl.Array {
 			variable.dimensions, variable.fixed = declarationDimensions(file.Lines, decl.Line, decl.Name, base)
 			if len(decl.Dimensions) > 0 {

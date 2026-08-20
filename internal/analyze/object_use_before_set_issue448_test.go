@@ -861,6 +861,63 @@ func TestObjectCallEffectsSkipsAmbiguousDirectSummaries(t *testing.T) {
 	}
 }
 
+func TestObjectFlowUsesLexicalBindingForVariantShadows(t *testing.T) {
+	t.Parallel()
+	module := map[string]sourceDeclaration{
+		"sharedsheet": {Name: "sharedSheet", Type: "Worksheet", Object: true},
+	}
+	moduleVariable := objectVariable{Scope: procedureir.ScopeModule, Name: "sharedSheet"}
+	moduleSummary := objectProcedureSummary{
+		File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Initialize",
+		ModuleAssigned: map[string]bool{"sharedsheet": false},
+		ModuleWritten:  map[string]bool{"sharedsheet": true},
+	}
+	actualSummary := objectProcedureSummary{
+		File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Touch",
+		Params:        []objectParameterSummary{{Name: "value", Object: true, ByRef: true}},
+		ByRefAssigned: map[int]bool{0: false},
+		ByRefWritten:  map[int]bool{0: true},
+	}
+	expressions := map[int]procedureir.Expression{
+		1: {ID: 1, Kind: procedureir.ExpressionIdentifier, Text: "sharedSheet"},
+	}
+	call := procedureir.CallSite{
+		File: "src/Main.bas", Module: "Main", Caller: procedureir.ProcedureRef{QualifiedName: "Main.Run"},
+		Callee: procedureir.Callee{BaseName: "Initialize"},
+	}
+	actualCall := procedureir.CallSite{
+		File: "src/Main.bas", Module: "Main", Caller: procedureir.ProcedureRef{QualifiedName: "Main.Run"},
+		Callee:    procedureir.Callee{BaseName: "Touch"},
+		Arguments: procedureir.Arguments{Count: 1, ExpressionIDs: []int{1}},
+	}
+	for _, test := range []struct {
+		name       string
+		local      map[string]sourceDeclaration
+		parameters map[string]sourceDeclaration
+	}{
+		{name: "local", local: map[string]sourceDeclaration{"sharedsheet": {Name: "sharedSheet", Type: "Variant"}}},
+		{name: "parameter", parameters: map[string]sourceDeclaration{"sharedsheet": {Name: "sharedSheet", Type: "Variant", Parameter: true}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			declarations := declarationScope{module: module, local: test.local, parameters: test.parameters}
+			state := map[string]bool{moduleVariable.key(): true}
+			vars := map[string]objectVariable{moduleVariable.key(): moduleVariable}
+			applyObjectCallEffects(call, state, vars, declarations, nil, map[string]objectProcedureSummary{"initialize": moduleSummary})
+			if !state[moduleVariable.key()] {
+				t.Fatalf("initialized module object was changed through a shadowed Variant: %+v", state)
+			}
+			applyObjectCallEffects(actualCall, state, vars, declarations, expressions, map[string]objectProcedureSummary{"touch": actualSummary})
+			if !state[moduleVariable.key()] {
+				t.Fatalf("ByRef actual resolution selected the module object through a shadowed Variant: %+v", state)
+			}
+			assigned, present := objectCallParameterAssigned(sourceProcedure{Name: "Run"}, declarations, actualCall, actualSummary, 0, objectCallActuals(actualCall, expressions), state, vars, objectFlowContext{expressions: expressions}, map[string]objectProcedureSummary{})
+			if assigned || present {
+				t.Fatalf("entry-call actual resolution selected a shadowed Variant: assigned=%v present=%v", assigned, present)
+			}
+		})
+	}
+}
+
 func TestVBA202Issue448PreservesObjectStateAcrossUnresolvedPrivateByValCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
