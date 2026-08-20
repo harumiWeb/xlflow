@@ -133,13 +133,13 @@ func (p ProjectSummary) reachableProcedureKeys(owner string) []string {
 	return out
 }
 
-func (p ProjectSummary) propagatedEvidence(owner string) []Evidence {
+func (p ProjectSummary) propagatedEvidence(owner string, reachable []string) []Evidence {
 	if p.provenance == nil {
 		return nil
 	}
 	index := newMembershipIndex[Evidence](0, evidenceKey)
 	var out []Evidence
-	for _, key := range p.reachableProcedureKeys(owner) {
+	for _, key := range reachable {
 		for _, evidence := range p.provenance.summaries[key].Direct {
 			if evidence.Origin.Key() == owner || !index.add(evidence) {
 				continue
@@ -151,13 +151,13 @@ func (p ProjectSummary) propagatedEvidence(owner string) []Evidence {
 	return out
 }
 
-func (p ProjectSummary) propagatedUncertainty(owner string) []CallUncertainty {
+func (p ProjectSummary) propagatedUncertainty(owner string, reachable []string) []CallUncertainty {
 	if p.provenance == nil {
 		return nil
 	}
 	index := newMembershipIndex[CallUncertainty](0, uncertaintyKey)
 	var out []CallUncertainty
-	for _, key := range p.reachableProcedureKeys(owner) {
+	for _, key := range reachable {
 		for _, uncertainty := range p.provenance.summaries[key].DirectUncertainty {
 			if uncertainty.Origin.Key() == owner || !index.add(uncertainty) {
 				continue
@@ -169,19 +169,30 @@ func (p ProjectSummary) propagatedUncertainty(owner string) []CallUncertainty {
 	return out
 }
 
-func (p ProjectSummary) propagatedErrors(owner string) []ErrorEvidence {
+func (p ProjectSummary) propagatedErrors(owner string, reachable []string) []ErrorEvidence {
 	if p.provenance == nil {
 		return nil
 	}
 	index := newMembershipIndex[ErrorEvidence](0, errorEvidenceKey)
+	pathCache := map[string]map[string][]string{}
 	var out []ErrorEvidence
-	for _, key := range p.reachableProcedureKeys(owner) {
+	for _, key := range reachable {
 		for _, evidence := range p.provenance.summaries[key].Error.Direct {
 			if evidence.Behavior == ErrorMayRaise || evidence.Origin.Key() == owner {
 				continue
 			}
+			origin := evidence.Origin.Key()
+			paths, ok := pathCache[origin]
+			if !ok {
+				paths = p.cachedErrorPaths(origin)
+				pathCache[origin] = paths
+			}
+			path, ok := paths[owner]
+			if !ok {
+				continue
+			}
 			copyEvidence := cloneErrorEvidence([]ErrorEvidence{evidence})[0]
-			copyEvidence.CallChain = p.errorCallChain(owner, evidence.Origin.Key())
+			copyEvidence.CallChain = procedurePathIdentities(p.provenance.summaries, path)
 			if len(copyEvidence.CallChain) == 0 || !index.add(copyEvidence) {
 				continue
 			}
@@ -202,25 +213,40 @@ func (p ProjectSummary) propagatedErrors(owner string) []ErrorEvidence {
 	return out
 }
 
-func (p ProjectSummary) errorCallChain(owner, origin string) []ProcedureIdentity {
-	if owner == origin {
-		return nil
-	}
+func (p ProjectSummary) cachedErrorPaths(origin string) map[string][]string {
 	if p.provenance == nil {
 		return nil
 	}
-	// Re-run the legacy first-arrival worklist for this one origin. The eager
+	p.provenance.pathMu.Lock()
+	defer p.provenance.pathMu.Unlock()
+	if p.provenance.errorPaths == nil {
+		p.provenance.errorPaths = map[string]map[string][]string{}
+	}
+	if paths, ok := p.provenance.errorPaths[origin]; ok {
+		return paths
+	}
+	paths := p.errorPathsFromOrigin(origin)
+	p.provenance.errorPaths[origin] = paths
+	return paths
+}
+
+func (p ProjectSummary) errorPathsFromOrigin(origin string) map[string][]string {
+	if p.provenance == nil {
+		return nil
+	}
+	keys := p.provenance.keys
+	if len(keys) == 0 {
+		keys = make([]string, 0, len(p.provenance.summaries))
+		for key := range p.provenance.summaries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+	}
+	// Re-run the legacy first-arrival worklist for this origin. The eager
 	// implementation selected a representative path when an ErrorEvidence key
 	// first reached a caller; a shortest-path search can choose a different path
 	// when a long branch is queued before a shorter branch becomes informative.
-	// This simulation carries only one path per procedure and is performed only
-	// while materializing an error witness, so it does not inflate the fixed
-	// point state.
-	keys := make([]string, 0, len(p.provenance.summaries))
-	for key := range p.provenance.summaries {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	// Keep every first-arrival path so all owners can reuse this one traversal.
 	queue := append([]string(nil), keys...)
 	queued := make(map[string]bool, len(keys))
 	for _, key := range keys {
@@ -248,16 +274,13 @@ func (p ProjectSummary) errorCallChain(owner, origin string) []ProcedureIdentity
 			nextPath = append(nextPath, caller)
 			nextPath = append(nextPath, path...)
 			paths[caller] = nextPath
-			if caller == owner {
-				return procedurePathIdentities(p.provenance.summaries, nextPath)
-			}
 			if !queued[caller] {
 				queue = append(queue, caller)
 				queued[caller] = true
 			}
 		}
 	}
-	return nil
+	return paths
 }
 
 func procedurePathIdentities(summaries map[string]ProcedureSummary, path []string) []ProcedureIdentity {

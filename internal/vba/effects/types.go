@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -225,9 +226,12 @@ func (s *semanticState) factCount() uint64 {
 }
 
 type provenanceGraph struct {
-	callers   map[string][]string
-	callees   map[string][]string
-	summaries map[string]ProcedureSummary
+	callers    map[string][]string
+	callees    map[string][]string
+	summaries  map[string]ProcedureSummary
+	keys       []string
+	pathMu     sync.Mutex
+	errorPaths map[string]map[string][]string
 }
 
 func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
@@ -317,9 +321,10 @@ func (p ProjectSummary) materialize(index int) ProcedureSummary {
 		return out
 	}
 	key := out.Identity.Key()
-	out.Propagated = p.propagatedEvidence(key)
-	out.PropagatedUncertainty = p.propagatedUncertainty(key)
-	out.Error.Propagated = p.propagatedErrors(key)
+	reachable := p.reachableProcedureKeys(key)
+	out.Propagated = p.propagatedEvidence(key, reachable)
+	out.PropagatedUncertainty = p.propagatedUncertainty(key, reachable)
+	out.Error.Propagated = p.propagatedErrors(key, reachable)
 	if out.semantic != nil {
 		out.Error = errorSummaryWithState(out.Error, out.semantic)
 	}

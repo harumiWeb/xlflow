@@ -186,10 +186,24 @@ func TestWithoutNormalErrRaiseContinuationUsesSparseBlockIndex(t *testing.T) {
 		Entry: 40, NormalExit: 120, ExceptionalExit: 150,
 	}
 	filtered := graph.WithoutNormalErrRaiseContinuation()
+	keptEntry := false
+	keptExceptional := false
 	for _, edge := range filtered.Edges {
 		if edge.From == 90 && edge.Class == EdgeNormal {
 			t.Fatalf("sparse Err.Raise block retained normal edge: %+v", edge)
 		}
+		if edge.From == 40 && edge.To == 90 && edge.Class == EdgeNormal {
+			keptEntry = true
+		}
+		if edge.From == 90 && edge.To == 150 && edge.Class == EdgeExceptional {
+			keptExceptional = true
+		}
+	}
+	if !keptEntry {
+		t.Fatalf("filtered edges = %+v, want the normal entry edge retained", filtered.Edges)
+	}
+	if !keptExceptional {
+		t.Fatalf("filtered edges = %+v, want the exceptional edge retained", filtered.Edges)
 	}
 }
 

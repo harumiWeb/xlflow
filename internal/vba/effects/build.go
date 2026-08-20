@@ -93,20 +93,18 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 		}
 		return edges[i].to < edges[j].to
 	})
-	stats := propagateBounded(summaries, edges)
+	callers, callees := buildAdjacency(edges)
+	stats := propagateBounded(summaries, callers)
 	out := ProjectSummary{
 		byKey:           map[string]int{},
 		byCandidateLine: map[int][]int{},
 		stats:           stats,
 		provenance: &provenanceGraph{
-			callers:   map[string][]string{},
-			callees:   map[string][]string{},
-			summaries: map[string]ProcedureSummary{},
+			callers:    callers,
+			callees:    callees,
+			summaries:  map[string]ProcedureSummary{},
+			errorPaths: map[string]map[string][]string{},
 		},
-	}
-	for _, item := range edges {
-		out.provenance.callees[item.from] = appendUniqueKey(out.provenance.callees[item.from], item.to)
-		out.provenance.callers[item.to] = appendUniqueKey(out.provenance.callers[item.to], item.from)
 	}
 	for _, summary := range summaries {
 		out.procedures = append(out.procedures, *summary)
@@ -118,11 +116,9 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 		line := out.procedures[i].Identity.DeclarationLine
 		out.byCandidateLine[line] = append(out.byCandidateLine[line], i)
 	}
-	for key := range out.provenance.callees {
-		sort.Strings(out.provenance.callees[key])
-	}
-	for key := range out.provenance.callers {
-		sort.Strings(out.provenance.callers[key])
+	out.provenance.keys = make([]string, 0, len(out.provenance.summaries))
+	for _, summary := range out.procedures {
+		out.provenance.keys = append(out.provenance.keys, summary.Identity.Key())
 	}
 	return out, stats
 }
@@ -154,15 +150,6 @@ func candidateIndex(inputs []procedureInput) map[string]string {
 
 func candidateKey(c procedureir.Candidate) string {
 	return strings.Join([]string{canonicalPath(c.File), strings.ToLower(c.QualifiedName), strings.ToLower(c.Kind), decimal(c.Line)}, "\x00")
-}
-
-func appendUniqueKey(items []string, value string) []string {
-	for _, item := range items {
-		if item == value {
-			return items
-		}
-	}
-	return append(items, value)
 }
 
 func reachableStatements(proc procedureir.ProcedureIR, graph cfg.Graph) map[int]bool {
@@ -213,15 +200,43 @@ func dedupeDirect(summary *ProcedureSummary) {
 	summary.DirectUncertainty = uniqueUncertainty(summary.DirectUncertainty)
 }
 
-// propagateBounded propagates only finite semantic state.
-func propagateBounded(summaries map[string]*ProcedureSummary, edges []edge) BuildStats {
-	callers := map[string][]string{}
+func buildAdjacency(edges []edge) (map[string][]string, map[string][]string) {
+	callerSets := make(map[string]map[string]struct{})
+	calleeSets := make(map[string]map[string]struct{})
 	for _, item := range edges {
-		callers[item.to] = appendUniqueKey(callers[item.to], item.from)
+		callers := callerSets[item.to]
+		if callers == nil {
+			callers = map[string]struct{}{}
+			callerSets[item.to] = callers
+		}
+		callers[item.from] = struct{}{}
+
+		callees := calleeSets[item.from]
+		if callees == nil {
+			callees = map[string]struct{}{}
+			calleeSets[item.from] = callees
+		}
+		callees[item.to] = struct{}{}
 	}
-	for key := range callers {
+	callers := make(map[string][]string, len(callerSets))
+	for key, set := range callerSets {
+		for caller := range set {
+			callers[key] = append(callers[key], caller)
+		}
 		sort.Strings(callers[key])
 	}
+	callees := make(map[string][]string, len(calleeSets))
+	for key, set := range calleeSets {
+		for callee := range set {
+			callees[key] = append(callees[key], callee)
+		}
+		sort.Strings(callees[key])
+	}
+	return callers, callees
+}
+
+// propagateBounded propagates only finite semantic state.
+func propagateBounded(summaries map[string]*ProcedureSummary, callers map[string][]string) BuildStats {
 	queue := make([]string, 0, len(summaries))
 	queued := map[string]bool{}
 	for key := range summaries {

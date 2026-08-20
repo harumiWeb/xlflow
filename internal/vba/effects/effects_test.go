@@ -750,6 +750,22 @@ func TestBuildKeepsFixedPointStateBoundedUntilProvenanceIsRequested(t *testing.T
 	if len(materialized[0].Propagated) == 0 {
 		t.Fatalf("lazy provenance did not reconstruct the chain: %#v", materialized[0])
 	}
+	var direct ProcedureSummary
+	for _, summary := range project.AllDirect() {
+		if summary.Identity.QualifiedName == "EffectsBenchmark.Proc0000" {
+			direct = summary
+			break
+		}
+	}
+	if direct.Identity.QualifiedName == "" {
+		t.Fatal("direct-only root summary was not found")
+	}
+	if len(direct.Propagated) != 0 {
+		t.Fatalf("direct-only summary materialized propagated evidence: %#v", direct.Propagated)
+	}
+	if !direct.Has(WritesCells) {
+		t.Fatalf("direct-only summary lost transitive semantic effect: %#v", direct)
+	}
 }
 
 func TestMembershipIndexComputesOneKeyPerAdd(t *testing.T) {
