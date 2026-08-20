@@ -295,7 +295,7 @@ jobs:
           codex-home: ${{ steps.paths.outputs.codex_home }}
 
           model: gpt-5.6-luna
-          effort: xhigh
+          effort: high
 
           permission-profile: ":read-only"
           safety-strategy: drop-sudo
