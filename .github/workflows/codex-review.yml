@@ -7,6 +7,8 @@ on:
       - synchronize
       - reopened
       - ready_for_review
+      - converted_to_draft
+      - closed
 
 # A newer revision of the same PR makes an in-progress review stale.
 # Cancellation is only an optimization; publication also verifies the
@@ -28,6 +30,7 @@ jobs:
     #
     # openai/codex-action also performs its own actor write-access check.
     if: >
+      github.event.pull_request.state == 'open' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
 
@@ -45,6 +48,57 @@ jobs:
       final_message: ${{ steps.codex.outputs.final-message }}
 
     steps:
+      # RTK is useful for an exploratory review workload because Codex runs
+      # many git/rg/read-style commands.
+      #
+      # Build from an immutable upstream commit instead of executing a mutable
+      # installer or downloading an unchecked "latest" binary.
+      #
+      # --locked ensures the upstream Cargo.lock is respected.
+      - name: Install pinned RTK in isolated environment
+        shell: bash
+        env:
+          RTK_REV: b34be37caf3796b69a50952a28e60e32b5daad43 # v0.45.0
+          RTK_ROOT: ${{ runner.temp }}/rtk
+          CARGO_HOME: ${{ runner.temp }}/cargo-home
+          CARGO_TARGET_DIR: ${{ runner.temp }}/rtk-target
+        run: |
+          set -euo pipefail
+
+          bootstrap="$RUNNER_TEMP/rtk-bootstrap"
+
+          rm -rf \
+            "$bootstrap" \
+            "$CARGO_HOME" \
+            "$CARGO_TARGET_DIR" \
+            "$RTK_ROOT"
+
+          mkdir -p \
+            "$bootstrap" \
+            "$CARGO_HOME" \
+            "$CARGO_TARGET_DIR" \
+            "$RTK_ROOT"
+
+          # Important: do not execute Cargo from the PR checkout.
+          cd "$bootstrap"
+
+          # Do not inherit compiler wrappers from an ambient Cargo/Rust
+          # configuration.
+          unset RUSTC_WRAPPER
+          unset RUSTC_WORKSPACE_WRAPPER
+
+          cargo install \
+            --git https://github.com/rtk-ai/rtk.git \
+            --rev "$RTK_REV" \
+            --locked \
+            --root "$RTK_ROOT" \
+            rtk
+
+          echo "$RTK_ROOT/bin" >> "$GITHUB_PATH"
+
+          "$RTK_ROOT/bin/rtk" --version
+          "$RTK_ROOT/bin/rtk" --version | grep -F "0.45.0"
+
       # Pin the checkout action and the reviewed repository revision.
       #
       # Do not use refs/pull/<n>/merge or refs/pull/<n>/head here:
@@ -88,33 +142,6 @@ jobs:
 
           echo "Review base: $PR_BASE_SHA"
           echo "Review head: $PR_HEAD_SHA"
-
-      # RTK is useful for an exploratory review workload because Codex runs
-      # many git/rg/read-style commands.
-      #
-      # Build from an immutable upstream commit instead of executing a mutable
-      # installer or downloading an unchecked "latest" binary.
-      #
-      # --locked ensures the upstream Cargo.lock is respected.
-      - name: Install pinned RTK
-        shell: bash
-        env:
-          RTK_REV: b34be37caf3796b69a50952a28e60e32b5daad43 # v0.45.0
-          RTK_ROOT: ${{ runner.temp }}/rtk
-        run: |
-          set -euo pipefail
-
-          cargo install \
-            --git https://github.com/rtk-ai/rtk.git \
-            --rev "$RTK_REV" \
-            --locked \
-            --root "$RTK_ROOT" \
-            rtk
-
-          echo "$RTK_ROOT/bin" >> "$GITHUB_PATH"
-
-          "$RTK_ROOT/bin/rtk" --version
-          "$RTK_ROOT/bin/rtk" --version | grep -F "0.45.0"
 
       - name: Run Codex review
         id: codex
@@ -407,7 +434,6 @@ jobs:
 
               No actionable findings.
 
-
   publish:
     name: Publish Codex review
     needs: review
@@ -444,43 +470,159 @@ jobs:
             const expectedBase = process.env.EXPECTED_BASE_SHA;
             const body = process.env.CODEX_REVIEW;
 
-            // Cancellation of an older workflow is not an atomic guarantee.
-            // Re-read the PR immediately before publication.
-            const { data: pull } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            function validatePull(pull, phase) {
+              if (pull.state !== "open") {
+                core.notice(
+                  `Skipping Codex review during ${phase}: ` +
+                  `PR #${pull_number} is no longer open.`
+                );
+                return false;
+              }
+
+              if (pull.draft) {
+                core.notice(
+                  `Skipping Codex review during ${phase}: ` +
+                  `PR #${pull_number} is now a draft.`
+                );
+                return false;
+              }
+
+              if (pull.head.sha !== expectedHead) {
+                core.notice(
+                  `Skipping stale Codex review during ${phase}: head moved ` +
+                  `from ${expectedHead} to ${pull.head.sha}.`
+                );
+                return false;
+              }
+
+              if (pull.base.sha !== expectedBase) {
+                core.notice(
+                  `Skipping stale Codex review during ${phase}: base moved ` +
+                  `from ${expectedBase} to ${pull.base.sha}.`
+                );
+                return false;
+              }
+
+              return true;
+            }
+
+            async function getPull() {
+              const { data } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number,
+              });
+
+              return data;
+            }
+
+            // First eligibility/revision check.
+            let pull = await getPull();
+
+            if (!validatePull(pull, "pre-publication check")) {
+              return;
+            }
+
+            const CODEX_MARKER = "<!-- xlflow-codex-review -->";
+
+            // Clean up a pending Codex review that may have been left behind by a
+            // workflow run cancelled after createReview() but before submitReview().
+            const { data: existingReviews } = await github.rest.pulls.listReviews({
+              owner,
+              repo,
               pull_number,
+              per_page: 100,
             });
 
-            if (pull.state !== "open") {
+            for (const review of existingReviews) {
+              if (
+                review.state === "PENDING" &&
+                typeof review.body === "string" &&
+                review.body.includes(CODEX_MARKER)
+              ) {
+                core.notice(
+                  `Deleting orphaned pending Codex review ${review.id}.`
+                );
+
+                await github.rest.pulls.deletePendingReview({
+                  owner,
+                  repo,
+                  pull_number,
+                  review_id: review.id,
+                });
+              }
+            }
+
+            const reviewBody = `${body}\n\n${CODEX_MARKER}`;
+
+            // Create a PENDING review first. It is not visible as a submitted
+            // review yet, so we can safely discard it if the PR changes.
+            const { data: pendingReview } =
+              await github.rest.pulls.createReview({
+                owner,
+                repo,
+                pull_number,
+                commit_id: expectedHead,
+                body: reviewBody,
+              });
+
+            // Re-read the PR after creating the pending review.
+            pull = await getPull();
+
+            if (!validatePull(pull, "pre-submit check")) {
+              await github.rest.pulls.deletePendingReview({
+                owner,
+                repo,
+                pull_number,
+                review_id: pendingReview.id,
+              });
+
               core.notice(
-                `Skipping Codex review: PR #${pull_number} is no longer open.`
+                `Deleted stale pending Codex review ${pendingReview.id}.`
               );
+
               return;
             }
 
-            if (pull.head.sha !== expectedHead) {
-              core.notice(
-                `Skipping stale Codex review: head moved ` +
-                `from ${expectedHead} to ${pull.head.sha}.`
-              );
-              return;
-            }
+            // Submit only after the second revision check.
+            const { data: submittedReview } =
+              await github.rest.pulls.submitReview({
+                owner,
+                repo,
+                pull_number,
+                review_id: pendingReview.id,
+                event: "COMMENT",
+              });
 
-            if (pull.base.sha !== expectedBase) {
-              core.notice(
-                `Skipping stale Codex review: base moved ` +
-                `from ${expectedBase} to ${pull.base.sha}.`
-              );
-              return;
-            }
+            // There is no atomic compare-and-submit primitive in the GitHub
+            // review API. Reconcile once more after submission to cover a
+            // push/draft/close racing with submitReview().
+            pull = await getPull();
 
-            // Anchor the review to the exact commit that Codex inspected.
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number,
-              commit_id: expectedHead,
-              event: "COMMENT",
-              body,
-            });
+            if (!validatePull(pull, "post-submit check")) {
+              try {
+                await github.rest.pulls.dismissReview({
+                  owner,
+                  repo,
+                  pull_number,
+                  review_id: submittedReview.id,
+                  message:
+                    "Dismissed automatically because the pull request " +
+                    "changed while the Codex review was being published.",
+                });
+
+                core.notice(
+                  `Dismissed stale Codex review ${submittedReview.id}.`
+                );
+              } catch (error) {
+                // Dismissal can be restricted by repository branch/ruleset
+                // configuration. Do not hide the failure.
+                core.warning(
+                  `Codex review ${submittedReview.id} became stale after ` +
+                  `submission, but automatic dismissal failed: ${error.message}`
+                );
+              }
+            }
