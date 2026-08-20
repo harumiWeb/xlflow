@@ -4,6 +4,10 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Improved project-local call graph construction by indexing canonical
+  procedure candidate identities, avoiding a full procedure-node scan for each
+  uniquely matched call while preserving conservative resolution behavior.
+
 - Added canonical large-single-module analyzer performance telemetry for
   `xlflow analyze --performance-log`, including aggregate workload counters and
   maximum file/procedure dimensions. Profiling remains opt-in and stderr-only;
