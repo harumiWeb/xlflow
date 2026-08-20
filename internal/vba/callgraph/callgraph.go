@@ -167,14 +167,13 @@ type AmbiguousTargetError struct{ Candidates []Node }
 func (e *AmbiguousTargetError) Error() string { return "impact target is ambiguous" }
 
 type graph struct {
-	nodes              map[string]Node
-	byQualified        map[string][]string
-	byName             map[string][]string
-	byCandidate        map[procedureIdentity]string
-	candidateConflicts map[procedureIdentity]struct{}
-	out                map[string][]Edge
-	in                 map[string][]Edge
-	uncertain          map[string][]calls.Call
+	nodes       map[string]Node
+	byQualified map[string][]string
+	byName      map[string][]string
+	byCandidate map[procedureIdentity]candidateIndexEntry
+	out         map[string][]Edge
+	in          map[string][]Edge
+	uncertain   map[string][]calls.Call
 }
 
 // procedureIdentity contains the fields that a uniquely resolved call
@@ -186,6 +185,15 @@ type procedureIdentity struct {
 	kind          string
 	file          string
 	line          int
+}
+
+// candidateIndexEntry retains every graph node in a normalized identity
+// bucket. Most buckets contain one node and therefore avoid a slice
+// allocation; alternates are retained only for normalized collisions and are
+// checked against the original identity fields during lookup.
+type candidateIndexEntry struct {
+	first      string
+	alternates []string
 }
 
 func Analyze(input *calls.Result, request Request) (Result, error) {
@@ -304,7 +312,7 @@ func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {
 }
 
 func build(input Snapshot) graph {
-	g := graph{nodes: map[string]Node{}, byQualified: map[string][]string{}, byName: map[string][]string{}, byCandidate: map[procedureIdentity]string{}, candidateConflicts: map[procedureIdentity]struct{}{}, out: map[string][]Edge{}, in: map[string][]Edge{}, uncertain: map[string][]calls.Call{}}
+	g := graph{nodes: map[string]Node{}, byQualified: map[string][]string{}, byName: map[string][]string{}, byCandidate: map[procedureIdentity]candidateIndexEntry{}, out: map[string][]Edge{}, in: map[string][]Edge{}, uncertain: map[string][]calls.Call{}}
 	moduleKinds := map[string]string{}
 	for _, sym := range input.Symbols {
 		if sym.Kind == "module" {
@@ -332,27 +340,24 @@ func build(input Snapshot) graph {
 	// The candidate index is populated immediately below and has one entry per
 	// procedure in the common case. Reserve that capacity after the node pass so
 	// map growth does not become part of the matched-call hot path.
-	g.byCandidate = make(map[procedureIdentity]string, len(g.nodes))
+	g.byCandidate = make(map[procedureIdentity]candidateIndexEntry, len(g.nodes))
 	for qualified := range g.byQualified {
 		sort.Strings(g.byQualified[qualified])
 	}
 	for name := range g.byName {
 		sort.Strings(g.byName[name])
 	}
-	// Build the candidate identity index once for this graph snapshot. Keep a
-	// separate conflict set so the common unique-identity case does not allocate
-	// a one-element slice for every procedure.
+	// Build the candidate identity index once for this graph snapshot. Keep all
+	// normalized collisions so an exact raw-file match can still be selected.
 	for key, node := range g.nodes {
 		identity := procedureIdentityForNode(node)
-		if _, conflict := g.candidateConflicts[identity]; conflict {
-			continue
+		entry, exists := g.byCandidate[identity]
+		if !exists {
+			entry.first = key
+		} else {
+			entry.alternates = append(entry.alternates, key)
 		}
-		if _, exists := g.byCandidate[identity]; exists {
-			delete(g.byCandidate, identity)
-			g.candidateConflicts[identity] = struct{}{}
-			continue
-		}
-		g.byCandidate[identity] = key
+		g.byCandidate[identity] = entry
 	}
 	for _, call := range input.Calls {
 		if call.Caller == nil {
@@ -406,22 +411,36 @@ func procedureIdentityForCandidate(candidate calls.Candidate) procedureIdentity 
 	}
 }
 
-// candidateKey returns a callee only when its canonical identity is unique
-// and the original comparison used by the graph builder still succeeds.
-// Rechecking the original values is important because normalization is an
-// index optimization, not a change to call-resolution semantics.
+// candidateKey narrows a candidate to its canonical identity bucket, then
+// rechecks the original comparison used by the graph builder. Normalized path
+// collisions may contain a valid exact match, while multiple exact matches
+// remain ambiguous and must not become a confirmed edge.
 func (g graph) candidateKey(candidate calls.Candidate) string {
 	identity := procedureIdentityForCandidate(candidate)
-	if _, conflict := g.candidateConflicts[identity]; conflict {
+	entry, ok := g.byCandidate[identity]
+	if !ok {
 		return ""
 	}
-	key, ok := g.byCandidate[identity]
-	node, nodeOK := g.nodes[key]
-	if !ok || !nodeOK || !strings.EqualFold(node.ID.QualifiedName, candidate.QualifiedName) ||
-		node.ID.Kind != candidate.Kind || node.ID.File != candidate.File || node.ID.Line != candidate.Line {
-		return ""
+	match := ""
+	if g.candidateNodeMatches(entry.first, candidate) {
+		match = entry.first
 	}
-	return key
+	for _, key := range entry.alternates {
+		if !g.candidateNodeMatches(key, candidate) {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = key
+	}
+	return match
+}
+
+func (g graph) candidateNodeMatches(key string, candidate calls.Candidate) bool {
+	node, ok := g.nodes[key]
+	return ok && strings.EqualFold(node.ID.QualifiedName, candidate.QualifiedName) &&
+		node.ID.Kind == candidate.Kind && node.ID.File == candidate.File && node.ID.Line == candidate.Line
 }
 
 func normalizeProcedureFile(file string) string {

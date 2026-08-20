@@ -451,6 +451,39 @@ func TestBuildIndexesCandidateIdentityWithoutChangingMatches(t *testing.T) {
 	}
 }
 
+func TestBuildSelectsExactCandidateFromNormalizedFileCollision(t *testing.T) {
+	input := Snapshot{
+		Symbols: []Symbol{
+			{Name: "Caller", Kind: "sub", Module: "Main", File: "Main.bas", Line: 1, Column: 1},
+			{Name: "Target", Kind: "sub", Module: "M", File: "src/M.bas", Line: 5, Column: 1},
+			{Name: "Target", Kind: "sub", Module: "M", File: "src/./M.bas", Line: 5, Column: 2},
+		},
+		Calls: []calls.Call{
+			matched("Main", "Main.bas", "Caller", "M", "src/M.bas", "Target", 5, 2),
+			matched("Main", "Main.bas", "Caller", "M", "src/./M.bas", "Target", 5, 3),
+		},
+	}
+
+	g := build(input)
+	callerKey, ok := g.lookupCallerKey("Main.Caller", "sub", "Main.bas")
+	if !ok {
+		t.Fatal("caller was not indexed")
+	}
+	if got := len(g.out[callerKey]); got != 2 {
+		t.Fatalf("confirmed edges = %d, want 2", got)
+	}
+	files := map[string]int{}
+	for _, edge := range g.out[callerKey] {
+		if edge.Callee.File != "src/M.bas" && edge.Callee.File != "src/./M.bas" {
+			t.Fatalf("unexpected callee file = %q", edge.Callee.File)
+		}
+		files[edge.Callee.File]++
+	}
+	if files["src/M.bas"] != 1 || files["src/./M.bas"] != 1 {
+		t.Fatalf("normalized collision targets = %#v, want one edge per raw file", files)
+	}
+}
+
 func TestBuildIndexesPropertyAccessorKinds(t *testing.T) {
 	input := Snapshot{
 		Symbols: []Symbol{
