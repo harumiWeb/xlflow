@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
 )
@@ -168,9 +170,30 @@ type graph struct {
 	nodes       map[string]Node
 	byQualified map[string][]string
 	byName      map[string][]string
+	byCandidate map[procedureIdentity]candidateIndexEntry
 	out         map[string][]Edge
 	in          map[string][]Edge
 	uncertain   map[string][]calls.Call
+}
+
+// procedureIdentity contains the fields that a uniquely resolved call
+// candidate must match before it can become a confirmed graph edge. The file
+// component is normalized for indexing, while build still rechecks the
+// original file string below to preserve the historical exact-file match.
+type procedureIdentity struct {
+	qualifiedName string
+	kind          string
+	file          string
+	line          int
+}
+
+// candidateIndexEntry retains every graph node in a normalized identity
+// bucket. Most buckets contain one node and therefore avoid a slice
+// allocation; alternates are retained only for normalized collisions and are
+// checked against the original identity fields during lookup.
+type candidateIndexEntry struct {
+	first      string
+	alternates []string
 }
 
 func Analyze(input *calls.Result, request Request) (Result, error) {
@@ -289,7 +312,7 @@ func AnalyzeSnapshot(input Snapshot, request Request) (Result, error) {
 }
 
 func build(input Snapshot) graph {
-	g := graph{nodes: map[string]Node{}, byQualified: map[string][]string{}, byName: map[string][]string{}, out: map[string][]Edge{}, in: map[string][]Edge{}, uncertain: map[string][]calls.Call{}}
+	g := graph{nodes: map[string]Node{}, byQualified: map[string][]string{}, byName: map[string][]string{}, byCandidate: map[procedureIdentity]candidateIndexEntry{}, out: map[string][]Edge{}, in: map[string][]Edge{}, uncertain: map[string][]calls.Call{}}
 	moduleKinds := map[string]string{}
 	for _, sym := range input.Symbols {
 		if sym.Kind == "module" {
@@ -314,11 +337,27 @@ func build(input Snapshot) graph {
 		g.byQualified[qualified] = append(g.byQualified[qualified], key)
 		g.byName[strings.ToLower(node.Name)] = append(g.byName[strings.ToLower(node.Name)], key)
 	}
+	// The candidate index is populated immediately below and has one entry per
+	// procedure in the common case. Reserve that capacity after the node pass so
+	// map growth does not become part of the matched-call hot path.
+	g.byCandidate = make(map[procedureIdentity]candidateIndexEntry, len(g.nodes))
 	for qualified := range g.byQualified {
 		sort.Strings(g.byQualified[qualified])
 	}
 	for name := range g.byName {
 		sort.Strings(g.byName[name])
+	}
+	// Build the candidate identity index once for this graph snapshot. Keep all
+	// normalized collisions so an exact raw-file match can still be selected.
+	for key, node := range g.nodes {
+		identity := procedureIdentityForNode(node)
+		entry, exists := g.byCandidate[identity]
+		if !exists {
+			entry.first = key
+		} else {
+			entry.alternates = append(entry.alternates, key)
+		}
+		g.byCandidate[identity] = entry
 	}
 	for _, call := range input.Calls {
 		if call.Caller == nil {
@@ -333,13 +372,7 @@ func build(input Snapshot) graph {
 			continue
 		}
 		candidate := call.Resolution.Candidates[0]
-		calleeKey := ""
-		for key, node := range g.nodes {
-			if strings.EqualFold(node.ID.QualifiedName, candidate.QualifiedName) && node.ID.Kind == candidate.Kind && node.ID.File == candidate.File && node.ID.Line == candidate.Line {
-				calleeKey = key
-				break
-			}
-		}
+		calleeKey := g.candidateKey(candidate)
 		if calleeKey == "" {
 			continue
 		}
@@ -358,6 +391,106 @@ func build(input Snapshot) graph {
 		sort.Slice(g.in[key], func(i, j int) bool { return edgeKey(g.in[key][i]) < edgeKey(g.in[key][j]) })
 	}
 	return g
+}
+
+func procedureIdentityForNode(node Node) procedureIdentity {
+	return procedureIdentity{
+		qualifiedName: foldEqualFold(node.ID.QualifiedName),
+		kind:          node.ID.Kind,
+		file:          normalizeProcedureFile(node.ID.File),
+		line:          node.ID.Line,
+	}
+}
+
+func procedureIdentityForCandidate(candidate calls.Candidate) procedureIdentity {
+	return procedureIdentity{
+		qualifiedName: foldEqualFold(candidate.QualifiedName),
+		kind:          candidate.Kind,
+		file:          normalizeProcedureFile(candidate.File),
+		line:          candidate.Line,
+	}
+}
+
+// candidateKey narrows a candidate to its canonical identity bucket, then
+// rechecks the original comparison used by the graph builder. Normalized path
+// collisions may contain a valid exact match, while multiple exact matches
+// remain ambiguous and must not become a confirmed edge.
+func (g graph) candidateKey(candidate calls.Candidate) string {
+	identity := procedureIdentityForCandidate(candidate)
+	entry, ok := g.byCandidate[identity]
+	if !ok {
+		return ""
+	}
+	match := ""
+	if g.candidateNodeMatches(entry.first, candidate) {
+		match = entry.first
+	}
+	for _, key := range entry.alternates {
+		if !g.candidateNodeMatches(key, candidate) {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = key
+	}
+	return match
+}
+
+func (g graph) candidateNodeMatches(key string, candidate calls.Candidate) bool {
+	node, ok := g.nodes[key]
+	return ok && strings.EqualFold(node.ID.QualifiedName, candidate.QualifiedName) &&
+		node.ID.Kind == candidate.Kind && node.ID.File == candidate.File && node.ID.Line == candidate.Line
+}
+
+func normalizeProcedureFile(file string) string {
+	if strings.TrimSpace(file) == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(file))
+}
+
+// foldEqualFold returns a canonical key for Go's Unicode simple-fold
+// equivalence. strings.ToLower is insufficient for a few simple-fold cycles
+// (for example, Kelvin sign), so canonicalize each rune through its complete
+// unicode.SimpleFold cycle. This keeps indexing lossless while retaining the
+// final strings.EqualFold guard in candidateKey.
+func foldEqualFold(value string) string {
+	ascii := true
+	needsUpper := false
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			ascii = false
+			break
+		}
+		if value[i] >= 'a' && value[i] <= 'z' {
+			needsUpper = true
+		}
+	}
+	if ascii {
+		if !needsUpper {
+			return value
+		}
+		folded := []byte(value)
+		for i, char := range folded {
+			if char >= 'a' && char <= 'z' {
+				folded[i] -= 'a' - 'A'
+			}
+		}
+		return string(folded)
+	}
+	var folded strings.Builder
+	folded.Grow(len(value))
+	for _, r := range value {
+		canonical := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < canonical {
+				canonical = next
+			}
+		}
+		folded.WriteRune(canonical)
+	}
+	return folded.String()
 }
 
 // AnalyzeReachability walks the confirmed project call graph from explicit
