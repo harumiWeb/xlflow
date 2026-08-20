@@ -60,6 +60,8 @@ func TestModuleAnalysisFactsUsesIRDeclarationsAndIndexedProcedureOwnership(t *te
 	if declaration := facts.moduleDeclarations["table"]; !declaration.Object {
 		t.Fatalf("IR ListObject declaration = %#v, want object declaration", declaration)
 	}
+	// MSForms controls are runtime-initialized and excluded, while other
+	// IR-marked external objects such as mscorlib.AppDomain remain objects.
 	if declaration := facts.moduleDeclarations["control"]; declaration.Object {
 		t.Fatalf("dotted form-control declaration = %#v, want non-object declaration", declaration)
 	}

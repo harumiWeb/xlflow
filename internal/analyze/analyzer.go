@@ -2023,7 +2023,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
 		}
-		if a.Config.Analyze.DetectObjectArrayComparison {
+		if a.Config.Analyze.DetectObjectArrayComparison && objectNothingEqualityLineIsExecutable(proc, lineNo, stmt) {
 			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
 		}
 		_ = lower
@@ -2661,12 +2661,42 @@ func dictionaryIterationValueUse(stmt, item string, decls declarationScope) bool
 
 func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, decls declarationScope) []Finding {
 	var findings []Finding
+	reported := make(map[string]bool)
 	decls.forEach(func(key string, decl sourceDeclaration) {
 		if decl.Object && objectNothingEqualityComparisonExists(stmt, key) {
 			findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", decl.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+decl.Name+" Is Nothing Then` or `If Not "+decl.Name+" Is Nothing Then`."))
+			reported[key] = true
 		}
 	})
+	for _, declaration := range proc.Declarations {
+		if declaration.Scope != procedureir.ScopeParameter || !sourceDeclarationIsObject(declaration, declaration.Type) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if reported[key] || !objectNothingEqualityComparisonExists(stmt, key) {
+			continue
+		}
+		findings = append(findings, a.simpleFinding(file, proc, lineNo, "VBA209", "warning", declaration.Name+" is compared to Nothing with =.", "Object references must be compared with Is Nothing, not the scalar equality operator.", "Use `If "+declaration.Name+" Is Nothing Then` or `If Not "+declaration.Name+" Is Nothing Then`."))
+		reported[key] = true
+	}
 	return findings
+}
+
+func objectNothingEqualityLineIsExecutable(proc sourceProcedure, lineNo int, stmt string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stmt))
+	if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
+		return false
+	}
+	for _, parameter := range proc.Params {
+		if !parameter.Optional || parameter.Range.StartLine == 0 || lineNo < parameter.Range.StartLine || lineNo > parameter.Range.EndLine {
+			continue
+		}
+		// Optional defaults belong to the procedure declaration, not to an
+		// executable object comparison. Keep the later `If ad = Nothing` line
+		// eligible by limiting this to the parameter's source range.
+		return false
+	}
+	return true
 }
 
 func objectNothingEqualityComparisonExists(stmt, name string) bool {

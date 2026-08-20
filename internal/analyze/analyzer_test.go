@@ -5090,6 +5090,28 @@ End Sub
 	}
 }
 
+func TestAnalyzerObjectNothingComparisonIgnoresOptionalParameterDefault(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Load(Optional ad As mscorlib.AppDomain = Nothing) As Object
+  If ad = Nothing Then
+    Set ad = New Collection
+  End If
+  Set Load = ad
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 1 || got[0].Line != 3 || !strings.Contains(got[0].Message, "ad") {
+		t.Fatalf("optional default must be ignored while executable comparison remains reported: %+v", got)
+	}
+}
+
 func TestVBA209BatchAndRealtimeResultsMatch(t *testing.T) {
 	dir := t.TempDir()
 	source := `Option Explicit
@@ -7476,6 +7498,46 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a successful bounds probe must prove the later indexed access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsUnprovenResumeNextCapacityGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Stale(ByRef values() As Byte)
+  Dim capacity As Long
+  capacity = 1
+  On Error Resume Next
+  capacity = UBound(values) - LBound(values) + 1
+  On Error GoTo 0
+  If capacity <= 0 Then Exit Sub
+  Debug.Print values(LBound(values))
+End Sub
+
+Private Sub GotoGuard(ByRef values() As Byte)
+  Dim capacity As Long
+  capacity = 0
+  On Error Resume Next
+  capacity = UBound(values) - LBound(values) + 1
+  On Error GoTo 0
+  If capacity <= 0 Then GoTo done
+  Debug.Print values(LBound(values))
+done:
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	seen := map[string]bool{}
+	for _, finding := range got {
+		seen[finding.Procedure] = true
+	}
+	if !seen["Stale"] || !seen["GotoGuard"] {
+		t.Fatalf("unproven Resume Next guards must not suppress indexed access: %+v", got)
 	}
 }
 

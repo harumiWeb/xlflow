@@ -37,7 +37,7 @@
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":52,"column":22}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":60,"column":10}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":60,"column":10}
-{"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA209","severity":"warning","line":82,"column":0}
+{"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA209","severity":"warning","line":83,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":104,"column":21}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":116,"column":61}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":116,"column":61}

@@ -123,7 +123,7 @@ var (
 	arrayErrNumberFailureRe   = regexp.MustCompile(`(?i)^\s*if\s+err\.number\s*<>\s*0\s+then\s*$`)
 	arrayCapacityProbeRe      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
 	arrayBoundsProbeRe        = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*-\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
-	arrayCheckedProbeExitRe   = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*(?:<=|=)\s*0\s+then\s+(?:exit\s+(?:sub|function|property)|goto\s+[A-Za-z_]\w*)\s*$`)
+	arrayCheckedProbeExitRe   = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*(?:<=|=)\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
 	arrayCapacityIfRe         = regexp.MustCompile(`(?i)^\s*if\s+.+\s*>\s*([A-Za-z_]\w*)\s+then\s*$`)
 	arrayForZeroToCountRe     = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
 	arrayLabelRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
@@ -533,26 +533,28 @@ func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variab
 		if !known || !variable.isArray {
 			continue
 		}
-		if restoreIndex, restoreText, ok := nextNonEmpty(probeIndex + 1); ok &&
-			(arrayOnErrorGotoZeroRe.MatchString(restoreText) || arrayOnErrorGotoRe.MatchString(restoreText)) {
-			if checkIndex, checkText, ok := nextNonEmpty(restoreIndex + 1); ok {
-				if match := arrayCheckedProbeExitRe.FindStringSubmatch(checkText); len(match) == 2 && strings.EqualFold(match[1], capacityName) {
-					indexStartLine := checkIndex + 2
-					indexEndLine := end
-					for candidate := indexStartLine - 1; candidate < end; candidate++ {
-						text := lineText(candidate)
-						if erase := arrayEraseRe.FindStringSubmatch(text); len(erase) == 2 && strings.EqualFold(strings.TrimSpace(erase[1]), targetName) {
-							indexEndLine = candidate
-							break
+		if arrayResumeNextCapacityStartsAtZero(file, proc, variables, index, capacityName) {
+			if restoreIndex, restoreText, ok := nextNonEmpty(probeIndex + 1); ok &&
+				(arrayOnErrorGotoZeroRe.MatchString(restoreText) || arrayOnErrorGotoRe.MatchString(restoreText)) {
+				if checkIndex, checkText, ok := nextNonEmpty(restoreIndex + 1); ok {
+					if match := arrayCheckedProbeExitRe.FindStringSubmatch(checkText); len(match) == 2 && strings.EqualFold(match[1], capacityName) {
+						indexStartLine := checkIndex + 2
+						indexEndLine := end
+						for candidate := indexStartLine - 1; candidate < end; candidate++ {
+							text := lineText(candidate)
+							if erase := arrayEraseRe.FindStringSubmatch(text); len(erase) == 2 && strings.EqualFold(strings.TrimSpace(erase[1]), targetName) {
+								indexEndLine = candidate
+								break
+							}
 						}
+						guards = append(guards, arrayResumeNextCapacityGuard{
+							target:         targetName,
+							probeLine:      probeIndex + 1,
+							indexStartLine: indexStartLine,
+							indexEndLine:   indexEndLine,
+						})
+						continue
 					}
-					guards = append(guards, arrayResumeNextCapacityGuard{
-						target:         targetName,
-						probeLine:      probeIndex + 1,
-						indexStartLine: indexStartLine,
-						indexEndLine:   indexEndLine,
-					})
-					continue
 				}
 			}
 		}
@@ -646,6 +648,76 @@ func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variab
 		})
 	}
 	return guards
+}
+
+// arrayResumeNextCapacityStartsAtZero proves the only state that makes a
+// Resume Next bounds probe safe to use as a guard: a failed assignment must
+// leave the capacity at zero. A stale positive value would make `If capacity
+// <= 0 Then Exit ...` incorrectly accept an unallocated array.
+func arrayResumeNextCapacityStartsAtZero(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, resumeIndex int, capacityName string) bool {
+	start := max(0, proc.StartLine-1)
+	lineText := func(index int) string {
+		if index < 0 || index >= len(file.Lines) {
+			return ""
+		}
+		return strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+	}
+	for index := resumeIndex - 1; index >= start; index-- {
+		text := lineText(index)
+		if text == "" {
+			continue
+		}
+		if rhs, assigned := arrayScalarAssignment(text, capacityName); assigned {
+			return strings.TrimSpace(rhs) == "0"
+		}
+		break
+	}
+
+	variable, known := variables[strings.ToLower(cleanIdentifier(capacityName))]
+	if !known || variable.parameter || variable.isArray || variable.isVariant || !variable.knownScalar {
+		return false
+	}
+	declarationLine := 0
+	for _, declaration := range proc.Declarations {
+		if declaration.Scope != procedureir.ScopeLocal || !strings.EqualFold(cleanIdentifier(declaration.Name), cleanIdentifier(capacityName)) || declaration.IsArray || !arrayKnownScalarType(declaration.Type) {
+			continue
+		}
+		declarationLine = declaration.Range.StartLine
+		break
+	}
+	if declarationLine == 0 || declarationLine > resumeIndex+1 {
+		return false
+	}
+	for index := start; index < resumeIndex; index++ {
+		text := lineText(index)
+		if text == "" || index+1 == declarationLine {
+			continue
+		}
+		if _, assigned := arrayScalarAssignment(text, capacityName); assigned || strings.Contains(strings.ToLower(text), strings.ToLower(cleanIdentifier(capacityName))) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayScalarAssignment(text, name string) (string, bool) {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return "", false
+	}
+	statements := strings.Split(text, ":")
+	for index := len(statements) - 1; index >= 0; index-- {
+		statement := statements[index]
+		if strings.TrimSpace(statement) == "" {
+			continue
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(strings.TrimSpace(statement))
+		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+			return rhs, true
+		}
+		break
+	}
+	return "", false
 }
 
 func arraySourceIfEnd(lines []string, start, end int) int {

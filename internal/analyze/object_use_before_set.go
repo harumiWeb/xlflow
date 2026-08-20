@@ -1960,7 +1960,11 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 		if strings.TrimSpace(name) == "" {
 			name = call.Callee.Member
 		}
-		for _, summary := range objectSummaryCandidatesForDirectCall(call.Module, name, call.File, summaries) {
+		matches := objectSummaryCandidatesForDirectCall(call.Module, name, call.File, summaries)
+		if len(matches) != 1 {
+			matches = nil
+		}
+		for _, summary := range matches {
 			if !strings.EqualFold(strings.TrimSpace(call.Caller.QualifiedName), strings.TrimSpace(summary.QualifiedName)) {
 				candidates = append(candidates, summary)
 			}

@@ -831,6 +831,36 @@ func TestObjectDirectCallSummaryUsesCallFileForDuplicateModules(t *testing.T) {
 	}
 }
 
+func TestObjectCallEffectsSkipsAmbiguousDirectSummaries(t *testing.T) {
+	t.Parallel()
+	value := objectVariable{Scope: procedureir.ScopeParameter, Name: "value"}
+	call := procedureir.CallSite{
+		File: "src/Main.bas", Module: "Main",
+		Caller:    procedureir.ProcedureRef{QualifiedName: "Main.Run"},
+		Callee:    procedureir.Callee{BaseName: "Touch"},
+		Arguments: procedureir.Arguments{Count: 1, ExpressionIDs: []int{1}},
+	}
+	declarations := declarationScope{parameters: map[string]sourceDeclaration{
+		"value": {Name: "value", Type: "Collection", Object: true, Parameter: true},
+	}}
+	vars := map[string]objectVariable{value.key(): value}
+	expressions := map[int]procedureir.Expression{
+		1: {ID: 1, Kind: procedureir.ExpressionIdentifier, Text: "value"},
+	}
+	summary := func() objectProcedureSummary {
+		return objectProcedureSummary{
+			File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Touch",
+			Params: []objectParameterSummary{{Name: "value", Object: true, ByRef: true}},
+		}
+	}
+	summaries := map[string]objectProcedureSummary{"first": summary(), "second": summary()}
+	state := map[string]bool{value.key(): true}
+	applyObjectCallEffects(call, state, vars, declarations, expressions, summaries)
+	if state[value.key()] {
+		t.Fatalf("ambiguous direct summaries must not preserve a nullable ByRef object state: %+v", state)
+	}
+}
+
 func TestVBA202Issue448PreservesObjectStateAcrossUnresolvedPrivateByValCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
