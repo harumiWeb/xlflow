@@ -132,27 +132,6 @@ var (
 )
 
 func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
-	// Array-shape enrichment is local to this rule. Do not mutate the shared
-	// declaration map used by object, Excel, and dictionary analyses later in
-	// the same module; doing so can change unrelated findings for subsequent
-	// procedures.
-	moduleDecls = cloneDeclarations(moduleDecls)
-	// Keep module-level Const/Enum declarations visible to the shared shape
-	// lattice; the historical text scanner only indexed Dim/Static/visibility
-	// declarations.
-	for _, declaration := range file.IR.Declarations {
-		key := strings.ToLower(declaration.Name)
-		if key == "" {
-			continue
-		}
-		if _, exists := moduleDecls[key]; exists {
-			continue
-		}
-		moduleDecls[key] = sourceDeclaration{
-			Name: declaration.Name, Type: declaration.Type, Line: declaration.Range.StartLine,
-			Object: declaration.IsObject, Array: declaration.IsArray,
-		}
-	}
 	variables := arrayVariables(file, proc, moduleDecls)
 	capacityGuards := arrayResumeNextCapacityGuards(file, proc, variables)
 	objectArrayDiagnosticsApplicable := false
@@ -2016,7 +1995,7 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	if !ok {
 		return state
 	}
-	localDeclarations := procedureDeclarations(file.Lines, proc)
+	localDeclarations := file.procedureDeclarationsFor(proc)
 	updated := cloneArrayState(state)
 	markArgument := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
@@ -2142,7 +2121,7 @@ func applyArrayInternalStorageConfiguration(state arrayFlowState, file parsedFil
 	if len(arrays) == 0 {
 		return state
 	}
-	localDeclarations := procedureDeclarations(file.Lines, proc)
+	localDeclarations := file.procedureDeclarationsFor(proc)
 	updated := cloneArrayState(state)
 	for name := range arrays {
 		name = strings.ToLower(cleanIdentifier(name))
@@ -2240,7 +2219,7 @@ func applyArrayModuleConfigurationBranch(state arrayFlowState, statement *proced
 	if len(arrays) == 0 {
 		return state
 	}
-	localDeclarations := procedureDeclarations(file.Lines, proc)
+	localDeclarations := file.procedureDeclarationsFor(proc)
 	updated := cloneArrayState(state)
 	for name := range arrays {
 		name = strings.ToLower(cleanIdentifier(name))
@@ -2327,7 +2306,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 	if len(moduleArrays) == 0 || proc.Graph == nil {
 		return nil
 	}
-	localDeclarations := procedureDeclarations(file.Lines, proc)
+	localDeclarations := file.procedureDeclarationsFor(proc)
 	for name := range localDeclarations {
 		delete(moduleArrays, name)
 	}
@@ -2651,7 +2630,7 @@ func applyArrayModuleInitializationState(state arrayFlowState, file parsedFile, 
 	if strings.EqualFold(strings.TrimSpace(proc.Name), initializer) {
 		return state
 	}
-	localDeclarations := procedureDeclarations(file.Lines, proc)
+	localDeclarations := file.procedureDeclarationsFor(proc)
 	updated := cloneArrayState(state)
 	for name := range initializationStates[file.Path] {
 		if _, shadowed := localDeclarations[name]; shadowed {
@@ -2801,7 +2780,7 @@ func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleD
 			moduleArrays[strings.ToLower(name)] = true
 		}
 	}
-	for name := range procedureDeclarations(file.Lines, proc) {
+	for name := range file.procedureDeclarationsFor(proc) {
 		delete(moduleArrays, name)
 	}
 	return moduleArrays
@@ -3653,10 +3632,8 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 }
 
 func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]arrayVariable {
-	decls := cloneDeclarations(moduleDecls)
-	for key, decl := range procedureDeclarations(file.Lines, proc) {
-		decls[key] = decl
-	}
+	decls := newDeclarationScope(file, proc)
+	decls.module = moduleDecls
 	base := arrayOptionBase(file)
 	// The legacy line scanner intentionally ignores Const and Enum syntax.
 	// Fill those gaps from the shared procedure IR so a known scalar constant
@@ -3666,19 +3643,16 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 		if key == "" {
 			continue
 		}
-		if _, exists := decls[key]; exists {
-			continue
-		}
-		decls[key] = sourceDeclaration{
+		decls.addExtraIfMissing(key, sourceDeclaration{
 			Name: declaration.Name, Type: declaration.Type, Line: declaration.Range.StartLine,
 			Object: declaration.IsObject, Array: declaration.IsArray,
 			Fixed:      declaration.ValueShape == procedureir.ValueShapeFixedArray,
 			Dimensions: parameterArrayDimensions(declaration.ArrayBounds, base),
-		}
+		})
 	}
 	for _, param := range proc.Params {
 		array := param.ParamArray || strings.Contains(param.Type, "()") || param.ValueShape == procedureir.ValueShapeFixedArray || param.ValueShape == procedureir.ValueShapeDynamicArray
-		decls[strings.ToLower(param.Name)] = sourceDeclaration{
+		decls.parameters[strings.ToLower(param.Name)] = sourceDeclaration{
 			Name: param.Name, Type: param.Type, Array: array,
 			Fixed:      param.ValueShape == procedureir.ValueShapeFixedArray,
 			Dimensions: parameterArrayDimensions(param.ArrayBounds, base),
@@ -3686,7 +3660,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 		}
 	}
 	variables := map[string]arrayVariable{}
-	for key, decl := range decls {
+	decls.forEach(func(key string, decl sourceDeclaration) {
 		typeName := strings.TrimSpace(decl.Type)
 		// VBA declarations without an As clause are implicit Variant values.
 		// Treat them exactly like an explicit Variant so array-sensitive rules
@@ -3706,7 +3680,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 			}
 		}
 		variables[key] = variable
-	}
+	})
 	return variables
 }
 

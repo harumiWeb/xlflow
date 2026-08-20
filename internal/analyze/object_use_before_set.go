@@ -55,7 +55,7 @@ type objectProcedurePlan struct {
 	file           parsedFile
 	proc           sourceProcedure
 	moduleDecls    map[string]sourceDeclaration
-	declarations   map[string]sourceDeclaration
+	declarations   declarationScope
 	procedureDecls map[string]sourceDeclaration
 
 	flowProc    sourceProcedure
@@ -177,8 +177,8 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 		file:           file,
 		proc:           proc,
 		moduleDecls:    moduleDecls,
-		declarations:   objectFlowDeclarations(file.Lines, proc, moduleDecls),
-		procedureDecls: procedureDeclarations(file.Lines, proc),
+		declarations:   objectFlowDeclarations(file, proc, moduleDecls),
+		procedureDecls: file.procedureDeclarationsFor(proc),
 		reachable:      map[vbacfg.BlockID]bool{},
 		vars:           map[string]objectVariable{},
 	}
@@ -191,19 +191,22 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 		}
 		plan.flowContext = newObjectFlowContext(plan.flowProc)
 	}
-	for key, declaration := range plan.declarations {
-		if !declaration.Object {
-			continue
+	addObjectVariables := func(scope procedureir.SymbolScope, declarations map[string]sourceDeclaration) {
+		for _, declaration := range declarations {
+			if !declaration.Object {
+				continue
+			}
+			variable := objectVariable{Scope: scope, Name: declaration.Name}
+			plan.vars[variable.key()] = variable
 		}
-		scope := procedureir.ScopeModule
-		if declaration.Parameter {
-			scope = procedureir.ScopeParameter
-		} else if _, local := plan.procedureDecls[key]; local {
-			scope = procedureir.ScopeLocal
-		}
-		variable := objectVariable{Scope: scope, Name: declaration.Name}
-		plan.vars[variable.key()] = variable
 	}
+	// Keep the module layer shared. Local and parameter layers are small and
+	// are enumerated independently so shadowed bindings still get distinct
+	// object-flow variables without copying the module declaration map.
+	addObjectVariables(procedureir.ScopeModule, plan.declarations.module)
+	addObjectVariables(procedureir.ScopeLocal, plan.declarations.extra)
+	addObjectVariables(procedureir.ScopeLocal, plan.declarations.local)
+	addObjectVariables(procedureir.ScopeParameter, plan.declarations.parameters)
 	if isObjectType(proc.ReturnType) {
 		variable := objectVariable{Scope: procedureir.ScopeLocal, Name: proc.Name}
 		plan.vars[variable.key()] = variable
@@ -1116,48 +1119,24 @@ func newObjectFlowContext(proc sourceProcedure) objectFlowContext {
 	return context
 }
 
-func objectFlowDeclarations(lines []string, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]sourceDeclaration {
-	declarations := map[string]sourceDeclaration{}
-	localDecls := procedureDeclarations(lines, proc)
-	for key, declaration := range moduleDecls {
-		key = strings.ToLower(key)
-		if _, shadowed := localDecls[key]; shadowed {
-			declarations["@module:"+key] = declaration
-			continue
-		}
-		declarations[key] = declaration
-	}
-	for key, declaration := range localDecls {
-		declarations[strings.ToLower(key)] = declaration
-	}
-	for _, parameter := range proc.Params {
-		declaration := sourceDeclaration{
-			Name: parameter.Name, Type: parameter.Type, Object: isObjectType(parameter.Type), Parameter: true,
-		}
-		key := strings.ToLower(parameter.Name)
-		if _, shadowed := declarations[key]; shadowed {
-			declarations["@parameter:"+key] = declaration
-		} else {
-			declarations[key] = declaration
-		}
-	}
+func objectFlowDeclarations(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) declarationScope {
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
 	return declarations
 }
 
-func objectDeclarationFor(name string, scope procedureir.SymbolScope, declarations map[string]sourceDeclaration) (sourceDeclaration, bool) {
+func objectDeclarationFor(name string, scope procedureir.SymbolScope, declarations declarationScope) (sourceDeclaration, bool) {
 	key := strings.ToLower(cleanIdentifier(name))
-	if scope == procedureir.ScopeModule {
-		if declaration, ok := declarations["@module:"+key]; ok {
+	switch scope {
+	case procedureir.ScopeModule:
+		declaration, ok := declarations.module[key]
+		return declaration, ok
+	case procedureir.ScopeParameter:
+		if declaration, ok := declarations.parameters[key]; ok {
 			return declaration, true
 		}
 	}
-	if scope == procedureir.ScopeParameter {
-		if declaration, ok := declarations["@parameter:"+key]; ok {
-			return declaration, true
-		}
-	}
-	declaration, ok := declarations[key]
-	return declaration, ok
+	return declarations.lookup(key)
 }
 
 func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectProcedureSummary, options objectFlowOptions) objectFlowResult {
@@ -1456,7 +1435,7 @@ func objectFlowAssigned(state map[string]bool, variable objectVariable) bool {
 	return state[variable.key()]
 }
 
-func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Block, input map[string]bool, vars map[string]objectVariable, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, flowContext objectFlowContext) map[string]bool {
+func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Block, input map[string]bool, vars map[string]objectVariable, declarations declarationScope, summaries map[string]objectProcedureSummary, flowContext objectFlowContext) map[string]bool {
 	state := cloneObjectState(input)
 	statement := block.Statement
 	if statement == nil {
@@ -1489,7 +1468,7 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 	return state
 }
 
-func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, declarations map[string]sourceDeclaration, flowContext objectFlowContext) (objectVariable, bool) {
+func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, declarations declarationScope, flowContext objectFlowContext) (objectVariable, bool) {
 	for _, access := range flowContext.accesses[statement.ID] {
 		if access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite {
 			continue
@@ -1549,7 +1528,7 @@ func objectIndexedTargetCall(calls []procedureir.CallSite, targetText string) bo
 	return false
 }
 
-func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Statement, state map[string]bool, flowContext objectFlowContext, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) bool {
+func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Statement, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
 	value := statement.Value
 	if value == nil {
 		return false
@@ -1557,7 +1536,7 @@ func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Stateme
 	return objectExpressionAssigned(proc, *value, state, flowContext, declarations, summaries, statement.ID)
 }
 
-func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expression, state map[string]bool, flowContext objectFlowContext, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, statementID int) bool {
+func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expression, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary, statementID int) bool {
 	expressions := flowContext.expressions
 	text := strings.TrimSpace(expression.Text)
 	lower := strings.ToLower(text)
@@ -1619,7 +1598,7 @@ func objectConstructorCallText(text string) bool {
 	return strings.HasPrefix(text, "createobject(") || strings.HasPrefix(text, "getobject(")
 }
 
-func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) bool {
+func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call procedureir.CallSite, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
 	if objectConstructorCallText(strings.ToLower(call.Callee.Text)) || strings.EqualFold(call.Callee.BaseName, "CreateObject") || strings.EqualFold(call.Callee.BaseName, "GetObject") {
 		return true
 	}
@@ -1674,11 +1653,11 @@ func objectCallReturnsAssigned(proc sourceProcedure, statementID int, call proce
 	return ok && summary.ReturnAssigned
 }
 
-func objectReceiverReturnSummary(call procedureir.CallSite, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
+func objectReceiverReturnSummary(call procedureir.CallSite, declarations declarationScope, summaries map[string]objectProcedureSummary) (objectProcedureSummary, bool) {
 	return objectReceiverReturnSummaryIndexed(call, declarations, summaries, nil)
 }
 
-func objectReceiverReturnSummaryIndexed(call procedureir.CallSite, declarations map[string]sourceDeclaration, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) (objectProcedureSummary, bool) {
+func objectReceiverReturnSummaryIndexed(call procedureir.CallSite, declarations declarationScope, summaries map[string]objectProcedureSummary, receiverSummaryKeys map[string][]string) (objectProcedureSummary, bool) {
 	if call.Callee.Receiver == nil || call.Callee.Member == "" {
 		return objectProcedureSummary{}, false
 	}
@@ -1712,7 +1691,7 @@ func objectReceiverReturnSummaryIndexed(call procedureir.CallSite, declarations 
 	return match, found
 }
 
-func objectExcelMemberChainAssigned(call procedureir.CallSite, state map[string]bool, declarations map[string]sourceDeclaration) bool {
+func objectExcelMemberChainAssigned(call procedureir.CallSite, state map[string]bool, declarations declarationScope) bool {
 	if call.Callee.Receiver == nil {
 		return false
 	}
@@ -1737,7 +1716,7 @@ func objectExcelMemberChainAssigned(call procedureir.CallSite, state map[string]
 	return excelObjectUseMember(call.Callee.Member)
 }
 
-func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations map[string]sourceDeclaration) bool {
+func objectExcelMemberFactoryAssigned(call procedureir.CallSite, declarations declarationScope) bool {
 	if call.Callee.Receiver == nil {
 		return false
 	}
@@ -1770,7 +1749,7 @@ func objectNameDefinitelyAssigned(name string, state map[string]bool) bool {
 	return false
 }
 
-func objectDeclarationByName(name string, declarations map[string]sourceDeclaration) (sourceDeclaration, bool) {
+func objectDeclarationByName(name string, declarations declarationScope) (sourceDeclaration, bool) {
 	for _, scope := range []procedureir.SymbolScope{procedureir.ScopeLocal, procedureir.ScopeParameter, procedureir.ScopeModule} {
 		if declaration, ok := objectDeclarationFor(name, scope, declarations); ok {
 			return declaration, true
@@ -1809,7 +1788,7 @@ func excelObjectFactoryMember(member string) bool {
 	}
 }
 
-func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations map[string]sourceDeclaration, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) {
+func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations declarationScope, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) {
 	// Unresolved calls embedded in expressions (for example TypeName(obj) or
 	// StrComp(TypeName(obj), ...)) consume values but do not provide a reliable
 	// ByRef mutation contract.  Only statement-level unresolved calls can affect
@@ -1927,7 +1906,7 @@ func objectProcedureAllowsParameterEntry(proc sourceProcedure) bool {
 	return strings.EqualFold(strings.TrimSpace(proc.Visibility), "private")
 }
 
-func objectCallParameterAssigned(proc sourceProcedure, declarations map[string]sourceDeclaration, call procedureir.CallSite, summary objectProcedureSummary, formalIndex int, actuals []objectCallActual, state map[string]bool, vars map[string]objectVariable, flowContext objectFlowContext, summaries map[string]objectProcedureSummary) (bool, bool) {
+func objectCallParameterAssigned(proc sourceProcedure, declarations declarationScope, call procedureir.CallSite, summary objectProcedureSummary, formalIndex int, actuals []objectCallActual, state map[string]bool, vars map[string]objectVariable, flowContext objectFlowContext, summaries map[string]objectProcedureSummary) (bool, bool) {
 	for actualIndex, actual := range actuals {
 		if objectFormalIndex(call, summary, actualIndex) != formalIndex {
 			continue

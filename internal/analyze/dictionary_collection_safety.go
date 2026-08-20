@@ -348,7 +348,7 @@ func dcInitialState(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 	for key, decl := range moduleDecls {
 		add(key, decl, false)
 	}
-	for key, decl := range procedureDeclarations(file.Lines, proc) {
+	for key, decl := range file.procedureDeclarationsFor(proc) {
 		add(key, decl, true)
 	}
 	for _, param := range proc.Params {
