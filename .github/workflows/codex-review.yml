@@ -429,7 +429,10 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            const CODEX_MARKER = "<!-- xlflow-codex-review -->";
+            const CODEX_MARKER_PREFIX = "<!-- xlflow-codex-review";
+            const reviewMarker =
+              `${CODEX_MARKER_PREFIX} base=${expectedBase} ` +
+              `head=${expectedHead} -->`;
 
             function validatePull(pull, phase) {
               if (pull.state !== "open") {
@@ -541,7 +544,7 @@ jobs:
                 review.user?.login === "github-actions[bot]" &&
                 review.commit_id === expectedHead &&
                 typeof review.body === "string" &&
-                review.body.includes(CODEX_MARKER)
+                review.body.includes(reviewMarker)
             );
 
             for (const review of existingReviews) {
@@ -571,7 +574,7 @@ jobs:
               return;
             }
 
-            const reviewBody = `${body}\n\n${CODEX_MARKER}`;
+            const reviewBody = `${body}\n\n${reviewMarker}`;
 
             // Create a PENDING review first so revision eligibility can be
             // checked again before it becomes visible as a submitted review.
