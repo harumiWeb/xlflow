@@ -132,3 +132,4 @@
 - When lazily reconstructing interprocedural diagnostic provenance, replay the legacy deterministic worklist once per analysis and share its materialization cache; isolated per-origin traversals can change representative paths and repeated lookups can reintroduce quadratic work.
 - For Windows coordination timeout tests, separate the shared-deadline assertion from hosted-runner wall-clock jitter; use focused reruns to distinguish a timing flake from a restarted-budget regression before changing production coordination logic.
 - When filtering a copied CFG, do not call value-receiver indexed lookups inside the edge loop: the copied slices invalidate the shared index. Build one local block-ID map before filtering, then rebuild the final index once.
+- Every CFG transformation that mutates cloned block or edge elements in place must rebuild the query index before publication; slice identity checks cannot detect element edits.
