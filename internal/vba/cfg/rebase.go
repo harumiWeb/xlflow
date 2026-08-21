@@ -22,5 +22,9 @@ func RebaseGraph(in Graph, oldBase, newBase vbaast.Range) Graph {
 	for i := range out.ValidationFacts {
 		out.ValidationFacts[i].Range = procedureir.RebaseRange(out.ValidationFacts[i].Range, oldBase, newBase)
 	}
+	// Clone builds an index for the pre-rebase slice contents. Rebase updates
+	// block and edge values in place, so publish a fresh index for the rebased
+	// graph revision rather than retaining the clone's index metadata.
+	out.query = buildQueryIndex(out)
 	return out
 }

@@ -5,6 +5,7 @@ package cfg
 // and graph transformations rebuild it for their independent slice storage.
 type queryIndex struct {
 	blocksByStatement  map[int]int
+	blocksByID         map[BlockID]int
 	outgoing           map[BlockID][]Edge
 	incoming           map[BlockID][]Edge
 	reachableAll       map[BlockID]bool
@@ -21,6 +22,7 @@ type queryIndex struct {
 func buildQueryIndex(g Graph) *queryIndex {
 	index := &queryIndex{
 		blocksByStatement:  make(map[int]int),
+		blocksByID:         make(map[BlockID]int, len(g.Blocks)),
 		outgoing:           make(map[BlockID][]Edge),
 		incoming:           make(map[BlockID][]Edge),
 		blocksLen:          len(g.Blocks),
@@ -36,6 +38,9 @@ func buildQueryIndex(g Graph) *queryIndex {
 		index.edgesBase = &g.Edges[0]
 	}
 	for blockIndex, block := range g.Blocks {
+		if _, exists := index.blocksByID[block.ID]; !exists {
+			index.blocksByID[block.ID] = blockIndex
+		}
 		if block.Kind == BlockStatement && block.StatementID > 0 {
 			if _, exists := index.blocksByStatement[block.StatementID]; !exists {
 				index.blocksByStatement[block.StatementID] = blockIndex

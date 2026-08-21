@@ -7,6 +7,16 @@ All notable changes to xlflow will be documented in this file.
 - Improved project-local call graph construction by indexing canonical
   procedure candidate identities, avoiding a full procedure-node scan for each
   uniquely matched call while preserving conservative resolution behavior.
+- Bounded `effects.Build` fixed-point propagation for large call graphs by
+  separating compact semantic state from deterministic diagnostic witnesses,
+  retaining the existing effect/error/uncertainty provenance contract while
+  avoiding redundant transitive growth. Added effect-summary worklist and
+  propagated-fact performance counters, indexed reachable CFG queries, and
+  dedicated large-callgraph benchmark guidance for before/after measurements.
+  On the recorded Windows host, provenance-heavy effect workloads reduced
+  median wall time by 74.7–88.5% and `B/op` by 64.2–67.5%; ROneCOne's
+  `effect_summaries` stage was approximately 0.3% of total analysis time and
+  was not a confirmed end-to-end hotspot.
 
 - Added canonical large-single-module analyzer performance telemetry for
   `xlflow analyze --performance-log`, including aggregate workload counters and

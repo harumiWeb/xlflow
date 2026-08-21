@@ -289,6 +289,12 @@ an additional empty line.
 Analyzer worklist counters such as `object_summary_evaluations`,
 `object_entry_flow_evaluations`, and `byref_diagnostic_passes` may also be
 reported when those subsystems run.
+The effect-summary stage may additionally report
+`effect_summary_worklist_evaluations`,
+`effect_summary_max_propagated_facts_per_procedure`, and
+`effect_summary_total_propagated_facts`. These counters describe the compact
+fixed-point state and worklist activity; they do not count lazily materialized
+provenance entries and are not diagnostics.
 Large-single-module dimensions are reported by the maximum counters
 `max_lines_per_file`, `max_procedures_per_file`,
 `max_calls_per_file`, `max_statements_per_procedure`,

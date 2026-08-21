@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -150,9 +151,16 @@ type ProcedureSummary struct {
 	Propagated            []Evidence
 	DirectUncertainty     []CallUncertainty
 	PropagatedUncertainty []CallUncertainty
+	// semantic is the bounded fixed-point state used while building a
+	// project. Propagated evidence is materialized from the project call graph
+	// only when a caller asks for a full ProcedureSummary.
+	semantic *semanticState
 }
 
 func (s ProcedureSummary) Has(kind EffectKind) bool {
+	if s.semantic != nil && s.semantic.hasEffect(kind) {
+		return true
+	}
 	for _, evidence := range s.Direct {
 		if evidence.Effect == kind {
 			return true
@@ -170,9 +178,129 @@ type ProjectSummary struct {
 	procedures      []ProcedureSummary
 	byKey           map[string]int
 	byCandidateLine map[int][]int
+	provenance      *provenanceGraph
+	materialization *materializationCache
+	stats           BuildStats
+}
+
+// BuildStats describes the bounded fixed-point computation. Propagated fact
+// counts refer to semantic slots, not to lazily reconstructed source
+// evidence.
+type BuildStats struct {
+	WorklistEvaluations            uint64
+	MaxPropagatedFactsPerProcedure uint64
+	TotalPropagatedFacts           uint64
+}
+
+type semanticState struct {
+	effects             map[EffectKind]struct{}
+	applicationChanges  map[string]struct{}
+	applicationRestores map[string]struct{}
+	errors              map[ErrorBehaviorKind]struct{}
+	uncertainty         map[UncertaintyKind]struct{}
+	mayRaiseWitness     string
+}
+
+func newSemanticState() *semanticState {
+	return &semanticState{
+		effects:             map[EffectKind]struct{}{},
+		applicationChanges:  map[string]struct{}{},
+		applicationRestores: map[string]struct{}{},
+		errors:              map[ErrorBehaviorKind]struct{}{},
+		uncertainty:         map[UncertaintyKind]struct{}{},
+	}
+}
+
+func (s *semanticState) hasEffect(kind EffectKind) bool {
+	if s == nil {
+		return false
+	}
+	_, ok := s.effects[kind]
+	return ok
+}
+
+func (s *semanticState) factCount() uint64 {
+	if s == nil {
+		return 0
+	}
+	return uint64(len(s.effects) + len(s.applicationChanges) + len(s.applicationRestores) + len(s.errors) + len(s.uncertainty))
+}
+
+type provenanceGraph struct {
+	callers   map[string][]string
+	callees   map[string][]string
+	summaries map[string]ProcedureSummary
+	witness   map[string]ProcedureSummary
+	keys      []string
+}
+
+type provenanceMaterialization struct {
+	project     ProjectSummary
+	replayOnce  sync.Once
+	errorReplay *errorWitnessReplay
+}
+
+type materializationCache struct {
+	mu           sync.RWMutex
+	materializer *provenanceMaterialization
+	byIndex      map[int]ProcedureSummary
+}
+
+func newProvenanceMaterialization(project ProjectSummary) *provenanceMaterialization {
+	return &provenanceMaterialization{
+		project: project,
+	}
+}
+
+func newMaterializationCache(project ProjectSummary) *materializationCache {
+	return &materializationCache{
+		materializer: newProvenanceMaterialization(project),
+		byIndex:      map[int]ProcedureSummary{},
+	}
+}
+
+func (p ProjectSummary) materializeCached(index int) ProcedureSummary {
+	if p.materialization == nil {
+		return p.materialize(index)
+	}
+	cache := p.materialization
+	cache.mu.RLock()
+	summary, ok := cache.byIndex[index]
+	cache.mu.RUnlock()
+	if ok {
+		return cloneProcedureSummary(summary)
+	}
+
+	// Materialization can traverse a large call graph. Do not hold the cache
+	// lock while doing that work; concurrent lookups may compute different
+	// indexes independently and publish one immutable result each.
+	summary = cache.materializer.materialize(index)
+	cache.mu.Lock()
+	if cached, ok := cache.byIndex[index]; ok {
+		summary = cached
+	} else {
+		cache.byIndex[index] = summary
+	}
+	cache.mu.Unlock()
+	return cloneProcedureSummary(summary)
+}
+
+func (m *provenanceMaterialization) errorWitnessReplay() *errorWitnessReplay {
+	m.replayOnce.Do(func() { m.errorReplay = buildErrorWitnessReplay(m.project) })
+	return m.errorReplay
 }
 
 func (p ProjectSummary) Lookup(id ProcedureIdentity) (ProcedureSummary, bool) {
+	i, ok := p.byKey[id.Key()]
+	if !ok {
+		return ProcedureSummary{}, false
+	}
+	return p.materializeCached(i), true
+}
+
+// LookupDirect returns one defensive direct-only summary while retaining its
+// compact semantic state for bounded Has/error-flag queries.
+func (p ProjectSummary) LookupDirect(id ProcedureIdentity) (ProcedureSummary, bool) {
 	i, ok := p.byKey[id.Key()]
 	if !ok {
 		return ProcedureSummary{}, false
@@ -192,17 +320,91 @@ func (p ProjectSummary) LookupCandidate(candidate procedureir.Candidate) (Proced
 			strings.EqualFold(id.QualifiedName, candidate.QualifiedName) &&
 			strings.EqualFold(string(id.Kind), candidate.Kind) &&
 			id.DeclarationLine == candidate.Line {
+			return p.materializeCached(i), true
+		}
+	}
+	return ProcedureSummary{}, false
+}
+
+// LookupCandidateDirect is the direct-only counterpart of LookupCandidate.
+func (p ProjectSummary) LookupCandidateDirect(candidate procedureir.Candidate) (ProcedureSummary, bool) {
+	candidateFile := filepath.ToSlash(candidate.File)
+	for _, i := range p.byCandidateLine[candidate.Line] {
+		id := p.procedures[i].Identity
+		if strings.EqualFold(filepath.ToSlash(id.File), candidateFile) &&
+			strings.EqualFold(id.QualifiedName, candidate.QualifiedName) &&
+			strings.EqualFold(string(id.Kind), candidate.Kind) &&
+			id.DeclarationLine == candidate.Line {
 			return cloneProcedureSummary(p.procedures[i]), true
 		}
 	}
 	return ProcedureSummary{}, false
 }
 
-// All returns a defensive copy in deterministic procedure order.
-func (p ProjectSummary) All() []ProcedureSummary {
+// AllDirect returns defensive direct-only summaries in deterministic order.
+// The compact state remains attached so Has and error flags include the fixed
+// point result without materializing provenance collections.
+func (p ProjectSummary) AllDirect() []ProcedureSummary {
 	out := make([]ProcedureSummary, len(p.procedures))
 	for i := range p.procedures {
 		out[i] = cloneProcedureSummary(p.procedures[i])
+	}
+	return out
+}
+
+// Identities returns procedure identities in the same deterministic order as
+// AllDirect and All, without cloning any evidence or provenance collections.
+func (p ProjectSummary) Identities() []ProcedureIdentity {
+	out := make([]ProcedureIdentity, len(p.procedures))
+	for i := range p.procedures {
+		out[i] = p.procedures[i].Identity
+	}
+	return out
+}
+
+// All returns a defensive copy in deterministic procedure order.
+func (p ProjectSummary) All() []ProcedureSummary {
+	out := make([]ProcedureSummary, len(p.procedures))
+	if p.materialization == nil {
+		materializer := newProvenanceMaterialization(p)
+		for i := range p.procedures {
+			out[i] = materializer.materialize(i)
+		}
+		return out
+	}
+	for i := range p.procedures {
+		out[i] = p.materializeCached(i)
+	}
+	return out
+}
+
+// ProcedureCount returns the number of compact procedure records without
+// materializing transitive provenance.
+func (p ProjectSummary) ProcedureCount() int { return len(p.procedures) }
+
+// Stats returns fixed-point counters captured during BuildWithStats.
+func (p ProjectSummary) Stats() BuildStats { return p.stats }
+
+func (p ProjectSummary) materialize(index int) ProcedureSummary {
+	return newProvenanceMaterialization(p).materialize(index)
+}
+
+func (m *provenanceMaterialization) materialize(index int) ProcedureSummary {
+	p := m.project
+	if index < 0 || index >= len(p.procedures) {
+		return ProcedureSummary{}
+	}
+	out := cloneProcedureSummary(p.procedures[index])
+	if p.provenance == nil {
+		return out
+	}
+	key := out.Identity.Key()
+	reachable := p.reachableProcedureKeys(key)
+	out.Propagated = p.propagatedEvidence(key, reachable)
+	out.PropagatedUncertainty = p.propagatedUncertainty(key, reachable)
+	out.Error.Propagated = p.propagatedErrors(key, m.errorWitnessReplay())
+	if out.semantic != nil {
+		out.Error = errorSummaryWithState(out.Error, out.semantic)
 	}
 	return out
 }

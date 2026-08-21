@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -595,6 +596,82 @@ End Sub
 	}
 }
 
+func TestErrorSummaryRepresentativePathMatchesWorklistOnDiamondAndLongShort(t *testing.T) {
+	summary := buildSources(t,
+		sourceFile{"A_Root.bas", "Root", "Public Sub Root()\n    LongPath\n    ShortPath\nEnd Sub\n"},
+		sourceFile{"B_Long.bas", "LongPath", "Public Sub LongPath()\n    MidPath\nEnd Sub\n"},
+		sourceFile{"C_Mid.bas", "MidPath", "Public Sub MidPath()\n    Leaf\nEnd Sub\n"},
+		sourceFile{"D_Short.bas", "ShortPath", "Public Sub ShortPath()\n    Leaf\nEnd Sub\n"},
+		sourceFile{"E_Leaf.bas", "Leaf", "Public Sub Leaf()\n    On Error GoTo Cleanup\n    Workbooks.Open \"missing.xlsx\"\n    Exit Sub\nCleanup:\n    Root\nEnd Sub\n"},
+	)
+	root := find(t, summary, "Root.Root")
+	evidence := firstErrorEvidence(root.Error.Propagated, ErrorSuppresses)
+	if evidence.Origin.QualifiedName != "Leaf.Leaf" {
+		t.Fatalf("diamond error origin = %#v", evidence)
+	}
+	got := make([]string, 0, len(evidence.CallChain))
+	for _, identity := range evidence.CallChain {
+		got = append(got, identity.QualifiedName)
+	}
+	want := []string{"Root.Root", "ShortPath.ShortPath", "Leaf.Leaf"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("representative long/short diamond path = %v, want %v", got, want)
+	}
+}
+
+func TestErrorWitnessReplayUsesGlobalWorklistOrdering(t *testing.T) {
+	identity := func(name string) ProcedureIdentity {
+		return ProcedureIdentity{File: name + ".bas", Module: name, QualifiedName: name + ".Run", Name: "Run", Kind: procedureir.ProcedureSub}
+	}
+	ids := map[string]ProcedureIdentity{}
+	for _, name := range []string{"A", "B", "C", "D", "E"} {
+		ids[name] = identity(name)
+	}
+	key := func(name string) string { return ids[name].Key() }
+	edges := []edge{
+		{from: key("A"), to: key("C")}, {from: key("A"), to: key("E")}, {from: key("B"), to: key("D")},
+		{from: key("B"), to: key("E")}, {from: key("C"), to: key("A")}, {from: key("C"), to: key("B")},
+		{from: key("D"), to: key("B")}, {from: key("E"), to: key("B")}, {from: key("E"), to: key("C")},
+		{from: key("E"), to: key("D")},
+	}
+	callers, callees := buildAdjacency(edges)
+	witness := map[string]ProcedureSummary{}
+	for _, name := range []string{"A", "B", "C", "D", "E"} {
+		origin := ids[name]
+		summary := ProcedureSummary{Identity: origin}
+		if name != "B" {
+			summary.Error.Direct = []ErrorEvidence{{
+				Behavior: ErrorSuppresses, Origin: origin, CallChain: []ProcedureIdentity{origin},
+			}}
+		}
+		witness[name] = summary
+	}
+	witnessByKey := map[string]ProcedureSummary{}
+	for name, summary := range witness {
+		witnessByKey[key(name)] = summary
+	}
+	project := ProjectSummary{provenance: &provenanceGraph{
+		callers: callers, callees: callees, summaries: witnessByKey, witness: witnessByKey,
+		keys: []string{key("A"), key("B"), key("C"), key("D"), key("E")},
+	}}
+	replay := buildErrorWitnessReplay(project)
+	var got []ProcedureIdentity
+	for _, evidence := range replay.propagated[key("C")] {
+		if evidence.Origin.Key() == ids["D"].Key() {
+			got = evidence.CallChain
+			break
+		}
+	}
+	var names []string
+	for _, item := range got {
+		names = append(names, item.Module)
+	}
+	want := []string{"C", "A", "E", "D"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("global witness path = %v, want %v", names, want)
+	}
+}
+
 func TestErrorSummaryPreservesExternalCallUncertainty(t *testing.T) {
 	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
 		manualProcedure("Calls.Root", 1, []procedureir.CallSite{manualCall(1, procedureir.ResolutionExternal)}),
@@ -710,6 +787,41 @@ func TestPropagationConvergesAndDeduplicatesDiamondAndCycles(t *testing.T) {
 	}
 }
 
+func TestBuildKeepsFixedPointStateBoundedUntilProvenanceIsRequested(t *testing.T) {
+	project, stats := BuildWithStats(buildEffectBenchmarkDocuments(effectBenchmarkChain, 128))
+	if stats.WorklistEvaluations == 0 {
+		t.Fatal("bounded propagation did not evaluate the worklist")
+	}
+	if stats.MaxPropagatedFactsPerProcedure > 64 {
+		t.Fatalf("semantic state grew beyond the finite domain: %+v", stats)
+	}
+	for _, summary := range project.procedures {
+		if len(summary.Propagated) != 0 || len(summary.PropagatedUncertainty) != 0 || len(summary.Error.Propagated) != 0 {
+			t.Fatalf("eager provenance remained in fixed-point state for %s: %#v", summary.Identity.QualifiedName, summary)
+		}
+	}
+	materialized := project.All()
+	if len(materialized[0].Propagated) == 0 {
+		t.Fatalf("lazy provenance did not reconstruct the chain: %#v", materialized[0])
+	}
+	var direct ProcedureSummary
+	for _, summary := range project.AllDirect() {
+		if summary.Identity.QualifiedName == "EffectsBenchmark.Proc0000" {
+			direct = summary
+			break
+		}
+	}
+	if direct.Identity.QualifiedName == "" {
+		t.Fatal("direct-only root summary was not found")
+	}
+	if len(direct.Propagated) != 0 {
+		t.Fatalf("direct-only summary materialized propagated evidence: %#v", direct.Propagated)
+	}
+	if !direct.Has(WritesCells) {
+		t.Fatalf("direct-only summary lost transitive semantic effect: %#v", direct)
+	}
+}
+
 func TestMembershipIndexComputesOneKeyPerAdd(t *testing.T) {
 	const size = 4096
 	keyCalls := 0
@@ -732,32 +844,6 @@ func TestMembershipIndexComputesOneKeyPerAdd(t *testing.T) {
 	}
 }
 
-func TestPropagationMembershipPreservesFirstSeenOrderAndExactSlices(t *testing.T) {
-	callerID := ProcedureIdentity{File: "Caller.bas", Module: "Caller", QualifiedName: "Caller.Run", Kind: procedureir.ProcedureSub, DeclarationLine: 1}
-	calleeID := ProcedureIdentity{File: "Callee.bas", Module: "Callee", QualifiedName: "Callee.Run", Kind: procedureir.ProcedureSub, DeclarationLine: 1}
-	uncertainties := []CallUncertainty{
-		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 3, Callee: "Third"},
-		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 2, Callee: "Second"},
-		{Kind: UncertaintyUnresolved, Origin: calleeID, CallID: 1, Callee: "First"},
-	}
-	summaries := map[string]*ProcedureSummary{
-		callerID.Key(): {Identity: callerID},
-		calleeID.Key(): {Identity: calleeID, DirectUncertainty: uncertainties},
-	}
-	propagate(summaries, []edge{
-		{from: callerID.Key(), to: calleeID.Key()},
-		{from: callerID.Key(), to: calleeID.Key()},
-	})
-
-	caller := summaries[callerID.Key()]
-	if !reflect.DeepEqual(caller.PropagatedUncertainty, uncertainties) {
-		t.Fatalf("propagated uncertainty changed order or contents:\ngot  %#v\nwant %#v", caller.PropagatedUncertainty, uncertainties)
-	}
-	if caller.DirectUncertainty != nil {
-		t.Fatalf("direct uncertainty was mutated: %#v", caller.DirectUncertainty)
-	}
-}
-
 func TestCallUncertaintyClassificationAndPropagation(t *testing.T) {
 	doc := procedureir.DocumentIR{Path: "Calls.bas", ModuleName: "Calls", Procedures: []procedureir.ProcedureIR{
 		manualProcedure("Calls.Root", 1, []procedureir.CallSite{{ID: 1, StatementID: 1, Callee: procedureir.Callee{Text: "Child", BaseName: "Child"}, Resolution: procedureir.CallResolution{Status: procedureir.ResolutionMatched, Candidates: []procedureir.Candidate{{QualifiedName: "Calls.Child", Kind: "sub", File: "Calls.bas", Line: 10}}}}}),
@@ -775,6 +861,12 @@ func TestCallUncertaintyClassificationAndPropagation(t *testing.T) {
 	root := find(t, project, "Calls.Root")
 	if len(root.PropagatedUncertainty) != 4 {
 		t.Fatalf("propagated uncertainty = %#v", root.PropagatedUncertainty)
+	}
+	wantCallIDs := []int{1, 4, 3, 2}
+	for index, uncertainty := range root.PropagatedUncertainty {
+		if uncertainty.CallID != wantCallIDs[index] {
+			t.Fatalf("propagated uncertainty order = %#v, want call IDs %v", root.PropagatedUncertainty, wantCallIDs)
+		}
 	}
 }
 
@@ -939,6 +1031,51 @@ func TestRecoveredStatementsDoNotProduceEffects(t *testing.T) {
 	run := find(t, Build([]Document{{IR: doc, CFG: cfg.BuildDocument(doc)}}), "M.Run")
 	if len(run.Direct) != 0 {
 		t.Fatalf("recovered effect = %#v", run.Direct)
+	}
+}
+
+func TestProjectSummarySharesFullMaterializationCacheAcrossLookups(t *testing.T) {
+	project := buildSources(t,
+		sourceFile{"Entry.bas", "Entry", "Public Sub Run()\n Leaf\nEnd Sub\n"},
+		sourceFile{"Leaf.bas", "Leaf", "Public Sub Leaf()\n On Error GoTo Cleanup\n Workbooks.Open \"missing.xlsx\"\nCleanup:\nEnd Sub\n"},
+	)
+	direct := project.AllDirect()
+	if len(direct) == 0 {
+		t.Fatal("project has no procedures")
+	}
+	id := direct[0].Identity
+	candidate := procedureir.Candidate{File: id.File, QualifiedName: id.QualifiedName, Kind: string(id.Kind), Line: id.DeclarationLine}
+	if _, ok := project.LookupCandidate(candidate); !ok {
+		t.Fatal("candidate lookup failed")
+	}
+	if project.materialization == nil || len(project.materialization.byIndex) != 1 || project.materialization.materializer.errorReplay == nil {
+		t.Fatalf("candidate lookup did not populate shared materialization cache: %#v", project.materialization)
+	}
+	replay := project.materialization.materializer.errorReplay
+	if _, ok := project.Lookup(id); !ok {
+		t.Fatal("identity lookup failed")
+	}
+	if len(project.materialization.byIndex) != 1 || project.materialization.materializer.errorReplay != replay {
+		t.Fatal("identity lookup discarded or repeated the shared materialization cache")
+	}
+	var waitGroup sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			for j := 0; j < 16; j++ {
+				if _, ok := project.Lookup(id); !ok {
+					t.Errorf("concurrent identity lookup failed")
+				}
+			}
+		}()
+	}
+	waitGroup.Wait()
+	if len(project.materialization.byIndex) != 1 {
+		t.Fatalf("concurrent lookups changed the shared cache size: %d", len(project.materialization.byIndex))
+	}
+	if project.materialization.materializer.errorReplay != replay {
+		t.Fatal("concurrent lookups rebuilt the error-witness replay")
 	}
 }
 

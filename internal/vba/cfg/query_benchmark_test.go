@@ -7,9 +7,11 @@ import (
 
 var (
 	benchmarkBlockSink       Block
+	benchmarkBlockByIDSink   Block
 	benchmarkIsReachableSink bool
 	benchmarkReachableSink   []BlockID
 	benchmarkPredecessorSink []BlockID
+	benchmarkOutgoingSink    []Edge
 )
 
 func BenchmarkCFGQuery(b *testing.B) {
@@ -55,7 +57,7 @@ func BenchmarkCFGIsReachable(b *testing.B) {
 					benchmarkIsReachableSink = graph.IsReachable(target, test.filter)
 				}
 			})
-			b.Run("defensive-copy/"+test.name+"/"+benchmarkSizeName(size), func(b *testing.B) {
+			b.Run("legacy-scan/"+test.name+"/"+benchmarkSizeName(size), func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
@@ -82,6 +84,25 @@ func BenchmarkCFGBlockForStatement(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			benchmarkBlockSink, _ = legacyBlockForStatement(graph, i%size+1)
+		}
+	})
+}
+
+func BenchmarkCFGIndexedLookup(b *testing.B) {
+	const size = 5000
+	graph := benchmarkQueryGraph(size)
+	b.Run("block-by-id", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchmarkBlockByIDSink, _ = graph.BlockByID(BlockID(i%size + 6))
+		}
+	})
+	b.Run("outgoing-edges", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchmarkOutgoingSink = graph.OutgoingEdges(BlockID(i%size + 6))
 		}
 	})
 }
@@ -122,7 +143,20 @@ func benchmarkQueryGraph(size int) Graph {
 }
 
 func legacyIsReachable(g Graph, target BlockID, filter EdgeFilter) bool {
-	return g.reachableWithout(filter, nil)[target]
+	visited := map[BlockID]bool{g.Entry: true}
+	queue := []BlockID{g.Entry}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range g.Edges {
+			if edge.From != current || !filter.accepts(edge) || visited[edge.To] {
+				continue
+			}
+			visited[edge.To] = true
+			queue = append(queue, edge.To)
+		}
+	}
+	return visited[target]
 }
 
 func benchmarkSet(ids []BlockID) map[BlockID]bool {

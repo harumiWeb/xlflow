@@ -144,6 +144,10 @@ None.
 
 None.
 
+## Amended by
+
+- `docs/adr/ADR-0044-bounded-procedure-effect-summaries.md`
+
 ## Related
 
 - Issue #446
