@@ -127,20 +127,20 @@ func (a Analyzer) httpTransportFindings(file parsedFile, proc sourceProcedure) [
 
 func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnalysisState {
 	state := httpAnalysisState{objects: map[string]httpObjectState{}, launchers: map[string]string{}, strings: map[string]string{}, known: map[string]bool{}, sensitive: map[string]bool{}}
-	for _, line := range file.Lines {
-		name, expr, ok := fileConstDeclaration(line)
-		if !ok {
-			continue
-		}
-		if value, known := httpConstantString(expr, state); known {
-			key := strings.ToLower(name)
-			state.strings[key] = value
-			state.known[key] = true
-			state.sensitive[key] = httpAuthLiteralRe.MatchString(value) || credentialLiteralEvidence(value)
-		} else if value, err := strconv.ParseInt(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(expr), "&H", "0x"), "&h", "0x"), 0, 64); err == nil {
-			key := strings.ToLower(name)
-			state.strings[key] = strconv.FormatInt(value, 10)
-			state.known[key] = true
+	// The normal batch/realtime setup attaches ModuleFacts before any rule
+	// worker runs. Do not rebuild facts from a standalone parsedFile on every
+	// statement; retain the old IR fallback for package-local callers that do
+	// not perform file setup.
+	if facts := file.ModuleFacts; facts != nil {
+		facts.forEachConstant(func(constant moduleConstantFact) {
+			httpRecordConstant(&state, constant.Name, constant.Expression)
+		})
+	} else {
+		for _, line := range file.Lines {
+			name, expr, ok := fileConstDeclaration(line)
+			if ok {
+				httpRecordConstant(&state, name, expr)
+			}
 		}
 	}
 	for _, declaration := range ir.Declarations {
@@ -156,6 +156,22 @@ func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnaly
 		}
 	}
 	return state
+}
+
+func httpRecordConstant(state *httpAnalysisState, name, expression string) {
+	if state == nil {
+		return
+	}
+	if value, known := httpConstantString(expression, *state); known {
+		key := strings.ToLower(name)
+		state.strings[key] = value
+		state.known[key] = true
+		state.sensitive[key] = httpAuthLiteralRe.MatchString(value) || credentialLiteralEvidence(value)
+	} else if value, err := strconv.ParseInt(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(expression), "&H", "0x"), "&h", "0x"), 0, 64); err == nil {
+		key := strings.ToLower(name)
+		state.strings[key] = strconv.FormatInt(value, 10)
+		state.known[key] = true
+	}
 }
 
 func solveHTTPStates(a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) map[vbacfg.BlockID]httpAnalysisState {
@@ -611,6 +627,19 @@ func markHTTPExpressionSensitive(expr string, state httpAnalysisState) {
 }
 
 func httpExpressionUsesSensitiveModuleConstant(expr string, file parsedFile, state httpAnalysisState) bool {
+	if facts := file.ModuleFacts; facts != nil {
+		found := false
+		facts.forEachConstant(func(constant moduleConstantFact) {
+			if found || !constant.Module {
+				return
+			}
+			name := strings.ToLower(constant.Name)
+			if state.sensitive[name] && containsHTTPIdentifierToken(strings.ToLower(expr), name) {
+				found = true
+			}
+		})
+		return found
+	}
 	for _, declaration := range file.IR.Declarations {
 		name := strings.ToLower(declaration.Name)
 		if declaration.Scope == procedureir.ScopeModule && declaration.Kind == "const" && state.sensitive[name] && containsHTTPIdentifierToken(strings.ToLower(expr), name) {

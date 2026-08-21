@@ -62,6 +62,28 @@ func TestTotalsAggregateStagesAndSortCounters(t *testing.T) {
 	}
 }
 
+func TestRecordFactBuildCounters(t *testing.T) {
+	recorder := NewRecorder()
+	recorder.RecordModuleFactBuild()
+	recorder.RecordProcedureFactBuild()
+	recorder.RecordProcedureFactBuilds(1)
+
+	_, counters := recorder.Totals()
+	want := []Counter{
+		{Name: ModuleFactBuildsCounter, Value: 1},
+		{Name: ProcedureFactBuildsCounter, Value: 2},
+	}
+	if !reflect.DeepEqual(counters, want) {
+		t.Fatalf("fact build counters = %+v, want %+v", counters, want)
+	}
+}
+
+func TestRecordFactBuildCountersNilSafe(t *testing.T) {
+	var recorder *Recorder
+	recorder.RecordModuleFactBuild()
+	recorder.RecordProcedureFactBuild()
+}
+
 func TestMeasureRecordsCanceledOutcome(t *testing.T) {
 	recorder := NewRecorder()
 	ctx, cancel := context.WithCancel(WithRecorder(context.Background(), recorder))

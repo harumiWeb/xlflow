@@ -66,7 +66,7 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 		if !ok {
 			continue
 		}
-		for _, expression := range statementMemberExpressions(statement, proc.Expressions) {
+		for _, expression := range statementMemberExpressions(proc, statement) {
 			if seen[expression.ID] {
 				continue
 			}

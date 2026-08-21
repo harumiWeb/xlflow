@@ -315,7 +315,7 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 				caller:        caller,
 				callee:        callee,
 				call:          call,
-				actuals:       objectCallActuals(call, caller.flowContext.expressions),
+				actuals:       objectCallActuals(call, caller.flowContext.facts),
 				contributions: map[string]bool{},
 			}
 			analysis.entryOutgoing[callerKey] = append(analysis.entryOutgoing[callerKey], entryCall)
@@ -474,7 +474,7 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 			}
 			variable := objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}
 			updated.ByRefAssigned[index] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
-			updated.ByRefWritten[index] = plan.unknownFlow || objectProcedureWritesParameterIndexed(plan.proc, parameter.Name, analysis.summaries, plan.flowContext.expressions, plan.flowContext.statements)
+			updated.ByRefWritten[index] = plan.unknownFlow || objectProcedureWritesParameterIndexed(plan.proc, parameter.Name, analysis.summaries, plan.flowContext.facts)
 		}
 		for name, declaration := range plan.moduleDecls {
 			if !declaration.Object {
@@ -482,7 +482,7 @@ func (analysis *objectAnalysisContext) buildSummaries() map[string]objectProcedu
 			}
 			variable := objectVariable{Scope: procedureir.ScopeModule, Name: declaration.Name}
 			updated.ModuleAssigned[strings.ToLower(name)] = !plan.unknownFlow && objectFlowExitDefinitelyAssigned(flow, variable)
-			updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleFieldIndexed(plan.proc, declaration.Name, plan.flowContext.expressions, plan.flowContext.statements)
+			updated.ModuleWritten[strings.ToLower(name)] = objectProcedureWritesModuleFieldIndexed(plan.proc, declaration.Name, plan.flowContext.facts)
 		}
 		if isObjectType(plan.proc.ReturnType) {
 			variable := objectVariable{Scope: procedureir.ScopeLocal, Name: plan.proc.Name}
@@ -709,12 +709,12 @@ func objectProcedureUsesModuleObject(proc sourceProcedure, moduleDecls map[strin
 	return false
 }
 
-func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, expressions map[int]procedureir.Expression, statements map[int]procedureir.Statement) bool {
+func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, facts *procedureAnalysisFacts) bool {
 	for _, access := range proc.Accesses {
 		if access.Scope != procedureir.ScopeModule || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) || !strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
 			continue
 		}
-		if objectMemberReceiver(expressions, statements, access) {
+		if objectMemberReceiver(facts, access) {
 			continue
 		}
 		return true
@@ -722,19 +722,19 @@ func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, 
 	return false
 }
 
-func objectProcedureWritesParameterIndexed(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary, expressions map[int]procedureir.Expression, statements map[int]procedureir.Statement) bool {
+func objectProcedureWritesParameterIndexed(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary, facts *procedureAnalysisFacts) bool {
 	for _, access := range proc.Accesses {
 		if access.Scope != procedureir.ScopeParameter ||
 			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) ||
 			!strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
 			continue
 		}
-		if !objectMemberReceiver(expressions, statements, access) {
+		if !objectMemberReceiver(facts, access) {
 			return true
 		}
 	}
 	for _, call := range proc.Calls {
-		actuals := objectCallActuals(call, expressions)
+		actuals := objectCallActuals(call, facts)
 		for actualIndex, actual := range actuals {
 			if actual.parenthesized {
 				// Parenthesized actuals are temporary ByVal expressions even
@@ -779,8 +779,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 	file, proc := plan.file, plan.proc
 	declarations := plan.declarations
 	flow := objectStateFlowPlan(plan, summaries, objectFlowOptions{Entry: entry})
-	expressions := plan.flowContext.expressions
-	statements := plan.flowContext.statements
+	facts := plan.flowContext.facts
 
 	accesses := append([]procedureir.VariableAccess(nil), proc.Accesses...)
 	sort.SliceStable(accesses, func(i, j int) bool {
@@ -803,7 +802,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 		if access.Mode != procedureir.AccessRead && access.Mode != procedureir.AccessReadWrite && access.Mode != procedureir.AccessWrite {
 			continue
 		}
-		if !objectMemberReceiver(expressions, statements, access) {
+		if !objectMemberReceiver(facts, access) {
 			continue
 		}
 		declaration, scope, ok := objectDeclarationBinding(access.Name, declarations)
@@ -1110,10 +1109,7 @@ type objectFlowResult struct {
 }
 
 type objectFlowContext struct {
-	expressions         map[int]procedureir.Expression
-	statements          map[int]procedureir.Statement
-	calls               map[int][]procedureir.CallSite
-	accesses            map[int][]procedureir.VariableAccess
+	facts               *procedureAnalysisFacts
 	predecessors        map[vbacfg.BlockID][]vbacfg.Edge
 	vars                map[string]objectVariable
 	receiverSummaryKeys map[string][]string
@@ -1121,24 +1117,9 @@ type objectFlowContext struct {
 
 func newObjectFlowContext(proc sourceProcedure) objectFlowContext {
 	context := objectFlowContext{
-		expressions:  make(map[int]procedureir.Expression, len(proc.Expressions)),
-		statements:   make(map[int]procedureir.Statement, len(proc.Statements)),
-		calls:        make(map[int][]procedureir.CallSite),
-		accesses:     make(map[int][]procedureir.VariableAccess),
+		facts:        proc.analysisFacts(),
 		predecessors: make(map[vbacfg.BlockID][]vbacfg.Edge),
 		vars:         map[string]objectVariable{},
-	}
-	for _, expression := range proc.Expressions {
-		context.expressions[expression.ID] = expression
-	}
-	for _, statement := range proc.Statements {
-		context.statements[statement.ID] = statement
-	}
-	for _, call := range proc.Calls {
-		context.calls[call.StatementID] = append(context.calls[call.StatementID], call)
-	}
-	for _, access := range proc.Accesses {
-		context.accesses[access.StatementID] = append(context.accesses[access.StatementID], access)
 	}
 	if proc.Graph != nil {
 		for _, edge := range proc.Graph.Edges {
@@ -1306,7 +1287,7 @@ func objectFlowApplyGuard(state map[string]bool, flowContext objectFlowContext, 
 	if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
 		return state
 	}
-	statement, ok := flowContext.statements[edge.StatementID]
+	statement, ok := flowContext.facts.Statement(edge.StatementID)
 	if !ok || statement.Condition == nil {
 		return state
 	}
@@ -1500,13 +1481,15 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 	if statement == nil {
 		return state
 	}
-	for _, call := range flowContext.calls[statement.ID] {
-		applyObjectCallEffects(call, state, vars, declarations, flowContext.expressions, summaries)
-	}
+	callSeen := false
+	flowContext.facts.forEachCallForStatement(statement.ID, func(call procedureir.CallSite) {
+		callSeen = true
+		applyObjectCallEffects(call, state, vars, declarations, flowContext.facts, summaries)
+	})
 	// The IR represents implicit call statements such as `Helper obj` as an
 	// assignment-shaped statement. Their argument effects were applied above;
 	// do not then treat the first argument as an object assignment target.
-	if statement.Kind == procedureir.StatementAssignment && len(flowContext.calls[statement.ID]) > 0 {
+	if statement.Kind == procedureir.StatementAssignment && callSeen {
 		return state
 	}
 	target, ok := objectFlowTarget(proc, *statement, declarations, flowContext)
@@ -1528,27 +1511,36 @@ func objectFlowTransfer(file parsedFile, proc sourceProcedure, block vbacfg.Bloc
 }
 
 func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, declarations declarationScope, flowContext objectFlowContext) (objectVariable, bool) {
-	for _, access := range flowContext.accesses[statement.ID] {
+	var accessTarget objectVariable
+	accessFound := false
+	flowContext.facts.forEachAccessForStatement(statement.ID, func(access procedureir.VariableAccess) {
+		if accessFound {
+			return
+		}
 		if access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite {
-			continue
+			return
 		}
 		// A receiver in `obj.Member = value` or `dict(key) = value` is
 		// dereferenced, but it is not the object reference being assigned.  Do
 		// not reset its state merely because the member/index write is modeled
 		// as AccessWrite by the IR.
-		if objectMemberReceiver(flowContext.expressions, flowContext.statements, access) {
-			continue
+		if objectMemberReceiver(flowContext.facts, access) {
+			return
 		}
-		if objectIndexedReceiverWrite(flowContext.calls[statement.ID], access) {
-			continue
+		if objectIndexedReceiverWrite(flowContext.facts, statement.ID, access) {
+			return
 		}
 		declaration, scope, ok := objectDeclarationBinding(access.Name, declarations)
 		if !ok || !declaration.Object {
-			continue
+			return
 		}
-		return objectVariable{Scope: scope, Name: access.Name}, true
+		accessTarget = objectVariable{Scope: scope, Name: access.Name}
+		accessFound = true
+	})
+	if accessFound {
+		return accessTarget, true
 	}
-	if statement.Target != nil && statement.Target.Kind != procedureir.ExpressionCall && statement.Target.Kind != procedureir.ExpressionMember && !objectIndexedTargetCall(flowContext.calls[statement.ID], statement.Target.Text) {
+	if statement.Target != nil && statement.Target.Kind != procedureir.ExpressionCall && statement.Target.Kind != procedureir.ExpressionMember && !objectIndexedTargetCall(flowContext.facts, statement.ID, statement.Target.Text) {
 		name := cleanIdentifier(strings.TrimSpace(statement.Target.Text))
 		if declaration, scope, ok := objectDeclarationBinding(name, declarations); ok && declaration.Object {
 			return objectVariable{Scope: scope, Name: name}, true
@@ -1560,23 +1552,31 @@ func objectFlowTarget(proc sourceProcedure, statement procedureir.Statement, dec
 	return objectVariable{}, false
 }
 
-func objectIndexedReceiverWrite(calls []procedureir.CallSite, access procedureir.VariableAccess) bool {
-	for _, call := range calls {
-		if call.Callee.Receiver == nil && call.Arguments.Count > 0 && strings.EqualFold(cleanIdentifier(call.Callee.BaseName), cleanIdentifier(access.Name)) {
-			return true
+func objectIndexedReceiverWrite(facts *procedureAnalysisFacts, statementID int, access procedureir.VariableAccess) bool {
+	found := false
+	facts.forEachCallForStatement(statementID, func(call procedureir.CallSite) {
+		if found {
+			return
 		}
-	}
-	return false
+		if call.Callee.Receiver == nil && call.Arguments.Count > 0 && strings.EqualFold(cleanIdentifier(call.Callee.BaseName), cleanIdentifier(access.Name)) {
+			found = true
+		}
+	})
+	return found
 }
 
-func objectIndexedTargetCall(calls []procedureir.CallSite, targetText string) bool {
+func objectIndexedTargetCall(facts *procedureAnalysisFacts, statementID int, targetText string) bool {
 	name := cleanIdentifier(strings.TrimSpace(targetText))
-	for _, call := range calls {
-		if call.Callee.Receiver == nil && call.Arguments.Count > 0 && strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
-			return true
+	found := false
+	facts.forEachCallForStatement(statementID, func(call procedureir.CallSite) {
+		if found {
+			return
 		}
-	}
-	return false
+		if call.Callee.Receiver == nil && call.Arguments.Count > 0 && strings.EqualFold(cleanIdentifier(call.Callee.BaseName), name) {
+			found = true
+		}
+	})
+	return found
 }
 
 func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Statement, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary) bool {
@@ -1588,7 +1588,7 @@ func objectFlowValueAssigned(proc sourceProcedure, statement procedureir.Stateme
 }
 
 func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expression, state map[string]bool, flowContext objectFlowContext, declarations declarationScope, summaries map[string]objectProcedureSummary, statementID int) bool {
-	expressions := flowContext.expressions
+	facts := flowContext.facts
 	text := strings.TrimSpace(expression.Text)
 	lower := strings.ToLower(text)
 	if lower == "nothing" || strings.HasPrefix(lower, "nothing ") {
@@ -1599,7 +1599,7 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		return true
 	case procedureir.ExpressionParentheses:
 		for _, child := range expression.Children {
-			if nested, ok := expressions[child]; ok {
+			if nested, ok := facts.Expression(child); ok {
 				return objectExpressionAssigned(proc, nested, state, flowContext, declarations, summaries, statementID)
 			}
 		}
@@ -1631,7 +1631,7 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		// non-Nothing factory value.  For a user object, the member may itself be
 		// Nothing; keep the assignment nullable and report a later dereference.
 		for _, childID := range expression.Children {
-			if child, ok := expressions[childID]; ok && child.Kind == procedureir.ExpressionIdentifier {
+			if child, ok := facts.Expression(childID); ok && child.Kind == procedureir.ExpressionIdentifier {
 				root := strings.ToLower(cleanIdentifier(child.Text))
 				if root == "thisworkbook" || root == "application" || (root == "me" && strings.EqualFold(proc.ModuleKind, "form")) {
 					return true
@@ -1939,7 +1939,7 @@ func excelObjectFactoryMember(member string) bool {
 	}
 }
 
-func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations declarationScope, expressions map[int]procedureir.Expression, summaries map[string]objectProcedureSummary) {
+func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, vars map[string]objectVariable, declarations declarationScope, facts *procedureAnalysisFacts, summaries map[string]objectProcedureSummary) {
 	// Unresolved calls embedded in expressions (for example TypeName(obj) or
 	// StrComp(TypeName(obj), ...)) consume values but do not provide a reliable
 	// ByRef mutation contract.  Only statement-level unresolved calls can affect
@@ -1947,7 +1947,7 @@ func applyObjectCallEffects(call procedureir.CallSite, state map[string]bool, va
 	if call.Resolution.Status != procedureir.ResolutionMatched && call.ExpressionID != 0 {
 		return
 	}
-	actuals := objectCallActuals(call, expressions)
+	actuals := objectCallActuals(call, facts)
 	var candidates []objectProcedureSummary
 	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
 		if summary, ok := objectSummaryForCandidate(call.Resolution.Candidates[0], summaries); ok {
@@ -2077,7 +2077,7 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 			continue
 		}
 		if actual.expressionID != 0 {
-			if expression, ok := flowContext.expressions[actual.expressionID]; ok && expression.Kind != procedureir.ExpressionIdentifier {
+			if expression, ok := flowContext.facts.Expression(actual.expressionID); ok && expression.Kind != procedureir.ExpressionIdentifier {
 				return objectExpressionAssigned(proc, expression, state, flowContext, declarations, summaries, call.StatementID), true
 			}
 		}
@@ -2107,10 +2107,10 @@ func objectCallParameterAssigned(proc sourceProcedure, declarations declarationS
 	return false, false
 }
 
-func objectCallActuals(call procedureir.CallSite, expressions map[int]procedureir.Expression) []objectCallActual {
+func objectCallActuals(call procedureir.CallSite, facts *procedureAnalysisFacts) []objectCallActual {
 	actuals := make([]objectCallActual, 0, len(call.Arguments.ExpressionIDs))
 	for _, id := range call.Arguments.ExpressionIDs {
-		expression, ok := expressions[id]
+		expression, ok := facts.Expression(id)
 		if !ok {
 			// Preserve the positional slot.  Dropping a missing expression ID
 			// would shift every following actual onto the wrong formal parameter.
@@ -2120,7 +2120,7 @@ func objectCallActuals(call procedureir.CallSite, expressions map[int]procedurei
 		parenthesized := false
 		for expression.Kind == procedureir.ExpressionParentheses && len(expression.Children) == 1 {
 			parenthesized = true
-			nested, nestedOK := expressions[expression.Children[0]]
+			nested, nestedOK := facts.Expression(expression.Children[0])
 			if !nestedOK {
 				break
 			}
@@ -2198,7 +2198,7 @@ func objectFlowForEachZeroIteration(flowContext objectFlowContext, edge vbacfg.E
 	if edge.Kind != vbacfg.EdgeLoopExit {
 		return false
 	}
-	statement, ok := flowContext.statements[edge.StatementID]
+	statement, ok := flowContext.facts.Statement(edge.StatementID)
 	return ok && statement.Kind == procedureir.StatementForEach
 }
 
@@ -2243,13 +2243,13 @@ func objectStateEqual(a, b map[string]bool) bool {
 	return true
 }
 
-func objectMemberReceiver(expressions map[int]procedureir.Expression, statements map[int]procedureir.Statement, access procedureir.VariableAccess) bool {
-	expression, ok := expressions[access.ExpressionID]
+func objectMemberReceiver(facts *procedureAnalysisFacts, access procedureir.VariableAccess) bool {
+	expression, ok := facts.Expression(access.ExpressionID)
 	if !ok {
 		return false
 	}
 	for expression.ParentID != 0 {
-		parent, exists := expressions[expression.ParentID]
+		parent, exists := facts.Expression(expression.ParentID)
 		if !exists {
 			break
 		}
@@ -2265,7 +2265,7 @@ func objectMemberReceiver(expressions map[int]procedureir.Expression, statements
 		}
 		expression = parent
 	}
-	statement, ok := statements[access.StatementID]
+	statement, ok := facts.Statement(access.StatementID)
 	return ok && statement.Kind == procedureir.StatementWith &&
 		(statement.TargetID == access.ExpressionID || statement.ValueID == access.ExpressionID)
 }

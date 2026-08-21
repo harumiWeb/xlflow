@@ -284,18 +284,15 @@ func eventGuardedAt(proc sourceProcedure, statementID int) bool {
 	if proc.ModuleKind == "form" || proc.Graph == nil || statementID == 0 {
 		return false
 	}
-	byID := map[int]procedureir.Statement{}
-	for _, statement := range proc.Statements {
-		byID[statement.ID] = statement
-	}
-	unsafe := applicationStateExitWitnesses(proc, "enableevents", byID)
+	facts := proc.analysisFacts()
+	unsafe := applicationStateExitWitnesses(proc, "enableevents", facts)
 	target, ok := proc.Graph.BlockForStatement(statementID)
 	if !ok {
 		return false
 	}
 	dominators := proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[target.ID]
 	for _, statement := range proc.Statements {
-		property, value, ok := applicationPropertyAssignment(statement, byID)
+		property, value, ok := applicationPropertyAssignment(statement, facts)
 		if !ok || property != "enableevents" || unsafe[statement.ID].Kind != "" || !eventDisableValue(value) {
 			continue
 		}

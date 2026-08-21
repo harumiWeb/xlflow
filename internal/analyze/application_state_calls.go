@@ -45,13 +45,10 @@ func applicationStateLeakOrigins(proc sourceProcedure, project effects.ProjectSu
 	if proc.Graph == nil || proc.Effects == nil {
 		return nil
 	}
-	byID := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		byID[statement.ID] = statement
-	}
+	facts := proc.analysisFacts()
 	var out []applicationStateLeakOrigin
 	for _, property := range applicationStateProperties() {
-		unsafe := applicationStateExitWitnesses(proc, property.Key, byID)
+		unsafe := applicationStateExitWitnesses(proc, property.Key, facts)
 		if len(unsafe) == 0 || hasPairedApplicationRestoreProcedure(proc, property.Key, project) {
 			continue
 		}
@@ -60,7 +57,7 @@ func applicationStateLeakOrigins(proc sourceProcedure, project effects.ProjectSu
 			if !found {
 				continue
 			}
-			assigned, _, ok := applicationPropertyAssignment(statement, byID)
+			assigned, _, ok := applicationPropertyAssignment(statement, facts)
 			if !ok || assigned != property.Key {
 				continue
 			}

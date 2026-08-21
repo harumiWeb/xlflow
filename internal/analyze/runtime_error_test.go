@@ -8,7 +8,32 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 )
+
+func TestRuntimeConstantEnvironmentUsesImmutableOverlay(t *testing.T) {
+	base := constexpr.NewValues(map[string]constexpr.Value{
+		"ModuleLimit": {Kind: constexpr.ValueLong, Integer: 7},
+		"SharedText":  {Kind: constexpr.ValueString, String: "base"},
+	})
+	state := runtimeConstantState{
+		"modulelimit": {Kind: constexpr.ValueLong, Integer: 11},
+		"localvalue":  {Kind: constexpr.ValueLong, Integer: 13},
+	}
+	env := runtimeConstantEnvironment(base, state)
+	if got, ok := env.Resolve("MODULELIMIT"); !ok || got.Integer != 11 {
+		t.Fatalf("overlay state = %#v, want local shadow value", got)
+	}
+	if got, ok := env.Resolve("sharedtext"); !ok || got.String != "base" {
+		t.Fatalf("overlay base fallback = %#v, want base value", got)
+	}
+	if got, ok := env.Resolve("LocalValue"); !ok || got.Integer != 13 {
+		t.Fatalf("overlay local value = %#v, want state value", got)
+	}
+	if _, ok := env.Resolve("missing"); ok {
+		t.Fatal("overlay resolved an unknown constant")
+	}
+}
 
 func TestVBA249DetectsLiteralAndProjectConstantRuntimeFailures(t *testing.T) {
 	t.Parallel()

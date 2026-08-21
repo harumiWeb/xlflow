@@ -922,7 +922,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 	text = sanitizeExcelStatementText(text)
 	lower := strings.ToLower(text)
 	var out []excelLoopAccess
-	for _, expression := range statementMemberExpressions(statement, proc.Expressions) {
+	for _, expression := range statementMemberExpressions(proc, statement) {
 		receiver, member, memberEnd, ok := splitExcelMemberAccess(expression.Text)
 		if !ok {
 			continue
@@ -1116,44 +1116,8 @@ func excelRootBindingHasValueType(kind string) bool {
 	}
 }
 
-func statementMemberExpressions(statement procedureir.Statement, expressions []procedureir.Expression) []procedureir.Expression {
-	byID := make(map[int]procedureir.Expression, len(expressions))
-	for _, expression := range expressions {
-		byID[expression.ID] = expression
-	}
-	seen := map[int]bool{}
-	var out []procedureir.Expression
-	var visit func(int)
-	visit = func(id int) {
-		if seen[id] {
-			return
-		}
-		expression, ok := byID[id]
-		if !ok {
-			return
-		}
-		seen[id] = true
-		if !expression.Recovered && expression.Kind == procedureir.ExpressionMember {
-			out = append(out, expression)
-		}
-		for _, childID := range expression.Children {
-			visit(childID)
-		}
-	}
-	for _, id := range statement.ExpressionIDs {
-		visit(id)
-	}
-	if len(out) == 0 {
-		for _, expression := range expressions {
-			if expression.StatementID == statement.ID && !expression.Recovered && expression.Kind == procedureir.ExpressionMember {
-				out = append(out, expression)
-			}
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Range.StartByte < out[j].Range.StartByte
-	})
-	return out
+func statementMemberExpressions(proc sourceProcedure, statement procedureir.Statement) []procedureir.Expression {
+	return proc.analysisFacts().MemberExpressionsForStatement(statement.ID)
 }
 
 func splitExcelMemberAccess(text string) (string, string, int, bool) {

@@ -55,12 +55,19 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	if !a.Config.Analyze.DetectUnsafeFilePath {
 		return nil
 	}
+	facts := file.moduleAnalysisFacts()
 	values := map[string]filePathValue{}
 	// Module/procedure Const declarations are clean symbolic values even when
 	// they do not appear as assignments inside the current procedure.
-	for _, line := range file.Lines {
-		if name, expr, ok := fileConstDeclaration(line); ok {
-			values[strings.ToLower(name)] = classifyFilePathExpr(expr, values, nil)
+	if facts != nil {
+		facts.forEachConstant(func(constant moduleConstantFact) {
+			values[strings.ToLower(constant.Name)] = classifyFilePathExpr(constant.Expression, values, nil)
+		})
+	} else {
+		for _, line := range file.Lines {
+			if name, expr, ok := fileConstDeclaration(line); ok {
+				values[strings.ToLower(name)] = classifyFilePathExpr(expr, values, nil)
+			}
 		}
 	}
 	values["vbnullstring"] = filePathValue{raw: "vbNullString", constant: "", origin: "clean", known: true}
@@ -69,9 +76,16 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 		params[strings.ToLower(p.Name)] = true
 		values[strings.ToLower(p.Name)] = filePathValue{raw: p.Name, origin: "tainted", known: false}
 	}
-	localProcedures := map[string]bool{}
-	for _, p := range file.IR.Procedures {
-		localProcedures[strings.ToLower(p.Symbol.Name)] = true
+	localProcedure := func(name string) bool {
+		if facts != nil {
+			return facts.hasProcedure(name)
+		}
+		for _, p := range file.IR.Procedures {
+			if strings.EqualFold(p.Symbol.Name, name) {
+				return true
+			}
+		}
+		return false
 	}
 	fsos := map[string]bool{}
 	workbooks := map[string]bool{}
@@ -121,7 +135,7 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 		if match := fileCloseRe.FindStringSubmatch(stmt); len(match) == 2 {
 			clearClosedBinaryHandles(match[1], binaryHandles)
 		}
-		uses := fileOperationUses(stmt, localProcedures, fsos, values, workbooks)
+		uses := fileOperationUsesWithLookup(stmt, localProcedure, fsos, values, workbooks)
 		if match := fileBinaryWriteRe.FindStringSubmatch(stmt); len(match) == 2 {
 			if path, ok := binaryHandles[match[1]]; ok {
 				uses = append(uses, fileOperationUse{operation: "Open For Binary", paths: []fileOperationPath{path}})
@@ -324,7 +338,7 @@ func filePathEquivalent(left, right filePathValue) bool {
 	return strings.EqualFold(strings.TrimSpace(left.raw), strings.TrimSpace(right.raw)) && strings.TrimSpace(left.raw) != ""
 }
 
-func fileOperationUses(stmt string, localProcedures map[string]bool, fsos map[string]bool, values map[string]filePathValue, workbooks map[string]bool) []fileOperationUse {
+func fileOperationUsesWithLookup(stmt string, localProcedure func(string) bool, fsos map[string]bool, values map[string]filePathValue, workbooks map[string]bool) []fileOperationUse {
 	lower := strings.ToLower(stmt)
 	var out []fileOperationUse
 	addBuiltin := func(re *regexp.Regexp, operation string, count int) bool {
@@ -336,7 +350,7 @@ func fileOperationUses(stmt string, localProcedures map[string]bool, fsos map[st
 		name = strings.TrimSpace(strings.TrimPrefix(name, "call"))
 		name = strings.TrimSpace(strings.TrimPrefix(name, "vba."))
 		name = strings.ToLower(lastName(name))
-		if localProcedures[name] {
+		if localProcedure != nil && localProcedure(name) {
 			return false
 		}
 		rest := strings.TrimSpace(stmt[loc[1]:])

@@ -311,7 +311,14 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 
 	narrowProbes := dcNarrowProbeStatements(proc)
 	loops := excelLoopRegions(proc)
-	consts := dcConstantNames(file.Lines)
+	constFacts := file.moduleAnalysisFacts()
+	var constNames map[string]bool
+	if constFacts == nil {
+		// Keep standalone package-level callers (and focused tests that build a
+		// parsedFile directly) on the historical source fallback. Normal batch
+		// and realtime paths attach module facts before this rule runs.
+		constNames = dcConstantNames(file.Lines)
+	}
 	seen := map[string]bool{}
 	var findings []Finding
 	linear := initial.clone()
@@ -321,7 +328,7 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 			continue
 		}
 		state := dcOverlayState(in[block.ID], linear)
-		findings = append(findings, a.dcStatementFindings(file, proc, statement, state, loops, narrowProbes, consts, seen)...)
+		findings = append(findings, a.dcStatementFindings(file, proc, statement, state, loops, narrowProbes, constFacts, constNames, seen)...)
 		a.dcTransfer(file, proc, statement, linear)
 	}
 	return findings
@@ -651,7 +658,7 @@ func (a Analyzer) dcApplyGuard(statement procedureir.Statement, edge vbacfg.Edge
 	state.Objects[id] = object
 }
 
-func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state *dcFlowState, loops []excelLoopRegion, narrow map[int]bool, consts map[string]bool, seen map[string]bool) []Finding {
+func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state *dcFlowState, loops []excelLoopRegion, narrow map[int]bool, constFacts *moduleAnalysisFacts, constNames map[string]bool, seen map[string]bool) []Finding {
 	text := maskStringLiterals(dcStatementSource(statement))
 	line := statement.Range.StartLine
 	if text == "" {
@@ -676,7 +683,13 @@ func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, sta
 		}
 		if a.Config.Analyze.DetectLateBoundDictionaryConstants && object.Kind == dcDictionary && object.LateBound && lowerMember == "comparemode" && len(args) > 0 {
 			name := strings.ToLower(cleanIdentifier(args[0]))
-			if dcLateCompareConstants[name] && !consts[name] {
+			declared := false
+			if constFacts != nil {
+				declared = constFacts.hasConstant(name)
+			} else {
+				declared = constNames[strings.ToLower(strings.TrimSpace(name))]
+			}
+			if dcLateCompareConstants[name] && !declared {
 				findings = dcAppendFinding(findings, seen, a.simpleFinding(file, proc, line, "VBA233", "warning", args[0]+" is an undefined Scripting enum constant in late-bound Dictionary code.", "Late binding should not depend on enum names supplied only by a Scripting Runtime reference.", "Use vbBinaryCompare, vbTextCompare, or vbDatabaseCompare, or declare an explicit project Const."))
 			}
 		}

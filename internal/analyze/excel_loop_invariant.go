@@ -57,7 +57,7 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	constants := loopInvariantStringConstants(file, proc)
 	expressionsByStatement := make(map[int][]procedureir.Expression)
 	for _, statement := range proc.Statements {
-		expressionsByStatement[statement.ID] = statementMemberExpressions(statement, proc.Expressions)
+		expressionsByStatement[statement.ID] = statementMemberExpressions(proc, statement)
 	}
 	seen := map[string]loopInvariantCandidate{}
 	for _, statement := range proc.Statements {

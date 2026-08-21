@@ -86,6 +86,7 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 		"file_count", "procedure_count", "statement_count", "expression_count",
 		"call_site_count", "cfg_block_count", "cfg_edge_count", "project_symbol_count",
 		"byref_diagnostic_passes", "line_count", "module_declaration_count",
+		analysisstats.ModuleFactBuildsCounter, analysisstats.ProcedureFactBuildsCounter,
 		"max_lines_per_file", "max_procedures_per_file", "max_calls_per_file",
 		"max_statements_per_procedure", "max_cfg_blocks_per_procedure", "max_cfg_edges_per_procedure",
 	} {
@@ -95,6 +96,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	}
 	if counterByName["file_count"] != 1 || counterByName["procedure_count"] != 1 {
 		t.Fatalf("workload counters = %+v", counters)
+	}
+	if counterByName[analysisstats.ModuleFactBuildsCounter] != 1 || counterByName[analysisstats.ProcedureFactBuildsCounter] != 1 {
+		t.Fatalf("shared fact builds = module %d, procedure %d; want one each for one file/procedure revision", counterByName[analysisstats.ModuleFactBuildsCounter], counterByName[analysisstats.ProcedureFactBuildsCounter])
 	}
 	wantLineCount := uint64(len(normalizedSourceLines(source)) - 1)
 	if counterByName["line_count"] != wantLineCount ||
@@ -192,6 +196,14 @@ func TestVBA202WorklistEvaluationCountScalesWithDependencyChain(t *testing.T) {
 		if values[name] < procedureCount {
 			t.Fatalf("%s = %d, want at least one evaluation per procedure", name, values[name])
 		}
+	}
+	if values[analysisstats.ModuleFactBuildsCounter] != 1 {
+		t.Fatalf("module fact builds = %d, want one for the file revision", values[analysisstats.ModuleFactBuildsCounter])
+	}
+	// The fixture contains the dependency chain plus its Run entry point.
+	wantProcedureFacts := uint64(procedureCount + 1)
+	if values[analysisstats.ProcedureFactBuildsCounter] != wantProcedureFacts {
+		t.Fatalf("procedure fact builds = %d, want one per procedure revision (%d procedures)", values[analysisstats.ProcedureFactBuildsCounter], wantProcedureFacts)
 	}
 	limit := uint64((procedureCount + 1) * 5)
 	if values["object_summary_evaluations"] > limit {

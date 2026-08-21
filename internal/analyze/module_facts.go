@@ -14,6 +14,28 @@ type moduleAnalysisFacts struct {
 	moduleDeclarations  map[string]sourceDeclaration
 	procedureLineOwners []int
 	procedureDecls      map[int]map[string]sourceDeclaration
+	// procedureFactsByStart is a compact declaration-start index to the
+	// already-owned procedure facts. It stores pointers, not another copy of
+	// procedure IR, so module consumers can resolve a procedure revision
+	// without rebuilding its indexes.
+	procedureFactsByStart map[int]*procedureAnalysisFacts
+	// constants preserves source order because constant expressions may refer
+	// to declarations that appeared earlier in the module. The backing slice
+	// is owned by the facts object and is only exposed through read-only
+	// iteration helpers below.
+	constants      []moduleConstantFact
+	constantNames  map[string]struct{}
+	procedureNames map[string]struct{}
+}
+
+type moduleConstantFact struct {
+	Name       string
+	Expression string
+	Line       int
+	// Module is false for a procedure-local Const. Keeping this bit alongside
+	// the ordered declaration avoids re-scanning source/IR for consumers that
+	// need to distinguish module constants from local constants.
+	Module bool
 }
 
 func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, procedures []sourceProcedure) *moduleAnalysisFacts {
@@ -21,6 +43,9 @@ func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, p
 		moduleDeclarations:  make(map[string]sourceDeclaration),
 		procedureLineOwners: make([]int, len(lines)+1),
 		procedureDecls:      make(map[int]map[string]sourceDeclaration, len(procedures)),
+	}
+	if len(procedures) > 0 {
+		facts.procedureFactsByStart = make(map[int]*procedureAnalysisFacts, len(procedures))
 	}
 	for line := range facts.procedureLineOwners {
 		facts.procedureLineOwners[line] = -1
@@ -54,6 +79,51 @@ func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, p
 			coveredThrough = end
 		}
 		facts.procedureDecls[procedure.StartByte] = procedureDeclarations(lines, procedure)
+		procedureFacts := procedure.Facts
+		if procedureFacts == nil {
+			// Compatibility callers may provide a hand-built source projection
+			// without the normal sourceProceduresFromIR attachment. Build once for
+			// this module index rather than once per lookup.
+			procedureFacts = procedure.analysisFacts()
+		}
+		facts.procedureFactsByStart[procedure.StartByte] = procedureFacts
+		if name := strings.ToLower(strings.TrimSpace(procedure.Name)); name != "" {
+			if facts.procedureNames == nil {
+				facts.procedureNames = make(map[string]struct{}, len(procedures))
+			}
+			facts.procedureNames[name] = struct{}{}
+		}
+	}
+	// Some package-local callers build facts from a DocumentIR while passing a
+	// minimal sourceProcedure projection. Retain the IR names as a fallback so
+	// the same-module index remains complete for those revisions too.
+	for _, procedure := range document.Procedures {
+		if name := strings.ToLower(strings.TrimSpace(procedure.Symbol.Name)); name != "" {
+			if facts.procedureNames == nil {
+				facts.procedureNames = make(map[string]struct{}, len(document.Procedures))
+			}
+			facts.procedureNames[name] = struct{}{}
+		}
+	}
+	for lineNo, rawLine := range lines {
+		name, expression, ok := fileConstDeclaration(rawLine)
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		facts.constants = append(facts.constants, moduleConstantFact{
+			Name:       name,
+			Expression: strings.TrimSpace(expression),
+			Line:       lineNo + 1,
+			Module:     lineNo+1 >= 0 && lineNo+1 < len(facts.procedureLineOwners) && facts.procedureLineOwners[lineNo+1] < 0,
+		})
+		if facts.constantNames == nil {
+			facts.constantNames = make(map[string]struct{})
+		}
+		facts.constantNames[strings.ToLower(name)] = struct{}{}
 	}
 
 	if !document.Parse.HasError && !document.Parse.HasMissing && len(document.Declarations) > 0 {
@@ -126,6 +196,46 @@ func (facts *moduleAnalysisFacts) procedureDeclarations(procedure sourceProcedur
 		return nil
 	}
 	return facts.procedureDecls[procedure.StartByte]
+}
+
+// procedureFactsFor resolves the immutable facts associated with a procedure
+// declaration start byte. The sourceProcedure fallback keeps package-local
+// synthetic callers compatible when they bypass module setup.
+func (facts *moduleAnalysisFacts) procedureFactsFor(procedure sourceProcedure) *procedureAnalysisFacts {
+	if facts != nil {
+		if procedureFacts := facts.procedureFactsByStart[procedure.StartByte]; procedureFacts != nil {
+			return procedureFacts
+		}
+	}
+	return procedure.analysisFacts()
+}
+
+// forEachConstant visits declarations in source order. Callers must treat the
+// value as immutable; the callback is deliberately the only public-in-package
+// access path to the facts slice.
+func (facts *moduleAnalysisFacts) forEachConstant(visit func(moduleConstantFact)) {
+	if facts == nil || visit == nil {
+		return
+	}
+	for _, constant := range facts.constants {
+		visit(constant)
+	}
+}
+
+func (facts *moduleAnalysisFacts) hasConstant(name string) bool {
+	if facts == nil {
+		return false
+	}
+	_, ok := facts.constantNames[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
+func (facts *moduleAnalysisFacts) hasProcedure(name string) bool {
+	if facts == nil {
+		return false
+	}
+	_, ok := facts.procedureNames[strings.ToLower(strings.TrimSpace(name))]
+	return ok
 }
 
 func moduleDeclarationsFromSource(lines []string, procedureLineOwners []int) map[string]sourceDeclaration {
