@@ -238,8 +238,14 @@ func mergeExcelSummary(dst *excelAccessSummary, src excelAccessSummary) bool {
 func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.DB, rootBindings excelRootBindingIndex, rootDir string, cfg config.Config) excelAccessSummary {
 	summary := excelAccessSummary{Categories: map[string]bool{}, Members: map[string]bool{}}
 	loopVars := rangeVariablesForProcedure(proc, file, db, rootBindings, rootDir, cfg)
+	facts := proc.Facts
+	if facts == nil {
+		// Standalone callers may omit the attached projection. Build the
+		// compatibility facts once for this procedure, not once per statement.
+		facts = proc.analysisFacts()
+	}
 	for _, statement := range proc.Statements {
-		for _, access := range classifyExcelStatement(file, proc, statement, db, loopVars, rootDir, cfg) {
+		for _, access := range classifyExcelStatement(file, proc, statement, db, loopVars, rootDir, cfg, facts) {
 			summary.Categories[access.Category] = true
 			if access.Member != "" {
 				summary.Members[strings.ToLower(access.Member)] = true
@@ -275,9 +281,15 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
 	}
 	loopVars := rangeVariablesForProcedure(proc, file, a.typeDB, rootBindings, a.RootDir, a.Config)
+	facts := proc.Facts
+	if facts == nil {
+		// Keep the fallback procedure-scoped so every statement shares one
+		// compatibility projection in standalone/synthetic callers.
+		facts = proc.analysisFacts()
+	}
 	byStatement := map[int][]excelLoopAccess{}
 	for _, statement := range proc.Statements {
-		accesses := classifyExcelStatement(file, proc, statement, a.typeDB, loopVars, a.RootDir, a.Config)
+		accesses := classifyExcelStatement(file, proc, statement, a.typeDB, loopVars, a.RootDir, a.Config, facts)
 		if len(accesses) > 0 {
 			byStatement[statement.ID] = accesses
 		}
@@ -912,7 +924,7 @@ func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb
 	return vars
 }
 
-func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, db *vbadb.DB, rangeVars excelRangeVariables, rootDir string, cfg config.Config) []excelLoopAccess {
+func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, db *vbadb.DB, rangeVars excelRangeVariables, rootDir string, cfg config.Config, facts *procedureAnalysisFacts) []excelLoopAccess {
 	line := statement.Range.StartLine
 	rawText := statement.Text
 	text := rawText
@@ -922,7 +934,7 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 	text = sanitizeExcelStatementText(text)
 	lower := strings.ToLower(text)
 	var out []excelLoopAccess
-	for _, expression := range statementMemberExpressions(proc, statement) {
+	for _, expression := range statementMemberExpressions(facts, statement) {
 		receiver, member, memberEnd, ok := splitExcelMemberAccess(expression.Text)
 		if !ok {
 			continue
@@ -1116,8 +1128,11 @@ func excelRootBindingHasValueType(kind string) bool {
 	}
 }
 
-func statementMemberExpressions(proc sourceProcedure, statement procedureir.Statement) []procedureir.Expression {
-	return proc.analysisFacts().MemberExpressionsForStatement(statement.ID)
+func statementMemberExpressions(facts *procedureAnalysisFacts, statement procedureir.Statement) []procedureir.Expression {
+	if facts == nil {
+		return nil
+	}
+	return facts.MemberExpressionsForStatement(statement.ID)
 }
 
 func splitExcelMemberAccess(text string) (string, string, int, bool) {

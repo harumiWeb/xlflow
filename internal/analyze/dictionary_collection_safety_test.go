@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestDictionaryCollectionSafetyRules(t *testing.T) {
@@ -47,6 +49,61 @@ End Sub
 		"VBA235": 22,
 	} {
 		assertFinding(t, findings, code, line)
+	}
+}
+
+func TestVBA233DoesNotLeakProcedureLocalConstants(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub First()
+  Dim dict As Object
+  Set dict = CreateObject("Scripting.Dictionary")
+  dict.CompareMode = TextCompare
+End Sub
+
+Public Sub Second()
+  Const TextCompare As Long = 1
+  Dim dict As Object
+  Set dict = CreateObject("Scripting.Dictionary")
+  dict.CompareMode = TextCompare
+End Sub
+`)
+	cfg := config.Default()
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA233")
+	if len(got) != 1 || got[0].Line != 5 || got[0].Procedure != "First" {
+		t.Fatalf("VBA233 local-constant scope = %+v, want only First line 5", got)
+	}
+}
+
+func TestDCConstantNamesForProcedureFiltersOtherProcedureLocals(t *testing.T) {
+	file := parsedFile{
+		Lines: []string{
+			"Private Const ModuleValue As Long = 1",
+			"Public Sub First()",
+			"End Sub",
+			"Public Sub Second()",
+			"    Const LocalValue As Long = 2",
+			"End Sub",
+		},
+		IR: procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{
+			{Symbol: procedureir.ProcedureSymbol{DeclarationRange: vbaast.Range{StartLine: 2, EndLine: 3}}},
+			{Symbol: procedureir.ProcedureSymbol{DeclarationRange: vbaast.Range{StartLine: 4, EndLine: 6}}},
+		}},
+	}
+	first := sourceProcedure{StartLine: 2, EndLine: 3}
+	second := sourceProcedure{StartLine: 4, EndLine: 6}
+	firstNames := dcConstantNamesForProcedure(file, first)
+	secondNames := dcConstantNamesForProcedure(file, second)
+	if !firstNames["modulevalue"] || firstNames["localvalue"] {
+		t.Fatalf("First fallback constant scope = %#v", firstNames)
+	}
+	if !secondNames["modulevalue"] || !secondNames["localvalue"] {
+		t.Fatalf("Second fallback constant scope = %#v", secondNames)
 	}
 }
 

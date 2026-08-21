@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -2600,6 +2601,25 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA203"); len(got) != 0 {
 		t.Fatalf("shared cleanup and copied saved values should be safe: %+v", got)
+	}
+}
+
+func TestStatementWithinApplicationWithStopsOnParentCycle(t *testing.T) {
+	facts := newProcedureAnalysisFacts([]procedureir.Statement{
+		{ID: 1, ParentID: 2},
+		{ID: 2, ParentID: 1},
+	}, nil, nil, nil)
+	done := make(chan bool, 1)
+	go func() {
+		done <- statementWithinApplicationWith(procedureir.Statement{ID: 3, ParentID: 1}, facts)
+	}()
+	select {
+	case got := <-done:
+		if got {
+			t.Fatalf("parent cycle was incorrectly classified as With Application")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("statementWithinApplicationWith did not terminate on a parent cycle")
 	}
 }
 

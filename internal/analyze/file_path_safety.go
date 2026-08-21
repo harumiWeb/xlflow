@@ -55,7 +55,10 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	if !a.Config.Analyze.DetectUnsafeFilePath {
 		return nil
 	}
-	facts := file.moduleAnalysisFacts()
+	// Normal batch/realtime setup attaches module facts before rule execution.
+	// Read the field directly so standalone callers can use the source fallback
+	// without rebuilding the complete module index.
+	facts := file.ModuleFacts
 	values := map[string]filePathValue{}
 	// Module/procedure Const declarations are clean symbolic values even when
 	// they do not appear as assignments inside the current procedure.

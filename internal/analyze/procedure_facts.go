@@ -271,7 +271,13 @@ func (facts *procedureAnalysisFacts) MemberExpressionsForStatement(statementID i
 		return nil
 	}
 	indexes := facts.memberExpressionsByStatement[statementID]
-	if len(indexes) > 0 && !facts.memberExpressionFallback {
+	if !facts.memberExpressionFallback {
+		if len(indexes) == 0 {
+			// In authoritative production IR, an empty group proves that this
+			// statement has no eligible member expressions. Do not fall back to
+			// tree traversal or a procedure-wide scan.
+			return nil
+		}
 		out := make([]procedureir.Expression, 0, len(indexes))
 		for _, index := range indexes {
 			out = append(out, facts.expressions[index])
@@ -453,7 +459,11 @@ func (groups indexGroups) lookup(id int) ([]int, bool) {
 	if !ok {
 		return nil, false
 	}
-	return []int{span.start, span.end}, true
+	indexes := make([]int, 0, span.end-span.start)
+	for index := span.start; index < span.end; index++ {
+		indexes = append(indexes, index)
+	}
+	return indexes, true
 }
 
 func (groups indexGroups) contiguousSpan(id int) (indexSpan, bool) {

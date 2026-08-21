@@ -311,13 +311,16 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 
 	narrowProbes := dcNarrowProbeStatements(proc)
 	loops := excelLoopRegions(proc)
-	constFacts := file.moduleAnalysisFacts()
+	// Normal batch/realtime setup attaches module facts before rule execution.
+	// Read the field directly here so standalone callers retain the cheap source
+	// fallback instead of rebuilding the complete module index for each file.
+	constFacts := file.ModuleFacts
 	var constNames map[string]bool
 	if constFacts == nil {
 		// Keep standalone package-level callers (and focused tests that build a
-		// parsedFile directly) on the historical source fallback. Normal batch
-		// and realtime paths attach module facts before this rule runs.
-		constNames = dcConstantNames(file.Lines)
+		// parsedFile directly) on the historical source fallback, filtered to
+		// module constants and the current procedure's local constants.
+		constNames = dcConstantNamesForProcedure(file, proc)
 	}
 	seen := map[string]bool{}
 	var findings []Finding
@@ -685,7 +688,7 @@ func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, sta
 			name := strings.ToLower(cleanIdentifier(args[0]))
 			declared := false
 			if constFacts != nil {
-				declared = constFacts.hasConstant(name)
+				declared = constFacts.hasConstantForProcedure(name, proc)
 			} else {
 				declared = constNames[strings.ToLower(strings.TrimSpace(name))]
 			}
@@ -1371,22 +1374,55 @@ func dcCompareMode(text string) string {
 
 var dcLateCompareConstants = map[string]bool{"binarycompare": true, "textcompare": true, "databasecompare": true, "comparemethod.binarycompare": true, "comparemethod.textcompare": true, "comparemethod.databasecompare": true}
 
-func dcConstantNames(lines []string) map[string]bool {
+func dcConstantName(line string) (string, bool) {
+	text := strings.TrimSpace(normalizedCodeLine(line))
+	lower := strings.ToLower(text)
+	at := strings.Index(lower, "const ")
+	if at < 0 {
+		return "", false
+	}
+	rest := strings.TrimSpace(text[at+len("const "):])
+	name := rest
+	if stop := strings.IndexAny(name, " =,"); stop >= 0 {
+		name = name[:stop]
+	}
+	name = strings.ToLower(cleanIdentifier(name))
+	return name, name != ""
+}
+
+// dcConstantNamesForProcedure is the source-only compatibility path used when
+// a standalone parsedFile has no attached module facts. Module constants and
+// constants in the current procedure are visible; locals owned by another
+// procedure are excluded using the IR procedure ranges.
+func dcConstantNamesForProcedure(file parsedFile, proc sourceProcedure) map[string]bool {
 	out := map[string]bool{}
-	for _, line := range lines {
-		text := strings.TrimSpace(normalizedCodeLine(line))
-		lower := strings.ToLower(text)
-		at := strings.Index(lower, "const ")
-		if at < 0 {
+	ranges := make([][2]int, 0, len(file.IR.Procedures))
+	for _, candidate := range file.IR.Procedures {
+		start := candidate.Symbol.DeclarationRange.StartLine
+		end := candidate.Symbol.DeclarationRange.EndLine
+		if start > 0 && end >= start {
+			ranges = append(ranges, [2]int{start, end})
+		}
+	}
+	for lineIndex, line := range file.Lines {
+		name, ok := dcConstantName(line)
+		if !ok {
 			continue
 		}
-		rest := strings.TrimSpace(text[at+len("const "):])
-		name := rest
-		if stop := strings.IndexAny(name, " =,"); stop >= 0 {
-			name = name[:stop]
+		lineNo := lineIndex + 1
+		ownedByOtherProcedure := false
+		for _, candidate := range ranges {
+			if lineNo < candidate[0] || lineNo > candidate[1] {
+				continue
+			}
+			if lineNo < proc.StartLine || lineNo > proc.EndLine ||
+				candidate[0] != proc.StartLine || candidate[1] != proc.EndLine {
+				ownedByOtherProcedure = true
+				break
+			}
 		}
-		if name != "" {
-			out[strings.ToLower(cleanIdentifier(name))] = true
+		if !ownedByOtherProcedure {
+			out[name] = true
 		}
 	}
 	return out

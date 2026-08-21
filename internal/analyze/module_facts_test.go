@@ -137,6 +137,31 @@ func TestModuleAnalysisFactsIndexesOrderedConstantsAndLocalProcedures(t *testing
 	}
 }
 
+func TestModuleAnalysisFactsConstantLookupRespectsProcedureScope(t *testing.T) {
+	lines := []string{
+		"Private Const ModuleValue As Long = 1",
+		"Public Sub First()",
+		"End Sub",
+		"Public Sub Second()",
+		"    Const LocalValue As Long = 2",
+		"End Sub",
+	}
+	procedures := []sourceProcedure{
+		{Name: "First", StartLine: 2, EndLine: 3, StartByte: 101},
+		{Name: "Second", StartLine: 4, EndLine: 6, StartByte: 201},
+	}
+	facts := buildModuleAnalysisFacts(lines, procedureir.DocumentIR{}, procedures)
+	if !facts.hasConstantForProcedure("ModuleValue", procedures[0]) {
+		t.Fatalf("module constant should be visible in First")
+	}
+	if facts.hasConstantForProcedure("LocalValue", procedures[0]) {
+		t.Fatalf("Second's local constant leaked into First")
+	}
+	if !facts.hasConstantForProcedure("LocalValue", procedures[1]) {
+		t.Fatalf("Second's local constant should be visible in Second")
+	}
+}
+
 func TestDeclarationScopeLayersWithoutModuleMapCopy(t *testing.T) {
 	module := map[string]sourceDeclaration{
 		"value":      {Name: "value", Type: "Object", Object: true},

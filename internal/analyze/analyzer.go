@@ -3350,7 +3350,12 @@ func applicationPropertyTarget(expression string, statement procedureir.Statemen
 }
 
 func statementWithinApplicationWith(statement procedureir.Statement, facts *procedureAnalysisFacts) bool {
+	visited := map[int]bool{}
 	for parentID := statement.ParentID; parentID != 0; {
+		if visited[parentID] {
+			return false
+		}
+		visited[parentID] = true
 		parent, ok := facts.Statement(parentID)
 		if !ok {
 			return false

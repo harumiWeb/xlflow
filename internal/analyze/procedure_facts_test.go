@@ -170,3 +170,26 @@ func TestProcedureAnalysisFactsMemberExpressionsMixedStatementIDFallback(t *test
 		t.Fatalf("mixed StatementID member expression fallback = %#v, want both reachable members", got)
 	}
 }
+
+func TestProcedureAnalysisFactsEmptyAuthoritativeMemberGroupDoesNotTraverseOtherStatements(t *testing.T) {
+	statements := []procedureir.Statement{
+		{ID: 10, ExpressionIDs: []int{1}},
+		{ID: 20},
+	}
+	expressions := []procedureir.Expression{
+		{ID: 1, StatementID: 10, Kind: procedureir.ExpressionIdentifier, Children: []int{2}},
+		{ID: 2, StatementID: 20, Kind: procedureir.ExpressionMember, Text: "Range.Value"},
+	}
+	facts := newProcedureAnalysisFacts(statements, expressions, nil, nil)
+	if got := facts.MemberExpressionsForStatement(10); len(got) != 0 {
+		t.Fatalf("authoritative empty member group = %#v, want nil", got)
+	}
+}
+
+func TestIndexGroupsLookupExpandsContiguousSpan(t *testing.T) {
+	groups := newIndexGroups([]int{10, 10})
+	got, ok := groups.lookup(10)
+	if !ok || len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("contiguous lookup = %#v, %v; want indexes [0 1]", got, ok)
+	}
+}

@@ -23,9 +23,11 @@ type moduleAnalysisFacts struct {
 	// to declarations that appeared earlier in the module. The backing slice
 	// is owned by the facts object and is only exposed through read-only
 	// iteration helpers below.
-	constants      []moduleConstantFact
-	constantNames  map[string]struct{}
-	procedureNames map[string]struct{}
+	constants              []moduleConstantFact
+	constantNames          map[string]struct{}
+	moduleConstantNames    map[string]struct{}
+	procedureConstantNames map[int]map[string]struct{}
+	procedureNames         map[string]struct{}
 }
 
 type moduleConstantFact struct {
@@ -123,7 +125,25 @@ func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, p
 		if facts.constantNames == nil {
 			facts.constantNames = make(map[string]struct{})
 		}
-		facts.constantNames[strings.ToLower(name)] = struct{}{}
+		key := strings.ToLower(name)
+		facts.constantNames[key] = struct{}{}
+		owner := facts.procedureLineOwners[lineNo+1]
+		if owner < 0 || owner >= len(ordered) {
+			if facts.moduleConstantNames == nil {
+				facts.moduleConstantNames = make(map[string]struct{})
+			}
+			facts.moduleConstantNames[key] = struct{}{}
+			continue
+		}
+		if facts.procedureConstantNames == nil {
+			facts.procedureConstantNames = make(map[int]map[string]struct{})
+		}
+		localNames := facts.procedureConstantNames[ordered[owner].StartByte]
+		if localNames == nil {
+			localNames = make(map[string]struct{})
+			facts.procedureConstantNames[ordered[owner].StartByte] = localNames
+		}
+		localNames[key] = struct{}{}
 	}
 
 	if !document.Parse.HasError && !document.Parse.HasMissing && len(document.Declarations) > 0 {
@@ -227,6 +247,23 @@ func (facts *moduleAnalysisFacts) hasConstant(name string) bool {
 		return false
 	}
 	_, ok := facts.constantNames[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
+// hasConstantForProcedure reports constants visible from one procedure: all
+// module constants plus only the Const declarations owned by that procedure.
+// Procedure-local names are indexed by declaration start byte so repeated
+// rule-family lookups do not rescan the module's ordered constant slice.
+func (facts *moduleAnalysisFacts) hasConstantForProcedure(name string, procedure sourceProcedure) bool {
+	if facts == nil {
+		return false
+	}
+	key := strings.ToLower(strings.TrimSpace(name))
+	if _, ok := facts.moduleConstantNames[key]; ok {
+		return true
+	}
+	localNames := facts.procedureConstantNames[procedure.StartByte]
+	_, ok := localNames[key]
 	return ok
 }
 
