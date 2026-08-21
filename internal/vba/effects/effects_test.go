@@ -1071,6 +1071,12 @@ func TestProjectSummarySharesFullMaterializationCacheAcrossLookups(t *testing.T)
 		}()
 	}
 	waitGroup.Wait()
+	if len(project.materialization.byIndex) != 1 {
+		t.Fatalf("concurrent lookups changed the shared cache size: %d", len(project.materialization.byIndex))
+	}
+	if project.materialization.materializer.errorReplay != replay {
+		t.Fatal("concurrent lookups rebuilt the error-witness replay")
+	}
 }
 
 func TestMissingCFGDoesNotClaimStatementsAreUnreachable(t *testing.T) {

@@ -318,6 +318,9 @@ func seedReplayUncertainty(state *replaySummary, uncertaintyItems []CallUncertai
 }
 
 func mergeReplayEvidence(caller, callee *replaySummary, callerKey string) bool {
+	// Retain evidence even though replayPropagatedErrors emits only error
+	// state: its changed signal preserves the legacy requeue ordering that
+	// selects deterministic representative error paths.
 	changed := false
 	for _, fact := range callee.evidence {
 		if fact.origin == callerKey {
@@ -339,12 +342,12 @@ func mergeReplayErrors(caller, callee *replaySummary, callerKey string) bool {
 		if evidence.Behavior == ErrorMayRaise || evidence.Origin.Key() == callerKey {
 			continue
 		}
-		copyEvidence := cloneErrorEvidence([]ErrorEvidence{evidence})[0]
-		copyEvidence.CallChain = prependErrorCaller(caller.identity, copyEvidence.CallChain, copyEvidence.Origin)
-		factKey := errorEvidenceKey(copyEvidence)
+		factKey := errorEvidenceKey(evidence)
 		if _, exists := caller.errorSet[factKey]; exists {
 			continue
 		}
+		copyEvidence := cloneErrorEvidence([]ErrorEvidence{evidence})[0]
+		copyEvidence.CallChain = prependErrorCaller(caller.identity, copyEvidence.CallChain, copyEvidence.Origin)
 		caller.errorSet[factKey] = struct{}{}
 		caller.errors = append(caller.errors, copyEvidence)
 		changed = true
@@ -378,6 +381,8 @@ func mergeReplayMayRaise(caller, callee *replaySummary) bool {
 }
 
 func mergeReplayUncertainty(caller, callee *replaySummary, callerKey string) bool {
+	// Retain uncertainty for the same legacy changed/requeue ordering reason
+	// as evidence, even though the replay output is error provenance only.
 	changed := false
 	for _, fact := range callee.uncertainty {
 		if fact.origin == callerKey {

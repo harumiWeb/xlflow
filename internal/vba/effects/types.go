@@ -265,26 +265,24 @@ func (p ProjectSummary) materializeCached(index int) ProcedureSummary {
 	}
 	cache := p.materialization
 	cache.mu.RLock()
-	if summary, ok := cache.byIndex[index]; ok {
-		out := cloneProcedureSummary(summary)
-		cache.mu.RUnlock()
-		return out
-	}
+	summary, ok := cache.byIndex[index]
 	cache.mu.RUnlock()
+	if ok {
+		return cloneProcedureSummary(summary)
+	}
 
 	// Materialization can traverse a large call graph. Do not hold the cache
 	// lock while doing that work; concurrent lookups may compute different
 	// indexes independently and publish one immutable result each.
-	summary := cache.materializer.materialize(index)
+	summary = cache.materializer.materialize(index)
 	cache.mu.Lock()
 	if cached, ok := cache.byIndex[index]; ok {
 		summary = cached
 	} else {
 		cache.byIndex[index] = summary
 	}
-	out := cloneProcedureSummary(summary)
 	cache.mu.Unlock()
-	return out
+	return cloneProcedureSummary(summary)
 }
 
 func (m *provenanceMaterialization) errorWitnessReplay() *errorWitnessReplay {
