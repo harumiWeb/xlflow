@@ -15,6 +15,7 @@ var referenceFiles = []string{
 	"xlflow-ui.md",
 	"recovery.md",
 	"code-analysis.md",
+	"object-model-traps.md",
 }
 
 func requireContains(t *testing.T, body string, wants ...string) {
@@ -94,6 +95,7 @@ func TestInstallUsesProviderDefaultTarget(t *testing.T) {
 		"## Dispatch to Specialized References",
 		"[recovery.md](references/recovery.md)",
 		"[code-analysis.md](references/code-analysis.md)",
+		"[object-model-traps.md](references/object-model-traps.md)",
 		"## Evidence of Completion",
 	)
 	requireBefore(t, installed, "xlflow lint --json", "xlflow push --fast --session --no-save --json")

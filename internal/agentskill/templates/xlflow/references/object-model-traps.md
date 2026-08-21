@@ -26,17 +26,25 @@ dangerous one is a key inside the range: a position comes back with no error and
 no `#N/A`, and it is not the nearest value. The result may also be correct by
 accident on the data you tested with, and wrong on the data your user has.
 
-**Safe rule.** Either sort the range ascending immediately before the lookup, or
-pass exact matching explicitly: `Match(key, rng, 0)`, `VLookup(key, tbl, 2,
-False)`. Prefer exact matching unless a banded or bucketed lookup is genuinely
-intended. Do not rely on any particular wrong answer.
+**Safe rule.** Approximate matching is only defined when the required order is
+established *and* verified. If you cannot show that it holds, pass exact matching
+explicitly: `Match(key, rng, 0)`, `VLookup(key, tbl, 2, False)`. Prefer exact
+matching unless a banded or bucketed lookup is genuinely intended, and do not
+rely on any particular wrong answer.
 
-**Proof.** Write a test that fills a range out of order, performs the lookup, and
-asserts the position you require, then run it through the session proof loop in
-SKILL.md (`session start` → `push --fast --session --no-save` → `test --session
---no-save` → `save --session` → `session stop`). If it passes only because the
-data happened to be arranged a certain way, arrange it differently and watch it
-fail.
+Sorting to satisfy the rule is a structural edit, not a lookup detail. Sort the
+whole associated dataset, never the key column alone — sorting a `VLookup` key
+range by itself breaks its rows away from the columns it returns — and treat
+reordering the user's data as a change that needs its own justification.
+
+**Proof.** Assert the behavior you are relying on, not the one you are avoiding.
+Fill a range out of order and assert that exact matching finds the key wherever
+it sits; or establish the required order in the procedure, assert the order
+itself, and then assert the approximate result. Run it through the session proof
+loop in SKILL.md (`session start` → `push --fast --session --no-save` → `test
+--session --no-save` → `save --session` → `session stop`). Do not assert the
+position an unsorted approximate lookup happens to return: that is the observed
+behavior below, and it is not a contract to hold a test against.
 
 **Scope / provenance.** Excel documents approximate matching as requiring
 ascending order, and documents nothing about unsorted input. Observed on Excel
@@ -89,10 +97,13 @@ stable, it is now reading a different cell.
 addresses after inserting or deleting, or refer to the data through a defined
 name or a table column, which are maintained across the edit.
 
-**Safe rule for ranges.** A range argument resizes rather than shifts. An insert
-inside `SUM(A1:A3)` gives `SUM(A1:A4)`; a deletion across it gives `SUM(A1:A2)`;
-only a range removed in its entirety becomes `#REF!`. Do not treat the absence of
-`#REF!` as evidence that a formula still covers what it used to.
+**Safe rule for ranges.** A range reference may shift or resize, depending on
+where the structural edit meets it. An insert *above* `SUM(A1:A3)` shifts it to
+`SUM(A2:A4)`; an insert *inside* it resizes it to `SUM(A1:A4)`; a deletion across
+it gives `SUM(A1:A2)`; an insert past its end leaves it exactly as it was; only a
+range removed in its entirety becomes `#REF!`. Either way the reference is
+adjusted silently, so do not treat the absence of `#REF!` as evidence that a
+formula still covers what it used to.
 
 **Proof.** Snapshot formulas with `xlflow formulas pull --json` before and after
 the structural edit and compare the regions that matter. The snapshot reads the
@@ -132,25 +143,32 @@ reference adjustment; the merge half is an observation.
 **Trigger.** `Range.Sort` or `AutoFilter` sorting over a column that may hold more
 than one type, or any `Sort` call that omits `Header`.
 
-**Risk.** Two silent failures. Values do not interleave: all numbers come before
-all text, which comes before Booleans, so a "sorted" column can look shuffled to
-a user reading values. And `Header` defaults to `xlNo`, so an omitted argument
-sorts the header row in with the data.
+**Risk.** Two silent failures. Values do not interleave, they group by kind: in
+ascending order all numbers come before all text, which comes before Booleans,
+which come before error values; descending reverses that order of kinds as well
+as the values inside each one. So a "sorted" column can look shuffled to a user
+reading values. And `Header` defaults to `xlNo`, so an omitted argument sorts the
+header row in with the data.
 
 **Safe rule.** Pass `Header:=xlYes` explicitly whenever the range includes a
 header row — do not rely on Excel guessing. Normalise a mixed column to one type
 before sorting if the user expects values to interleave.
 
-**Safe rule for blanks.** Blanks sort to the bottom in both directions. A
-descending sort does not bring them to the top, so "the last row is blank" is not
-a reliable end-of-data test after sorting.
+**Safe rule for blanks.** Blanks sit outside the ordering of kinds: they sort to
+the bottom in both directions. A descending sort does not bring them to the top,
+so "the last row is blank" is not a reliable end-of-data test after sorting.
 
-**Proof.** Sort a column holding a number, a text value, a Boolean and a blank,
-then assert the resulting order cell by cell.
+**Proof.** Sort a column holding a number, a text value, a Boolean, an error and
+a blank — ascending and descending — and assert the resulting order cell by cell.
+Assert both directions: a test that only covers ascending will not notice code
+that assumes the kinds stay in the same order when the direction flips.
 
 **Scope / provenance.** Excel documents the type ordering and the `Header`
-default. Observed to hold on Excel 16 (Windows 11, ja-JP). Locale affects text
-collation, so assert on the type grouping rather than on the order of specific
+default. Observed on Excel 16 (Windows 11, ja-JP), over a column holding `text`,
+`5`, `TRUE`, a blank, `#DIV/0!`, `apple`, `100` and `FALSE`: ascending gives
+`5, 100, apple, text, FALSE, TRUE, #DIV/0!, [blank]` and descending gives
+`#DIV/0!, TRUE, FALSE, text, apple, 100, 5, [blank]`. Locale affects text
+collation, so assert on the grouping by kind rather than on the order of specific
 strings if the workbook may run elsewhere.
 
 ## The Same Name Is Two Different Functions
@@ -186,12 +204,14 @@ Observed on Excel 16 (Windows 11, ja-JP).
 
 ## Safety Rules
 
-- Treat any approximate lookup over data you did not just sort as unverified.
+- Treat any approximate lookup as unverified until the required order is both
+  established and asserted; otherwise pass exact matching.
 - Do not derive a criteria string by negating another one.
 - Re-read addresses after a structural edit; do not trust an address literal
   across `Insert` or `Delete`.
 - Check merges after a partial shift, separately from checking formulas.
-- Pass `Header` explicitly to every `Sort` over a range that has one.
+- Pass `Header` explicitly to every `Sort` over a range that has one, and assert
+  a mixed-type sort in both directions rather than only ascending.
 - Prove the boundary case whenever a rounding or trimming rule matters.
 - When an entry above is marked as an observation, verify it on the target Excel
   version before writing code that depends on the specific value.
