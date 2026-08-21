@@ -241,3 +241,9 @@ tasks:
         platforms: [windows]
       - cmd: go mod tidy
         platforms: [linux, darwin]
+
+  review:codex:
+    desc: Run quiet Codex review against origin/main
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/codex-review.ps1 {{.CLI_ARGS}}
+        platforms: [windows]
