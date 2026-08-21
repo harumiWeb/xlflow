@@ -13,10 +13,18 @@ import (
 // active On Error modes, including Resume Next, are still represented.
 func (g Graph) WithoutNormalErrRaiseContinuation() Graph {
 	g.Blocks = append([]Block(nil), g.Blocks...)
+	blocksByID := make(map[BlockID]Block, len(g.Blocks))
+	for _, block := range g.Blocks {
+		// Match BlockByID's first-match behavior for defensive graph values
+		// that contain duplicate block IDs.
+		if _, exists := blocksByID[block.ID]; !exists {
+			blocksByID[block.ID] = block
+		}
+	}
 	edges := g.Edges
 	g.Edges = make([]Edge, 0, len(edges))
 	for _, edge := range edges {
-		if edge.Class == EdgeNormal && g.isNonReturningRaiseBlock(edge.From) {
+		if edge.Class == EdgeNormal && isNonReturningRaiseBlock(blocksByID[edge.From]) {
 			continue
 		}
 		g.Edges = append(g.Edges, edge)
@@ -25,11 +33,7 @@ func (g Graph) WithoutNormalErrRaiseContinuation() Graph {
 	return g
 }
 
-func (g Graph) isNonReturningRaiseBlock(id BlockID) bool {
-	block, ok := g.BlockByID(id)
-	if !ok {
-		return false
-	}
+func isNonReturningRaiseBlock(block Block) bool {
 	statement := block.Statement
 	if statement == nil {
 		return false

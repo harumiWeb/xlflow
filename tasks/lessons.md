@@ -131,3 +131,4 @@
 - When caching derived CFG reachability, invalidate the cache for every reachability input (`Blocks`, `Edges`, `Entry`, `UnknownExit`, and `UnknownFlowSources`), not only the adjacency storage.
 - When lazily reconstructing interprocedural diagnostic provenance, replay the legacy deterministic worklist once per analysis and share its materialization cache; isolated per-origin traversals can change representative paths and repeated lookups can reintroduce quadratic work.
 - For Windows coordination timeout tests, separate the shared-deadline assertion from hosted-runner wall-clock jitter; use focused reruns to distinguish a timing flake from a restarted-budget regression before changing production coordination logic.
+- When filtering a copied CFG, do not call value-receiver indexed lookups inside the edge loop: the copied slices invalidate the shared index. Build one local block-ID map before filtering, then rebuild the final index once.
