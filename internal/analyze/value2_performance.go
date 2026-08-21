@@ -55,6 +55,12 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 	states := value2PerformanceIncomingStates(proc, facts)
 	regions := excelLoopRegions(proc)
 	declarations := value2ProcedureTypes(proc)
+	factsForMembers := proc.Facts
+	if factsForMembers == nil {
+		// Reuse one compatibility projection for all statement lookups when a
+		// standalone caller has not attached procedure facts.
+		factsForMembers = proc.analysisFacts()
+	}
 	var candidates []value2PerformanceCandidate
 	seen := map[int]bool{}
 	seenReceivers := map[string]int{}
@@ -66,7 +72,7 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 		if !ok {
 			continue
 		}
-		for _, expression := range statementMemberExpressions(statement, proc.Expressions) {
+		for _, expression := range statementMemberExpressions(factsForMembers, statement) {
 			if seen[expression.ID] {
 				continue
 			}

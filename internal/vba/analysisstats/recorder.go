@@ -16,6 +16,15 @@ type Stage struct {
 	Calls       int
 }
 
+// Fact-build counters are additive observations. They deliberately live in
+// analysisstats rather than in an analyzer rule package so batch, realtime,
+// and benchmark callers use the same stable names when reporting the amount
+// of shared-facts preparation work.
+const (
+	ModuleFactBuildsCounter    = "module_fact_builds"
+	ProcedureFactBuildsCounter = "procedure_fact_builds"
+)
+
 type Recorder struct {
 	mu       sync.Mutex
 	stages   []Stage
@@ -132,6 +141,27 @@ func (r *Recorder) AddMax(name string, value uint64) {
 		r.counters[name] = value
 	}
 	r.mu.Unlock()
+}
+
+// RecordModuleFactBuild records one construction of the immutable file-level
+// facts for an analysis revision. A nil recorder is intentionally a no-op.
+func (r *Recorder) RecordModuleFactBuild() {
+	r.AddSum(ModuleFactBuildsCounter, 1)
+}
+
+// RecordProcedureFactBuild records one construction of the immutable
+// procedure-level facts for an analysis revision. A nil recorder is
+// intentionally a no-op.
+func (r *Recorder) RecordProcedureFactBuild() {
+	r.RecordProcedureFactBuilds(1)
+}
+
+// RecordProcedureFactBuilds records multiple procedure-fact constructions in
+// one counter update. Callers that already know the procedure count should use
+// this form so instrumentation does not take one recorder lock per procedure
+// in a large-module benchmark.
+func (r *Recorder) RecordProcedureFactBuilds(count uint64) {
+	r.AddSum(ProcedureFactBuildsCounter, count)
 }
 
 func (r *Recorder) Snapshot() ([]Stage, map[string]uint64) {

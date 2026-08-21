@@ -80,6 +80,9 @@ func TestModuleAnalysisFactsUsesIRDeclarationsAndIndexedProcedureOwnership(t *te
 	if got := facts.procedureDeclarations(procedures[0]); got["localvalue"].Name != "localValue" {
 		t.Fatalf("cached procedure declarations = %#v, want localValue", got)
 	}
+	if got := facts.procedureFactsFor(procedures[0]); got == nil || got != facts.procedureFactsFor(procedures[0]) {
+		t.Fatalf("procedure facts start-byte index = %p, want one stable facts pointer", got)
+	}
 }
 
 func TestModuleAnalysisFactsFallsBackToSourceForIncompleteIR(t *testing.T) {
@@ -96,6 +99,73 @@ func TestModuleAnalysisFactsFallsBackToSourceForIncompleteIR(t *testing.T) {
 	}
 	if _, ok := facts.moduleDeclarations["localvalue"]; ok {
 		t.Fatalf("source fallback included procedure-local declaration: %#v", facts.moduleDeclarations)
+	}
+}
+
+func TestModuleAnalysisFactsIndexesOrderedConstantsAndLocalProcedures(t *testing.T) {
+	lines := []string{
+		"Private Const RootPath As String = ThisWorkbook.Path",
+		"Public Sub First()",
+		"    Const LocalPath As String = RootPath & \"\\data\"",
+		"End Sub",
+		"Private Function Second() As String",
+		"    Second = LocalPath",
+		"End Function",
+	}
+	procedures := []sourceProcedure{
+		{Name: "First", StartLine: 2, EndLine: 4, StartByte: 101},
+		{Name: "Second", StartLine: 5, EndLine: 7, StartByte: 201},
+	}
+	facts := buildModuleAnalysisFacts(lines, procedureir.DocumentIR{}, procedures)
+
+	var constants []moduleConstantFact
+	facts.forEachConstant(func(constant moduleConstantFact) { constants = append(constants, constant) })
+	if len(constants) != 2 {
+		t.Fatalf("constant facts = %#v, want two source declarations", constants)
+	}
+	if constants[0].Name != "RootPath" || constants[0].Line != 1 || !constants[0].Module {
+		t.Fatalf("first constant fact = %#v, want module RootPath on line 1", constants[0])
+	}
+	if constants[1].Name != "LocalPath" || constants[1].Line != 3 || constants[1].Module {
+		t.Fatalf("second constant fact = %#v, want procedure-local LocalPath on line 3", constants[1])
+	}
+	if !facts.hasConstant("rootpath") || !facts.hasConstant("LOCALPATH") || facts.hasConstant("Missing") {
+		t.Fatalf("constant name index does not provide case-insensitive read-only lookup")
+	}
+	if !facts.hasProcedure("first") || !facts.hasProcedure("SECOND") || facts.hasProcedure("Missing") {
+		t.Fatalf("procedure name index does not provide case-insensitive same-module lookup")
+	}
+}
+
+func TestModuleAnalysisFactsConstantLookupRespectsProcedureScope(t *testing.T) {
+	lines := []string{
+		"Private Const ModuleValue As Long = 1",
+		"Public Sub First()",
+		"End Sub",
+		"Public Sub Second()",
+		"    Const LocalValue As Long = 2",
+		"End Sub",
+	}
+	procedures := []sourceProcedure{
+		{Name: "First", StartLine: 2, EndLine: 3, StartByte: 101},
+		{Name: "Second", StartLine: 4, EndLine: 6, StartByte: 201},
+	}
+	facts := buildModuleAnalysisFacts(lines, procedureir.DocumentIR{}, procedures)
+	if !facts.hasConstantForProcedure("ModuleValue", procedures[0]) {
+		t.Fatalf("module constant should be visible in First")
+	}
+	if facts.hasConstantForProcedure("LocalValue", procedures[0]) {
+		t.Fatalf("Second's local constant leaked into First")
+	}
+	if !facts.hasConstantForProcedure("LocalValue", procedures[1]) {
+		t.Fatalf("Second's local constant should be visible in Second")
+	}
+	var visible []string
+	facts.forEachConstantForProcedure(procedures[1], func(constant moduleConstantFact) {
+		visible = append(visible, constant.Name)
+	})
+	if len(visible) != 2 || visible[0] != "ModuleValue" || visible[1] != "LocalValue" {
+		t.Fatalf("visible constants = %#v, want module then current local", visible)
 	}
 }
 

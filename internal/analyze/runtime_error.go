@@ -52,10 +52,7 @@ func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc source
 			values[name] = value
 		}
 	}
-	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
-		expressions[expression.ID] = expression
-	}
+	facts := proc.analysisFacts()
 	localNames := runtimeLocalNames(proc)
 	for name := range localNames {
 		delete(values, name)
@@ -71,7 +68,7 @@ func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc source
 		sort.SliceStable(statements, func(i, j int) bool { return statements[i].Range.StartByte < statements[j].Range.StartByte })
 		for _, statement := range statements {
 			env := runtimeConstantEnvironment(base, state)
-			findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, statement, expressions, env)
+			findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, statement, facts, env)
 			state = runtimeTransfer(statement, state, env, writes[statement.ID])
 		}
 		return append(findings, a.deterministicArrayRuntimeFindings(file, proc, ctx, moduleDecls)...)
@@ -89,7 +86,7 @@ func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc source
 			continue
 		}
 		env := runtimeConstantEnvironment(base, state)
-		findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, *block.Statement, expressions, env)
+		findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, *block.Statement, facts, env)
 	}
 	return append(findings, a.deterministicArrayRuntimeFindings(file, proc, ctx, moduleDecls)...)
 }
@@ -291,16 +288,34 @@ func arrayOperationFindingKey(finding Finding) string {
 }
 
 func runtimeConstantEnvironment(base constexpr.Environment, state runtimeConstantState) constexpr.Environment {
-	values := make(map[string]constexpr.Value)
-	if baseValues, ok := base.(constexpr.Values); ok {
-		for name, value := range baseValues {
-			values[name] = value
-		}
+	// Keep the immutable file/project environment shared and layer the
+	// procedure-local transfer state over it. The previous implementation
+	// copied every base constant for every CFG statement, which made a large
+	// module's runtime-error pass allocate in proportion to
+	// statements*constants. runtimeConstantState keys are normalized by the
+	// producer; Resolve still normalizes callers to preserve constexpr.Values'
+	// case-insensitive contract.
+	return runtimeConstantOverlay{base: base, state: state}
+}
+
+// runtimeConstantOverlay is an immutable, read-only constexpr environment for
+// one transfer state. The state map is never mutated after it is passed here;
+// transfers clone before writing, so concurrent readers can safely share the
+// base environment and the overlay value.
+type runtimeConstantOverlay struct {
+	base  constexpr.Environment
+	state runtimeConstantState
+}
+
+func (overlay runtimeConstantOverlay) Resolve(name string) (constexpr.Value, bool) {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if value, ok := overlay.state[key]; ok {
+		return value, true
 	}
-	for name, value := range state {
-		values[name] = value
+	if overlay.base == nil {
+		return constexpr.Value{}, false
 	}
-	return constexpr.NewValues(values)
+	return overlay.base.Resolve(key)
 }
 
 func runtimeCFGStates(graph *vbacfg.Graph, initial runtimeConstantState, base constexpr.Environment, accesses []procedureir.VariableAccess) map[vbacfg.BlockID]runtimeConstantState {
@@ -579,7 +594,7 @@ func runtimeSimpleIdentifier(text string) string {
 	return strings.ToLower(text)
 }
 
-func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, analyzer Analyzer, file parsedFile, proc sourceProcedure, statement procedureir.Statement, expressions map[int]procedureir.Expression, env constexpr.Environment) []Finding {
+func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, analyzer Analyzer, file parsedFile, proc sourceProcedure, statement procedureir.Statement, facts *procedureAnalysisFacts, env constexpr.Environment) []Finding {
 	add := func(expression procedureir.Expression, kind string) {
 		line := expression.Range.StartLine
 		if line <= 0 {
@@ -598,7 +613,7 @@ func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, an
 		finding.RuntimeError = &RuntimeErrorContext{Kind: kind}
 		findings = append(findings, finding)
 	}
-	for _, expression := range expressionsForRuntimeStatement(statement, expressions) {
+	for _, expression := range expressionsForRuntimeStatement(statement, facts) {
 		if expression.Recovered || expression.Text == "" {
 			continue
 		}
@@ -606,7 +621,7 @@ func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, an
 		// shared evaluator intentionally leaves the enclosing call unknown.
 		// Walk the expression tree so supported conversions are checked at the
 		// exact call site instead of only when they are the root expression.
-		for _, candidate := range runtimeExpressionTree(expression, expressions) {
+		for _, candidate := range runtimeExpressionTree(expression, facts) {
 			if candidate.Recovered || candidate.Text == "" {
 				continue
 			}
@@ -615,7 +630,7 @@ func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, an
 			}
 		}
 		if result := constexpr.Evaluate(expression.Text, env); result.Kind == constexpr.Invalid {
-			if kind, ok := deterministicRuntimeFailureKind(result, expression, expressions, env); ok {
+			if kind, ok := deterministicRuntimeFailureKind(result, expression, facts, env); ok {
 				add(expression, kind)
 			}
 		}
@@ -623,7 +638,7 @@ func appendRuntimeStatementFindings(findings []Finding, seen map[string]bool, an
 	return findings
 }
 
-func runtimeExpressionTree(root procedureir.Expression, expressions map[int]procedureir.Expression) []procedureir.Expression {
+func runtimeExpressionTree(root procedureir.Expression, facts *procedureAnalysisFacts) []procedureir.Expression {
 	out := make([]procedureir.Expression, 0, 1+len(root.Children))
 	visited := make(map[int]bool)
 	var visit func(procedureir.Expression)
@@ -634,7 +649,7 @@ func runtimeExpressionTree(root procedureir.Expression, expressions map[int]proc
 		visited[expression.ID] = true
 		out = append(out, expression)
 		for _, childID := range expression.Children {
-			if child, ok := expressions[childID]; ok {
+			if child, ok := facts.Expression(childID); ok {
 				visit(child)
 			}
 		}
@@ -767,31 +782,31 @@ func runtimeNumericFloat(value constexpr.Value) float64 {
 	}
 }
 
-func expressionsForRuntimeStatement(statement procedureir.Statement, expressions map[int]procedureir.Expression) []procedureir.Expression {
+func expressionsForRuntimeStatement(statement procedureir.Statement, facts *procedureAnalysisFacts) []procedureir.Expression {
 	ids := make([]int, 0, len(statement.ExpressionIDs))
 	for _, id := range statement.ExpressionIDs {
-		if expression, ok := expressions[id]; ok && expression.ParentID == 0 {
+		if expression, ok := facts.Expression(id); ok && expression.ParentID == 0 {
 			ids = append(ids, id)
 		}
 	}
 	if len(ids) == 0 {
-		for id, expression := range expressions {
+		facts.forEachExpression(func(expression procedureir.Expression) {
 			if expression.StatementID == statement.ID && expression.ParentID == 0 {
-				ids = append(ids, id)
+				ids = append(ids, expression.ID)
 			}
-		}
+		})
 	}
 	sort.Ints(ids)
 	out := make([]procedureir.Expression, 0, len(ids))
 	for _, id := range ids {
-		if expression, ok := expressions[id]; ok {
+		if expression, ok := facts.Expression(id); ok {
 			out = append(out, expression)
 		}
 	}
 	return out
 }
 
-func deterministicRuntimeFailureKind(result constexpr.Result, expression procedureir.Expression, expressions map[int]procedureir.Expression, env constexpr.Environment) (string, bool) {
+func deterministicRuntimeFailureKind(result constexpr.Result, expression procedureir.Expression, facts *procedureAnalysisFacts, env constexpr.Environment) (string, bool) {
 	if result.Kind != constexpr.Invalid {
 		return "", false
 	}
@@ -803,23 +818,23 @@ func deterministicRuntimeFailureKind(result constexpr.Result, expression procedu
 	// interpreted as a number. Numeric strings are accepted by VBA coercion.
 	switch result.Reason {
 	case "arithmetic requires numeric operands", "unary plus requires numeric operand", "unary minus requires numeric operand", "exponent requires numeric operands", "integer operator requires integral operands":
-		if expressionHasKnownNonnumericString(expression, expressions, env) {
+		if expressionHasKnownNonnumericString(expression, facts, env) {
 			return "numeric_type_mismatch", true
 		}
 	}
 	return "", false
 }
 
-func expressionHasKnownNonnumericString(expression procedureir.Expression, expressions map[int]procedureir.Expression, env constexpr.Environment) bool {
+func expressionHasKnownNonnumericString(expression procedureir.Expression, facts *procedureAnalysisFacts, env constexpr.Environment) bool {
 	for _, childID := range expression.Children {
-		child, ok := expressions[childID]
+		child, ok := facts.Expression(childID)
 		if !ok || child.Recovered {
 			continue
 		}
 		if result := constexpr.Evaluate(child.Text, env); result.Kind == constexpr.Known && result.Typed.Kind == constexpr.ValueString && definitelyNonnumericString(result.Typed.String) {
 			return true
 		}
-		if expressionHasKnownNonnumericString(child, expressions, env) {
+		if expressionHasKnownNonnumericString(child, facts, env) {
 			return true
 		}
 	}

@@ -327,8 +327,12 @@ type sourceProcedure struct {
 	Expressions      []procedureir.Expression
 	Calls            []procedureir.CallSite
 	Accesses         []procedureir.VariableAccess
-	Graph            *vbacfg.Graph
-	Effects          *effects.ProcedureSummary
+	// Facts is the immutable procedure-local index shared by analysis rules.
+	// Its backing slices are the projections above; both are owned by this
+	// source-procedure revision and must be treated as read-only.
+	Facts   *procedureAnalysisFacts
+	Graph   *vbacfg.Graph
+	Effects *effects.ProcedureSummary
 }
 
 type sourceDeclaration struct {
@@ -361,6 +365,21 @@ func (a Analyzer) Run() ([]Finding, error) {
 
 func (a Analyzer) RunResult() (Result, error) {
 	return a.RunResultContext(context.Background())
+}
+
+// recordFactBuilds records the construction performed by the current file
+// setup. The caller invokes this only after attaching the newly built facts to
+// the file, so benchmark counters describe one file/procedure revision rather
+// than each rule-family lookup of the shared object.
+func recordFactBuilds(ctx context.Context, procedureCount int) {
+	recorder := analysisstats.FromContext(ctx)
+	if recorder == nil {
+		return
+	}
+	recorder.RecordModuleFactBuild()
+	if procedureCount > 0 {
+		recorder.RecordProcedureFactBuilds(uint64(procedureCount))
+	}
 }
 
 // RunContext is the cancellable variant of Run.
@@ -514,6 +533,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		parsedFiles[i].Procedures = procedures
 		parsedFiles[i].ModuleFacts = buildModuleAnalysisFacts(parsedFiles[i].Lines, parsedFiles[i].IR, procedures)
 		parsedFiles[i].ModuleDeclarations = parsedFiles[i].ModuleFacts.moduleDeclarations
+		recordFactBuilds(ctx, len(procedures))
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -1272,6 +1292,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 		}
 		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
 		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
+		recordFactBuilds(ctx, len(procedures))
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
 		var scanErr error
 		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
@@ -1428,6 +1449,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		}
 		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
 		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
+		recordFactBuilds(ctx, len(procedures))
 		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
 			file.ArrayOptionBase = optionBase(lines)
 			file.ArrayOptionBaseSet = true
@@ -1929,7 +1951,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	decls := newDeclarationScope(file, proc)
 	decls.module = moduleDecls
-	shadowedVBA205 := vba205ShadowedIdentifiers(proc, decls, ctx)
+	shadowedVBA205 := vba205ShadowedIdentifiersWithFacts(proc, decls, ctx, file.moduleAnalysisFacts())
 	withStack := make([]withInfo, 0)
 	findAssignments := map[string]rangeFindAssignmentInfo{}
 	guardedFinds := map[string]bool{}
@@ -2235,6 +2257,7 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			Calls:            append([]procedureir.CallSite(nil), procedure.Calls...),
 			Accesses:         append([]procedureir.VariableAccess(nil), procedure.Accesses...),
 		}
+		source.Facts = newProcedureAnalysisFactsWithDeclarations(source.Declarations, source.Statements, source.Expressions, source.Calls, source.Accesses)
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
 			graph := controlFlow[0].Graphs[procedureIndex]
 			source.Graph = &graph
@@ -2473,7 +2496,7 @@ func vba205NonExecutableStatement(stmt string) bool {
 		strings.HasPrefix(lower, "declare ")
 }
 
-func vba205ShadowedIdentifiers(proc sourceProcedure, decls declarationScope, ctx analysisContext) map[string]bool {
+func vba205ShadowedIdentifiersWithFacts(proc sourceProcedure, decls declarationScope, ctx analysisContext, facts *moduleAnalysisFacts) map[string]bool {
 	shadowed := make(map[string]bool, decls.len()+len(proc.Accesses)+len(proc.Declarations)+len(ctx.procedures))
 	decls.forEach(func(name string, _ sourceDeclaration) {
 		shadowed[strings.ToLower(name)] = true
@@ -2492,6 +2515,15 @@ func vba205ShadowedIdentifiers(proc sourceProcedure, decls declarationScope, ctx
 	}
 	for name := range ctx.procedures {
 		if strings.Contains(name, ".") {
+			continue
+		}
+		// A procedure declared in the caller's own module is always visible to
+		// unqualified VBA calls (including Private procedures). The immutable
+		// module index avoids resolving the same local name through the full
+		// project resolver for every procedure and preserves the resolver path
+		// for cross-module visibility and ambiguity decisions.
+		if facts != nil && facts.hasProcedure(name) {
+			shadowed[name] = true
 			continue
 		}
 		if vba205ProcedureVisibleFrom(ctx.procedureResolver, proc, name) {
@@ -2800,7 +2832,7 @@ func (w applicationStateExitWitness) description() string {
 // because VBA can fault before an assignment completes. A proven saved-value
 // restoration is the cleanup boundary itself, so it clears state on its own
 // exceptional transition as well.
-func applicationStateExitWitnesses(proc sourceProcedure, property string, byID map[int]procedureir.Statement) map[int]applicationStateExitWitness {
+func applicationStateExitWitnesses(proc sourceProcedure, property string, facts *procedureAnalysisFacts) map[int]applicationStateExitWitness {
 	flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
 	graph := &flowGraph
 	in := map[vbacfg.BlockID]applicationStateFlow{graph.Entry: newApplicationStateFlow()}
@@ -2820,7 +2852,7 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, byID m
 			if edge.From != blockID {
 				continue
 			}
-			out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, byID)
+			out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, facts)
 			merged, changed := mergeApplicationStateFlow(in[edge.To], out)
 			if !changed {
 				continue
@@ -2846,7 +2878,7 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, byID m
 		if !ok {
 			continue
 		}
-		out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, byID)
+		out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, facts)
 		if out.ViaExceptional && kind == "normal exit" {
 			kind = "error-handler path to normal exit"
 		}
@@ -2859,17 +2891,17 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, byID m
 	return witnesses
 }
 
-func applicationStateFlowAcrossEdge(proc sourceProcedure, state applicationStateFlow, block vbacfg.Block, edge vbacfg.Edge, property string, byID map[int]procedureir.Statement) applicationStateFlow {
+func applicationStateFlowAcrossEdge(proc sourceProcedure, state applicationStateFlow, block vbacfg.Block, edge vbacfg.Edge, property string, facts *procedureAnalysisFacts) applicationStateFlow {
 	out := cloneApplicationStateFlow(state)
 	out.ViaExceptional = out.ViaExceptional || edge.Class == vbacfg.EdgeExceptional
 	if block.Statement == nil {
 		return out
 	}
 	switch {
-	case edge.Class == vbacfg.EdgeNormal || applicationStateSavedRestore(proc, state, *block.Statement, property, byID):
-		return applyApplicationStateStatement(proc, out, *block.Statement, property, byID)
+	case edge.Class == vbacfg.EdgeNormal || applicationStateSavedRestore(proc, state, *block.Statement, property, facts):
+		return applyApplicationStateStatement(proc, out, *block.Statement, property, facts)
 	case edge.Class == vbacfg.EdgeExceptional:
-		return applyApplicationStateExceptionalRestore(proc, out, *block.Statement, property, byID)
+		return applyApplicationStateExceptionalRestore(proc, out, *block.Statement, property, facts)
 	default:
 		return out
 	}
@@ -3032,12 +3064,12 @@ func applicationStateSnapshotEqual(a, b applicationStateSnapshot) bool {
 	return true
 }
 
-func applyApplicationStateStatement(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) applicationStateFlow {
+func applyApplicationStateStatement(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, facts *procedureAnalysisFacts) applicationStateFlow {
 	if statement.Recovered || statement.Kind != procedureir.StatementAssignment || statement.Target == nil {
 		return state
 	}
-	if assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, byID); isPropertyWrite && assignedProperty == property {
-		if applicationStateSavedRestore(proc, state, statement, property, byID) {
+	if assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, facts); isPropertyWrite && assignedProperty == property {
+		if applicationStateSavedRestore(proc, state, statement, property, facts) {
 			variable, _ := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead)
 			state.Dirty = cloneApplicationStateSnapshot(state.Saved[variable]).Dirty
 			return state
@@ -3047,7 +3079,7 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 				for origin := range saved.Restores {
 					delete(state.Dirty, origin)
 				}
-				if applicationStateMatchingGuard(proc, saved, statement, byID) {
+				if applicationStateMatchingGuard(proc, saved, statement, facts) {
 					for origin := range saved.Dirty {
 						state.Dirty[origin] = true
 					}
@@ -3075,11 +3107,11 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 	if !ok {
 		return state
 	}
-	if isApplicationPropertyReference(statement.Value, statement, byID, property) {
+	if isApplicationPropertyReference(statement.Value, statement, facts, property) {
 		state.Saved[variable] = applicationStateSnapshot{
 			Dirty:     cloneApplicationStateFlow(state).Dirty,
 			Restores:  map[int]bool{},
-			GuardedBy: applicationStateDirectGuard(statement, byID),
+			GuardedBy: applicationStateDirectGuard(statement, facts),
 		}
 		return state
 	}
@@ -3093,7 +3125,7 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 	return state
 }
 
-func applicationStateDirectGuard(statement procedureir.Statement, byID map[int]procedureir.Statement) map[int]bool {
+func applicationStateDirectGuard(statement procedureir.Statement, facts *procedureAnalysisFacts) map[int]bool {
 	guards := map[int]bool{}
 	visited := map[int]bool{}
 	for parentID := statement.ParentID; parentID != 0; {
@@ -3101,7 +3133,7 @@ func applicationStateDirectGuard(statement procedureir.Statement, byID map[int]p
 			break
 		}
 		visited[parentID] = true
-		parent, ok := byID[parentID]
+		parent, ok := facts.Statement(parentID)
 		if !ok {
 			break
 		}
@@ -3117,8 +3149,8 @@ func applicationStateDirectGuard(statement procedureir.Statement, byID map[int]p
 	return guards
 }
 
-func applyApplicationStateExceptionalRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) applicationStateFlow {
-	assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, byID)
+func applyApplicationStateExceptionalRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, facts *procedureAnalysisFacts) applicationStateFlow {
+	assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, facts)
 	if !isPropertyWrite || assignedProperty != property {
 		return state
 	}
@@ -3130,7 +3162,7 @@ func applyApplicationStateExceptionalRestore(proc sourceProcedure, state applica
 	if !exists {
 		return state
 	}
-	if applicationStateMatchingGuard(proc, saved, statement, byID) {
+	if applicationStateMatchingGuard(proc, saved, statement, facts) {
 		state.Dirty = cloneApplicationStateSnapshot(saved).Dirty
 		return state
 	}
@@ -3140,15 +3172,15 @@ func applyApplicationStateExceptionalRestore(proc sourceProcedure, state applica
 	return state
 }
 
-func applicationStateMatchingGuard(proc sourceProcedure, saved applicationStateSnapshot, restore procedureir.Statement, byID map[int]procedureir.Statement) bool {
-	restoreGuards := applicationStateDirectGuard(restore, byID)
+func applicationStateMatchingGuard(proc sourceProcedure, saved applicationStateSnapshot, restore procedureir.Statement, facts *procedureAnalysisFacts) bool {
+	restoreGuards := applicationStateDirectGuard(restore, facts)
 	for savedID := range saved.GuardedBy {
-		savedGuard, savedOK := byID[savedID]
+		savedGuard, savedOK := facts.Statement(savedID)
 		if !savedOK || savedGuard.Condition == nil {
 			continue
 		}
 		for restoreID := range restoreGuards {
-			restoreGuard, restoreOK := byID[restoreID]
+			restoreGuard, restoreOK := facts.Statement(restoreID)
 			if !restoreOK || restoreGuard.Condition == nil ||
 				applicationStateGuardConditionKey(savedGuard.Condition.Text) != applicationStateGuardConditionKey(restoreGuard.Condition.Text) {
 				continue
@@ -3242,8 +3274,8 @@ func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, resto
 	return true
 }
 
-func applicationStateSavedRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, byID map[int]procedureir.Statement) bool {
-	assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, byID)
+func applicationStateSavedRestore(proc sourceProcedure, state applicationStateFlow, statement procedureir.Statement, property string, facts *procedureAnalysisFacts) bool {
+	assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, facts)
 	if !isPropertyWrite || assignedProperty != property {
 		return false
 	}
@@ -3285,41 +3317,46 @@ func applicationStateVariable(proc sourceProcedure, statementID int, expression 
 	return "", false
 }
 
-func applicationPropertyAssignment(statement procedureir.Statement, byID map[int]procedureir.Statement) (string, string, bool) {
+func applicationPropertyAssignment(statement procedureir.Statement, facts *procedureAnalysisFacts) (string, string, bool) {
 	if statement.Target == nil || statement.Value == nil {
 		return "", "", false
 	}
-	property, ok := applicationPropertyTarget(statement.Target.Text, statement, byID)
+	property, ok := applicationPropertyTarget(statement.Target.Text, statement, facts)
 	if !ok {
 		return "", "", false
 	}
 	return property, statement.Value.Text, true
 }
 
-func isApplicationPropertyReference(expr *procedureir.Expression, statement procedureir.Statement, byID map[int]procedureir.Statement, property string) bool {
+func isApplicationPropertyReference(expr *procedureir.Expression, statement procedureir.Statement, facts *procedureAnalysisFacts, property string) bool {
 	if expr == nil {
 		return false
 	}
-	got, ok := applicationPropertyTarget(expr.Text, statement, byID)
+	got, ok := applicationPropertyTarget(expr.Text, statement, facts)
 	return ok && got == property
 }
 
-func applicationPropertyTarget(expression string, statement procedureir.Statement, byID map[int]procedureir.Statement) (string, bool) {
+func applicationPropertyTarget(expression string, statement procedureir.Statement, facts *procedureAnalysisFacts) (string, bool) {
 	compact := strings.ToLower(compactStatement(expression))
 	for _, property := range applicationStateProperties() {
 		if compact == "application."+property.Key {
 			return property.Key, true
 		}
-		if compact == "."+property.Key && statementWithinApplicationWith(statement, byID) {
+		if compact == "."+property.Key && statementWithinApplicationWith(statement, facts) {
 			return property.Key, true
 		}
 	}
 	return "", false
 }
 
-func statementWithinApplicationWith(statement procedureir.Statement, byID map[int]procedureir.Statement) bool {
+func statementWithinApplicationWith(statement procedureir.Statement, facts *procedureAnalysisFacts) bool {
+	visited := map[int]bool{}
 	for parentID := statement.ParentID; parentID != 0; {
-		parent, ok := byID[parentID]
+		if visited[parentID] {
+			return false
+		}
+		visited[parentID] = true
+		parent, ok := facts.Statement(parentID)
 		if !ok {
 			return false
 		}

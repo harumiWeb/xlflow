@@ -65,17 +65,14 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 		))
 	}
 
-	statements := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		statements[statement.ID] = statement
-	}
+	facts := proc.analysisFacts()
 	for _, call := range proc.Calls {
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 || !applicationStateCallReachable(proc, call) {
 			continue
 		}
 		callee, ok := project.LookupCandidateDirect(call.Resolution.Candidates[0])
-		statement := statements[call.StatementID]
-		if !ok || !directSuccessFlag(callee) || errorFailureOutputObserved(proc, call, callee) || errorSuccessResultUseUncertain(proc, call, statement) || errorSuccessResultChecked(proc, call, statement) {
+		statement, statementOK := facts.Statement(call.StatementID)
+		if !ok || !statementOK || !directSuccessFlag(callee) || errorFailureOutputObserved(proc, call, callee) || errorSuccessResultUseUncertain(proc, call, statement) || errorSuccessResultChecked(proc, call, statement) {
 			continue
 		}
 		line := call.Range.StartLine
@@ -143,10 +140,7 @@ func resultMayBeCheckedAfterStatement(proc sourceProcedure, statementID int, tar
 	if !ok {
 		return false
 	}
-	byID := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		byID[statement.ID] = statement
-	}
+	facts := proc.analysisFacts()
 	queue := []vbacfg.BlockID{}
 	for _, edge := range proc.Graph.Edges {
 		if edge.From == start.ID && edge.Class == vbacfg.EdgeNormal {
@@ -165,7 +159,10 @@ func resultMayBeCheckedAfterStatement(proc sourceProcedure, statementID int, tar
 		if !exists || block.Statement == nil {
 			continue
 		}
-		statement := byID[block.StatementID]
+		statement, ok := facts.Statement(block.StatementID)
+		if !ok {
+			continue
+		}
 		if statementWritesName(proc, statement.ID, target) {
 			continue
 		}
@@ -199,10 +196,8 @@ func callerArgumentExpression(proc sourceProcedure, call procedureir.CallSite, o
 	if expressionID == 0 {
 		return "", false
 	}
-	for _, expression := range proc.Expressions {
-		if expression.ID == expressionID {
-			return expression.Text, true
-		}
+	if expression, ok := proc.analysisFacts().Expression(expressionID); ok {
+		return expression.Text, true
 	}
 	return "", false
 }
@@ -324,10 +319,7 @@ func booleanResultCheckedBeforeExit(proc sourceProcedure, assignmentID int, targ
 	if !ok {
 		return false
 	}
-	byID := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		byID[statement.ID] = statement
-	}
+	facts := proc.analysisFacts()
 	queue := []vbacfg.BlockID{}
 	for _, edge := range proc.Graph.Edges {
 		if edge.From == assignment.ID && edge.Class == vbacfg.EdgeNormal {
@@ -350,7 +342,10 @@ func booleanResultCheckedBeforeExit(proc sourceProcedure, assignmentID int, targ
 		if !exists || block.Statement == nil {
 			continue
 		}
-		statement := byID[block.StatementID]
+		statement, ok := facts.Statement(block.StatementID)
+		if !ok {
+			continue
+		}
 		if statementWritesName(proc, statement.ID, target) {
 			return false
 		}

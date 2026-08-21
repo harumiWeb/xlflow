@@ -246,6 +246,26 @@ func TestSingleModuleBenchmarkFixtureScale(t *testing.T) {
 	}
 }
 
+func TestSingleModuleBenchmarkFactBuildCounters(t *testing.T) {
+	root := t.TempDir()
+	fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "declarations", size: 2000})
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+	recorder := analysisstats.NewRecorder()
+	recordSingleModuleBenchmarkDimensions(recorder, fixture)
+	ctx := analysisstats.WithRecorder(context.Background(), recorder)
+	if _, err := (Analyzer{RootDir: root, Config: config.Default()}).RunResultContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, counters := recorder.Totals()
+	values := map[string]uint64{}
+	for _, counter := range counters {
+		values[counter.Name] = counter.Value
+	}
+	if values[analysisstats.ModuleFactBuildsCounter] != 1 || values[analysisstats.ProcedureFactBuildsCounter] != 1 {
+		t.Fatalf("single-module facts = module %d, procedure %d; want one build per revision", values[analysisstats.ModuleFactBuildsCounter], values[analysisstats.ProcedureFactBuildsCounter])
+	}
+}
+
 type singleModuleBenchmarkWorkload struct {
 	shape string
 	size  int
@@ -566,6 +586,7 @@ func reportAnalysisRecorderMetrics(b *testing.B, recorder *analysisstats.Recorde
 			b.ReportMetric(float64(counter.Value), metricName)
 			continue
 		}
-		b.ReportMetric(float64(counter.Value)/float64(iterations), metricName+"/op")
+		metricValue := float64(counter.Value) / float64(iterations)
+		b.ReportMetric(metricValue, metricName+"/op")
 	}
 }

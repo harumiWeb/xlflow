@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reused immutable file and procedure analysis facts across analyzer rule
+  families. Shared declaration/constant/procedure indexes, statement and
+  expression lookups, member-expression projections, and constant overlays
+  avoid repeated preparation for large single-module analyses; diagnostic IDs,
+  ranges, severities, and public output remain unchanged.
+
 - Improved project-local call graph construction by indexing canonical
   procedure candidate identities, avoiding a full procedure-node scan for each
   uniquely matched call while preserving conservative resolution behavior.

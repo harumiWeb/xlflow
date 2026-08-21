@@ -54,10 +54,16 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	for _, statement := range proc.Statements {
 		statements[statement.ID] = statement
 	}
+	facts := proc.Facts
+	if facts == nil {
+		// Standalone callers may omit the attached projection. Share one
+		// compatibility projection across all statements in this procedure.
+		facts = proc.analysisFacts()
+	}
 	constants := loopInvariantStringConstants(file, proc)
 	expressionsByStatement := make(map[int][]procedureir.Expression)
 	for _, statement := range proc.Statements {
-		expressionsByStatement[statement.ID] = statementMemberExpressions(statement, proc.Expressions)
+		expressionsByStatement[statement.ID] = statementMemberExpressions(facts, statement)
 	}
 	seen := map[string]loopInvariantCandidate{}
 	for _, statement := range proc.Statements {

@@ -829,6 +829,48 @@ retain wall time (`ns/op`), allocations, findings, workload dimensions, and the
 these are Go benchmark metrics, not stderr records from
 `analyze --performance-log`.
 
+For issue #677, the same Windows amd64 machine (12th Gen Intel(R) Core(TM)
+i7-12700, Go 1.26.6 toolchain) was used with baseline HEAD
+`245d4ad0792bbc49c2769e3cbd7f0156dc9a7c33` and the implementation worktree,
+using `BenchmarkSingleModuleSynthetic/independent/2000-procedures` and
+`BenchmarkSingleModuleSynthetic/declarations/2000-declarations`,
+`-benchmem -benchtime=1x -count=5`. The independent trial values
+(ns/op; B/op; allocs/op) were, before:
+`15,082,456,700/10,595,106,376/175,671,258`,
+`14,070,609,300/10,595,213,184/175,673,277`,
+`14,874,702,400/10,594,734,880/175,680,863`,
+`15,055,094,800/10,595,629,288/175,672,346`, and
+`13,300,470,200/10,595,969,152/175,667,154`; after:
+`1,801,398,600/1,453,074,600/11,277,336`,
+`1,812,785,500/1,452,991,792/11,281,779`,
+`1,859,160,700/1,453,007,720/11,287,788`,
+`2,106,054,200/1,453,114,664/11,283,437`, and
+`1,914,653,900/1,452,904,888/11,279,283`. Medians changed from
+14,874,702,400 ns/op, 10,595,213,184 B/op, and 175,672,346 allocs/op to
+1,859,160,700 ns/op, 1,453,007,720 B/op, and 11,281,779 allocs/op: 8.00x
+speedup, with 87.5% less time, 86.3% fewer allocated bytes, and 93.6% fewer
+allocations. The recorder reported `module_fact_builds=1` and
+`procedure_fact_builds=2000` per operation.
+
+The declaration-heavy trial values were, before:
+`2,794,628,900/3,600,116,176/1,065,219`,
+`3,083,994,200/3,601,708,584/1,064,689`,
+`3,128,503,500/3,601,308,800/1,065,147`,
+`2,532,879,000/3,601,569,448/1,064,520`, and
+`2,152,009,600/3,601,638,472/1,064,243`; after:
+`1,770,364,600/3,580,182,600/1,044,882`,
+`1,615,096,000/3,577,576,544/1,044,232`,
+`1,481,524,900/3,578,309,560/1,044,122`,
+`1,601,773,700/3,578,604,872/1,044,057`, and
+`1,508,833,100/3,577,864,840/1,045,309`. Medians changed from
+2,794,628,900 ns/op, 3,601,569,448 B/op, and 1,064,689 allocs/op to
+1,601,773,700 ns/op, 3,578,309,560 B/op, and 1,044,232 allocs/op: 1.74x
+speedup, with 42.7% less time, 0.65% fewer allocated bytes, and 1.92% fewer
+allocations. Timing is observational and is not a CI assertion. Retain the
+complete trial outputs, SHA, command, and power-state notes with performance
+investigations; do not treat these measurements as a semantic or diagnostic
+contract.
+
 Issue #674 adds an effects-focused scalability measurement to this procedure.
 The benchmark generator must construct the IR, CFG, and project-local call
 graph before the timer starts, then measure only `effects.Build` (or its

@@ -302,14 +302,7 @@ func (a Analyzer) arrayComparisonFindings(file parsedFile, proc sourceProcedure,
 	if !a.Config.Analyze.DetectObjectArrayComparison {
 		return nil
 	}
-	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
-		expressions[expression.ID] = expression
-	}
-	statements := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
-		statements[statement.ID] = statement
-	}
+	facts := proc.analysisFacts()
 
 	arrayNames := make([]string, 0, len(variables))
 	nonArrayNames := procedureIRNonArrayNames(proc)
@@ -321,17 +314,17 @@ func (a Analyzer) arrayComparisonFindings(file parsedFile, proc sourceProcedure,
 	sort.Strings(arrayNames)
 
 	var findings []Finding
-	for _, comparison := range proc.Expressions {
+	facts.forEachExpression(func(comparison procedureir.Expression) {
 		if comparison.SyntaxKind != "comparison_expression" || comparison.Recovered {
-			continue
+			return
 		}
-		statement, ok := statements[comparison.StatementID]
+		statement, ok := facts.Statement(comparison.StatementID)
 		if !ok || comparisonAssignmentCarrier(statement, comparison) {
-			continue
+			return
 		}
 		matched := map[string]bool{}
 		for _, childID := range comparison.Children {
-			child, ok := directComparisonOperand(expressions, childID)
+			child, ok := directComparisonOperand(facts, childID)
 			if !ok || child.Recovered || child.Kind != procedureir.ExpressionIdentifier {
 				continue
 			}
@@ -347,7 +340,7 @@ func (a Analyzer) arrayComparisonFindings(file parsedFile, proc sourceProcedure,
 			variable := variables[name]
 			findings = append(findings, a.simpleFinding(file, proc, comparison.Range.StartLine, "VBA209", "warning", variable.name+" appears to be compared as a scalar value.", "VBA arrays cannot be compared directly to scalar values.", "Compare explicit elements or bounds instead of the array variable itself."))
 		}
-	}
+	})
 	sortFindings(findings)
 	return findings
 }
@@ -369,10 +362,10 @@ func procedureIRNonArrayNames(proc sourceProcedure) map[string]bool {
 	return names
 }
 
-func directComparisonOperand(expressions map[int]procedureir.Expression, id int) (procedureir.Expression, bool) {
-	child, ok := expressions[id]
+func directComparisonOperand(facts *procedureAnalysisFacts, id int) (procedureir.Expression, bool) {
+	child, ok := facts.Expression(id)
 	for ok && child.Kind == procedureir.ExpressionParentheses && len(child.Children) == 1 {
-		child, ok = expressions[child.Children[0]]
+		child, ok = facts.Expression(child.Children[0])
 	}
 	return child, ok
 }
@@ -3438,13 +3431,10 @@ func arrayCallArgumentTexts(proc sourceProcedure, call procedureir.CallSite) []s
 	if len(call.Arguments.ExpressionIDs) == 0 {
 		return nil
 	}
-	expressions := make(map[int]procedureir.Expression, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
-		expressions[expression.ID] = expression
-	}
+	facts := proc.analysisFacts()
 	texts := make([]string, 0, len(call.Arguments.ExpressionIDs))
 	for _, id := range call.Arguments.ExpressionIDs {
-		expression, ok := expressions[id]
+		expression, ok := facts.Expression(id)
 		if !ok {
 			return nil
 		}

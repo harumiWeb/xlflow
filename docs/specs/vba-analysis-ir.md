@@ -260,6 +260,33 @@ IR and CFG reuse. A conditional-compilation change, overlapping/recovered
 procedure boundary, or non-unique catalog mapping falls back to a complete
 module build.
 
+### Analyzer-derived facts
+
+The analyzer may derive a `moduleAnalysisFacts` value and one
+`procedureAnalysisFacts` value for each procedure from the owned IR projection.
+These are implementation-level projections for one analysis revision, not a
+second snapshot cache. File facts own compact declaration, source-ordered
+constant, procedure-name, and line-ownership indexes; procedure facts own
+read-only ID lookups and statement-grouped call, access, and member-expression
+indexes. The file facts also keep a compact declaration-start-to-procedure-facts
+pointer index, without duplicating procedure IR. Empty projections do not
+eagerly allocate maps.
+
+Facts are immutable after construction. Rule families and future procedure
+workers may read the same facts concurrently through lookup/iterator helpers,
+while flow state, findings, CFG worklists, object variables, and other
+rule-specific overlays remain local and mutable. Fact indexes retain only
+Go-owned IR values and compact offsets: they must not retain tree-sitter nodes,
+`ParsedDocument` instances, source snapshots, or obsolete revisions. Their
+lifetime is bounded by the parsed file/procedure revision and they are released
+with that analysis result.
+
+Batch and realtime entry points construct and attach facts before rule workers
+run. The performance recorder reports `module_fact_builds` and
+`procedure_fact_builds`; a normal file revision contributes one module build
+and one procedure build per procedure, independent of the number of rule
+families that consume them.
+
 ## Compatibility and Layer Boundaries
 
 Existing adapters may project IR facts into `calls.CallSite`, analyzer findings,

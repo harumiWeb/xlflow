@@ -847,6 +847,7 @@ func TestObjectCallEffectsSkipsAmbiguousDirectSummaries(t *testing.T) {
 	expressions := map[int]procedureir.Expression{
 		1: {ID: 1, Kind: procedureir.ExpressionIdentifier, Text: "value"},
 	}
+	facts := newProcedureAnalysisFacts(nil, []procedureir.Expression{expressions[1]}, nil, nil)
 	summary := func() objectProcedureSummary {
 		return objectProcedureSummary{
 			File: "src/Main.bas", Module: "Main", QualifiedName: "Main.Touch",
@@ -855,7 +856,7 @@ func TestObjectCallEffectsSkipsAmbiguousDirectSummaries(t *testing.T) {
 	}
 	summaries := map[string]objectProcedureSummary{"first": summary(), "second": summary()}
 	state := map[string]bool{value.key(): true}
-	applyObjectCallEffects(call, state, vars, declarations, expressions, summaries)
+	applyObjectCallEffects(call, state, vars, declarations, facts, summaries)
 	if state[value.key()] {
 		t.Fatalf("ambiguous direct summaries must not preserve a nullable ByRef object state: %+v", state)
 	}
@@ -881,6 +882,7 @@ func TestObjectFlowUsesLexicalBindingForVariantShadows(t *testing.T) {
 	expressions := map[int]procedureir.Expression{
 		1: {ID: 1, Kind: procedureir.ExpressionIdentifier, Text: "sharedSheet"},
 	}
+	facts := newProcedureAnalysisFacts(nil, []procedureir.Expression{expressions[1]}, nil, nil)
 	call := procedureir.CallSite{
 		File: "src/Main.bas", Module: "Main", Caller: procedureir.ProcedureRef{QualifiedName: "Main.Run"},
 		Callee: procedureir.Callee{BaseName: "Initialize"},
@@ -906,11 +908,11 @@ func TestObjectFlowUsesLexicalBindingForVariantShadows(t *testing.T) {
 			if !state[moduleVariable.key()] {
 				t.Fatalf("initialized module object was changed through a shadowed Variant: %+v", state)
 			}
-			applyObjectCallEffects(actualCall, state, vars, declarations, expressions, map[string]objectProcedureSummary{"touch": actualSummary})
+			applyObjectCallEffects(actualCall, state, vars, declarations, facts, map[string]objectProcedureSummary{"touch": actualSummary})
 			if !state[moduleVariable.key()] {
 				t.Fatalf("ByRef actual resolution selected the module object through a shadowed Variant: %+v", state)
 			}
-			assigned, present := objectCallParameterAssigned(sourceProcedure{Name: "Run"}, declarations, actualCall, actualSummary, 0, objectCallActuals(actualCall, expressions), state, vars, objectFlowContext{expressions: expressions}, map[string]objectProcedureSummary{})
+			assigned, present := objectCallParameterAssigned(sourceProcedure{Name: "Run"}, declarations, actualCall, actualSummary, 0, objectCallActuals(actualCall, facts), state, vars, objectFlowContext{facts: facts}, map[string]objectProcedureSummary{})
 			if assigned || present {
 				t.Fatalf("entry-call actual resolution selected a shadowed Variant: assigned=%v present=%v", assigned, present)
 			}

@@ -311,7 +311,17 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 
 	narrowProbes := dcNarrowProbeStatements(proc)
 	loops := excelLoopRegions(proc)
-	consts := dcConstantNames(file.Lines)
+	// Normal batch/realtime setup attaches module facts before rule execution.
+	// Read the field directly here so standalone callers retain the cheap source
+	// fallback instead of rebuilding the complete module index for each file.
+	constFacts := file.ModuleFacts
+	var constNames map[string]bool
+	if constFacts == nil {
+		// Keep standalone package-level callers (and focused tests that build a
+		// parsedFile directly) on the historical source fallback, filtered to
+		// module constants and the current procedure's local constants.
+		constNames = dcConstantNamesForProcedure(file, proc)
+	}
 	seen := map[string]bool{}
 	var findings []Finding
 	linear := initial.clone()
@@ -321,7 +331,7 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 			continue
 		}
 		state := dcOverlayState(in[block.ID], linear)
-		findings = append(findings, a.dcStatementFindings(file, proc, statement, state, loops, narrowProbes, consts, seen)...)
+		findings = append(findings, a.dcStatementFindings(file, proc, statement, state, loops, narrowProbes, constFacts, constNames, seen)...)
 		a.dcTransfer(file, proc, statement, linear)
 	}
 	return findings
@@ -651,7 +661,7 @@ func (a Analyzer) dcApplyGuard(statement procedureir.Statement, edge vbacfg.Edge
 	state.Objects[id] = object
 }
 
-func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state *dcFlowState, loops []excelLoopRegion, narrow map[int]bool, consts map[string]bool, seen map[string]bool) []Finding {
+func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state *dcFlowState, loops []excelLoopRegion, narrow map[int]bool, constFacts *moduleAnalysisFacts, constNames map[string]bool, seen map[string]bool) []Finding {
 	text := maskStringLiterals(dcStatementSource(statement))
 	line := statement.Range.StartLine
 	if text == "" {
@@ -676,7 +686,13 @@ func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, sta
 		}
 		if a.Config.Analyze.DetectLateBoundDictionaryConstants && object.Kind == dcDictionary && object.LateBound && lowerMember == "comparemode" && len(args) > 0 {
 			name := strings.ToLower(cleanIdentifier(args[0]))
-			if dcLateCompareConstants[name] && !consts[name] {
+			declared := false
+			if constFacts != nil {
+				declared = constFacts.hasConstantForProcedure(name, proc)
+			} else {
+				declared = constNames[strings.ToLower(strings.TrimSpace(name))]
+			}
+			if dcLateCompareConstants[name] && !declared {
 				findings = dcAppendFinding(findings, seen, a.simpleFinding(file, proc, line, "VBA233", "warning", args[0]+" is an undefined Scripting enum constant in late-bound Dictionary code.", "Late binding should not depend on enum names supplied only by a Scripting Runtime reference.", "Use vbBinaryCompare, vbTextCompare, or vbDatabaseCompare, or declare an explicit project Const."))
 			}
 		}
@@ -1358,24 +1374,15 @@ func dcCompareMode(text string) string {
 
 var dcLateCompareConstants = map[string]bool{"binarycompare": true, "textcompare": true, "databasecompare": true, "comparemethod.binarycompare": true, "comparemethod.textcompare": true, "comparemethod.databasecompare": true}
 
-func dcConstantNames(lines []string) map[string]bool {
+// dcConstantNamesForProcedure is the source-only compatibility path used when
+// a standalone parsedFile has no attached module facts. Module constants and
+// constants in the current procedure are visible; locals owned by another
+// procedure are excluded using the IR procedure ranges.
+func dcConstantNamesForProcedure(file parsedFile, proc sourceProcedure) map[string]bool {
 	out := map[string]bool{}
-	for _, line := range lines {
-		text := strings.TrimSpace(normalizedCodeLine(line))
-		lower := strings.ToLower(text)
-		at := strings.Index(lower, "const ")
-		if at < 0 {
-			continue
-		}
-		rest := strings.TrimSpace(text[at+len("const "):])
-		name := rest
-		if stop := strings.IndexAny(name, " =,"); stop >= 0 {
-			name = name[:stop]
-		}
-		if name != "" {
-			out[strings.ToLower(cleanIdentifier(name))] = true
-		}
-	}
+	forEachSourceConstantForProcedure(file, proc, func(constant moduleConstantFact) {
+		out[strings.ToLower(strings.TrimSpace(constant.Name))] = true
+	})
 	return out
 }
 
