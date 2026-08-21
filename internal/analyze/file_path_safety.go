@@ -61,17 +61,17 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	facts := file.ModuleFacts
 	values := map[string]filePathValue{}
 	// Module/procedure Const declarations are clean symbolic values even when
-	// they do not appear as assignments inside the current procedure.
+	// they do not appear as assignments inside the current procedure. Keep
+	// procedure-local names scoped so an unrelated local declaration cannot
+	// shadow a module constant in this procedure.
 	if facts != nil {
-		facts.forEachConstant(func(constant moduleConstantFact) {
+		facts.forEachConstantForProcedure(proc, func(constant moduleConstantFact) {
 			values[strings.ToLower(constant.Name)] = classifyFilePathExpr(constant.Expression, values, nil)
 		})
 	} else {
-		for _, line := range file.Lines {
-			if name, expr, ok := fileConstDeclaration(line); ok {
-				values[strings.ToLower(name)] = classifyFilePathExpr(expr, values, nil)
-			}
-		}
+		forEachSourceConstantForProcedure(file, proc, func(constant moduleConstantFact) {
+			values[strings.ToLower(constant.Name)] = classifyFilePathExpr(constant.Expression, values, nil)
+		})
 	}
 	values["vbnullstring"] = filePathValue{raw: "vbNullString", constant: "", origin: "clean", known: true}
 	params := map[string]bool{}

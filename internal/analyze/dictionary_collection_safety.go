@@ -1374,57 +1374,15 @@ func dcCompareMode(text string) string {
 
 var dcLateCompareConstants = map[string]bool{"binarycompare": true, "textcompare": true, "databasecompare": true, "comparemethod.binarycompare": true, "comparemethod.textcompare": true, "comparemethod.databasecompare": true}
 
-func dcConstantName(line string) (string, bool) {
-	text := strings.TrimSpace(normalizedCodeLine(line))
-	lower := strings.ToLower(text)
-	at := strings.Index(lower, "const ")
-	if at < 0 {
-		return "", false
-	}
-	rest := strings.TrimSpace(text[at+len("const "):])
-	name := rest
-	if stop := strings.IndexAny(name, " =,"); stop >= 0 {
-		name = name[:stop]
-	}
-	name = strings.ToLower(cleanIdentifier(name))
-	return name, name != ""
-}
-
 // dcConstantNamesForProcedure is the source-only compatibility path used when
 // a standalone parsedFile has no attached module facts. Module constants and
 // constants in the current procedure are visible; locals owned by another
 // procedure are excluded using the IR procedure ranges.
 func dcConstantNamesForProcedure(file parsedFile, proc sourceProcedure) map[string]bool {
 	out := map[string]bool{}
-	ranges := make([][2]int, 0, len(file.IR.Procedures))
-	for _, candidate := range file.IR.Procedures {
-		start := candidate.Symbol.DeclarationRange.StartLine
-		end := candidate.Symbol.DeclarationRange.EndLine
-		if start > 0 && end >= start {
-			ranges = append(ranges, [2]int{start, end})
-		}
-	}
-	for lineIndex, line := range file.Lines {
-		name, ok := dcConstantName(line)
-		if !ok {
-			continue
-		}
-		lineNo := lineIndex + 1
-		ownedByOtherProcedure := false
-		for _, candidate := range ranges {
-			if lineNo < candidate[0] || lineNo > candidate[1] {
-				continue
-			}
-			if lineNo < proc.StartLine || lineNo > proc.EndLine ||
-				candidate[0] != proc.StartLine || candidate[1] != proc.EndLine {
-				ownedByOtherProcedure = true
-				break
-			}
-		}
-		if !ownedByOtherProcedure {
-			out[name] = true
-		}
-	}
+	forEachSourceConstantForProcedure(file, proc, func(constant moduleConstantFact) {
+		out[strings.ToLower(strings.TrimSpace(constant.Name))] = true
+	})
 	return out
 }
 

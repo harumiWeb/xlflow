@@ -85,6 +85,34 @@ End Sub
 	}
 }
 
+func TestVBA245ScopesProcedureLocalConstants(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const TargetPath As String = "C:\safe.txt"
+
+Public Sub First()
+    Kill TargetPath
+End Sub
+
+Public Sub Second()
+    Const TargetPath As String = "..\unsafe.txt"
+    Kill TargetPath
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA245")
+	if len(got) != 1 || got[0].Procedure != "Second" || got[0].Line != 11 {
+		t.Fatalf("procedure-local path constant scope = %+v, want only Second line 11", got)
+	}
+}
+
 func TestVBA245FallsBackToVBA224WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"

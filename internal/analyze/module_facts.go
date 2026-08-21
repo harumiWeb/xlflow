@@ -242,6 +242,84 @@ func (facts *moduleAnalysisFacts) forEachConstant(visit func(moduleConstantFact)
 	}
 }
 
+// forEachConstantForProcedure visits the constants visible from one
+// procedure. Module constants are visited first, followed by local constants
+// in source order, so a procedure-local declaration correctly shadows a
+// same-named module constant for consumers that build an environment map.
+func (facts *moduleAnalysisFacts) forEachConstantForProcedure(procedure sourceProcedure, visit func(moduleConstantFact)) {
+	if facts == nil || visit == nil {
+		return
+	}
+	for _, constant := range facts.constants {
+		if constant.Module {
+			visit(constant)
+		}
+	}
+	for _, constant := range facts.constants {
+		if !constant.Module && constant.Line >= procedure.StartLine && constant.Line <= procedure.EndLine {
+			visit(constant)
+		}
+	}
+}
+
+// forEachSourceConstantForProcedure is the no-facts compatibility path for
+// standalone callers. It retains module constants and current-procedure local
+// constants while excluding locals owned by another procedure.
+func forEachSourceConstantForProcedure(file parsedFile, procedure sourceProcedure, visit func(moduleConstantFact)) {
+	if visit == nil {
+		return
+	}
+	type procedureRange struct{ start, end int }
+	ranges := make([]procedureRange, 0, len(file.IR.Procedures))
+	for _, candidate := range file.IR.Procedures {
+		start := candidate.Symbol.DeclarationRange.StartLine
+		end := candidate.Symbol.DeclarationRange.EndLine
+		if start > 0 && end >= start {
+			ranges = append(ranges, procedureRange{start: start, end: end})
+		}
+	}
+	var moduleConstants []moduleConstantFact
+	var localConstants []moduleConstantFact
+	for lineIndex, rawLine := range file.Lines {
+		name, expression, ok := fileConstDeclaration(rawLine)
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		line := lineIndex + 1
+		ownedByOther := false
+		ownedByCurrent := false
+		for _, candidate := range ranges {
+			if line < candidate.start || line > candidate.end {
+				continue
+			}
+			if candidate.start == procedure.StartLine && candidate.end == procedure.EndLine {
+				ownedByCurrent = true
+			} else {
+				ownedByOther = true
+			}
+			break
+		}
+		if ownedByOther {
+			continue
+		}
+		constant := moduleConstantFact{
+			Name: strings.TrimSpace(name), Expression: strings.TrimSpace(expression), Line: line,
+			Module: !ownedByCurrent,
+		}
+		if ownedByCurrent || (len(ranges) == 0 && line >= procedure.StartLine && line <= procedure.EndLine) {
+			localConstants = append(localConstants, constant)
+		} else {
+			moduleConstants = append(moduleConstants, constant)
+		}
+	}
+	for _, constant := range moduleConstants {
+		visit(constant)
+	}
+	for _, constant := range localConstants {
+		visit(constant)
+	}
+}
+
 func (facts *moduleAnalysisFacts) hasConstant(name string) bool {
 	if facts == nil {
 		return false

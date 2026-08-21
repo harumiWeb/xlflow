@@ -160,6 +160,13 @@ func TestModuleAnalysisFactsConstantLookupRespectsProcedureScope(t *testing.T) {
 	if !facts.hasConstantForProcedure("LocalValue", procedures[1]) {
 		t.Fatalf("Second's local constant should be visible in Second")
 	}
+	var visible []string
+	facts.forEachConstantForProcedure(procedures[1], func(constant moduleConstantFact) {
+		visible = append(visible, constant.Name)
+	})
+	if len(visible) != 2 || visible[0] != "ModuleValue" || visible[1] != "LocalValue" {
+		t.Fatalf("visible constants = %#v, want module then current local", visible)
+	}
 }
 
 func TestDeclarationScopeLayersWithoutModuleMapCopy(t *testing.T) {
