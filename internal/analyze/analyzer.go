@@ -521,7 +521,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 
 	finishStage = analysisstats.Measure(ctx, "effect_summaries")
 	projectEffects := buildProjectEffects(parsedFiles)
-	finishStage(len(projectEffects.All()), nil)
+	finishStage(projectEffects.ProcedureCount(), nil)
+	if recorder := analysisstats.FromContext(ctx); recorder != nil {
+		stats := projectEffects.Stats()
+		recorder.AddSum("effect_summary_worklist_evaluations", stats.WorklistEvaluations)
+		recorder.AddMax("effect_summary_max_propagated_facts_per_procedure", stats.MaxPropagatedFactsPerProcedure)
+		recorder.AddSum("effect_summary_total_propagated_facts", stats.TotalPropagatedFacts)
+	}
 	for i := range parsedFiles {
 		procedures := sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
@@ -2168,7 +2174,7 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 			break
 		}
 		id := procedureEffectIdentity(file.IR, file.IR.Procedures[i].Symbol)
-		if summary, ok := project.Lookup(id); ok {
+		if summary, ok := project.LookupDirect(id); ok {
 			procedures[i].Effects = &summary
 		}
 	}
@@ -3367,16 +3373,20 @@ func hasPairedApplicationRestoreProcedure(proc sourceProcedure, prop string, pro
 		pairNames := map[string]bool{"pop" + suffix: true, "restore" + suffix: true}
 		sameModule := make([]effects.ProcedureSummary, 0, 1)
 		projectVisible := make([]effects.ProcedureSummary, 0, 1)
-		for _, summary := range project.All() {
-			if !pairNames[strings.ToLower(summary.Identity.Name)] {
+		for _, direct := range project.AllDirect() {
+			if !pairNames[strings.ToLower(direct.Identity.Name)] {
 				continue
 			}
-			if strings.EqualFold(summary.Identity.Module, proc.Effects.Identity.Module) {
-				sameModule = append(sameModule, summary)
+			if strings.EqualFold(direct.Identity.Module, proc.Effects.Identity.Module) {
+				if summary, ok := project.Lookup(direct.Identity); ok {
+					sameModule = append(sameModule, summary)
+				}
 				continue
 			}
-			if isProjectVisibleProcedure(summary.Identity) {
-				projectVisible = append(projectVisible, summary)
+			if isProjectVisibleProcedure(direct.Identity) {
+				if summary, ok := project.Lookup(direct.Identity); ok {
+					projectVisible = append(projectVisible, summary)
+				}
 			}
 		}
 		if len(sameModule) > 0 {
@@ -3400,9 +3410,13 @@ func hasPairedApplicationRestoreProcedure(proc sourceProcedure, prop string, pro
 	if !hasApplicationStateEffect(proc.Effects.Direct, effects.RestoresApplicationState, prop) {
 		return false
 	}
-	for _, candidate := range project.All() {
-		if !hasApplicationStateEffectFrom(candidate.Direct, effects.RestoresApplicationState, prop, proc.Effects.Identity) &&
-			!hasApplicationStateEffectFrom(candidate.Propagated, effects.RestoresApplicationState, prop, proc.Effects.Identity) {
+	for _, direct := range project.AllDirect() {
+		if !direct.Has(effects.RestoresApplicationState) {
+			continue
+		}
+		candidate, ok := project.Lookup(direct.Identity)
+		if !ok || (!hasApplicationStateEffectFrom(candidate.Direct, effects.RestoresApplicationState, prop, proc.Effects.Identity) &&
+			!hasApplicationStateEffectFrom(candidate.Propagated, effects.RestoresApplicationState, prop, proc.Effects.Identity)) {
 			continue
 		}
 		if hasMatchingPushProcedure(candidate, prop, project) {
@@ -3444,7 +3458,7 @@ func hasMatchingPushProcedure(candidate effects.ProcedureSummary, prop string, p
 		return false
 	}
 	matches := 0
-	for _, push := range project.All() {
+	for _, push := range project.AllDirect() {
 		if !strings.EqualFold(push.Identity.Name, "push"+suffix) || !hasApplicationStateEffect(push.Direct, effects.ChangesApplicationState, prop) {
 			continue
 		}

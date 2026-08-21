@@ -105,9 +105,25 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 		byFile[canonicalCyclePath(file.Path)] = file
 	}
 	bySummary := make(map[string]effects.ProcedureSummary)
-	for _, summary := range project.All() {
+	directByCycleKey := make(map[string]effects.ProcedureIdentity, project.ProcedureCount())
+	for _, summary := range project.AllDirect() {
 		identity := summary.Identity
-		bySummary[cycleSummaryKey(identity.File, identity.QualifiedName, string(identity.Kind), identity.DeclarationLine)] = summary
+		directByCycleKey[cycleSummaryKey(identity.File, identity.QualifiedName, string(identity.Kind), identity.DeclarationLine)] = identity
+	}
+	for _, cycle := range cycles {
+		for _, node := range cycle.Nodes {
+			key := cycleSummaryKey(node.File, node.QualifiedName, node.Kind, node.Line)
+			identity, ok := directByCycleKey[key]
+			if !ok {
+				continue
+			}
+			if _, exists := bySummary[key]; exists {
+				continue
+			}
+			if summary, ok := project.Lookup(identity); ok {
+				bySummary[key] = summary
+			}
+		}
 	}
 	out := make([]Finding, 0, len(cycles))
 	for _, cycle := range cycles {

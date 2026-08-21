@@ -382,6 +382,184 @@ func TestAnalyzeReachabilityTreatsAmbiguousRootsAsPossible(t *testing.T) {
 	}
 }
 
+func TestBuildIndexesCandidateIdentityWithoutChangingMatches(t *testing.T) {
+	input := Snapshot{
+		Symbols: []Symbol{
+			{Name: "Caller", Kind: "sub", Module: "Main", File: "Main.bas", Line: 1, Column: 1},
+			// Kelvin sign and ASCII k are EqualFold-equivalent but have different
+			// lower-case representations. The index must retain that match.
+			{Name: "Karget", Kind: "sub", Module: "M", File: "M.bas", Line: 5, Column: 1},
+			// Same qualified name and declaration line in different files must
+			// remain distinct candidate identities.
+			{Name: "Target", Kind: "sub", Module: "M", File: "M.bas", Line: 8, Column: 1},
+			{Name: "Target", Kind: "sub", Module: "M", File: "Other.bas", Line: 8, Column: 1},
+			// Different columns make these distinct graph nodes but the candidate
+			// identity is not unique, so no edge may be inferred.
+			{Name: "Collision", Kind: "sub", Module: "M", File: "M.bas", Line: 11, Column: 1},
+			{Name: "Collision", Kind: "sub", Module: "M", File: "M.bas", Line: 11, Column: 2},
+		},
+		Calls: []calls.Call{
+			matched("Main", "Main.bas", "Caller", "M", "M.bas", "karget", 5, 2),
+			matched("Main", "Main.bas", "Caller", "M", "Other.bas", "Target", 8, 3),
+			// These candidates have the same qualified name but fail one of the
+			// exact identity fields that the old graph scan checked.
+			matchedKind("Main", "Main.bas", "Caller", "sub", "M", "M.bas", "Target", "function", 8, 4),
+			matched("Main", "Main.bas", "Caller", "M", "Missing.bas", "Target", 8, 5),
+			// File normalization is only an index aid; the historical exact file
+			// comparison must still reject a cleaned-but-different candidate.
+			matched("Main", "Main.bas", "Caller", "M", ".\\M.bas", "Target", 8, 6),
+			matched("Main", "Main.bas", "Caller", "M", "M.bas", "Target", 9, 6),
+			matched("Main", "Main.bas", "Caller", "M", "M.bas", "Collision", 11, 7),
+			calls.Call{CallSite: calls.CallSite{File: "Main.bas", Module: "Main", Caller: &calls.Caller{Name: "Caller", Kind: "sub", QualifiedName: "Main.Caller"}, Range: vbaast.Range{StartLine: 8}}, Resolution: calls.Resolution{Status: "ambiguous", Candidates: []calls.Candidate{{QualifiedName: "M.Target", Kind: "sub", File: "M.bas", Line: 8}}}},
+		},
+	}
+
+	g := build(input)
+	callerKey, callerOK := g.lookupCallerKey("Main.Caller", "sub", "Main.bas")
+	if !callerOK {
+		t.Fatal("caller was not indexed")
+	}
+	if got := len(g.out[callerKey]); got != 2 {
+		t.Fatalf("confirmed edges = %d, want 2", got)
+	}
+	if got := g.out[callerKey][0].Callee.QualifiedName; got != "M.Karget" {
+		t.Fatalf("first edge callee = %q, want Unicode EqualFold target", got)
+	}
+	if got := g.out[callerKey][1].Callee.File; got != "Other.bas" {
+		t.Fatalf("second edge file = %q, want Other.bas", got)
+	}
+	if got := len(g.uncertain[callerKey]); got != 1 {
+		t.Fatalf("non-matched calls recorded as uncertain = %d, want 1", got)
+	}
+
+	permuted := input
+	permuted.Symbols = append([]Symbol(nil), input.Symbols...)
+	permuted.Calls = append([]calls.Call(nil), input.Calls...)
+	for left, right := 0, len(permuted.Symbols)-1; left < right; left, right = left+1, right-1 {
+		permuted.Symbols[left], permuted.Symbols[right] = permuted.Symbols[right], permuted.Symbols[left]
+	}
+	for left, right := 0, len(permuted.Calls)-1; left < right; left, right = left+1, right-1 {
+		permuted.Calls[left], permuted.Calls[right] = permuted.Calls[right], permuted.Calls[left]
+	}
+	permutedGraph := build(permuted)
+	permutedCallerKey, permutedCallerOK := permutedGraph.lookupCallerKey("Main.Caller", "sub", "Main.bas")
+	if !permutedCallerOK {
+		t.Fatal("caller was not indexed after input permutation")
+	}
+	if got := edgeKeys(permutedGraph.out[permutedCallerKey]); !reflect.DeepEqual(got, edgeKeys(g.out[callerKey])) {
+		t.Fatalf("edge ordering changed after input permutation: first=%v permuted=%v", edgeKeys(g.out[callerKey]), got)
+	}
+}
+
+func TestBuildSelectsExactCandidateFromNormalizedFileCollision(t *testing.T) {
+	input := Snapshot{
+		Symbols: []Symbol{
+			{Name: "Caller", Kind: "sub", Module: "Main", File: "Main.bas", Line: 1, Column: 1},
+			{Name: "Target", Kind: "sub", Module: "M", File: "src/M.bas", Line: 5, Column: 1},
+			{Name: "Target", Kind: "sub", Module: "M", File: "src/./M.bas", Line: 5, Column: 2},
+		},
+		Calls: []calls.Call{
+			matched("Main", "Main.bas", "Caller", "M", "src/M.bas", "Target", 5, 2),
+			matched("Main", "Main.bas", "Caller", "M", "src/./M.bas", "Target", 5, 3),
+		},
+	}
+
+	g := build(input)
+	callerKey, ok := g.lookupCallerKey("Main.Caller", "sub", "Main.bas")
+	if !ok {
+		t.Fatal("caller was not indexed")
+	}
+	if got := len(g.out[callerKey]); got != 2 {
+		t.Fatalf("confirmed edges = %d, want 2", got)
+	}
+	files := map[string]int{}
+	for _, edge := range g.out[callerKey] {
+		if edge.Callee.File != "src/M.bas" && edge.Callee.File != "src/./M.bas" {
+			t.Fatalf("unexpected callee file = %q", edge.Callee.File)
+		}
+		files[edge.Callee.File]++
+	}
+	if files["src/M.bas"] != 1 || files["src/./M.bas"] != 1 {
+		t.Fatalf("normalized collision targets = %#v, want one edge per raw file", files)
+	}
+}
+
+func TestBuildIndexesPropertyAccessorKinds(t *testing.T) {
+	input := Snapshot{
+		Symbols: []Symbol{
+			{Name: "Caller", Kind: "sub", Module: "Main", File: "Main.bas", Line: 1, Column: 1},
+			{Name: "Value", Kind: "property_get", Module: "Thing", File: "Thing.cls", Line: 5, Column: 1},
+			{Name: "Value", Kind: "property_let", Module: "Thing", File: "Thing.cls", Line: 10, Column: 1},
+			{Name: "Value", Kind: "property_set", Module: "Thing", File: "Thing.cls", Line: 15, Column: 1},
+		},
+		Calls: []calls.Call{
+			matchedKind("Main", "Main.bas", "Caller", "sub", "Thing", "Thing.cls", "Value", "property_get", 5, 2),
+			matchedKind("Main", "Main.bas", "Caller", "sub", "Thing", "Thing.cls", "Value", "property_let", 10, 3),
+			matchedKind("Main", "Main.bas", "Caller", "sub", "Thing", "Thing.cls", "Value", "property_set", 15, 4),
+		},
+	}
+
+	g := build(input)
+	callerKey, ok := g.lookupCallerKey("Main.Caller", "sub", "Main.bas")
+	if !ok {
+		t.Fatal("caller was not indexed")
+	}
+	if got := len(g.out[callerKey]); got != 3 {
+		t.Fatalf("property accessor edges = %d, want 3", got)
+	}
+	gotKinds := make([]string, 0, len(g.out[callerKey]))
+	for _, edge := range g.out[callerKey] {
+		gotKinds = append(gotKinds, edge.Callee.Kind)
+	}
+	if want := []string{"property_get", "property_let", "property_set"}; !reflect.DeepEqual(gotKinds, want) {
+		t.Fatalf("property accessor kinds = %v, want %v", gotKinds, want)
+	}
+}
+
+func TestBuildKeepsNonMatchedResolutionStatusesUnconnected(t *testing.T) {
+	statuses := []string{"ambiguous", "unresolved", "external", "builtin_like", "member_call", "dynamic", "incomplete"}
+	input := Snapshot{
+		Symbols: []Symbol{
+			{Name: "Caller", Kind: "sub", Module: "Main", File: "Main.bas", Line: 1, Column: 1},
+			{Name: "Target", Kind: "sub", Module: "M", File: "M.bas", Line: 2, Column: 1},
+		},
+		Calls: make([]calls.Call, 0, len(statuses)),
+	}
+	for i, status := range statuses {
+		input.Calls = append(input.Calls, calls.Call{
+			CallSite: calls.CallSite{
+				File: "Main.bas", Module: "Main",
+				Caller: &calls.Caller{Name: "Caller", Kind: "sub", QualifiedName: "Main.Caller"},
+				Range:  vbaast.Range{StartLine: i + 2},
+			},
+			Resolution: calls.Resolution{
+				Status:     status,
+				Candidates: []calls.Candidate{{QualifiedName: "M.Target", Kind: "sub", File: "M.bas", Line: 2}},
+			},
+		})
+	}
+
+	g := build(input)
+	callerKey, ok := g.lookupCallerKey("Main.Caller", "sub", "Main.bas")
+	if !ok {
+		t.Fatal("caller was not resolved")
+	}
+	if got := len(g.out[callerKey]); got != 0 {
+		t.Fatalf("non-matched statuses created %d edges", got)
+	}
+	if got := len(g.uncertain[callerKey]); got != len(statuses) {
+		t.Fatalf("uncertain calls = %d, want %d", got, len(statuses))
+	}
+}
+
+func edgeKeys(edges []Edge) []string {
+	keys := make([]string, len(edges))
+	for i, edge := range edges {
+		keys[i] = edgeKey(edge)
+	}
+	return keys
+}
+
 func TestAnalyzeReachabilityHandlesRecursiveDiamondWithoutDuplicates(t *testing.T) {
 	input := &calls.Result{
 		Symbols: []symbols.Symbol{

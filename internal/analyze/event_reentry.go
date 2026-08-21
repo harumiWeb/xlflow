@@ -235,7 +235,7 @@ func eventSafeProcedures(files []parsedFile, project effects.ProjectSummary) map
 				continue
 			}
 			id := procedureEffectIdentity(file.IR, file.IR.Procedures[index].Symbol)
-			summary, ok := project.Lookup(id)
+			summary, ok := project.LookupDirect(id)
 			if !ok || !summary.Has(effects.DisablesEvents) || !summary.Has(effects.RestoresEvents) {
 				continue
 			}

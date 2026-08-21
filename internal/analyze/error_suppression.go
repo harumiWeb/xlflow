@@ -22,6 +22,8 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 	}
 	var findings []Finding
 	seen := map[string]bool{}
+	var procedureIdentities []effects.ProcedureIdentity
+	identitiesReady := false
 	resumeNextOwnedByVBA214 := map[int]bool{}
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		for _, existing := range a.leakedOnErrorResumeNextFindings(file, proc) {
@@ -50,7 +52,11 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 			message = proc.Name + " logs a runtime error and then continues without signaling failure."
 			reason = "The handler records error information, but the same exceptional path reaches a normal procedure exit without rethrowing or returning failure."
 		}
-		if chain := representativePublicErrorChain(project, evidence); chain != "" {
+		if !identitiesReady {
+			procedureIdentities = project.Identities()
+			identitiesReady = true
+		}
+		if chain := representativePublicErrorChain(procedureIdentities, project, evidence); chain != "" {
 			reason += " Representative call chain: " + chain + "."
 		}
 		findings = append(findings, a.simpleFinding(
@@ -64,7 +70,7 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 || !applicationStateCallReachable(proc, call) {
 			continue
 		}
-		callee, ok := project.LookupCandidate(call.Resolution.Candidates[0])
+		callee, ok := project.LookupCandidateDirect(call.Resolution.Candidates[0])
 		statement, statementOK := facts.Statement(call.StatementID)
 		if !ok || !statementOK || !directSuccessFlag(callee) || errorFailureOutputObserved(proc, call, callee) || errorSuccessResultUseUncertain(proc, call, statement) || errorSuccessResultChecked(proc, call, statement) {
 			continue
@@ -223,9 +229,13 @@ func errorEvidenceAt(items []effects.ErrorEvidence, behavior effects.ErrorBehavi
 	return false
 }
 
-func representativePublicErrorChain(project effects.ProjectSummary, loss effects.ErrorEvidence) string {
-	for _, summary := range project.All() {
-		if !errorEntryProcedure(summary.Identity) {
+func representativePublicErrorChain(identities []effects.ProcedureIdentity, project effects.ProjectSummary, loss effects.ErrorEvidence) string {
+	for _, identity := range identities {
+		if !errorEntryProcedure(identity) {
+			continue
+		}
+		summary, ok := project.Lookup(identity)
+		if !ok {
 			continue
 		}
 		for _, evidence := range summary.Error.Propagated {

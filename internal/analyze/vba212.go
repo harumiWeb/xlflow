@@ -60,13 +60,13 @@ func (a Analyzer) vba212ScanWithContext(ctx context.Context, file parsedFile, pr
 	if scanCtx.declarations == nil {
 		scanCtx.declarations = vba212DeclarationIndexesForFile(file, procedures)
 	}
-	summaries := scanCtx.projectEffects.All()
+	summaries := scanCtx.projectEffects.AllDirect()
 	if len(summaries) == 0 && file.Root != nil && vba212SourceMayHaveGetter(file) {
 		// Standalone/realtime callers do not have a project summary.  Building a
 		// one-document summary gives them the same-document getter proof while
 		// retaining the batch caller's full-project summary when supplied.
 		scanCtx.projectEffects = buildProjectEffects([]parsedFile{file})
-		summaries = scanCtx.projectEffects.All()
+		summaries = scanCtx.projectEffects.AllDirect()
 	}
 	userDefined := make(map[string]bool, len(scanCtx.userDefined)+3)
 	for name, defined := range scanCtx.userDefined {

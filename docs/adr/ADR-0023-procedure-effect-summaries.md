@@ -131,6 +131,10 @@ effect summaries do not alter that fallback.
   `internal/analyze/analyzer.go`, `internal/analyze/analyzer_test.go`.
 - Detailed effect contract: `docs/specs/vba-effect-analysis.md`.
 
+## Amended by
+
+- `docs/adr/ADR-0044-bounded-procedure-effect-summaries.md`
+
 ## Related
 
 - `docs/adr/ADR-0013-analyze-runtime-risk-ownership.md`

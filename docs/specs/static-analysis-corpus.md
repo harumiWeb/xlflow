@@ -656,6 +656,15 @@ Policy and maintainability observations remain unbound when VBE compilation
 cannot establish their meaning. Do not silence a suspected false positive by
 deleting a row or weakening the real-world snapshot comparison.
 
+An optimization-induced diagnostic increase follows the same review boundary.
+Do not update the snapshot to accept the new row. Re-run the verify-only
+comparison twice, reduce the delta to a focused fixture, and classify it as a
+true-positive contract change, a false positive, or nondeterminism. A false
+positive requires a focused regression and a root-cause fix in the analyzer;
+for a compile-equivalent rule, bind the fix to sequential VBE-oracle evidence
+and retain the corresponding forbidden negative control. Only after the
+focused contract is stable may a reviewed snapshot update be considered.
+
 ### Explicit snapshot updates
 
 After the source, fixture, and (when applicable) VBE evidence are reviewed,
@@ -861,6 +870,53 @@ allocations. Timing is observational and is not a CI assertion. Retain the
 complete trial outputs, SHA, command, and power-state notes with performance
 investigations; do not treat these measurements as a semantic or diagnostic
 contract.
+
+Issue #674 adds an effects-focused scalability measurement to this procedure.
+The benchmark generator must construct the IR, CFG, and project-local call
+graph before the timer starts, then measure only `effects.Build` (or its
+equivalent package benchmark). Run long chains, wide fan-in, wide fan-out,
+bounded-dense project-local graphs, large uncertainty sets, and effect-heavy
+callees at approximately 500, 1,000, and 2,000 procedures. Each run records
+wall time (`ns/op`), `B/op`, `allocs/op`, maximum propagated facts per
+procedure, total propagated facts, and worklist evaluations. Keep the Go
+toolchain, machine, power state, benchmark filter, `-benchmem`,
+`-benchtime=1x`, and sample count fixed for before/after comparisons; on
+Windows invoke Go through `scripts/dev/go.ps1`.
+
+The baseline is captured before changing the propagation algorithm. Report
+the median and spread for at least five before/after samples for the focused
+effects cases. A successful optimization should reduce the provenance-heavy
+median wall time by at least 20% and allocated bytes by at least 50% without
+increasing allocation count; record the observed result rather than treating
+these targets as a CI timing threshold. Re-run the existing
+`BenchmarkSingleModuleSynthetic` scales and the `std-vba`/`ronecone`
+`analyze-only` leaf benchmarks to determine whether `effect_summaries` is a
+confirmed end-to-end hotspot. If it is, retain CPU and heap profiles for the
+same leaf benchmark; if it is not, record that result and do not attribute the
+workload-wide improvement to effects.
+
+The 2026-08-20 Windows observation used the i7-12700 host, the repository Go
+wrapper, the same benchmark generator, and five samples for the effects
+comparison. The legacy rows were collected by temporarily selecting the
+pre-#674 eager propagation function; that switch was not retained in the
+source tree. Values below are medians from `-benchtime=1x -benchmem`:
+
+| workload             | eager `ns/op` | bounded `ns/op` | wall change | eager `B/op` | bounded `B/op` | bytes change | eager `allocs/op` | bounded `allocs/op` |
+| -------------------- | ------------: | --------------: | ----------: | -----------: | -------------: | -----------: | ----------------: | ------------------: |
+| effect-heavy / 500   |     116.82 ms |        13.48 ms |      -88.5% |     24.65 MB |        8.01 MB |       -67.5% |              364k |               93.5k |
+| effect-heavy / 1,000 |     206.30 ms |        27.85 ms |      -86.5% |     51.18 MB |       17.74 MB |       -65.3% |              737k |              196.9k |
+| effect-heavy / 2,000 |     227.69 ms |        57.67 ms |      -74.7% |    104.31 MB |       37.37 MB |       -64.2% |            1.492m |                409k |
+
+The bounded runs reported maximum semantic propagated facts of 14 and
+worklist evaluations of 999, 1,999, and 3,999 for the three sizes. Chain and
+dense workloads also reduced wall time (about 66--89% and 59--75%
+respectively), but their byte reductions were below the 50% target; the target
+is therefore claimed only for the provenance-heavy effect-heavy cases. The
+optimized ROneCOne `analyze-only` leaf completed in 108.35 s and 126.28 s; its
+`effect_summaries` stage was 0.308 s and 0.373 s (roughly 0.3% of total), so it
+was not a confirmed end-to-end hotspot. The legacy ROneCOne attempt terminated
+before producing a benchmark record in this workspace; no ROneCOne speedup is
+claimed from that incomplete before run.
 
 ROneCOne profiling is developer-only and must be selected explicitly as a leaf
 benchmark; it is Excel/COM-free and is not part of ordinary `go test ./...`:

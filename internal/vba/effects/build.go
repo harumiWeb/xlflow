@@ -9,9 +9,10 @@ import (
 )
 
 type procedureInput struct {
-	id    ProcedureIdentity
-	proc  procedureir.ProcedureIR
-	graph cfg.Graph
+	id        ProcedureIdentity
+	proc      procedureir.ProcedureIR
+	graph     cfg.Graph
+	reachable map[int]bool
 }
 
 type edge struct{ from, to string }
@@ -37,44 +38,17 @@ func (i *membershipIndex[T]) add(value T) bool {
 	return true
 }
 
-type summaryMembership struct {
-	identityKey string
-	evidence    membershipIndex[Evidence]
-	error       membershipIndex[ErrorEvidence]
-	uncertainty membershipIndex[CallUncertainty]
-}
-
-func newSummaryMembership(summary *ProcedureSummary) *summaryMembership {
-	index := &summaryMembership{
-		identityKey: summary.Identity.Key(),
-		evidence:    newMembershipIndex(len(summary.Direct)+len(summary.Propagated), evidenceKey),
-		error:       newMembershipIndex(len(summary.Error.Direct)+len(summary.Error.Propagated), errorEvidenceKey),
-		uncertainty: newMembershipIndex(len(summary.DirectUncertainty)+len(summary.PropagatedUncertainty), uncertaintyKey),
-	}
-	for _, fact := range summary.Direct {
-		index.evidence.add(fact)
-	}
-	for _, fact := range summary.Propagated {
-		index.evidence.add(fact)
-	}
-	for _, fact := range summary.Error.Direct {
-		index.error.add(fact)
-	}
-	for _, fact := range summary.Error.Propagated {
-		index.error.add(fact)
-	}
-	for _, fact := range summary.DirectUncertainty {
-		index.uncertainty.add(fact)
-	}
-	for _, fact := range summary.PropagatedUncertainty {
-		index.uncertainty.add(fact)
-	}
-	return index
-}
-
-// Build computes direct facts and then propagates finite provenance sets over
+// Build computes direct facts and then propagates bounded semantic state over
 // uniquely resolved, reachable project-local calls until a fixed point.
 func Build(documents []Document) ProjectSummary {
+	project, _ := BuildWithStats(documents)
+	return project
+}
+
+// BuildWithStats is Build with developer-facing fixed-point counters. Detailed
+// source provenance remains at its origin and is reconstructed lazily from the
+// project call graph by ProjectSummary.Lookup/All.
+func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 	inputs := collectInputs(documents)
 	summaries := make(map[string]*ProcedureSummary, len(inputs))
 	candidateKeys := candidateIndex(inputs)
@@ -84,7 +58,7 @@ func Build(documents []Document) ProjectSummary {
 	var edges []edge
 	for _, input := range inputs {
 		summary := &ProcedureSummary{Identity: input.id}
-		reachable := reachableStatements(input.proc, input.graph)
+		reachable := input.reachable
 		statements := statementIndex(input.proc)
 		extractStatements(summary, input.proc, reachable)
 		extractErrorSummary(summary, input.proc, input.graph, reachable, candidateKeys, loggerTargets, rethrowTargets, terminalTargets)
@@ -109,7 +83,8 @@ func Build(documents []Document) ProjectSummary {
 			}
 		}
 		dedupeDirect(summary)
-		refreshErrorFlags(&summary.Error)
+		summary.semantic = semanticStateFromSummary(summary)
+		summary.Error = errorSummaryWithState(summary.Error, summary.semantic)
 		summaries[input.id.Key()] = summary
 	}
 	sort.Slice(edges, func(i, j int) bool {
@@ -118,10 +93,27 @@ func Build(documents []Document) ProjectSummary {
 		}
 		return edges[i].to < edges[j].to
 	})
-	propagate(summaries, edges)
+	callers, callees := buildAdjacency(edges)
+	stats := propagateBounded(summaries, callers)
+	witnessSummaries := make(map[string]ProcedureSummary, len(summaries))
+	for key, summary := range summaries {
+		if summary != nil {
+			// Keep extraction order for lazy compatibility replay. The public
+			// summaries are sorted below, but the legacy propagation worklist saw
+			// these direct slices before that presentation-only sort.
+			witnessSummaries[key] = cloneProcedureSummary(*summary)
+		}
+	}
 	out := ProjectSummary{
 		byKey:           map[string]int{},
 		byCandidateLine: map[int][]int{},
+		stats:           stats,
+		provenance: &provenanceGraph{
+			callers:   callers,
+			callees:   callees,
+			summaries: map[string]ProcedureSummary{},
+			witness:   witnessSummaries,
+		},
 	}
 	for _, summary := range summaries {
 		out.procedures = append(out.procedures, *summary)
@@ -129,10 +121,16 @@ func Build(documents []Document) ProjectSummary {
 	sortSummaries(out.procedures)
 	for i := range out.procedures {
 		out.byKey[out.procedures[i].Identity.Key()] = i
+		out.provenance.summaries[out.procedures[i].Identity.Key()] = out.procedures[i]
 		line := out.procedures[i].Identity.DeclarationLine
 		out.byCandidateLine[line] = append(out.byCandidateLine[line], i)
 	}
-	return out
+	out.provenance.keys = make([]string, 0, len(out.provenance.summaries))
+	for _, summary := range out.procedures {
+		out.provenance.keys = append(out.provenance.keys, summary.Identity.Key())
+	}
+	out.materialization = newMaterializationCache(out)
+	return out, stats
 }
 
 func collectInputs(documents []Document) []procedureInput {
@@ -144,7 +142,7 @@ func collectInputs(documents []Document) []procedureInput {
 		}
 		for _, proc := range doc.IR.Procedures {
 			graph := graphs[proc.Symbol.QualifiedName+"\x00"+string(proc.Symbol.Kind)]
-			out = append(out, procedureInput{id: identity(doc.IR, proc), proc: proc, graph: graph})
+			out = append(out, procedureInput{id: identity(doc.IR, proc), proc: proc, graph: graph, reachable: reachableStatements(proc, graph)})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].id.Key() < out[j].id.Key() })
@@ -175,11 +173,9 @@ func reachableStatements(proc procedureir.ProcedureIR, graph cfg.Graph) map[int]
 		return out
 	}
 	for _, id := range graph.Reachable(cfg.EdgeFilter{}) {
-		for _, block := range graph.Blocks {
-			if block.ID == id && block.Kind == cfg.BlockStatement {
-				out[block.StatementID] = true
-				break
-			}
+		block, ok := graph.BlockByID(id)
+		if ok && block.Kind == cfg.BlockStatement {
+			out[block.StatementID] = true
 		}
 	}
 	return out
@@ -214,118 +210,90 @@ func dedupeDirect(summary *ProcedureSummary) {
 	summary.DirectUncertainty = uniqueUncertainty(summary.DirectUncertainty)
 }
 
-func propagate(summaries map[string]*ProcedureSummary, edges []edge) {
-	callers := map[string][]string{}
-	for _, edge := range edges {
-		callers[edge.to] = append(callers[edge.to], edge.from)
+func buildAdjacency(edges []edge) (map[string][]string, map[string][]string) {
+	callerSets := make(map[string]map[string]struct{})
+	calleeSets := make(map[string]map[string]struct{})
+	for _, item := range edges {
+		callers := callerSets[item.to]
+		if callers == nil {
+			callers = map[string]struct{}{}
+			callerSets[item.to] = callers
+		}
+		callers[item.from] = struct{}{}
+
+		callees := calleeSets[item.from]
+		if callees == nil {
+			callees = map[string]struct{}{}
+			calleeSets[item.from] = callees
+		}
+		callees[item.to] = struct{}{}
 	}
+	callers := make(map[string][]string, len(callerSets))
+	for key, set := range callerSets {
+		for caller := range set {
+			callers[key] = append(callers[key], caller)
+		}
+		sort.Strings(callers[key])
+	}
+	callees := make(map[string][]string, len(calleeSets))
+	for key, set := range calleeSets {
+		for callee := range set {
+			callees[key] = append(callees[key], callee)
+		}
+		sort.Strings(callees[key])
+	}
+	return callers, callees
+}
+
+// propagateBounded propagates only finite semantic state.
+func propagateBounded(summaries map[string]*ProcedureSummary, callers map[string][]string) BuildStats {
 	queue := make([]string, 0, len(summaries))
 	queued := map[string]bool{}
-	membership := make(map[string]*summaryMembership, len(summaries))
 	for key := range summaries {
 		queue = append(queue, key)
 		queued[key] = true
-		if summaries[key] != nil {
-			membership[key] = newSummaryMembership(summaries[key])
-		}
 	}
 	sort.Strings(queue)
+	var stats BuildStats
 	for len(queue) > 0 {
 		calleeKey := queue[0]
 		queue = queue[1:]
 		queued[calleeKey] = false
+		stats.WorklistEvaluations++
+		callee := summaries[calleeKey]
+		if callee == nil || callee.semantic == nil {
+			continue
+		}
 		for _, callerKey := range callers[calleeKey] {
-			caller, callee := summaries[callerKey], summaries[calleeKey]
-			callerMembership := membership[callerKey]
-			if caller == nil || callee == nil || callerMembership == nil {
+			caller := summaries[callerKey]
+			if caller == nil || caller.semantic == nil {
 				continue
 			}
-			changed := false
-			propagateEvidence := func(facts []Evidence) {
-				for _, fact := range facts {
-					if fact.Origin.Key() == callerMembership.identityKey || !callerMembership.evidence.add(fact) {
-						continue
-					}
-					caller.Propagated = append(caller.Propagated, fact)
-					changed = true
-				}
-			}
-			propagateEvidence(callee.Direct)
-			propagateEvidence(callee.Propagated)
-
-			propagateErrors := func(facts []ErrorEvidence) {
-				for _, fact := range facts {
-					// MayRaise is already a local CFG outcome for a reachable call
-					// site and can occur in nearly every non-trivial procedure. Its
-					// per-origin transitive expansion is redundant and quadratic on
-					// large call graphs; loss diagnostics require provenance only for
-					// the more specific handled-error outcomes below.
-					if fact.Behavior == ErrorMayRaise {
-						continue
-					}
-					if fact.Origin.Key() == callerMembership.identityKey {
-						continue
-					}
-					fact.CallChain = prependErrorCaller(caller.Identity, fact.CallChain, fact.Origin)
-					if !callerMembership.error.add(fact) {
-						continue
-					}
-					caller.Error.Propagated = append(caller.Error.Propagated, fact)
-					changed = true
-				}
-			}
-			propagateErrors(callee.Error.Direct)
-			propagateErrors(callee.Error.Propagated)
-			if callee.Error.MayRaise && !caller.Error.MayRaise {
-				fact := ErrorEvidence{
-					Behavior: ErrorMayRaise,
-					Origin:   callee.Identity,
-					CallChain: []ProcedureIdentity{
-						caller.Identity,
-						callee.Identity,
-					},
-					Target: "callee",
-					Value:  callee.Identity.QualifiedName,
-				}
-				if callerMembership.error.add(fact) {
-					caller.Error.Propagated = append(caller.Error.Propagated, fact)
-					changed = true
-				}
-			}
-			refreshErrorFlags(&caller.Error)
-
-			propagateUncertainty := func(facts []CallUncertainty) {
-				for _, fact := range facts {
-					if fact.Origin.Key() == callerMembership.identityKey || !callerMembership.uncertainty.add(fact) {
-						continue
-					}
-					caller.PropagatedUncertainty = append(caller.PropagatedUncertainty, fact)
-					changed = true
-				}
-			}
-			propagateUncertainty(callee.DirectUncertainty)
-			propagateUncertainty(callee.PropagatedUncertainty)
+			changed := mergeSemanticState(caller.semantic, callee.semantic, callerKey, calleeKey)
+			caller.Error = errorSummaryWithState(caller.Error, caller.semantic)
 			if changed && !queued[callerKey] {
 				queue = append(queue, callerKey)
 				queued[callerKey] = true
 			}
 		}
 	}
-}
-
-func prependErrorCaller(caller ProcedureIdentity, chain []ProcedureIdentity, origin ProcedureIdentity) []ProcedureIdentity {
-	for _, item := range chain {
-		if item.Key() == caller.Key() {
-			return append([]ProcedureIdentity(nil), chain...)
+	for _, summary := range summaries {
+		if summary == nil || summary.semantic == nil {
+			continue
 		}
+		direct := semanticStateFromSummary(summary).factCount()
+		facts := summary.semantic.factCount()
+		if facts > direct {
+			facts -= direct
+		} else {
+			facts = 0
+		}
+		if facts > stats.MaxPropagatedFactsPerProcedure {
+			stats.MaxPropagatedFactsPerProcedure = facts
+		}
+		stats.TotalPropagatedFacts += facts
 	}
-	if len(chain) == 0 {
-		chain = []ProcedureIdentity{origin}
-	}
-	out := make([]ProcedureIdentity, 0, len(chain)+1)
-	out = append(out, caller)
-	out = append(out, chain...)
-	return out
+	return stats
 }
 
 func uniqueEvidence(in []Evidence) []Evidence {
