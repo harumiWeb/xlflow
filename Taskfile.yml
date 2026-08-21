@@ -247,3 +247,9 @@ tasks:
     cmds:
       - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/codex-review.ps1 {{.CLI_ARGS}}
         platforms: [windows]
+
+  test:codex-review:
+    desc: Run Codex review launcher argument regression tests
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/test-codex-review.ps1
+        platforms: [windows]

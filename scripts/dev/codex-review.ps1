@@ -19,6 +19,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+. (Join-Path $PSScriptRoot "codex-review-arguments.ps1")
+
 function Write-Heartbeat {
     param(
         [string]$Glyph,
@@ -71,66 +73,6 @@ function Stop-CodexProcess {
     }
 
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-}
-
-function New-BackslashSequence {
-    param(
-        [int]$Count
-    )
-
-    if ($Count -le 0) {
-        return ""
-    }
-
-    return (1..$Count | ForEach-Object { '\' }) -join ""
-}
-
-function ConvertTo-ProcessArgument {
-    param(
-        [AllowEmptyString()]
-        [string]$Value
-    )
-
-    if ($null -eq $Value -or $Value.Length -eq 0) {
-        return '""'
-    }
-
-    if ($Value -notmatch '[\s"]') {
-        return $Value
-    }
-
-    $builder = New-Object System.Text.StringBuilder
-    [void]$builder.Append([char]34)
-    $backslashCount = 0
-
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq [char]92) {
-            $backslashCount++
-            continue
-        }
-
-        if ($character -eq [char]34) {
-            [void]$builder.Append(
-                (New-BackslashSequence -Count ($backslashCount * 2 + 1))
-            )
-            [void]$builder.Append([char]34)
-            $backslashCount = 0
-            continue
-        }
-
-        [void]$builder.Append(
-            (New-BackslashSequence -Count $backslashCount)
-        )
-        [void]$builder.Append($character)
-        $backslashCount = 0
-    }
-
-    [void]$builder.Append(
-        (New-BackslashSequence -Count ($backslashCount * 2))
-    )
-    [void]$builder.Append([char]34)
-
-    return $builder.ToString()
 }
 
 $repoRoot = (& git rev-parse --show-toplevel 2>$null)
@@ -191,6 +133,9 @@ if ([string]::IsNullOrWhiteSpace($codexPath)) {
     throw "Codex CLI was not found on PATH."
 }
 
+$cmdLauncher = [System.IO.Path]::GetExtension($codexPath) -ieq ".cmd"
+$cmdLiteralPercentVariableName = "XLFLOW_CODEX_REVIEW_LITERAL_PERCENT"
+
 $tempRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ("xlflow-codex-review-" + [Guid]::NewGuid().ToString("N"))
@@ -247,7 +192,15 @@ $codexReviewArguments += $reviewModeArguments
 $processArguments = @($launcherArguments) + @($codexReviewArguments)
 $processArgumentString = (
     $processArguments |
-        ForEach-Object { ConvertTo-ProcessArgument -Value ([string]$_) }
+        ForEach-Object {
+            if ($cmdLauncher) {
+                ConvertTo-CmdProcessArgument `
+                    -Value ([string]$_) `
+                    -PercentVariableName $cmdLiteralPercentVariableName
+            } else {
+                ConvertTo-ProcessArgument -Value ([string]$_)
+            }
+        }
 ) -join " "
 
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -255,8 +208,26 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 $reviewProcess = $null
 $reviewProcessId = 0
 $timedOut = $false
+$cmdPercentEnvironmentSet = $false
+$cmdPercentEnvironmentPath = "Env:{0}" -f $cmdLiteralPercentVariableName
+$hadPreviousCmdPercentEnvironment = $false
+$previousCmdPercentEnvironmentValue = $null
 
 try {
+    if ($cmdLauncher) {
+        $previousEnvironmentItem = Get-Item `
+            -Path $cmdPercentEnvironmentPath `
+            -ErrorAction SilentlyContinue
+
+        if ($null -ne $previousEnvironmentItem) {
+            $hadPreviousCmdPercentEnvironment = $true
+            $previousCmdPercentEnvironmentValue = [string]$previousEnvironmentItem.Value
+        }
+
+        Set-Item -Path $cmdPercentEnvironmentPath -Value "%"
+        $cmdPercentEnvironmentSet = $true
+    }
+
     # Run Codex off-screen. All normal Codex output, including reasoning
     # summaries, tool calls and diagnostics, is redirected to temporary logs.
     $reviewProcess = Start-Process `
@@ -369,6 +340,19 @@ finally {
         if (-not $reviewProcess.HasExited) {
             Stop-CodexProcess -ProcessId $reviewProcessId
             $null = $reviewProcess.WaitForExit(5000)
+        }
+    }
+
+    if ($cmdPercentEnvironmentSet) {
+        if ($hadPreviousCmdPercentEnvironment) {
+            Set-Item `
+                -Path $cmdPercentEnvironmentPath `
+                -Value $previousCmdPercentEnvironmentValue
+        } else {
+            Remove-Item `
+                -Path $cmdPercentEnvironmentPath `
+                -Force `
+                -ErrorAction SilentlyContinue
         }
     }
 
