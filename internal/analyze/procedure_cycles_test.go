@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/callgraph"
 )
 
 func TestVBA244ReportsIndependentCyclesWithClosedDeterministicPaths(t *testing.T) {
@@ -67,6 +68,79 @@ End Sub
 		if firstCycles[i].Message != secondCycles[i].Message || firstCycles[i].File != secondCycles[i].File || firstCycles[i].Line != secondCycles[i].Line {
 			t.Fatalf("cycle output changed: first=%+v second=%+v", firstCycles[i], secondCycles[i])
 		}
+	}
+}
+
+func TestVBA244BoundsFindingsAndAggregatesWholeSCCContext(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub A()
+  B
+  C
+  Zed.D
+End Sub
+Public Sub B()
+  A
+End Sub
+Public Sub C()
+  Application.ScreenUpdating = False
+  MissingDispatch
+  A
+End Sub
+`)
+	writeModule(t, dir, "Zed.bas", `Option Explicit
+Public Sub D()
+  A
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA244")
+	if len(got) != 1 {
+		t.Fatalf("VBA244 findings = %+v, want one finding for one SCC", got)
+	}
+	finding := got[0]
+	if finding.Severity != "warning" || finding.CallCycle == nil {
+		t.Fatalf("SCC context severity = %+v, want warning with context", finding)
+	}
+	if gotPath := strings.Join([]string{
+		finding.CallCycle.Path[0].QualifiedName,
+		finding.CallCycle.Path[1].QualifiedName,
+		finding.CallCycle.Path[2].QualifiedName,
+	}, "->"); gotPath != "Main.A->Main.B->Main.A" {
+		t.Fatalf("representative path = %q, want deterministic A->B->A", gotPath)
+	}
+	var propagatedEffect, uncertainty bool
+	for _, effect := range finding.CallCycle.DangerousEffects {
+		if effect.Origin == "Main.C" {
+			propagatedEffect = true
+		}
+	}
+	uncertainty = len(finding.CallCycle.Uncertainty) > 0
+	if !propagatedEffect || !uncertainty {
+		t.Fatalf("SCC-wide context lost effect/uncertainty: %+v", finding.CallCycle)
+	}
+	if !finding.CallCycle.CrossModule {
+		t.Fatalf("SCC-wide cross-module context was lost: %+v", finding.CallCycle)
+	}
+}
+
+func TestVBA244AggregatesEventOutsideRepresentativeWitness(t *testing.T) {
+	a := callgraph.ID{Module: "Main", QualifiedName: "Main.A", Kind: "sub", File: "Main.bas", Line: 1, Column: 1}
+	b := callgraph.ID{Module: "Main", QualifiedName: "Main.B", Kind: "sub", File: "Main.bas", Line: 4, Column: 1}
+	event := callgraph.ID{Module: "Sheet1", QualifiedName: "Sheet1.Worksheet_Change", Kind: "event", File: "Sheet1.cls", Line: 1, Column: 1}
+	cycle := callgraph.Cycle{
+		Nodes: []callgraph.ID{a, b},
+		Edges: []callgraph.Edge{
+			{Caller: a, Callee: b},
+			{Caller: b, Callee: a},
+		},
+	}
+	context, severity := buildCallCycleContext(cycle, []callgraph.ID{a, b, event}, nil)
+	if severity != "warning" || len(context.EventHandlers) != 1 || context.EventHandlers[0] != event.QualifiedName {
+		t.Fatalf("event outside witness = context:%+v severity:%s", context, severity)
 	}
 }
 

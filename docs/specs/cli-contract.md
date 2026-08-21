@@ -1324,7 +1324,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA241`: `ReDim Preserve` repeatedly resizes an array inside a reachable loop, causing repeated copies
 - `VBA242`: an expensive operation targets an entire row, column, worksheet, or unbounded `UsedRange` where a bounded range is likely intended
 - `VBA243`: a bulk or repeated `Range.Value` transfer may benefit from `Range.Value2` when Date/Currency coercion is not required
-- `VBA244`: uniquely resolved project-local procedures form a recursive or cyclic dependency; the complete deterministic path is reported, and dangerous reachable effects elevate severity
+- `VBA244`: uniquely resolved project-local procedures form a recursive or cyclic dependency; normal analysis reports one deterministic representative witness per cyclic SCC, and dangerous reachable effects elevate severity
 - `VBA245`: a destructive or state-dependent file operation receives an empty/root, relative/current-directory, wildcard, traversal, overwrite, same-source/destination, external-input, or uncleared temporary path
 - `VBA246`: a recognized HTTP client exposes credentials, weakens TLS/certificate validation, logs authorization data, uses a sensitive module constant, or downloads and launches executable/script content
 - `VBA247`: a recognized ServerXMLHTTP or WinHTTP request is sent without a proven finite timeout on every reaching path
@@ -1533,15 +1533,20 @@ does not recommend `Value2` when Date or Currency coercion appears intentional.
 Use `[analyze].disabled_rules = ["VBA243"]` or an inline suppression for an
 intentional `Value` transfer.
 
-`VBA244` is default-enabled and batch-only. It reports each unique directed
-simple cycle once, using only uniquely resolved project-local calls. The
-finding's additive `call_cycle` JSON context contains a closed canonical path,
+`VBA244` is default-enabled and batch-only. It reports one finding per cyclic
+strongly connected component (SCC), using only uniquely resolved project-local
+calls. An SCC is cyclic when it has multiple procedures or a self-edge. The
+normal analyzer does not enumerate elementary cycles; explicit graph-inspection
+surfaces may retain exhaustive cycle output. The finding's additive
+`call_cycle` JSON context contains a deterministic closed representative path,
 aligned call-site edges, cross-module and event-handler identities, dangerous
-effect evidence, and reachable resolution uncertainty. Ordinary recursion is
-`information`; event handlers, Application-state changes, error suppression,
-workbook acquisition, and VBA file acquisition elevate a cycle to `warning`.
-Unresolved or ambiguous calls never prove or close a cycle. Suppress an
-intentional cycle with `[analyze].disabled_rules = ["VBA244"]` or an inline
+effect evidence, and reachable resolution uncertainty. Context is aggregated
+from all SCC members and confirmed edges. Ordinary recursion is `information`;
+event handlers, Application-state changes, error suppression, workbook
+acquisition, and VBA file acquisition elevate the finding to `warning`.
+Unresolved or ambiguous calls never prove or close a cycle, and uncertainty
+alone does not elevate severity. Suppress an intentional cycle with
+`[analyze].disabled_rules = ["VBA244"]` or an inline
 `xlflow:disable-line VBA244` comment.
 
 `VBA245` is default-enabled, warning-level, procedure-local, realtime, and

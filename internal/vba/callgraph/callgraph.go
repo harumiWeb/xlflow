@@ -69,6 +69,16 @@ type Cycle struct {
 	Edges []Edge `json:"edges"`
 }
 
+// CyclicComponent is one strongly connected component that contains a
+// directed cycle. Nodes contains every procedure in the component, while
+// Witness contains one deterministic representative cycle. The witness is
+// intentionally bounded to one cycle per component; callers that need every
+// elementary cycle should continue to use FindCyclesContext.
+type CyclicComponent struct {
+	Nodes   []ID  `json:"nodes"`
+	Witness Cycle `json:"witness"`
+}
+
 type Traversal struct {
 	Direction string `json:"direction"`
 	Depth     int    `json:"depth"`
@@ -359,6 +369,7 @@ func build(input Snapshot) graph {
 		}
 		g.byCandidate[identity] = entry
 	}
+	seenEdges := make(map[string]struct{}, len(input.Calls))
 	for _, call := range input.Calls {
 		if call.Caller == nil {
 			continue
@@ -378,9 +389,10 @@ func build(input Snapshot) graph {
 		}
 		edge := Edge{Caller: g.nodes[callerKey].ID, Callee: g.nodes[calleeKey].ID, Location: Location{File: call.File, StartLine: call.Range.StartLine, StartColumn: call.Range.StartColumn, EndLine: call.Range.EndLine, EndColumn: call.Range.EndColumn}}
 		key := edgeKey(edge)
-		if hasEdge(g.out[callerKey], key) {
+		if _, exists := seenEdges[key]; exists {
 			continue
 		}
+		seenEdges[key] = struct{}{}
 		g.out[callerKey] = append(g.out[callerKey], edge)
 		g.in[calleeKey] = append(g.in[calleeKey], edge)
 	}
@@ -785,14 +797,6 @@ func moduleKindForFile(file string) string {
 func edgeKey(edge Edge) string {
 	return edge.Caller.String() + "->" + edge.Callee.String() + fmt.Sprintf("@%s:%d:%d", edge.Location.File, edge.Location.StartLine, edge.Location.StartColumn)
 }
-func hasEdge(edges []Edge, key string) bool {
-	for _, edge := range edges {
-		if edgeKey(edge) == key {
-			return true
-		}
-	}
-	return false
-}
 func nodesForKeys(g graph, keys []string) []Node {
 	result := make([]Node, 0, len(keys))
 	for _, key := range keys {
@@ -866,6 +870,211 @@ func FindCyclesContext(ctx context.Context, input Snapshot) ([]Cycle, error) {
 		return nil, err
 	}
 	return cycles, nil
+}
+
+// FindCyclicComponents returns one bounded, deterministic cycle witness for
+// every cyclic strongly connected component in input. Unlike FindCycles, it
+// does not enumerate elementary cycles and therefore has bounded output per
+// component.
+func FindCyclicComponents(input Snapshot) []CyclicComponent {
+	components, err := FindCyclicComponentsContext(context.Background(), input)
+	if err != nil {
+		// A background context cannot be canceled. Keep the non-context API
+		// convenient while retaining cancellation for large workspaces.
+		return []CyclicComponent{}
+	}
+	return components
+}
+
+// FindCyclicComponentsContext is the cancellation-aware bounded cycle
+// detector. SCC discovery and representative witness construction are linear
+// in the number of graph vertices and unique endpoint edges. It returns
+// context.Canceled/context.DeadlineExceeded when cancellation is observed and
+// never returns a partial component set.
+func FindCyclicComponentsContext(ctx context.Context, input Snapshot) ([]CyclicComponent, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return findCyclicComponentsGraphContext(ctx, build(input))
+}
+
+// findCyclicComponentsGraphContext runs the bounded detector over an already
+// materialized graph. Keeping graph construction outside this helper makes the
+// O(V+E) cycle-detection boundary explicit for callers and benchmarks; the
+// public Snapshot API still owns normal graph construction.
+func findCyclicComponentsGraphContext(ctx context.Context, g graph) ([]CyclicComponent, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	nodes := make(map[string]ID, len(g.nodes))
+	keys := make([]string, 0, len(g.nodes))
+	for key, node := range g.nodes {
+		nodes[key] = node.ID
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	// Reduce parallel call sites to the earliest source edge for each ordered
+	// endpoint pair. The analyzer can retain all call sites separately; a
+	// representative cycle only needs one stable edge per transition.
+	byEndpoint := make(map[string]map[string]Edge, len(g.out))
+	for _, from := range keys {
+		for _, edge := range g.out[from] {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			to := edge.Callee.String()
+			if _, ok := nodes[to]; !ok {
+				continue
+			}
+			if byEndpoint[from] == nil {
+				byEndpoint[from] = make(map[string]Edge)
+			}
+			prior, exists := byEndpoint[from][to]
+			if !exists || edgeLess(edge, prior) {
+				byEndpoint[from][to] = edge
+			}
+		}
+	}
+
+	adjacency := make(map[string][]cycleArc, len(keys))
+	for _, from := range keys {
+		endpointEdges := byEndpoint[from]
+		if len(endpointEdges) == 0 {
+			continue
+		}
+		neighbors := make([]string, 0, len(endpointEdges))
+		for to := range endpointEdges {
+			neighbors = append(neighbors, to)
+		}
+		sort.Strings(neighbors)
+		arcs := make([]cycleArc, 0, len(neighbors))
+		for _, to := range neighbors {
+			arcs = append(arcs, cycleArc{to: to, edge: endpointEdges[to]})
+		}
+		adjacency[from] = arcs
+	}
+
+	components, err := stronglyConnectedComponents(ctx, keys, adjacency)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CyclicComponent, 0, len(components))
+	for _, component := range components {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !componentContainsCycle(component, adjacency) {
+			continue
+		}
+		witness, err := representativeCycle(ctx, component, adjacency, nodes)
+		if err != nil {
+			return nil, err
+		}
+		componentNodes := make([]ID, len(component))
+		for index, key := range component {
+			componentNodes[index] = nodes[key]
+		}
+		result = append(result, CyclicComponent{Nodes: componentNodes, Witness: witness})
+	}
+	return result, nil
+}
+
+// representativeCycle chooses the lexicographically first edge leaving the
+// component's lexicographically smallest node, then finds a shortest return
+// path with deterministic BFS ordering. Since SCCs are disjoint, the total
+// work of these searches is O(V+E) after SCC discovery.
+func representativeCycle(ctx context.Context, component []string, adjacency map[string][]cycleArc, nodes map[string]ID) (Cycle, error) {
+	if len(component) == 0 {
+		return Cycle{Nodes: []ID{}, Edges: []Edge{}}, nil
+	}
+	root := component[0]
+	member := make(map[string]bool, len(component))
+	for _, key := range component {
+		member[key] = true
+	}
+
+	var first cycleArc
+	found := false
+	for _, arc := range adjacency[root] {
+		if member[arc.to] {
+			first = arc
+			found = true
+			break
+		}
+	}
+	if !found {
+		// This should only be possible for malformed input. SCC classification
+		// has already established that a cyclic component has an internal edge.
+		return Cycle{Nodes: []ID{}, Edges: []Edge{}}, nil
+	}
+	if first.to == root {
+		return canonicalCycle([]string{root}, []Edge{first.edge}, nodes), nil
+	}
+
+	parent := map[string]string{first.to: ""}
+	parentEdge := map[string]Edge{}
+	queue := []string{first.to}
+	foundRoot := false
+	for head := 0; head < len(queue) && !foundRoot; head++ {
+		if err := ctx.Err(); err != nil {
+			return Cycle{}, err
+		}
+		current := queue[head]
+		for _, arc := range adjacency[current] {
+			if err := ctx.Err(); err != nil {
+				return Cycle{}, err
+			}
+			if !member[arc.to] {
+				continue
+			}
+			if _, seen := parent[arc.to]; seen {
+				continue
+			}
+			parent[arc.to] = current
+			parentEdge[arc.to] = arc.edge
+			if arc.to == root {
+				foundRoot = true
+				break
+			}
+			queue = append(queue, arc.to)
+		}
+	}
+	if !foundRoot {
+		return Cycle{Nodes: []ID{}, Edges: []Edge{}}, nil
+	}
+
+	// Walk parent links backwards from root to the first edge's destination.
+	// Reversing the collected edges yields the return path destination->root.
+	returnEdgesReversed := make([]Edge, 0, len(component))
+	for current := root; current != first.to; {
+		previous, ok := parent[current]
+		if !ok {
+			return Cycle{Nodes: []ID{}, Edges: []Edge{}}, nil
+		}
+		returnEdgesReversed = append(returnEdgesReversed, parentEdge[current])
+		current = previous
+	}
+	returnEdges := make([]Edge, len(returnEdgesReversed))
+	for index := range returnEdgesReversed {
+		returnEdges[len(returnEdgesReversed)-1-index] = returnEdgesReversed[index]
+	}
+	cycleKeys := make([]string, 0, len(returnEdges)+1)
+	cycleKeys = append(cycleKeys, root, first.to)
+	for index := 0; index+1 < len(returnEdges); index++ {
+		cycleKeys = append(cycleKeys, returnEdges[index].Callee.String())
+	}
+	cycleEdges := make([]Edge, 0, len(returnEdges)+1)
+	cycleEdges = append(cycleEdges, first.edge)
+	cycleEdges = append(cycleEdges, returnEdges...)
+	return canonicalCycle(cycleKeys, cycleEdges, nodes), nil
 }
 
 func cyclesFor(visited map[string]bool, edges []Edge) []Cycle {

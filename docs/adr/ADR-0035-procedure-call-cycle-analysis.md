@@ -46,6 +46,12 @@ vocabulary while `VBA219` retains ownership/lifetime analysis.
 - LSP publication and compile/VBE validation are outside this decision; the
   rule is batch-only and non-blocking.
 
+The finding-multiplicity and normal-analysis scalability parts of this decision
+are superseded by ADR-0044. The structured `call_cycle` shape, effect and
+uncertainty vocabulary, project-local edge policy, and inspection API
+compatibility remain the context that ADR-0044 carries forward unless it says
+otherwise.
+
 ## Alternatives considered
 
 1. Report one representative cycle per SCC. Rejected because nested/chorded
@@ -68,3 +74,7 @@ vocabulary while `VBA219` retains ownership/lifetime analysis.
 
 - Issue #459
 - ADR-0021, ADR-0023, ADR-0024, ADR-0025-rooted-vba-callgraph-reachability
+
+## Superseded by
+
+- `docs/adr/ADR-0044-bounded-scc-procedure-call-cycle-diagnostics.md`

@@ -210,6 +210,14 @@ tasks:
       - cmd: rtk go test ./internal/analyze -run '^TestSingleModuleBenchmarkFixtureScale$' -bench '^BenchmarkSingleModuleSynthetic$' -benchmem -benchtime=1x -count 1
         platforms: [linux, darwin]
 
+  bench:callgraph-cycles:
+    desc: Compare exhaustive and bounded procedure-cycle detection
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/vba/callgraph -run '^$' -bench '^BenchmarkCycleDetection$' -benchmem -benchtime=1x -count 5
+        platforms: [windows]
+      - cmd: rtk go test ./internal/vba/callgraph -run '^$' -bench '^BenchmarkCycleDetection$' -benchmem -benchtime=1x -count 5
+        platforms: [linux, darwin]
+
   verify:security:
     desc: Run vulnerability and third-party licence inventory checks
     cmds:

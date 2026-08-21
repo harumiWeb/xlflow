@@ -2446,7 +2446,7 @@
     {
       "id": "VBA244",
       "title": "Recursive and cyclic procedure dependency",
-      "description": "Procedures form a recursive call cycle; the complete deterministic cycle path and any dangerous reachable effects are reported.",
+      "description": "Procedures form a recursive or cyclic dependency; normal analysis reports one deterministic representative witness per cyclic strongly connected component, and dangerous reachable effects are reported.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "maintainability",
