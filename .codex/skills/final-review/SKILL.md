@@ -16,6 +16,12 @@ Run:
 rtk proxy task review:codex
 ```
 
+The runner uses automatic scope selection. A dirty worktree is rejected when
+it also contains committed changes relative to the review base, because
+`--uncommitted` would otherwise omit those committed changes. In that case,
+commit or stash one scope first, or explicitly choose `-ReviewMode base` or
+`-ReviewMode uncommitted` when reviewing only one scope is intentional.
+
 The command intentionally suppresses the nested reviewer's intermediate
 reasoning and tool output.
 

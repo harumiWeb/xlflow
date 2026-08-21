@@ -12,7 +12,10 @@ param(
     [ValidateRange(30, 86400)]
     [int]$TimeoutSeconds = 1800,
 
-    [switch]$SkipFetch
+    [switch]$SkipFetch,
+
+    [ValidateSet("auto", "base", "uncommitted")]
+    [string]$ReviewMode = "auto"
 )
 
 Set-StrictMode -Version Latest
@@ -90,16 +93,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to inspect the Git worktree."
 }
 
-$reviewModeArguments = @("--base", $Base)
-
-if ($worktreeStatus.Count -gt 0) {
-    $reviewModeArguments = @("--uncommitted")
-}
-
 # Keep origin/main current before reviewing. Do this quietly because successful
-# setup output is not useful to the calling agent.
+# setup output is not useful to the calling agent. An explicit uncommitted-only
+# review does not need the base reference.
 if (
-    $reviewModeArguments[0] -eq "--base" -and
+    $ReviewMode -ne "uncommitted" -and
     -not $SkipFetch -and
     $Base -eq "origin/main"
 ) {
@@ -108,6 +106,40 @@ if (
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to update origin/main before Codex review."
     }
+}
+
+$hasUncommittedChanges = $worktreeStatus.Count -gt 0
+
+if (-not $hasUncommittedChanges) {
+    if ($ReviewMode -eq "uncommitted") {
+        $reviewModeArguments = @("--uncommitted")
+    } else {
+        $reviewModeArguments = @("--base", $Base)
+    }
+} elseif ($ReviewMode -eq "uncommitted") {
+    $reviewModeArguments = @("--uncommitted")
+} elseif ($ReviewMode -eq "base") {
+    [Console]::Error.WriteLine(
+        "Codex review is using base mode; uncommitted worktree changes are excluded."
+    )
+    $reviewModeArguments = @("--base", $Base)
+} else {
+    & git diff --quiet ("{0}...HEAD" -f $Base) --
+    $baseDiffExitCode = $LASTEXITCODE
+
+    if ($baseDiffExitCode -gt 1) {
+        throw "Failed to compare HEAD with review base '$Base'."
+    }
+
+    if ($baseDiffExitCode -eq 1) {
+        throw (
+            "The worktree has uncommitted changes and committed changes relative to " +
+            "'$Base'. Commit or stash one scope first, or select " +
+            "-ReviewMode base or -ReviewMode uncommitted explicitly."
+        )
+    }
+
+    $reviewModeArguments = @("--uncommitted")
 }
 
 # Prefer concrete command shims so the background worker does not have to

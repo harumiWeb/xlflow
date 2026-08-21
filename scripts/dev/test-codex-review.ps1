@@ -10,6 +10,102 @@ if ($env:OS -ne "Windows_NT") {
 
 . (Join-Path $PSScriptRoot "codex-review-arguments.ps1")
 
+function Test-TaskArgumentTransport {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TempRoot
+    )
+
+    $taskCommand = Get-Command task -ErrorAction Stop |
+        Select-Object -First 1
+    $taskFile = Join-Path $TempRoot "Taskfile.transport.yml"
+    $probeScript = Join-Path $TempRoot "task-transport-probe.ps1"
+    $outputFile = Join-Path $TempRoot "task-transport.json"
+    $outputEnvironmentPath = "Env:XLFLOW_CODEX_REVIEW_TASK_TEST_OUTPUT"
+    $expected = @(
+        "-Base",
+        "origin/feature&review",
+        "-Model",
+        "gpt%PATH%model",
+        "-ReviewMode",
+        "uncommitted"
+    )
+
+    Set-Content -LiteralPath $probeScript -Encoding utf8 -Value @'
+Set-Content `
+    -LiteralPath $env:XLFLOW_CODEX_REVIEW_TASK_TEST_OUTPUT `
+    -Value $env:XLFLOW_CODEX_REVIEW_ARGS_JSON `
+    -Encoding utf8
+'@
+
+    Set-Content -LiteralPath $taskFile -Encoding utf8 -Value @"
+version: "3"
+tasks:
+  probe:
+    silent: true
+    env:
+      XLFLOW_CODEX_REVIEW_ARGS_JSON: '{{.CLI_ARGS_LIST | toJson}}'
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '$probeScript'
+        platforms: [windows]
+"@
+
+    $previousOutputEnvironmentItem = Get-Item `
+        -Path $outputEnvironmentPath `
+        -ErrorAction SilentlyContinue
+    $hadPreviousOutputEnvironment = $null -ne $previousOutputEnvironmentItem
+    $previousOutputEnvironmentValue = if ($hadPreviousOutputEnvironment) {
+        [string]$previousOutputEnvironmentItem.Value
+    } else {
+        $null
+    }
+
+    try {
+        Set-Item -Path $outputEnvironmentPath -Value $outputFile
+        $taskArguments = @("-t", $taskFile, "probe", "--") + $expected
+        & $taskCommand.Source @taskArguments *> $null
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -ne 0) {
+            throw "Task argument transport probe failed with exit code $exitCode."
+        }
+
+        $raw = Get-Content -LiteralPath $outputFile -Raw -Encoding utf8
+        $parsed = ConvertFrom-Json -InputObject $raw
+        $actual = @()
+
+        foreach ($argument in $parsed) {
+            $actual += [string]$argument
+        }
+
+        if ($actual.Count -ne $expected.Count) {
+            throw (
+                "Task transported {0} arguments instead of {1}. Raw JSON: {2}" -f
+                    $actual.Count,
+                    $expected.Count,
+                    $raw
+            )
+        }
+
+        foreach ($index in 0..($expected.Count - 1)) {
+            if ($actual[$index] -ne $expected[$index]) {
+                throw "Task changed argument '$($expected[$index])' into '$($actual[$index])'."
+            }
+        }
+    } finally {
+        if ($hadPreviousOutputEnvironment) {
+            Set-Item `
+                -Path $outputEnvironmentPath `
+                -Value $previousOutputEnvironmentValue
+        } else {
+            Remove-Item `
+                -Path $outputEnvironmentPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 $percentVariableName = "XLFLOW_CODEX_REVIEW_TEST_LITERAL_PERCENT"
 $percentEnvironmentPath = "Env:{0}" -f $percentVariableName
 $previousEnvironmentItem = Get-Item `
@@ -28,6 +124,16 @@ $tempRoot = Join-Path `
 $probeScript = Join-Path $tempRoot "probe.ps1"
 $shimPath = Join-Path $tempRoot "codex.cmd"
 $outputFile = Join-Path $tempRoot "arguments.txt"
+$outputEnvironmentPath = "Env:XLFLOW_CODEX_REVIEW_TEST_OUTPUT"
+$previousOutputEnvironmentItem = Get-Item `
+    -Path $outputEnvironmentPath `
+    -ErrorAction SilentlyContinue
+$hadPreviousOutputEnvironment = $null -ne $previousOutputEnvironmentItem
+$previousOutputEnvironmentValue = if ($hadPreviousOutputEnvironment) {
+    [string]$previousOutputEnvironmentItem.Value
+} else {
+    $null
+}
 
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
@@ -86,7 +192,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$probeScript" %*
         }
     }
 
-    Write-Output ("Codex review argument encoding passed for {0} case(s)." -f $cases.Count)
+    Test-TaskArgumentTransport -TempRoot $tempRoot
+
+    Write-Output (
+        "Codex review argument encoding and Task transport passed for {0} case(s)." -f
+            $cases.Count
+    )
 } finally {
     if ($hadPreviousEnvironment) {
         Set-Item -Path $percentEnvironmentPath -Value $previousEnvironmentValue
@@ -97,7 +208,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$probeScript" %*
             -ErrorAction SilentlyContinue
     }
 
-    Remove-Item Env:XLFLOW_CODEX_REVIEW_TEST_OUTPUT -ErrorAction SilentlyContinue
+    if ($hadPreviousOutputEnvironment) {
+        Set-Item `
+            -Path $outputEnvironmentPath `
+            -Value $previousOutputEnvironmentValue
+    } else {
+        Remove-Item `
+            -Path $outputEnvironmentPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
     Remove-Item `
         -LiteralPath $tempRoot `
         -Recurse `
