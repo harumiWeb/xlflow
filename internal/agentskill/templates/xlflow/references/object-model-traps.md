@@ -20,10 +20,11 @@ prove it, and how far the statement reaches.
 — the default — against a range whose sort order you have not established in
 the same procedure.
 
-**Risk.** No error is raised and no `#N/A` is returned. A position comes back
-that looks like an answer and is not the nearest value. The result may also be
-correct by accident on the data you tested with, and wrong on the data your user
-has.
+**Risk.** A key below every value in the range returns `#N/A` in a formula, and
+raises at the `WorksheetFunction` call — that case is at least loud. The
+dangerous one is a key inside the range: a position comes back with no error and
+no `#N/A`, and it is not the nearest value. The result may also be correct by
+accident on the data you tested with, and wrong on the data your user has.
 
 **Safe rule.** Either sort the range ascending immediately before the lookup, or
 pass exact matching explicitly: `Match(key, rng, 0)`, `VLookup(key, tbl, 2,
@@ -31,9 +32,11 @@ False)`. Prefer exact matching unless a banded or bucketed lookup is genuinely
 intended. Do not rely on any particular wrong answer.
 
 **Proof.** Write a test that fills a range out of order, performs the lookup, and
-asserts the position you require. Run it with `xlflow test --session --no-save
---json`. If it passes only because the data happened to be arranged a certain
-way, arrange it differently and watch it fail.
+asserts the position you require, then run it through the session proof loop in
+SKILL.md (`session start` → `push --fast --session --no-save` → `test --session
+--no-save` → `save --session` → `session stop`). If it passes only because the
+data happened to be arranged a certain way, arrange it differently and watch it
+fail.
 
 **Scope / provenance.** Excel documents approximate matching as requiring
 ascending order, and documents nothing about unsorted input. Observed on Excel
@@ -50,8 +53,9 @@ input was not stable enough to state at all.
 `AutoFilter`, given a criteria string — especially against a column that mixes
 numbers with text that spells numbers.
 
-**Risk.** `"<>20"` does not count what `"=20"` leaves out. Both can be right at
-once and the totals will not reconcile, with no error to notice.
+**Risk.** `"<>20"` does not count what `"=20"` leaves out. The two overlap, so
+their counts can exceed the number of cells; both are right at once and the
+totals will not reconcile, with no error to notice.
 
 **Safe rule.** Do not derive one criterion from another by negation. When a
 column may hold text that looks numeric, either normalise the column before
@@ -59,8 +63,10 @@ counting, or state the comparison you actually mean and verify both halves
 against the row count.
 
 **Proof.** Build a range holding the text `"20"`, the number `20`, and the text
-`"20.0"`, then assert `CountIf` for `"=20"`, `"<>20"` and `">=20"` in one test.
-Three cells and five matches is the signal.
+`"20.0"`, then assert `CountIf` for `"=20"`, `"<>20"` and `">=20"` in one test
+run through the session proof loop. The signal is that `"=20"` and `"<>20"`
+together account for five matches over three cells: they overlap rather than
+partition.
 
 **Scope / provenance.** Observed on Excel 16 (Windows 11, ja-JP): `"=20"` counts
 3, `"<>20"` counts 2, `">=20"` counts 1. Equality coerces text that spells a
@@ -168,8 +174,11 @@ named helper. Never change a qualifier during unrelated cleanup. For whitespace,
 `Trim` and `WorksheetFunction.Trim` are not interchangeable at all — pick by
 whether inner runs must collapse.
 
-**Proof.** Assert the boundary case directly: `Round(2.5, 0)` and `Round(3.5, 0)`
-in one test tell you which rule is in force.
+**Proof.** Assert both boundary cases directly. `Round(2.5, 0)` tells you which
+rounding rule is in force — `3.5` agrees under both rules and proves nothing. For
+whitespace, assert `Trim("  a   b  ")` against
+`WorksheetFunction.Trim("  a   b  ")`: one keeps the inner run and the other
+collapses it.
 
 **Scope / provenance.** Both behaviors are documented in their own references;
 they are listed here because the collision is easy to miss and expensive to find.

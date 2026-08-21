@@ -221,7 +221,7 @@ that Excel not stay open.
 | Runtime or compile diagnostics that do not identify the cause              | [debugging.md](references/debugging.md)         |
 | Recovery-required state or uncertain workbook termination                  | [recovery.md](references/recovery.md)           |
 | Callers, callees, dependencies, refactors, blast radius, or affected tests | [code-analysis.md](references/code-analysis.md) |
-| Lookups over unsorted data, criteria strings, structural inserts, or sorting | [object-model-traps.md](references/object-model-traps.md) |
+| Approximate lookups, criteria strings, `Insert`/`Delete` and partial shifts, merged cells under a shift, mixed-type sorting, or `WorksheetFunction` versus VBA (`Round`, `Trim`) | [object-model-traps.md](references/object-model-traps.md) |
 
 Use the reference before editing when its subject changes source authority,
 safety, test selection, or the evidence needed to prove the task.
