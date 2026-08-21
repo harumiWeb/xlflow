@@ -203,52 +203,8 @@ func buildErrorWitnessReplay(project ProjectSummary) *errorWitnessReplay {
 	if project.provenance == nil {
 		return replay
 	}
-	keys := project.provenance.keys
-	if len(keys) == 0 {
-		keys = make([]string, 0, len(project.provenance.summaries))
-		for key := range project.provenance.summaries {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-	}
-	states := make(map[string]*replaySummary, len(keys))
-	for _, key := range keys {
-		summary, ok := project.provenance.witness[key]
-		if !ok {
-			summary = project.provenance.summaries[key]
-		}
-		state := &replaySummary{
-			identity:       summary.Identity,
-			evidenceSet:    map[string]struct{}{},
-			errorSet:       map[string]struct{}{},
-			uncertaintySet: map[string]struct{}{},
-		}
-		for _, evidence := range summary.Direct {
-			fact := replayEvidence{key: evidenceKey(evidence), origin: evidence.Origin.Key()}
-			if _, exists := state.evidenceSet[fact.key]; !exists {
-				state.evidenceSet[fact.key] = struct{}{}
-				state.evidence = append(state.evidence, fact)
-			}
-		}
-		for _, evidence := range summary.Error.Direct {
-			key := errorEvidenceKey(evidence)
-			if _, exists := state.errorSet[key]; !exists {
-				state.errorSet[key] = struct{}{}
-				state.errors = append(state.errors, cloneErrorEvidence([]ErrorEvidence{evidence})[0])
-			}
-			if evidence.Behavior == ErrorMayRaise {
-				state.mayRaise = true
-			}
-		}
-		for _, uncertainty := range summary.DirectUncertainty {
-			fact := replayUncertainty{key: uncertaintyKey(uncertainty), origin: uncertainty.Origin.Key()}
-			if _, exists := state.uncertaintySet[fact.key]; !exists {
-				state.uncertaintySet[fact.key] = struct{}{}
-				state.uncertainty = append(state.uncertainty, fact)
-			}
-		}
-		states[key] = state
-	}
+	keys := replayProcedureKeys(project)
+	states := seedReplayStates(project, keys)
 
 	queue := append([]string(nil), keys...)
 	queued := make(map[string]bool, len(keys))
@@ -268,59 +224,14 @@ func buildErrorWitnessReplay(project ProjectSummary) *errorWitnessReplay {
 			if caller == nil {
 				continue
 			}
-			changed := false
-			for _, fact := range callee.evidence {
-				if fact.origin == callerKey {
-					continue
-				}
-				if _, exists := caller.evidenceSet[fact.key]; exists {
-					continue
-				}
-				caller.evidenceSet[fact.key] = struct{}{}
-				caller.evidence = append(caller.evidence, fact)
+			changed := mergeReplayEvidence(caller, callee, callerKey)
+			if mergeReplayErrors(caller, callee, callerKey) {
 				changed = true
 			}
-			for _, evidence := range callee.errors {
-				if evidence.Behavior == ErrorMayRaise || evidence.Origin.Key() == callerKey {
-					continue
-				}
-				copyEvidence := cloneErrorEvidence([]ErrorEvidence{evidence})[0]
-				copyEvidence.CallChain = prependErrorCaller(caller.identity, copyEvidence.CallChain, copyEvidence.Origin)
-				key := errorEvidenceKey(copyEvidence)
-				if _, exists := caller.errorSet[key]; exists {
-					continue
-				}
-				caller.errorSet[key] = struct{}{}
-				caller.errors = append(caller.errors, copyEvidence)
+			if mergeReplayMayRaise(caller, callee) {
 				changed = true
 			}
-			if callee.mayRaise && !caller.mayRaise {
-				copyEvidence := ErrorEvidence{
-					Behavior: ErrorMayRaise,
-					Origin:   callee.identity,
-					CallChain: []ProcedureIdentity{
-						caller.identity,
-						callee.identity,
-					},
-					Target: "callee", Value: callee.identity.QualifiedName,
-				}
-				key := errorEvidenceKey(copyEvidence)
-				if _, exists := caller.errorSet[key]; !exists {
-					caller.errorSet[key] = struct{}{}
-					caller.errors = append(caller.errors, copyEvidence)
-					changed = true
-				}
-				caller.mayRaise = true
-			}
-			for _, fact := range callee.uncertainty {
-				if fact.origin == callerKey {
-					continue
-				}
-				if _, exists := caller.uncertaintySet[fact.key]; exists {
-					continue
-				}
-				caller.uncertaintySet[fact.key] = struct{}{}
-				caller.uncertainty = append(caller.uncertainty, fact)
+			if mergeReplayUncertainty(caller, callee, callerKey) {
 				changed = true
 			}
 			if changed && !queued[callerKey] {
@@ -331,21 +242,172 @@ func buildErrorWitnessReplay(project ProjectSummary) *errorWitnessReplay {
 	}
 
 	for _, key := range keys {
-		state := states[key]
-		if state == nil {
-			continue
-		}
-		for _, evidence := range state.errors {
-			if evidence.Behavior == ErrorMayRaise || evidence.Origin.Key() == key {
-				continue
-			}
-			replay.propagated[key] = append(replay.propagated[key], cloneErrorEvidence([]ErrorEvidence{evidence})[0])
-		}
-		sort.Slice(replay.propagated[key], func(i, j int) bool {
-			return errorEvidenceKey(replay.propagated[key][i]) < errorEvidenceKey(replay.propagated[key][j])
-		})
+		replay.propagated[key] = replayPropagatedErrors(states[key], key)
 	}
 	return replay
+}
+
+func replayProcedureKeys(project ProjectSummary) []string {
+	if len(project.provenance.keys) != 0 {
+		keys := append([]string(nil), project.provenance.keys...)
+		sort.Strings(keys)
+		return keys
+	}
+	keys := make([]string, 0, len(project.provenance.summaries))
+	for key := range project.provenance.summaries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func seedReplayStates(project ProjectSummary, keys []string) map[string]*replaySummary {
+	states := make(map[string]*replaySummary, len(keys))
+	for _, key := range keys {
+		summary, ok := project.provenance.witness[key]
+		if !ok {
+			summary = project.provenance.summaries[key]
+		}
+		state := &replaySummary{
+			identity:       summary.Identity,
+			evidenceSet:    map[string]struct{}{},
+			errorSet:       map[string]struct{}{},
+			uncertaintySet: map[string]struct{}{},
+		}
+		seedReplayEvidence(state, summary.Direct)
+		seedReplayErrors(state, summary.Error.Direct)
+		seedReplayUncertainty(state, summary.DirectUncertainty)
+		states[key] = state
+	}
+	return states
+}
+
+func seedReplayEvidence(state *replaySummary, evidenceItems []Evidence) {
+	for _, evidence := range evidenceItems {
+		fact := replayEvidence{key: evidenceKey(evidence), origin: evidence.Origin.Key()}
+		if _, exists := state.evidenceSet[fact.key]; exists {
+			continue
+		}
+		state.evidenceSet[fact.key] = struct{}{}
+		state.evidence = append(state.evidence, fact)
+	}
+}
+
+func seedReplayErrors(state *replaySummary, evidenceItems []ErrorEvidence) {
+	for _, evidence := range evidenceItems {
+		factKey := errorEvidenceKey(evidence)
+		if _, exists := state.errorSet[factKey]; !exists {
+			state.errorSet[factKey] = struct{}{}
+			state.errors = append(state.errors, cloneErrorEvidence([]ErrorEvidence{evidence})[0])
+		}
+		if evidence.Behavior == ErrorMayRaise {
+			state.mayRaise = true
+		}
+	}
+}
+
+func seedReplayUncertainty(state *replaySummary, uncertaintyItems []CallUncertainty) {
+	for _, uncertainty := range uncertaintyItems {
+		fact := replayUncertainty{key: uncertaintyKey(uncertainty), origin: uncertainty.Origin.Key()}
+		if _, exists := state.uncertaintySet[fact.key]; exists {
+			continue
+		}
+		state.uncertaintySet[fact.key] = struct{}{}
+		state.uncertainty = append(state.uncertainty, fact)
+	}
+}
+
+func mergeReplayEvidence(caller, callee *replaySummary, callerKey string) bool {
+	changed := false
+	for _, fact := range callee.evidence {
+		if fact.origin == callerKey {
+			continue
+		}
+		if _, exists := caller.evidenceSet[fact.key]; exists {
+			continue
+		}
+		caller.evidenceSet[fact.key] = struct{}{}
+		caller.evidence = append(caller.evidence, fact)
+		changed = true
+	}
+	return changed
+}
+
+func mergeReplayErrors(caller, callee *replaySummary, callerKey string) bool {
+	changed := false
+	for _, evidence := range callee.errors {
+		if evidence.Behavior == ErrorMayRaise || evidence.Origin.Key() == callerKey {
+			continue
+		}
+		copyEvidence := cloneErrorEvidence([]ErrorEvidence{evidence})[0]
+		copyEvidence.CallChain = prependErrorCaller(caller.identity, copyEvidence.CallChain, copyEvidence.Origin)
+		factKey := errorEvidenceKey(copyEvidence)
+		if _, exists := caller.errorSet[factKey]; exists {
+			continue
+		}
+		caller.errorSet[factKey] = struct{}{}
+		caller.errors = append(caller.errors, copyEvidence)
+		changed = true
+	}
+	return changed
+}
+
+func mergeReplayMayRaise(caller, callee *replaySummary) bool {
+	if !callee.mayRaise || caller.mayRaise {
+		return false
+	}
+	// Keep the legacy requeue signal and may-raise transitivity. The
+	// compatibility projection supplies the representative may-raise witness
+	// from semanticState.mayRaiseWitness below.
+	copyEvidence := ErrorEvidence{
+		Behavior: ErrorMayRaise,
+		Origin:   callee.identity,
+		CallChain: []ProcedureIdentity{
+			caller.identity,
+			callee.identity,
+		},
+		Target: "callee", Value: callee.identity.QualifiedName,
+	}
+	factKey := errorEvidenceKey(copyEvidence)
+	if _, exists := caller.errorSet[factKey]; !exists {
+		caller.errorSet[factKey] = struct{}{}
+		caller.errors = append(caller.errors, copyEvidence)
+	}
+	caller.mayRaise = true
+	return true
+}
+
+func mergeReplayUncertainty(caller, callee *replaySummary, callerKey string) bool {
+	changed := false
+	for _, fact := range callee.uncertainty {
+		if fact.origin == callerKey {
+			continue
+		}
+		if _, exists := caller.uncertaintySet[fact.key]; exists {
+			continue
+		}
+		caller.uncertaintySet[fact.key] = struct{}{}
+		caller.uncertainty = append(caller.uncertainty, fact)
+		changed = true
+	}
+	return changed
+}
+
+func replayPropagatedErrors(state *replaySummary, owner string) []ErrorEvidence {
+	if state == nil {
+		return nil
+	}
+	var out []ErrorEvidence
+	for _, evidence := range state.errors {
+		if evidence.Behavior == ErrorMayRaise || evidence.Origin.Key() == owner {
+			continue
+		}
+		out = append(out, cloneErrorEvidence([]ErrorEvidence{evidence})[0])
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return errorEvidenceKey(out[i]) < errorEvidenceKey(out[j])
+	})
+	return out
 }
 
 func prependErrorCaller(caller ProcedureIdentity, chain []ProcedureIdentity, origin ProcedureIdentity) []ProcedureIdentity {

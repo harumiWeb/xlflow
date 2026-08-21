@@ -22,6 +22,7 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 	}
 	var findings []Finding
 	seen := map[string]bool{}
+	procedureIdentities := project.Identities()
 	resumeNextOwnedByVBA214 := map[int]bool{}
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		for _, existing := range a.leakedOnErrorResumeNextFindings(file, proc) {
@@ -50,7 +51,7 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 			message = proc.Name + " logs a runtime error and then continues without signaling failure."
 			reason = "The handler records error information, but the same exceptional path reaches a normal procedure exit without rethrowing or returning failure."
 		}
-		if chain := representativePublicErrorChain(project, evidence); chain != "" {
+		if chain := representativePublicErrorChain(procedureIdentities, project, evidence); chain != "" {
 			reason += " Representative call chain: " + chain + "."
 		}
 		findings = append(findings, a.simpleFinding(
@@ -228,12 +229,12 @@ func errorEvidenceAt(items []effects.ErrorEvidence, behavior effects.ErrorBehavi
 	return false
 }
 
-func representativePublicErrorChain(project effects.ProjectSummary, loss effects.ErrorEvidence) string {
-	for _, direct := range project.AllDirect() {
-		if !errorEntryProcedure(direct.Identity) {
+func representativePublicErrorChain(identities []effects.ProcedureIdentity, project effects.ProjectSummary, loss effects.ErrorEvidence) string {
+	for _, identity := range identities {
+		if !errorEntryProcedure(identity) {
 			continue
 		}
-		summary, ok := project.Lookup(direct.Identity)
+		summary, ok := project.Lookup(identity)
 		if !ok {
 			continue
 		}

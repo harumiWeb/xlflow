@@ -236,11 +236,12 @@ type provenanceGraph struct {
 
 type provenanceMaterialization struct {
 	project     ProjectSummary
+	replayOnce  sync.Once
 	errorReplay *errorWitnessReplay
 }
 
 type materializationCache struct {
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	materializer *provenanceMaterialization
 	byIndex      map[int]ProcedureSummary
 }
@@ -263,20 +264,31 @@ func (p ProjectSummary) materializeCached(index int) ProcedureSummary {
 		return p.materialize(index)
 	}
 	cache := p.materialization
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
+	cache.mu.RLock()
 	if summary, ok := cache.byIndex[index]; ok {
-		return cloneProcedureSummary(summary)
+		out := cloneProcedureSummary(summary)
+		cache.mu.RUnlock()
+		return out
 	}
+	cache.mu.RUnlock()
+
+	// Materialization can traverse a large call graph. Do not hold the cache
+	// lock while doing that work; concurrent lookups may compute different
+	// indexes independently and publish one immutable result each.
 	summary := cache.materializer.materialize(index)
-	cache.byIndex[index] = summary
-	return cloneProcedureSummary(summary)
+	cache.mu.Lock()
+	if cached, ok := cache.byIndex[index]; ok {
+		summary = cached
+	} else {
+		cache.byIndex[index] = summary
+	}
+	out := cloneProcedureSummary(summary)
+	cache.mu.Unlock()
+	return out
 }
 
 func (m *provenanceMaterialization) errorWitnessReplay() *errorWitnessReplay {
-	if m.errorReplay == nil {
-		m.errorReplay = buildErrorWitnessReplay(m.project)
-	}
+	m.replayOnce.Do(func() { m.errorReplay = buildErrorWitnessReplay(m.project) })
 	return m.errorReplay
 }
 
@@ -338,6 +350,16 @@ func (p ProjectSummary) AllDirect() []ProcedureSummary {
 	out := make([]ProcedureSummary, len(p.procedures))
 	for i := range p.procedures {
 		out[i] = cloneProcedureSummary(p.procedures[i])
+	}
+	return out
+}
+
+// Identities returns procedure identities in the same deterministic order as
+// AllDirect and All, without cloning any evidence or provenance collections.
+func (p ProjectSummary) Identities() []ProcedureIdentity {
+	out := make([]ProcedureIdentity, len(p.procedures))
+	for i := range p.procedures {
+		out[i] = p.procedures[i].Identity
 	}
 	return out
 }

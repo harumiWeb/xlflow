@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -635,14 +636,15 @@ func TestErrorWitnessReplayUsesGlobalWorklistOrdering(t *testing.T) {
 	}
 	callers, callees := buildAdjacency(edges)
 	witness := map[string]ProcedureSummary{}
-	for _, name := range []string{"A", "C", "D", "E"} {
+	for _, name := range []string{"A", "B", "C", "D", "E"} {
 		origin := ids[name]
-		witness[name] = ProcedureSummary{
-			Identity: origin,
-			Error: ErrorSummary{Direct: []ErrorEvidence{{
+		summary := ProcedureSummary{Identity: origin}
+		if name != "B" {
+			summary.Error.Direct = []ErrorEvidence{{
 				Behavior: ErrorSuppresses, Origin: origin, CallChain: []ProcedureIdentity{origin},
-			}}},
+			}}
 		}
+		witness[name] = summary
 	}
 	witnessByKey := map[string]ProcedureSummary{}
 	for name, summary := range witness {
@@ -1056,6 +1058,19 @@ func TestProjectSummarySharesFullMaterializationCacheAcrossLookups(t *testing.T)
 	if len(project.materialization.byIndex) != 1 || project.materialization.materializer.errorReplay != replay {
 		t.Fatal("identity lookup discarded or repeated the shared materialization cache")
 	}
+	var waitGroup sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			for j := 0; j < 16; j++ {
+				if _, ok := project.Lookup(id); !ok {
+					t.Errorf("concurrent identity lookup failed")
+				}
+			}
+		}()
+	}
+	waitGroup.Wait()
 }
 
 func TestMissingCFGDoesNotClaimStatementsAreUnreachable(t *testing.T) {

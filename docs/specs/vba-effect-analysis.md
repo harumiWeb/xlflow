@@ -149,7 +149,11 @@ Other reachable calls retain call-site provenance as direct uncertainty:
 - `ambiguous` for multiple visible candidates;
 - `unresolved` when no known candidate exists;
 - `external` for known external dispatch; and
-- `dynamic` for `member_call` resolution that cannot be bound conservatively.
+- `dynamic` for `member_call` or `dynamic` resolution that cannot be bound
+  conservatively;
+- `incomplete` when resolution cannot produce a complete call fact; and
+- `non_callable` when a visible candidate is not callable in the current
+  context.
 
 `builtin_like` is not project-call uncertainty. It contributes an effect only
 when a direct detector above recognizes the built-in; otherwise it is ignored
