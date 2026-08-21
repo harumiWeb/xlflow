@@ -241,3 +241,17 @@ tasks:
         platforms: [windows]
       - cmd: go mod tidy
         platforms: [linux, darwin]
+
+  review:codex:
+    desc: Run quiet Codex review against origin/main
+    env:
+      XLFLOW_CODEX_REVIEW_ARGS_JSON: '{{.CLI_ARGS_LIST | toJson}}'
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/codex-review-task.ps1
+        platforms: [windows]
+
+  test:codex-review:
+    desc: Run Codex review launcher argument regression tests
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev/test-codex-review.ps1
+        platforms: [windows]
