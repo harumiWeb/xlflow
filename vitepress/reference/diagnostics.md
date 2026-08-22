@@ -2570,7 +2570,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA244
 
-**Recursive and cyclic procedure dependency.** Procedures form a recursive call cycle; the complete deterministic cycle path and any dangerous reachable effects are reported.
+**Recursive and cyclic procedure dependency.** Procedures form a recursive or cyclic dependency; normal analysis reports one deterministic representative witness per cyclic strongly connected component, and dangerous reachable effects are reported.
 
 | Property                    | Value                          |
 | --------------------------- | ------------------------------ |

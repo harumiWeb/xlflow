@@ -646,6 +646,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_ambiguous`
 - `module_declaration_after_procedure`
 - `module_declaration_count`
+- `module_fact_builds`
 - `module_install_failed`
 - `module_kind`
 - `module_mutation_failed`
@@ -785,6 +786,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_count`
 - `procedure_declaration`
 - `procedure_exit`
+- `procedure_fact_builds`
 - `procedure_ir`
 - `procedure_ir_builds`
 - `procedure_ir_reuses`

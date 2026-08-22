@@ -93,11 +93,11 @@ func buildProcedureCallGraphSnapshot(files []parsedFile) callgraph.Snapshot {
 }
 
 func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsedFile, project effects.ProjectSummary) ([]Finding, error) {
-	cycles, err := callgraph.FindCyclesContext(ctx, buildProcedureCallGraphSnapshot(files))
+	components, err := callgraph.FindCyclicComponentsContext(ctx, buildProcedureCallGraphSnapshot(files))
 	if err != nil {
 		return nil, err
 	}
-	if len(cycles) == 0 {
+	if len(components) == 0 {
 		return nil, nil
 	}
 	byFile := make(map[string]parsedFile, len(files))
@@ -110,8 +110,8 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 		identity := summary.Identity
 		directByCycleKey[cycleSummaryKey(identity.File, identity.QualifiedName, string(identity.Kind), identity.DeclarationLine)] = identity
 	}
-	for _, cycle := range cycles {
-		for _, node := range cycle.Nodes {
+	for _, component := range components {
+		for _, node := range component.Nodes {
 			key := cycleSummaryKey(node.File, node.QualifiedName, node.Kind, node.Line)
 			identity, ok := directByCycleKey[key]
 			if !ok {
@@ -125,12 +125,13 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 			}
 		}
 	}
-	out := make([]Finding, 0, len(cycles))
-	for _, cycle := range cycles {
+	out := make([]Finding, 0, len(components))
+	for _, component := range components {
+		cycle := component.Witness
 		if len(cycle.Nodes) == 0 || len(cycle.Edges) != len(cycle.Nodes) {
 			continue
 		}
-		cycleContext, severity := buildCallCycleContext(cycle, bySummary)
+		cycleContext, severity := buildCallCycleContext(cycle, component.Nodes, bySummary)
 		anchor := cycle.Edges[0].Location
 		file, ok := byFile[canonicalCyclePath(anchor.File)]
 		if !ok {
@@ -182,7 +183,7 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 	return out, nil
 }
 
-func buildCallCycleContext(cycle callgraph.Cycle, summaries map[string]effects.ProcedureSummary) (CallCycleContext, string) {
+func buildCallCycleContext(cycle callgraph.Cycle, componentNodes []callgraph.ID, summaries map[string]effects.ProcedureSummary) (CallCycleContext, string) {
 	ctx := CallCycleContext{Path: make([]CallCycleNode, 0, len(cycle.Nodes)+1), Edges: make([]CallCycleEdge, 0, len(cycle.Edges))}
 	modules := map[string]bool{}
 	eventSeen := map[string]bool{}
@@ -196,6 +197,13 @@ func buildCallCycleContext(cycle callgraph.Cycle, summaries map[string]effects.P
 			moduleKind = summary.Identity.ModuleKind
 		}
 		ctx.Path = append(ctx.Path, CallCycleNode{QualifiedName: node.QualifiedName, Module: node.Module, Kind: node.Kind, ModuleKind: moduleKind, File: node.File, Line: node.Line})
+	}
+	// A finding represents the whole SCC, while Path/Edges remain the
+	// deterministic representative witness. Aggregate severity and auxiliary
+	// evidence from every member so dangerous effects or event handlers that are
+	// outside the witness cannot be silently lost.
+	for _, node := range componentNodes {
+		summary, ok := summaryForCycleNode(node, summaries)
 		modules[strings.ToLower(node.Module)] = true
 		if strings.EqualFold(node.Kind, "event") || (ok && summary.Identity.IsEventHandler) {
 			identity := node.QualifiedName

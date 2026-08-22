@@ -361,13 +361,12 @@ All notable changes to xlflow will be documented in this file.
   retaining `.bas` fixture compatibility and cleanup-gated promotion.
 
 - Added default-enabled, batch-only `VBA244` analysis for recursive and cyclic
-  project-local procedure dependencies. Each unique directed simple cycle is
-  reported once with a deterministic closed path and additive structured JSON
-  context; ordinary cycles use `information`, while event handlers,
-  Application-state mutations, error suppression, workbook acquisition, or
-  VBA file acquisition elevate the cycle to `warning`. Configure or disable
-  it with `detect_procedure_call_cycles` or
-  `[analyze].disabled_rules = ["VBA244"]`.
+  project-local procedure dependencies. Normal analysis now reports one
+  deterministic representative `call_cycle` witness per cyclic SCC, retaining
+  severity, event-handler, dangerous-effect, cross-module, and uncertainty
+  context aggregated across the component. Explicit graph inspection may still
+  expose exhaustive elementary cycles; this intentional finding-multiplicity
+  change prevents dense call graphs from causing elementary-cycle explosion.
 - Fixed `VB023` false positives for valid composite `For Each` control targets
   such as array elements. The rule now resolves bare control identifiers from
   Procedure IR declarations and remains conservative for unresolved composite

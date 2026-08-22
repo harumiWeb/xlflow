@@ -317,6 +317,109 @@ func TestFindCyclesContextDiscardsPartialResultsOnCancellation(t *testing.T) {
 	}
 }
 
+func TestFindCyclicComponentsReturnsBoundedDeterministicWitnesses(t *testing.T) {
+	input := SnapshotFromResult(&calls.Result{
+		Symbols: []symbols.Symbol{
+			symbol("M", "M.bas", "A", 1),
+			symbol("M", "M.bas", "B", 2),
+			symbol("M", "M.bas", "C", 3),
+			symbol("M", "M.bas", "D", 4),
+			symbol("M", "M.bas", "E", 5),
+			symbol("M", "M.bas", "Self", 6),
+			symbol("M", "M.bas", "Tail", 7),
+			symbol("M", "M.bas", "Sink", 8),
+		},
+		Calls: []calls.Call{
+			// One dense SCC with several possible elementary cycles. The
+			// representative must remain one bounded A->B->C->A witness.
+			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 20),
+			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 2),
+			matched("M", "M.bas", "A", "M", "M.bas", "C", 3, 3),
+			matched("M", "M.bas", "B", "M", "M.bas", "C", 3, 4),
+			matched("M", "M.bas", "C", "M", "M.bas", "A", 1, 5),
+			matched("M", "M.bas", "C", "M", "M.bas", "B", 2, 6),
+			// Independent two-node SCC.
+			matched("M", "M.bas", "D", "M", "M.bas", "E", 5, 7),
+			matched("M", "M.bas", "E", "M", "M.bas", "D", 4, 8),
+			// Self recursion is a one-node cyclic SCC. Tail->Sink is acyclic.
+			matched("M", "M.bas", "Self", "M", "M.bas", "Self", 6, 9),
+			matched("M", "M.bas", "Tail", "M", "M.bas", "Sink", 8, 10),
+		},
+	})
+
+	components, err := FindCyclicComponentsContext(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(components) != 3 {
+		t.Fatalf("cyclic components = %#v, want 3 components", components)
+	}
+	want := []struct {
+		members []string
+		witness []string
+	}{
+		{members: []string{"M.A", "M.B", "M.C"}, witness: []string{"M.A", "M.B", "M.C"}},
+		{members: []string{"M.D", "M.E"}, witness: []string{"M.D", "M.E"}},
+		{members: []string{"M.Self"}, witness: []string{"M.Self"}},
+	}
+	for index, expected := range want {
+		component := components[index]
+		if got := qualifiedNames(component.Nodes); !reflect.DeepEqual(got, expected.members) {
+			t.Fatalf("component %d members = %#v, want %#v", index, got, expected.members)
+		}
+		if got := qualifiedNames(component.Witness.Nodes); !reflect.DeepEqual(got, expected.witness) {
+			t.Fatalf("component %d witness nodes = %#v, want %#v", index, got, expected.witness)
+		}
+		if len(component.Witness.Nodes) != len(component.Witness.Edges) {
+			t.Fatalf("component %d witness = %#v, nodes/edges mismatch", index, component.Witness)
+		}
+		for edgeIndex, edge := range component.Witness.Edges {
+			if edge.Caller != component.Witness.Nodes[edgeIndex] || edge.Callee != component.Witness.Nodes[(edgeIndex+1)%len(component.Witness.Nodes)] {
+				t.Fatalf("component %d witness edge %d is not closed: %#v", index, edgeIndex, component.Witness)
+			}
+		}
+		if index == 0 && component.Witness.Edges[0].Location.StartLine != 2 {
+			t.Fatalf("parallel endpoint did not retain earliest edge: %#v", component.Witness.Edges[0])
+		}
+	}
+
+	permuted := input
+	permuted.Symbols = append([]Symbol(nil), input.Symbols...)
+	permuted.Calls = append([]calls.Call(nil), input.Calls...)
+	for left, right := 0, len(permuted.Symbols)-1; left < right; left, right = left+1, right-1 {
+		permuted.Symbols[left], permuted.Symbols[right] = permuted.Symbols[right], permuted.Symbols[left]
+	}
+	for left, right := 0, len(permuted.Calls)-1; left < right; left, right = left+1, right-1 {
+		permuted.Calls[left], permuted.Calls[right] = permuted.Calls[right], permuted.Calls[left]
+	}
+	again, err := FindCyclicComponentsContext(context.Background(), permuted)
+	if err != nil || !reflect.DeepEqual(components, again) {
+		t.Fatalf("component output changed after input permutation: first=%#v permuted=%#v err=%v", components, again, err)
+	}
+}
+
+func TestFindCyclicComponentsContextDiscardsPartialResultsOnCancellation(t *testing.T) {
+	input := SnapshotFromResult(&calls.Result{
+		Symbols: []symbols.Symbol{symbol("M", "M.bas", "A", 1), symbol("M", "M.bas", "B", 2)},
+		Calls: []calls.Call{
+			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 1),
+			matched("M", "M.bas", "B", "M", "M.bas", "A", 1, 1),
+		},
+	})
+	components, err := FindCyclicComponentsContext(&cancelAfterChecksContext{remaining: 1}, input)
+	if !errors.Is(err, context.Canceled) || components != nil {
+		t.Fatalf("canceled component result = (%#v, %v), want nil and context.Canceled", components, err)
+	}
+}
+
+func qualifiedNames(nodes []ID) []string {
+	result := make([]string, len(nodes))
+	for index, node := range nodes {
+		result[index] = node.QualifiedName
+	}
+	return result
+}
+
 func TestAnalyzeReachabilitySeparatesConfirmedPossibleAndUnreachableClusters(t *testing.T) {
 	input := &calls.Result{
 		Symbols: []symbols.Symbol{
