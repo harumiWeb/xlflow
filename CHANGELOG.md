@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added bounded procedure-level parallelism for large single-file
+  `xlflow analyze` workloads. Procedure batches share the analyzer's bounded
+  execution budget with file workers, merge into source-ordered result slots,
+  and preserve deterministic findings, suppression, JSON output, and
+  cancellation behavior. Ordinary small files retain the existing fast path.
+
 - Fixed `VB060` false positives for writable member assignments such as
   Excel `Range.Hidden`, including member access with an omitted `With`
   receiver. Incomplete member names are no longer treated as proven constants.

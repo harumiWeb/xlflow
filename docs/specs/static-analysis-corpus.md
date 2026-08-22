@@ -819,7 +819,7 @@ rtk task bench:corpus
 
 `bench:analyze` retains the existing multi-module and object-worklist baselines.
 `bench:analyze-single-module` keeps fixture generation outside the timed region
-and covers single-module scales around 500, 1,000, and 2,000 procedures,
+and covers single-module scales around 100, 500, 1,000, and 2,000 procedures,
 including large call graphs, declaration sets, and CFGs. `bench:corpus` runs the checked-in
 `std-vba` and `ronecone` analyze-only sub-benchmarks. These tasks use
 `-benchmem -benchtime=1x`; on Windows they run through `scripts/dev/go.ps1` to
@@ -828,6 +828,17 @@ retain wall time (`ns/op`), allocations, findings, workload dimensions, and the
 `stage_*` / `counter_*` metrics derived from the attached analysis recorder;
 these are Go benchmark metrics, not stderr records from
 `analyze --performance-log`.
+
+For issue #675, the benchmark matrix must also include one-file workloads with
+100, 500, 1,000, and 2,000 procedures and a many-file workload. Where the
+host permits, compare `-cpu=1,2,4,8` (equivalent `GOMAXPROCS` settings) and
+record wall time, allocations, finding counts, and stable JSON equality across
+repeated runs. The 100-
+procedure and many-file cases guard the ordinary file-level fast path; the
+1,000- and 2,000-procedure cases measure the intended intra-file speedup. These
+measurements are hardware-local evidence, not CI timing thresholds, and the
+benchmark must not run from ordinary `analyze`, corpus snapshot, or VBE-oracle
+workflows.
 
 For issue #677, the same Windows amd64 machine (12th Gen Intel(R) Core(TM)
 i7-12700, Go 1.26.6 toolchain) was used with baseline HEAD
