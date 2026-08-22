@@ -105,6 +105,9 @@ schema field.
   `internal/analyze/analyzer.go`.
 - Existing file-level cancellation and deterministic result-slot regression:
   `internal/analyze/bounded_parallel_test.go`.
+- Procedure-level determinism, shared-budget, cancellation, and small-file
+  fast-path regression coverage:
+  `internal/analyze/bounded_procedure_parallel_test.go`.
 - Synthetic large-module benchmark and profiling dimensions:
   `internal/analyze/benchmark_test.go` and
   `internal/analyze/profiling_test.go`.

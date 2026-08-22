@@ -316,7 +316,7 @@ type singleModuleBenchmarkWorkload struct {
 }
 
 func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
-	workloads := make([]singleModuleBenchmarkWorkload, 0, 17)
+	workloads := make([]singleModuleBenchmarkWorkload, 0, 20)
 	for _, shape := range []string{"independent", "chain", "declarations"} {
 		for _, size := range []int{100, 500, 1000, 2000} {
 			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})

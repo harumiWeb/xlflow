@@ -64,6 +64,43 @@ func TestAnalyzerSingleModuleProcedureAnalysisIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFilesBoundedStartsProcedurePoolForLargeFiles(t *testing.T) {
+	files := []parsedFile{{Procedures: make([]sourceProcedure, procedureParallelThreshold)}}
+	seen := make(chan bool, 1)
+	_, err := (Analyzer{analysisWorkerLimit: 4}).analyzeFilesBoundedWith(
+		context.Background(), files, analysisContext{}, effects.ProjectSummary{}, nil,
+		func(ctx context.Context, _ parsedFile, _ analysisContext, _ effects.ProjectSummary, _ *apiTypeIndex) ([]Finding, []Finding, error) {
+			budget := analysisExecutionBudgetFromContext(ctx)
+			seen <- budget != nil && budget.procedureJobs != nil
+			return nil, nil, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("bounded analysis: %v", err)
+	}
+	if got := <-seen; !got {
+		t.Fatal("large-file analysis did not start the shared procedure pool")
+	}
+}
+
+func TestAnalyzerMultipleLargeFilesCompleteWithSharedProcedurePool(t *testing.T) {
+	root := t.TempDir()
+	source := singleModuleBenchmarkSource(singleModuleBenchmarkWorkload{shape: "independent", size: procedureParallelThreshold})
+	writeModule(t, root, "LargeA.bas", source)
+	writeModule(t, root, "LargeB.bas", source)
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := (Analyzer{RootDir: root, Config: config.Default(), analysisWorkerLimit: 2}).RunResultContext(ctx)
+	if err != nil {
+		t.Fatalf("multi-file bounded analysis: %v", err)
+	}
+	if result.AnalyzedFiles != 2 {
+		t.Fatalf("analyzed files = %d, want 2", result.AnalyzedFiles)
+	}
+}
+
 // TestAnalyzeFilesBoundedCapsConcurrentAnalyses protects the existing
 // process-wide file budget. Procedure-level scheduling is allowed to add work
 // inside a file, but it must not multiply the outer worker limit.
@@ -133,15 +170,44 @@ func TestAnalyzeFilesBoundedCapsConcurrentAnalyses(t *testing.T) {
 }
 
 func TestAnalyzerSingleModuleProcedureCancellationReturnsNoResult(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	result, err := (Analyzer{RootDir: t.TempDir(), Config: config.Default(), analysisWorkerLimit: 4}).RunResultContext(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+	root := t.TempDir()
+	fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "independent", size: 2000})
+	if fixture.procedures < procedureParallelThreshold {
+		t.Fatalf("cancellation fixture has %d procedures, want at least %d", fixture.procedures, procedureParallelThreshold)
 	}
-	if !reflect.DeepEqual(result, Result{}) {
-		t.Fatalf("canceled analysis returned partial result: %+v", result)
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan struct {
+		result Result
+		err    error
+	}, 1)
+	go func() {
+		result, err := (Analyzer{RootDir: root, Config: config.Default(), analysisWorkerLimit: 4}).RunResultContext(ctx)
+		resultCh <- struct {
+			result Result
+			err    error
+		}{result: result, err: err}
+	}()
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case outcome := <-resultCh:
+		cancel()
+		t.Fatalf("large-module analysis completed before the cancellation window: %v", outcome.err)
+	case <-timer.C:
+		cancel()
+	}
+	select {
+	case outcome := <-resultCh:
+		result, err := outcome.result, outcome.err
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunResultContext error = %v, want context.Canceled", err)
+		}
+		if !reflect.DeepEqual(result, Result{}) {
+			t.Fatalf("canceled analysis returned partial result: %+v", result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for canceled large-module analysis")
 	}
 }
 

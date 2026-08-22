@@ -893,7 +893,7 @@ func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile,
 	// tree-sitter node. The tree is leased below only for the one file-global
 	// scan that still needs it.
 	file.Root = nil
-	procedureFindings, procedureErr := a.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
+	procedureFindings, procedureErr := a.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects, true)
 	if procedureErr != nil {
 		finishStage(0, procedureErr)
 		return nil, nil, procedureErr
@@ -2046,7 +2046,7 @@ func recordBatchWorkload(ctx context.Context, files []parsedFile) {
 	}
 }
 
-func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analysisContext, file parsedFile, projectEffects effects.ProjectSummary) ([]Finding, error) {
+func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analysisContext, file parsedFile, projectEffects effects.ProjectSummary, filePermitHeld bool) ([]Finding, error) {
 	if err := cancelCtx.Err(); err != nil {
 		return nil, err
 	}
@@ -2054,7 +2054,7 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := file.moduleDecls()
 	findings = append(findings, a.hardcodedSecretFindings(file, procedures)...)
-	procedureFindings, err := a.analyzeProcedureContextsBounded(cancelCtx, file, procedures, moduleDecls, ctx, projectEffects)
+	procedureFindings, err := a.analyzeProcedureContextsBounded(cancelCtx, file, procedures, moduleDecls, ctx, projectEffects, filePermitHeld)
 	if err != nil {
 		return nil, err
 	}
@@ -2065,13 +2065,13 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 // analyzeProcedureContextsBounded evaluates procedure-local rules using the
 // shared analysis execution budget. Each result is stored by source index and
 // merged in that order, so worker completion order cannot affect findings.
-func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, file parsedFile, procedures []sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary) ([]Finding, error) {
+func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, file parsedFile, procedures []sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, filePermitHeld bool) ([]Finding, error) {
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		return a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, map[string]bool{})
 	}
 	budget := analysisExecutionBudgetFromContext(cancelCtx)
-	if budget == nil || budget.procedureJobs == nil || budget.limit < 2 || len(procedures) < procedureParallelThreshold {
+	if !filePermitHeld || budget == nil || budget.procedureJobs == nil || budget.limit < 2 || len(procedures) < procedureParallelThreshold {
 		reportedMissingHelpers := map[string]bool{}
 		var findings []Finding
 		for _, proc := range procedures {
@@ -2090,13 +2090,19 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 	// The enclosing file job owns one permit. Yield it before waiting for
 	// procedure jobs; otherwise a full set of file workers could deadlock while
 	// trying to acquire the same budget for their children.
+	// The caller explicitly confirms that it owns the file-level permit. A
+	// future caller without that permit must take the serial path above rather
+	// than releasing an unrelated semaphore slot.
 	budget.release()
+	filePermitHeld = false
 	defer func() {
 		// The caller owns a permit for the duration of analyzeParsedFileBounded.
 		// Cancellation is handled by the caller's existing error path. Reacquire
 		// without that cancellation so the ownership invariant remains balanced
 		// before the file worker releases its original permit.
-		_ = budget.acquire(context.Background())
+		if !filePermitHeld {
+			_ = budget.acquire(context.Background())
+		}
 	}()
 
 	workCtx, cancel := context.WithCancel(cancelCtx)
@@ -2123,7 +2129,6 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 			run: func(jobCtx context.Context) ([]Finding, error) {
 				procedureFile := file
 				procedureFile.Root = nil
-				var batchFindings []Finding
 				for index := batchStart; index < batchEnd; index++ {
 					if err := jobCtx.Err(); err != nil {
 						return nil, err
@@ -2134,7 +2139,7 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 					}
 					results[index] = findings
 				}
-				return batchFindings, nil
+				return nil, nil
 			},
 			complete: func(_ []Finding, err error) {
 				defer batches.Done()

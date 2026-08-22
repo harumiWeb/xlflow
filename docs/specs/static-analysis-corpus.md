@@ -819,7 +819,7 @@ rtk task bench:corpus
 
 `bench:analyze` retains the existing multi-module and object-worklist baselines.
 `bench:analyze-single-module` keeps fixture generation outside the timed region
-and covers single-module scales around 500, 1,000, and 2,000 procedures,
+and covers single-module scales around 100, 500, 1,000, and 2,000 procedures,
 including large call graphs, declaration sets, and CFGs. `bench:corpus` runs the checked-in
 `std-vba` and `ronecone` analyze-only sub-benchmarks. These tasks use
 `-benchmem -benchtime=1x`; on Windows they run through `scripts/dev/go.ps1` to
