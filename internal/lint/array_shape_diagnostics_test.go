@@ -246,6 +246,42 @@ End Sub
 	}
 }
 
+func TestLintConstantAssignmentIgnoresWritableExcelPropertyChains(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Const Hidden As Long = 1
+Public Enum Modes
+  ModeBad = 1
+End Enum
+Public Sub Test(ByVal ws As Worksheet)
+  ws.Rows(1).Hidden = True
+  ws.Rows(1).Hidden = False
+  ws.Columns(1).Hidden = False
+  With ws.Rows(1)
+    .Hidden = False
+  End With
+
+  Dim receiver As Object
+  With receiver
+    .Modes.ModeBad = 2
+  End With
+
+  Dim rng As Range
+  Set rng = ws.Rows(1)
+  rng.Hidden = False
+End Sub
+`
+	writeLintModule(t, dir, "Main.bas", source)
+	issues, err := (Linter{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB060"); len(got) != 0 {
+		t.Fatalf("writable Excel property assignments produced VB060: %#v", got)
+	}
+}
+
 func TestLintArrayShapeDoesNotTreatProcedureParametersAsDeclarationBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

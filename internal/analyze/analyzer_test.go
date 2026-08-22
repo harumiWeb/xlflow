@@ -7978,6 +7978,37 @@ End Sub
 	}
 }
 
+func TestAnalyzerIgnoresWritableExcelPropertyChainsForVB060(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Const Hidden As Long = 1
+Public Sub Test(ByVal ws As Worksheet)
+  ws.Rows(1).Hidden = True
+  ws.Rows(1).Hidden = False
+  ws.Columns(1).Hidden = False
+
+  With ws.Rows(1)
+    .Hidden = False
+  End With
+
+  Dim rng As Range
+  Set rng = ws.Rows(1)
+  rng.Hidden = False
+End Sub
+`)
+	result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(result.Findings, "VB060"); len(got) != 0 {
+		t.Fatalf("writable Excel property assignments produced VB060 findings: %#v", got)
+	}
+	if got := findingsByCode(result.PreflightFindings, "VB060"); len(got) != 0 {
+		t.Fatalf("writable Excel property assignments produced VB060 preflight findings: %#v", got)
+	}
+}
+
 func TestVBA208AllowsOneDimensionalAndStableNonFinalDimensions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
