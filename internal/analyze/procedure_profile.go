@@ -22,6 +22,12 @@ const (
 	procedureDomainOther            = analysisstats.DomainOther
 )
 
+var gatedProcedureDomains = [...]procedureDomain{
+	procedureDomainRuntime, procedureDomainArray, procedureDomainObject,
+	procedureDomainDictionary, procedureDomainError, procedureDomainDataflow,
+	procedureDomainResource, procedureDomainExcel, procedureDomainApplicationState,
+}
+
 // procedureDomainProfile is owned by one serial file analysis or one
 // procedure batch. It never crosses worker boundaries. This keeps the hot
 // procedure loop free from Recorder locks and makes the default (no recorder)
@@ -118,11 +124,7 @@ func (p *procedureDomainProfile) plannerDecision(plan procedureAnalysisPlan, dom
 }
 
 func (p *procedureDomainProfile) plannerDecisions(plan procedureAnalysisPlan) {
-	for _, domain := range [...]procedureDomain{
-		procedureDomainRuntime, procedureDomainArray, procedureDomainObject,
-		procedureDomainDictionary, procedureDomainError, procedureDomainDataflow,
-		procedureDomainResource, procedureDomainExcel, procedureDomainApplicationState,
-	} {
+	for _, domain := range gatedProcedureDomains {
 		p.plannerDecision(plan, domain)
 	}
 }

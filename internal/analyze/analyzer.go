@@ -2441,9 +2441,9 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	sourceMeasurement.finish(len(findings) - sourceFindingStart)
 	if plan.runs(procedureDomainObject) && a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
 		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
-		if plan := ctx.objectAnalysis.plans[key]; plan != nil {
+		if objectPlan := ctx.objectAnalysis.plans[key]; objectPlan != nil {
 			objectMeasurement := profile.begin(procedureDomainObject)
-			objectFindings := a.objectUseBeforeSetIRFindingsPlan(plan, ctx.objectAnalysis.summaries, ctx.objectAnalysis.entries[key])
+			objectFindings := a.objectUseBeforeSetIRFindingsPlan(objectPlan, ctx.objectAnalysis.summaries, ctx.objectAnalysis.entries[key])
 			profile.kernel()
 			profile.candidate(&candidateCounters, analysisstats.CounterObjectCandidateProcedures)
 			objectMeasurement.finish(len(objectFindings))
@@ -2516,11 +2516,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		}
 		findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
 		if a.Config.Analyze.DetectUnsafeFilePath {
-			dataflowMeasurement := profile.begin(procedureDomainDataflow)
+			filePathMeasurement := profile.begin(procedureDomainDataflow)
 			filePathFindings := a.filePathSafetyFindings(file, proc)
 			profile.kernel()
 			profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
-			dataflowMeasurement.finish(len(filePathFindings))
+			filePathMeasurement.finish(len(filePathFindings))
 			findings = append(findings, filePathFindings...)
 		}
 		findings = append(findings, httpFindings...)

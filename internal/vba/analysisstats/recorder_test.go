@@ -195,16 +195,33 @@ func TestDomainAndCounterNamesAreStable(t *testing.T) {
 	if CounterRuntimeCandidateProcedures.String() != RuntimeCandidateProceduresCounter || CounterSemanticKernelRuns.String() != SemanticKernelRunsCounter {
 		t.Fatalf("counter names = %q, %q", CounterRuntimeCandidateProcedures, CounterSemanticKernelRuns)
 	}
-	if CounterRuntimePlannedRuns.String() != RuntimePlannedRunsCounter || CounterRuntimeSkippedRuns.String() != RuntimeSkippedRunsCounter ||
-		CounterArrayPlannedRuns.String() != ArrayPlannedRunsCounter || CounterArraySkippedRuns.String() != ArraySkippedRunsCounter ||
-		CounterObjectPlannedRuns.String() != ObjectPlannedRunsCounter || CounterObjectSkippedRuns.String() != ObjectSkippedRunsCounter ||
-		CounterDictionaryPlannedRuns.String() != DictionaryPlannedRunsCounter || CounterDictionarySkippedRuns.String() != DictionarySkippedRunsCounter ||
-		CounterErrorPlannedRuns.String() != ErrorPlannedRunsCounter || CounterErrorSkippedRuns.String() != ErrorSkippedRunsCounter ||
-		CounterDataflowPlannedRuns.String() != DataflowPlannedRunsCounter || CounterDataflowSkippedRuns.String() != DataflowSkippedRunsCounter ||
-		CounterResourcePlannedRuns.String() != ResourcePlannedRunsCounter || CounterResourceSkippedRuns.String() != ResourceSkippedRunsCounter ||
-		CounterExcelPlannedRuns.String() != ExcelPlannedRunsCounter || CounterExcelSkippedRuns.String() != ExcelSkippedRunsCounter ||
-		CounterApplicationStatePlannedRuns.String() != ApplicationStatePlannedRunsCounter || CounterApplicationStateSkippedRuns.String() != ApplicationStateSkippedRunsCounter {
-		t.Fatalf("planner counter names are not stable")
+	plannerCounterNames := []struct {
+		counter WorkCounter
+		want    string
+	}{
+		{CounterRuntimePlannedRuns, RuntimePlannedRunsCounter},
+		{CounterRuntimeSkippedRuns, RuntimeSkippedRunsCounter},
+		{CounterArrayPlannedRuns, ArrayPlannedRunsCounter},
+		{CounterArraySkippedRuns, ArraySkippedRunsCounter},
+		{CounterObjectPlannedRuns, ObjectPlannedRunsCounter},
+		{CounterObjectSkippedRuns, ObjectSkippedRunsCounter},
+		{CounterDictionaryPlannedRuns, DictionaryPlannedRunsCounter},
+		{CounterDictionarySkippedRuns, DictionarySkippedRunsCounter},
+		{CounterErrorPlannedRuns, ErrorPlannedRunsCounter},
+		{CounterErrorSkippedRuns, ErrorSkippedRunsCounter},
+		{CounterDataflowPlannedRuns, DataflowPlannedRunsCounter},
+		{CounterDataflowSkippedRuns, DataflowSkippedRunsCounter},
+		{CounterResourcePlannedRuns, ResourcePlannedRunsCounter},
+		{CounterResourceSkippedRuns, ResourceSkippedRunsCounter},
+		{CounterExcelPlannedRuns, ExcelPlannedRunsCounter},
+		{CounterExcelSkippedRuns, ExcelSkippedRunsCounter},
+		{CounterApplicationStatePlannedRuns, ApplicationStatePlannedRunsCounter},
+		{CounterApplicationStateSkippedRuns, ApplicationStateSkippedRunsCounter},
+	}
+	for _, test := range plannerCounterNames {
+		if got := test.counter.String(); got != test.want {
+			t.Errorf("counter %d name = %q, want %q", test.counter, got, test.want)
+		}
 	}
 	if Domain(255).String() != ProcedureLocalOther || WorkCounter(255).String() != "" {
 		t.Fatalf("invalid enum names = %q, %q", Domain(255), WorkCounter(255))

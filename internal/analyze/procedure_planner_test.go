@@ -89,6 +89,35 @@ func TestProcedureFeatureSetProvesScalarProcedureAbsent(t *testing.T) {
 	}
 }
 
+func TestProcedureFeatureSetRecognizesQualifiedCollectionAndFileRename(t *testing.T) {
+	if !dictionaryCollectionType("VBA.Collection") {
+		t.Fatal("qualified Collection type was not recognized")
+	}
+	if !dictionaryCollectionType("Scripting.Dictionary") {
+		t.Fatal("qualified Dictionary type was not recognized")
+	}
+	nameAssignment := newProcedureAnalysisFactsWithDeclarations(
+		nil,
+		[]procedureir.Statement{{ID: 1, Kind: procedureir.StatementAssignment, Text: "name = value"}},
+		nil,
+		nil,
+		nil,
+	)
+	if nameAssignment.features.mayHave(featureFileIO) {
+		t.Fatalf("ordinary name assignment was classified as file I/O: %#v", nameAssignment.features)
+	}
+	rename := newProcedureAnalysisFactsWithDeclarations(
+		nil,
+		[]procedureir.Statement{{ID: 2, Kind: procedureir.StatementAssignment, Text: "Name oldPath As newPath"}},
+		nil,
+		nil,
+		nil,
+	)
+	if !rename.features.mayHave(featureFileIO) {
+		t.Fatalf("Name ... As ... was not classified as file I/O: %#v", rename.features)
+	}
+}
+
 func TestProcedureFeatureSetFailsOpenForRecoveredAndDynamicIR(t *testing.T) {
 	recovered := newProcedureAnalysisFactsWithDeclarations(
 		nil,
@@ -273,6 +302,14 @@ func TestProcedurePlannerDecisionsRecordPlannedAndSkippedOnce(t *testing.T) {
 	}
 	if values[analysisstats.DataflowSkippedRunsCounter] != 1 || values[analysisstats.DataflowPlannedRunsCounter] != 0 {
 		t.Fatalf("dataflow planner counters = %#v", values)
+	}
+}
+
+func TestPlannerCountersCoverEveryGatedDomain(t *testing.T) {
+	for _, domain := range gatedProcedureDomains {
+		if _, _, ok := plannerCounters(domain); !ok {
+			t.Errorf("gated domain %s has no planner counters", domain)
+		}
 	}
 }
 

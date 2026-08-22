@@ -180,6 +180,7 @@ func BenchmarkProcedureApplicabilityPlanning(b *testing.B) {
 		},
 	}
 	cfg := config.Default()
+	moduleDecls := map[string]sourceDeclaration{}
 	for name, fixture := range fixtures {
 		fixture := fixture
 		b.Run(name+"/feature-facts", func(b *testing.B) {
@@ -194,7 +195,7 @@ func BenchmarkProcedureApplicabilityPlanning(b *testing.B) {
 		b.Run(name+"/plan", func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				_ = buildProcedureAnalysisPlan(cfg.Analyze, proc, map[string]sourceDeclaration{})
+				_ = buildProcedureAnalysisPlan(cfg.Analyze, proc, moduleDecls)
 			}
 		})
 	}

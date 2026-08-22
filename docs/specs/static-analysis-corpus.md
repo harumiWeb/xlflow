@@ -1146,9 +1146,15 @@ generated control-flow facts do not prove domain absence. Even with planner
 construction and counter reporting, its median wall time did not regress;
 median bytes and allocations increased by 1.4% and 1.7%, respectively, within
 the existing 2% observational criterion. The microbenchmark separately covered
-scalar-only, array-heavy, mixed-domain, and recovered procedures: planner
-construction allocated 0 B/op and 0 allocs/op, with the three 100-iteration
-sample ranges spanning 0.631--0.886 microseconds per procedure.
+scalar-only, array-heavy, mixed-domain, and recovered procedures with
+`-benchtime=100x -count=3` (100 `b.Loop()` iterations per sample). Planner
+construction used 0 B/op and 0 allocs/op; the three `plan` samples ranged from
+662--957 ns/op (scalar-only), 645--685 ns/op (array-heavy), 689--720 ns/op
+(mixed-domain), and 651--664 ns/op (recovered). The corresponding
+`feature-facts` samples ranged from 1,067--1,306 ns/op (scalar-only),
+1,729--2,084 ns/op (array-heavy), 3,108--3,246 ns/op (mixed-domain), and
+125--161 ns/op (recovered), with 800/9, 720/11, 832/15, and 400/3 B/op and
+allocs/op, respectively.
 
 The `-count=1` CPU/allocation profile completed in 23.83 s with 84.88 s of CPU
 samples. Its flat CPU top ten were `runtime.semasleep` (13.57%),

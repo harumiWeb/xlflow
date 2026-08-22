@@ -122,7 +122,9 @@ func (features *procedureFeatureSet) observeExpression(expression procedureir.Ex
 
 func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
 	features.add(featureCalls | featureByRefCalls)
-	features.observeText(call.Callee.Text + " " + call.Callee.BaseName + " " + call.Callee.Member)
+	features.observeText(call.Callee.Text)
+	features.observeText(call.Callee.BaseName)
+	features.observeText(call.Callee.Member)
 	switch call.Resolution.Status {
 	case procedureir.ResolutionMatched, procedureir.ResolutionBuiltinLike:
 		// These are the only statuses that prove a stable target. A matched call
@@ -169,7 +171,7 @@ func (features *procedureFeatureSet) observeText(text string) {
 	if containsAny(lower, "xmlhttp", "winhttprequest", ".open(\"get", ".open(\"post", "setrequestheader", ".send") {
 		features.add(featureDataflow | featureHTTP)
 	}
-	if containsAny(lower, "kill ", "rmdir ", "filecopy ", "name ", " open ", "open ", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") {
+	if containsAny(lower, "kill ", "rmdir ", "filecopy ", " open ", "open ", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") || looksLikeFileRename(lower) {
 		features.add(featureDataflow | featureFileIO)
 	}
 	if containsAny(lower, "workbooks.open", "open ") {
@@ -203,9 +205,14 @@ func containsAny(value string, needles ...string) bool {
 	return false
 }
 
+func looksLikeFileRename(lower string) bool {
+	trimmed := strings.TrimSpace(lower)
+	return strings.HasPrefix(trimmed, "name ") && strings.Contains(trimmed, " as ")
+}
+
 func dictionaryCollectionType(typeName string) bool {
 	lower := strings.ToLower(strings.TrimSpace(typeName))
-	return lower == "collection" || lower == "dictionary" || strings.HasSuffix(lower, ".dictionary")
+	return lower == "collection" || lower == "dictionary" || strings.HasSuffix(lower, ".collection") || strings.HasSuffix(lower, ".dictionary")
 }
 
 func finalizeProcedureFeatures(features procedureFeatureSet, document procedureir.DocumentIR, procedure procedureir.ProcedureIR, graphPresent bool, graphUnknown bool) procedureFeatureSet {
@@ -295,6 +302,13 @@ type procedureAnalysisPlan struct {
 
 func procedureDomainBit(domain analysisstats.Domain) uint16 { return uint16(1) << uint(domain) }
 
+// Procedure plans use a compact uint16 mask. Keep this compile-time guard in
+// sync with the DomainOther sentinel so a future domain cannot silently make
+// procedureDomainBit overflow the mask.
+const procedureDomainMaskWidth = 16
+
+var _ [procedureDomainMaskWidth - int(procedureDomainOther) - 1]struct{}
+
 func (plan procedureAnalysisPlan) enabledDomain(domain analysisstats.Domain) bool {
 	return plan.enabled&procedureDomainBit(domain) != 0
 }
@@ -303,26 +317,37 @@ func (plan procedureAnalysisPlan) runs(domain analysisstats.Domain) bool {
 	return plan.planned&procedureDomainBit(domain) != 0
 }
 
+func moduleDeclarationFeatures(moduleDecls map[string]sourceDeclaration) procedureFeatureSet {
+	var features procedureFeatureSet
+	if moduleDecls == nil {
+		features.addUnknown(featureArray | featureObject | featureDictionaryCollection)
+		return features
+	}
+	for _, declaration := range moduleDecls {
+		if declaration.Array {
+			features.add(featureArray)
+		}
+		if declaration.Object {
+			features.add(featureObject)
+		}
+		if dictionaryCollectionType(declaration.Type) {
+			features.add(featureDictionaryCollection)
+		}
+	}
+	return features
+}
+
 func buildProcedureAnalysisPlan(cfg config.AnalyzeConfig, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) procedureAnalysisPlan {
+	return buildProcedureAnalysisPlanWithModuleFeatures(cfg, proc, moduleDeclarationFeatures(moduleDecls))
+}
+
+func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc sourceProcedure, moduleFeatures procedureFeatureSet) procedureAnalysisPlan {
 	features := proc.Features
 	if proc.Facts == nil {
 		features.addUnknown(allProcedureFeatures)
 	}
-	if moduleDecls == nil {
-		features.addUnknown(featureArray | featureObject | featureDictionaryCollection)
-	} else {
-		for _, declaration := range moduleDecls {
-			if declaration.Array {
-				features.add(featureArray)
-			}
-			if declaration.Object {
-				features.add(featureObject)
-			}
-			if dictionaryCollectionType(declaration.Type) {
-				features.add(featureDictionaryCollection)
-			}
-		}
-	}
+	features.addUnknown(moduleFeatures.unknown)
+	features.add(moduleFeatures.present)
 	if proc.Effects != nil {
 		if len(proc.Effects.DirectUncertainty) > 0 || len(proc.Effects.PropagatedUncertainty) > 0 {
 			features.addUnknown(allProcedureFeatures)
@@ -383,11 +408,14 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 	if procedures == nil {
 		procedures = sourceProceduresFromIR(file.IR, file.CFG)
 	}
-	moduleDecls := file.moduleDecls()
+	moduleFeatures := moduleDeclarationFeatures(file.moduleDecls())
 	for i := range procedures {
 		planningProcedure := procedures[i]
 		if i < len(file.IR.Procedures) {
 			id := procedureEffectIdentity(file.IR, file.IR.Procedures[i].Symbol)
+			// Planning consumes the propagated summary so indirect project effects
+			// fail open; rule execution retains the direct summary expected by the
+			// existing semantic domains.
 			if summary, ok := projectEffects.Lookup(id); ok {
 				planningProcedure.Effects = &summary
 			}
@@ -395,7 +423,7 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 				procedures[i].Effects = &summary
 			}
 		}
-		procedures[i].Plan = buildProcedureAnalysisPlan(cfg, planningProcedure, moduleDecls)
+		procedures[i].Plan = buildProcedureAnalysisPlanWithModuleFeatures(cfg, planningProcedure, moduleFeatures)
 		procedures[i].PlanReady = true
 	}
 	file.Procedures = procedures
@@ -403,9 +431,25 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 
 func projectPlansDomain(cfg config.AnalyzeConfig, files []parsedFile, projectEffects effects.ProjectSummary, domain analysisstats.Domain) bool {
 	for _, file := range files {
-		moduleDecls := file.moduleDecls()
-		for _, proc := range sourceProceduresWithEffects(file, projectEffects) {
-			if proc.analysisPlan(cfg, moduleDecls).runs(domain) {
+		procedures := file.procedureProjection()
+		materialized := file.Procedures != nil
+		if materialized {
+			for _, proc := range procedures {
+				if !proc.PlanReady {
+					materialized = false
+					break
+				}
+			}
+		}
+		if !materialized {
+			procedures = sourceProceduresWithEffects(file, projectEffects)
+		}
+		for _, proc := range procedures {
+			plan := proc.Plan
+			if !proc.PlanReady {
+				plan = proc.analysisPlan(cfg, file.moduleDecls())
+			}
+			if plan.runs(domain) {
 				return true
 			}
 		}
