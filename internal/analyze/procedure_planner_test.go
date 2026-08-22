@@ -90,11 +90,17 @@ func TestProcedureFeatureSetProvesScalarProcedureAbsent(t *testing.T) {
 }
 
 func TestProcedureFeatureSetRecognizesQualifiedCollectionAndFileRename(t *testing.T) {
-	if !dictionaryCollectionType("VBA.Collection") {
-		t.Fatal("qualified Collection type was not recognized")
-	}
-	if !dictionaryCollectionType("Scripting.Dictionary") {
-		t.Fatal("qualified Dictionary type was not recognized")
+	for _, typeName := range []string{"VBA.Collection", "Scripting.Dictionary"} {
+		facts := newProcedureAnalysisFactsWithDeclarations(
+			[]procedureir.Declaration{{ID: 1, Name: "items", Type: typeName}},
+			nil,
+			nil,
+			nil,
+			nil,
+		)
+		if facts.features.present&featureDictionaryCollection == 0 {
+			t.Errorf("qualified %s declaration was not classified as a collection feature: %#v", typeName, facts.features)
+		}
 	}
 	nameAssignment := newProcedureAnalysisFactsWithDeclarations(
 		nil,

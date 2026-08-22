@@ -1156,6 +1156,12 @@ construction used 0 B/op and 0 allocs/op; the three `plan` samples ranged from
 125--161 ns/op (recovered), with 800/9, 720/11, 832/15, and 400/3 B/op and
 allocs/op, respectively.
 
+The exact command for this microbenchmark was:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench '^BenchmarkProcedureApplicabilityPlanning$' -benchmem -benchtime=100x -count=3
+```
+
 The `-count=1` CPU/allocation profile completed in 23.83 s with 84.88 s of CPU
 samples. Its flat CPU top ten were `runtime.semasleep` (13.57%),
 `runtime.scanObject` (4.92%), `runtime.tryDeferToSpanScan` (4.50%),
