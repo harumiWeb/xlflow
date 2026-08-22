@@ -246,6 +246,56 @@ End Sub
 	}
 }
 
+func TestLintConstantAssignmentIgnoresWritableExcelPropertyChains(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Const Hidden As Long = 1
+Public Enum Modes
+  ModeBad = 1
+End Enum
+Public Sub Test(ByVal ws As Worksheet)
+  ws.Rows(1).Hidden = True
+  ws.Rows(1).Hidden = False
+  ws.Columns(1).Hidden = False
+  With ws.Rows(1)
+    .Hidden = False
+  End With
+
+  Dim receiver As Object
+  With receiver
+    .Modes.ModeBad = 2
+  End With
+
+  Dim rng As Range
+  Set rng = ws.Rows(1)
+  rng.Hidden = False
+End Sub
+`
+	writeLintModule(t, dir, "Main.bas", source)
+	issues, err := (Linter{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(issues, "VB060"); len(got) != 0 {
+		t.Fatalf("writable Excel property assignments produced VB060: %#v", got)
+	}
+
+	classSource := `Option Explicit
+Private Const Limit As Long = 2
+Public Sub Run()
+  Me.Limit = 3
+End Sub
+`
+	classIssues, err := (Linter{RootDir: dir, Config: config.Default(), ModuleKind: "class"}).LintSource("Widget.cls", []byte(classSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issuesByCode(classIssues, "VB060"); len(got) != 1 || got[0].Symbol != "Me.Limit" {
+		t.Fatalf("Me Const assignment = %#v, want one VB060 for Me.Limit", got)
+	}
+}
+
 func TestLintArrayShapeDoesNotTreatProcedureParametersAsDeclarationBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

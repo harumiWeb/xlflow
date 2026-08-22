@@ -72,6 +72,27 @@ End Sub
 	}
 }
 
+func TestCompileEquivalentDiagnosticsIgnoreWritableMemberAssignments(t *testing.T) {
+	root := t.TempDir()
+	doc := Document{
+		Path: filepath.Join(root, "Main.bas"),
+		Source: `Option Explicit
+Public Const Hidden As Long = 1
+Public Sub Probe(ByVal ws As Worksheet)
+    ws.Rows(1).Hidden = True
+    ws.Columns(1).Hidden = False
+    With ws.Rows(1)
+        .Hidden = False
+    End With
+End Sub
+`,
+	}
+	diagnostics := (Analyzer{RootDir: root, Config: config.Default()}).CompileEquivalentDiagnosticsContext(context.Background(), doc)
+	if got := diagnosticsByCode(diagnostics, "VB060"); len(got) != 0 {
+		t.Fatalf("writable member assignments produced VB060 diagnostics: %#v", got)
+	}
+}
+
 func TestDiagnosticsExposeIssue594SyntaxRules(t *testing.T) {
 	root := t.TempDir()
 	cases := []struct {
