@@ -177,25 +177,34 @@ func TestAnalyzerSingleModuleProcedureCancellationReturnsNoResult(t *testing.T) 
 	}
 	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
 	ctx, cancel := context.WithCancel(context.Background())
+	procedureStarted := make(chan struct{})
 	resultCh := make(chan struct {
 		result Result
 		err    error
 	}, 1)
 	go func() {
-		result, err := (Analyzer{RootDir: root, Config: config.Default(), analysisWorkerLimit: 4}).RunResultContext(ctx)
+		result, err := (Analyzer{
+			RootDir:                    root,
+			Config:                     config.Default(),
+			analysisWorkerLimit:        4,
+			procedureAnalysisStartHook: func() { close(procedureStarted) },
+		}).RunResultContext(ctx)
 		resultCh <- struct {
 			result Result
 			err    error
 		}{result: result, err: err}
 	}()
-	timer := time.NewTimer(100 * time.Millisecond)
+	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
 	select {
 	case outcome := <-resultCh:
 		cancel()
-		t.Fatalf("large-module analysis completed before the cancellation window: %v", outcome.err)
+		t.Fatalf("large-module analysis completed before procedure work started: %v", outcome.err)
+	case <-procedureStarted:
+		cancel()
 	case <-timer.C:
 		cancel()
+		t.Fatal("timed out waiting for procedure analysis to start")
 	}
 	select {
 	case outcome := <-resultCh:

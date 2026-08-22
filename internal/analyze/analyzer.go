@@ -123,6 +123,9 @@ type Analyzer struct {
 	// analysisWorkerLimit is test-only tuning for the bounded file analysis
 	// pool. A zero value derives the limit from GOMAXPROCS and project size.
 	analysisWorkerLimit int
+	// procedureAnalysisStartHook is test-only synchronization for cancellation
+	// coverage. Production callers leave it nil.
+	procedureAnalysisStartHook func()
 }
 
 // procedureParallelThreshold is deliberately high enough that the ordinary
@@ -2109,9 +2112,10 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 	defer cancel()
 	results := make([][]Finding, len(procedures))
 	var (
-		batches  sync.WaitGroup
-		firstErr error
-		errOnce  sync.Once
+		batches   sync.WaitGroup
+		firstErr  error
+		errOnce   sync.Once
+		startOnce sync.Once
 	)
 	batchSize := (len(procedures) + budget.limit*4 - 1) / (budget.limit * 4)
 	if batchSize < 1 {
@@ -2129,6 +2133,11 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 			run: func(jobCtx context.Context) ([]Finding, error) {
 				procedureFile := file
 				procedureFile.Root = nil
+				startOnce.Do(func() {
+					if a.procedureAnalysisStartHook != nil {
+						a.procedureAnalysisStartHook()
+					}
+				})
 				for index := batchStart; index < batchEnd; index++ {
 					if err := jobCtx.Err(); err != nil {
 						return nil, err
