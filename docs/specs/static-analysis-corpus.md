@@ -997,12 +997,31 @@ allocation-space and allocation-object consumers, and the final view reports
 heap in use when that profile sample is available. Keep the complete command
 output with the benchmark record.
 
-On Linux or macOS, use the same command with `rtk go test` instead of the
-Windows wrapper. Keep the Go version, machine, power state, benchmark filter,
-and sample count constant for before/after comparisons, and report unusually
-slow runs with the complete command and environment. Benchmark generation is
-test-only infrastructure and must not run from ordinary `analyze`, `check`,
-corpus snapshot, or Excel/VBE oracle workflows.
+On Linux or macOS, use this directly executable POSIX equivalent. It writes a
+native test binary (without the Windows `.exe` suffix) and keeps profiles in a
+temporary directory:
+
+```sh
+profile_dir="${TMPDIR:-/tmp}/xlflow-ronecone-694"
+rtk mkdir -p "$profile_dir"
+rtk go test ./internal/staticanalysis/corpus \
+  -run '^$' \
+  -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' \
+  -benchtime=1x -count=1 \
+  -cpuprofile="$profile_dir/ronecone.cpu.pprof" \
+  -memprofile="$profile_dir/ronecone.mem.pprof" \
+  -o="$profile_dir/ronecone-corpus.test"
+rtk go tool pprof -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.cpu.pprof"
+rtk go tool pprof -sample_index=alloc_space -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.mem.pprof"
+rtk go tool pprof -sample_index=alloc_objects -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.mem.pprof"
+rtk go tool pprof -sample_index=inuse_space -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.mem.pprof"
+```
+
+Keep the Go version, machine, power state, benchmark filter, and sample count
+constant for before/after comparisons, and report unusually slow runs with the
+complete command and environment. Benchmark generation is test-only
+infrastructure and must not run from ordinary `analyze`, `check`, corpus
+snapshot, or Excel/VBE oracle workflows.
 
 ### Issue #694 baseline record
 
@@ -1036,7 +1055,10 @@ baseline. This is a workload result, not a disabled-profiling regression.
 For ROneCOne, the median parent `procedure_local_diagnostics` wall time was
 3.456 s. Domain values below are median accumulated worker execution times;
 they overlap under procedure parallelism and therefore must not be added or
-compared as a partition of the parent wall time.
+compared as a partition of the parent wall time. In addition,
+`procedure_local/source_scan` contains the source-line loop and therefore
+includes elapsed time and result counts from nested Excel, object, and array
+measurements; those nested values must not be added to source-scan values.
 
 | semantic domain         | median accumulated time |
 | ----------------------- | ----------------------: |

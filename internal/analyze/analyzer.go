@@ -2148,6 +2148,7 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 				})
 				for index := batchStart; index < batchEnd; index++ {
 					if err := jobCtx.Err(); err != nil {
+						profile.flush()
 						return nil, err
 					}
 					findings, err := a.analyzeProcedureContext(jobCtx, procedureFile, procedures[index], moduleDecls, ctx, projectEffects, map[string]bool{}, profile)
@@ -2272,7 +2273,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		if i&0xff == 0 {
 			if err := cancelCtx.Err(); err != nil {
-				sourceMeasurement.finishOutcome(len(findings)-sourceFindingStart, cancelCtx, err)
+				sourceMeasurement.finishOutcome(cancelCtx, len(findings)-sourceFindingStart, err)
 				return nil, err
 			}
 		}
@@ -2282,8 +2283,6 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		if stmt == "" {
 			continue
 		}
-		lower := strings.ToLower(stmt)
-
 		if endWithRe.MatchString(stmt) {
 			if len(withStack) > 0 {
 				withStack = withStack[:len(withStack)-1]
@@ -2408,7 +2407,6 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			arrayMeasurement.finish(len(arrayFindings))
 			findings = append(findings, arrayFindings...)
 		}
-		_ = lower
 	}
 	sourceMeasurement.finish(len(findings) - sourceFindingStart)
 	if a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
@@ -2479,7 +2477,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
 		profile.add(analysisstats.CounterDataflowCFGWalks, 1)
 	}
-	dataflowMeasurement.finishOutcome(len(dataFlowFindings)+len(httpFindings), cancelCtx, err)
+	dataflowMeasurement.finishOutcome(cancelCtx, len(dataFlowFindings)+len(httpFindings), err)
 	if err != nil {
 		return nil, err
 	}

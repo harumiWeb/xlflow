@@ -68,6 +68,13 @@ var domainNames = [...]string{
 	ProcedureLocalOther,
 }
 
+// These paired array declarations fail compilation if a domain is added
+// without adding its canonical output name (or vice versa).
+var (
+	_ [len(domainNames) - domainCount]struct{}
+	_ [domainCount - len(domainNames)]struct{}
+)
+
 // String returns the stable stage name used by performance-log output.
 func (d Domain) String() string {
 	if int(d) >= 0 && int(d) < len(domainNames) {
@@ -103,6 +110,11 @@ const (
 )
 
 const counterCount = int(CounterSemanticKernelRuns) + 1
+
+// WorkCounterCount is the fixed number of counter slots used by
+// DomainAggregate. It is exposed for compile-time guards in lightweight
+// callers that use a bitset for per-procedure de-duplication.
+const WorkCounterCount = counterCount
 
 const (
 	RuntimeCandidateProceduresCounter          = "runtime_candidate_procedures"
@@ -145,6 +157,13 @@ var counterNames = [...]string{
 	ExcelCFGWalksCounter,
 	SemanticKernelRunsCounter,
 }
+
+// These paired array declarations fail compilation if a counter is added
+// without adding its canonical output name (or vice versa).
+var (
+	_ [len(counterNames) - counterCount]struct{}
+	_ [counterCount - len(counterNames)]struct{}
+)
 
 // String returns the stable counter name used by performance-log output.
 func (c WorkCounter) String() string {

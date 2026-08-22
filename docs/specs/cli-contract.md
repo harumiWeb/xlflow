@@ -294,6 +294,10 @@ state, and project-context index work keep their existing top-level stages.
 When procedures run in parallel, a domain's elapsed value is the cumulative
 worker time and is not an additive partition of the parent's wall time; domain
 values may therefore exceed the parent stage's elapsed value.
+The `procedure_local/source_scan` measurement is also a containment measure for
+the source-line loop: its elapsed time and result count include nested Excel,
+object, and array measurements performed while scanning those lines. Consumers
+must not add nested domain values to source-scan values as if they were disjoint.
 
 The performance output also reports workload counters in stable order. Aggregate
 workload counters are `file_count`, `procedure_count`, `statement_count`,

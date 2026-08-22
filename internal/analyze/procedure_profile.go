@@ -51,10 +51,13 @@ func (p *procedureDomainProfile) begin(domain procedureDomain) procedureDomainMe
 }
 
 func (m procedureDomainMeasurement) finish(resultCount int) {
-	m.finishOutcome(resultCount, nil, nil)
+	if m.owner == nil {
+		return
+	}
+	m.measurement.FinishOutcome(resultCount, "ok")
 }
 
-func (m procedureDomainMeasurement) finishOutcome(resultCount int, ctx context.Context, err error) {
+func (m procedureDomainMeasurement) finishOutcome(ctx context.Context, resultCount int, err error) {
 	if m.owner == nil {
 		return
 	}
@@ -86,6 +89,13 @@ func (p *procedureDomainProfile) candidate(seen *uint32, counter analysisstats.W
 	*seen |= uint32(1) << bit
 	p.aggregate.AddCounter(counter, 1)
 }
+
+// Keep the per-procedure candidate bitset wide enough for every current
+// workload counter. If a future counter grows past the bitset limit, this
+// package must widen the mask before candidate attribution can silently drop.
+const procedureCandidateBitLimit = 32
+
+var _ [procedureCandidateBitLimit - analysisstats.WorkCounterCount]struct{}
 
 func (p *procedureDomainProfile) kernel() {
 	p.add(analysisstats.CounterSemanticKernelRuns, 1)
