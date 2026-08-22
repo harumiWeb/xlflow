@@ -280,15 +280,45 @@ stages are `source_discovery`, `file_read`, `parse`, `procedure_ir`, `cfg`,
 `suppression_and_finalize`; the complete operation is reported as
 `analyze_total`. These are the canonical CLI labels.
 
+The `procedure_local_diagnostics` stage remains the parent for procedure-local
+work. When profiling is enabled, its aggregate is additionally attributed to
+the following semantic-domain stages:
+`procedure_local/source_scan`, `procedure_local/runtime`,
+`procedure_local/array`, `procedure_local/object`,
+`procedure_local/dictionary`, `procedure_local/error`,
+`procedure_local/dataflow`, `procedure_local/resource`,
+`procedure_local/excel`, `procedure_local/application_state`, and
+`procedure_local/other`. Domain records are aggregate records; they do not
+create one timer or record per procedure. Typed Excel, object summary/entry
+state, and project-context index work keep their existing top-level stages.
+When procedures run in parallel, a domain's elapsed value is the cumulative
+worker time and is not an additive partition of the parent's wall time; domain
+values may therefore exceed the parent stage's elapsed value.
+
 The performance output also reports workload counters in stable order. Aggregate
 workload counters are `file_count`, `procedure_count`, `statement_count`,
 `expression_count`, `call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
 `project_symbol_count`, `line_count`, and `module_declaration_count`.
+Counter records use the existing `operation="analyze/counter"` stderr record
+shape; stage records continue to use `operation="analyze/stage"`.
 `line_count` uses physical source lines and does not count a terminal newline as
 an additional empty line.
 Analyzer worklist counters such as `object_summary_evaluations`,
 `object_entry_flow_evaluations`, and `byref_diagnostic_passes` may also be
 reported when those subsystems run.
+Procedure-local profiling also exposes work counters when the corresponding
+domain runs. Candidate counters are
+`runtime_candidate_procedures`, `array_candidate_procedures`,
+`object_candidate_procedures`, `dictionary_candidate_procedures`,
+`error_candidate_procedures`, `dataflow_candidate_procedures`,
+`resource_candidate_procedures`, `excel_candidate_procedures`, and
+`application_state_candidate_procedures`. Traversal counters are
+`source_line_scans`, `runtime_cfg_walks`, `array_cfg_walks`,
+`dictionary_cfg_walks`, `error_cfg_walks`, `dataflow_cfg_walks`,
+`resource_cfg_walks`, and `excel_cfg_walks`; `semantic_kernel_runs` counts
+valid semantic-domain kernel invocations. Candidate counters count procedures
+that pass the rule gate and are actually analyzed, traversal counters count
+started source/CFG traversals, and none of these counters count findings.
 The effect-summary stage may additionally report
 `effect_summary_worklist_evaluations`,
 `effect_summary_max_propagated_facts_per_procedure`, and

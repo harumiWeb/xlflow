@@ -16,12 +16,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
 - `analyze_total`
+- `application_state_candidate_procedures`
 - `args_invalid`
 - `argument_count`
 - `argument_diagnostics`
 - `argument_list`
 - `array_bound`
 - `array_bounds`
+- `array_candidate_procedures`
+- `array_cfg_walks`
 - `array_subscript_out_of_bounds`
 - `array_unallocated`
 - `as_type_clause`
@@ -198,6 +201,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `cyclomatic_complexity`
 - `data_flow`
 - `database_result`
+- `dataflow_candidate_procedures`
+- `dataflow_cfg_walks`
 - `debug_log`
 - `debug_stream_init_failed`
 - `declaration_range`
@@ -279,6 +284,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `diagnostic_meaning`
 - `diagnostic_runs`
 - `dialog_id`
+- `dictionary_candidate_procedures`
+- `dictionary_cfg_walks`
 - `diff_args_invalid`
 - `diff_failed`
 - `direct_callees`
@@ -348,6 +355,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `enum_group`
 - `enum_member`
 - `environment_variable`
+- `error_candidate_procedures`
+- `error_cfg_walks`
 - `error_handling_count`
 - `event_declaration`
 - `event_reader_count`
@@ -362,6 +371,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exceeds_max_count`
 - `exceeds_max_total_size`
 - `excel_available`
+- `excel_candidate_procedures`
+- `excel_cfg_walks`
 - `excel_cleanup`
 - `excel_com`
 - `excel_com_failure`
@@ -693,6 +704,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `nothing_literal`
 - `number_format`
 - `numeric_type_mismatch`
+- `object_candidate_procedures`
 - `object_entry_flow_evaluations`
 - `object_entry_states`
 - `object_procedure_summaries`
@@ -793,6 +805,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_ir_singleflight`
 - `procedure_kind`
 - `procedure_local_diagnostics`
+- `procedure_local_source_scan`
 - `procedure_modifier`
 - `procedure_name`
 - `procedure_name_constant`
@@ -880,6 +893,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `residual_path`
 - `resolved_result`
 - `resolved_value`
+- `resource_candidate_procedures`
+- `resource_cfg_walks`
 - `resource_ownership_count`
 - `resource_scope`
 - `response_source`
@@ -914,6 +929,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `run_command`
 - `run_diagnostic`
 - `runner_args_invalid`
+- `runtime_candidate_procedures`
+- `runtime_cfg_walks`
 - `runtime_error`
 - `runtime_form_load_failed`
 - `runtime_form_loads_initialize`
@@ -939,6 +956,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `selected_bridge`
 - `selected_by`
 - `selected_index`
+- `semantic_kernel_runs`
 - `sensitive_module_constant`
 - `session_args_invalid`
 - `session_dirty`
@@ -983,6 +1001,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `source_file`
 - `source_files`
 - `source_line_count`
+- `source_line_scans`
 - `source_lines`
 - `source_newer_than_workbook`
 - `source_of_truth`

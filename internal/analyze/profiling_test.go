@@ -5,12 +5,51 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 )
+
+// procedureLocalProfileDomains is the stable, aggregate-only profiling
+// surface for the procedure-local analyzer. Keep this list in the test so a
+// newly added domain cannot silently disappear from the developer profile.
+var procedureLocalProfileDomains = []string{
+	analysisstats.ProcedureLocalSourceScan,
+	analysisstats.ProcedureLocalRuntime,
+	analysisstats.ProcedureLocalArray,
+	analysisstats.ProcedureLocalObject,
+	analysisstats.ProcedureLocalDictionary,
+	analysisstats.ProcedureLocalError,
+	analysisstats.ProcedureLocalDataflow,
+	analysisstats.ProcedureLocalResource,
+	analysisstats.ProcedureLocalExcel,
+	analysisstats.ProcedureLocalApplicationState,
+	analysisstats.ProcedureLocalOther,
+}
+
+var procedureLocalProfileCounters = []string{
+	analysisstats.RuntimeCandidateProceduresCounter,
+	analysisstats.ArrayCandidateProceduresCounter,
+	analysisstats.ObjectCandidateProceduresCounter,
+	analysisstats.DictionaryCandidateProceduresCounter,
+	analysisstats.ErrorCandidateProceduresCounter,
+	analysisstats.DataflowCandidateProceduresCounter,
+	analysisstats.ResourceCandidateProceduresCounter,
+	analysisstats.ExcelCandidateProceduresCounter,
+	analysisstats.ApplicationStateCandidateProceduresCounter,
+	analysisstats.ArrayCFGWalksCounter,
+	analysisstats.DataflowCFGWalksCounter,
+	analysisstats.DictionaryCFGWalksCounter,
+	analysisstats.ErrorCFGWalksCounter,
+	analysisstats.ResourceCFGWalksCounter,
+	analysisstats.ExcelCFGWalksCounter,
+	analysisstats.RuntimeCFGWalksCounter,
+	analysisstats.SourceLineScansCounter,
+	analysisstats.SemanticKernelRunsCounter,
+}
 
 func TestPhysicalSourceLineCount(t *testing.T) {
 	for _, test := range []struct {
@@ -78,6 +117,31 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 			t.Fatalf("stage %q = %+v", name, stage)
 		}
 	}
+	validDomains := make(map[string]bool, len(procedureLocalProfileDomains))
+	for _, name := range procedureLocalProfileDomains {
+		validDomains[name] = true
+	}
+	for _, stage := range stages {
+		if !strings.HasPrefix(stage.Name, "procedure_local/") {
+			continue
+		}
+		if !validDomains[stage.Name] {
+			t.Fatalf("unknown procedure-local domain stage %q", stage.Name)
+		}
+		if stage.Calls < 1 || stage.Outcome != "ok" {
+			t.Fatalf("procedure-local domain stage %q = %+v", stage.Name, stage)
+		}
+	}
+	for _, name := range []string{
+		analysisstats.ProcedureLocalSourceScan,
+		analysisstats.ProcedureLocalRuntime,
+		analysisstats.ProcedureLocalDictionary,
+		analysisstats.ProcedureLocalOther,
+	} {
+		if _, ok := stageByName[name]; !ok {
+			t.Fatalf("missing representative procedure-local domain stage %q: %+v", name, stages)
+		}
+	}
 	counterByName := make(map[string]uint64, len(counters))
 	for _, counter := range counters {
 		counterByName[counter.Name] = counter.Value
@@ -93,6 +157,25 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 		if _, ok := counterByName[name]; !ok {
 			t.Fatalf("missing counter %q: %+v", name, counters)
 		}
+	}
+	validCounters := make(map[string]bool, len(procedureLocalProfileCounters))
+	for _, name := range procedureLocalProfileCounters {
+		validCounters[name] = true
+	}
+	for name := range counterByName {
+		if validCounters[name] {
+			continue
+		}
+		looksLikeProcedureLocalCounter := strings.HasSuffix(name, "_candidate_procedures") ||
+			strings.HasSuffix(name, "_cfg_walks") ||
+			name == analysisstats.SourceLineScansCounter ||
+			name == analysisstats.SemanticKernelRunsCounter
+		if looksLikeProcedureLocalCounter {
+			t.Fatalf("unknown procedure-local work counter %q", name)
+		}
+	}
+	if counterByName[analysisstats.SourceLineScansCounter] == 0 || counterByName[analysisstats.SemanticKernelRunsCounter] == 0 {
+		t.Fatalf("procedure-local traversal counters = %+v", counters)
 	}
 	if counterByName["file_count"] != 1 || counterByName["procedure_count"] != 1 {
 		t.Fatalf("workload counters = %+v", counters)
@@ -156,10 +239,36 @@ func TestBatchAnalysisSkipsVBA202ContextWhenDisabled(t *testing.T) {
 	for _, counter := range counters {
 		counterByName[counter.Name] = counter.Value
 	}
-	for _, name := range []string{"object_summary_evaluations", "object_entry_flow_evaluations"} {
+	for _, name := range []string{
+		"object_summary_evaluations", "object_entry_flow_evaluations",
+	} {
 		value, ok := counterByName[name]
-		if !ok || value != 0 {
+		if ok && value != 0 {
 			t.Fatalf("disabled VBA202 counter %q = %d (present=%t), want zero", name, value, ok)
+		}
+	}
+}
+
+func TestBatchAnalysisDoesNotCountDisabledRuntimeCandidates(t *testing.T) {
+	root := t.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modules, "Main.bas"), []byte("Option Explicit\nPublic Sub Run()\n  Debug.Print 1 / 0\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+	cfg := config.Default()
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	recorder := analysisstats.NewRecorder()
+	if _, err := (Analyzer{RootDir: root, Config: cfg}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder)); err != nil {
+		t.Fatal(err)
+	}
+	_, counters := recorder.Totals()
+	for _, counter := range counters {
+		if counter.Name == analysisstats.RuntimeCandidateProceduresCounter || counter.Name == analysisstats.RuntimeCFGWalksCounter {
+			t.Fatalf("disabled runtime counter %q = %d, want absent", counter.Name, counter.Value)
 		}
 	}
 }

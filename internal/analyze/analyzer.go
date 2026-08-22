@@ -2071,22 +2071,29 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, file parsedFile, procedures []sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, filePermitHeld bool) ([]Finding, error) {
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		return a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, map[string]bool{})
+		profile := newProcedureDomainProfile(cancelCtx)
+		findings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, map[string]bool{}, profile)
+		profile.flush()
+		return findings, err
 	}
 	budget := analysisExecutionBudgetFromContext(cancelCtx)
 	if !filePermitHeld || budget == nil || budget.procedureJobs == nil || budget.limit < 2 || len(procedures) < procedureParallelThreshold {
+		profile := newProcedureDomainProfile(cancelCtx)
 		reportedMissingHelpers := map[string]bool{}
 		var findings []Finding
 		for _, proc := range procedures {
 			if err := cancelCtx.Err(); err != nil {
+				profile.flush()
 				return nil, err
 			}
-			procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)
+			procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers, profile)
 			if err != nil {
+				profile.flush()
 				return nil, err
 			}
 			findings = append(findings, procedureFindings...)
 		}
+		profile.flush()
 		return findings, nil
 	}
 
@@ -2133,6 +2140,7 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 			run: func(jobCtx context.Context) ([]Finding, error) {
 				procedureFile := file
 				procedureFile.Root = nil
+				profile := newProcedureDomainProfile(jobCtx)
 				startOnce.Do(func() {
 					if a.procedureAnalysisStartHook != nil {
 						a.procedureAnalysisStartHook()
@@ -2142,12 +2150,14 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 					if err := jobCtx.Err(); err != nil {
 						return nil, err
 					}
-					findings, err := a.analyzeProcedureContext(jobCtx, procedureFile, procedures[index], moduleDecls, ctx, projectEffects, map[string]bool{})
+					findings, err := a.analyzeProcedureContext(jobCtx, procedureFile, procedures[index], moduleDecls, ctx, projectEffects, map[string]bool{}, profile)
 					if err != nil {
+						profile.flush()
 						return nil, err
 					}
 					results[index] = findings
 				}
+				profile.flush()
 				return nil, nil
 			},
 			complete: func(_ []Finding, err error) {
@@ -2192,7 +2202,7 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 	return findings, nil
 }
 
-func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool) ([]Finding, error) {
+func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool, profile *procedureDomainProfile) ([]Finding, error) {
 	if err := cancelCtx.Err(); err != nil {
 		return nil, err
 	}
@@ -2204,18 +2214,65 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	guardedFinds := map[string]bool{}
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
-	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, ctx.procedures)...)
-	findings = append(findings, a.deterministicRuntimeErrorFindings(file, proc, ctx, moduleDecls)...)
+	var candidateCounters uint32
+	otherMeasurement := profile.begin(procedureDomainOther)
+	opaqueFindings := a.opaqueBooleanArgumentFindings(file, proc, ctx.procedures)
+	if a.Config.Analyze.DetectOpaqueBooleanArguments {
+		profile.kernel()
+	}
+	otherMeasurement.finish(len(opaqueFindings))
+	findings = append(findings, opaqueFindings...)
+	runtimeMeasurement := profile.begin(procedureDomainRuntime)
+	runtimeFindings := a.deterministicRuntimeErrorFindings(file, proc, ctx, moduleDecls)
+	if enabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA249"); known && enabled {
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterRuntimeCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterRuntimeCFGWalks, 1)
+		}
+	}
+	runtimeMeasurement.finish(len(runtimeFindings))
+	findings = append(findings, runtimeFindings...)
 	if dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
-		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
+		dictionaryMeasurement := profile.begin(procedureDomainDictionary)
+		dictionaryFindings := a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)
+		if proc.Graph != nil {
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterDictionaryCandidateProcedures)
+			profile.add(analysisstats.CounterDictionaryCFGWalks, 1)
+		}
+		dictionaryMeasurement.finish(len(dictionaryFindings))
+		findings = append(findings, dictionaryFindings...)
 	}
 	if a.Config.Analyze.DetectDictionaryIterationValueUsage {
-		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
+		dictionaryMeasurement := profile.begin(procedureDomainDictionary)
+		dictionaryFindings := a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterDictionaryCandidateProcedures)
+		dictionaryMeasurement.finish(len(dictionaryFindings))
+		findings = append(findings, dictionaryFindings...)
 	}
 
+	sourceMeasurement := profile.begin(procedureDomainSourceScan)
+	sourceFindingStart := len(findings)
+	if profile != nil {
+		start := proc.StartLine - 1
+		if start < 0 {
+			start = 0
+		}
+		end := proc.EndLine
+		if end > len(file.Lines) {
+			end = len(file.Lines)
+		}
+		if end > start {
+			profile.add(analysisstats.CounterSourceLineScans, uint64(end-start))
+			profile.kernel()
+		}
+	}
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
 		if i&0xff == 0 {
 			if err := cancelCtx.Err(); err != nil {
+				sourceMeasurement.finishOutcome(len(findings)-sourceFindingStart, cancelCtx, err)
 				return nil, err
 			}
 		}
@@ -2235,13 +2292,23 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			continue
 		}
 		if worksheetStatementStart && a.Config.Analyze.ForbidUnqualifiedExcelObjects {
-			findings = append(findings, a.unqualifiedExcelFindings(file, proc, lineNo, normalizedCodeLine(worksheetStmt), shadowedVBA205)...)
+			excelMeasurement := profile.begin(procedureDomainExcel)
+			excelFindings := a.unqualifiedExcelFindings(file, proc, lineNo, normalizedCodeLine(worksheetStmt), shadowedVBA205)
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+			excelMeasurement.finish(len(excelFindings))
+			findings = append(findings, excelFindings...)
 		}
 		if m := withRe.FindStringSubmatch(stmt); len(m) > 0 {
 			withStack = append(withStack, resolveWithInfo(m[1], decls))
 			if worksheetStatementStart {
 				if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
-					findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
+					excelMeasurement := profile.begin(procedureDomainExcel)
+					excelFindings := a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)
+					profile.kernel()
+					profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+					excelMeasurement.finish(len(excelFindings))
+					findings = append(findings, excelFindings...)
 				}
 				if rootWith := withRe.FindStringSubmatch(worksheetStmt); len(rootWith) > 0 {
 					worksheetRoots.pushWith(rootWith[1])
@@ -2253,7 +2320,12 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		}
 		if worksheetStatementStart {
 			if a.Config.Analyze.DetectWorksheetRootMismatch || a.Config.Analyze.DetectUnstableLastRowPatterns {
-				findings = append(findings, a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)...)
+				excelMeasurement := profile.begin(procedureDomainExcel)
+				excelFindings := a.worksheetRootFindings(file, proc, lineNo, worksheetStmt, worksheetRoots)
+				profile.kernel()
+				profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+				excelMeasurement.finish(len(excelFindings))
+				findings = append(findings, excelFindings...)
 			}
 			worksheetRoots.observeSetAssignment(worksheetStmt)
 		}
@@ -2268,9 +2340,19 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			}
 		}
 		if a.Config.Analyze.DetectExcelObjectMemberMismatch {
-			findings = append(findings, a.memberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)...)
+			excelMeasurement := profile.begin(procedureDomainExcel)
+			excelFindings := a.memberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+			excelMeasurement.finish(len(excelFindings))
+			findings = append(findings, excelFindings...)
 		} else {
-			findings = append(findings, a.legacyMemberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)...)
+			excelMeasurement := profile.begin(procedureDomainExcel)
+			excelFindings := a.legacyMemberMismatchFindings(file, proc, lineNo, stmt, decls, withStack)
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+			excelMeasurement.finish(len(excelFindings))
+			findings = append(findings, excelFindings...)
 		}
 		if setAssignRe.MatchString(stmt) {
 			if name, receiver, ok := rangeFindAssignment(stmt, currentWithExpression(withStack)); ok {
@@ -2281,83 +2363,236 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		if m := assignRe.FindStringSubmatch(stmt); len(m) > 0 {
 			target := strings.ToLower(m[1])
 			if proc.Name != "" && strings.EqualFold(target, proc.Name) && isObjectType(proc.ReturnType) {
-				findings = append(findings, a.objectSetFinding(file, proc, lineNo, "VBA103", m[1], proc.ReturnType))
+				objectMeasurement := profile.begin(procedureDomainObject)
+				objectFinding := a.objectSetFinding(file, proc, lineNo, "VBA103", m[1], proc.ReturnType)
+				profile.kernel()
+				profile.candidate(&candidateCounters, analysisstats.CounterObjectCandidateProcedures)
+				objectMeasurement.finish(1)
+				findings = append(findings, objectFinding)
 				continue
 			}
 			if cm := callAssignRe.FindStringSubmatch(stmt); len(cm) > 0 {
 				callee := strings.ToLower(lastName(cm[2]))
 				if typ, ok := decls.lookup(target); ok && typ.Object && isObjectType(ctx.functionReturns[callee]) {
-					findings = append(findings, a.objectSetFinding(file, proc, lineNo, "VBA102", m[1], ctx.functionReturns[callee]))
+					objectMeasurement := profile.begin(procedureDomainObject)
+					objectFinding := a.objectSetFinding(file, proc, lineNo, "VBA102", m[1], ctx.functionReturns[callee])
+					profile.kernel()
+					profile.candidate(&candidateCounters, analysisstats.CounterObjectCandidateProcedures)
+					objectMeasurement.finish(1)
+					findings = append(findings, objectFinding)
 					continue
 				}
 			}
 			if decl, ok := decls.lookup(target); ok && decl.Object {
-				findings = append(findings, a.objectSetFinding(file, proc, lineNo, "VBA101", m[1], decl.Type))
+				objectMeasurement := profile.begin(procedureDomainObject)
+				objectFinding := a.objectSetFinding(file, proc, lineNo, "VBA101", m[1], decl.Type)
+				profile.kernel()
+				profile.candidate(&candidateCounters, analysisstats.CounterObjectCandidateProcedures)
+				objectMeasurement.finish(1)
+				findings = append(findings, objectFinding)
 			}
 		}
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
-			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
+			excelMeasurement := profile.begin(procedureDomainExcel)
+			excelFindings := a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+			excelMeasurement.finish(len(excelFindings))
+			findings = append(findings, excelFindings...)
 		}
 		if a.Config.Analyze.DetectObjectArrayComparison && objectNothingEqualityLineIsExecutable(proc, lineNo, stmt) {
-			findings = append(findings, a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)...)
+			arrayMeasurement := profile.begin(procedureDomainArray)
+			arrayFindings := a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+			arrayMeasurement.finish(len(arrayFindings))
+			findings = append(findings, arrayFindings...)
 		}
 		_ = lower
 	}
+	sourceMeasurement.finish(len(findings) - sourceFindingStart)
 	if a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
 		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
 		if plan := ctx.objectAnalysis.plans[key]; plan != nil {
-			findings = append(findings, a.objectUseBeforeSetIRFindingsPlan(plan, ctx.objectAnalysis.summaries, ctx.objectAnalysis.entries[key])...)
+			objectMeasurement := profile.begin(procedureDomainObject)
+			objectFindings := a.objectUseBeforeSetIRFindingsPlan(plan, ctx.objectAnalysis.summaries, ctx.objectAnalysis.entries[key])
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterObjectCandidateProcedures)
+			objectMeasurement.finish(len(objectFindings))
+			findings = append(findings, objectFindings...)
 		}
 	}
-	findings = append(findings, a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)...)
+	arrayMeasurement := profile.begin(procedureDomainArray)
+	arrayFindings := a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)
+	if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison {
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterArrayCFGWalks, 1)
+			if a.Config.Analyze.DetectArrayLifecycleSafety {
+				profile.add(analysisstats.CounterArrayCFGWalks, 1)
+			}
+		}
+	}
+	arrayMeasurement.finish(len(arrayFindings))
+	findings = append(findings, arrayFindings...)
 	findings = suppressDeterministicArrayWarningDuplicates(findings)
 	if a.Config.Analyze.DetectRedimPreserveInLoops {
-		findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
+		arrayMeasurement := profile.begin(procedureDomainArray)
+		redimFindings := a.redimPreserveLoopFindings(file, proc, moduleDecls)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterArrayCFGWalks, 1)
+		}
+		arrayMeasurement.finish(len(redimFindings))
+		findings = append(findings, redimFindings...)
 	}
 	if a.Config.Analyze.DetectApplicationStateRestore {
-		findings = append(findings, a.applicationStateFindings(file, proc, projectEffects)...)
+		applicationMeasurement := profile.begin(procedureDomainApplicationState)
+		applicationFindings := a.applicationStateFindings(file, proc, projectEffects)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterApplicationStateCandidateProcedures)
+		applicationMeasurement.finish(len(applicationFindings))
+		findings = append(findings, applicationFindings...)
 	}
 	if a.Config.Analyze.DetectApplicationStateCallEffects {
-		findings = append(findings, a.applicationStateCallEffectFindings(file, proc, projectEffects)...)
+		applicationMeasurement := profile.begin(procedureDomainApplicationState)
+		applicationFindings := a.applicationStateCallEffectFindings(file, proc, projectEffects)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterApplicationStateCandidateProcedures)
+		applicationMeasurement.finish(len(applicationFindings))
+		findings = append(findings, applicationFindings...)
 	}
 	if a.Config.Analyze.DetectEventHandlerReentry {
-		findings = append(findings, a.eventHandlerReentryFindings(file, proc, projectEffects)...)
+		applicationMeasurement := profile.begin(procedureDomainApplicationState)
+		eventFindings := a.eventHandlerReentryFindings(file, proc, projectEffects)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterApplicationStateCandidateProcedures)
+		applicationMeasurement.finish(len(eventFindings))
+		findings = append(findings, eventFindings...)
 	}
+	dataflowMeasurement := profile.begin(procedureDomainDataflow)
 	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
+	if (a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction) && proc.Graph != nil {
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
+		profile.add(analysisstats.CounterDataflowCFGWalks, 1)
+	}
+	dataflowMeasurement.finishOutcome(len(dataFlowFindings)+len(httpFindings), cancelCtx, err)
 	if err != nil {
 		return nil, err
 	}
 	findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
-	findings = append(findings, a.filePathSafetyFindings(file, proc)...)
+	if a.Config.Analyze.DetectUnsafeFilePath {
+		dataflowMeasurement := profile.begin(procedureDomainDataflow)
+		filePathFindings := a.filePathSafetyFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
+		dataflowMeasurement.finish(len(filePathFindings))
+		findings = append(findings, filePathFindings...)
+	}
 	findings = append(findings, httpFindings...)
 	if a.Config.Analyze.DetectResourceLeaks {
-		findings = append(findings, a.resourceLeakFindings(file, proc)...)
+		resourceMeasurement := profile.begin(procedureDomainResource)
+		resourceFindings := a.resourceLeakFindings(file, proc)
+		if proc.Graph != nil {
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterResourceCandidateProcedures)
+			profile.add(analysisstats.CounterResourceCFGWalks, 1)
+		}
+		resourceMeasurement.finish(len(resourceFindings))
+		findings = append(findings, resourceFindings...)
 	}
 	if a.Config.Analyze.DetectExcelCellAccessInLoops {
-		findings = append(findings, a.excelLoopAccessFindings(file, proc)...)
+		excelMeasurement := profile.begin(procedureDomainExcel)
+		excelFindings := a.excelLoopAccessFindings(file, proc)
+		if a.typeDB != nil && proc.Graph != nil {
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+			profile.add(analysisstats.CounterExcelCFGWalks, 1)
+		}
+		excelMeasurement.finish(len(excelFindings))
+		findings = append(findings, excelFindings...)
 	}
 	if a.Config.Analyze.DetectLoopInvariantExcelObjectResolution {
-		findings = append(findings, a.excelLoopInvariantFindings(file, proc)...)
+		excelMeasurement := profile.begin(procedureDomainExcel)
+		excelFindings := a.excelLoopInvariantFindings(file, proc)
+		if a.typeDB != nil && proc.Graph != nil {
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+			profile.add(analysisstats.CounterExcelCFGWalks, 1)
+		}
+		excelMeasurement.finish(len(excelFindings))
+		findings = append(findings, excelFindings...)
 	}
 	if a.Config.Analyze.DetectExpensiveFullRangeOperations {
-		findings = append(findings, a.expensiveFullRangeOperationFindings(file, proc)...)
+		excelMeasurement := profile.begin(procedureDomainExcel)
+		excelFindings := a.expensiveFullRangeOperationFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+		excelMeasurement.finish(len(excelFindings))
+		findings = append(findings, excelFindings...)
 	}
 	if a.Config.Analyze.DetectValue2PerformanceOpportunities {
-		findings = append(findings, a.value2PerformanceFindings(file, proc)...)
+		excelMeasurement := profile.begin(procedureDomainExcel)
+		excelFindings := a.value2PerformanceFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterExcelCandidateProcedures)
+		excelMeasurement.finish(len(excelFindings))
+		findings = append(findings, excelFindings...)
 	}
 	if a.Config.Analyze.DetectErrorHandlerFallthrough {
-		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
+		errorMeasurement := profile.begin(procedureDomainError)
+		errorFindings := a.errorHandlerFallthroughFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterErrorCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterErrorCFGWalks, 1)
+		}
+		errorMeasurement.finish(len(errorFindings))
+		findings = append(findings, errorFindings...)
 	}
 	if a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
-		findings = append(findings, a.leakedOnErrorResumeNextFindings(file, proc)...)
+		errorMeasurement := profile.begin(procedureDomainError)
+		errorFindings := a.leakedOnErrorResumeNextFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterErrorCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterErrorCFGWalks, 1)
+		}
+		errorMeasurement.finish(len(errorFindings))
+		findings = append(findings, errorFindings...)
 	}
 	if a.Config.Analyze.DetectErrorSuppressionPropagation {
-		findings = append(findings, a.errorSuppressionFindings(file, proc, projectEffects)...)
+		errorMeasurement := profile.begin(procedureDomainError)
+		errorFindings := a.errorSuppressionFindings(file, proc, projectEffects)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterErrorCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterErrorCFGWalks, 1)
+		}
+		errorMeasurement.finish(len(errorFindings))
+		findings = append(findings, errorFindings...)
 	}
 	if a.Config.Analyze.DetectRangeValueArrayShape {
-		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
+		arrayMeasurement := profile.begin(procedureDomainArray)
+		arrayFindings := a.rangeValueShapeFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterArrayCFGWalks, 1)
+		}
+		arrayMeasurement.finish(len(arrayFindings))
+		findings = append(findings, arrayFindings...)
 	}
-	findings = append(findings, a.functionReturnPathFindings(file, proc)...)
+	otherMeasurement = profile.begin(procedureDomainOther)
+	functionFindings := a.functionReturnPathFindings(file, proc)
+	if a.Config.Analyze.DetectFunctionReturnPath {
+		profile.kernel()
+	}
+	otherMeasurement.finish(len(functionFindings))
+	findings = append(findings, functionFindings...)
 	findings = suppressDictionaryGuardsForUninitializedObjects(findings)
 	return findings, cancelCtx.Err()
 }
