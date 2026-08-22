@@ -808,6 +808,36 @@ diagnostics. The canonical stage labels include `parse`, `procedure_ir`, `cfg`,
 `effect_summaries`, `project_context`, `project_wide_diagnostics`,
 `procedure_local_diagnostics`, and `suppression_and_finalize`.
 
+For issue #694, `procedure_local_diagnostics` remains the parent stage and is
+also attributed to these aggregate semantic-domain stages:
+`procedure_local/source_scan`, `procedure_local/runtime`,
+`procedure_local/array`, `procedure_local/object`,
+`procedure_local/dictionary`, `procedure_local/error`,
+`procedure_local/dataflow`, `procedure_local/resource`,
+`procedure_local/excel`, `procedure_local/application_state`, and
+`procedure_local/other`. The records are aggregate observations rather than
+one timer per procedure. Procedure work may run in parallel, so a domain's
+elapsed time is cumulative worker time, not an additive wall-time partition;
+domain values can exceed the parent stage's elapsed time. Typed Excel, object
+summary/entry state, and project-context index work remain in their existing
+top-level stages.
+
+Domain profiling also reports work counters when the corresponding work runs.
+Candidate counters are `runtime_candidate_procedures`,
+`array_candidate_procedures`, `object_candidate_procedures`,
+`dictionary_candidate_procedures`, `error_candidate_procedures`,
+`dataflow_candidate_procedures`, `resource_candidate_procedures`,
+`excel_candidate_procedures`, and `application_state_candidate_procedures`.
+Traversal counters are `source_line_scans`, `runtime_cfg_walks`,
+`array_cfg_walks`, `dictionary_cfg_walks`, `error_cfg_walks`,
+`dataflow_cfg_walks`, `resource_cfg_walks`, and `excel_cfg_walks`.
+`semantic_kernel_runs` counts valid semantic-domain kernel invocations.
+Candidates are procedures that pass the relevant rule gate and are actually
+analyzed; traversal counters count started source/CFG traversals. These are
+workload counters and never counts of emitted findings.
+The CLI emits stage records with `operation="analyze/stage"` and counter
+records with `operation="analyze/counter"`; both remain stderr-only.
+
 Run the deterministic synthetic benchmark and the real-world corpus hotspot
 benchmark with the repository tasks:
 
@@ -820,7 +850,17 @@ rtk task bench:corpus
 `bench:analyze` retains the existing multi-module and object-worklist baselines.
 `bench:analyze-single-module` keeps fixture generation outside the timed region
 and covers single-module scales around 100, 500, 1,000, and 2,000 procedures,
-including large call graphs, declaration sets, and CFGs. `bench:corpus` runs the checked-in
+including large call graphs, declaration sets, and CFGs. The 2,000-procedure
+domain-profiling matrix retains these four workload shapes:
+
+| benchmark                        | workload shape         |
+| -------------------------------- | ---------------------- |
+| `independent/2000-procedures`    | independent procedures |
+| `declarations/2000-declarations` | declaration-heavy      |
+| `chain/2000-procedures`          | call-heavy             |
+| `cfg-independent/2000-branches`  | CFG-heavy              |
+
+`bench:corpus` runs the checked-in
 `std-vba` and `ronecone` analyze-only sub-benchmarks. These tasks use
 `-benchmem -benchtime=1x`; on Windows they run through `scripts/dev/go.ps1` to
 keep CGO and tree-sitter toolchain selection consistent. Benchmark output should
@@ -933,15 +973,144 @@ ROneCOne profiling is developer-only and must be selected explicitly as a leaf
 benchmark; it is Excel/COM-free and is not part of ordinary `go test ./...`:
 
 ```powershell
-rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 2
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 5
 ```
 
-On Linux or macOS, use the same command with `rtk go test` instead of the
-Windows wrapper. Keep the Go version, machine, power state, benchmark filter,
-and sample count constant for before/after comparisons, and report unusually
-slow runs with the complete command and environment. Benchmark generation is
-test-only infrastructure and must not run from ordinary `analyze`, `check`,
-corpus snapshot, or Excel/VBE oracle workflows.
+For a reproducible CPU and allocation profile, use `-count=1` and keep the
+benchmark binary and profiles outside the repository. The benchmark
+materializes and loads the fixture before the timed `analyze-only` region.
+Go's process-wide profile may still observe the small amount of benchmark
+setup, but the leaf filter keeps the captured workload focused on analyzer
+work:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -Command '$cpu = Join-Path $env:TEMP "xlflow-ronecone.cpu.pprof"; $mem = Join-Path $env:TEMP "xlflow-ronecone.mem.pprof"; $bin = Join-Path $env:TEMP "xlflow-ronecone-corpus.test.exe"; $args = @("test", "./internal/staticanalysis/corpus", "-run", "^$", "-bench", "^BenchmarkRealWorldCorpus/ronecone/analyze-only$", "-benchtime=1x", "-count=1", "-cpuprofile=$cpu", "-memprofile=$mem", "-o=$bin"); & ".\scripts\dev\go.ps1" @args'
+rtk go tool pprof -top "$env:TEMP\xlflow-ronecone-corpus.test.exe" "$env:TEMP\xlflow-ronecone.cpu.pprof"
+rtk go tool pprof -sample_index=alloc_space -top "$env:TEMP\xlflow-ronecone-corpus.test.exe" "$env:TEMP\xlflow-ronecone.mem.pprof"
+rtk go tool pprof -sample_index=alloc_objects -top "$env:TEMP\xlflow-ronecone-corpus.test.exe" "$env:TEMP\xlflow-ronecone.mem.pprof"
+rtk go tool pprof -sample_index=inuse_space -top "$env:TEMP\xlflow-ronecone-corpus.test.exe" "$env:TEMP\xlflow-ronecone.mem.pprof"
+```
+
+Add `-cum` to the first `pprof` view when cumulative CPU consumers are needed;
+without it the view is ordered by flat CPU. The next two report top
+allocation-space and allocation-object consumers, and the final view reports
+heap in use when that profile sample is available. Keep the complete command
+output with the benchmark record.
+
+On Linux or macOS, use this directly executable POSIX equivalent. It writes a
+native test binary (without the Windows `.exe` suffix) and keeps profiles in a
+temporary directory:
+
+```sh
+profile_dir="${TMPDIR:-/tmp}/xlflow-ronecone-694"
+rtk mkdir -p "$profile_dir"
+rtk go test ./internal/staticanalysis/corpus \
+  -run '^$' \
+  -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' \
+  -benchtime=1x -count=1 \
+  -cpuprofile="$profile_dir/ronecone.cpu.pprof" \
+  -memprofile="$profile_dir/ronecone.mem.pprof" \
+  -o="$profile_dir/ronecone-corpus.test"
+rtk go tool pprof -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.cpu.pprof"
+rtk go tool pprof -sample_index=alloc_space -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.mem.pprof"
+rtk go tool pprof -sample_index=alloc_objects -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.mem.pprof"
+rtk go tool pprof -sample_index=inuse_space -top "$profile_dir/ronecone-corpus.test" "$profile_dir/ronecone.mem.pprof"
+```
+
+Keep the Go version, machine, power state, benchmark filter, and sample count
+constant for before/after comparisons, and report unusually slow runs with the
+complete command and environment. Benchmark generation is test-only
+infrastructure and must not run from ordinary `analyze`, `check`, corpus
+snapshot, or Excel/VBE oracle workflows.
+
+### Issue #694 baseline record
+
+The post-wave-2 observations above remain historical reference values and must
+not be overwritten. After capturing the first rule-domain profiles, append one
+completed row per ROneCOne or synthetic workload to the following record shape.
+Record the repository SHA, machine/toolchain and power-state notes, complete
+command, wall time, `B/op`, `allocs/op`, top CPU consumers, top alloc-space
+consumers, and the semantic-domain timings and work counters from the same run.
+
+The initial #694 capture was made on 2026-08-22 from base SHA
+`6858757ea938d60e123cbadd2e9facf1f34e4217` plus the #694 working-tree change,
+using Go 1.26.6 on Windows 11 Home 10.0.22631, a Thirdwave XA7C-R38 with an
+Intel Core i7-12700 (12 cores / 20 logical processors), and the normal
+plugged-in developer power state. Five `-benchtime=1x` samples were taken
+serially.
+
+| workload                          | `ns/op` samples                                                                |   median | min--max spread |  median `B/op` | median `allocs/op` |
+| --------------------------------- | ------------------------------------------------------------------------------ | -------: | --------------: | -------------: | -----------------: |
+| ROneCOne analyze-only             | 23,815,264,100; 24,193,761,600; 28,179,640,900; 26,682,322,000; 24,197,555,700 | 24.198 s |         4.365 s | 27,319,440,464 |        178,295,249 |
+| independent / 2,000 procedures    | 1,237,728,400; 1,234,423,800; 1,236,714,300; 1,231,832,700; 2,670,839,000      |  1.237 s |         1.439 s |  1,469,165,568 |         11,450,545 |
+| declarations / 2,000 declarations | 1,673,953,300; 1,540,513,700; 1,431,431,000; 1,462,106,900; 1,617,206,000      |  1.541 s |         0.243 s |  3,578,884,504 |          1,044,303 |
+| chain / 2,000 procedures          | 963,067,500; 864,272,300; 849,723,600; 876,187,500; 856,400,900                |  0.864 s |         0.113 s |  1,501,293,120 |         11,974,108 |
+
+The `cfg-independent/2000-branches` fixture remains contract-tested and
+benchmark-selectable, but its five-sample capture did not complete on this
+machine: the pre-instrumentation five-run command failed after about 368 s and
+a single run exceeded ten minutes. No partial timing is presented as a
+baseline. This is a workload result, not a disabled-profiling regression.
+
+For ROneCOne, the median parent `procedure_local_diagnostics` wall time was
+3.456 s. Domain values below are median accumulated worker execution times;
+they overlap under procedure parallelism and therefore must not be added or
+compared as a partition of the parent wall time. In addition,
+`procedure_local/source_scan` contains the source-line loop and therefore
+includes elapsed time and result counts from nested Excel, object, and array
+measurements; those nested values must not be added to source-scan values.
+
+| semantic domain         | median accumulated time |
+| ----------------------- | ----------------------: |
+| source scan             |                 1.754 s |
+| runtime                 |                 4.964 s |
+| array                   |                10.001 s |
+| object                  |                 1.585 s |
+| dictionary / collection |                 3.011 s |
+| error                   |                 0.109 s |
+| dataflow                |                28.564 s |
+| resource                |                 0.014 s |
+| Excel-specific          |                 4.604 s |
+| application state       |                 0.284 s |
+| other                   |                 0.002 s |
+
+The work counters were stable across the five samples: 1,565 procedures for
+each candidate domain; 24,303 source lines scanned; 134,289 semantic kernel
+runs; 1,565 runtime, dictionary, dataflow, and resource CFG walks; 6,260 array
+CFG walks; 4,695 error CFG walks; and 3,130 Excel CFG walks. The object
+candidate counter was 1,565 and has no CFG-walk counter by design.
+
+The `-count=1` CPU/allocation profile completed in 23.83 s with 84.88 s of CPU
+samples. Its flat CPU top ten were `runtime.semasleep` (13.57%),
+`runtime.scanObject` (4.92%), `runtime.tryDeferToSpanScan` (4.50%),
+`regexp.(*Regexp).tryBacktrack` (3.19%), `aeshashbody` (2.95%),
+`runtime.spanClass.sizeclass` (2.58%), `runtime.findObject` (2.21%),
+`internal/runtime/maps.(*Iter).Next` (2.14%), `strings.ToLower` (1.89%), and
+`runtime.scanObjectsSmall` (1.87%).
+
+The alloc-space top ten were `cloneHTTPState` (5,755.43 MB),
+`cloneArrayState` (5,420.14 MB), `internal/bytealg.MakeNoZero` (2,049.05 MB),
+`meetArrayState` (1,694.06 MB), `arrayVariables.func1` (1,106.16 MB),
+`strings.Fields` (1,098.09 MB), `cfg.buildQueryIndex` (824.41 MB),
+`constexpr.NewValues` (520.52 MB), `cfg.Graph.Dominators` (426.53 MB), and
+`dcFlowState.clone` (425.54 MB). The alloc-object top ten were
+`internal/bytealg.MakeNoZero` (58,031,404), `strings.Fields` (18,443,983),
+`reflect.unsafe_New` (17,694,988), `cloneArrayState` (4,887,930),
+`strings.genSplit` (4,482,038), tree-sitter `GoString` (3,883,006),
+`cloneApplicationStateSnapshot` (3,746,639), `cfg.buildQueryIndex` (3,598,583),
+`cloneHTTPState` (3,361,323), and `meetArrayState` (2,406,706).
+
+The unprofiled, bounded `independent/2000` scheduling benchmark changed from a
+pre-instrumentation median of 1.391 s to 1.382 s after instrumentation
+(-0.6%). Median allocation changed from 1,469,546,792 B/op and 11,452,572
+allocs/op to 1,470,062,104 B/op and 11,450,001 allocs/op. This is within the
+local 2% disabled-path threshold; timing remains observational rather than a
+CI assertion.
+
+Use the same five-sample benchmark convention for comparisons where practical;
+the profile-producing command itself remains a single `-count=1` run so profile
+files are not overwritten. These are developer observations for same-machine
+comparison, not fixed CI thresholds.
 
 ## Verification requirements
 

@@ -21,7 +21,7 @@ import (
 // procedures grows. The source is generated before the timer starts so these
 // measurements describe analysis work rather than fixture construction.
 func BenchmarkSyntheticProject(b *testing.B) {
-	for _, procedureCount := range []int{100, 500, 1000} {
+	for _, procedureCount := range []int{100, 500, 1000, 2000} {
 		procedureCount := procedureCount
 		b.Run(fmt.Sprintf("%d-procedures", procedureCount), func(b *testing.B) {
 			root := b.TempDir()
@@ -285,6 +285,32 @@ func TestSingleModuleBenchmarkFixtureScale(t *testing.T) {
 			}
 			if fixture.calls != workload.expectedCalls() {
 				t.Fatalf("single-module %s calls = %d, want %d", workload.benchmarkName(), fixture.calls, workload.expectedCalls())
+			}
+		})
+	}
+}
+
+// TestCanonicalLargeModuleBenchmarkFixtures keeps the four workload shapes
+// used for rule-domain comparisons explicit. These fixtures are materialized
+// and parsed here, but analyzer execution remains benchmark-only so ordinary
+// test runs do not spend minutes on 2,000-procedure analysis.
+func TestCanonicalLargeModuleBenchmarkFixtures(t *testing.T) {
+	for _, shape := range []string{"independent", "declarations", "chain", "cfg-independent"} {
+		shape := shape
+		t.Run(shape, func(t *testing.T) {
+			workload := singleModuleBenchmarkWorkload{shape: shape, size: 2000}
+			fixture := writeSingleModuleBenchmarkProject(t, t.TempDir(), workload)
+			if fixture.moduleCount != 1 || fixture.sourcePath == "" || fixture.lines == 0 {
+				t.Fatalf("large-module %s fixture metadata = %+v", shape, fixture)
+			}
+			if fixture.procedures != workload.expectedProcedures() {
+				t.Fatalf("large-module %s procedures = %d, want %d", shape, fixture.procedures, workload.expectedProcedures())
+			}
+			if fixture.moduleDeclarations != workload.expectedModuleDeclarations() {
+				t.Fatalf("large-module %s declarations = %d, want %d", shape, fixture.moduleDeclarations, workload.expectedModuleDeclarations())
+			}
+			if fixture.calls != workload.expectedCalls() {
+				t.Fatalf("large-module %s calls = %d, want %d", shape, fixture.calls, workload.expectedCalls())
 			}
 		})
 	}
@@ -619,18 +645,35 @@ func reportAnalysisRecorderMetrics(b *testing.B, recorder *analysisstats.Recorde
 	}
 	stages, counters := recorder.Totals()
 	for _, stage := range stages {
-		metricName := "stage_" + strings.ReplaceAll(stage.Name, "-", "_")
+		// Domain stages contain a slash (for example,
+		// procedure_local/source_scan). Normalize it before passing the name to
+		// testing.B so each domain remains one stable benchmark metric rather
+		// than being interpreted as a benchmark sub-name.
+		metricName := "stage_" + normalizeAnalysisBenchmarkMetricName(stage.Name)
 		b.ReportMetric(float64(stage.Elapsed.Nanoseconds())/float64(iterations), metricName+"-ns/op")
 		b.ReportMetric(float64(stage.Calls)/float64(iterations), metricName+"-calls/op")
 		b.ReportMetric(float64(stage.ResultCount)/float64(iterations), metricName+"-results/op")
 	}
 	for _, counter := range counters {
-		metricName := "counter_" + strings.ReplaceAll(counter.Name, "-", "_")
+		metricName := "counter_" + normalizeAnalysisBenchmarkMetricName(counter.Name)
 		if strings.HasPrefix(counter.Name, "max_") {
 			b.ReportMetric(float64(counter.Value), metricName)
 			continue
 		}
 		metricValue := float64(counter.Value) / float64(iterations)
 		b.ReportMetric(metricValue, metricName+"/op")
+	}
+}
+
+func normalizeAnalysisBenchmarkMetricName(name string) string {
+	return strings.NewReplacer("-", "_", "/", "_").Replace(name)
+}
+
+func TestBenchmarkMetricNameNormalizesDomainSlash(t *testing.T) {
+	if got := normalizeAnalysisBenchmarkMetricName("procedure_local/source_scan"); got != "procedure_local_source_scan" {
+		t.Fatalf("normalized domain metric = %q, want %q", got, "procedure_local_source_scan")
+	}
+	if got := normalizeAnalysisBenchmarkMetricName("runtime-cfg/walks"); got != "runtime_cfg_walks" {
+		t.Fatalf("normalized compound metric = %q, want %q", got, "runtime_cfg_walks")
 	}
 }

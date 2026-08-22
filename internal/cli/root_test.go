@@ -760,11 +760,18 @@ func TestAnalyzePerformanceLogFlagIsOptInAndPreservesJSON(t *testing.T) {
 		`stage="typed_excel_diagnostics"`, `stage="byref_diagnostics"`,
 		`stage="compile_equivalent_diagnostics"`,
 		`stage="suppression_and_finalize"`, `stage="analyze_total"`,
+		`stage="procedure_local/source_scan"`, `stage="procedure_local/runtime"`,
+		`stage="procedure_local/dictionary"`, `stage="procedure_local/excel"`,
+		`stage="procedure_local/other"`,
 		`operation="analyze/counter"`, `counter="file_count"`, `counter="line_count"`,
 		`counter="module_declaration_count"`, `counter="procedure_count"`,
 		`counter="max_lines_per_file"`, `counter="max_procedures_per_file"`,
 		`counter="max_calls_per_file"`, `counter="max_statements_per_procedure"`,
 		`counter="max_cfg_blocks_per_procedure"`, `counter="max_cfg_edges_per_procedure"`,
+		`counter="runtime_candidate_procedures"`,
+		`counter="dictionary_candidate_procedures"`,
+		`counter="dictionary_cfg_walks"`, `counter="runtime_cfg_walks"`,
+		`counter="source_line_scans"`, `counter="semantic_kernel_runs"`,
 	} {
 		if !strings.Contains(profiledStderr, expected) {
 			t.Fatalf("performance output missing %q:\n%s", expected, profiledStderr)
@@ -776,6 +783,8 @@ func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
 	recorder := analysisstats.NewRecorder()
 	recorder.Record(analysisstats.Stage{Name: "procedure_local_diagnostics", Elapsed: time.Millisecond, Outcome: "ok", ResultCount: 2})
 	recorder.Record(analysisstats.Stage{Name: "procedure_local_diagnostics", Elapsed: 2 * time.Millisecond, Outcome: "error", ResultCount: 3})
+	recorder.Record(analysisstats.Stage{Name: "procedure_local/source_scan", Elapsed: time.Millisecond, Outcome: "ok", ResultCount: 0})
+	recorder.Record(analysisstats.Stage{Name: "procedure_local/runtime", Elapsed: 2 * time.Millisecond, Outcome: "ok", ResultCount: 1})
 	recorder.Record(analysisstats.Stage{Name: "suppression_and_finalize", Elapsed: time.Millisecond, Outcome: "ok", ResultCount: 1})
 	for _, name := range []string{
 		"file_count", "procedure_count", "statement_count", "expression_count",
@@ -789,18 +798,42 @@ func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
 	} {
 		recorder.AddMax(name, 1)
 	}
+	for _, name := range []string{
+		"runtime_candidate_procedures", "array_candidate_procedures",
+		"object_candidate_procedures", "dictionary_candidate_procedures",
+		"error_candidate_procedures", "dataflow_candidate_procedures",
+		"resource_candidate_procedures", "excel_candidate_procedures",
+		"application_state_candidate_procedures", "array_cfg_walks",
+		"dataflow_cfg_walks", "dictionary_cfg_walks", "error_cfg_walks",
+		"resource_cfg_walks", "excel_cfg_walks", "runtime_cfg_walks",
+		"source_line_scans", "semantic_kernel_runs",
+	} {
+		recorder.AddSum(name, 1)
+	}
 
 	var stderr bytes.Buffer
 	writeAnalyzePerformance(&stderr, recorder)
 	output := stderr.String()
 	for _, expected := range []string{
 		`stage="procedure_local_diagnostics" elapsed_ms=3.000`,
+		`stage="procedure_local/source_scan"`,
+		`stage="procedure_local/runtime"`,
 		`calls=2 result_count=5 outcome="error"`,
 		`stage="suppression_and_finalize"`,
 		`counter="file_count"`, `counter="procedure_count"`,
 		`counter="max_lines_per_file"`, `counter="max_procedures_per_file"`,
 		`counter="max_calls_per_file"`, `counter="max_statements_per_procedure"`,
 		`counter="max_cfg_blocks_per_procedure"`, `counter="max_cfg_edges_per_procedure"`,
+		`counter="runtime_candidate_procedures"`, `counter="array_candidate_procedures"`,
+		`counter="object_candidate_procedures"`, `counter="dictionary_candidate_procedures"`,
+		`counter="error_candidate_procedures"`, `counter="dataflow_candidate_procedures"`,
+		`counter="resource_candidate_procedures"`, `counter="excel_candidate_procedures"`,
+		`counter="application_state_candidate_procedures"`,
+		`counter="array_cfg_walks"`, `counter="dataflow_cfg_walks"`,
+		`counter="dictionary_cfg_walks"`, `counter="error_cfg_walks"`,
+		`counter="resource_cfg_walks"`, `counter="excel_cfg_walks"`,
+		`counter="runtime_cfg_walks"`, `counter="source_line_scans"`,
+		`counter="semantic_kernel_runs"`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("performance output missing %q:\n%s", expected, output)

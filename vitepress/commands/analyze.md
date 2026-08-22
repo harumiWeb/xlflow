@@ -69,14 +69,40 @@ complete `analyze_total` operation. The canonical stage labels include
 `project_context_indexes`, `procedure_local_diagnostics`,
 `typed_excel_diagnostics`, and `suppression_and_finalize`.
 
+`procedure_local_diagnostics` remains the parent stage for procedure-local
+work. With profiling enabled, aggregate child stages attribute that work to
+`procedure_local/source_scan`, `procedure_local/runtime`,
+`procedure_local/array`, `procedure_local/object`,
+`procedure_local/dictionary`, `procedure_local/error`,
+`procedure_local/dataflow`, `procedure_local/resource`,
+`procedure_local/excel`, `procedure_local/application_state`, and
+`procedure_local/other`. These are aggregate domain records, not per-procedure
+timers. Parallel procedure analysis reports cumulative worker time for a
+domain, so child timings are not a wall-time partition and may exceed the
+parent stage.
+
 The performance output includes stable aggregate workload counters:
 `file_count`, `procedure_count`, `statement_count`, `expression_count`,
 `call_site_count`, `cfg_block_count`, `cfg_edge_count`, and
 `project_symbol_count`, `line_count`, and `module_declaration_count`.
+Counter records use the existing `operation="analyze/counter"` stderr shape;
+stage records use `operation="analyze/stage"`.
 `line_count` uses physical source lines and excludes a terminal newline from the
 count.
 Subsystem worklist counters such as `object_summary_evaluations`,
 `object_entry_flow_evaluations`, and `byref_diagnostic_passes` may also appear.
+Procedure-local work counters include candidate counts
+(`runtime_candidate_procedures`, `array_candidate_procedures`,
+`object_candidate_procedures`, `dictionary_candidate_procedures`,
+`error_candidate_procedures`, `dataflow_candidate_procedures`,
+`resource_candidate_procedures`, `excel_candidate_procedures`, and
+`application_state_candidate_procedures`), traversal counts
+(`source_line_scans`, `runtime_cfg_walks`, `array_cfg_walks`,
+`dictionary_cfg_walks`, `error_cfg_walks`, `dataflow_cfg_walks`,
+`resource_cfg_walks`, and `excel_cfg_walks`), and
+`semantic_kernel_runs`. They describe work performed: candidates pass the
+relevant rule gate, traversals start a source/CFG walk, and kernel runs invoke
+a valid semantic-domain kernel. Findings are not counted by these counters.
 Large-module profiles also expose maximum dimensions:
 `max_lines_per_file`, `max_procedures_per_file`, `max_calls_per_file`,
 `max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and
@@ -85,6 +111,14 @@ findings. Timings vary by machine and Go toolchain; use them for same-
 environment comparisons rather than fixed pass/fail limits.
 The flag does not change findings, their order, exit status, or the JSON schema.
 `check` has no performance-log option.
+
+For the reproducible ROneCOne CPU and heap workflow, keep fixture materialization
+outside the timed `analyze-only` benchmark and run the explicit leaf benchmark
+with `-benchtime=1x -count=1` as documented in the
+[static-analysis corpus specification](https://github.com/harumiWeb/xlflow/blob/main/docs/specs/static-analysis-corpus.md).
+Use `go tool pprof` on the resulting files to inspect CPU, allocation-space,
+allocation-object, and heap-in-use views. These developer profiles are written
+to temporary paths and are never part of analyzer JSON output.
 
 For reproducible developer measurements, use `rtk task bench:analyze-single-module`
 for the synthetic large-module workloads, `rtk task bench:analyze` for the

@@ -120,17 +120,30 @@ func reportCorpusAnalysisRecorderMetrics(b *testing.B, recorder *analysisstats.R
 	}
 	stages, counters := recorder.Totals()
 	for _, stage := range stages {
-		metricName := "stage_" + strings.ReplaceAll(stage.Name, "-", "_")
+		// Domain stages use slash-qualified names. Normalize the slash before
+		// emitting benchmark metrics so each stage is reported as one stable
+		// metric name (the /op suffix below remains the standard unit suffix).
+		metricName := "stage_" + normalizeCorpusBenchmarkMetricName(stage.Name)
 		b.ReportMetric(float64(stage.Elapsed.Nanoseconds())/float64(iterations), metricName+"-ns/op")
 		b.ReportMetric(float64(stage.Calls)/float64(iterations), metricName+"-calls/op")
 		b.ReportMetric(float64(stage.ResultCount)/float64(iterations), metricName+"-results/op")
 	}
 	for _, counter := range counters {
-		metricName := "counter_" + strings.ReplaceAll(counter.Name, "-", "_")
+		metricName := "counter_" + normalizeCorpusBenchmarkMetricName(counter.Name)
 		if strings.HasPrefix(counter.Name, "max_") {
 			b.ReportMetric(float64(counter.Value), metricName)
 			continue
 		}
 		b.ReportMetric(float64(counter.Value)/float64(iterations), metricName+"/op")
+	}
+}
+
+func normalizeCorpusBenchmarkMetricName(name string) string {
+	return strings.NewReplacer("-", "_", "/", "_").Replace(name)
+}
+
+func TestCorpusBenchmarkMetricNameNormalizesDomainSlash(t *testing.T) {
+	if got := normalizeCorpusBenchmarkMetricName("procedure_local/source_scan"); got != "procedure_local_source_scan" {
+		t.Fatalf("normalized domain metric = %q, want %q", got, "procedure_local_source_scan")
 	}
 }

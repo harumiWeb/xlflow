@@ -4,6 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in semantic-domain profiling beneath
+  `procedure_local_diagnostics` for giant-module `xlflow analyze` workloads.
+  `--performance-log` now attributes aggregate source-scan, runtime, array,
+  object, dictionary, error, dataflow, resource, Excel, application-state,
+  and other procedure-local work, and reports candidate/traversal/kernel work
+  counters. Parallel domain timings are cumulative worker time, not an additive
+  wall-time partition. Output remains stderr-only and findings, exit codes, and
+  JSON output are unchanged when profiling is enabled.
+
 - Added bounded procedure-level parallelism for large single-file
   `xlflow analyze` workloads. Procedure batches share the analyzer's bounded
   execution budget with file workers, merge into source-ordered result slots,
