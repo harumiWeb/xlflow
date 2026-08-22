@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,6 +123,110 @@ type Analyzer struct {
 	// analysisWorkerLimit is test-only tuning for the bounded file analysis
 	// pool. A zero value derives the limit from GOMAXPROCS and project size.
 	analysisWorkerLimit int
+}
+
+// procedureParallelThreshold is deliberately high enough that the ordinary
+// file path does not pay for a second scheduler.  The threshold is kept
+// internal: callers should tune the existing analysis worker limit rather than
+// depending on a new public setting.
+const procedureParallelThreshold = 500
+
+// analysisExecutionBudget is shared by file jobs and procedure jobs.  A file
+// worker gives its slot back while waiting for its procedure jobs, so nested
+// scheduling never multiplies the configured worker count.
+type analysisExecutionBudget struct {
+	limit         int
+	sem           chan struct{}
+	procedureJobs chan procedureBatchJob
+	procedureWg   sync.WaitGroup
+}
+
+type procedureBatchJob struct {
+	ctx      context.Context
+	run      func(context.Context) ([]Finding, error)
+	complete func([]Finding, error)
+}
+
+type analysisExecutionBudgetKey struct{}
+
+func newAnalysisExecutionBudget(limit int) *analysisExecutionBudget {
+	if limit < 1 {
+		limit = 1
+	}
+	return &analysisExecutionBudget{limit: limit, sem: make(chan struct{}, limit)}
+}
+
+func (budget *analysisExecutionBudget) acquire(ctx context.Context) error {
+	if budget == nil {
+		return ctx.Err()
+	}
+	select {
+	case budget.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (budget *analysisExecutionBudget) release() {
+	if budget == nil {
+		return
+	}
+	<-budget.sem
+}
+
+func (budget *analysisExecutionBudget) startProcedurePool() {
+	if budget == nil {
+		return
+	}
+	budget.procedureJobs = make(chan procedureBatchJob)
+	budget.procedureWg.Add(budget.limit)
+	for worker := 0; worker < budget.limit; worker++ {
+		go func() {
+			defer budget.procedureWg.Done()
+			for job := range budget.procedureJobs {
+				if err := budget.acquire(job.ctx); err != nil {
+					job.complete(nil, err)
+					continue
+				}
+				findings, err := job.run(job.ctx)
+				budget.release()
+				job.complete(findings, err)
+			}
+		}()
+	}
+}
+
+func (budget *analysisExecutionBudget) submitProcedureBatch(ctx context.Context, job procedureBatchJob) bool {
+	if budget == nil || budget.procedureJobs == nil {
+		return false
+	}
+	select {
+	case budget.procedureJobs <- job:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (budget *analysisExecutionBudget) stopProcedurePool() {
+	if budget == nil || budget.procedureJobs == nil {
+		return
+	}
+	close(budget.procedureJobs)
+	budget.procedureWg.Wait()
+}
+
+func withAnalysisExecutionBudget(ctx context.Context, budget *analysisExecutionBudget) context.Context {
+	return context.WithValue(ctx, analysisExecutionBudgetKey{}, budget)
+}
+
+func analysisExecutionBudgetFromContext(ctx context.Context) *analysisExecutionBudget {
+	if ctx == nil {
+		return nil
+	}
+	budget, _ := ctx.Value(analysisExecutionBudgetKey{}).(*analysisExecutionBudget)
+	return budget
 }
 
 var (
@@ -697,19 +802,31 @@ func (a Analyzer) analyzeFilesBoundedWith(ctx context.Context, files []parsedFil
 	if len(files) == 0 {
 		return nil, nil
 	}
-	workerLimit := a.analysisWorkerLimit
-	if workerLimit <= 0 {
-		workerLimit = runtime.GOMAXPROCS(0)
+	executionLimit := a.analysisWorkerLimit
+	if executionLimit <= 0 {
+		executionLimit = runtime.GOMAXPROCS(0)
 	}
-	if workerLimit < 1 {
-		workerLimit = 1
+	if executionLimit < 1 {
+		executionLimit = 1
 	}
+	workerLimit := executionLimit
 	if workerLimit > len(files) {
 		workerLimit = len(files)
 	}
 
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	budget := newAnalysisExecutionBudget(executionLimit)
+	for _, file := range files {
+		if len(file.Procedures) >= procedureParallelThreshold || len(file.IR.Procedures) >= procedureParallelThreshold {
+			if executionLimit > 1 {
+				budget.startProcedurePool()
+			}
+			break
+		}
+	}
+	defer budget.stopProcedurePool()
+	workCtx = withAnalysisExecutionBudget(workCtx, budget)
 	jobs := make(chan int)
 	results := make([]parsedFileAnalysisResult, len(files))
 	var (
@@ -729,7 +846,11 @@ func (a Analyzer) analyzeFilesBoundedWith(ctx context.Context, files []parsedFil
 					if !ok {
 						return
 					}
+					if err := budget.acquire(workCtx); err != nil {
+						return
+					}
 					fileFindings, filePreflight, err := analyzeFile(workCtx, files[index], analysisCtx, projectEffects, publicAPITypeIndex)
+					budget.release()
 					results[index] = parsedFileAnalysisResult{findings: fileFindings, preflight: filePreflight, err: err}
 					if err != nil {
 						workerErrOnce.Do(func() {
@@ -767,22 +888,39 @@ sendJobs:
 func (a Analyzer) analyzeParsedFileBounded(ctx context.Context, file parsedFile, analysisCtx analysisContext, projectEffects effects.ProjectSummary, publicAPITypeIndex *apiTypeIndex) ([]Finding, []Finding, error) {
 	finishStage := analysisstats.Measure(ctx, "procedure_local_diagnostics")
 	var findings []Finding
+	// Procedure-local analysis only consumes immutable source/IR/CFG facts. Run
+	// it outside ParsedDocument.Read so workers never retain or receive a
+	// tree-sitter node. The tree is leased below only for the one file-global
+	// scan that still needs it.
+	file.Root = nil
+	procedureFindings, procedureErr := a.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
+	if procedureErr != nil {
+		finishStage(0, procedureErr)
+		return nil, nil, procedureErr
+	}
+	findings = append(findings, procedureFindings...)
 	readErr := file.Parsed.Read(func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		file.Root = view.Root
-		fileFindings, err := a.analyzeParsedFileContext(ctx, analysisCtx, file, projectEffects)
-		if err != nil {
-			return err
+		if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
+			procedures := sourceProceduresWithEffects(file, projectEffects)
+			guardFindings, err := a.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
+			if err != nil {
+				return err
+			}
+			findings = append(findings, guardFindings...)
 		}
-		findings = append(findings, fileFindings...)
 		if publicAPITypeIndex != nil {
 			findings = append(findings, a.publicAPITypeFindings(file, publicAPITypeIndex)...)
 		}
 		findings = append(findings, a.errorValueWrapperFindings(file)...)
 		return nil
 	})
+	// ParsedView.Root is borrowed for the Read callback only. Do not leave the
+	// tree-sitter node reachable from the file projection after the lease ends.
+	file.Root = nil
 	finishStage(len(findings), readErr)
 	if readErr != nil {
 		return nil, nil, readErr
@@ -1912,37 +2050,132 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 	if err := cancelCtx.Err(); err != nil {
 		return nil, err
 	}
-	reportedMissingHelpers := map[string]bool{}
 	var findings []Finding
 	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := file.moduleDecls()
 	findings = append(findings, a.hardcodedSecretFindings(file, procedures)...)
-	for _, proc := range procedures {
-		if err := cancelCtx.Err(); err != nil {
-			return nil, err
-		}
-		procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)
-		if err != nil {
-			return nil, err
-		}
-		findings = append(findings, procedureFindings...)
+	procedureFindings, err := a.analyzeProcedureContextsBounded(cancelCtx, file, procedures, moduleDecls, ctx, projectEffects)
+	if err != nil {
+		return nil, err
 	}
+	findings = append(findings, procedureFindings...)
+	return findings, cancelCtx.Err()
+}
+
+// analyzeProcedureContextsBounded evaluates procedure-local rules using the
+// shared analysis execution budget. Each result is stored by source index and
+// merged in that order, so worker completion order cannot affect findings.
+func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, file parsedFile, procedures []sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary) ([]Finding, error) {
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)
-		if err != nil {
-			return nil, err
-		}
-		findings = append(findings, procedureFindings...)
+		return a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, map[string]bool{})
 	}
-	if a.Config.Analyze.DetectNonShortCircuitObjectGuard {
-		guardFindings, err := a.vba212ScanWithContext(cancelCtx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
-		if err != nil {
-			return nil, err
+	budget := analysisExecutionBudgetFromContext(cancelCtx)
+	if budget == nil || budget.procedureJobs == nil || budget.limit < 2 || len(procedures) < procedureParallelThreshold {
+		reportedMissingHelpers := map[string]bool{}
+		var findings []Finding
+		for _, proc := range procedures {
+			if err := cancelCtx.Err(); err != nil {
+				return nil, err
+			}
+			procedureFindings, err := a.analyzeProcedureContext(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers)
+			if err != nil {
+				return nil, err
+			}
+			findings = append(findings, procedureFindings...)
 		}
-		findings = append(findings, guardFindings...)
+		return findings, nil
 	}
-	return findings, cancelCtx.Err()
+
+	// The enclosing file job owns one permit. Yield it before waiting for
+	// procedure jobs; otherwise a full set of file workers could deadlock while
+	// trying to acquire the same budget for their children.
+	budget.release()
+	defer func() {
+		// The caller owns a permit for the duration of analyzeParsedFileBounded.
+		// Cancellation is handled by the caller's existing error path. Reacquire
+		// without that cancellation so the ownership invariant remains balanced
+		// before the file worker releases its original permit.
+		_ = budget.acquire(context.Background())
+	}()
+
+	workCtx, cancel := context.WithCancel(cancelCtx)
+	defer cancel()
+	results := make([][]Finding, len(procedures))
+	var (
+		batches  sync.WaitGroup
+		firstErr error
+		errOnce  sync.Once
+	)
+	batchSize := (len(procedures) + budget.limit*4 - 1) / (budget.limit * 4)
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	for start := 0; start < len(procedures); start += batchSize {
+		end := start + batchSize
+		if end > len(procedures) {
+			end = len(procedures)
+		}
+		batchStart, batchEnd := start, end
+		batches.Add(1)
+		job := procedureBatchJob{
+			ctx: workCtx,
+			run: func(jobCtx context.Context) ([]Finding, error) {
+				procedureFile := file
+				procedureFile.Root = nil
+				var batchFindings []Finding
+				for index := batchStart; index < batchEnd; index++ {
+					if err := jobCtx.Err(); err != nil {
+						return nil, err
+					}
+					findings, err := a.analyzeProcedureContext(jobCtx, procedureFile, procedures[index], moduleDecls, ctx, projectEffects, map[string]bool{})
+					if err != nil {
+						return nil, err
+					}
+					results[index] = findings
+				}
+				return batchFindings, nil
+			},
+			complete: func(_ []Finding, err error) {
+				defer batches.Done()
+				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					errOnce.Do(func() {
+						firstErr = err
+						cancel()
+					})
+				}
+			},
+		}
+		if !budget.submitProcedureBatch(workCtx, job) {
+			batches.Done()
+			break
+		}
+	}
+	batches.Wait()
+	if err := cancelCtx.Err(); err != nil {
+		return nil, err
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Helper dependency findings are file-global one-time diagnostics. Workers
+	// collect them locally, then this source-order merge keeps the first
+	// occurrence and drops later duplicates exactly like the serial map did.
+	seenHelpers := map[string]bool{}
+	var findings []Finding
+	for index := range results {
+		for _, finding := range results[index] {
+			if finding.Code == "VBA105" || finding.Code == "VBA106" {
+				if seenHelpers[finding.Code] {
+					continue
+				}
+				seenHelpers[finding.Code] = true
+			}
+			findings = append(findings, finding)
+		}
+	}
+	return findings, nil
 }
 
 func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool) ([]Finding, error) {

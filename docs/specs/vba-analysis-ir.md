@@ -287,6 +287,30 @@ run. The performance recorder reports `module_fact_builds` and
 and one procedure build per procedure, independent of the number of rule
 families that consume them.
 
+### Batch procedure-worker boundary
+
+Batch `analyze` may evaluate procedures concurrently for a large file after
+the project and file facts have been constructed. Procedure workers share the
+same immutable `moduleAnalysisFacts`, `procedureAnalysisFacts`, resolution
+snapshot, effect/object summaries, and analyzer indexes; flow state, rule
+overlays, statistics deltas, and finding buffers remain procedure-local. The
+file coordinator owns file-global one-time diagnostics and performs any
+deduplication that depends on source order.
+
+The batch scheduler uses one bounded execution budget for file jobs and
+procedure batches. It does not create an independent full-size pool inside
+each file worker, and ordinary small files use the direct loop path. Procedure
+results are written to stable procedure-indexed slots, merged in source order,
+and passed through the existing final sort and suppression stages. Cancellation
+stops queued work, is checked by active context-aware scans, and does not
+publish partial findings.
+
+Workers consume owned IR, facts, and source values only. They must not retain
+tree-sitter nodes, a `ParsedDocument`, or borrowed `ParsedView.Source` data;
+all tree/source access remains within `ParsedDocument.Read`. This is an
+execution boundary for batch analysis and does not add a public CLI, JSON, or
+LSP contract.
+
 ## Compatibility and Layer Boundaries
 
 Existing adapters may project IR facts into `calls.CallSite`, analyzer findings,

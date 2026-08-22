@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -97,6 +98,49 @@ func BenchmarkSingleModuleSynthetic(b *testing.B) {
 			b.ReportMetric(float64(findings)/float64(b.N), "findings/op")
 			b.ReportMetric(float64(warnings)/float64(b.N), "warnings/op")
 			reportAnalysisRecorderMetrics(b, recorder, b.N)
+		})
+	}
+}
+
+// BenchmarkSingleModuleProcedureScheduling compares the serial procedure
+// path with the bounded procedure-aware path. The workload is intentionally a
+// single source file so file-level parallelism cannot hide a missing
+// procedure-level scheduler. Run with -cpu=1,2,4,8 to compare the effect of
+// the process-wide execution budget under different runtime settings.
+func BenchmarkSingleModuleProcedureScheduling(b *testing.B) {
+	for _, procedureCount := range []int{100, 500, 1000, 2000} {
+		procedureCount := procedureCount
+		b.Run(fmt.Sprintf("%d-procedures", procedureCount), func(b *testing.B) {
+			for _, mode := range []struct {
+				name  string
+				limit int
+			}{
+				{name: "serial", limit: 1},
+				{name: "bounded", limit: runtime.GOMAXPROCS(0)},
+			} {
+				mode := mode
+				b.Run(mode.name, func(b *testing.B) {
+					root := b.TempDir()
+					fixture := writeSingleModuleBenchmarkProject(b, root, singleModuleBenchmarkWorkload{shape: "independent", size: procedureCount})
+					b.Setenv(typedb.EnvDir, filepath.Join(b.TempDir(), "typelib"))
+					cfg := config.Default()
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					findings := 0
+					for i := 0; i < b.N; i++ {
+						result, err := (Analyzer{RootDir: root, Config: cfg, analysisWorkerLimit: mode.limit}).RunResult()
+						if err != nil {
+							b.Fatalf("analyze single-module %d-procedure fixture (%s): %v", procedureCount, mode.name, err)
+						}
+						findings += len(result.Findings)
+					}
+					b.StopTimer()
+
+					b.ReportMetric(float64(fixture.procedures), "procedures/op")
+					b.ReportMetric(float64(findings)/float64(b.N), "findings/op")
+				})
+			}
 		})
 	}
 }
@@ -274,7 +318,7 @@ type singleModuleBenchmarkWorkload struct {
 func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
 	workloads := make([]singleModuleBenchmarkWorkload, 0, 17)
 	for _, shape := range []string{"independent", "chain", "declarations"} {
-		for _, size := range []int{500, 1000, 2000} {
+		for _, size := range []int{100, 500, 1000, 2000} {
 			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
 		}
 	}

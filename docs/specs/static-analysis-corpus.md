@@ -829,6 +829,17 @@ retain wall time (`ns/op`), allocations, findings, workload dimensions, and the
 these are Go benchmark metrics, not stderr records from
 `analyze --performance-log`.
 
+For issue #675, the benchmark matrix must also include one-file workloads with
+100, 500, 1,000, and 2,000 procedures and a many-file workload. Where the
+host permits, compare `-cpu=1,2,4,8` (equivalent `GOMAXPROCS` settings) and
+record wall time, allocations, finding counts, and stable JSON equality across
+repeated runs. The 100-
+procedure and many-file cases guard the ordinary file-level fast path; the
+1,000- and 2,000-procedure cases measure the intended intra-file speedup. These
+measurements are hardware-local evidence, not CI timing thresholds, and the
+benchmark must not run from ordinary `analyze`, corpus snapshot, or VBE-oracle
+workflows.
+
 For issue #677, the same Windows amd64 machine (12th Gen Intel(R) Core(TM)
 i7-12700, Go 1.26.6 toolchain) was used with baseline HEAD
 `245d4ad0792bbc49c2769e3cbd7f0156dc9a7c33` and the implementation worktree,

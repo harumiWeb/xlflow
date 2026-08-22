@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added bounded procedure-level parallelism for large single-file
+  `xlflow analyze` workloads. Procedure batches share the analyzer's bounded
+  execution budget with file workers, merge into source-ordered result slots,
+  and preserve deterministic findings, suppression, JSON output, and
+  cancellation behavior. Ordinary small files retain the existing fast path.
+
 - Reused immutable file and procedure analysis facts across analyzer rule
   families. Shared declaration/constant/procedure indexes, statement and
   expression lookups, member-expression projections, and constant overlays
