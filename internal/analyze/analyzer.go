@@ -2472,7 +2472,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	dataflowMeasurement := profile.begin(procedureDomainDataflow)
 	dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
-	if (a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction) && proc.Graph != nil {
+	if (a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction || a.Config.Analyze.DetectUnsafeHTTPConfiguration || a.Config.Analyze.DetectMissingHTTPTimeout) && proc.Graph != nil {
 		profile.kernel()
 		profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
 		profile.add(analysisstats.CounterDataflowCFGWalks, 1)

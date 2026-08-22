@@ -273,6 +273,50 @@ func TestBatchAnalysisDoesNotCountDisabledRuntimeCandidates(t *testing.T) {
 	}
 }
 
+func TestBatchAnalysisProfilesHTTPOnlyDataflowWork(t *testing.T) {
+	root := t.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "Option Explicit\nPublic Sub Run()\n  Dim request As Object\n  Set request = CreateObject(\"MSXML2.XMLHTTP\")\n  request.Open \"GET\", \"http://example.test\", False\n  request.Send\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(modules, "Main.bas"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+	cfg := config.Default()
+	cfg.Analyze.DetectUntrustedDataFlow = false
+	cfg.Analyze.DetectUnsafeCommandConstruction = false
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	cfg.Analyze.DetectUnsafeHTTPConfiguration = true
+	cfg.Analyze.DetectMissingHTTPTimeout = true
+	recorder := analysisstats.NewRecorder()
+	if _, err := (Analyzer{RootDir: root, Config: cfg}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder)); err != nil {
+		t.Fatal(err)
+	}
+	stages, counters := recorder.Totals()
+	stageByName := make(map[string]analysisstats.Stage, len(stages))
+	for _, stage := range stages {
+		stageByName[stage.Name] = stage
+	}
+	if stageByName[analysisstats.ProcedureLocalDataflow].Calls == 0 {
+		t.Fatalf("HTTP-only dataflow stage missing: %+v", stages)
+	}
+	counterByName := make(map[string]uint64, len(counters))
+	for _, counter := range counters {
+		counterByName[counter.Name] = counter.Value
+	}
+	for _, name := range []string{
+		analysisstats.DataflowCandidateProceduresCounter,
+		analysisstats.DataflowCFGWalksCounter,
+		analysisstats.SemanticKernelRunsCounter,
+	} {
+		if counterByName[name] == 0 {
+			t.Fatalf("HTTP-only dataflow counter %q = %d; counters = %+v", name, counterByName[name], counters)
+		}
+	}
+}
+
 func TestVBA202WorklistEvaluationCountScalesWithDependencyChain(t *testing.T) {
 	const procedureCount = 40
 	root := t.TempDir()
