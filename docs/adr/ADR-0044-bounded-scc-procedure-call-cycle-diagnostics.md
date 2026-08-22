@@ -83,7 +83,7 @@ data. Normal `analyze` and `check` must not invoke exhaustive enumeration.
   contract and finding multiplicity.
 - `internal/vba/callgraph` provides the confirmed project-local graph and keeps
   exhaustive enumeration for explicit inspection.
-- Focused call-graph and analyzer tests cover self recursion, independent and
+- Focused call-graph and analyzer tests cover self-recursion, independent and
   dense SCCs, deterministic witnesses, cancellation, and large sparse graphs.
 - Developer benchmarks compare the pre-change exhaustive detector with the
   SCC detector using the same dense and 1000/2000-procedure fixtures.

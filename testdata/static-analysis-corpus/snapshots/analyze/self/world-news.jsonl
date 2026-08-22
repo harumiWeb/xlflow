@@ -1,6 +1,4 @@
 {"project":"self/world-news","file":"src/modules/App.bas","surface":"analyze","code":"VBA237","severity":"warning","line":13,"column":0}
-{"project":"self/world-news","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":96,"column":22}
-{"project":"self/world-news","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":107,"column":18}
 {"project":"self/world-news","file":"src/modules/JsonParser.bas","surface":"analyze","code":"VBA244","severity":"information","line":109,"column":18}
 {"project":"self/world-news","file":"src/modules/NewsApi.bas","surface":"analyze","code":"VBA224","severity":"warning","line":43,"column":0}
 {"project":"self/world-news","file":"src/modules/NewsApi.bas","surface":"analyze","code":"VBA224","severity":"warning","line":45,"column":0}

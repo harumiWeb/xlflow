@@ -1536,8 +1536,8 @@ intentional `Value` transfer.
 `VBA244` is default-enabled and batch-only. It reports one finding per cyclic
 strongly connected component (SCC), using only uniquely resolved project-local
 calls. An SCC is cyclic when it has multiple procedures or a self-edge. The
-normal analyzer does not enumerate elementary cycles; explicit graph-inspection
-surfaces may retain exhaustive cycle output. The finding's additive
+normal analyzer does not enumerate elementary cycles; the explicit
+graph-inspection API retains exhaustive cycle output. The finding's additive
 `call_cycle` JSON context contains a deterministic closed representative path,
 aligned call-site edges, cross-module and event-handler identities, dangerous
 effect evidence, and reachable resolution uncertainty. Context is aggregated

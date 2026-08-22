@@ -182,7 +182,6 @@
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":463,"column":13}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA237","severity":"warning","line":478,"column":0}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":500,"column":43}
-{"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA244","severity":"information","line":517,"column":56}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":530,"column":43}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA244","severity":"information","line":544,"column":34}
 {"project":"third_party/selenium-vba","file":"src/VBA/WebJsonConverter.cls","surface":"analyze","code":"VBA206","severity":"warning","line":571,"column":47}

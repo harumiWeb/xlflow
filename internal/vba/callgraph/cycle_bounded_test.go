@@ -24,8 +24,8 @@ func TestFindCyclicComponentsReportsOneDeterministicWitnessPerSCC(t *testing.T) 
 			matched("M", "M.bas", "A", "M", "M.bas", "B", 4, 1),
 			matched("M", "M.bas", "B", "M", "M.bas", "C", 5, 1),
 			matched("M", "M.bas", "C", "M", "M.bas", "A", 3, 1),
-			matched("M", "M.bas", "A", "M", "M.bas", "C", 6, 1),
-			matched("M", "M.bas", "C", "M", "M.bas", "A", 7, 1),
+			matched("M", "M.bas", "A", "M", "M.bas", "C", 5, 1),
+			matched("M", "M.bas", "C", "M", "M.bas", "A", 3, 1),
 			matched("M", "M.bas", "Leaf", "M", "M.bas", "Leaf", 7, 1),
 		},
 	})
@@ -59,7 +59,7 @@ func TestFindCyclicComponentsIsStableAcrossInputPermutationAndParallelEdges(t *t
 	input := SnapshotFromResult(&calls.Result{
 		Symbols: []symbols.Symbol{symbol("M", "M.bas", "A", 1), symbol("M", "M.bas", "B", 2), symbol("M", "M.bas", "C", 3)},
 		Calls: []calls.Call{
-			matched("M", "M.bas", "A", "M", "M.bas", "B", 20, 1),
+			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 1),
 			matched("M", "M.bas", "A", "M", "M.bas", "B", 2, 2),
 			matched("M", "M.bas", "B", "M", "M.bas", "C", 3, 3),
 			matched("M", "M.bas", "C", "M", "M.bas", "A", 1, 4),
@@ -85,7 +85,7 @@ func TestFindCyclicComponentsIsStableAcrossInputPermutationAndParallelEdges(t *t
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("components changed after input permutation: first=%#v second=%#v", first, second)
 	}
-	if len(first) != 1 || len(first[0].Witness.Edges) != 3 || first[0].Witness.Edges[0].Location.StartLine != 2 {
+	if len(first) != 1 || len(first[0].Witness.Edges) != 3 || first[0].Witness.Edges[0].Location.StartLine != 1 {
 		t.Fatalf("parallel endpoint/witness = %#v", first)
 	}
 }

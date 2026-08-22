@@ -920,46 +920,16 @@ func findCyclicComponentsGraphContext(ctx context.Context, g graph) ([]CyclicCom
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-
-	// Reduce parallel call sites to the earliest source edge for each ordered
-	// endpoint pair. The analyzer can retain all call sites separately; a
-	// representative cycle only needs one stable edge per transition.
-	byEndpoint := make(map[string]map[string]Edge, len(g.out))
-	for _, from := range keys {
-		for _, edge := range g.out[from] {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			to := edge.Callee.String()
-			if _, ok := nodes[to]; !ok {
-				continue
-			}
-			if byEndpoint[from] == nil {
-				byEndpoint[from] = make(map[string]Edge)
-			}
-			prior, exists := byEndpoint[from][to]
-			if !exists || edgeLess(edge, prior) {
-				byEndpoint[from][to] = edge
-			}
+	allEdges := make([]Edge, 0)
+	for _, edges := range g.out {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
+		allEdges = append(allEdges, edges...)
 	}
-
-	adjacency := make(map[string][]cycleArc, len(keys))
-	for _, from := range keys {
-		endpointEdges := byEndpoint[from]
-		if len(endpointEdges) == 0 {
-			continue
-		}
-		neighbors := make([]string, 0, len(endpointEdges))
-		for to := range endpointEdges {
-			neighbors = append(neighbors, to)
-		}
-		sort.Strings(neighbors)
-		arcs := make([]cycleArc, 0, len(neighbors))
-		for _, to := range neighbors {
-			arcs = append(arcs, cycleArc{to: to, edge: endpointEdges[to]})
-		}
-		adjacency[from] = arcs
+	adjacency, err := buildCycleAdjacency(ctx, nodes, allEdges, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	components, err := stronglyConnectedComponents(ctx, keys, adjacency)
@@ -1103,23 +1073,18 @@ type cycleArc struct {
 	edge Edge
 }
 
-// enumerateCycles uses Johnson's elementary-cycle traversal. Each iteration
-// finds the least strongly connected component in the remaining ordered
-// subgraph, runs the blocked/unblocked circuit search from that component's
-// least node, and then removes that root. This preserves every directed simple
-// path while avoiding the target-scoped back-edge omissions of the old DFS.
-func enumerateCycles(ctx context.Context, nodes map[string]ID, edges []Edge, allowed map[string]bool) ([]Cycle, error) {
+// buildCycleAdjacency reduces parallel edges to the earliest stable edge for
+// each ordered endpoint pair and returns deterministically sorted adjacency.
+// The optional allowed set scopes the result for exhaustive inspection while
+// preserving the same edge-selection contract used by bounded witnesses.
+func buildCycleAdjacency(ctx context.Context, nodes map[string]ID, edges []Edge, allowed map[string]bool) (map[string][]cycleArc, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	// Keep one deterministic source edge per endpoint pair. Analyze retains
-	// every distinct call site, but a cycle path has one edge per transition;
-	// choosing the earliest location avoids duplicate edge variants.
-	byEndpoint := map[string]map[string]Edge{}
+	byEndpoint := make(map[string]map[string]Edge)
 	for _, edge := range edges {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1137,7 +1102,7 @@ func enumerateCycles(ctx context.Context, nodes map[string]ID, edges []Edge, all
 			}
 		}
 		if byEndpoint[from] == nil {
-			byEndpoint[from] = map[string]Edge{}
+			byEndpoint[from] = make(map[string]Edge)
 		}
 		prior, exists := byEndpoint[from][to]
 		if !exists || edgeLess(edge, prior) {
@@ -1145,17 +1110,50 @@ func enumerateCycles(ctx context.Context, nodes map[string]ID, edges []Edge, all
 		}
 	}
 
+	fromKeys := make([]string, 0, len(byEndpoint))
+	for from := range byEndpoint {
+		fromKeys = append(fromKeys, from)
+	}
+	sort.Strings(fromKeys)
 	adjacency := make(map[string][]cycleArc, len(byEndpoint))
-	for from, endpointEdges := range byEndpoint {
-		for to, edge := range endpointEdges {
-			adjacency[from] = append(adjacency[from], cycleArc{to: to, edge: edge})
+	for _, from := range fromKeys {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		sort.Slice(adjacency[from], func(i, j int) bool {
-			if adjacency[from][i].to != adjacency[from][j].to {
-				return adjacency[from][i].to < adjacency[from][j].to
+		endpointEdges := byEndpoint[from]
+		neighbors := make([]string, 0, len(endpointEdges))
+		for to := range endpointEdges {
+			neighbors = append(neighbors, to)
+		}
+		sort.Strings(neighbors)
+		arcs := make([]cycleArc, 0, len(neighbors))
+		for _, to := range neighbors {
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
-			return edgeLess(adjacency[from][i].edge, adjacency[from][j].edge)
-		})
+			arcs = append(arcs, cycleArc{to: to, edge: endpointEdges[to]})
+		}
+		adjacency[from] = arcs
+	}
+	return adjacency, nil
+}
+
+// enumerateCycles uses Johnson's elementary-cycle traversal. Each iteration
+// finds the least strongly connected component in the remaining ordered
+// subgraph, runs the blocked/unblocked circuit search from that component's
+// least node, and then removes that root. This preserves every directed simple
+// path while avoiding the target-scoped back-edge omissions of the old DFS.
+func enumerateCycles(ctx context.Context, nodes map[string]ID, edges []Edge, allowed map[string]bool) ([]Cycle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	adjacency, err := buildCycleAdjacency(ctx, nodes, edges, allowed)
+	if err != nil {
+		return nil, err
 	}
 
 	keysSet := map[string]bool{}
@@ -1164,10 +1162,10 @@ func enumerateCycles(ctx context.Context, nodes map[string]ID, edges []Edge, all
 			keysSet[key] = true
 		}
 	}
-	for from, endpointEdges := range byEndpoint {
+	for from, arcs := range adjacency {
 		keysSet[from] = true
-		for to := range endpointEdges {
-			keysSet[to] = true
+		for _, arc := range arcs {
+			keysSet[arc.to] = true
 		}
 	}
 	keys := make([]string, 0, len(keysSet))

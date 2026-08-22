@@ -15,8 +15,10 @@ import (
 // timed region so the benchmark measures cycle detection.
 func BenchmarkCycleDetection(b *testing.B) {
 	b.Run("exhaustive-baseline/dense-scc-8", func(b *testing.B) {
-		benchmarkCycleDetector(b, completeCycleSnapshot(8), func(ctx context.Context, g graph) (int, error) {
-			nodes, edges := graphCycleInputs(g)
+		input := completeCycleSnapshot(8)
+		prepared := build(input)
+		nodes, edges := graphCycleInputs(prepared)
+		benchmarkCycleDetector(b, input, func(ctx context.Context, _ graph) (int, error) {
 			cycles, err := enumerateCycles(ctx, nodes, edges, nil)
 			return len(cycles), err
 		}, -1)

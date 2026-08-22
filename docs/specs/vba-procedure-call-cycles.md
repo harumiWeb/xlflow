@@ -26,9 +26,9 @@ outgoing edge, and returns to the root through a deterministic path. Alternative
 simple cycles in the same SCC are intentionally not reported by normal
 `analyze`/`check`.
 
-The explicit graph-inspection surface may retain exhaustive elementary-cycle
-enumeration where its contract requires all paths. That inspection behavior is
-separate from the bounded `VBA244` analyzer contract.
+The explicit graph-inspection surface remains available and retains exhaustive
+elementary-cycle enumeration where its contract requires all paths. That
+inspection behavior is separate from the bounded `VBA244` analyzer contract.
 
 ## Severity and context
 
@@ -77,8 +77,8 @@ is at most the number of cyclic SCCs, with exactly one finding per cyclic SCC
 when no suppression applies. The analyzer must not invoke exhaustive cycle
 enumeration on the normal `analyze` or `check` path.
 
-The exhaustive detector can remain available behind an explicit inspection or
-debugging surface. Performance coverage includes self recursion, a simple
+The exhaustive detector remains available behind an explicit inspection or
+debugging surface. Performance coverage includes self-recursion, a simple
 cycle, independent SCCs, dense SCCs with many alternative simple cycles, large
 acyclic graphs, and 1000–2000 procedure graphs. Benchmark results are retained
 with the implementation change; timing thresholds are not part of CI.
@@ -87,15 +87,18 @@ The local Windows/amd64 benchmark used the same Go toolchain and fixture for
 the old exhaustive detector and the bounded detector:
 
 ```text
-go test ./internal/vba/callgraph -run '^$' -bench '^BenchmarkCycleDetection$' -benchmem -benchtime=1x -count=5
+rtk task bench:callgraph-cycles
 ```
 
-For the 8-node complete SCC, median detector time fell from 1.043 s,
-736,920,616 B, and 24,534,409 allocations to 41.6 µs, 42,096 B, and 505
-allocations (25,072× faster; 99.9960% less time). Bounded runs remained
-linear-shaped for dense 100/250/1,000/2,000-node SCCs, 1,000/2,000-node
-rings, and 1,000/2,000-node DAGs; the dense SCC result count was one. These
-are local performance observations, not CI thresholds. The current benchmark
+For the 8-node complete SCC, median detector time fell from 947.1 ms,
+730,971,512 B, and 24,300,333 allocations to 56.9 µs, 73,280 B, and 904
+allocations (16,644× faster; 99.9940% less time). Bounded runs followed the
+SCC algorithm's O(V + E) input-size shape for dense 100/250/1,000/2,000-node
+SCCs, 1,000/2,000-node rings, and 1,000/2,000-node DAGs; the dense SCC result
+count was one (the 2,000-node dense SCC median was 22.0 ms). This describes
+the measured V + E relationship, not linearity in V alone for arbitrary graph
+density. These are local performance observations, not CI thresholds. The
+current benchmark
 also reports 16,064 elementary cycles/op for the complete SCC baseline versus
 1 component/op for the bounded detector; graph materialization is outside the
 timed detector region.
