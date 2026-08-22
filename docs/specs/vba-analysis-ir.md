@@ -287,6 +287,51 @@ run. The performance recorder reports `module_fact_builds` and
 and one procedure build per procedure, independent of the number of rule
 families that consume them.
 
+### Procedure features and applicability planning
+
+Each `procedureAnalysisFacts` value also owns one immutable applicability
+summary for the same analysis revision. The summary is a compact internal
+value equivalent to two bit sets: `present` contains features proven to occur
+in the procedure and `unknown` contains features whose absence cannot be
+proved. A feature in neither set is proven absent. The representation and bit
+assignments are internal; this specification defines the tri-state contract,
+not a public type or serialization format.
+
+Feature classification consumes the already-owned declarations, statements,
+expressions, calls, and accesses. It is built as part of the existing facts
+pass with at most one bounded visit of each owned IR projection. The planner
+then combines the local summary with module/project facts. Neither step
+may reparse source or run an independent source-text scan once per
+feature or rule family. Features are added only for actual semantic
+prerequisites, such as array shape/use and `ReDim`, loops, object/member or
+Dictionary/Collection access, error handling, runtime candidates, source/sink
+operations (including process launch, SQL, HTTP, and file I/O), resource
+acquire/release, Excel access, application-state mutation, event metadata,
+calls, ByRef mutation possibility, and dynamic/unresolved-call uncertainty.
+
+The applicability planner maps enabled diagnostic IDs to explicit semantic
+domain requirements and combines them with this summary, CFG/resolution
+completeness, module facts, and procedure/project effect summaries. It must
+run before a domain's expensive setup, CFG walk, or flow-state allocation.
+Only a proven-absent requirement may skip a domain. Unknown applicability is
+planned. Parse/read errors, missing or recovered IR, unknown CFG flow,
+incomplete resolution, ambiguous/dynamic/unresolved calls, and missing
+module/type/project facts therefore fail open. A hand-built source procedure
+that lacks the owned facts required for classification uses the same
+conservative unknown fallback.
+
+Project-wide indexes and effect closure remain complete whenever any procedure
+is planned for a domain. The planner may skip construction only when no
+procedure can be applicable; it must not build a reduced project index that
+would change propagated effects. Compile-equivalent diagnostics and existing
+unconditional compatibility paths retain their existing behavior.
+
+The summary and planner are reused by batch and realtime/LSP entry points and
+are safe for concurrent readers. The performance recorder reports one
+`planned_<domain>_runs` or `skipped_<domain>_runs` decision per procedure and
+gated domain. These are opt-in stderr telemetry only and do not change normal
+CLI JSON, LSP, diagnostic, or configuration contracts.
+
 ### Batch procedure-worker boundary
 
 Batch `analyze` may evaluate procedures concurrently for a large file after

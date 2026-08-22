@@ -145,6 +145,61 @@ func BenchmarkSingleModuleProcedureScheduling(b *testing.B) {
 	}
 }
 
+// BenchmarkProcedureApplicabilityPlanning isolates the bounded feature/fact
+// construction and the configuration-plus-feature planning decision. The
+// end-to-end single-module and corpus benchmarks measure the semantic work
+// avoided by those decisions.
+func BenchmarkProcedureApplicabilityPlanning(b *testing.B) {
+	fixtures := map[string]procedureir.ProcedureIR{
+		"scalar-only": {
+			Symbol:       procedureir.ProcedureSymbol{Name: "Scalar", Kind: procedureir.ProcedureSub},
+			Declarations: []procedureir.Declaration{{ID: 1, Name: "value", Type: "Long"}},
+			Statements:   []procedureir.Statement{{ID: 1, Kind: procedureir.StatementAssignment, Text: "value = 1"}},
+			Expressions:  []procedureir.Expression{{ID: 1, StatementID: 1, Kind: procedureir.ExpressionLiteral, Text: "1"}},
+		},
+		"array-heavy": {
+			Symbol:       procedureir.ProcedureSymbol{Name: "Arrays", Kind: procedureir.ProcedureSub},
+			Declarations: []procedureir.Declaration{{ID: 1, Name: "values", Type: "Variant", IsArray: true, ValueShape: procedureir.ValueShapeDynamicArray}},
+			Statements: []procedureir.Statement{
+				{ID: 1, Kind: procedureir.StatementReDim, Text: "ReDim values(100)"},
+				{ID: 2, Kind: procedureir.StatementFor, Text: "For i = 0 To UBound(values)"},
+			},
+		},
+		"mixed-domain": {
+			Symbol: procedureir.ProcedureSymbol{Name: "Mixed", Kind: procedureir.ProcedureSub, IsEventHandler: true},
+			Statements: []procedureir.Statement{
+				{ID: 1, Kind: procedureir.StatementOnError, Text: "On Error GoTo Failed"},
+				{ID: 2, Kind: procedureir.StatementFor, Text: "For Each cell In Range(\"A1:A10\")"},
+				{ID: 3, Kind: procedureir.StatementCall, Text: "Shell command"},
+			},
+			Calls: []procedureir.CallSite{{ID: 1, StatementID: 3, Callee: procedureir.Callee{Text: "Shell", BaseName: "Shell"}, Resolution: procedureir.CallResolution{Status: procedureir.ResolutionBuiltinLike}}},
+		},
+		"recovered": {
+			Symbol:     procedureir.ProcedureSymbol{Name: "Recovered", Kind: procedureir.ProcedureSub, Recovered: true},
+			Statements: []procedureir.Statement{{ID: 1, Kind: procedureir.StatementRecovered, Text: "?", Recovered: true}},
+		},
+	}
+	cfg := config.Default()
+	for name, fixture := range fixtures {
+		fixture := fixture
+		b.Run(name+"/feature-facts", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				facts := newProcedureAnalysisFactsWithDeclarations(fixture.Declarations, fixture.Statements, fixture.Expressions, fixture.Calls, fixture.Accesses)
+				_ = finalizeProcedureFeatures(facts.features, procedureir.DocumentIR{}, fixture, true, false)
+			}
+		})
+		facts := newProcedureAnalysisFactsWithDeclarations(fixture.Declarations, fixture.Statements, fixture.Expressions, fixture.Calls, fixture.Accesses)
+		proc := sourceProcedure{Facts: facts, Features: finalizeProcedureFeatures(facts.features, procedureir.DocumentIR{}, fixture, true, false)}
+		b.Run(name+"/plan", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = buildProcedureAnalysisPlan(cfg.Analyze, proc, map[string]sourceDeclaration{})
+			}
+		})
+	}
+}
+
 // BenchmarkObjectAnalysisWorklist isolates the object-summary and entry-state
 // stages on a deliberately reverse-ordered object-return chain. The source is
 // parsed and its IR/CFG are constructed before timing starts so the benchmark

@@ -103,6 +103,16 @@ Procedure-local work counters include candidate counts
 `semantic_kernel_runs`. They describe work performed: candidates pass the
 relevant rule gate, traversals start a source/CFG walk, and kernel runs invoke
 a valid semantic-domain kernel. Findings are not counted by these counters.
+Applicability planning also reports one decision per procedure and gated
+domain: `planned_*_runs` and `skipped_*_runs` for runtime, array, object,
+dictionary, error, dataflow, resource, Excel, and application-state domains
+(for example, `planned_array_runs` / `skipped_array_runs` and
+`planned_dataflow_runs` / `skipped_dataflow_runs`). A planned run includes
+unknown or incomplete applicability; a skipped run requires a proven-absent
+prerequisite. These counters measure planner decisions, while candidate,
+traversal, and kernel counters retain their existing meanings. They are
+stderr-only performance telemetry and do not change findings, their order,
+exit status, or the JSON schema.
 Large-module profiles also expose maximum dimensions:
 `max_lines_per_file`, `max_procedures_per_file`, `max_calls_per_file`,
 `max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and

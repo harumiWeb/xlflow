@@ -1080,6 +1080,76 @@ runs; 1,565 runtime, dictionary, dataflow, and resource CFG walks; 6,260 array
 CFG walks; 4,695 error CFG walks; and 3,130 Excel CFG walks. The object
 candidate counter was 1,565 and has no CFG-walk counter by design.
 
+### Applicability-planner verification record
+
+Issue #695 adds immutable procedure feature summaries and applicability-based
+skipping for expensive semantic domains. Verify the optimization against the
+same conservative analyzer contract used for corpus snapshots; do not accept
+planner counters as evidence of a diagnostic change by themselves.
+
+For every implementation change, run the focused planner matrix and the
+deterministic corpus snapshot verification. Compare findings, ranges,
+severity, multiplicity, ordering, suppression, and exit status with a
+conservative-all reference path or equivalent regression fixture. Include
+recovered/incomplete procedures, ambiguous or dynamic calls, and incomplete
+project/type facts so unknown applicability is demonstrated as planned rather
+than skipped. The batch serial/parallel and realtime/LSP paths should use the
+same applicability decisions where both surfaces support the rule.
+
+Record `planned_<domain>_runs` and `skipped_<domain>_runs` from the same
+`analyze --performance-log` or benchmark run as domain timings. A skipped run
+must be a proven-absence decision; unknown features are planned. The counters
+are observations of planner work, not findings, and must not be used to
+rewrite a snapshot without a separate semantic review.
+
+Performance coverage must include scalar-only, array-heavy, mixed-domain, and
+recovered/incomplete synthetic procedures plus ROneCOne. Use the existing
+`bench:analyze-single-module` and `bench:corpus` workflows, keep fixture
+materialization outside the timed analyzer region, and take five serial
+`-benchtime=1x` samples for ROneCOne when collecting a before/after record.
+Report planner construction cost, avoided semantic-domain work, wall time,
+`B/op`, `allocs/op`, domain timings, planned/skipped counters, and CFG/kernel
+work counts. Keep the Go version, machine, power state, SHA, benchmark filter,
+and command constant for comparison. Small-module overhead is an acceptance
+check, not a fixed CI timing threshold.
+
+The #695 capture was made on 2026-08-22 from base SHA `aa2cddd9` plus the #695
+working-tree change. It used the same Thirdwave XA7C-R38, Intel Core i7-12700,
+Windows 11 Home 10.0.22631, Go 1.26.6, and normal plugged-in developer power
+state as the #694 baseline. Both comparisons used five serial
+`-benchtime=1x` samples.
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^TestSingleModuleBenchmarkFixtureScale$' -bench '^BenchmarkSingleModuleSynthetic/independent/2000-procedures$' -benchmem -benchtime=1x -count=5
+```
+
+| workload                       | `ns/op` samples                                                                |   median | change from #694 |  median `B/op` | median `allocs/op` |
+| ------------------------------ | ------------------------------------------------------------------------------ | -------: | ---------------: | -------------: | -----------------: |
+| ROneCOne analyze-only          | 19,613,948,300; 19,543,799,200; 19,563,849,500; 19,571,910,100; 19,609,888,100 | 19.572 s |           -19.1% | 27,164,873,376 |        179,448,654 |
+| independent / 2,000 procedures | 1,222,285,600; 1,185,823,200; 1,164,685,300; 1,164,679,600; 1,166,594,100      |  1.167 s |            -5.7% |  1,489,784,960 |         11,649,544 |
+
+For ROneCOne, planner decisions were stable across all samples: application
+state 1,365 planned / 200 skipped, dataflow 1,382 / 183, Excel 1,346 / 219,
+and resource 1,365 / 200. Array, dictionary, error, object, and runtime remained
+conservatively planned for all 1,565 procedures because call/effect facts did
+not prove those domains absent. The resulting dataflow CFG walks fell from
+1,565 to 1,382, resource CFG walks from 1,565 to 1,365, Excel CFG walks from
+3,130 to 2,692, and semantic kernel runs from 134,289 to 132,247. Median
+accumulated domain times were 1.181 s source scan, 2.915 s runtime, 6.428 s
+array, 0.910 s object, 1.866 s dictionary/collection, 0.071 s error, 17.330 s
+dataflow, 0.009 s resource, 2.891 s Excel, and 0.096 s
+application state. These worker times overlap and are not additive.
+
+The independent synthetic workload remained conservative-all because its
+generated control-flow facts do not prove domain absence. Even with planner
+construction and counter reporting, its median wall time did not regress;
+median bytes and allocations increased by 1.4% and 1.7%, respectively, within
+the existing 2% observational criterion. The microbenchmark separately covered
+scalar-only, array-heavy, mixed-domain, and recovered procedures: planner
+construction allocated 0 B/op and 0 allocs/op, with the three 100-iteration
+sample ranges spanning 0.631--0.886 microseconds per procedure.
+
 The `-count=1` CPU/allocation profile completed in 23.83 s with 84.88 s of CPU
 samples. Its flat CPU top ten were `runtime.semasleep` (13.57%),
 `runtime.scanObject` (4.92%), `runtime.tryDeferToSpanScan` (4.50%),

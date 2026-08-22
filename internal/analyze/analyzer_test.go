@@ -402,6 +402,27 @@ End Sub
 	}
 }
 
+func TestVBA225PlansParenthesisFreeLoopMemberAccess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal rng As Range)
+  Dim cell As Range
+  Dim dst As Range
+  For Each cell In rng
+    Set dst = cell.Offset
+  Next cell
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA225"); len(got) != 1 {
+		t.Fatalf("parenthesis-free Offset inside a loop should remain planned for VBA225: %+v", got)
+	}
+}
+
 func TestVBA225SupportsDoAndWhileLoops(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -7069,6 +7090,27 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PlansScalarForEachWithoutOtherArrayFeatures(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim scalar As Long
+  Dim item As Variant
+  For Each item In scalar
+  Next item
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("scalar-only For Each source should remain planned for VBA227: %#v", got)
+	}
+}
+
 func TestAnalyzerVBA227KeepsUnknownVariantReDimConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -8285,6 +8327,9 @@ End Sub
 	cfg.Analyze.DetectArrayLifecycleSafety = false
 	cfg.Analyze.DetectRedimPreserveDimension = false
 	cfg.Analyze.DetectObjectArrayComparison = false
+	cfg.Analyze.DetectRangeValueArrayShape = false
+	cfg.Analyze.DetectRedimPreserveInLoops = false
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
 
 	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {

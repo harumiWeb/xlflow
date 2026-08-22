@@ -17,6 +17,7 @@ import (
 // sourceProcedure itself is an immutable projection during an analysis run;
 // procedure workers may safely read the same facts concurrently.
 type procedureAnalysisFacts struct {
+	features     procedureFeatureSet
 	declarations []procedureir.Declaration
 	statements   []procedureir.Statement
 	expressions  []procedureir.Expression
@@ -67,18 +68,21 @@ func newProcedureAnalysisFactsWithDeclarations(
 	if len(declarations) > 0 {
 		facts.declarationIndex = make(map[int]int, len(declarations))
 		for index, declaration := range declarations {
+			facts.features.observeDeclaration(declaration)
 			facts.declarationIndex[declaration.ID] = index
 		}
 	}
 	if len(statements) > 0 {
 		facts.statementIndex = make(map[int]int, len(statements))
 		for index, statement := range statements {
+			facts.features.observeStatement(statement)
 			facts.statementIndex[statement.ID] = index
 		}
 	}
 	if len(expressions) > 0 {
 		facts.expressionIndex = make(map[int]int, len(expressions))
 		for index, expression := range expressions {
+			facts.features.observeExpression(expression)
 			facts.expressionIndex[expression.ID] = index
 		}
 		// The IR builder assigns StatementID to every expression it emits. Keep
@@ -102,6 +106,9 @@ func newProcedureAnalysisFactsWithDeclarations(
 		}
 	}
 	if len(calls) > 0 {
+		for _, call := range calls {
+			facts.features.observeCall(call)
+		}
 		facts.callsByStatement = newCallFactsByStatement(calls)
 	}
 	if len(accesses) > 0 {
@@ -482,5 +489,7 @@ func (procedure sourceProcedure) analysisFacts() *procedureAnalysisFacts {
 	if procedure.Facts != nil {
 		return procedure.Facts
 	}
-	return newProcedureAnalysisFactsWithDeclarations(procedure.Declarations, procedure.Statements, procedure.Expressions, procedure.Calls, procedure.Accesses)
+	facts := newProcedureAnalysisFactsWithDeclarations(procedure.Declarations, procedure.Statements, procedure.Expressions, procedure.Calls, procedure.Accesses)
+	facts.features.addUnknown(allProcedureFeatures)
+	return facts
 }

@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added immutable tri-state procedure feature summaries and applicability-based
+  planning for expensive semantic analyzer domains. Proven-irrelevant domains
+  can be skipped before setup, while recovered, unresolved, dynamic, or
+  otherwise unknown applicability remains planned conservatively. Opt-in
+  `--performance-log` output adds planned/skipped domain counters; findings,
+  exit codes, and normal JSON/LSP contracts remain unchanged.
+
 - Added opt-in semantic-domain profiling beneath
   `procedure_local_diagnostics` for giant-module `xlflow analyze` workloads.
   `--performance-log` now attributes aggregate source-scan, runtime, array,

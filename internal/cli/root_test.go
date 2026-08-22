@@ -768,9 +768,8 @@ func TestAnalyzePerformanceLogFlagIsOptInAndPreservesJSON(t *testing.T) {
 		`counter="max_lines_per_file"`, `counter="max_procedures_per_file"`,
 		`counter="max_calls_per_file"`, `counter="max_statements_per_procedure"`,
 		`counter="max_cfg_blocks_per_procedure"`, `counter="max_cfg_edges_per_procedure"`,
-		`counter="runtime_candidate_procedures"`,
-		`counter="dictionary_candidate_procedures"`,
-		`counter="dictionary_cfg_walks"`, `counter="runtime_cfg_walks"`,
+		`counter="skipped_array_runs"`, `counter="skipped_excel_runs"`,
+		`counter="skipped_runtime_runs"`, `counter="skipped_dictionary_runs"`,
 		`counter="source_line_scans"`, `counter="semantic_kernel_runs"`,
 	} {
 		if !strings.Contains(profiledStderr, expected) {
@@ -807,6 +806,15 @@ func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
 		"dataflow_cfg_walks", "dictionary_cfg_walks", "error_cfg_walks",
 		"resource_cfg_walks", "excel_cfg_walks", "runtime_cfg_walks",
 		"source_line_scans", "semantic_kernel_runs",
+		"planned_runtime_runs", "skipped_runtime_runs",
+		"planned_array_runs", "skipped_array_runs",
+		"planned_object_runs", "skipped_object_runs",
+		"planned_dictionary_runs", "skipped_dictionary_runs",
+		"planned_error_runs", "skipped_error_runs",
+		"planned_dataflow_runs", "skipped_dataflow_runs",
+		"planned_resource_runs", "skipped_resource_runs",
+		"planned_excel_runs", "skipped_excel_runs",
+		"planned_application_state_runs", "skipped_application_state_runs",
 	} {
 		recorder.AddSum(name, 1)
 	}
@@ -834,6 +842,15 @@ func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
 		`counter="resource_cfg_walks"`, `counter="excel_cfg_walks"`,
 		`counter="runtime_cfg_walks"`, `counter="source_line_scans"`,
 		`counter="semantic_kernel_runs"`,
+		`counter="planned_runtime_runs"`, `counter="skipped_runtime_runs"`,
+		`counter="planned_array_runs"`, `counter="skipped_array_runs"`,
+		`counter="planned_object_runs"`, `counter="skipped_object_runs"`,
+		`counter="planned_dictionary_runs"`, `counter="skipped_dictionary_runs"`,
+		`counter="planned_error_runs"`, `counter="skipped_error_runs"`,
+		`counter="planned_dataflow_runs"`, `counter="skipped_dataflow_runs"`,
+		`counter="planned_resource_runs"`, `counter="skipped_resource_runs"`,
+		`counter="planned_excel_runs"`, `counter="skipped_excel_runs"`,
+		`counter="planned_application_state_runs"`, `counter="skipped_application_state_runs"`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("performance output missing %q:\n%s", expected, output)

@@ -78,24 +78,79 @@ func (p *procedureDomainProfile) add(counter analysisstats.WorkCounter, value ui
 	p.aggregate.AddCounter(counter, value)
 }
 
-func (p *procedureDomainProfile) candidate(seen *uint32, counter analysisstats.WorkCounter) {
+func (p *procedureDomainProfile) candidate(seen *uint64, counter analysisstats.WorkCounter) {
 	if p == nil || seen == nil {
 		return
 	}
 	bit := uint(counter)
-	if bit >= 32 || *seen&(uint32(1)<<bit) != 0 {
+	if bit >= 64 || *seen&(uint64(1)<<bit) != 0 {
 		return
 	}
-	*seen |= uint32(1) << bit
+	*seen |= uint64(1) << bit
 	p.aggregate.AddCounter(counter, 1)
 }
 
 // Keep the per-procedure candidate bitset wide enough for every current
 // workload counter. If a future counter grows past the bitset limit, this
 // package must widen the mask before candidate attribution can silently drop.
-const procedureCandidateBitLimit = 32
+const procedureCandidateBitLimit = 64
 
 var _ [procedureCandidateBitLimit - analysisstats.WorkCounterCount]struct{}
+
+func (p *procedureDomainProfile) plannerDecision(plan procedureAnalysisPlan, domain procedureDomain) {
+	if p == nil || !plan.enabledDomain(domain) {
+		return
+	}
+	planned, skipped, ok := plannerCounters(domain)
+	if !ok {
+		return
+	}
+	if plan.runs(domain) {
+		p.add(planned, 1)
+		return
+	}
+	p.add(skipped, 1)
+	// Keep the existing performance-log stage schema observable even when the
+	// planner proves a domain irrelevant. This records an empty stage without
+	// entering the domain or allocating its semantic state.
+	measurement := p.begin(domain)
+	measurement.finish(0)
+}
+
+func (p *procedureDomainProfile) plannerDecisions(plan procedureAnalysisPlan) {
+	for _, domain := range [...]procedureDomain{
+		procedureDomainRuntime, procedureDomainArray, procedureDomainObject,
+		procedureDomainDictionary, procedureDomainError, procedureDomainDataflow,
+		procedureDomainResource, procedureDomainExcel, procedureDomainApplicationState,
+	} {
+		p.plannerDecision(plan, domain)
+	}
+}
+
+func plannerCounters(domain procedureDomain) (analysisstats.WorkCounter, analysisstats.WorkCounter, bool) {
+	switch domain {
+	case procedureDomainRuntime:
+		return analysisstats.CounterRuntimePlannedRuns, analysisstats.CounterRuntimeSkippedRuns, true
+	case procedureDomainArray:
+		return analysisstats.CounterArrayPlannedRuns, analysisstats.CounterArraySkippedRuns, true
+	case procedureDomainObject:
+		return analysisstats.CounterObjectPlannedRuns, analysisstats.CounterObjectSkippedRuns, true
+	case procedureDomainDictionary:
+		return analysisstats.CounterDictionaryPlannedRuns, analysisstats.CounterDictionarySkippedRuns, true
+	case procedureDomainError:
+		return analysisstats.CounterErrorPlannedRuns, analysisstats.CounterErrorSkippedRuns, true
+	case procedureDomainDataflow:
+		return analysisstats.CounterDataflowPlannedRuns, analysisstats.CounterDataflowSkippedRuns, true
+	case procedureDomainResource:
+		return analysisstats.CounterResourcePlannedRuns, analysisstats.CounterResourceSkippedRuns, true
+	case procedureDomainExcel:
+		return analysisstats.CounterExcelPlannedRuns, analysisstats.CounterExcelSkippedRuns, true
+	case procedureDomainApplicationState:
+		return analysisstats.CounterApplicationStatePlannedRuns, analysisstats.CounterApplicationStateSkippedRuns, true
+	default:
+		return 0, 0, false
+	}
+}
 
 func (p *procedureDomainProfile) kernel() {
 	p.add(analysisstats.CounterSemanticKernelRuns, 1)
