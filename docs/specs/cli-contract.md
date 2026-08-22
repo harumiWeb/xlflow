@@ -1184,7 +1184,11 @@ Module` directives are also reported as duplicate same-kind declarations.
   error and blocks source preflight; parser recovery alone is not sufficient
   evidence.
 - `VB060`: an assignment targets a `Const` value rejected by the VBE; it is an
-  unsuppressible error and blocks source preflight.
+  unsuppressible error and blocks source preflight. The target must be a
+  provably resolved constant declaration or a complete qualified constant
+  reference. A member access whose receiver is omitted or unresolved is not
+  enough evidence, because the final member name may be a writable property
+  (for example, `Range.Hidden`).
 - `VB061`: a fixed array declaration has a constant lower bound greater than
   its upper bound; it is an unsuppressible error and blocks source preflight.
 - `VB062`: a conditional branch statement uses a form that VBA rejects. The

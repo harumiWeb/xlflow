@@ -174,8 +174,7 @@ func (l Linter) arrayShapeIssues(path, source string, ir *procedureir.DocumentIR
 			if stmt.Recovered || (stmt.Kind != procedureir.StatementAssignment && stmt.Kind != procedureir.StatementSet) || stmt.Target == nil {
 				continue
 			}
-			name := normalizeQualifiedIdentifier(stmt.Target.Text)
-			if isConstAssignmentTarget(name, p, ir.Declarations, consts, qualifiedConsts) && (stmt.Target.Kind == procedureir.ExpressionIdentifier || stmt.Target.Kind == procedureir.ExpressionMember) {
+			if isConstAssignmentTarget(stmt.Target.Text, stmt.Target.Kind, p, ir.Declarations, consts, qualifiedConsts) {
 				issue := l.issueAt(path, stmt.Target.Range, "VB060", "error", "A Const value cannot be assigned.")
 				issue.EndLine, issue.EndColumn = stmt.Target.Range.EndLine, stmt.Target.Range.EndColumn
 				issue.Kind, issue.Symbol = "constant_assignment", stmt.Target.Text
@@ -365,8 +364,26 @@ func enumMemberConstant(line string, previous *int) (string, string) {
 	return name, strconv.Itoa(*previous)
 }
 
-func isConstAssignmentTarget(name string, procedure procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, consts, qualifiedConsts map[string]bool) bool {
+func isConstAssignmentTarget(name string, targetKind procedureir.ExpressionKind, procedure procedureir.ProcedureIR, moduleDeclarations []procedureir.Declaration, consts, qualifiedConsts map[string]bool) bool {
+	rawName := strings.TrimSpace(name)
+	if targetKind == procedureir.ExpressionMember && strings.HasPrefix(rawName, ".") {
+		// Preserve the omitted receiver before normalization. This also covers
+		// nested implicit chains such as `.Modes.ModeBad`, whose normalized form
+		// would otherwise look like an explicit qualified constant reference.
+		return false
+	}
 	name = normalizeQualifiedIdentifier(name)
+	if targetKind != procedureir.ExpressionIdentifier && targetKind != procedureir.ExpressionMember {
+		return false
+	}
+	// An implicit member expression (for example, `.Hidden` inside a With
+	// block) is normalized to its final member name. That name alone is not
+	// enough to prove a Const assignment: it may be a writable property on the
+	// With receiver, or any other late-bound member. Only a complete member
+	// chain can be compared with a qualified constant name.
+	if targetKind == procedureir.ExpressionMember && !strings.Contains(name, ".") {
+		return false
+	}
 	if strings.Contains(name, ".") {
 		return qualifiedConsts[name]
 	}
@@ -374,13 +391,13 @@ func isConstAssignmentTarget(name string, procedure procedureir.ProcedureIR, mod
 		if !strings.EqualFold(cleanIdentifier(declaration.Name), name) {
 			continue
 		}
-		return strings.EqualFold(declaration.Kind, "const") || strings.EqualFold(declaration.Kind, "enum_member")
+		return procedureir.IsConstKind(declaration.Kind)
 	}
 	for _, declaration := range moduleDeclarations {
 		if !strings.EqualFold(cleanIdentifier(declaration.Name), name) {
 			continue
 		}
-		return strings.EqualFold(declaration.Kind, "const") || strings.EqualFold(declaration.Kind, "enum_member")
+		return procedureir.IsConstKind(declaration.Kind)
 	}
 	return consts[name]
 }

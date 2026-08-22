@@ -10,6 +10,10 @@ All notable changes to xlflow will be documented in this file.
   and preserve deterministic findings, suppression, JSON output, and
   cancellation behavior. Ordinary small files retain the existing fast path.
 
+- Fixed `VB060` false positives for writable member assignments such as
+  Excel `Range.Hidden`, including member access with an omitted `With`
+  receiver. Incomplete member names are no longer treated as proven constants.
+
 - Reused immutable file and procedure analysis facts across analyzer rule
   families. Shared declaration/constant/procedure indexes, statement and
   expression lookups, member-expression projections, and constant overlays
