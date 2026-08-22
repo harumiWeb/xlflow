@@ -323,6 +323,26 @@ domain runs. Candidate counters are
 valid semantic-domain kernel invocations. Candidate counters count procedures
 that pass the rule gate and are actually analyzed, traversal counters count
 started source/CFG traversals, and none of these counters count findings.
+
+Applicability planning adds additive decision counters for each gated semantic
+domain: `planned_runtime_runs` / `skipped_runtime_runs`,
+`planned_array_runs` / `skipped_array_runs`,
+`planned_object_runs` / `skipped_object_runs`,
+`planned_dictionary_runs` / `skipped_dictionary_runs`,
+`planned_error_runs` / `skipped_error_runs`,
+`planned_dataflow_runs` / `skipped_dataflow_runs`,
+`planned_resource_runs` / `skipped_resource_runs`,
+`planned_excel_runs` / `skipped_excel_runs`, and
+`planned_application_state_runs` / `skipped_application_state_runs`.
+Each counter is incremented at most once per procedure/domain decision after
+the enabled-rule requirements and immutable feature summary are combined.
+`planned_*` includes unknown applicability and any procedure that must remain
+conservative; `skipped_*` requires a proof that the enabled domain cannot
+produce a finding for that procedure. Candidate, traversal, and kernel
+counters retain their existing meaning and are not replaced by planner
+counters. Planner counters are emitted only in stderr performance records and
+do not alter the normal analyze JSON or LSP schema.
+
 The effect-summary stage may additionally report
 `effect_summary_worklist_evaluations`,
 `effect_summary_max_propagated_facts_per_procedure`, and

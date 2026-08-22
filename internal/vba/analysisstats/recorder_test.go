@@ -195,6 +195,34 @@ func TestDomainAndCounterNamesAreStable(t *testing.T) {
 	if CounterRuntimeCandidateProcedures.String() != RuntimeCandidateProceduresCounter || CounterSemanticKernelRuns.String() != SemanticKernelRunsCounter {
 		t.Fatalf("counter names = %q, %q", CounterRuntimeCandidateProcedures, CounterSemanticKernelRuns)
 	}
+	plannerCounterNames := []struct {
+		counter WorkCounter
+		want    string
+	}{
+		{CounterRuntimePlannedRuns, "planned_runtime_runs"},
+		{CounterRuntimeSkippedRuns, "skipped_runtime_runs"},
+		{CounterArrayPlannedRuns, "planned_array_runs"},
+		{CounterArraySkippedRuns, "skipped_array_runs"},
+		{CounterObjectPlannedRuns, "planned_object_runs"},
+		{CounterObjectSkippedRuns, "skipped_object_runs"},
+		{CounterDictionaryPlannedRuns, "planned_dictionary_runs"},
+		{CounterDictionarySkippedRuns, "skipped_dictionary_runs"},
+		{CounterErrorPlannedRuns, "planned_error_runs"},
+		{CounterErrorSkippedRuns, "skipped_error_runs"},
+		{CounterDataflowPlannedRuns, "planned_dataflow_runs"},
+		{CounterDataflowSkippedRuns, "skipped_dataflow_runs"},
+		{CounterResourcePlannedRuns, "planned_resource_runs"},
+		{CounterResourceSkippedRuns, "skipped_resource_runs"},
+		{CounterExcelPlannedRuns, "planned_excel_runs"},
+		{CounterExcelSkippedRuns, "skipped_excel_runs"},
+		{CounterApplicationStatePlannedRuns, "planned_application_state_runs"},
+		{CounterApplicationStateSkippedRuns, "skipped_application_state_runs"},
+	}
+	for _, test := range plannerCounterNames {
+		if got := test.counter.String(); got != test.want {
+			t.Errorf("counter %d name = %q, want %q", test.counter, got, test.want)
+		}
+	}
 	if Domain(255).String() != ProcedureLocalOther || WorkCounter(255).String() != "" {
 		t.Fatalf("invalid enum names = %q, %q", Domain(255), WorkCounter(255))
 	}

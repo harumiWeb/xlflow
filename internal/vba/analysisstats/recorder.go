@@ -107,9 +107,27 @@ const (
 	CounterResourceCFGWalks
 	CounterExcelCFGWalks
 	CounterSemanticKernelRuns
+	CounterRuntimePlannedRuns
+	CounterRuntimeSkippedRuns
+	CounterArrayPlannedRuns
+	CounterArraySkippedRuns
+	CounterObjectPlannedRuns
+	CounterObjectSkippedRuns
+	CounterDictionaryPlannedRuns
+	CounterDictionarySkippedRuns
+	CounterErrorPlannedRuns
+	CounterErrorSkippedRuns
+	CounterDataflowPlannedRuns
+	CounterDataflowSkippedRuns
+	CounterResourcePlannedRuns
+	CounterResourceSkippedRuns
+	CounterExcelPlannedRuns
+	CounterExcelSkippedRuns
+	CounterApplicationStatePlannedRuns
+	CounterApplicationStateSkippedRuns
 )
 
-const counterCount = int(CounterSemanticKernelRuns) + 1
+const counterCount = int(CounterApplicationStateSkippedRuns) + 1
 
 // WorkCounterCount is the fixed number of counter slots used by
 // DomainAggregate. It is exposed for compile-time guards in lightweight
@@ -135,6 +153,24 @@ const (
 	ResourceCFGWalksCounter                    = "resource_cfg_walks"
 	ExcelCFGWalksCounter                       = "excel_cfg_walks"
 	SemanticKernelRunsCounter                  = "semantic_kernel_runs"
+	RuntimePlannedRunsCounter                  = "planned_runtime_runs"
+	RuntimeSkippedRunsCounter                  = "skipped_runtime_runs"
+	ArrayPlannedRunsCounter                    = "planned_array_runs"
+	ArraySkippedRunsCounter                    = "skipped_array_runs"
+	ObjectPlannedRunsCounter                   = "planned_object_runs"
+	ObjectSkippedRunsCounter                   = "skipped_object_runs"
+	DictionaryPlannedRunsCounter               = "planned_dictionary_runs"
+	DictionarySkippedRunsCounter               = "skipped_dictionary_runs"
+	ErrorPlannedRunsCounter                    = "planned_error_runs"
+	ErrorSkippedRunsCounter                    = "skipped_error_runs"
+	DataflowPlannedRunsCounter                 = "planned_dataflow_runs"
+	DataflowSkippedRunsCounter                 = "skipped_dataflow_runs"
+	ResourcePlannedRunsCounter                 = "planned_resource_runs"
+	ResourceSkippedRunsCounter                 = "skipped_resource_runs"
+	ExcelPlannedRunsCounter                    = "planned_excel_runs"
+	ExcelSkippedRunsCounter                    = "skipped_excel_runs"
+	ApplicationStatePlannedRunsCounter         = "planned_application_state_runs"
+	ApplicationStateSkippedRunsCounter         = "skipped_application_state_runs"
 )
 
 var counterNames = [...]string{
@@ -156,6 +192,24 @@ var counterNames = [...]string{
 	ResourceCFGWalksCounter,
 	ExcelCFGWalksCounter,
 	SemanticKernelRunsCounter,
+	RuntimePlannedRunsCounter,
+	RuntimeSkippedRunsCounter,
+	ArrayPlannedRunsCounter,
+	ArraySkippedRunsCounter,
+	ObjectPlannedRunsCounter,
+	ObjectSkippedRunsCounter,
+	DictionaryPlannedRunsCounter,
+	DictionarySkippedRunsCounter,
+	ErrorPlannedRunsCounter,
+	ErrorSkippedRunsCounter,
+	DataflowPlannedRunsCounter,
+	DataflowSkippedRunsCounter,
+	ResourcePlannedRunsCounter,
+	ResourceSkippedRunsCounter,
+	ExcelPlannedRunsCounter,
+	ExcelSkippedRunsCounter,
+	ApplicationStatePlannedRunsCounter,
+	ApplicationStateSkippedRunsCounter,
 }
 
 // These paired array declarations fail compilation if a counter is added
