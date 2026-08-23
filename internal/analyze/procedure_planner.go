@@ -406,7 +406,7 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 	}
 	procedures := file.Procedures
 	if procedures == nil {
-		procedures = sourceProceduresFromIR(file.IR, file.CFG)
+		procedures = sourceProceduresFromIRRef(&file.IR, file.CFG)
 	}
 	moduleFeatures := moduleDeclarationFeatures(file.moduleDecls())
 	for i := range procedures {

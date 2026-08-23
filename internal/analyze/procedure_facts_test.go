@@ -37,16 +37,45 @@ func TestSourceProceduresFromIRAttachesProcedureAnalysisFacts(t *testing.T) {
 		}},
 	}
 
-	procedures := sourceProceduresFromIR(document)
+	procedures := sourceProceduresFromIRRef(&document)
 	if len(procedures) != 1 || procedures[0].Facts == nil {
 		t.Fatalf("source procedures = %#v, want one procedure with facts", procedures)
 	}
+	if procedures[0].IR != &document.Procedures[0] {
+		t.Fatalf("procedure IR = %p, want canonical %p", procedures[0].IR, &document.Procedures[0])
+	}
+	if procedures[0].Document != &document {
+		t.Fatalf("procedure document = %p, want canonical %p", procedures[0].Document, &document)
+	}
+	if &procedures[0].IR.Declarations[0] != &document.Procedures[0].Declarations[0] ||
+		&procedures[0].IR.Statements[0] != &document.Procedures[0].Statements[0] ||
+		&procedures[0].IR.Expressions[0] != &document.Procedures[0].Expressions[0] ||
+		&procedures[0].IR.Calls[0] != &document.Procedures[0].Calls[0] ||
+		&procedures[0].IR.Accesses[0] != &document.Procedures[0].Accesses[0] {
+		t.Fatal("procedure view does not use canonical IR collection storage")
+	}
 	facts := procedures[0].Facts
+	if facts.procedure != procedures[0].IR {
+		t.Fatalf("facts procedure = %p, want canonical %p", facts.procedure, procedures[0].IR)
+	}
+	if facts.declarations != nil || facts.statements != nil || facts.expressions != nil || facts.calls != nil || facts.accesses != nil {
+		t.Fatal("production facts retained duplicate IR collection storage")
+	}
 	if got, ok := facts.Declaration(1); !ok || got.Name != "value" {
 		t.Fatalf("declaration lookup = %#v, %v", got, ok)
 	}
 	if got, ok := facts.Statement(10); !ok || got.Kind != procedureir.StatementAssignment {
 		t.Fatalf("statement lookup = %#v, %v", got, ok)
+	}
+	if got, ok := facts.Statements().At(1); !ok || got.ID != 20 {
+		t.Fatalf("statement span lookup = %#v, %v", got, ok)
+	}
+	var statementIDs []int
+	for statement := range facts.Statements().All() {
+		statementIDs = append(statementIDs, statement.ID)
+	}
+	if len(statementIDs) != 2 || statementIDs[0] != 10 || statementIDs[1] != 20 {
+		t.Fatalf("statement span iteration = %#v", statementIDs)
 	}
 	if _, ok := facts.Statement(999); ok {
 		t.Fatalf("missing statement lookup unexpectedly succeeded")
@@ -67,11 +96,12 @@ func TestSourceProceduresFromIRAttachesProcedureAnalysisFacts(t *testing.T) {
 		t.Fatalf("member expressions for call = %#v", got)
 	}
 
-	// sourceProceduresFromIR owns its IR projection. A caller changing the
-	// input document after construction cannot change the shared facts.
+	// The canonical DocumentIR owns the view storage. Facts retain compact
+	// indexes, so reading through an index observes the current canonical value
+	// without retaining a copied IR object.
 	document.Procedures[0].Statements[0].ID = 999
-	if got, ok := facts.Statement(10); !ok || got.ID != 10 {
-		t.Fatalf("facts changed after input IR mutation = %#v, %v", got, ok)
+	if got, ok := facts.Statement(10); !ok || got.ID != 999 {
+		t.Fatalf("facts did not read canonical IR after owner mutation = %#v, %v", got, ok)
 	}
 }
 

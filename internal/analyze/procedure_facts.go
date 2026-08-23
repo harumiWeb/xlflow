@@ -1,23 +1,81 @@
 package analyze
 
 import (
+	"iter"
 	"sort"
 
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
-// procedureAnalysisFacts is the immutable, procedure-local projection shared
-// by analysis rules. The slices are owned by the sourceProcedure that created
-// these facts and are never modified after construction. The indexes contain
-// only offsets into those slices, which keeps the facts compact and avoids
-// copying IR values for every consumer.
+// readOnlySpan is an internal, allocation-free view over immutable IR
+// storage. The backing slice is private so callers cannot assign, append, or
+// reslice shared ProcedureIR storage. Values are returned by value through At
+// and All; callers must treat any nested IR slices as immutable as well.
+type readOnlySpan[T any] struct {
+	values []T
+}
+
+func newReadOnlySpan[T any](values []T) readOnlySpan[T] {
+	return readOnlySpan[T]{values: values}
+}
+
+func (span readOnlySpan[T]) Len() int { return len(span.values) }
+
+func (span readOnlySpan[T]) At(index int) (T, bool) {
+	if index < 0 || index >= len(span.values) {
+		var zero T
+		return zero, false
+	}
+	return span.values[index], true
+}
+
+// valueAt is an internal convenience for call sites that have already
+// validated an index. It still returns a value, never the backing element.
+func (span readOnlySpan[T]) valueAt(index int) T {
+	value, _ := span.At(index)
+	return value
+}
+
+func (span readOnlySpan[T]) All() iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, value := range span.values {
+			if !yield(value) {
+				return
+			}
+		}
+	}
+}
+
+// AllIndexed visits values together with their stable source-order offset.
+// It is the read-only counterpart to ranging over the backing slice with two
+// iteration variables.
+func (span readOnlySpan[T]) AllIndexed() iter.Seq2[int, T] {
+	return func(yield func(int, T) bool) {
+		for index, value := range span.values {
+			if !yield(index, value) {
+				return
+			}
+		}
+	}
+}
+
+// procedureAnalysisFacts is the immutable, procedure-local index shared by
+// analysis rules. Production facts retain only the canonical ProcedureIR
+// pointer and compact offsets; they never own a second declaration,
+// statement, expression, call, or access collection. The legacy slices below
+// exist only for small synthetic fixtures that do not have a ProcedureIR
+// owner.
 //
 // The fields are deliberately private. Consumers should use the lookup and
 // iteration helpers below instead of retaining or modifying the indexes.
 // sourceProcedure itself is an immutable projection during an analysis run;
 // procedure workers may safely read the same facts concurrently.
 type procedureAnalysisFacts struct {
-	features     procedureFeatureSet
+	features procedureFeatureSet
+	// procedure is the canonical owned IR for production views. The legacy
+	// slices below are populated only by focused synthetic tests and are kept
+	// as a compatibility path while consumers migrate to the view API.
+	procedure    *procedureir.ProcedureIR
 	declarations []procedureir.Declaration
 	statements   []procedureir.Statement
 	expressions  []procedureir.Expression
@@ -38,9 +96,9 @@ type procedureAnalysisFacts struct {
 }
 
 // newProcedureAnalysisFacts constructs facts from already-owned procedure IR
-// projections. It intentionally does not copy the slices: sourceProceduresFromIR
-// makes the one ownership copy and both the legacy projection and these facts
-// read that same immutable storage.
+// projections for focused synthetic fixtures. It intentionally does not copy
+// the supplied slices; production callers use newProcedureAnalysisFactsForProcedure
+// so the canonical ProcedureIR is the explicit owner.
 func newProcedureAnalysisFacts(
 	statements []procedureir.Statement,
 	expressions []procedureir.Expression,
@@ -48,6 +106,17 @@ func newProcedureAnalysisFacts(
 	accesses []procedureir.VariableAccess,
 ) *procedureAnalysisFacts {
 	return newProcedureAnalysisFactsWithDeclarations(nil, statements, expressions, calls, accesses)
+}
+
+// newProcedureAnalysisFactsForProcedure builds compact indexes over the
+// canonical ProcedureIR. No procedure collection is copied or retained as a
+// second backing allocation.
+func newProcedureAnalysisFactsForProcedure(procedure *procedureir.ProcedureIR) *procedureAnalysisFacts {
+	if procedure == nil {
+		return newProcedureAnalysisFacts(nil, nil, nil, nil)
+	}
+	facts := &procedureAnalysisFacts{procedure: procedure}
+	return facts.initialize(procedure.Declarations, procedure.Statements, procedure.Expressions, procedure.Calls, procedure.Accesses)
 }
 
 func newProcedureAnalysisFactsWithDeclarations(
@@ -64,6 +133,16 @@ func newProcedureAnalysisFactsWithDeclarations(
 		calls:        calls,
 		accesses:     accesses,
 	}
+	return facts.initialize(declarations, statements, expressions, calls, accesses)
+}
+
+func (facts *procedureAnalysisFacts) initialize(
+	declarations []procedureir.Declaration,
+	statements []procedureir.Statement,
+	expressions []procedureir.Expression,
+	calls []procedureir.CallSite,
+	accesses []procedureir.VariableAccess,
+) *procedureAnalysisFacts {
 
 	if len(declarations) > 0 {
 		facts.declarationIndex = make(map[int]int, len(declarations))
@@ -117,13 +196,63 @@ func newProcedureAnalysisFactsWithDeclarations(
 	return facts
 }
 
-// Declarations returns a copy of procedure-local declarations in IR order.
-// Facts never expose their internally owned mutable slice to a rule.
-func (facts *procedureAnalysisFacts) Declarations() []procedureir.Declaration {
+func (facts *procedureAnalysisFacts) declarationsView() readOnlySpan[procedureir.Declaration] {
 	if facts == nil {
-		return nil
+		return readOnlySpan[procedureir.Declaration]{}
 	}
-	return append([]procedureir.Declaration(nil), facts.declarations...)
+	if facts.procedure != nil {
+		return newReadOnlySpan(facts.procedure.Declarations)
+	}
+	return newReadOnlySpan(facts.declarations)
+}
+
+func (facts *procedureAnalysisFacts) statementsView() readOnlySpan[procedureir.Statement] {
+	if facts == nil {
+		return readOnlySpan[procedureir.Statement]{}
+	}
+	if facts.procedure != nil {
+		return newReadOnlySpan(facts.procedure.Statements)
+	}
+	return newReadOnlySpan(facts.statements)
+}
+
+func (facts *procedureAnalysisFacts) expressionsView() readOnlySpan[procedureir.Expression] {
+	if facts == nil {
+		return readOnlySpan[procedureir.Expression]{}
+	}
+	if facts.procedure != nil {
+		return newReadOnlySpan(facts.procedure.Expressions)
+	}
+	return newReadOnlySpan(facts.expressions)
+}
+
+func (facts *procedureAnalysisFacts) callsView() readOnlySpan[procedureir.CallSite] {
+	if facts == nil {
+		return readOnlySpan[procedureir.CallSite]{}
+	}
+	if facts.procedure != nil {
+		return newReadOnlySpan(facts.procedure.Calls)
+	}
+	return newReadOnlySpan(facts.calls)
+}
+
+func (facts *procedureAnalysisFacts) accessesView() readOnlySpan[procedureir.VariableAccess] {
+	if facts == nil {
+		return readOnlySpan[procedureir.VariableAccess]{}
+	}
+	if facts.procedure != nil {
+		return newReadOnlySpan(facts.procedure.Accesses)
+	}
+	return newReadOnlySpan(facts.accesses)
+}
+
+// Declarations returns a read-only view of procedure-local declarations in IR
+// order. The view aliases the canonical ProcedureIR and does not allocate.
+func (facts *procedureAnalysisFacts) Declarations() readOnlySpan[procedureir.Declaration] {
+	if facts == nil {
+		return readOnlySpan[procedureir.Declaration]{}
+	}
+	return facts.declarationsView()
 }
 
 // Declaration returns one procedure-local declaration by its stable IR ID.
@@ -135,15 +264,17 @@ func (facts *procedureAnalysisFacts) Declaration(id int) (procedureir.Declaratio
 	if !ok {
 		return procedureir.Declaration{}, false
 	}
-	return facts.declarations[index], true
+	declarations := facts.declarationsView()
+	return declarations.At(index)
 }
 
-// Statements returns a copy of the procedure's source-order statements.
-func (facts *procedureAnalysisFacts) Statements() []procedureir.Statement {
+// Statements returns a read-only view of the procedure's source-order
+// statements without allocating.
+func (facts *procedureAnalysisFacts) Statements() readOnlySpan[procedureir.Statement] {
 	if facts == nil {
-		return nil
+		return readOnlySpan[procedureir.Statement]{}
 	}
-	return append([]procedureir.Statement(nil), facts.statements...)
+	return facts.statementsView()
 }
 
 // Statement returns one statement by its stable IR ID.
@@ -155,15 +286,17 @@ func (facts *procedureAnalysisFacts) Statement(id int) (procedureir.Statement, b
 	if !ok {
 		return procedureir.Statement{}, false
 	}
-	return facts.statements[index], true
+	statements := facts.statementsView()
+	return statements.At(index)
 }
 
-// Expressions returns a copy of the procedure's expressions in IR order.
-func (facts *procedureAnalysisFacts) Expressions() []procedureir.Expression {
+// Expressions returns a read-only view of the procedure's expressions in IR
+// order without allocating.
+func (facts *procedureAnalysisFacts) Expressions() readOnlySpan[procedureir.Expression] {
 	if facts == nil {
-		return nil
+		return readOnlySpan[procedureir.Expression]{}
 	}
-	return append([]procedureir.Expression(nil), facts.expressions...)
+	return facts.expressionsView()
 }
 
 // forEachExpression visits expressions without exposing the facts-owned slice
@@ -172,7 +305,7 @@ func (facts *procedureAnalysisFacts) forEachExpression(visit func(procedureir.Ex
 	if facts == nil || visit == nil {
 		return
 	}
-	for _, expression := range facts.expressions {
+	for expression := range facts.expressionsView().All() {
 		visit(expression)
 	}
 }
@@ -186,15 +319,17 @@ func (facts *procedureAnalysisFacts) Expression(id int) (procedureir.Expression,
 	if !ok {
 		return procedureir.Expression{}, false
 	}
-	return facts.expressions[index], true
+	expressions := facts.expressionsView()
+	return expressions.At(index)
 }
 
-// Calls returns a copy of the procedure's calls in IR order.
-func (facts *procedureAnalysisFacts) Calls() []procedureir.CallSite {
+// Calls returns a read-only view of the procedure's calls in IR order without
+// allocating.
+func (facts *procedureAnalysisFacts) Calls() readOnlySpan[procedureir.CallSite] {
 	if facts == nil {
-		return nil
+		return readOnlySpan[procedureir.CallSite]{}
 	}
-	return append([]procedureir.CallSite(nil), facts.calls...)
+	return facts.callsView()
 }
 
 // CallsForStatement returns calls associated with a statement, preserving IR
@@ -203,7 +338,7 @@ func (facts *procedureAnalysisFacts) CallsForStatement(statementID int) []proced
 	if facts == nil {
 		return nil
 	}
-	return facts.callsByStatement.values(facts.calls, statementID)
+	return facts.callsByStatement.values(facts.callsView(), statementID)
 }
 
 // forEachCallForStatement visits calls without exposing the facts-owned slice
@@ -214,8 +349,12 @@ func (facts *procedureAnalysisFacts) forEachCallForStatement(statementID int, vi
 		return
 	}
 	if span, contiguous := facts.callsByStatement.groups.contiguousSpan(statementID); contiguous {
-		for _, call := range facts.calls[span.start:span.end] {
-			visit(call)
+		calls := facts.callsView()
+		for index := span.start; index < span.end; index++ {
+			call, ok := calls.At(index)
+			if ok {
+				visit(call)
+			}
 		}
 		return
 	}
@@ -224,18 +363,22 @@ func (facts *procedureAnalysisFacts) forEachCallForStatement(statementID int, vi
 		return
 	}
 	for _, index := range indexes {
-		if index >= 0 && index < len(facts.calls) {
-			visit(facts.calls[index])
+		calls := facts.callsView()
+		if index >= 0 && index < calls.Len() {
+			if call, ok := calls.At(index); ok {
+				visit(call)
+			}
 		}
 	}
 }
 
-// Accesses returns a copy of the procedure's variable accesses in IR order.
-func (facts *procedureAnalysisFacts) Accesses() []procedureir.VariableAccess {
+// Accesses returns a read-only view of the procedure's variable accesses in IR
+// order without allocating.
+func (facts *procedureAnalysisFacts) Accesses() readOnlySpan[procedureir.VariableAccess] {
 	if facts == nil {
-		return nil
+		return readOnlySpan[procedureir.VariableAccess]{}
 	}
-	return append([]procedureir.VariableAccess(nil), facts.accesses...)
+	return facts.accessesView()
 }
 
 // AccessesForStatement returns accesses associated with a statement,
@@ -245,7 +388,7 @@ func (facts *procedureAnalysisFacts) AccessesForStatement(statementID int) []pro
 	if facts == nil {
 		return nil
 	}
-	return facts.accessesByStatement.values(facts.accesses, statementID)
+	return facts.accessesByStatement.values(facts.accessesView(), statementID)
 }
 
 // forEachAccessForStatement is the allocation-free counterpart to
@@ -255,8 +398,12 @@ func (facts *procedureAnalysisFacts) forEachAccessForStatement(statementID int, 
 		return
 	}
 	if span, contiguous := facts.accessesByStatement.groups.contiguousSpan(statementID); contiguous {
-		for _, access := range facts.accesses[span.start:span.end] {
-			visit(access)
+		accesses := facts.accessesView()
+		for index := span.start; index < span.end; index++ {
+			access, ok := accesses.At(index)
+			if ok {
+				visit(access)
+			}
 		}
 		return
 	}
@@ -265,8 +412,11 @@ func (facts *procedureAnalysisFacts) forEachAccessForStatement(statementID int, 
 		return
 	}
 	for _, index := range indexes {
-		if index >= 0 && index < len(facts.accesses) {
-			visit(facts.accesses[index])
+		accesses := facts.accessesView()
+		if index >= 0 && index < accesses.Len() {
+			if access, ok := accesses.At(index); ok {
+				visit(access)
+			}
 		}
 	}
 }
@@ -277,6 +427,7 @@ func (facts *procedureAnalysisFacts) MemberExpressionsForStatement(statementID i
 	if facts == nil {
 		return nil
 	}
+	expressions := facts.expressionsView()
 	indexes := facts.memberExpressionsByStatement[statementID]
 	if !facts.memberExpressionFallback {
 		if len(indexes) == 0 {
@@ -287,7 +438,9 @@ func (facts *procedureAnalysisFacts) MemberExpressionsForStatement(statementID i
 		}
 		out := make([]procedureir.Expression, 0, len(indexes))
 		for _, index := range indexes {
-			out = append(out, facts.expressions[index])
+			if expression, ok := expressions.At(index); ok {
+				out = append(out, expression)
+			}
 		}
 		return out
 	}
@@ -302,8 +455,8 @@ func (facts *procedureAnalysisFacts) MemberExpressionsForStatement(statementID i
 		}
 		out := make([]procedureir.Expression, 0, len(indexes))
 		for _, index := range indexes {
-			if index >= 0 && index < len(facts.expressions) {
-				out = append(out, facts.expressions[index])
+			if expression, ok := expressions.At(index); ok {
+				out = append(out, expression)
 			}
 		}
 		return out
@@ -331,7 +484,7 @@ func (facts *procedureAnalysisFacts) MemberExpressionsForStatement(statementID i
 		visit(id)
 	}
 	if len(out) == 0 {
-		for _, expression := range facts.expressions {
+		for expression := range expressions.All() {
 			if expression.StatementID == statement.ID && !expression.Recovered && expression.Kind == procedureir.ExpressionMember {
 				out = append(out, expression)
 			}
@@ -369,9 +522,15 @@ func newCallFactsByStatement(calls []procedureir.CallSite) callsByStatement {
 	return callsByStatement{groups: newIndexGroups(ids)}
 }
 
-func (facts callsByStatement) values(calls []procedureir.CallSite, statementID int) []procedureir.CallSite {
+func (facts callsByStatement) values(calls readOnlySpan[procedureir.CallSite], statementID int) []procedureir.CallSite {
 	if span, contiguous := facts.groups.contiguousSpan(statementID); contiguous {
-		return append([]procedureir.CallSite(nil), calls[span.start:span.end]...)
+		out := make([]procedureir.CallSite, 0, span.end-span.start)
+		for index := span.start; index < span.end; index++ {
+			if call, ok := calls.At(index); ok {
+				out = append(out, call)
+			}
+		}
+		return out
 	}
 	indexes, ok := facts.groups.lookup(statementID)
 	if !ok {
@@ -379,8 +538,8 @@ func (facts callsByStatement) values(calls []procedureir.CallSite, statementID i
 	}
 	out := make([]procedureir.CallSite, 0, len(indexes))
 	for _, index := range indexes {
-		if index >= 0 && index < len(calls) {
-			out = append(out, calls[index])
+		if call, ok := calls.At(index); ok {
+			out = append(out, call)
 		}
 	}
 	return out
@@ -398,9 +557,15 @@ func newAccessFactsByStatement(accesses []procedureir.VariableAccess) accessesBy
 	return accessesByStatement{groups: newIndexGroups(ids)}
 }
 
-func (facts accessesByStatement) values(accesses []procedureir.VariableAccess, statementID int) []procedureir.VariableAccess {
+func (facts accessesByStatement) values(accesses readOnlySpan[procedureir.VariableAccess], statementID int) []procedureir.VariableAccess {
 	if span, contiguous := facts.groups.contiguousSpan(statementID); contiguous {
-		return append([]procedureir.VariableAccess(nil), accesses[span.start:span.end]...)
+		out := make([]procedureir.VariableAccess, 0, span.end-span.start)
+		for index := span.start; index < span.end; index++ {
+			if access, ok := accesses.At(index); ok {
+				out = append(out, access)
+			}
+		}
+		return out
 	}
 	indexes, ok := facts.groups.lookup(statementID)
 	if !ok {
@@ -408,8 +573,8 @@ func (facts accessesByStatement) values(accesses []procedureir.VariableAccess, s
 	}
 	out := make([]procedureir.VariableAccess, 0, len(indexes))
 	for _, index := range indexes {
-		if index >= 0 && index < len(accesses) {
-			out = append(out, accesses[index])
+		if access, ok := accesses.At(index); ok {
+			out = append(out, access)
 		}
 	}
 	return out
@@ -489,7 +654,29 @@ func (procedure sourceProcedure) analysisFacts() *procedureAnalysisFacts {
 	if procedure.Facts != nil {
 		return procedure.Facts
 	}
-	facts := newProcedureAnalysisFactsWithDeclarations(procedure.Declarations, procedure.Statements, procedure.Expressions, procedure.Calls, procedure.Accesses)
+	if procedure.IR != nil {
+		facts := newProcedureAnalysisFactsForProcedure(procedure.IR)
+		facts.features.addUnknown(allProcedureFeatures)
+		return facts
+	}
+	facts := newProcedureAnalysisFactsWithDeclarations(
+		spanValues(procedure.Declarations),
+		spanValues(procedure.Statements),
+		spanValues(procedure.Expressions),
+		spanValues(procedure.Calls),
+		spanValues(procedure.Accesses),
+	)
 	facts.features.addUnknown(allProcedureFeatures)
 	return facts
+}
+
+// spanValues is used only by compatibility sourceProcedure literals that do
+// not carry a canonical ProcedureIR owner. Production views never materialize
+// a second collection.
+func spanValues[T any](span readOnlySpan[T]) []T {
+	values := make([]T, 0, span.Len())
+	for value := range span.All() {
+		values = append(values, value)
+	}
+	return values
 }

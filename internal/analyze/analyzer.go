@@ -353,20 +353,12 @@ type analysisContext struct {
 type procedureSignature struct {
 	Name       string
 	ReturnType string
-	Params     []parameterInfo
+	Params     readOnlySpan[parameterInfo]
 }
 
-type parameterInfo struct {
-	Name        string
-	Type        string
-	Passing     string
-	Optional    bool
-	ParamArray  bool
-	ValueShape  procedureir.ValueShapeKind
-	ArrayShape  procedureir.ArrayShape
-	ArrayBounds []procedureir.ArrayBound
-	Range       vbaast.Range
-}
+// parameterInfo is an internal compatibility alias. Procedure parameters are
+// owned by ProcedureIR and are never copied into an analyzer projection.
+type parameterInfo = procedureir.Parameter
 
 type parsedFile struct {
 	Path       string
@@ -417,6 +409,12 @@ type batchByRefDiagnostics struct {
 }
 
 type sourceProcedure struct {
+	// Document and IR retain the Go-owned immutable IR for this analysis
+	// revision.  IR points at Document.Procedures[Index]; the projection must
+	// never retain parser/tree-sitter state.
+	Document         *procedureir.DocumentIR
+	IR               *procedureir.ProcedureIR
+	Index            int
 	Kind             string
 	ProcedureKind    procedureir.ProcedureKind
 	Name             string
@@ -429,12 +427,16 @@ type sourceProcedure struct {
 	EndLine          int
 	StartByte        int
 	EndByte          int
-	Params           []parameterInfo
-	Declarations     []procedureir.Declaration
-	Statements       []procedureir.Statement
-	Expressions      []procedureir.Expression
-	Calls            []procedureir.CallSite
-	Accesses         []procedureir.VariableAccess
+	Params           readOnlySpan[parameterInfo]
+	// These are read-only views over IR.  The type is deliberately private; it
+	// provides range/len compatibility for the analyzer while exposing no
+	// mutable slice through a package boundary.  New consumers should prefer
+	// the view/facts accessors.
+	Declarations readOnlySpan[procedureir.Declaration]
+	Statements   readOnlySpan[procedureir.Statement]
+	Expressions  readOnlySpan[procedureir.Expression]
+	Calls        readOnlySpan[procedureir.CallSite]
+	Accesses     readOnlySpan[procedureir.VariableAccess]
 	// Features is the immutable, analyzer-owned applicability summary built
 	// with the procedure facts. It contains no parser-owned values.
 	Features procedureFeatureSet
@@ -444,8 +446,8 @@ type sourceProcedure struct {
 	Plan      procedureAnalysisPlan
 	PlanReady bool
 	// Facts is the immutable procedure-local index shared by analysis rules.
-	// Its backing slices are the projections above; both are owned by this
-	// source-procedure revision and must be treated as read-only.
+	// Its canonical backing storage is IR.  Synthetic focused tests may use
+	// the compatibility constructors in procedure_facts.go.
 	Facts   *procedureAnalysisFacts
 	Graph   *vbacfg.Graph
 	Effects *effects.ProcedureSummary
@@ -645,7 +647,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		recorder.AddSum("effect_summary_total_propagated_facts", stats.TotalPropagatedFacts)
 	}
 	for i := range parsedFiles {
-		procedures := sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
+		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
 		parsedFiles[i].ModuleFacts = buildModuleAnalysisFacts(parsedFiles[i].Lines, parsedFiles[i].IR, procedures)
 		parsedFiles[i].ModuleDeclarations = parsedFiles[i].ModuleFacts.moduleDeclarations
@@ -1430,7 +1432,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 	}
 	var findings []Finding
 	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
-		procedures := sourceProceduresFromIR(ir)
+		procedures := sourceProceduresFromIRRef(&ir)
 		file := parsedFile{
 			Path:       view.Path,
 			Lines:      normalizedSourceLines(string(view.Source)),
@@ -1582,7 +1584,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
-		procedures := sourceProceduresFromIR(ir, controlFlow)
+		procedures := sourceProceduresFromIRRef(&ir, controlFlow)
 		file := parsedFile{
 			Path:                      view.Path,
 			Lines:                     lines,
@@ -2763,7 +2765,7 @@ func (file parsedFile) procedureProjection() []sourceProcedure {
 	if file.Procedures != nil {
 		return file.Procedures
 	}
-	return sourceProceduresFromIR(file.IR, file.CFG)
+	return sourceProceduresFromIRRef(&file.IR, file.CFG)
 }
 
 func (file parsedFile) moduleDecls() map[string]sourceDeclaration {
@@ -2784,13 +2786,21 @@ func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir
 	}
 }
 
-func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
+// sourceProceduresFromIRRef materializes lightweight analyzer views over the
+// canonical, Go-owned DocumentIR. It intentionally does not copy any of the
+// procedure IR collections; facts and views alias the ProcedureIR storage for
+// the lifetime of the document revision.
+func sourceProceduresFromIRRef(document *procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
+	if document == nil {
+		return nil
+	}
 	procedures := make([]sourceProcedure, 0, len(document.Procedures))
 	module := strings.TrimSpace(document.ModuleName)
 	if module == "" {
 		module = strings.TrimSuffix(filepath.Base(document.Path), filepath.Ext(document.Path))
 	}
-	for procedureIndex, procedure := range document.Procedures {
+	for procedureIndex := range document.Procedures {
+		procedure := &document.Procedures[procedureIndex]
 		kind := "Sub"
 		switch procedure.Symbol.Kind {
 		case procedureir.ProcedureFunction:
@@ -2799,16 +2809,10 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			procedureir.ProcedurePropertyLet, procedureir.ProcedurePropertySet:
 			kind = "Property"
 		}
-		params := make([]parameterInfo, len(procedure.Symbol.Parameters))
-		for i, parameter := range procedure.Symbol.Parameters {
-			params[i] = parameterInfo{
-				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing,
-				Optional: parameter.Optional, ParamArray: parameter.ParamArray,
-				ValueShape: parameter.ValueShape, ArrayShape: parameter.ArrayShape,
-				ArrayBounds: append([]procedureir.ArrayBound(nil), parameter.ArrayBounds...), Range: parameter.Range,
-			}
-		}
 		source := sourceProcedure{
+			Document:         document,
+			IR:               procedure,
+			Index:            procedureIndex,
 			Kind:             kind,
 			ProcedureKind:    procedure.Symbol.Kind,
 			Name:             procedure.Symbol.Name,
@@ -2821,20 +2825,19 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			EndLine:          procedure.Symbol.DeclarationRange.EndLine,
 			StartByte:        procedure.Symbol.DeclarationRange.StartByte,
 			EndByte:          procedure.Symbol.DeclarationRange.EndByte,
-			Params:           params,
-			Declarations:     append([]procedureir.Declaration(nil), procedure.Declarations...),
-			Statements:       append([]procedureir.Statement(nil), procedure.Statements...),
-			Expressions:      append([]procedureir.Expression(nil), procedure.Expressions...),
-			Calls:            append([]procedureir.CallSite(nil), procedure.Calls...),
-			Accesses:         append([]procedureir.VariableAccess(nil), procedure.Accesses...),
+			Params:           newReadOnlySpan(procedure.Symbol.Parameters),
+			Declarations:     newReadOnlySpan(procedure.Declarations),
+			Statements:       newReadOnlySpan(procedure.Statements),
+			Expressions:      newReadOnlySpan(procedure.Expressions),
+			Calls:            newReadOnlySpan(procedure.Calls),
+			Accesses:         newReadOnlySpan(procedure.Accesses),
 		}
-		source.Facts = newProcedureAnalysisFactsWithDeclarations(source.Declarations, source.Statements, source.Expressions, source.Calls, source.Accesses)
+		source.Facts = newProcedureAnalysisFactsForProcedure(procedure)
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
-			graph := controlFlow[0].Graphs[procedureIndex]
-			source.Graph = &graph
+			source.Graph = &controlFlow[0].Graphs[procedureIndex]
 		}
 		graphUnknown := source.Graph != nil && len(source.Graph.UnknownFlowSources) > 0
-		source.Features = finalizeProcedureFeatures(source.Facts.features, document, procedure, source.Graph != nil, graphUnknown)
+		source.Features = finalizeProcedureFeatures(source.Facts.features, *document, *procedure, source.Graph != nil, graphUnknown)
 		source.Facts.features = source.Features
 		procedures = append(procedures, source)
 	}
@@ -3071,17 +3074,17 @@ func vba205NonExecutableStatement(stmt string) bool {
 }
 
 func vba205ShadowedIdentifiersWithFacts(proc sourceProcedure, decls declarationScope, ctx analysisContext, facts *moduleAnalysisFacts) map[string]bool {
-	shadowed := make(map[string]bool, decls.len()+len(proc.Accesses)+len(proc.Declarations)+len(ctx.procedures))
+	shadowed := make(map[string]bool, decls.len()+proc.Accesses.Len()+proc.Declarations.Len()+len(ctx.procedures))
 	decls.forEach(func(name string, _ sourceDeclaration) {
 		shadowed[strings.ToLower(name)] = true
 	})
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		switch declaration.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
 			shadowed[strings.ToLower(declaration.Name)] = true
 		}
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		switch access.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
 			shadowed[strings.ToLower(access.Name)] = true
@@ -3280,7 +3283,7 @@ func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProc
 			reported[key] = true
 		}
 	})
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if declaration.Scope != procedureir.ScopeParameter || !sourceDeclarationIsObject(declaration, declaration.Type) {
 			continue
 		}
@@ -3299,7 +3302,7 @@ func objectNothingEqualityLineIsExecutable(proc sourceProcedure, lineNo int, stm
 	if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
 		return false
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		if !parameter.Optional || parameter.Range.StartLine == 0 || lineNo < parameter.Range.StartLine || lineNo > parameter.Range.EndLine {
 			continue
 		}
@@ -3806,7 +3809,7 @@ func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, resto
 	}
 	savedBindings := map[binding]bool{}
 	restoreBindings := map[binding]bool{}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Mode != procedureir.AccessRead || access.Scope == procedureir.ScopeUnresolved {
 			continue
 		}
@@ -3830,13 +3833,13 @@ func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, resto
 		if key.scope != procedureir.ScopeModule && key.scope != procedureir.ScopeProject {
 			continue
 		}
-		for _, call := range proc.Calls {
+		for call := range proc.Calls.All() {
 			if call.StatementID > savedGuard.ID && call.StatementID < restoreGuard.ID {
 				return false
 			}
 		}
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID <= savedGuard.ID || access.StatementID >= restoreGuard.ID ||
 			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
 			continue
@@ -3873,7 +3876,7 @@ func applicationStateVariable(proc sourceProcedure, statementID int, expression 
 	if name == "" || strings.ContainsAny(name, ".() ") {
 		return "", false
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID != statementID || !strings.EqualFold(access.Name, name) {
 			continue
 		}
@@ -4059,7 +4062,7 @@ func isProjectVisibleProcedure(identity effects.ProcedureIdentity) bool {
 
 func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourceProcedure) []Finding {
 	handlerLabels := map[string]bool{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Kind != procedureir.StatementOnError {
 			continue
 		}
@@ -4078,7 +4081,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 		for _, blockID := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
 			reachable[blockID] = true
 		}
-		for _, statement := range proc.Statements {
+		for statement := range proc.Statements.All() {
 			if statement.Kind != procedureir.StatementLabel {
 				continue
 			}
@@ -4097,7 +4100,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
 					implicitEntry = true
 					if edge.Kind == vbacfg.EdgeLoopExit {
-						for _, candidate := range proc.Statements {
+						for candidate := range proc.Statements.All() {
 							if candidate.ID == edge.StatementID && candidate.Control != nil && candidate.Control.LoopVariable != "" {
 								loopExitVariables[strings.ToLower(candidate.Control.LoopVariable)] = true
 							}
@@ -4118,7 +4121,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 	}
 
 	lastCodeByParent := map[int]string{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Kind == procedureir.StatementLabel {
 			label := cleanIdentifier(statement.Label)
 			if handlerLabels[strings.ToLower(label)] &&
@@ -4167,7 +4170,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		reachable[id] = true
 	}
 	outcomes := map[string]resumeNextScopeOutcome{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if !isOnErrorResumeNext(statement) {
 			continue
 		}
@@ -4327,8 +4330,8 @@ func resumeNextScopeControlStatement(statement procedureir.Statement) bool {
 	}
 }
 
-func resumeNextScopeCallRisk(calls []procedureir.CallSite, statementID int) (call bool, projectCall bool) {
-	for _, candidate := range calls {
+func resumeNextScopeCallRisk(calls readOnlySpan[procedureir.CallSite], statementID int) (call bool, projectCall bool) {
+	for candidate := range calls.All() {
 		if candidate.StatementID != statementID {
 			continue
 		}
@@ -4838,7 +4841,7 @@ func isCleanupAssignment(statement procedureir.Statement) bool {
 }
 
 func isCleanupCall(proc sourceProcedure, statement procedureir.Statement) bool {
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.StatementID != statement.ID {
 			continue
 		}

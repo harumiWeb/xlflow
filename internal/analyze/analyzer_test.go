@@ -81,56 +81,81 @@ func TestSortFindingsUsesProcedureTieBreaker(t *testing.T) {
 
 func TestParsedFileProceduresReusesMaterializedProjection(t *testing.T) {
 	t.Parallel()
-	file := parsedFile{
-		IR:         procedureir.DocumentIR{Path: "Main.bas"},
-		Procedures: []sourceProcedure{{Name: "Run", StartLine: 1, EndLine: 2, Declarations: []procedureir.Declaration{{Name: "cached"}}}},
-	}
+	file := parsedFile{IR: procedureir.DocumentIR{
+		Path: "Main.bas",
+		Procedures: []procedureir.ProcedureIR{{
+			Symbol: procedureir.ProcedureSymbol{
+				Name:             "Run",
+				Kind:             procedureir.ProcedureSub,
+				DeclarationRange: vbaast.Range{StartLine: 1, EndLine: 2},
+			},
+			Declarations: []procedureir.Declaration{{Name: "cached"}},
+		}},
+	}}
+	file.Procedures = sourceProceduresFromIRRef(&file.IR)
 	first := file.procedures()
 	second := file.procedures()
 	if len(first) != 1 || len(second) != 1 || &first[0] == &second[0] {
 		t.Fatal("parsed file exposed or failed to copy its cached procedure projection")
 	}
-	first[0].Name = "Changed"
-	if second[0].Name != "Run" || file.Procedures[0].Name != "Run" {
+	first[0].IR = nil
+	if second[0].IR == nil || file.Procedures[0].IR == nil {
 		t.Fatal("procedure field mutation leaked into the cached projection")
 	}
-	if &first[0].Declarations[0] != &file.Procedures[0].Declarations[0] {
-		t.Fatal("cached procedure metadata was unnecessarily rebuilt")
+	if first[0].IR != nil || second[0].IR != &file.IR.Procedures[0] || file.Procedures[0].IR != &file.IR.Procedures[0] {
+		t.Fatal("procedure views do not retain the canonical IR owner")
+	}
+	if first[0].Facts != second[0].Facts || first[0].Facts != file.Procedures[0].Facts {
+		t.Fatal("cached procedure projection rebuilt immutable view state")
+	}
+	if &second[0].IR.Declarations[0] != &file.IR.Procedures[0].Declarations[0] {
+		t.Fatal("procedure view does not use canonical declaration storage")
 	}
 }
 
 var benchmarkProcedureProjectionSink []sourceProcedure
 
 func BenchmarkParsedFileProcedureProjection(b *testing.B) {
+	for _, procedureCount := range []int{100, 500, 1000, 2000} {
+		b.Run(fmt.Sprintf("%d-procedures", procedureCount), func(b *testing.B) {
+			ir := benchmarkProcedureProjectionIR(procedureCount)
+			b.Run("materialize", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					benchmarkProcedureProjectionSink = sourceProceduresFromIRRef(&ir)
+				}
+			})
+
+			file := parsedFile{IR: ir}
+			file.Procedures = sourceProceduresFromIRRef(&file.IR)
+			b.Run("cached", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					benchmarkProcedureProjectionSink = file.procedures()
+				}
+			})
+		})
+	}
+}
+
+func benchmarkProcedureProjectionIR(procedureCount int) procedureir.DocumentIR {
 	ir := procedureir.DocumentIR{Path: "Benchmark.bas", ModuleName: "Benchmark"}
-	for i := 0; i < 500; i++ {
-		ir.Procedures = append(ir.Procedures, procedureir.ProcedureIR{
+	ir.Procedures = make([]procedureir.ProcedureIR, procedureCount)
+	for i := range ir.Procedures {
+		ir.Procedures[i] = procedureir.ProcedureIR{
 			Symbol: procedureir.ProcedureSymbol{
-				Name:             fmt.Sprintf("Procedure%03d", i),
+				Name:             fmt.Sprintf("Procedure%04d", i),
 				Kind:             procedureir.ProcedureSub,
 				DeclarationRange: vbaast.Range{StartLine: i*4 + 1, EndLine: i*4 + 3},
 			},
-			Declarations: []procedureir.Declaration{{ID: i + 1, Name: fmt.Sprintf("value%03d", i), Type: "Long"}},
+			Declarations: []procedureir.Declaration{{ID: i + 1, Name: fmt.Sprintf("value%04d", i), Type: "Long"}},
 			Statements:   []procedureir.Statement{{ID: i + 1, Kind: procedureir.StatementAssignment, Text: "value = 1"}},
 			Expressions:  []procedureir.Expression{{ID: i + 1, Kind: procedureir.ExpressionLiteral, Text: "1"}},
 			Calls:        []procedureir.CallSite{{ID: i + 1, Callee: procedureir.Callee{BaseName: "Helper"}}},
-			Accesses:     []procedureir.VariableAccess{{Name: fmt.Sprintf("value%03d", i), Mode: procedureir.AccessWrite}},
-		})
+			Accesses:     []procedureir.VariableAccess{{Name: fmt.Sprintf("value%04d", i), Mode: procedureir.AccessWrite}},
+		}
 	}
-
-	b.Run("rebuild", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			benchmarkProcedureProjectionSink = sourceProceduresFromIR(ir)
-		}
-	})
-	b.Run("cached", func(b *testing.B) {
-		file := parsedFile{IR: ir, Procedures: sourceProceduresFromIR(ir)}
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			benchmarkProcedureProjectionSink = file.procedures()
-		}
-	})
+	return ir
 }
 
 func TestVBA225DetectsIndexedCellReadsWritesAndFormatting(t *testing.T) {
@@ -6967,7 +6992,7 @@ func TestArrayModuleEntryStateDoesNotInitializeShadowingParameter(t *testing.T) 
 	}
 	proc := sourceProcedure{
 		Name: "Consume", Module: "Main", StartLine: 1, EndLine: 2,
-		Params: []parameterInfo{{Name: "values", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}},
+		Params: newReadOnlySpan([]parameterInfo{{Name: "values", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}}),
 	}
 	file := parsedFile{
 		Lines:              []string{"Private Sub Consume(ByRef values() As Byte)", "End Sub"},

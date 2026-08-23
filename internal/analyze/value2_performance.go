@@ -48,7 +48,7 @@ type value2PerformanceCandidate struct {
 // a bulk, repeated, or Variant-array transfer signal makes the round-trip cost
 // material. It deliberately does not make a global Value2 preference claim.
 func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedure) []Finding {
-	if !a.Config.Analyze.DetectValue2PerformanceOpportunities || a.typeDB == nil || len(proc.Statements) == 0 {
+	if !a.Config.Analyze.DetectValue2PerformanceOpportunities || a.typeDB == nil || proc.Statements.Len() == 0 {
 		return nil
 	}
 	facts := rangeValueFactsForProcedure(file, proc)
@@ -64,7 +64,7 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 	var candidates []value2PerformanceCandidate
 	seen := map[int]bool{}
 	seenReceivers := map[string]int{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered {
 			continue
 		}
@@ -169,7 +169,7 @@ func value2ScalarProcessing(proc sourceProcedure, statementID int, statementText
 	}
 	seen := false
 	nameRe := value2IdentifierPattern(name)
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == statementID {
 			seen = true
 			continue
@@ -289,15 +289,15 @@ func value2DynamicRangeAliasAt(proc sourceProcedure, statementID int, name strin
 		return false
 	}
 	visiting[name] = true
-	limit := len(proc.Statements)
-	for index, statement := range proc.Statements {
+	limit := proc.Statements.Len()
+	for index, statement := range proc.Statements.AllIndexed() {
 		if statement.ID == statementID {
 			limit = index
 			break
 		}
 	}
 	for index := limit - 1; index >= 0; index-- {
-		statement := proc.Statements[index]
+		statement := proc.Statements.valueAt(index)
 		left, right, ok := rangeValueAssignment(statement.Text)
 		left = value2TrimSetPrefix(left)
 		if !ok || !strings.EqualFold(left, name) {
@@ -378,14 +378,14 @@ func sameExpression(left *procedureir.Expression, right procedureir.Expression) 
 
 func value2ProcedureTypes(proc sourceProcedure) map[string]string {
 	types := map[string]string{}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		typ := strings.TrimSpace(declaration.Type)
 		if typ == "" {
 			typ = "Variant"
 		}
 		types[strings.ToLower(strings.TrimSpace(declaration.Name))] = typ
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		typ := strings.TrimSpace(parameter.Type)
 		if typ == "" {
 			typ = "Variant"
@@ -439,7 +439,7 @@ func value2DateCurrencyExpression(text string, declarations map[string]string) b
 func value2LaterDateCurrencyUse(proc sourceProcedure, statementID int, name string, declarations map[string]string) bool {
 	seen := false
 	nameRe := value2IdentifierPattern(name)
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == statementID {
 			seen = true
 			continue
@@ -580,7 +580,7 @@ func value2PerformanceIncomingStates(proc sourceProcedure, facts rangeValueFacts
 	states := map[int]rangeValueFlowState{}
 	if proc.Graph == nil {
 		state := newRangeValueFlowState()
-		for _, statement := range proc.Statements {
+		for statement := range proc.Statements.All() {
 			states[statement.ID] = cloneRangeValueFlowState(state)
 			_, state = rangeValueStatement(state, statement, facts)
 		}

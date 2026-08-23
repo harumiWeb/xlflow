@@ -343,12 +343,12 @@ func (a Analyzer) commandFinding(file parsedFile, proc sourceProcedure, command 
 // carries the argument expression, so the adapter can recover cmd/PowerShell
 // guidance without exposing parser nodes in the public finding.
 func commandInterpreterForProcedure(proc sourceProcedure, execution vbadf.CommandExecution) string {
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.Range.StartByte != execution.Range.StartByte || execution.Argument < 0 || execution.Argument >= len(call.Arguments.ExpressionIDs) {
 			continue
 		}
 		expressionID := call.Arguments.ExpressionIDs[execution.Argument]
-		for _, expression := range proc.Expressions {
+		for expression := range proc.Expressions.All() {
 			if expression.ID == expressionID {
 				return commandInterpreter(expression.Text)
 			}
@@ -389,12 +389,12 @@ func commandRiskClassification(flow vbadf.Finding, role string) (string, string)
 }
 
 func commandCallForFlow(proc sourceProcedure, flow vbadf.Finding) (procedureir.CallSite, bool) {
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.StatementID == flow.Sink.StatementID && call.Range.StartByte == flow.Sink.Range.StartByte {
 			return call, true
 		}
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.StatementID == flow.Sink.StatementID {
 			return call, true
 		}
@@ -411,7 +411,7 @@ func commandLauncherDetails(flow vbadf.Finding, call procedureir.CallSite, proc 
 	command := ""
 	if len(call.Arguments.ExpressionIDs) > 0 {
 		for _, expressionID := range call.Arguments.ExpressionIDs {
-			for _, expression := range proc.Expressions {
+			for expression := range proc.Expressions.All() {
 				if expression.ID == expressionID {
 					command = expression.Text
 					break
@@ -486,6 +486,12 @@ func (a Analyzer) isKnownDataFlowConstant(file parsedFile, name string) bool {
 }
 
 func procedureIRForSource(document procedureir.DocumentIR, proc sourceProcedure) (procedureir.ProcedureIR, bool) {
+	if proc.IR != nil {
+		return *proc.IR, true
+	}
+	// Focused compatibility callers may still construct a sourceProcedure
+	// without the canonical view. Keep their conservative name/range lookup,
+	// but never use it on the normal projection path.
 	for _, candidate := range document.Procedures {
 		if !strings.EqualFold(candidate.Symbol.Name, proc.Name) {
 			continue

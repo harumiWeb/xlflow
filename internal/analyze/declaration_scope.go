@@ -17,9 +17,9 @@ func newDeclarationScope(file parsedFile, proc sourceProcedure) declarationScope
 	scope := declarationScope{
 		module:     file.moduleDecls(),
 		local:      file.procedureDeclarationsFor(proc),
-		parameters: make(map[string]sourceDeclaration, len(proc.Params)),
+		parameters: make(map[string]sourceDeclaration, proc.Params.Len()),
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		name := strings.ToLower(strings.TrimSpace(parameter.Name))
 		if name == "" {
 			continue

@@ -151,9 +151,10 @@ func TestProcedureFeatureSetFailsOpenForRecoveredAndDynamicIR(t *testing.T) {
 		t.Fatalf("dynamic-call features = %#v, want every feature present or unknown", dynamic.features)
 	}
 
-	missingGraph := sourceProceduresFromIR(procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{
+	missingDocument := procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{{
 		Symbol: procedureir.ProcedureSymbol{Name: "Recovered", Kind: procedureir.ProcedureSub},
-	}}})
+	}}}
+	missingGraph := sourceProceduresFromIRRef(&missingDocument)
 	if len(missingGraph) != 1 || missingGraph[0].Features.present|missingGraph[0].Features.unknown != allProcedureFeatures {
 		t.Fatalf("missing-graph features = %#v, want every feature potentially applicable", missingGraph)
 	}
@@ -363,7 +364,7 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 	}
 }
 
-func TestSourceProceduresFromIRFeatureSummaryIsOwnedAndSafeForConcurrentReads(t *testing.T) {
+func TestSourceProceduresFromIRFeatureSummaryUsesCanonicalIRAndIsSafeForConcurrentReads(t *testing.T) {
 	document := procedureir.DocumentIR{
 		Path: "module.bas", ModuleName: "Sheet1",
 		Procedures: []procedureir.ProcedureIR{{
@@ -376,7 +377,7 @@ func TestSourceProceduresFromIRFeatureSummaryIsOwnedAndSafeForConcurrentReads(t 
 		}},
 	}
 	flow := cfg.Document{Graphs: []cfg.Graph{{}}}
-	procedures := sourceProceduresFromIR(document, flow)
+	procedures := sourceProceduresFromIRRef(&document, flow)
 	if len(procedures) != 1 {
 		t.Fatalf("procedures = %d, want 1", len(procedures))
 	}
@@ -387,15 +388,21 @@ func TestSourceProceduresFromIRFeatureSummaryIsOwnedAndSafeForConcurrentReads(t 
 		}
 	}
 
-	// sourceProceduresFromIR copies the procedure-owned IR projection before
-	// constructing facts; changing the caller's document cannot change it.
+	// The view retains the canonical Go-owned procedure IR. Facts are immutable
+	// summaries, while their compact indexes continue to address that storage.
+	if procedures[0].IR != &document.Procedures[0] {
+		t.Fatalf("procedure IR = %p, want canonical %p", procedures[0].IR, &document.Procedures[0])
+	}
+	if procedures[0].Document != &document {
+		t.Fatalf("procedure document = %p, want canonical %p", procedures[0].Document, &document)
+	}
 	document.Procedures[0].Statements[0].Kind = procedureir.StatementRecovered
 	document.Procedures[0].Declarations[0].IsArray = false
-	if got := procedures[0].Statements[0].Kind; got != procedureir.StatementFor {
-		t.Fatalf("owned statement changed after source mutation: %v", got)
+	if got := procedures[0].IR.Statements[0].Kind; got != procedureir.StatementRecovered {
+		t.Fatalf("canonical statement was not visible through procedure view: %v", got)
 	}
 	if !procedures[0].Features.mayHave(featureArray) || procedures[0].Features.unknown&featureArray != 0 {
-		t.Fatalf("owned feature changed after source mutation: %#v", procedures[0].Features)
+		t.Fatalf("immutable feature summary changed after canonical IR mutation: %#v", procedures[0].Features)
 	}
 
 	var wait sync.WaitGroup

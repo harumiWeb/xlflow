@@ -67,9 +67,9 @@ func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFi
 	if proc.Graph == nil {
 		state := initial
 		writes := runtimeWriteNames(proc.Accesses)
-		statements := append([]procedureir.Statement(nil), proc.Statements...)
-		sort.SliceStable(statements, func(i, j int) bool { return statements[i].Range.StartByte < statements[j].Range.StartByte })
-		for _, statement := range statements {
+		// The canonical ProcedureIR preserves source order, so no projection
+		// sort or temporary statement collection is needed here.
+		for statement := range proc.Statements.All() {
 			env := runtimeConstantEnvironment(base, state)
 			findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, statement, facts, env)
 			state = runtimeTransfer(statement, state, env, writes[statement.ID])
@@ -102,17 +102,17 @@ func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFi
 
 func runtimeLocalNames(proc sourceProcedure) map[string]bool {
 	names := make(map[string]bool)
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if name := runtimeSimpleIdentifier(declaration.Name); name != "" {
 			names[name] = true
 		}
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		if name := runtimeSimpleIdentifier(parameter.Name); name != "" {
 			names[name] = true
 		}
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if name, ok := runtimeAssignmentTarget(statement); ok {
 			names[name] = true
 		}
@@ -327,7 +327,7 @@ func (overlay runtimeConstantOverlay) Resolve(name string) (constexpr.Value, boo
 	return overlay.base.Resolve(key)
 }
 
-func runtimeCFGStates(graph *vbacfg.Graph, initial runtimeConstantState, base constexpr.Environment, accesses []procedureir.VariableAccess) map[vbacfg.BlockID]runtimeConstantState {
+func runtimeCFGStates(graph *vbacfg.Graph, initial runtimeConstantState, base constexpr.Environment, accesses readOnlySpan[procedureir.VariableAccess]) map[vbacfg.BlockID]runtimeConstantState {
 	if graph == nil {
 		return nil
 	}
@@ -473,10 +473,10 @@ func runtimeTransfer(statement procedureir.Statement, in runtimeConstantState, e
 	return out
 }
 
-func runtimeWriteNames(accesses []procedureir.VariableAccess) map[int][]string {
+func runtimeWriteNames(accesses readOnlySpan[procedureir.VariableAccess]) map[int][]string {
 	byStatement := map[int][]string{}
 	seen := map[int]map[string]bool{}
-	for _, access := range accesses {
+	for access := range accesses.All() {
 		if access.StatementID == 0 || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
 			continue
 		}

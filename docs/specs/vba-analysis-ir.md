@@ -263,23 +263,28 @@ module build.
 ### Analyzer-derived facts
 
 The analyzer may derive a `moduleAnalysisFacts` value and one
-`procedureAnalysisFacts` value for each procedure from the owned IR projection.
-These are implementation-level projections for one analysis revision, not a
-second snapshot cache. File facts own compact declaration, source-ordered
-constant, procedure-name, and line-ownership indexes; procedure facts own
-read-only ID lookups and statement-grouped call, access, and member-expression
-indexes. The file facts also keep a compact declaration-start-to-procedure-facts
-pointer index, without duplicating procedure IR. Empty projections do not
-eagerly allocate maps.
+`procedureAnalysisFacts` value for each procedure from a revision-local
+immutable view of the canonical `DocumentIR`/`ProcedureIR`. These are
+implementation-level projections for one analysis revision, not a second
+snapshot cache. A procedure view retains the owned procedure/CFG elements and
+analysis overlays; it does not materialize replacement declaration, statement,
+expression, call, access, or parameter collections. File facts own compact
+declaration, source-ordered constant, procedure-name, and line-ownership
+indexes; procedure facts own compact offsets plus read-only ID lookups and
+statement-grouped call, access, and member-expression indexes. The file facts
+also keep a compact declaration-start-to-procedure-facts pointer index, without
+duplicating procedure IR. Empty projections do not eagerly allocate maps.
 
-Facts are immutable after construction. Rule families and future procedure
-workers may read the same facts concurrently through lookup/iterator helpers,
-while flow state, findings, CFG worklists, object variables, and other
-rule-specific overlays remain local and mutable. Fact indexes retain only
-Go-owned IR values and compact offsets: they must not retain tree-sitter nodes,
-`ParsedDocument` instances, source snapshots, or obsolete revisions. Their
-lifetime is bounded by the parsed file/procedure revision and they are released
-with that analysis result.
+Facts and views are immutable after construction. Rule families and future
+procedure workers may read the same canonical IR through lookup/iterator
+helpers concurrently, while flow state, findings, CFG worklists, object
+variables, and other rule-specific overlays remain local and mutable. Fact
+indexes retain only Go-owned IR references and compact offsets: they must not
+retain tree-sitter nodes, `ParsedDocument` instances, source snapshots, or
+obsolete revisions. Their lifetime is bounded by the parsed file/procedure
+revision and they are released with that analysis result. Snapshot and public
+compatibility getters may continue to return defensive copies at their
+ownership boundary.
 
 Batch and realtime entry points construct and attach facts before rule workers
 run. The performance recorder reports `module_fact_builds` and

@@ -244,7 +244,7 @@ func directExcelAccessSummary(file parsedFile, proc sourceProcedure, db *vbadb.D
 		// compatibility facts once for this procedure, not once per statement.
 		facts = proc.analysisFacts()
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		for _, access := range classifyExcelStatement(file, proc, statement, db, loopVars, rootDir, cfg, facts) {
 			summary.Categories[access.Category] = true
 			if access.Member != "" {
@@ -288,13 +288,13 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		facts = proc.analysisFacts()
 	}
 	byStatement := map[int][]excelLoopAccess{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		accesses := classifyExcelStatement(file, proc, statement, a.typeDB, loopVars, a.RootDir, a.Config, facts)
 		if len(accesses) > 0 {
 			byStatement[statement.ID] = accesses
 		}
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if a.excelLoopAccess != nil && (call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1) {
 			continue
 		}
@@ -415,7 +415,7 @@ func excelProcedureHasLocalLoopCall(file parsedFile, proc sourceProcedure, regio
 	for _, procedure := range file.IR.Procedures {
 		localNames[strings.ToLower(procedure.Symbol.Name)]++
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.Callee.Receiver != nil || strings.TrimSpace(call.Callee.BaseName) == "" {
 			continue
 		}
@@ -543,12 +543,12 @@ func excelLoopRegions(proc sourceProcedure) []excelLoopRegion {
 	statementByBlock := excelCFGStatementsByBlock(proc.Graph)
 	children := map[int][]int{}
 	statements := map[int]procedureir.Statement{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		children[statement.ParentID] = append(children[statement.ParentID], statement.ID)
 		statements[statement.ID] = statement
 	}
 	regions := make([]excelLoopRegion, 0)
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if !isExcelLoopKind(statement.Kind) || statement.Recovered {
 			continue
 		}
@@ -607,7 +607,7 @@ func excelLoopRegions(proc sourceProcedure) []excelLoopRegion {
 
 func excelIntegerConstants(proc sourceProcedure) map[string]int {
 	constants := map[string]int{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(statement.Text))
 		if len(match) != 3 {
 			continue
@@ -904,12 +904,12 @@ func rangeVariablesForProcedure(proc sourceProcedure, file parsedFile, db *vbadb
 			vars.Shadowed[name] = true
 		}
 	}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if isExcelRangeType(declaration.Type) {
 			vars.Range[strings.ToLower(declaration.Name)] = true
 		}
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		match := forEachRangeRe.FindStringSubmatch(strings.TrimSpace(excelLoopHeaderText(statement.Text)))
 		if len(match) == 0 || !strings.Contains(strings.ToLower(match[2]), ".cells") {
 			continue
@@ -1054,12 +1054,12 @@ func isPerCellExcelExpression(file parsedFile, proc sourceProcedure, db *vbadb.D
 }
 
 func excelRootBindingType(file parsedFile, proc sourceProcedure, name string, rootBindings excelRootBindingIndex) string {
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		if strings.EqualFold(strings.TrimSpace(parameter.Name), name) {
 			return parameter.Type
 		}
 	}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if strings.EqualFold(strings.TrimSpace(declaration.Name), name) {
 			return declaration.Type
 		}

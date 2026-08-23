@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced giant-module analyzer allocation pressure by representing procedure
+  projections as immutable views over canonical Procedure IR. Facts now retain
+  compact indexes and read-only access paths instead of copied declaration,
+  statement, expression, call, access, and parameter collections. Diagnostic
+  and JSON/LSP contracts remain unchanged.
+
 - Added immutable tri-state procedure feature summaries and applicability-based
   planning for expensive semantic analyzer domains. Proven-irrelevant domains
   can be skipped before setup, while recovered, unresolved, dynamic, or

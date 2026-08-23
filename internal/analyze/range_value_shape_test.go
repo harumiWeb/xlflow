@@ -409,7 +409,7 @@ End Sub
 		Name:       "Run",
 		StartLine:  2,
 		EndLine:    6,
-		Statements: []procedureir.Statement{{Text: "Debug.Print values(1)"}},
+		Statements: newReadOnlySpan([]procedureir.Statement{{Text: "Debug.Print values(1)"}}),
 		Features:   procedureFeatureSet{unknown: featureRangeArray},
 	}
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(partialFile, partialProc), "VBA226"); len(got) != 1 {
@@ -703,8 +703,8 @@ End Sub
 
 func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {
 	proc := sourceProcedure{
-		Statements:  []procedureir.Statement{{Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
-		Expressions: []procedureir.Expression{{Text: "ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Statements:  newReadOnlySpan([]procedureir.Statement{{Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}}),
+		Expressions: newReadOnlySpan([]procedureir.Expression{{Text: "ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}}),
 		Features:    procedureFeatureSet{unknown: featureRangeArray},
 	}
 	if rangeValueProjectionUnknown(proc) {
@@ -714,8 +714,8 @@ func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {
 
 func TestVBA226RecoveredRangeValueExpressionUsesRecoveryFallback(t *testing.T) {
 	proc := sourceProcedure{
-		Statements:  []procedureir.Statement{{ID: 1, Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
-		Expressions: []procedureir.Expression{{ID: 1, StatementID: 1, Kind: procedureir.ExpressionUnknown, Text: "ws.Cells(2, 1)", Recovered: true}},
+		Statements:  newReadOnlySpan([]procedureir.Statement{{ID: 1, Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}}),
+		Expressions: newReadOnlySpan([]procedureir.Expression{{ID: 1, StatementID: 1, Kind: procedureir.ExpressionUnknown, Text: "ws.Cells(2, 1)", Recovered: true}}),
 	}
 	if !rangeValueProjectionUnknown(proc) {
 		t.Fatal("recovered Range.Value child expressions should select source recovery")

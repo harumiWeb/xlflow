@@ -129,14 +129,14 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 	if !a.Config.Analyze.DetectRangeValueArrayShape {
 		return nil
 	}
-	if len(proc.Statements) == 0 || rangeValueProjectionUnknown(proc) {
+	if proc.Statements.Len() == 0 || rangeValueProjectionUnknown(proc) {
 		return a.rangeValueShapeFindingsFromSource(file, proc)
 	}
 	facts := rangeValueFactsForProcedure(file, proc)
 	if proc.Graph == nil {
 		state := newRangeValueFlowState()
 		var findings []Finding
-		for _, statement := range proc.Statements {
+		for statement := range proc.Statements.All() {
 			issues, next := rangeValueStatement(state, statement, facts)
 			findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
 			state = next
@@ -1024,20 +1024,20 @@ func rangeValueFactsForProcedure(file parsedFile, proc sourceProcedure) rangeVal
 		constants:      map[string]int{},
 		expressions:    map[int]procedureir.Expression{},
 	}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if isExcelRangeType(declaration.Type) {
 			facts.rangeVariables[strings.ToLower(declaration.Name)] = true
 		}
 	}
-	for _, expression := range proc.Expressions {
+	for expression := range proc.Expressions.All() {
 		facts.expressions[expression.ID] = expression
 	}
 	constants := rangeValueIntegerConstants(file.RangeValueModuleConstants, proc)
-	if len(proc.Statements) == 0 || rangeValueProjectionUnknown(proc) {
+	if proc.Statements.Len() == 0 || rangeValueProjectionUnknown(proc) {
 		constants = rangeValueSourceIntegerConstants(file, proc, constants)
 	}
 	facts.constants = constants
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		text := strings.TrimSpace(excelLoopHeaderText(statement.Text))
 		if match := forBoundsRe.FindStringSubmatch(text); len(match) > 0 {
 			start, startErr := constantIntegerExpression(match[1], constants)
@@ -1105,7 +1105,7 @@ func rangeValueIntegerConstants(moduleConstants map[string]int, proc sourceProce
 	for name, value := range moduleConstants {
 		constants[name] = value
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if len(statement.ConditionalBranches) > 0 {
 			continue
 		}

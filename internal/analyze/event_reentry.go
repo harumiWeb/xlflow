@@ -89,7 +89,7 @@ func (a Analyzer) eventHandlerReentryFindings(file parsedFile, proc sourceProced
 	for _, uncertainty := range proc.Effects.DirectUncertainty {
 		record(uncertainty.Range.StartLine, uncertainty.StatementID, eventStatementBoundary(uncertainty.StatementID), effects.Evidence{}, string(uncertainty.Kind))
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
 			continue
 		}
@@ -248,7 +248,7 @@ func eventSafeProcedures(files []parsedFile, project effects.ProjectSummary) map
 					}
 				}
 			}
-			for _, call := range proc.Calls {
+			for call := range proc.Calls.All() {
 				if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
 					continue
 				}
@@ -291,7 +291,7 @@ func eventGuardedAt(proc sourceProcedure, statementID int) bool {
 		return false
 	}
 	dominators := proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[target.ID]
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		property, value, ok := applicationPropertyAssignment(statement, facts)
 		if !ok || property != "enableevents" || unsafe[statement.ID].Kind != "" || !eventDisableValue(value) {
 			continue

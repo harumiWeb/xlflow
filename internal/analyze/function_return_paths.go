@@ -143,7 +143,7 @@ func returnAssignmentKindForStatement(proc sourceProcedure, statement procedurei
 }
 
 func statementWritesReturnSlot(proc sourceProcedure, statementID int) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID != statementID || access.Scope != procedureir.ScopeLocal {
 			continue
 		}

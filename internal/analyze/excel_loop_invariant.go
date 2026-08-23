@@ -50,8 +50,8 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	if len(regions) == 0 {
 		return nil
 	}
-	statements := make(map[int]procedureir.Statement, len(proc.Statements))
-	for _, statement := range proc.Statements {
+	statements := make(map[int]procedureir.Statement, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
 		statements[statement.ID] = statement
 	}
 	facts := proc.Facts
@@ -62,11 +62,11 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	}
 	constants := loopInvariantStringConstants(file, proc)
 	expressionsByStatement := make(map[int][]procedureir.Expression)
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		expressionsByStatement[statement.ID] = statementMemberExpressions(facts, statement)
 	}
 	seen := map[string]loopInvariantCandidate{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		for _, expression := range expressionsByStatement[statement.ID] {
 			candidate, ok := a.loopInvariantCandidate(file, proc, statement, expression, constants, statements)
 			if !ok {
@@ -296,7 +296,7 @@ func loopInvariantDependsOnLoopVariable(proc sourceProcedure, expression procedu
 	if len(variables) == 0 && len(withStatements) == 0 {
 		return false
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if !loopInvariantRangeContains(expression.Range, access.Range) {
 			continue
 		}
@@ -305,7 +305,7 @@ func loopInvariantDependsOnLoopVariable(proc sourceProcedure, expression procedu
 		}
 	}
 	for _, statement := range withStatements {
-		for _, access := range proc.Accesses {
+		for access := range proc.Accesses.All() {
 			if access.StatementID == statement.ID && variables[strings.ToLower(access.Name)] {
 				return true
 			}
@@ -316,13 +316,13 @@ func loopInvariantDependsOnLoopVariable(proc sourceProcedure, expression procedu
 
 func loopInvariantRootWritten(proc sourceProcedure, expression procedureir.Expression, withStatements []procedureir.Statement, owner excelLoopRegion) bool {
 	dependencies := map[string]bool{}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if loopInvariantRangeContains(expression.Range, access.Range) {
 			dependencies[strings.ToLower(access.Name)] = true
 		}
 	}
 	for _, statement := range withStatements {
-		for _, access := range proc.Accesses {
+		for access := range proc.Accesses.All() {
 			if access.StatementID == statement.ID {
 				dependencies[strings.ToLower(access.Name)] = true
 			}
@@ -331,7 +331,7 @@ func loopInvariantRootWritten(proc sourceProcedure, expression procedureir.Expre
 	if len(dependencies) == 0 {
 		return false
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if !owner.Body[access.StatementID] || !dependencies[strings.ToLower(access.Name)] {
 			continue
 		}
@@ -345,7 +345,7 @@ func loopInvariantRootWritten(proc sourceProcedure, expression procedureir.Expre
 func loopInvariantLoopVariables(owner excelLoopRegion, proc sourceProcedure) map[string]bool {
 	variables := map[string]bool{}
 	var header procedureir.Statement
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == owner.StatementID {
 			header = statement
 			break
@@ -362,7 +362,7 @@ func loopInvariantLoopVariables(owner excelLoopRegion, proc sourceProcedure) map
 		// Do/While headers have no dedicated iterator syntax. Treat variables
 		// read by the header condition as loop controls so dynamic selectors
 		// such as Worksheets(names(i)) remain conservative.
-		for _, access := range proc.Accesses {
+		for access := range proc.Accesses.All() {
 			if access.StatementID == owner.StatementID && access.Mode != procedureir.AccessWrite {
 				variables[strings.ToLower(access.Name)] = true
 			}
@@ -586,7 +586,7 @@ func loopInvariantStringConstants(file parsedFile, proc sourceProcedure) map[str
 			constants[strings.ToLower(match[1])] = match[2]
 		}
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		line := strings.TrimSpace(gui.StripComment(statement.Text))
 		match := loopInvariantConstStringRe.FindStringSubmatch(line)
 		if len(match) == 2 {
@@ -703,13 +703,13 @@ func loopInvariantVariableName(proc sourceProcedure, typ string, issued map[stri
 	for name := range issued {
 		used[name] = true
 	}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		used[strings.ToLower(declaration.Name)] = true
 	}
-	for _, param := range proc.Params {
+	for param := range proc.Params.All() {
 		used[strings.ToLower(param.Name)] = true
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		used[strings.ToLower(access.Name)] = true
 	}
 	name := base

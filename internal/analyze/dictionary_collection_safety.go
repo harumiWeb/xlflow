@@ -124,11 +124,11 @@ func buildDictionaryCollectionIndex(files []parsedFile) *dictionaryCollectionInd
 
 func dcPropagateHelperSummary(proc sourceProcedure, summary *dcHelperSummary, helpers map[string]dcHelperSummary) bool {
 	params := map[string]int{}
-	for i, param := range proc.Params {
+	for i, param := range proc.Params.AllIndexed() {
 		params[strings.ToLower(param.Name)] = i
 	}
 	changed := false
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		text := dcStatementSource(statement)
 		if assignment := dcSetAssignment(text); assignment != nil && strings.EqualFold(assignment.target, proc.Name) {
 			if name, args, ok := dcSimpleFunctionCall(assignment.rhs); ok {
@@ -195,11 +195,11 @@ func dcHasHelperEffect(effects []dcHelperEffect, candidate dcHelperEffect) bool 
 func directDictionaryCollectionSummary(file parsedFile, proc sourceProcedure) dcHelperSummary {
 	summary := dcHelperSummary{Name: proc.Name, ExistsObject: -1, ExistsKey: -1, SourceFile: file.Path, DeclarationAt: proc.StartLine}
 	params := map[string]int{}
-	for i, param := range proc.Params {
+	for i, param := range proc.Params.AllIndexed() {
 		params[strings.ToLower(param.Name)] = i
 	}
 	returnName := strings.ToLower(proc.Name)
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		text := dcStatementSource(statement)
 		lower := strings.ToLower(text)
 		if match := dcSetAssignment(text); match != nil && strings.EqualFold(match.target, returnName) {
@@ -249,12 +249,12 @@ func directDictionaryCollectionSummary(file parsedFile, proc sourceProcedure) dc
 }
 
 func dcDeclaredKind(proc sourceProcedure, name string) dictionaryCollectionKind {
-	for _, decl := range proc.Declarations {
+	for decl := range proc.Declarations.All() {
 		if strings.EqualFold(decl.Name, name) {
 			return dcKindFromType(decl.Type)
 		}
 	}
-	for _, param := range proc.Params {
+	for param := range proc.Params.All() {
 		if strings.EqualFold(param.Name, name) {
 			return dcKindFromType(param.Type)
 		}
@@ -325,7 +325,7 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 	seen := map[string]bool{}
 	var findings []Finding
 	linear := initial.clone()
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		block, ok := proc.Graph.BlockForStatement(statement.ID)
 		if !ok {
 			continue
@@ -361,7 +361,7 @@ func dcInitialState(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 	for key, decl := range file.procedureDeclarationsFor(proc) {
 		add(key, decl, true)
 	}
-	for _, param := range proc.Params {
+	for param := range proc.Params.All() {
 		kind := dcKindFromType(param.Type)
 		if kind == dcUnknown {
 			continue
@@ -764,7 +764,7 @@ func dcAccessGuarded(proc sourceProcedure, statement procedureir.Statement, rece
 		return false
 	}
 	statements := map[int]procedureir.Statement{}
-	for _, candidate := range proc.Statements {
+	for candidate := range proc.Statements.All() {
 		statements[candidate.ID] = candidate
 	}
 	for current := statement; current.ID != 0; current = statements[current.ParentID] {
@@ -787,7 +787,7 @@ func dcCollectionIndexGuarded(proc sourceProcedure, statement procedureir.Statem
 		return false
 	}
 	statements := map[int]procedureir.Statement{}
-	for _, candidate := range proc.Statements {
+	for candidate := range proc.Statements.All() {
 		statements[candidate.ID] = candidate
 	}
 	for current := statement; current.ID != 0; current = statements[current.ParentID] {
@@ -1388,14 +1388,14 @@ func dcConstantNamesForProcedure(file parsedFile, proc sourceProcedure) map[stri
 
 func dcNarrowProbeStatements(proc sourceProcedure) map[int]bool {
 	out := map[int]bool{}
-	for i, statement := range proc.Statements {
+	for i, statement := range proc.Statements.AllIndexed() {
 		if !isOnErrorResumeNext(statement) {
 			continue
 		}
 		operations := 0
 		var candidate int
-		for j := i + 1; j < len(proc.Statements); j++ {
-			next := proc.Statements[j]
+		for j := i + 1; j < proc.Statements.Len(); j++ {
+			next := proc.Statements.valueAt(j)
 			if next.Kind == procedureir.StatementDeclaration || next.Kind == procedureir.StatementLabel || resumeNextScopeErrProbeStatement(next) {
 				continue
 			}
@@ -1449,7 +1449,7 @@ func dcForEach(text string) (string, string, bool) {
 
 func dcMutatesEnumeratedCollection(statement procedureir.Statement, objectID string, state *dcFlowState, proc sourceProcedure, loops []excelLoopRegion) bool {
 	statements := map[int]procedureir.Statement{}
-	for _, candidate := range proc.Statements {
+	for candidate := range proc.Statements.All() {
 		statements[candidate.ID] = candidate
 	}
 	for current := statement; current.ParentID != 0; {
@@ -1520,7 +1520,7 @@ func dcMutationCanContinueIteration(proc sourceProcedure, mutation procedureir.S
 
 func dcMutationHasUnconditionalExit(proc sourceProcedure, mutation procedureir.Statement, loopStatementID int) bool {
 	byID := map[int]procedureir.Statement{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		byID[statement.ID] = statement
 	}
 	ancestors := map[int]bool{}
@@ -1530,7 +1530,7 @@ func dcMutationHasUnconditionalExit(proc sourceProcedure, mutation procedureir.S
 			break
 		}
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Range.StartByte <= mutation.Range.StartByte {
 			continue
 		}
@@ -1568,7 +1568,7 @@ func dcZeroIndex(arg string, statement procedureir.Statement, proc sourceProcedu
 		return false
 	}
 	statements := map[int]procedureir.Statement{}
-	for _, candidate := range proc.Statements {
+	for candidate := range proc.Statements.All() {
 		statements[candidate.ID] = candidate
 	}
 	for current := statement; current.ParentID != 0; {
@@ -1619,7 +1619,7 @@ func dcArrayHasExplicitZeroLowerBound(proc sourceProcedure, arrayName string, be
 	}
 	needle := strings.ToLower(arrayName) + "(0 to "
 	compactNeedle := strings.ReplaceAll(needle, " ", "")
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Range.StartByte >= beforeByte {
 			continue
 		}

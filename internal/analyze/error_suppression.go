@@ -66,7 +66,7 @@ func (a Analyzer) errorSuppressionFindings(file parsedFile, proc sourceProcedure
 	}
 
 	facts := proc.analysisFacts()
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 || !applicationStateCallReachable(proc, call) {
 			continue
 		}
@@ -203,7 +203,7 @@ func callerArgumentExpression(proc sourceProcedure, call procedureir.CallSite, o
 }
 
 func procedureLocal(proc sourceProcedure, name string) bool {
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if strings.EqualFold(declaration.Name, name) {
 			return true
 		}
@@ -266,7 +266,7 @@ func errorEntryProcedure(identity effects.ProcedureIdentity) bool {
 }
 
 func errorSuccessResultUseUncertain(proc sourceProcedure, call procedureir.CallSite, statement procedureir.Statement) bool {
-	for _, other := range proc.Calls {
+	for other := range proc.Calls.All() {
 		if other.ID != call.ID && other.StatementID == call.StatementID {
 			return true
 		}
@@ -382,7 +382,7 @@ func errorResultCondition(kind procedureir.StatementKind) bool {
 }
 
 func booleanProcedureLocal(proc sourceProcedure, name string) bool {
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if strings.EqualFold(declaration.Name, name) && strings.EqualFold(strings.TrimSpace(declaration.Type), "Boolean") {
 			return true
 		}
@@ -391,7 +391,7 @@ func booleanProcedureLocal(proc sourceProcedure, name string) bool {
 }
 
 func statementReadsName(proc sourceProcedure, statementID int, name string) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID == statementID && strings.EqualFold(access.Name, name) &&
 			(access.Mode == procedureir.AccessRead || access.Mode == procedureir.AccessReadWrite) {
 			return true
@@ -401,7 +401,7 @@ func statementReadsName(proc sourceProcedure, statementID int, name string) bool
 }
 
 func statementWritesName(proc sourceProcedure, statementID int, name string) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID == statementID && strings.EqualFold(access.Name, name) &&
 			(access.Mode == procedureir.AccessWrite || access.Mode == procedureir.AccessReadWrite) {
 			return true

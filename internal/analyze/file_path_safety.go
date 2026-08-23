@@ -75,7 +75,7 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	}
 	values["vbnullstring"] = filePathValue{raw: "vbNullString", constant: "", origin: "clean", known: true}
 	params := map[string]bool{}
-	for _, p := range proc.Params {
+	for p := range proc.Params.All() {
 		params[strings.ToLower(p.Name)] = true
 		values[strings.ToLower(p.Name)] = filePathValue{raw: p.Name, origin: "tainted", known: false}
 	}
@@ -92,7 +92,7 @@ func (a Analyzer) filePathSafetyFindings(file parsedFile, proc sourceProcedure) 
 	}
 	fsos := map[string]bool{}
 	workbooks := map[string]bool{}
-	for _, d := range proc.Declarations {
+	for d := range proc.Declarations.All() {
 		name := strings.ToLower(strings.TrimSpace(d.Name))
 		if strings.Contains(strings.ToLower(d.Type), "filesystemobject") || name == "fso" || name == "fs" || name == "filesystemobject" {
 			fsos[strings.ToLower(d.Name)] = true
