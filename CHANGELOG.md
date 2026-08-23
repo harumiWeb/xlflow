@@ -11,6 +11,15 @@ All notable changes to xlflow will be documented in this file.
   `--performance-log` output adds planned/skipped domain counters; findings,
   exit codes, and normal JSON/LSP contracts remain unchanged.
 
+- Consolidated compatible array diagnostics onto one immutable,
+  procedure-local array semantic result per analysis revision. `VBA227`,
+  deterministic array `VBA249`, `VBA208`, object-array `VBA101`/`VBA102`,
+  `VBA241`, and applicable `VBA226` projections reuse shared preparation and
+  fixed-point facts while retaining their existing diagnostic ownership and
+  conservatism. Performance logs expose `array_kernel_runs`,
+  `array_cfg_walks`, and `array_projection_runs`; findings, snapshots, exit
+  codes, and normal JSON/LSP contracts remain unchanged.
+
 - Added opt-in semantic-domain profiling beneath
   `procedure_local_diagnostics` for giant-module `xlflow analyze` workloads.
   `--performance-log` now attributes aggregate source-scan, runtime, array,

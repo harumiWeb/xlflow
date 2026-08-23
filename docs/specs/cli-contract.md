@@ -324,6 +324,20 @@ valid semantic-domain kernel invocations. Candidate counters count procedures
 that pass the rule gate and are actually analyzed, traversal counters count
 started source/CFG traversals, and none of these counters count findings.
 
+Array-domain profiling adds three counters with the following meanings:
+`array_kernel_runs` counts canonical `ArrayAnalysisResult` materializations,
+`array_cfg_walks` counts started array fixed-point walks, and
+`array_projection_runs` counts enabled, applicable array diagnostic projectors.
+The array candidate and kernel counters are per procedure analysis revision,
+not per rule. With the core array projectors enabled together, the kernel and
+main CFG walk remain `1` for an applicable procedure while projection runs
+increase for the projectors that are applicable. `VBA241` reads shared facts
+without starting another fixed-point walk. An applicable `VBA226` policy may
+start its explicitly separate secondary shape pass, which is reflected in
+`array_cfg_walks`; this exception does not change the shared result lifetime.
+These counters are emitted only in stderr performance records and never count
+findings.
+
 Applicability planning adds additive decision counters for each gated semantic
 domain: `planned_runtime_runs` / `skipped_runtime_runs`,
 `planned_array_runs` / `skipped_array_runs`,
@@ -1423,6 +1437,10 @@ execution failure from both compile-equivalent errors and warning-level
 runtime-safety inference. It reports only deterministic division, conversion,
 numeric-operand, and array allocation/bound failures described in
 [Deterministic VBA Runtime-Error Diagnostics](vba-runtime-error-diagnostics.md).
+Array allocation and bound failures are projected from the same procedure-local
+array semantic result used by the compatible array diagnostics; this sharing
+does not broaden the deterministic proof threshold or change duplicate
+ownership with `VBA227`.
 Unknown `Variant`, late-bound, external, locale-dependent, and branch-merged
 values remain silent. Disable it with
 `[analyze].disabled_rules = ["VBA249"]` or suppress an intentional local case
@@ -1502,6 +1520,13 @@ and standalone getter predicates, remain allowed.
 
 For `VBA226`, the configurable analyzer mapping is `VBA226 = detect_range_value_array_shape`.
 `VBA227` is default-enabled, non-blocking, warning-level, inline-suppressible, and supported in batch and real-time analysis. It uses a conservative CFG allocation lattice (`allocated`, `unallocated`, and `unknown`) for fixed, dynamic, multidimensional, object, and Variant arrays. It reports unallocated bound/access operations, invalid dimensions or known bounds, fixed-array `ReDim`, incompatible `Erase`, known scalar bound/iterable sources, and impossible constant `ReDim` bounds. Unknown Variant operations remain fail-open. The shared state supplies `VBA208` `ReDim Preserve` findings and object-array missing-`Set` findings under `VBA101` / `VBA102`, which retain their existing ownership and configuration contracts. Unique project-local Function and Property Get return assignments may establish an array value; mixed, recursive, ambiguous, and external returns remain unknown. Batch summaries may use project-local files, while real-time summaries are limited to the active document. `Range.Value` / `Value2` shape findings remain owned by `VBA226` and are not duplicated. Disable it with `[analyze].disabled_rules = ["VBA227"]` or use `detect_array_lifecycle_safety`.
+The analyzer materializes one immutable procedure-local array semantic result
+for these compatible projections. The result is discarded with the current
+analysis revision, is read-only during projection, and does not contain
+diagnostic policy. `VBA227` retains its source-line lifecycle ordering and
+exceptional-edge policy; `VBA226` retains its independent `Range.Value` shape
+lattice and may use a secondary pass. These compatibility policies are not
+weakened to make the shared preparation possible.
 Conditional `ByRef` output helpers that exit on a zero collection/count and
 `ReDim` from that count are carried only into matching positive-count branches,
 including numeric `Select Case` clauses; the helper does not establish an

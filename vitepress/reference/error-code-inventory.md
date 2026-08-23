@@ -25,6 +25,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `array_bounds`
 - `array_candidate_procedures`
 - `array_cfg_walks`
+- `array_kernel_runs`
+- `array_projection_runs`
 - `array_subscript_out_of_bounds`
 - `array_unallocated`
 - `as_type_clause`

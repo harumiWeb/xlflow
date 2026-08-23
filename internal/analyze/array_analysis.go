@@ -1,0 +1,228 @@
+package analyze
+
+import (
+	"strings"
+
+	"github.com/harumiWeb/xlflow/internal/config"
+)
+
+// ArrayAnalysisResult is the immutable, procedure-local semantic result used
+// by array diagnostic projections.  It intentionally has no public fields:
+// the result is an implementation detail of one analysis revision and must
+// not become a cross-revision cache or a mutable rule API.
+//
+// The slices and maps are populated before the result is handed to any
+// projector.  Projectors only read them and create Finding values, which makes
+// the result safe for concurrent read-only consumers.
+type ArrayAnalysisResult struct {
+	variables      map[string]arrayVariable
+	constants      map[string]int
+	capacityGuards []arrayResumeNextCapacityGuard
+	// cfgWalks counts only fixed-point worklists owned by this result. The
+	// ReDim-in-loop inspection is intentionally not included; Range.Value
+	// shape is the only explicitly separate secondary lattice.
+	cfgWalks       uint64
+	projectionRuns uint64
+
+	lifecycleFindings []Finding
+	runtimeFindings   []Finding
+	redimFindings     []Finding
+	rangeFindings     []Finding
+}
+
+func (r *ArrayAnalysisResult) findings(kind string) []Finding {
+	if r == nil {
+		return nil
+	}
+	var source []Finding
+	switch kind {
+	case "lifecycle":
+		source = r.lifecycleFindings
+	case "runtime":
+		source = r.runtimeFindings
+	case "redim":
+		source = r.redimFindings
+	case "range":
+		source = r.rangeFindings
+	}
+	return append([]Finding(nil), source...)
+}
+
+func arrayAnalysisEnabled(cfg config.AnalyzeConfig) bool {
+	if cfg.DetectArrayLifecycleSafety || cfg.DetectRedimPreserveDimension || cfg.DetectObjectArrayComparison || cfg.DetectRedimPreserveInLoops || cfg.DetectRangeValueArrayShape {
+		return true
+	}
+	enabled, known := config.AnalyzeRuleEnabled(cfg, "VBA249")
+	return (!known || enabled) && cfg.DetectDeterministicRuntimeErrors
+}
+
+// buildArrayAnalysisResult materializes all procedure-local array preparation
+// once.  Project-wide ByRef/module/return summaries are supplied by ctx and
+// remain owned by the existing analysis-context fixed points.
+func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) *ArrayAnalysisResult {
+	if !arrayAnalysisEnabled(a.Config.Analyze) {
+		return nil
+	}
+	variables := arrayVariables(file, proc, moduleDecls)
+	result := &ArrayAnalysisResult{
+		variables:      variables,
+		constants:      arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants),
+		capacityGuards: arrayResumeNextCapacityGuards(file, proc, variables),
+	}
+	entryState := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, variables)
+
+	runtimeEnabled, knownRuntimeRule := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA249")
+	hasArrayVariable := false
+	for _, variable := range variables {
+		if variable.isArray {
+			hasArrayVariable = true
+			break
+		}
+	}
+	runtimeRequested := hasArrayVariable && a.Config.Analyze.DetectDeterministicRuntimeErrors && (!knownRuntimeRule || runtimeEnabled)
+	coreRequested := a.Config.Analyze.DetectArrayLifecycleSafety ||
+		a.Config.Analyze.DetectRedimPreserveDimension ||
+		a.Config.Analyze.DetectObjectArrayComparison ||
+		runtimeRequested
+	// A procedure can contain an object array even when the explicit lifecycle
+	// switches are disabled. The shared transfer owns the always-on VBA101/
+	// VBA102 projection for that case.
+	objectArrayApplicable := false
+	for _, variable := range variables {
+		if variable.isArray && variable.isObject {
+			objectArrayApplicable = true
+			break
+		}
+	}
+	coreFlowRequested := a.Config.Analyze.DetectArrayLifecycleSafety ||
+		a.Config.Analyze.DetectRedimPreserveDimension ||
+		objectArrayApplicable ||
+		runtimeRequested
+	if coreRequested || objectArrayApplicable {
+		var runtimeSink *[]Finding
+		if runtimeRequested {
+			runtimeSink = &result.runtimeFindings
+		}
+		result.lifecycleFindings = a.arrayLifecycleFindingsPreparedWithRuntimeEntry(file, proc, ctx, moduleDecls, result.variables, result.constants, result.capacityGuards, runtimeSink, entryState)
+		if proc.Graph != nil && coreFlowRequested {
+			result.cfgWalks++
+		}
+		result.projectionRuns += arrayCoreProjectionRuns(a.Config.Analyze, proc, variables, objectArrayApplicable, runtimeRequested)
+	}
+	if a.Config.Analyze.DetectRedimPreserveInLoops {
+		var redimApplicable bool
+		result.redimFindings, redimApplicable = a.redimPreserveLoopFindingsPreparedWithApplicability(file, proc, moduleDecls, result.variables)
+		if redimApplicable {
+			result.projectionRuns++
+		}
+	}
+	if a.Config.Analyze.DetectRangeValueArrayShape && rangeValueShapeApplicable(proc) {
+		result.rangeFindings = a.rangeValueShapeFindings(file, proc)
+		result.projectionRuns++
+		if proc.Graph != nil {
+			result.cfgWalks++
+		}
+	}
+	return result
+}
+
+// arrayCoreProjectionRuns counts the compatible projections fed by the shared
+// core lane. The lane itself is one worklist, but telemetry reports the
+// enabled, applicable diagnostic projections rather than treating that lane as
+// one diagnostic. This keeps the counter independent from finding multiplicity.
+func arrayCoreProjectionRuns(cfg config.AnalyzeConfig, proc sourceProcedure, variables map[string]arrayVariable, objectArrayApplicable, runtimeRequested bool) uint64 {
+	var runs uint64
+	hasArray := false
+	for _, variable := range variables {
+		if variable.isArray {
+			hasArray = true
+			break
+		}
+	}
+	if cfg.DetectArrayLifecycleSafety && arrayLifecycleProjectionApplicable(proc, variables) {
+		runs++ // VBA227 lifecycle and For Each projection
+	}
+	if runtimeRequested {
+		runs++ // deterministic array VBA249 projection
+	}
+	if cfg.DetectRedimPreserveDimension && arrayHasRedimPreserveOperation(proc) {
+		runs++ // VBA208
+	}
+	if cfg.DetectObjectArrayComparison && hasArray && arrayHasComparisonExpression(proc) {
+		runs++ // VBA209
+	}
+	if objectArrayApplicable {
+		runs++ // VBA101/VBA102
+	}
+	return runs
+}
+
+func arrayLifecycleProjectionApplicable(proc sourceProcedure, variables map[string]arrayVariable) bool {
+	if len(variables) > 0 {
+		for _, statement := range proc.Statements {
+			lower := strings.ToLower(statement.Text)
+			if strings.Contains(lower, "redim") || strings.Contains(lower, "erase ") || strings.Contains(lower, "lbound(") || strings.Contains(lower, "ubound(") || strings.Contains(lower, "for each") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayHasRedimPreserveOperation(proc sourceProcedure) bool {
+	for _, statement := range proc.Statements {
+		if strings.Contains(strings.ToLower(statement.Text), "redim preserve") {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayHasComparisonExpression(proc sourceProcedure) bool {
+	for _, expression := range proc.Expressions {
+		if expression.SyntaxKind == "comparison_expression" && !expression.Recovered {
+			return true
+		}
+	}
+	return false
+}
+
+// rangeValueShapeApplicable is the cheap procedure-level gate for the
+// deliberately independent Range.Value lattice.  The planner can schedule
+// the array domain for another rule (for example ReDim), but that must not
+// start a Range.Value worklist when the procedure has no Range.Value-shaped
+// source. Unknown/recovered statements are left applicable so the existing
+// conservative scanner remains fail-open.
+func rangeValueShapeApplicable(proc sourceProcedure) bool {
+	for _, statement := range proc.Statements {
+		if statement.Recovered {
+			return true
+		}
+		lower := strings.ToLower(statement.Text)
+		if strings.Contains(lower, ".value") || strings.Contains(lower, "range(") || strings.Contains(lower, "resize(") || strings.Contains(lower, "cells(") {
+			return true
+		}
+	}
+	for _, expression := range proc.Expressions {
+		if expression.Recovered {
+			return true
+		}
+		lower := strings.ToLower(expression.Text)
+		if strings.Contains(lower, ".value") || strings.Contains(lower, "range(") || strings.Contains(lower, "resize(") || strings.Contains(lower, "cells(") {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *ArrayAnalysisResult) lifecycle() []Finding  { return r.findings("lifecycle") }
+func (r *ArrayAnalysisResult) runtime() []Finding    { return r.findings("runtime") }
+func (r *ArrayAnalysisResult) redim() []Finding      { return r.findings("redim") }
+func (r *ArrayAnalysisResult) rangeShape() []Finding { return r.findings("range") }
+
+func arrayEntryStateForProcedure(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable) arrayFlowState {
+	state := arrayInitialState(variables)
+	state = applyArrayInternalStorageConfiguration(state, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
+	state = applyArrayByRefEntryStates(state, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
+	return applyArrayModuleEntryState(state, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
+}

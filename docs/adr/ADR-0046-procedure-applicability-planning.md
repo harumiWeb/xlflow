@@ -18,6 +18,12 @@ optimization must also work for realtime/LSP analysis, preserve the existing
 batch and project-wide effect contracts, and retain the conservative behavior
 of recovered or unresolved VBA.
 
+Issue #696 applies the same planning boundary to overlapping array diagnostics.
+Array applicability must decide whether the array domain is needed, while the
+domain itself must materialize one canonical procedure result that can feed
+several rule projections. Applicability planning must not become a second
+array parser or a rule-specific cache.
+
 ## Decision
 
 Derive one immutable, procedure-local applicability summary from the owned IR
@@ -57,6 +63,21 @@ changes them. Planning is an execution optimization only: finding content,
 range, multiplicity, ordering, severity, suppression, exit status, and normal
 JSON/LSP schemas remain unchanged.
 
+When the array domain is planned, its procedure worker materializes one
+immutable `ArrayAnalysisResult` for the current analysis revision and passes
+that result to the applicable array projectors. The result reuses the owned
+procedure/module facts and is discarded with the procedure analysis; it is not
+promoted to a project-wide cache. `array_kernel_runs` and the main
+`array_cfg_walks` therefore remain one per applicable procedure even when
+`VBA227`, deterministic `VBA249`, `VBA208`, `VBA209`, object-array
+`VBA101`/`VBA102`, `VBA241`, and `VBA226` are enabled together. The
+`array_projection_runs` counter records applicable projectors, while an
+explicit `VBA226` secondary shape pass is the only additional array walk
+allowed by this plan. `VBA241` reads shared facts and does not start a new
+fixed-point traversal. Rule-specific conservatism remains in the projection
+policy, including the source-line lifecycle policy of `VBA227` and the
+independent `Range.Value` shape policy of `VBA226`.
+
 The analyzer's opt-in performance recorder emits additive planned/skipped
 counters for each gated semantic domain. A counter is recorded once per
 procedure/domain decision; unknown applicability is counted as planned. These
@@ -89,6 +110,9 @@ produce a finding.
 - Requirement metadata becomes an internal completeness contract: a new
   gated rule must declare its domain requirements and add planner/correctness
   coverage before it can rely on skipping.
+- Array applicability is a domain-level decision rather than one decision per
+  array diagnostic. Adding an array projector changes projection work and
+  telemetry, not the canonical kernel or main CFG walk count.
 
 ## Alternatives Considered
 
@@ -126,11 +150,15 @@ produce a finding.
 - Existing analyzer performance and corpus measurement procedure:
   `docs/specs/cli-contract.md` and
   `docs/specs/static-analysis-corpus.md`.
+- ADR-0040 for the canonical array semantic result and its diagnostic
+  ownership boundaries.
 
 ## Related
 
 - Issue #693 (parent)
 - Issue #695
+- Issue #696
 - ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0043, ADR-0045
+- ADR-0040
 - `docs/specs/vba-analysis-ir.md`
 - `docs/specs/static-analysis-corpus.md`

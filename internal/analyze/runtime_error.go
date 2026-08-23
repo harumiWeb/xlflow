@@ -27,10 +27,13 @@ type RuntimeErrorContext struct {
 
 type runtimeConstantState map[string]constexpr.Value
 
-// deterministicRuntimeErrorFindings reports only failures that the shared
-// constant evaluator can prove from a complete expression. Runtime values and
-// unresolved identifiers stay unknown by construction.
-func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
+// deterministicRuntimeErrorFindingsWithArrayResult reports only failures that
+// the shared constant evaluator can prove from a complete expression, projects
+// the array facts from the procedure-local result when available, and retains
+// a nil-result fallback for focused helper callers that do not run through
+// procedure orchestration. Runtime values and unresolved identifiers stay
+// unknown by construction.
+func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, arrayResult *ArrayAnalysisResult) []Finding {
 	if enabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA249"); !known || !enabled {
 		return nil
 	}
@@ -71,6 +74,9 @@ func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc source
 			findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, statement, facts, env)
 			state = runtimeTransfer(statement, state, env, writes[statement.ID])
 		}
+		if arrayResult != nil {
+			return append(findings, arrayResult.runtime()...)
+		}
 		return append(findings, a.deterministicArrayRuntimeFindings(file, proc, ctx, moduleDecls)...)
 	}
 
@@ -87,6 +93,9 @@ func (a Analyzer) deterministicRuntimeErrorFindings(file parsedFile, proc source
 		}
 		env := runtimeConstantEnvironment(base, state)
 		findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, *block.Statement, facts, env)
+	}
+	if arrayResult != nil {
+		return append(findings, arrayResult.runtime()...)
 	}
 	return append(findings, a.deterministicArrayRuntimeFindings(file, proc, ctx, moduleDecls)...)
 }

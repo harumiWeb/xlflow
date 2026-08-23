@@ -29,6 +29,29 @@ comparison safety.
 The rule uses the existing `Finding` fields and adds no JSON fields, CLI flags,
 or LSP capabilities.
 
+## Shared procedure result
+
+For one procedure analysis revision, the array domain materializes one internal
+`ArrayAnalysisResult` after the immutable procedure/module preparation has been
+resolved. The result is worker-local, discarded with that revision, and
+read-only after construction; it is never promoted to a project cache. Its
+semantic payload covers the variable catalog, entry state, allocation and
+shape/bound transitions, operation identity, branch refinements, ReDim facts,
+and proven array runtime failures. Diagnostic projectors consume that payload
+for `VBA227`, deterministic array `VBA249`, `VBA208`, `VBA209`, object-array
+`VBA101`/`VBA102`, `VBA241`, and applicable `VBA226` without rebuilding the
+catalog, constants, capacity guards, or operation lookup.
+
+The procedure worker uses independent policy lanes over shared CFG scheduling.
+The block-level lane preserves `VBA208`, `VBA249`, and object-array semantics;
+the lifecycle lane retains `VBA227` physical source-line ordering, normal-edge
+pruning, and reliable `On Error Resume Next` allocation behavior. `VBA226`
+keeps its scalar/two-dimensional `Range.Value` lattice and may use one explicit
+secondary walk. `VBA241` is a source/loop-region projection and is not counted
+as another fixed-point walk. These policy choices are deliberate and do not
+change diagnostic code, severity, message, range, ordering, suppression, or
+Batch/realtime parity.
+
 ## State model
 
 The analyzer carries a case-insensitive variable state through the procedure

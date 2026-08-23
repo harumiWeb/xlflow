@@ -103,6 +103,16 @@ Procedure-local work counters include candidate counts
 `semantic_kernel_runs`. They describe work performed: candidates pass the
 relevant rule gate, traversals start a source/CFG walk, and kernel runs invoke
 a valid semantic-domain kernel. Findings are not counted by these counters.
+Array analysis also reports `array_kernel_runs`, `array_cfg_walks`, and
+`array_projection_runs`. The kernel counter records one immutable array
+semantic-result materialization per applicable procedure revision, the walk
+counter records started array fixed-point traversals, and the projection
+counter records enabled, applicable array projectors. Enabling several array
+rules therefore increases projection work without multiplying the canonical
+kernel or its main CFG walk. `VBA241` consumes shared facts without another
+walk; an applicable `VBA226` shape policy may use an explicitly separate
+secondary pass. These counters are stderr-only performance telemetry and do
+not change findings, JSON output, or LSP diagnostics.
 Applicability planning also reports one decision per procedure and gated
 domain: `planned_*_runs` and `skipped_*_runs` for runtime, array, object,
 dictionary, error, dataflow, resource, Excel, and application-state domains
@@ -378,6 +388,15 @@ counts alone do not trigger a finding; use `VBA202` for object use-before-`Set`.
 `VBA226` is enabled in batch and real-time analysis and tracks procedure-local `Range.Value` / `Value2` shapes. It reports one-dimensional or scalar assumptions for definite multi-cell ranges, dimensionless bounds, statically provable dimension/order/bounds mistakes, and incompatible known destination ranges. Multi-cell values are modeled as two-dimensional arrays; single-cell values are modeled as scalars. Dynamic, reassigned, and branch-merged shapes remain uncertain, so only unsafe consumption or a statically proven shape mismatch is reported. Use `values(row, column)`, dimension-specific bounds, and a dominating `IsArray` guard for dynamic values when appropriate.
 
 `VBA227` is enabled in batch and real-time analysis and tracks array allocation through the CFG. Fixed arrays start allocated; dynamic arrays start unallocated; `ReDim`, `Erase`, array assignments, and proven project-local array returns update the state, while unknown `Variant` and external values remain conservative. In real-time analysis, array-return summaries are limited to the active document. It reports unsafe `LBound` / `UBound` and indexed access, invalid dimensions or known bounds, fixed-array `ReDim`, incompatible `Erase`, known scalar bound/iterable sources, and impossible constant `ReDim` bounds. Unknown Variant operations remain fail-open. `VBA208` remains the owner of `ReDim Preserve` findings, while object-array missing-`Set` findings remain owned by `VBA101` / `VBA102`. `Range.Value` / `Value2` shape cases remain owned by `VBA226`; use `xlflow:disable-line VBA227`, `xlflow:disable-next-line VBA227`, or `[analyze].disabled_rules = ["VBA227"]` for intentional exceptions.
+Compatible array diagnostics read one immutable procedure-local semantic result
+for the current analysis revision. It consolidates variable metadata, entry
+state, allocation/shape/bounds, operation facts, ReDim transitions, branch
+refinements, and proven runtime failures before projecting findings. The
+result is shared by batch and realtime analysis but is not retained across
+revisions. Rule-specific conservatism remains visible: `VBA227` keeps its
+source-line lifecycle policy, `VBA249` reports only deterministic failures,
+`VBA241` does not add a CFG walk, and `VBA226` retains its independent
+`Range.Value` shape policy.
 The shared shape also distinguishes scalar, fixed-array rank,
 dynamic-array rank/unknown, `Variant`, and unknown values. Accordingly,
 `VBA227` covers statically provable scalar/fixed-array `ReDim`, incompatible
