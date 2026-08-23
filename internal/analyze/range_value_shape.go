@@ -71,6 +71,7 @@ type rangeValueSourceStatement struct {
 type rangeValueSourceGuardFrame struct {
 	name     string
 	previous bool
+	negated  bool
 	active   bool
 }
 
@@ -234,16 +235,24 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 			}
 			trimmed := strings.TrimSpace(text)
 			match := rangeValueGuardRe.FindStringSubmatch("If " + strings.TrimSpace(trimmed[len("ElseIf "):]))
-			if len(match) == 3 && strings.TrimSpace(match[1]) == "" {
-				frame.active = true
-				state.arrayGuards[frame.name] = true
+			if len(match) == 3 {
+				frame.negated = strings.TrimSpace(match[1]) != ""
+				frame.active = !frame.negated
+				if frame.active {
+					state.arrayGuards[frame.name] = true
+				}
 			}
 			return
 		}
 		frame := &(*guards)[len(*guards)-1]
-		if frame.name != "" && frame.active {
-			delete(state.arrayGuards, frame.name)
-			frame.active = false
+		if frame.name != "" {
+			if frame.active {
+				delete(state.arrayGuards, frame.name)
+			}
+			frame.active = frame.negated
+			if frame.active {
+				state.arrayGuards[frame.name] = true
+			}
 		}
 		return
 	}
@@ -257,7 +266,8 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 	}
 	name := strings.ToLower(match[2])
 	previous := state.arrayGuards[name]
-	frame := rangeValueSourceGuardFrame{name: name, previous: previous, active: strings.TrimSpace(match[1]) == ""}
+	negated := strings.TrimSpace(match[1]) != ""
+	frame := rangeValueSourceGuardFrame{name: name, previous: previous, negated: negated, active: !negated}
 	*guards = append(*guards, frame)
 	if frame.active {
 		state.arrayGuards[name] = true

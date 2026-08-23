@@ -60,10 +60,11 @@ func arrayAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 // once.  Project-wide ByRef/module/return summaries are supplied by ctx and
 // remain owned by the existing analysis-context fixed points.
 func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) *ArrayAnalysisResult {
-	if !arrayAnalysisEnabled(a.Config.Analyze) {
+	variables := arrayVariables(file, proc, moduleDecls)
+	objectArrayApplicable := arrayObjectArrayApplicable(variables)
+	if !arrayAnalysisEnabled(a.Config.Analyze) && !objectArrayApplicable {
 		return nil
 	}
-	variables := arrayVariables(file, proc, moduleDecls)
 	result := &ArrayAnalysisResult{
 		variables:      variables,
 		constants:      arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants),
@@ -84,13 +85,6 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 	// A procedure can contain an object array even when the explicit lifecycle
 	// switches are disabled. The shared transfer owns the always-on VBA101/
 	// VBA102 projection for that case.
-	objectArrayApplicable := false
-	for _, variable := range variables {
-		if variable.isArray && variable.isObject {
-			objectArrayApplicable = true
-			break
-		}
-	}
 	coreFlowRequested := a.Config.Analyze.DetectArrayLifecycleSafety ||
 		a.Config.Analyze.DetectRedimPreserveDimension ||
 		objectArrayApplicable ||
@@ -130,6 +124,15 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		}
 	}
 	return result
+}
+
+func arrayObjectArrayApplicable(variables map[string]arrayVariable) bool {
+	for _, variable := range variables {
+		if variable.isArray && variable.isObject {
+			return true
+		}
+	}
+	return false
 }
 
 // arrayCoreProjectionRuns counts the compatible projections fed by the shared

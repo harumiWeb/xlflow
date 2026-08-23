@@ -145,6 +145,21 @@ func TestArrayKernelComparisonOnlyDoesNotStartCFGWalk(t *testing.T) {
 	}
 }
 
+func TestArrayKernelAlwaysOnObjectArrayRunsWithRulesDisabled(t *testing.T) {
+	workload := arrayKernelBenchmarkWorkload{
+		name:          "object-array-only",
+		source:        arrayBenchmarkObjectArrayOnlySource(),
+		lines:         7,
+		procedures:    1,
+		arrayMarkers:  3,
+		statementHint: 6,
+	}
+	counters := runArrayKernelBenchmarkCounterFixture(t, workload, configureArrayBenchmarkRulesNone)
+	if counters["array_kernel_runs"] != 1 || counters["array_projection_runs"] != 1 {
+		t.Fatalf("object-array-only counters = %+v, want kernel=1/projection=1", counters)
+	}
+}
+
 func runArrayKernelBenchmarkCounterFixture(t *testing.T, workload arrayKernelBenchmarkWorkload, configure func(*config.Config)) map[string]uint64 {
 	t.Helper()
 	root := t.TempDir()
@@ -317,6 +332,17 @@ Public Sub Run()
     If values = 1 Then
         Debug.Print 1
     End If
+End Sub
+`
+}
+
+func arrayBenchmarkObjectArrayOnlySource() string {
+	return `Option Explicit
+
+Public Sub Run()
+    Dim values() As Object
+    ReDim values(0 To 0)
+    values(0) = Nothing
 End Sub
 `
 }
