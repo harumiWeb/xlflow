@@ -338,6 +338,23 @@ End Sub
 		t.Fatalf("negative IsArray guard Else branch should suppress uncertain two-dimensional access: %+v", got)
 	}
 
+	elseIfGuardSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String, ByVal useArray As Boolean)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If useArray Then
+    Debug.Print values
+  ElseIf IsArray(values) Then
+    Debug.Print values(1, 1)
+  End If
+End Sub
+`
+	elseIfGuardFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(elseIfGuardSource), Source: []byte(elseIfGuardSource)}
+	elseIfGuardProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(elseIfGuardFile, elseIfGuardProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("ElseIf IsArray guard should suppress uncertain indexing in source recovery: %+v", got)
+	}
+
 	inlineSource := `Option Explicit
 Public Sub Run(ByVal lastCell As String)
   Dim values As Variant
@@ -455,6 +472,22 @@ End Sub
 	loopProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(loopFile, loopProc), "VBA226"); len(got) != 1 {
 		t.Fatalf("loop recovery should merge the zero-iteration scalar path: %+v", got)
+	}
+
+	localConstSource := `Option Explicit
+Public Sub Run(ByVal ws As Worksheet, ByVal lastRow As Long)
+  Const COLUMN_COUNT As Long = 14
+  Dim values As Variant
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, COLUMN_COUNT)).Value2
+  If IsArray(values) Then
+    Debug.Print values(1, 15)
+  End If
+End Sub
+`
+	localConstFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(localConstSource), Source: []byte(localConstSource)}
+	localConstProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(localConstFile, localConstProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("source fallback should retain procedure-local constants for bounds: %+v", got)
 	}
 
 	continuedSource := `Option Explicit

@@ -365,16 +365,15 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 		}
 		if strings.HasPrefix(lower, "elseif ") {
 			frame := &(*guards)[len(*guards)-1]
-			if frame.name == "" {
-				return
-			}
-			if frame.active {
+			if frame.name != "" && frame.active {
 				delete(state.arrayGuards, frame.name)
-				frame.active = false
 			}
+			frame.name = ""
+			frame.active = false
 			trimmed := strings.TrimSpace(text)
 			match := rangeValueGuardRe.FindStringSubmatch("If " + strings.TrimSpace(trimmed[len("ElseIf "):]))
 			if len(match) == 3 {
+				frame.name = strings.ToLower(match[2])
 				frame.negated = strings.TrimSpace(match[1]) != ""
 				frame.active = !frame.negated
 				if frame.active {
@@ -800,6 +799,9 @@ func rangeValueFactsForProcedure(file parsedFile, proc sourceProcedure) rangeVal
 		facts.expressions[expression.ID] = expression
 	}
 	constants := rangeValueIntegerConstants(file.RangeValueModuleConstants, proc)
+	if len(proc.Statements) == 0 || rangeValueProjectionUnknown(proc) {
+		constants = rangeValueSourceIntegerConstants(file, proc, constants)
+	}
 	facts.constants = constants
 	for _, statement := range proc.Statements {
 		text := strings.TrimSpace(excelLoopHeaderText(statement.Text))
@@ -874,6 +876,23 @@ func rangeValueIntegerConstants(moduleConstants map[string]int, proc sourceProce
 			continue
 		}
 		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
+		if len(match) != 3 {
+			continue
+		}
+		if value, err := constantIntegerExpression(match[2], constants); err == nil {
+			constants[strings.ToLower(match[1])] = value
+		}
+	}
+	return constants
+}
+
+func rangeValueSourceIntegerConstants(file parsedFile, proc sourceProcedure, base map[string]int) map[string]int {
+	constants := make(map[string]int, len(base)+4)
+	for name, value := range base {
+		constants[name] = value
+	}
+	for _, source := range rangeValueSourceStatements(file, proc) {
+		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(source.text)))
 		if len(match) != 3 {
 			continue
 		}
