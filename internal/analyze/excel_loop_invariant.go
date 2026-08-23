@@ -50,10 +50,6 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	if len(regions) == 0 {
 		return nil
 	}
-	statements := make(map[int]procedureir.Statement, proc.Statements.Len())
-	for statement := range proc.Statements.All() {
-		statements[statement.ID] = statement
-	}
 	facts := proc.Facts
 	if facts == nil {
 		// Standalone callers may omit the attached projection. Share one
@@ -61,21 +57,17 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 		facts = proc.analysisFacts()
 	}
 	constants := loopInvariantStringConstants(file, proc)
-	expressionsByStatement := make(map[int][]procedureir.Expression)
-	for statement := range proc.Statements.All() {
-		expressionsByStatement[statement.ID] = statementMemberExpressions(facts, statement)
-	}
 	seen := map[string]loopInvariantCandidate{}
 	for statement := range proc.Statements.All() {
-		for _, expression := range expressionsByStatement[statement.ID] {
-			candidate, ok := a.loopInvariantCandidate(file, proc, statement, expression, constants, statements)
+		facts.forEachMemberExpressionForStatement(statement.ID, func(expression procedureir.Expression) {
+			candidate, ok := a.loopInvariantCandidate(file, proc, statement, expression, constants, facts)
 			if !ok {
-				continue
+				return
 			}
 			owners := containingExcelLoops(regions, statement.ID, expression.Range.StartLine)
-			owner, ok := loopInvariantOwner(proc, owners, statement, expression, statements)
+			owner, ok := loopInvariantOwner(proc, owners, statement, expression, facts)
 			if !ok {
-				continue
+				return
 			}
 			candidate.Owner = owner
 			candidate.Depth = owner.Depth
@@ -83,7 +75,7 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 			if previous, exists := seen[key]; !exists || candidate.Expression.Range.StartByte < previous.Expression.Range.StartByte {
 				seen[key] = candidate
 			}
-		}
+		})
 	}
 	if len(seen) == 0 {
 		return nil
@@ -135,7 +127,7 @@ func (a Analyzer) excelLoopInvariantFindings(file parsedFile, proc sourceProcedu
 	return findings
 }
 
-func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, statement procedureir.Statement, expression procedureir.Expression, constants map[string]string, statements map[int]procedureir.Statement) (loopInvariantCandidate, bool) {
+func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, statement procedureir.Statement, expression procedureir.Expression, constants map[string]string, facts *procedureAnalysisFacts) (loopInvariantCandidate, bool) {
 	expression.Text = loopInvariantExpressionSource(file.Source, expression)
 	loopInvariantExpandRange(&expression, expression.Text)
 	segments := splitLoopInvariantChain(expression.Text)
@@ -149,7 +141,7 @@ func (a Analyzer) loopInvariantCandidate(file parsedFile, proc sourceProcedure, 
 	if !loopInvariantConstantSelector(normalizeLoopInvariantChain(last.Arguments), constants) {
 		return loopInvariantCandidate{}, false
 	}
-	withPrefix, _ := loopInvariantWithPrefix(statement.ID, statements)
+	withPrefix, _ := loopInvariantWithPrefix(statement.ID, facts)
 	chain := strings.TrimSpace(expression.Text)
 	if withPrefix != "" && (strings.HasPrefix(strings.TrimSpace(chain), ".") || !strings.Contains(chain, ".")) {
 		chain = strings.TrimSpace(withPrefix) + strings.TrimSpace(chain)
@@ -271,8 +263,8 @@ func loopInvariantCallEnd(source []byte, open int) int {
 	return 0
 }
 
-func loopInvariantOwner(proc sourceProcedure, owners []excelLoopRegion, statement procedureir.Statement, expression procedureir.Expression, statements map[int]procedureir.Statement) (excelLoopRegion, bool) {
-	withStatements := candidateWithStatements(statement.ID, statements)
+func loopInvariantOwner(proc sourceProcedure, owners []excelLoopRegion, statement procedureir.Statement, expression procedureir.Expression, facts *procedureAnalysisFacts) (excelLoopRegion, bool) {
+	withStatements := candidateWithStatements(statement.ID, facts)
 	for _, owner := range owners {
 		if owner.Small || owner.StatementID == statement.ID {
 			continue
@@ -371,12 +363,15 @@ func loopInvariantLoopVariables(owner excelLoopRegion, proc sourceProcedure) map
 	return variables
 }
 
-func loopInvariantWithPrefix(statementID int, statements map[int]procedureir.Statement) (string, []procedureir.Statement) {
+func loopInvariantWithPrefix(statementID int, facts *procedureAnalysisFacts) (string, []procedureir.Statement) {
+	if facts == nil {
+		return "", nil
+	}
 	var chain []string
 	var withStatements []procedureir.Statement
-	current, ok := statements[statementID]
+	current, ok := facts.Statement(statementID)
 	for ok && current.ParentID != 0 {
-		parent, found := statements[current.ParentID]
+		parent, found := facts.Statement(current.ParentID)
 		if !found {
 			break
 		}
@@ -430,8 +425,8 @@ func loopInvariantWithHeaderText(text string) string {
 	return strings.Join(parts, " ")
 }
 
-func candidateWithStatements(statementID int, statements map[int]procedureir.Statement) []procedureir.Statement {
-	_, withStatements := loopInvariantWithPrefix(statementID, statements)
+func candidateWithStatements(statementID int, facts *procedureAnalysisFacts) []procedureir.Statement {
+	_, withStatements := loopInvariantWithPrefix(statementID, facts)
 	return withStatements
 }
 

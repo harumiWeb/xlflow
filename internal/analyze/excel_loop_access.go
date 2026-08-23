@@ -160,8 +160,9 @@ func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string,
 		return index
 	}
 	for _, file := range files {
-		procedures := file.procedures()
-		for i, proc := range procedures {
+		procedures := file.procedureView()
+		for i := 0; i < procedures.Len(); i++ {
+			proc := procedures.valueAt(i)
 			if i >= len(file.IR.Procedures) {
 				continue
 			}
@@ -436,13 +437,17 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 	if rootBindings == nil {
 		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	for i, candidate := range file.IR.Procedures {
-		if i >= len(procedures) {
+		if i >= procedures.Len() {
 			continue
 		}
 		key := excelProcedureKey(file.IR, candidate.Symbol)
-		summaries[key] = directExcelAccessSummary(file, procedures[i], db, rootBindings, rootDir, cfg)
+		procedure, ok := procedures.At(i)
+		if !ok {
+			continue
+		}
+		summaries[key] = directExcelAccessSummary(file, procedure, db, rootBindings, rootDir, cfg)
 	}
 	changed := true
 	for changed {
@@ -934,20 +939,20 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 	text = sanitizeExcelStatementText(text)
 	lower := strings.ToLower(text)
 	var out []excelLoopAccess
-	for _, expression := range statementMemberExpressions(facts, statement) {
+	facts.forEachMemberExpressionForStatement(statement.ID, func(expression procedureir.Expression) {
 		receiver, member, memberEnd, ok := splitExcelMemberAccess(expression.Text)
 		if !ok {
-			continue
+			return
 		}
 		memberLower := strings.ToLower(member)
 		if strings.EqualFold(receiver, "Application") && memberLower == "worksheetfunction" {
 			out = append(out, excelLoopAccess{Category: excelAccessWorksheetCall, Member: member, Line: line, Read: true})
-			continue
+			return
 		}
 		typ, resolved := resolveExcelExpressionType(file, db, receiver, line-1, rootDir, cfg)
 		perCell := isPerCellExcelExpression(file, proc, db, receiver, rangeVars, line-1, rootDir, cfg)
 		if !resolved && !perCell {
-			continue
+			return
 		}
 		if rangeVars.Range[strings.ToLower(strings.TrimSpace(receiver))] {
 			typ = "Excel.Range"
@@ -966,23 +971,23 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 			if perCell {
 				out = append(out, access)
 			}
-			continue
+			return
 		}
 		if formattingMembers[memberLower] && perCell {
 			out = append(out, excelLoopAccess{Category: excelAccessFormatting, Member: member, Line: line, Write: assignmentOperatorAfter(text, assignmentEnd)})
-			continue
+			return
 		}
 		if rangeLookupMembers[memberLower] && isExcelWorksheetOrRangeType(typ) {
 			if memberLower == "range" && !perCell && literalRangeCellCount(receiver) > 1 {
-				continue
+				return
 			}
 			out = append(out, excelLoopAccess{Category: excelAccessRangeLookup, Member: member, Line: line, Read: true})
-			continue
+			return
 		}
 		if mutatingRangeMembers[memberLower] && isExcelRangeType(typ) {
 			out = append(out, excelLoopAccess{Category: excelAccessWrite, Member: member, Line: line, Write: true})
 		}
-	}
+	})
 	if strings.Contains(lower, "worksheetfunction.") || strings.Contains(lower, ".evaluate(") {
 		out = append(out, excelLoopAccess{Category: excelAccessWorksheetCall, Line: line, Read: true})
 	}
@@ -1126,13 +1131,6 @@ func excelRootBindingHasValueType(kind string) bool {
 	default:
 		return false
 	}
-}
-
-func statementMemberExpressions(facts *procedureAnalysisFacts, statement procedureir.Statement) []procedureir.Expression {
-	if facts == nil {
-		return nil
-	}
-	return facts.MemberExpressionsForStatement(statement.ID)
 }
 
 func splitExcelMemberAccess(text string) (string, string, int, bool) {

@@ -72,22 +72,22 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 		if !ok {
 			continue
 		}
-		for _, expression := range statementMemberExpressions(factsForMembers, statement) {
+		factsForMembers.forEachMemberExpressionForStatement(statement.ID, func(expression procedureir.Expression) {
 			if seen[expression.ID] {
-				continue
+				return
 			}
 			receiver, ok := rangeValueMemberReceiver(&expression, facts, "value")
 			if !ok || !value2ReceiverIsExcelRange(a, file, proc, receiver) {
-				continue
+				return
 			}
 			memberRange, ok := value2MemberRange(expression, facts)
 			if !ok {
-				continue
+				return
 			}
 			shape, recognized := rangeValueRangeShapeExpression(&receiver, state, facts)
 			dynamic := value2DynamicRangeReceiver(receiver, shape, state, facts, proc, statement.ID)
 			if !recognized && !dynamic {
-				continue
+				return
 			}
 			write := value2IsAssignmentTarget(statement, expression)
 			owners := containingExcelLoops(regions, statement.ID, expression.Range.StartLine)
@@ -95,7 +95,7 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 			large := shape.known && shape.rows > 0 && shape.cols > 0 && shape.rows*shape.cols >= value2PerformanceLargeCells
 			variantTransfer := !write && value2ImmediateVariantTransfer(statement, expression, shape, dynamic, declarations)
 			if !large && !dynamic && len(owners) == 0 && !variantTransfer {
-				continue
+				return
 			}
 			candidate := value2PerformanceCandidate{
 				Statement: statement, Expression: expression, MemberRange: memberRange,
@@ -103,7 +103,7 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 				VariantTransfer: variantTransfer, ScalarProcessing: value2ScalarProcessing(proc, statement.ID, statement.Text), Loops: owners,
 			}
 			if value2IntentionalDateCurrency(proc, candidate, declarations) {
-				continue
+				return
 			}
 			seen[expression.ID] = true
 			key := strings.ToLower(strings.TrimSpace(receiver.Text))
@@ -111,11 +111,11 @@ func (a Analyzer) value2PerformanceFindings(file parsedFile, proc sourceProcedur
 				if len(candidates[existing].Loops) == 0 && len(candidate.Loops) > 0 {
 					candidates[existing] = candidate
 				}
-				continue
+				return
 			}
 			seenReceivers[key] = len(candidates)
 			candidates = append(candidates, candidate)
-		}
+		})
 	}
 	if len(candidates) == 0 {
 		return nil

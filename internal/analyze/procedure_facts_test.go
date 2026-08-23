@@ -201,6 +201,163 @@ func TestProcedureAnalysisFactsMemberExpressionsMixedStatementIDFallback(t *test
 	}
 }
 
+func TestProcedureAnalysisFactsMemberExpressionsReturnsOwnedCopy(t *testing.T) {
+	statements := []procedureir.Statement{{ID: 10}}
+	expressions := []procedureir.Expression{{ID: 1, StatementID: 10, Kind: procedureir.ExpressionMember, Text: "Range.Value"}}
+	facts := newProcedureAnalysisFacts(statements, expressions, nil, nil)
+	got := facts.MemberExpressionsForStatement(10)
+	if len(got) != 1 {
+		t.Fatalf("member expressions = %#v, want one expression", got)
+	}
+	got[0].ID = 99
+	got = facts.MemberExpressionsForStatement(10)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("member expressions were not returned as an owned copy: %#v", got)
+	}
+}
+
+func TestProcedureAnalysisFactsMemberExpressionIteratorPreservesOrder(t *testing.T) {
+	statements := []procedureir.Statement{{ID: 10}, {ID: 20}}
+	expressions := []procedureir.Expression{
+		{ID: 1, StatementID: 10, Kind: procedureir.ExpressionMember, Text: "Application.Range", Range: vbaast.Range{StartByte: 30}},
+		{ID: 2, StatementID: 20, Kind: procedureir.ExpressionMember, Text: "Other.Range", Range: vbaast.Range{StartByte: 40}},
+		{ID: 3, StatementID: 10, Kind: procedureir.ExpressionMember, Text: "Range.Value", Range: vbaast.Range{StartByte: 50}},
+		{ID: 4, StatementID: 10, Kind: procedureir.ExpressionIdentifier, Text: "value", Range: vbaast.Range{StartByte: 60}},
+	}
+	facts := newProcedureAnalysisFacts(statements, expressions, nil, nil)
+	var got []int
+	facts.forEachMemberExpressionForStatement(10, func(expression procedureir.Expression) {
+		got = append(got, expression.ID)
+	})
+	if len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("member expression iterator = %#v, want [1 3]", got)
+	}
+}
+
+func TestProcedureAnalysisFactsMemberExpressionIteratorMatchesFallbackOrder(t *testing.T) {
+	statements := []procedureir.Statement{{ID: 10, ExpressionIDs: []int{1}}}
+	expressions := []procedureir.Expression{
+		{ID: 1, StatementID: 10, Kind: procedureir.ExpressionMember, Text: "Application.Range", Children: []int{2}},
+		{ID: 2, Kind: procedureir.ExpressionMember, Text: "Range.Value2"},
+	}
+	facts := newProcedureAnalysisFacts(statements, expressions, nil, nil)
+	var got []int
+	facts.forEachMemberExpressionForStatement(10, func(expression procedureir.Expression) {
+		got = append(got, expression.ID)
+	})
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("fallback member expression iterator = %#v, want [1 2]", got)
+	}
+}
+
+func TestProcedureAnalysisFactsMemberExpressionIteratorIsAllocationFree(t *testing.T) {
+	statements := []procedureir.Statement{{ID: 10}}
+	expressions := []procedureir.Expression{
+		{ID: 1, StatementID: 10, Kind: procedureir.ExpressionMember, Text: "Application.Range"},
+		{ID: 2, StatementID: 10, Kind: procedureir.ExpressionMember, Text: "Range.Value"},
+	}
+	facts := newProcedureAnalysisFacts(statements, expressions, nil, nil)
+	allocs := testing.AllocsPerRun(100, func() {
+		facts.forEachMemberExpressionForStatement(10, consumeMemberExpression)
+	})
+	if allocs != 0 {
+		t.Fatalf("authoritative member expression iteration allocated %v times", allocs)
+	}
+}
+
+func BenchmarkProcedureAnalysisFactsMemberExpressionIterator(b *testing.B) {
+	statements := []procedureir.Statement{{ID: 10}}
+	expressions := make([]procedureir.Expression, 32)
+	for index := range expressions {
+		expressions[index] = procedureir.Expression{
+			ID: index + 1, StatementID: 10, Kind: procedureir.ExpressionMember,
+			Text: "Application.Range", Range: vbaast.Range{StartByte: index},
+		}
+	}
+	facts := newProcedureAnalysisFacts(statements, expressions, nil, nil)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		facts.forEachMemberExpressionForStatement(10, consumeMemberExpression)
+	}
+}
+
+func consumeMemberExpression(procedureir.Expression) {}
+
+var benchmarkProcedureFactReadSink int
+
+func BenchmarkProcedureAnalysisFactsReadOnlyViews(b *testing.B) {
+	const factCount = 4096
+	statements := make([]procedureir.Statement, factCount)
+	expressions := make([]procedureir.Expression, factCount)
+	calls := make([]procedureir.CallSite, factCount)
+	accesses := make([]procedureir.VariableAccess, factCount)
+	for index := 0; index < factCount; index++ {
+		id := index + 1
+		statements[index] = procedureir.Statement{ID: id}
+		expressions[index] = procedureir.Expression{ID: id, StatementID: 1, Kind: procedureir.ExpressionIdentifier}
+		calls[index] = procedureir.CallSite{ID: id, StatementID: 1}
+		accesses[index] = procedureir.VariableAccess{Name: "value", StatementID: 1, Mode: procedureir.AccessRead}
+	}
+	facts := newProcedureAnalysisFacts(statements, expressions, calls, accesses)
+
+	b.Run("statements", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			total := 0
+			for statement := range facts.Statements().All() {
+				total += statement.ID
+			}
+			benchmarkProcedureFactReadSink = total
+		}
+	})
+	b.Run("expressions", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			total := 0
+			for expression := range facts.Expressions().All() {
+				total += expression.ID
+			}
+			benchmarkProcedureFactReadSink = total
+		}
+	})
+	b.Run("calls", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			total := 0
+			for call := range facts.Calls().All() {
+				total += call.ID
+			}
+			benchmarkProcedureFactReadSink = total
+		}
+	})
+	b.Run("accesses", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			total := 0
+			for access := range facts.Accesses().All() {
+				total += access.StatementID
+			}
+			benchmarkProcedureFactReadSink = total
+		}
+	})
+	b.Run("grouped-calls", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			facts.forEachCallForStatement(1, consumeCallSite)
+		}
+	})
+	b.Run("grouped-accesses", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			facts.forEachAccessForStatement(1, consumeVariableAccess)
+		}
+	})
+}
+
+func consumeCallSite(procedureir.CallSite)             {}
+func consumeVariableAccess(procedureir.VariableAccess) {}
+
 func TestProcedureAnalysisFactsEmptyAuthoritativeMemberGroupDoesNotTraverseOtherStatements(t *testing.T) {
 	statements := []procedureir.Statement{
 		{ID: 10, ExpressionIDs: []int{1}},

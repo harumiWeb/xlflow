@@ -1301,6 +1301,42 @@ profiles are evidence that the removed projection copies are no longer a
 material corpus allocation leaf rather than a claim that all corpus allocation
 has been eliminated.
 
+### Immutable fact-read allocation record (#700)
+
+Issue #700 removes the remaining defensive copies from hot immutable analyzer
+reads. Rule consumers use the cached procedure span directly and iterate
+statement-grouped member expressions through the compact facts index. Owned
+copy APIs remain available at mutation, recovery, and compatibility boundaries.
+The focused fixtures contain 2,000 procedures and 4,096 statements,
+expressions, calls, and accesses; fixture construction remains outside the
+timed region.
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench 'BenchmarkParsedFileProcedureProjection/2000-procedures|BenchmarkProcedureAnalysisFacts' -benchmem -benchtime=20x -count=3
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^TestSingleModuleBenchmarkFixtureScale$' -bench '^BenchmarkSingleModuleSynthetic/independent/2000-procedures$' -benchmem -benchtime=1x -count=5
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5
+```
+
+The focused median observations were 0 B/op and 0 allocs/op for the procedure
+view; statement, expression, call, access, grouped-call, and grouped-access
+views; and statement-grouped member-expression iteration. The retained owned
+2,000-procedure copy used 753,664 B/op and one allocation. The five-sample
+synthetic median was 1,110,697,800 ns/op, 1,489,190,080 B/op, and 11,532,742
+allocs/op, with zero findings and unchanged procedure/fact counters.
+
+The pre-change ROneCOne medians were 20,146,589,800 ns/op, 26,790,001,160
+B/op, and 181,371,669 allocs/op. Post-change medians were 19,975,120,400 ns/op,
+26,820,669,096 B/op, and 181,460,151 allocs/op, with the same 510 findings.
+Elapsed time improved by 0.85%; total bytes and allocation counts moved by
+0.11% and 0.05%, respectively, inside a workload dominated by data-flow state
+cloning. These whole-workload movements are observational, not CI thresholds.
+
+The paired allocation-space profiles provide the targeted evidence. Before
+the change, `parsedFile.procedures` accounted for 13.33 MB per ROneCOne
+operation and `MemberExpressionsForStatement` accounted for 1 MB. Neither
+routine appears as an allocation leaf in the post-change profile. Profiles are
+retained locally as `%TEMP%\xlflow-ronecone-700-{before,after}.{cpu,mem}.pprof`.
+
 ### Capability-planner verification requirements (#697)
 
 Issue #697 moves the optimization boundary from procedure-local semantic

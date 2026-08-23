@@ -381,6 +381,35 @@ func (facts *procedureAnalysisFacts) Accesses() readOnlySpan[procedureir.Variabl
 	return facts.accessesView()
 }
 
+// forEachMemberExpressionForStatement visits the non-recovered member
+// expressions associated with statementID in IR order. The authoritative IR
+// path walks the compact statement index directly and does not allocate a
+// result slice. Callback values are copies, but nested IR slices remain
+// immutable and share the facts lifetime.
+//
+// MemberExpressionsForStatement remains the compatibility API for callers
+// that need an owned result. Recovered or hand-built IR may need the fallback
+// tree traversal used by that API; that uncommon path is intentionally not a
+// hot-path allocation contract.
+func (facts *procedureAnalysisFacts) forEachMemberExpressionForStatement(statementID int, visit func(procedureir.Expression)) {
+	if facts == nil || visit == nil {
+		return
+	}
+	expressions := facts.expressionsView()
+	indexes := facts.memberExpressionsByStatement[statementID]
+	if !facts.memberExpressionFallback {
+		for _, index := range indexes {
+			if expression, ok := expressions.At(index); ok {
+				visit(expression)
+			}
+		}
+		return
+	}
+	for _, expression := range facts.MemberExpressionsForStatement(statementID) {
+		visit(expression)
+	}
+}
+
 // AccessesForStatement returns accesses associated with a statement,
 // preserving IR order. The returned slice is independent of the immutable
 // facts.

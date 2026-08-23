@@ -113,9 +113,10 @@ func buildObjectAnalysisPlans(files []parsedFile) *objectAnalysisContext {
 		moduleProcedureKeys: map[string][]string{},
 	}
 	for _, file := range files {
-		procedures := file.procedureProjection()
+		procedures := file.procedureView()
 		moduleDecls := file.moduleDecls()
-		for _, proc := range procedures {
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
 			plan := newObjectProcedurePlan(file, proc, moduleDecls, key)
 			analysis.plans[key] = plan
