@@ -117,8 +117,8 @@ When this occurs, ask whether the implementation should instead:
 
 ### Pass 3 — exceptional final review
 
-A third full review is allowed only when Pass 2 caused a meaningful code change
-because of:
+A third full review is allowed only when resolving a qualifying Pass 2
+finding requires a meaningful code change because of:
 
 - a P0 or P1 finding;
 - a clear regression introduced by review-driven changes;
@@ -184,9 +184,9 @@ A valid P2/P3 finding may be deferred when fixing it would:
 When deferring a valid finding, preserve enough detail for follow-up work and
 mention it in the implementation summary.
 
-Completion does not require forcing the reviewer to return zero findings.
 Completion requires that no verified blocking finding remains and that the
-change has received the required bounded independent review and verification.
+change has completed the required independent review and verification within
+the bounded process.
 
 ## Failure
 
