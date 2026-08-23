@@ -67,9 +67,9 @@ func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFi
 	if proc.Graph == nil {
 		state := initial
 		writes := runtimeWriteNames(proc.Accesses)
-		statements := append([]procedureir.Statement(nil), proc.Statements...)
-		sort.SliceStable(statements, func(i, j int) bool { return statements[i].Range.StartByte < statements[j].Range.StartByte })
-		for _, statement := range statements {
+		// The canonical ProcedureIR preserves source order, so no projection
+		// sort or temporary statement collection is needed here.
+		for _, statement := range proc.Statements {
 			env := runtimeConstantEnvironment(base, state)
 			findings = appendRuntimeStatementFindings(findings, seen, a, file, proc, statement, facts, env)
 			state = runtimeTransfer(statement, state, env, writes[statement.ID])

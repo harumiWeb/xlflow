@@ -486,6 +486,12 @@ func (a Analyzer) isKnownDataFlowConstant(file parsedFile, name string) bool {
 }
 
 func procedureIRForSource(document procedureir.DocumentIR, proc sourceProcedure) (procedureir.ProcedureIR, bool) {
+	if proc.IR != nil {
+		return *proc.IR, true
+	}
+	// Focused compatibility callers may still construct a sourceProcedure
+	// without the canonical view. Keep their conservative name/range lookup,
+	// but never use it on the normal projection path.
 	for _, candidate := range document.Procedures {
 		if !strings.EqualFold(candidate.Symbol.Name, proc.Name) {
 			continue

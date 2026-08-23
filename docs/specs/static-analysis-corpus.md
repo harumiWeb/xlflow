@@ -1215,6 +1215,56 @@ the profile-producing command itself remains a single `-count=1` run so profile
 files are not overwritten. These are developer observations for same-machine
 comparison, not fixed CI thresholds.
 
+### Analyzer procedure-view allocation record (#698)
+
+Issue #698 removes the complete declaration, statement, expression, call, and
+access slice projections from the normal analyzer procedure path. The
+projection-only benchmark keeps IR fixture construction outside the timed
+region and compares view materialization with iteration over the cached view.
+The local run used Go 1.26.6 on the same Windows 11 / Intel Core i7-12700
+developer machine as the preceding corpus records.
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench '^BenchmarkParsedFileProcedureProjection$' -benchmem -benchtime=1x -count=3
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench 'BenchmarkSingleModuleSynthetic/(independent|declarations|chain|cfg-independent)/2000-' -benchmem -benchtime=1x -count=1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5
+```
+
+The projection-only median observations were:
+
+| procedures | materialize `B/op` / `allocs/op` | cached iteration `B/op` / `allocs/op` |
+| ---------: | -------------------------------: | ------------------------------------: |
+|        100 |                  175,360 / 1,501 |                            41,440 / 2 |
+|        500 |                  860,416 / 7,501 |                           188,896 / 2 |
+|      1,000 |               1,720,832 / 15,001 |                           377,312 / 2 |
+|      2,000 |               3,441,664 / 30,001 |                           754,144 / 2 |
+
+The previous 500-procedure projection baseline was 1,461,257 B/op and 10,002
+allocs/op; the new normal-path materialization is 41% lower in bytes and 25%
+lower in allocation count. End-to-end synthetic 2,000-procedure observations
+were 1,481,884,216 B/op and 11,500,704 allocs/op for `independent`,
+1,510,002,272 / 11,989,668 for `chain`, 3,579,487,696 / 1,045,050 for
+`declarations`, and 7,978,821,776 / 8,008,097 for `cfg-independent`.
+Findings and fact-build counters remained unchanged for these fixtures.
+
+The five ROneCOne `analyze-only` samples produced 23.135, 24.952, 25.329,
+33.490, and 37.966 seconds, with 26,642,309,208--26,661,017,936 B/op and
+177,339,816--177,458,969 allocs/op. The median was 25,328,943,600 ns/op,
+26,649,626,264 B/op, and 177,360,666 allocs/op. The wide timing spread is a
+developer-machine observation; allocation volume did not regress. All five
+samples reported 1,565 procedures and 1,565 procedure fact builds, with the
+same 510 findings and planner counters.
+
+The single profile run used the documented `-cpuprofile`/`-memprofile` command.
+Its allocation-space top entries were state/CFG/data-flow working storage
+(`cloneHTTPState`, `cloneArrayState`, `MakeNoZero`, and `meetArrayState`), not
+procedure projection copies. Allocation-object top entries were likewise
+dominated by `MakeNoZero`, reflection, `strings.Fields`, state clones, and CFG
+query construction. The in-use profile was startup/runtime dominated, so these
+profiles are evidence that the removed projection copies are no longer a
+material corpus allocation leaf rather than a claim that all corpus allocation
+has been eliminated.
+
 ## Verification requirements
 
 Manifest tests cover valid v2 data and rejection of unknown fields, unsupported

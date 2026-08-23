@@ -781,17 +781,12 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 	flow := objectStateFlowPlan(plan, summaries, objectFlowOptions{Entry: entry})
 	facts := plan.flowContext.facts
 
-	accesses := append([]procedureir.VariableAccess(nil), proc.Accesses...)
-	sort.SliceStable(accesses, func(i, j int) bool {
-		if accesses[i].Range.StartByte != accesses[j].Range.StartByte {
-			return accesses[i].Range.StartByte < accesses[j].Range.StartByte
-		}
-		return accesses[i].ExpressionID < accesses[j].ExpressionID
-	})
 	reported := map[string]bool{}
 	guardCache := &objectFlowGuardCache{}
 	var findings []Finding
-	for _, access := range accesses {
+	// ProcedureIR emits accesses in source order. Keep that order directly;
+	// sorting a copied collection (or an index permutation) only adds work.
+	for _, access := range proc.Accesses {
 		if access.Scope != procedureir.ScopeLocal && access.Scope != procedureir.ScopeModule && access.Scope != procedureir.ScopeParameter {
 			continue
 		}
@@ -853,9 +848,8 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 	// object used as a default item/index call, however, is a receiver read:
 	// `dict(key)`, `collection(i)`, and `obj.Property(...)` all dereference the
 	// object before invoking the call.  Recover those roots from CallSite.
-	calls := append([]procedureir.CallSite(nil), proc.Calls...)
-	sort.SliceStable(calls, func(i, j int) bool { return calls[i].Range.StartByte < calls[j].Range.StartByte })
-	for _, call := range calls {
+	// Calls are likewise source ordered in the canonical IR.
+	for _, call := range proc.Calls {
 		name := objectCallReceiverName(call)
 		if name == "" {
 			continue

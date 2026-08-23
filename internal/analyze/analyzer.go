@@ -356,17 +356,9 @@ type procedureSignature struct {
 	Params     []parameterInfo
 }
 
-type parameterInfo struct {
-	Name        string
-	Type        string
-	Passing     string
-	Optional    bool
-	ParamArray  bool
-	ValueShape  procedureir.ValueShapeKind
-	ArrayShape  procedureir.ArrayShape
-	ArrayBounds []procedureir.ArrayBound
-	Range       vbaast.Range
-}
+// parameterInfo is an internal compatibility alias. Procedure parameters are
+// owned by ProcedureIR and are never copied into an analyzer projection.
+type parameterInfo = procedureir.Parameter
 
 type parsedFile struct {
 	Path       string
@@ -417,6 +409,12 @@ type batchByRefDiagnostics struct {
 }
 
 type sourceProcedure struct {
+	// Document and IR retain the Go-owned immutable IR for this analysis
+	// revision.  IR points at Document.Procedures[Index]; the projection must
+	// never retain parser/tree-sitter state.
+	Document         *procedureir.DocumentIR
+	IR               *procedureir.ProcedureIR
+	Index            int
 	Kind             string
 	ProcedureKind    procedureir.ProcedureKind
 	Name             string
@@ -430,11 +428,15 @@ type sourceProcedure struct {
 	StartByte        int
 	EndByte          int
 	Params           []parameterInfo
-	Declarations     []procedureir.Declaration
-	Statements       []procedureir.Statement
-	Expressions      []procedureir.Expression
-	Calls            []procedureir.CallSite
-	Accesses         []procedureir.VariableAccess
+	// These are read-only views over IR.  The type is deliberately private; it
+	// provides range/len compatibility for the analyzer while exposing no
+	// mutable slice through a package boundary.  New consumers should prefer
+	// the view/facts accessors.
+	Declarations readOnlySpan[procedureir.Declaration]
+	Statements   readOnlySpan[procedureir.Statement]
+	Expressions  readOnlySpan[procedureir.Expression]
+	Calls        readOnlySpan[procedureir.CallSite]
+	Accesses     readOnlySpan[procedureir.VariableAccess]
 	// Features is the immutable, analyzer-owned applicability summary built
 	// with the procedure facts. It contains no parser-owned values.
 	Features procedureFeatureSet
@@ -444,8 +446,8 @@ type sourceProcedure struct {
 	Plan      procedureAnalysisPlan
 	PlanReady bool
 	// Facts is the immutable procedure-local index shared by analysis rules.
-	// Its backing slices are the projections above; both are owned by this
-	// source-procedure revision and must be treated as read-only.
+	// Its canonical backing storage is IR.  Synthetic focused tests may use
+	// the compatibility constructors in procedure_facts.go.
 	Facts   *procedureAnalysisFacts
 	Graph   *vbacfg.Graph
 	Effects *effects.ProcedureSummary
@@ -645,7 +647,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		recorder.AddSum("effect_summary_total_propagated_facts", stats.TotalPropagatedFacts)
 	}
 	for i := range parsedFiles {
-		procedures := sourceProceduresFromIR(parsedFiles[i].IR, parsedFiles[i].CFG)
+		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
 		parsedFiles[i].ModuleFacts = buildModuleAnalysisFacts(parsedFiles[i].Lines, parsedFiles[i].IR, procedures)
 		parsedFiles[i].ModuleDeclarations = parsedFiles[i].ModuleFacts.moduleDeclarations
@@ -1430,7 +1432,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 	}
 	var findings []Finding
 	err = doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
-		procedures := sourceProceduresFromIR(ir)
+		procedures := sourceProceduresFromIRRef(&ir)
 		file := parsedFile{
 			Path:       view.Path,
 			Lines:      normalizedSourceLines(string(view.Source)),
@@ -1582,7 +1584,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
-		procedures := sourceProceduresFromIR(ir, controlFlow)
+		procedures := sourceProceduresFromIRRef(&ir, controlFlow)
 		file := parsedFile{
 			Path:                      view.Path,
 			Lines:                     lines,
@@ -2763,7 +2765,7 @@ func (file parsedFile) procedureProjection() []sourceProcedure {
 	if file.Procedures != nil {
 		return file.Procedures
 	}
-	return sourceProceduresFromIR(file.IR, file.CFG)
+	return sourceProceduresFromIRRef(&file.IR, file.CFG)
 }
 
 func (file parsedFile) moduleDecls() map[string]sourceDeclaration {
@@ -2784,13 +2786,21 @@ func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir
 	}
 }
 
-func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
+// sourceProceduresFromIRRef materializes lightweight analyzer views over the
+// canonical, Go-owned DocumentIR. It intentionally does not copy any of the
+// procedure IR collections; facts and views alias the ProcedureIR storage for
+// the lifetime of the document revision.
+func sourceProceduresFromIRRef(document *procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
+	if document == nil {
+		return nil
+	}
 	procedures := make([]sourceProcedure, 0, len(document.Procedures))
 	module := strings.TrimSpace(document.ModuleName)
 	if module == "" {
 		module = strings.TrimSuffix(filepath.Base(document.Path), filepath.Ext(document.Path))
 	}
-	for procedureIndex, procedure := range document.Procedures {
+	for procedureIndex := range document.Procedures {
+		procedure := &document.Procedures[procedureIndex]
 		kind := "Sub"
 		switch procedure.Symbol.Kind {
 		case procedureir.ProcedureFunction:
@@ -2799,16 +2809,10 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			procedureir.ProcedurePropertyLet, procedureir.ProcedurePropertySet:
 			kind = "Property"
 		}
-		params := make([]parameterInfo, len(procedure.Symbol.Parameters))
-		for i, parameter := range procedure.Symbol.Parameters {
-			params[i] = parameterInfo{
-				Name: parameter.Name, Type: parameter.Type, Passing: parameter.Passing,
-				Optional: parameter.Optional, ParamArray: parameter.ParamArray,
-				ValueShape: parameter.ValueShape, ArrayShape: parameter.ArrayShape,
-				ArrayBounds: append([]procedureir.ArrayBound(nil), parameter.ArrayBounds...), Range: parameter.Range,
-			}
-		}
 		source := sourceProcedure{
+			Document:         document,
+			IR:               procedure,
+			Index:            procedureIndex,
 			Kind:             kind,
 			ProcedureKind:    procedure.Symbol.Kind,
 			Name:             procedure.Symbol.Name,
@@ -2821,20 +2825,19 @@ func sourceProceduresFromIR(document procedureir.DocumentIR, controlFlow ...vbac
 			EndLine:          procedure.Symbol.DeclarationRange.EndLine,
 			StartByte:        procedure.Symbol.DeclarationRange.StartByte,
 			EndByte:          procedure.Symbol.DeclarationRange.EndByte,
-			Params:           params,
-			Declarations:     append([]procedureir.Declaration(nil), procedure.Declarations...),
-			Statements:       append([]procedureir.Statement(nil), procedure.Statements...),
-			Expressions:      append([]procedureir.Expression(nil), procedure.Expressions...),
-			Calls:            append([]procedureir.CallSite(nil), procedure.Calls...),
-			Accesses:         append([]procedureir.VariableAccess(nil), procedure.Accesses...),
+			Params:           procedure.Symbol.Parameters,
+			Declarations:     readOnlySpan[procedureir.Declaration](procedure.Declarations),
+			Statements:       readOnlySpan[procedureir.Statement](procedure.Statements),
+			Expressions:      readOnlySpan[procedureir.Expression](procedure.Expressions),
+			Calls:            readOnlySpan[procedureir.CallSite](procedure.Calls),
+			Accesses:         readOnlySpan[procedureir.VariableAccess](procedure.Accesses),
 		}
-		source.Facts = newProcedureAnalysisFactsWithDeclarations(source.Declarations, source.Statements, source.Expressions, source.Calls, source.Accesses)
+		source.Facts = newProcedureAnalysisFactsForProcedure(procedure)
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
-			graph := controlFlow[0].Graphs[procedureIndex]
-			source.Graph = &graph
+			source.Graph = &controlFlow[0].Graphs[procedureIndex]
 		}
 		graphUnknown := source.Graph != nil && len(source.Graph.UnknownFlowSources) > 0
-		source.Features = finalizeProcedureFeatures(source.Facts.features, document, procedure, source.Graph != nil, graphUnknown)
+		source.Features = finalizeProcedureFeatures(source.Facts.features, *document, *procedure, source.Graph != nil, graphUnknown)
 		source.Facts.features = source.Features
 		procedures = append(procedures, source)
 	}

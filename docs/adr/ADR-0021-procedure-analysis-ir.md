@@ -88,6 +88,16 @@ CLI JSON, and LSP ranges remain unchanged. Existing `inspect calls` output is
 also a compatibility contract; projecting call facts from the IR must not
 change its JSON shape or resolution meaning.
 
+Analyzer procedure projections are revision-local immutable views over the
+canonical `DocumentIR`/`ProcedureIR` storage. They may retain pointers to
+owned IR and CFG elements, plus compact facts and analysis overlays, but must
+not copy complete procedure collections or retain parser leases, tree-sitter
+nodes, source buffers, or obsolete revisions. Internal analyzer readers use
+read-only views/iterators; snapshot and public compatibility boundaries keep
+their existing defensive-copy behavior. This decision is limited to analyzer
+projection storage and does not change the separate `Resolve` or CFG ownership
+contracts.
+
 ## Consequences
 
 - Positive: lint, analyze, inspect, LSP, and later project-wide analyses can
@@ -104,11 +114,10 @@ change its JSON shape or resolution meaning.
   of expanding rule-specific CST walkers.
 - Negative: the normalized model must evolve when tree-sitter-vba adds syntax
   that cannot be represented by current statement or expression kinds.
-- Negative: defensive copies and normalization allocate more Go values than a
-  consumer-specific walk.
-- Negative: compatibility projections remain necessary while existing calls,
-  symbols, analyzer, and LSP result types continue to serve their public
-  contracts.
+- Negative: revision-local analyzer views require every consumer and worker to
+  honor the immutable ownership contract; mutable rule state must remain local.
+- Negative: snapshot and public compatibility projections still retain their
+  defensive-copy cost even though analyzer hot paths use zero-copy views.
 - Limitation: issue #426 provides syntactic structure, not executable-path
   truth, type-complete member binding, COM type-library resolution, or
   interprocedural effects.

@@ -42,7 +42,7 @@ End Property
 	var findings []Finding
 	err = doc.Read(func(view vbaast.ParsedView) error {
 		file := parsedFile{Path: view.Path, Module: "Guard", Source: view.Source, Root: view.Root, Lines: normalizedSourceLines(string(view.Source)), IR: ir}
-		findings, err = (Analyzer{}).nonShortCircuitObjectGuardDocumentFindings(context.Background(), file, sourceProceduresFromIR(ir), stats)
+		findings, err = (Analyzer{}).nonShortCircuitObjectGuardDocumentFindings(context.Background(), file, sourceProceduresFromIRRef(&ir), stats)
 		return err
 	})
 	if err != nil {
@@ -86,7 +86,7 @@ func TestVBA212ScannerCancellationStopsAtCheckpoint(t *testing.T) {
 	ctx := vba212CheckpointContext{stats: stats, cancelAt: 256}
 	err = doc.Read(func(view vbaast.ParsedView) error {
 		file := parsedFile{Path: view.Path, Module: "Cancel", Source: view.Source, Root: view.Root, Lines: normalizedSourceLines(string(view.Source)), IR: ir}
-		_, scanErr := (Analyzer{}).nonShortCircuitObjectGuardDocumentFindings(ctx, file, sourceProceduresFromIR(ir), stats)
+		_, scanErr := (Analyzer{}).nonShortCircuitObjectGuardDocumentFindings(ctx, file, sourceProceduresFromIRRef(&ir), stats)
 		return scanErr
 	})
 	if !errors.Is(err, context.Canceled) {
