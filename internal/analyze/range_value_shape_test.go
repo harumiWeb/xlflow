@@ -647,6 +647,24 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(selectEarlyExitFile, selectEarlyExitProc), "VBA226"); len(got) != 1 {
 		t.Fatalf("source after Select Case branch Exit Sub should still be analyzed: %+v", got)
 	}
+
+	goSubReturnSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  GoTo Main
+Handler:
+  Return
+Main:
+  GoSub Handler
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	goSubReturnFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(goSubReturnSource), Source: []byte(goSubReturnSource)}
+	goSubReturnProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 11}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(goSubReturnFile, goSubReturnProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("GoSub Return must not terminate source recovery before the caller resumes: %+v", got)
+	}
 }
 
 func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {

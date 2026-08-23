@@ -602,7 +602,9 @@ func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool
 
 func rangeValueSourceEarlyExit(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
-	for _, prefix := range []string{"exit sub", "exit function", "exit property", "return"} {
+	// VBA Return only returns from a GoSub. It is not a procedure terminator;
+	// treating it as one would stop source recovery before the caller resumes.
+	for _, prefix := range []string{"exit sub", "exit function", "exit property"} {
 		if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
 			return true
 		}
