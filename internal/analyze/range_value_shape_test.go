@@ -336,6 +336,19 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(negatedFile, negatedProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("negative IsArray guard Else branch should suppress uncertain two-dimensional access: %+v", got)
 	}
+
+	inlineSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If IsArray(values) Then Debug.Print values(1, 1)
+End Sub
+`
+	inlineFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(inlineSource), Source: []byte(inlineSource)}
+	inlineProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(inlineFile, inlineProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("single-line IsArray guard should suppress uncertain two-dimensional access: %+v", got)
+	}
 }
 
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {

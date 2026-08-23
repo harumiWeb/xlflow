@@ -84,6 +84,7 @@ var (
 	rangeValueForEachRe     = regexp.MustCompile(`(?i)^\s*For\s+Each\s+([A-Za-z_][A-Za-z0-9_]*)\s+In\b`)
 	rangeValueForVariableRe = regexp.MustCompile(`(?i)^\s*For\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 	rangeValueIdentifierRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	rangeValueInlineGuardRe = regexp.MustCompile(`(?i)^\s*If\s+(Not\s+)?IsArray\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s+Then\s+(.+)$`)
 )
 
 func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure) []Finding {
@@ -193,6 +194,24 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				StartLine: source.line,
 				EndLine:   source.line,
 			},
+		}
+		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
+			name := strings.ToLower(match[2])
+			priorGuard := state.arrayGuards[name]
+			if strings.TrimSpace(match[1]) == "" {
+				state.arrayGuards[name] = true
+			} else {
+				delete(state.arrayGuards, name)
+			}
+			body := statement
+			body.Text = strings.TrimSpace(match[3])
+			issues, next := rangeValueStatement(state, body, facts)
+			if !next.arrayGuards[name] || !priorGuard {
+				delete(next.arrayGuards, name)
+			}
+			findings = appendRangeValueFindings(findings, file, proc, body, issues, a)
+			state = next
+			continue
 		}
 		updateRangeValueSourceGuard(&state, &guards, statement.Text)
 		issues, next := rangeValueStatement(state, statement, facts)
