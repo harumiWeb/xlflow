@@ -223,15 +223,36 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 		if len(*guards) == 0 {
 			return
 		}
+		if strings.HasPrefix(lower, "elseif ") {
+			frame := &(*guards)[len(*guards)-1]
+			if frame.name == "" {
+				return
+			}
+			if frame.active {
+				delete(state.arrayGuards, frame.name)
+				frame.active = false
+			}
+			trimmed := strings.TrimSpace(text)
+			match := rangeValueGuardRe.FindStringSubmatch("If " + strings.TrimSpace(trimmed[len("ElseIf "):]))
+			if len(match) == 3 && strings.TrimSpace(match[1]) == "" {
+				frame.active = true
+				state.arrayGuards[frame.name] = true
+			}
+			return
+		}
 		frame := &(*guards)[len(*guards)-1]
-		if frame.active {
+		if frame.name != "" && frame.active {
 			delete(state.arrayGuards, frame.name)
 			frame.active = false
 		}
 		return
 	}
+	if !isRangeValueBlockIf(text) {
+		return
+	}
 	match := rangeValueGuardRe.FindStringSubmatch(text)
 	if len(match) != 3 {
+		*guards = append(*guards, rangeValueSourceGuardFrame{})
 		return
 	}
 	name := strings.ToLower(match[2])
@@ -243,6 +264,15 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 	} else {
 		delete(state.arrayGuards, name)
 	}
+}
+
+func isRangeValueBlockIf(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if !strings.HasPrefix(lower, "if ") {
+		return false
+	}
+	then := strings.LastIndex(lower, " then")
+	return then >= 0 && strings.TrimSpace(lower[then+len(" then"):]) == ""
 }
 
 func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool {

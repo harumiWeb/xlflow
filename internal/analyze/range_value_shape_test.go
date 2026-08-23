@@ -305,14 +305,17 @@ End Sub
 	guardedSource := `Option Explicit
 Public Sub Run(ByVal lastCell As String)
   Dim values As Variant
-  values = Range("A1:" & lastCell).Value2
-  If IsArray(values) Then
-    Debug.Print values(1, 1)
-  End If
+	values = Range("A1:" & lastCell).Value2
+	If IsArray(values) Then
+	    If lastCell <> "" Then
+	      Debug.Print values(1, 1)
+	    End If
+	    Debug.Print values(1, 1)
+	End If
 End Sub
 `
 	guardedFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(guardedSource), Source: []byte(guardedSource)}
-	guardedProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 8}
+	guardedProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(guardedFile, guardedProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("source-line IsArray guard should suppress uncertain two-dimensional access: %+v", got)
 	}
