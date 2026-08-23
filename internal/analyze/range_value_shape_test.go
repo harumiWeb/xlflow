@@ -585,6 +585,23 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(procedureExitFile, procedureExitProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("source after Exit Sub must be unreachable: %+v", got)
 	}
+
+	selectEarlyExitSource := `Option Explicit
+Public Sub Run(ByVal mode As Long)
+  Dim values As Variant
+  Select Case mode
+    Case 1
+      Exit Sub
+  End Select
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	selectEarlyExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(selectEarlyExitSource), Source: []byte(selectEarlyExitSource)}
+	selectEarlyExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(selectEarlyExitFile, selectEarlyExitProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("source after Select Case branch Exit Sub should still be analyzed: %+v", got)
+	}
 }
 
 func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {

@@ -377,7 +377,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		issues, next := rangeValueStatement(state, statement, facts)
 		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
 		state = next
-		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 {
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) == 0 {
 			break
 		}
 	}
@@ -1366,14 +1366,7 @@ func rangeValueTextCellsPairShape(arguments []string, facts rangeValueFacts) (ra
 	if !startOK || !endOK {
 		return rangeShape{}, false
 	}
-	rows, rowsKnown := rangeValueAxisLength(startRow, startRowKnown, endRow, endRowKnown)
-	cols, colsKnown := rangeValueAxisLength(startColumn, startColumnKnown, endColumn, endColumnKnown)
-	return rangeShape{
-		known:   rowsKnown && colsKnown,
-		array2D: (rowsKnown && rows > 1) || (colsKnown && cols > 1),
-		rows:    rows,
-		cols:    cols,
-	}, true
+	return rangeValueCellsPairShapeFromCoordinates(startRow, startRowKnown, startColumn, startColumnKnown, endRow, endRowKnown, endColumn, endColumnKnown), true
 }
 
 func rangeValueTextCellsCoordinates(expression string, facts rangeValueFacts) (int, bool, int, bool, bool) {
@@ -1411,36 +1404,7 @@ func rangeValueTextLiteralRangeShape(arguments []string) (rangeShape, bool) {
 		}
 		addresses[index] = strings.ReplaceAll(text[1:len(text)-1], `""`, `"`)
 	}
-	if len(addresses) == 1 {
-		match := rangeValueAddressRe.FindStringSubmatch(addresses[0])
-		if len(match) != 5 {
-			return rangeShape{}, false
-		}
-		startColumn := excelColumnNumber(match[1])
-		startRow, _ := strconv.Atoi(match[2])
-		endColumn, endRow := startColumn, startRow
-		if match[3] != "" {
-			endColumn = excelColumnNumber(match[3])
-			endRow, _ = strconv.Atoi(match[4])
-		}
-		if startColumn <= 0 || endColumn < startColumn || endRow < startRow {
-			return rangeShape{}, false
-		}
-		return rangeShape{known: true, array2D: endColumn > startColumn || endRow > startRow, rows: endRow - startRow + 1, cols: endColumn - startColumn + 1}, true
-	}
-	startMatch := rangeValueAddressRe.FindStringSubmatch(addresses[0])
-	endMatch := rangeValueAddressRe.FindStringSubmatch(addresses[1])
-	if len(startMatch) != 5 || len(endMatch) != 5 || startMatch[3] != "" || endMatch[3] != "" {
-		return rangeShape{}, false
-	}
-	startColumn := excelColumnNumber(startMatch[1])
-	startRow, _ := strconv.Atoi(startMatch[2])
-	endColumn := excelColumnNumber(endMatch[1])
-	endRow, _ := strconv.Atoi(endMatch[2])
-	if startColumn <= 0 || endColumn < startColumn || endRow < startRow {
-		return rangeShape{}, false
-	}
-	return rangeShape{known: true, array2D: endColumn > startColumn || endRow > startRow, rows: endRow - startRow + 1, cols: endColumn - startColumn + 1}, true
+	return rangeValueLiteralRangeShapeFromAddresses(addresses)
 }
 
 func rangeValueMemberReceiver(expression *procedureir.Expression, facts rangeValueFacts, members ...string) (procedureir.Expression, bool) {
@@ -1557,47 +1521,18 @@ func rangeValueTerminalExpressionName(expression procedureir.Expression, facts r
 }
 
 func rangeValueLiteralRangeShape(arguments []procedureir.Expression, facts rangeValueFacts) (rangeShape, bool) {
-	if len(arguments) == 1 {
-		address, ok := rangeValueStringLiteral(arguments[0], facts)
+	if len(arguments) != 1 && len(arguments) != 2 {
+		return rangeShape{}, false
+	}
+	addresses := make([]string, len(arguments))
+	for index, argument := range arguments {
+		address, ok := rangeValueStringLiteral(argument, facts)
 		if !ok {
 			return rangeShape{}, false
 		}
-		match := rangeValueAddressRe.FindStringSubmatch(address)
-		if len(match) != 5 {
-			return rangeShape{}, false
-		}
-		startCol := excelColumnNumber(match[1])
-		startRow, _ := strconv.Atoi(match[2])
-		endCol, endRow := startCol, startRow
-		if match[3] != "" {
-			endCol = excelColumnNumber(match[3])
-			endRow, _ = strconv.Atoi(match[4])
-		}
-		if startCol > 0 && endCol >= startCol && endRow >= startRow {
-			return rangeShape{known: true, array2D: endCol > startCol || endRow > startRow, rows: endRow - startRow + 1, cols: endCol - startCol + 1}, true
-		}
-		return rangeShape{}, false
+		addresses[index] = address
 	}
-	if len(arguments) == 2 {
-		startAddress, startOK := rangeValueStringLiteral(arguments[0], facts)
-		endAddress, endOK := rangeValueStringLiteral(arguments[1], facts)
-		if !startOK || !endOK {
-			return rangeShape{}, false
-		}
-		startMatch := rangeValueAddressRe.FindStringSubmatch(startAddress)
-		endMatch := rangeValueAddressRe.FindStringSubmatch(endAddress)
-		if len(startMatch) != 5 || len(endMatch) != 5 || startMatch[3] != "" || endMatch[3] != "" {
-			return rangeShape{}, false
-		}
-		startCol := excelColumnNumber(startMatch[1])
-		startRow, _ := strconv.Atoi(startMatch[2])
-		endCol := excelColumnNumber(endMatch[1])
-		endRow, _ := strconv.Atoi(endMatch[2])
-		if startCol > 0 && endCol >= startCol && endRow >= startRow {
-			return rangeShape{known: true, array2D: endCol > startCol || endRow > startRow, rows: endRow - startRow + 1, cols: endCol - startCol + 1}, true
-		}
-	}
-	return rangeShape{}, false
+	return rangeValueLiteralRangeShapeFromAddresses(addresses)
 }
 
 func rangeValueStringLiteral(expression procedureir.Expression, facts rangeValueFacts) (string, bool) {
@@ -1618,13 +1553,54 @@ func rangeValueCellsPairShape(start, end procedureir.Expression, facts rangeValu
 	if !startOK || !endOK {
 		return rangeShape{}, false
 	}
+	return rangeValueCellsPairShapeFromCoordinates(startRow, startRowKnown, startCol, startColKnown, endRow, endRowKnown, endCol, endColKnown), true
+}
+
+func rangeValueCellsPairShapeFromCoordinates(startRow int, startRowKnown bool, startColumn int, startColumnKnown bool, endRow int, endRowKnown bool, endColumn int, endColumnKnown bool) rangeShape {
 	rows, rowsKnown := rangeValueAxisLength(startRow, startRowKnown, endRow, endRowKnown)
-	cols, colsKnown := rangeValueAxisLength(startCol, startColKnown, endCol, endColKnown)
+	cols, colsKnown := rangeValueAxisLength(startColumn, startColumnKnown, endColumn, endColumnKnown)
 	return rangeShape{
 		known:   rowsKnown && colsKnown,
 		array2D: (rowsKnown && rows > 1) || (colsKnown && cols > 1),
 		rows:    rows,
 		cols:    cols,
+	}
+}
+
+func rangeValueLiteralRangeShapeFromAddresses(addresses []string) (rangeShape, bool) {
+	if len(addresses) != 1 && len(addresses) != 2 {
+		return rangeShape{}, false
+	}
+	startMatch := rangeValueAddressRe.FindStringSubmatch(addresses[0])
+	if len(startMatch) != 5 {
+		return rangeShape{}, false
+	}
+	if len(addresses) == 1 {
+		return rangeValueLiteralRangeCoordinatesShape(startMatch[1], startMatch[2], startMatch[3], startMatch[4])
+	}
+	endMatch := rangeValueAddressRe.FindStringSubmatch(addresses[1])
+	if len(endMatch) != 5 || startMatch[3] != "" || endMatch[3] != "" {
+		return rangeShape{}, false
+	}
+	return rangeValueLiteralRangeCoordinatesShape(startMatch[1], startMatch[2], endMatch[1], endMatch[2])
+}
+
+func rangeValueLiteralRangeCoordinatesShape(startColumnText, startRowText, endColumnText, endRowText string) (rangeShape, bool) {
+	startColumn := excelColumnNumber(startColumnText)
+	startRow, _ := strconv.Atoi(startRowText)
+	endColumn, endRow := startColumn, startRow
+	if endColumnText != "" {
+		endColumn = excelColumnNumber(endColumnText)
+		endRow, _ = strconv.Atoi(endRowText)
+	}
+	if startColumn <= 0 || endColumn < startColumn || endRow < startRow {
+		return rangeShape{}, false
+	}
+	return rangeShape{
+		known:   true,
+		array2D: endColumn > startColumn || endRow > startRow,
+		rows:    endRow - startRow + 1,
+		cols:    endColumn - startColumn + 1,
 	}, true
 }
 

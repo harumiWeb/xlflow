@@ -15,8 +15,8 @@ func TestArrayAnalysisResultConcurrentRead(t *testing.T) {
 		variables: map[string]arrayVariable{
 			"values": {name: "values", isArray: true},
 		},
-		lifecycleFindings: []Finding{{Code: "VBA227", Message: "array"}},
-		runtimeFindings:   []Finding{{Code: "VBA249", Message: "runtime"}},
+		lifecycleFindings: []Finding{{Code: "VBA227", Message: "array", NearbyCode: []string{"original nearby"}}},
+		runtimeFindings:   []Finding{{Code: "VBA249", Message: "runtime", RuntimeError: &RuntimeErrorContext{Kind: "original runtime"}}},
 		redimFindings:     []Finding{{Code: "VBA208", Message: "redim"}},
 		rangeFindings:     []Finding{{Code: "VBA226", Message: "shape"}},
 	}
@@ -49,8 +49,17 @@ func TestArrayAnalysisResultConcurrentRead(t *testing.T) {
 
 	copyOfFindings := result.lifecycle()
 	copyOfFindings[0].Code = "mutated-copy"
+	copyOfFindings[0].NearbyCode[0] = "mutated-nearby-copy"
 	if result.lifecycle()[0].Code != "VBA227" {
 		t.Fatal("projector copy mutated the immutable result")
+	}
+	if result.lifecycle()[0].NearbyCode[0] != "original nearby" {
+		t.Fatal("projector copy mutated nested nearby code in the immutable result")
+	}
+	runtimeCopy := result.runtime()
+	runtimeCopy[0].RuntimeError.Kind = "mutated-runtime-copy"
+	if result.runtime()[0].RuntimeError.Kind != "original runtime" {
+		t.Fatal("projector copy mutated nested runtime error in the immutable result")
 	}
 }
 

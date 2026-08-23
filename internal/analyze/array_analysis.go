@@ -46,7 +46,21 @@ func (r *ArrayAnalysisResult) findings(kind string) []Finding {
 	case "range":
 		source = r.rangeFindings
 	}
-	return append([]Finding(nil), source...)
+	if source == nil {
+		return nil
+	}
+	findings := make([]Finding, len(source))
+	for index, finding := range source {
+		findings[index] = finding
+		if finding.NearbyCode != nil {
+			findings[index].NearbyCode = append([]string(nil), finding.NearbyCode...)
+		}
+		if finding.RuntimeError != nil {
+			runtimeError := *finding.RuntimeError
+			findings[index].RuntimeError = &runtimeError
+		}
+	}
+	return findings
 }
 
 func arrayAnalysisEnabled(cfg config.AnalyzeConfig) bool {
