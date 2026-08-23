@@ -276,9 +276,12 @@ func rangeValueProjectionUnknown(proc sourceProcedure) bool {
 	if proc.Features.unknown&featureRangeArray == 0 {
 		return false
 	}
-	if len(proc.Statements) == 0 || len(proc.Expressions) == 0 || proc.Graph == nil {
+	if len(proc.Statements) == 0 || len(proc.Expressions) == 0 {
 		return true
 	}
+	// A graphless procedure can still have a complete statement/expression
+	// projection. Keep the existing linear IR transfer for that case; only an
+	// actually incomplete projection should fall back to source text.
 	for _, statement := range proc.Statements {
 		if statement.Recovered || statement.Kind == procedureir.StatementRecovered || statement.Kind == procedureir.StatementUnknown {
 			return true

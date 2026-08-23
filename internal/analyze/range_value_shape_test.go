@@ -474,6 +474,17 @@ End Sub
 	}
 }
 
+func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {
+	proc := sourceProcedure{
+		Statements:  []procedureir.Statement{{Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Expressions: []procedureir.Expression{{Text: "ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Features:    procedureFeatureSet{unknown: featureRangeArray},
+	}
+	if rangeValueProjectionUnknown(proc) {
+		t.Fatal("graphless procedures with complete statement and expression IR should retain linear analysis")
+	}
+}
+
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
