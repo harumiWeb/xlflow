@@ -227,6 +227,11 @@ func buildProjectCapabilityPlan(cfg config.AnalyzeConfig, files []parsedFile) pr
 
 func projectHasGetterOrEagerContainer(files []parsedFile) bool {
 	for _, file := range files {
+		for _, procedure := range file.IR.Procedures {
+			if procedure.Symbol.Kind == procedureir.ProcedurePropertyGet {
+				return true
+			}
+		}
 		if vba212SourceMayHaveGetter(file) {
 			return true
 		}

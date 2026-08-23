@@ -5,6 +5,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -124,5 +125,40 @@ func TestProjectEffectsCapabilityRetainsCrossModuleEagerContainerDefinitions(t *
 	}}}}}
 	if !buildProjectCapabilityPlan(cfg, files).requires(projectCapabilityEffects) {
 		t.Fatal("project-defined IIf should retain Effects for cross-module VBA212 resolution")
+	}
+}
+
+func TestProjectCapabilityGetterDetectionUsesProcedureIRWhitespace(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default().Analyze
+	cfg.DetectNonShortCircuitObjectGuard = true
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{name: "spaces", source: "Public Property  Get Value() As Long\nValue = 1\nEnd Property\n"},
+		{name: "tab", source: "Public Property\tGet Value() As Long\nValue = 1\nEnd Property\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			doc, err := vbaast.ParseDocument("Widget.cls", []byte(test.source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer doc.Close()
+			ir, err := procedureir.BuildParsed(procedureir.BuildOptions{Path: "Widget.cls", ModuleKind: "class"}, doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := parsedFile{Lines: normalizedSourceLines(test.source), IR: ir}
+			if vba212SourceMayHaveGetter(file) {
+				t.Fatal("source-only getter matcher unexpectedly accepted noncanonical whitespace")
+			}
+			if !projectHasGetterOrEagerContainer([]parsedFile{file}) {
+				t.Fatal("IR getter detection missed Property Get with noncanonical whitespace")
+			}
+			if !buildProjectCapabilityPlan(cfg, []parsedFile{file}).requires(projectCapabilityEffects) {
+				t.Fatal("Property Get should retain Effects for VBA212")
+			}
+		})
 	}
 }
