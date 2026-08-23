@@ -102,6 +102,8 @@ type rangeValueSourceConditionalFlowFrame struct {
 
 type rangeValueSourceLoopFrame struct {
 	before rangeValueFlowState
+	kind   string
+	exited bool
 }
 
 type rangeValueSourceSelectFrame struct {
@@ -282,6 +284,9 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 			}
 			continue
 		}
+		if len(loops) > 0 && loops[len(loops)-1].exited && !rangeValueSourceLoopEnd(statement.Text) {
+			continue
+		}
 		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
 			name := strings.ToLower(match[2])
 			negated := strings.TrimSpace(match[1]) != ""
@@ -366,7 +371,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				state = cloneRangeValueFlowState(frame.before)
 			}
 		} else if rangeValueSourceLoopStart(statement.Text) {
-			loops = append(loops, rangeValueSourceLoopFrame{before: cloneRangeValueFlowState(state)})
+			loops = append(loops, rangeValueSourceLoopFrame{before: cloneRangeValueFlowState(state), kind: rangeValueSourceLoopKind(statement.Text)})
 		} else if rangeValueSourceLoopEnd(statement.Text) && len(loops) > 0 {
 			frame := loops[len(loops)-1]
 			loops = loops[:len(loops)-1]
@@ -437,6 +442,17 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				}
 			} else {
 				state = mergeRangeValueSourceStates(frame.before, current)
+			}
+		}
+		if exitKind := rangeValueSourceLoopExitKind(statement.Text); exitKind != "" && len(branches) == 0 && len(selects) == 0 && len(conditionals) == 0 && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "if ") {
+			for index := len(loops) - 1; index >= 0; index-- {
+				if loops[index].kind != exitKind {
+					continue
+				}
+				for exited := index; exited < len(loops); exited++ {
+					loops[exited].exited = true
+				}
+				break
 			}
 		}
 		if rangeValueSourceEarlyExit(statement.Text) && len(branches) > 0 {
@@ -546,6 +562,33 @@ func isRangeValueBlockIf(text string) bool {
 func rangeValueSourceLoopStart(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	return strings.HasPrefix(lower, "for ") || lower == "do" || strings.HasPrefix(lower, "do while ") || strings.HasPrefix(lower, "do until ") || strings.HasPrefix(lower, "while ")
+}
+
+func rangeValueSourceLoopKind(text string) string {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.HasPrefix(lower, "for ") {
+		return "for"
+	}
+	if lower == "do" || strings.HasPrefix(lower, "do while ") || strings.HasPrefix(lower, "do until ") {
+		return "do"
+	}
+	if strings.HasPrefix(lower, "while ") {
+		return "while"
+	}
+	return ""
+}
+
+func rangeValueSourceLoopExitKind(text string) string {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "exit for":
+		return "for"
+	case "exit do":
+		return "do"
+	case "exit while":
+		return "while"
+	default:
+		return ""
+	}
 }
 
 func rangeValueSourceSelectStart(text string) bool {

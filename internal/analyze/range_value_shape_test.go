@@ -665,6 +665,40 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(goSubReturnFile, goSubReturnProc), "VBA226"); len(got) != 1 {
 		t.Fatalf("GoSub Return must not terminate source recovery before the caller resumes: %+v", got)
 	}
+
+	loopExitSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  For index = 1 To 1
+    Exit For
+    values = Range("A1:B2").Value2
+  Next index
+  Debug.Print values(1, 1)
+End Sub
+`
+	loopExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(loopExitSource), Source: []byte(loopExitSource)}
+	loopExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(loopExitFile, loopExitProc), "VBA226"); len(got) != 1 || !strings.Contains(got[0].Message, "Single-cell") {
+		t.Fatalf("Exit For must skip unreachable loop statements before merging: %+v", got)
+	}
+
+	doExitSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Do
+    Exit Do
+    values = Range("A1:B2").Value2
+  Loop
+  Debug.Print values(1, 1)
+End Sub
+`
+	doExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(doExitSource), Source: []byte(doExitSource)}
+	doExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(doExitFile, doExitProc), "VBA226"); len(got) != 1 || !strings.Contains(got[0].Message, "Single-cell") {
+		t.Fatalf("Exit Do must skip unreachable loop statements before merging: %+v", got)
+	}
 }
 
 func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {
