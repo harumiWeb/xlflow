@@ -158,6 +158,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 			t.Fatalf("missing counter %q: %+v", name, counters)
 		}
 	}
+	if counterByName[analysisstats.CapabilityResolutionBuildsCounter] != 1 {
+		t.Fatalf("resolution capability builds = %d, want one", counterByName[analysisstats.CapabilityResolutionBuildsCounter])
+	}
 	validCounters := make(map[string]bool, len(procedureLocalProfileCounters))
 	for _, name := range procedureLocalProfileCounters {
 		validCounters[name] = true
@@ -314,6 +317,9 @@ func TestBatchAnalysisProfilesHTTPOnlyDataflowWork(t *testing.T) {
 		if counterByName[name] == 0 {
 			t.Fatalf("HTTP-only dataflow counter %q = %d; counters = %+v", name, counterByName[name], counters)
 		}
+	}
+	if counterByName[analysisstats.CapabilityDataflowBuildsCounter] != 1 {
+		t.Fatalf("dataflow capability builds = %d, want one", counterByName[analysisstats.CapabilityDataflowBuildsCounter])
 	}
 }
 

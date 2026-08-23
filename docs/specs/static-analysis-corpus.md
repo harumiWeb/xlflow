@@ -1301,6 +1301,67 @@ profiles are evidence that the removed projection copies are no longer a
 material corpus allocation leaf rather than a claim that all corpus allocation
 has been eliminated.
 
+### Capability-planner verification requirements (#697)
+
+Issue #697 moves the optimization boundary from procedure-local semantic
+domains to project-level capabilities. Corpus verification must prove both
+that unused project setup is absent and that every required transitive
+dependency is still built before its consumer runs. A capability build count is
+not evidence of a diagnostic result; compare the complete finding contract
+against the pre-change or conservative-all path.
+
+The focused planner matrix must include:
+
+- a scalar-only project with no array, object, effect, data-flow,
+  Dictionary/Collection, application-state, event-reentry, public-API, or
+  Excel-loop consumers;
+- projects that require each major capability directly and through a
+  transitive dependency, such as array entry state requiring resolution;
+- mixed-domain projects where only a subset of procedures participates in a
+  domain, including caller/callee closure, module state, ByRef state, helpers,
+  and class/document/UserForm initializers;
+- recovered or incomplete IR, ambiguous/dynamic/unresolved calls, and unknown
+  module-state boundaries, which must fail open to the complete participant
+  set; and
+- optional runtime-analysis settings toggled around the unconditional
+  compile-equivalent baseline, including the `VB052`--`VB054`, `VBA101`, and
+  `VBA102` contracts.
+
+For each normal analysis revision, record the capability build counters when
+the implementation exposes them: `capability_resolution_builds`,
+`capability_effects_builds`, `capability_array_builds`,
+`capability_object_builds`, `capability_dataflow_builds`,
+`capability_dictionary_builds`, `capability_application_state_builds`,
+`capability_event_reentry_builds`, `capability_public_api_type_index_builds`,
+and `capability_excel_loop_symbols_builds`. A required capability must be
+constructed once at most; an irrelevant capability must remain at zero. If
+elapsed capability stages are emitted, retain them with the same revision and
+benchmark record. These counters and timings are stderr/developer telemetry,
+not corpus snapshot fields.
+
+Run focused unit/integration tests through the Windows Go wrapper and run the
+full verify-only corpus workflow. Repeat the ROneCOne analyze-only leaf and the
+2,000-procedure synthetic workloads with five serial `-benchtime=1x` samples,
+keeping fixture generation outside the timed region. Report planner overhead,
+avoided project setup, capability build counts, domain/CFG/kernel counters,
+wall time, `B/op`, and `allocs/op`; treat the results as same-environment
+observations rather than CI thresholds. The required commands are:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze ./internal/vba/analysisstats ./internal/lspserver
+rtk task corpus:test
+rtk task bench:analyze-single-module
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5
+```
+
+Batch serial/parallel output and Full realtime/LSP output must remain equal in
+finding identity, range, severity, multiplicity, ordering, suppression, and
+exit status. LSP tests must additionally show at-most-once capability builds
+for concurrent requests at one revision and rebuilds after a revision or
+complete/incomplete transition. Any snapshot delta is a semantic regression to
+investigate; do not update snapshots merely to accept capability-planner
+differences.
+
 ## Verification requirements
 
 Manifest tests cover valid v2 data and rejection of unknown fields, unsupported

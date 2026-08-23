@@ -123,6 +123,24 @@ prerequisite. These counters measure planner decisions, while candidate,
 traversal, and kernel counters retain their existing meanings. They are
 stderr-only performance telemetry and do not change findings, their order,
 exit status, or the JSON schema.
+Project-level capability planning adds build counters for the revision-scoped
+semantic builders: `capability_resolution_builds`,
+`capability_effects_builds`, `capability_array_builds`,
+`capability_object_builds`, `capability_dataflow_builds`,
+`capability_dictionary_builds`, `capability_application_state_builds`,
+`capability_event_reentry_builds`, `capability_public_api_type_index_builds`,
+and `capability_excel_loop_symbols_builds`. The enabled diagnostic requirements
+are closed transitively before these builders run. Required capabilities are
+constructed at most once per analysis revision; an unrequired capability is
+not built and remains zero. If elapsed capability stages are enabled, they use
+the corresponding `capability_*` stage name. These counters and stages are
+stderr-only observations, not findings or JSON fields.
+Resolution-dependent builders reuse the shared resolved project inputs, and
+rules do not construct hidden project context as a fallback. Array, object,
+Dictionary/Collection, and Excel-loop participant filtering is conservative:
+uncertain, recovered, ambiguous, dynamic, unresolved, or incomplete evidence
+keeps the affected domain on the complete participant set. Compile-equivalent
+diagnostics remain available regardless of optional runtime-analysis settings.
 Large-module profiles also expose maximum dimensions:
 `max_lines_per_file`, `max_procedures_per_file`, `max_calls_per_file`,
 `max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and

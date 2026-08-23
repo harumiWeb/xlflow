@@ -129,6 +129,14 @@ type SymbolResolver struct {
 	modules     map[string]struct{}
 	moduleKinds map[string]string
 	complete    bool
+	// procedureByName/modules/moduleKinds retain the procedure-only view that
+	// the effects and procedure-local analyzers historically consumed. The
+	// full resolver remains the canonical Resolution capability; callers that
+	// need the legacy call graph semantics can request an immutable view over
+	// these same indexes without rebuilding the project symbol table.
+	procedureByName      map[string][]resolverEntry
+	procedureModules     map[string]struct{}
+	procedureModuleKinds map[string]string
 }
 
 func NewSymbolResolver(symbols []ResolverSymbol) SymbolResolver {
@@ -141,7 +149,15 @@ func NewSymbolResolver(symbols []ResolverSymbol) SymbolResolver {
 // returned as incomplete so diagnostics cannot mistake a partial index for a
 // proven compile error.
 func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) SymbolResolver {
-	out := SymbolResolver{byName: map[string][]resolverEntry{}, modules: map[string]struct{}{}, moduleKinds: map[string]string{}, complete: complete}
+	out := SymbolResolver{
+		byName:               map[string][]resolverEntry{},
+		modules:              map[string]struct{}{},
+		moduleKinds:          map[string]string{},
+		complete:             complete,
+		procedureByName:      map[string][]resolverEntry{},
+		procedureModules:     map[string]struct{}{},
+		procedureModuleKinds: map[string]string{},
+	}
 	for _, symbol := range symbols {
 		if strings.TrimSpace(symbol.Name) == "" {
 			continue
@@ -165,11 +181,31 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 		}
 		key := strings.ToLower(cleanIdentifier(symbol.Name))
 		out.byName[key] = append(out.byName[key], entry)
+		if isLegacyProjectProcedureKind(symbol.Kind) {
+			// Match the legacy effects resolver, which indexed only the public
+			// procedure identity fields and therefore never treated recovered or
+			// conditional procedure metadata as uncertainty evidence.
+			procedureEntry := entry
+			procedureEntry.typeName = ""
+			procedureEntry.parent = ""
+			procedureEntry.recovered = false
+			procedureEntry.conditionalBranches = nil
+			procedureEntry.isArray = false
+			procedureEntry.isConst = false
+			procedureEntry.valueShape = ValueShapeUnknown
+			out.procedureByName[key] = append(out.procedureByName[key], procedureEntry)
+		}
 		if strings.TrimSpace(symbol.Module) != "" {
 			moduleKey := strings.ToLower(cleanIdentifier(symbol.Module))
 			out.modules[moduleKey] = struct{}{}
 			if _, exists := out.moduleKinds[moduleKey]; !exists && strings.TrimSpace(symbol.ModuleKind) != "" {
 				out.moduleKinds[moduleKey] = strings.ToLower(strings.TrimSpace(symbol.ModuleKind))
+			}
+			if isLegacyProjectProcedureKind(symbol.Kind) {
+				out.procedureModules[moduleKey] = struct{}{}
+				if _, exists := out.procedureModuleKinds[moduleKey]; !exists && strings.TrimSpace(symbol.ModuleKind) != "" {
+					out.procedureModuleKinds[moduleKey] = strings.ToLower(strings.TrimSpace(symbol.ModuleKind))
+				}
 			}
 		}
 	}
@@ -188,7 +224,54 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 			return a.Line < b.Line
 		})
 	}
+	for key := range out.procedureByName {
+		sort.Slice(out.procedureByName[key], func(i, j int) bool {
+			a, b := out.procedureByName[key][i], out.procedureByName[key][j]
+			if a.QualifiedName != b.QualifiedName {
+				return a.QualifiedName < b.QualifiedName
+			}
+			if a.Kind != b.Kind {
+				return a.Kind < b.Kind
+			}
+			if a.File != b.File {
+				return a.File < b.File
+			}
+			return a.Line < b.Line
+		})
+	}
 	return out
+}
+
+// isLegacyProjectProcedureKind mirrors the procedure IR list used by the
+// pre-planner effects resolver. Declare statements live in document
+// declarations, but are not entries in DocumentIR.Procedures and therefore
+// must not become project-local call-graph targets in the compatibility view.
+func isLegacyProjectProcedureKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "declare", "declare_sub", "declare_function":
+		return false
+	default:
+		return isProcedureSymbolKind(kind)
+	}
+}
+
+// ProcedureOnlyResolver returns an immutable resolver view backed by the
+// procedure-only symbol indexes collected while constructing the full project
+// resolver. It preserves the pre-capability-planner call/effect semantics
+// without constructing a second project symbol index.
+func ProcedureOnlyResolver(resolver Resolver) Resolver {
+	r, ok := resolver.(SymbolResolver)
+	if !ok {
+		return resolver
+	}
+	r.byName = r.procedureByName
+	r.modules = r.procedureModules
+	r.moduleKinds = r.procedureModuleKinds
+	// The historical effects resolver was built from the complete procedure
+	// list and deliberately did not inherit TypeDB/path completeness. Preserve
+	// that fail-open boundary for procedure-local/effect consumers.
+	r.complete = true
+	return r
 }
 
 // NewResolver creates the default resolver backed by project symbols.

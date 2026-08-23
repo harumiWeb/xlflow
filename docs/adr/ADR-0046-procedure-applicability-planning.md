@@ -24,6 +24,15 @@ domain itself must materialize one canonical procedure result that can feed
 several rule projections. Applicability planning must not become a second
 array parser or a rule-specific cache.
 
+Issue #697 extends this boundary from procedure-local domain work to
+project-level semantic setup. The existing common project-context path can
+construct resolution, effect, object, array, data-flow, and other indexes
+before any enabled diagnostic has demonstrated that they are applicable. A
+project-level plan must therefore distinguish the capabilities required by the
+active diagnostics from the procedure domains that merely inspect their local
+inputs. It must also preserve the complete-project semantics of any capability
+whose propagation cannot safely be restricted to a participant subset.
+
 ## Decision
 
 Derive one immutable, procedure-local applicability summary from the owned IR
@@ -52,8 +61,11 @@ Only a feature/domain proven absent can make a domain skipped. An unknown
 feature, incomplete or recovered IR, missing project/module/type facts,
 ambiguous or unresolved resolution, dynamic call, or uncertain project effect
 keeps the domain planned. A domain with any planned procedure still builds its
-complete project-wide index and effect closure; the planner must not construct
-a procedure subset that weakens propagation.
+complete project-wide closure when that domain's propagation semantics require
+it. A safe feature seed and resolved caller/callee closure may instead select a
+participant subset, including the related module state, ByRef state, helpers,
+initializers, and uncertainty boundaries. The planner must not construct a
+reduced index that weakens propagation.
 
 The same requirements and planner are used by batch and realtime/LSP entry
 points. Compile-equivalent diagnostics, source-line checks, trace-helper
@@ -84,6 +96,63 @@ procedure/domain decision; unknown applicability is counted as planned. These
 counters are stderr performance-log telemetry and do not appear in normal
 analysis output.
 
+### Amendment: capability-driven project planning (#697)
+
+The planner now has a second, project-level dependency graph. The internal
+requirement table records each enabled diagnostic's direct capabilities and
+procedure-domain prerequisites. The planner computes the transitive closure
+before constructing project-wide semantic state; a capability is built only
+when that closure requires it, and at most once for an analysis revision. The
+initial capability vocabulary is:
+
+- `TypeDB`, `Resolution`, and `ProjectConstants`;
+- `ByRefSymbols`, `Effects`, `ObjectFlow`, and `ArrayInterprocedural`;
+- `DataFlow`, `DictionaryCollection`, `ApplicationState`, and `EventReentry`;
+- `PublicAPITypeIndex`, `ExcelLoopSymbols`, `ExcelAPIHelpers`, and
+  `ModuleState`.
+
+The dependency edges are explicit and transitive: `Resolution` requires
+`TypeDB`; `ProjectConstants` requires `TypeDB` and `Resolution`;
+`ByRefSymbols`, `Effects`, `ObjectFlow`, `DictionaryCollection`, and
+`ExcelAPIHelpers` require `Resolution`; `ArrayInterprocedural` requires
+`Resolution` and `ProjectConstants`; `DataFlow` requires `TypeDB`;
+`ApplicationState` and `EventReentry` require `Effects`;
+`PublicAPITypeIndex` requires `TypeDB` and `Resolution`; and
+`ExcelLoopSymbols` requires `TypeDB` and `Resolution`.
+`ModuleState` has no implicit dependency and must not construct another
+capability as a side effect.
+
+The batch implementation may build the planned closure eagerly after
+dependency planning. Realtime/LSP requests may use revision-scoped memoized
+construction, but the observable contract is the same: concurrent consumers
+of one revision share immutable capability results, and a new revision or a
+change in the complete/incomplete dimension invalidates the previous values.
+Individual rule implementations must consume the planned bundle and must not
+silently construct a missing project capability.
+
+Participant filtering is allowed only for domains whose semantics are
+preserved by a proven feature seed and resolved caller/callee closure. Array,
+object, Dictionary/Collection, and Excel-loop work may use such a subset when
+module state, ByRef state, helpers, initializers, and uncertainty are included.
+Recovered IR, incomplete resolution, ambiguous or dynamic calls, or an
+unresolved module-state boundary fail open to the complete procedure set.
+Effects, `ApplicationState`, and `EventReentry` retain the complete project
+closure whenever required. `PublicAPITypeIndex` may restrict itself to the
+public surface.
+
+Compile-equivalent diagnostics and the unconditional Intel, ByRef,
+assignment, local-type, CFG, array-shape, `VB052`--`VB054`, `VBA101`, and
+`VBA102` checks remain available independently of optional runtime-analysis
+settings. Capability planning is an execution optimization and does not
+change diagnostic IDs, findings, ranges, severity, suppression, ordering,
+exit status, or public CLI/LSP schemas.
+
+The performance recorder exposes capability build counters and, where
+enabled, matching elapsed stages. A normal revision records one build for
+each required capability and zero for each skipped capability. The counters
+are stderr-only telemetry and are not part of normal analysis JSON or LSP
+diagnostic payloads.
+
 ## Rationale
 
 The IR and fact ownership boundaries already make procedure inputs immutable
@@ -113,6 +182,16 @@ produce a finding.
 - Array applicability is a domain-level decision rather than one decision per
   array diagnostic. Adding an array projector changes projection work and
   telemetry, not the canonical kernel or main CFG walk count.
+- Project-level setup is now capability-driven. A scalar-only or otherwise
+  irrelevant project can avoid resolution-dependent summaries and indexes that
+  no enabled diagnostic consumes.
+- Capability dependencies are an internal completeness contract. A new
+  project/domain diagnostic must declare its direct requirements and have
+  transitive-planning and build-count coverage before it may rely on a shared
+  capability.
+- Participant filtering can reduce domain work, but fail-open boundaries may
+  deliberately retain complete-project work when resolution or module-state
+  certainty is unavailable.
 
 ## Alternatives Considered
 
@@ -131,6 +210,16 @@ produce a finding.
 5. **Restrict planning to batch analysis or change the public rule registry** -
    Rejected because batch and realtime/LSP must share applicability semantics,
    while the registry's public schema should remain focused on rule metadata.
+6. **Keep one eagerly constructed project context for every analysis** -
+   Rejected because it pays for unrelated interprocedural summaries and
+   indexes even when no enabled diagnostic can consume them.
+7. **Let each rule lazily construct missing capabilities** - Rejected because
+   hidden construction duplicates work, obscures transitive dependencies, and
+   makes at-most-once construction difficult to prove across workers.
+8. **Use synchronization-heavy laziness in batch workers** - Rejected because
+   batch dependency planning can perform one simple immutable eager build; the
+   LSP revision cache provides memoization only where concurrent requests make
+   it useful.
 
 ## Evidence
 
@@ -152,12 +241,15 @@ produce a finding.
   `docs/specs/static-analysis-corpus.md`.
 - ADR-0040 for the canonical array semantic result and its diagnostic
   ownership boundaries.
+- Issue #697 and the capability requirement/dependency planner, including
+  revision-scoped LSP reuse and capability build telemetry.
 
 ## Related
 
 - Issue #693 (parent)
 - Issue #695
 - Issue #696
+- Issue #697
 - ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0043, ADR-0045
 - ADR-0040
 - `docs/specs/vba-analysis-ir.md`
