@@ -757,8 +757,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	var resolutionPreflight []Finding
 	finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 	for i := range parsedFiles {
-		resolvedForDiagnostics := procedureir.Resolve(parsedFiles[i].IR, resolutionResolver)
-		for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, resolutionComplete) {
+		resolvedForDiagnostics := procedureir.ResolveView(parsedFiles[i].IR, resolutionResolver)
+		for _, diagnostic := range procedureir.DiagnosticsView(resolvedForDiagnostics, resolutionComplete) {
 			finding := analysis.resolutionFinding(parsedFiles[i], diagnostic)
 			findings = append(findings, finding)
 			resolutionPreflight = append(resolutionPreflight, finding)

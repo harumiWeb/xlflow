@@ -12,7 +12,15 @@ diagnostic contracts.
 ```go
 func BuildSource(BuildOptions, []byte) (DocumentIR, error)
 func BuildParsed(BuildOptions, *ast.ParsedDocument) (DocumentIR, error)
+func ResolveView(DocumentIR, Resolver) ResolvedDocumentView
 func Resolve(DocumentIR, Resolver) DocumentIR
+
+func (ResolvedDocumentView) ResolvedCall(procedureIndex, callID int) (ResolvedCall, bool)
+func (ResolvedDocumentView) ResolvedAccess(procedureIndex, accessID int) (ResolvedAccess, bool)
+func (ResolvedDocumentView) ResolvedEvent(procedureIndex, eventID int) (ResolvedEvent, bool)
+func (ResolvedDocumentView) Materialize() DocumentIR
+
+func DiagnosticsView(ResolvedDocumentView, bool) []ResolutionDiagnostic
 ```
 
 `BuildSource` parses the supplied immutable source and closes the parsed
@@ -25,6 +33,24 @@ All tree and source access occurs inside `ast.ParsedDocument.Read`. Returned IR
 values own every string and slice they expose and contain no tree-sitter node,
 tree, or borrowed `ParsedView.Source` slice. They remain safe to read after the
 parsed document is closed.
+
+`DocumentIR` is the immutable syntax-local input for project resolution.
+`ResolveView` builds a read-only, revision-scoped overlay containing only
+project-dependent call, access, and event resolution facts, including effective
+access scope. Its lookup helpers hide whether a fact is stored inline or in a
+side table. They do not expose mutable candidate storage; callers that need an
+independently owned IR use `Materialize` or the compatibility `Resolve` API.
+
+The overlay is keyed by a deterministic procedure identity composed from path,
+module name and kind, qualified procedure name and kind, declaration start
+byte, and source-order ordinal. Within that procedure, calls use their stable
+call ID and accesses and event references use revision-local IDs. The IDs are
+valid only for the document revision that created them and must not be used as
+workspace-global or source-text identities. Production IR assigns those IDs;
+hand-built IR with missing or duplicate IDs uses the corresponding procedure
+slice ordinal as a compatibility fallback. Access and event IDs are internal
+metadata omitted from serialized IR/JSON, so adding them does not change the
+existing wire shape.
 
 `BuildOptions` supplies document context that syntax alone cannot reliably
 provide, including path and module kind. A missing module name is derived using
@@ -155,10 +181,18 @@ Syntax construction does not require a project snapshot. Calls initially carry
 `not_attempted` resolution, and variable accesses that cannot be decided from
 procedure/module declarations remain unresolved until a resolver is supplied.
 
-`Resolve` returns an independently owned IR with a resolution overlay derived
-from the supplied project snapshot. It does not mutate the input IR or rescan
-source. Replacing the resolver can therefore re-resolve the same syntax after a
-workspace symbol change.
+`ResolveView` applies the supplied project snapshot without mutating the base
+IR or rescanning source. Replacing the resolver can therefore re-resolve the
+same syntax after a workspace symbol change. `Resolve` remains the compatibility
+API for consumers that require an independently owned resolved `DocumentIR`;
+it materializes equivalent overlay facts and preserves the input-unchanged,
+independent-ownership, and nil-resolver behavior of the existing API.
+
+The overlay and materialized forms have identical completeness and ambiguity
+semantics. This includes unresolved, incomplete, ambiguous, local/module/
+project scope, enum-member ambiguity, dynamic/external calls, event resolution,
+and deterministic candidate ordering. Overlay identity never uses source text
+when a stable IR identity is available.
 
 Call resolution statuses are:
 
@@ -176,6 +210,14 @@ symbols also retain module kind so receiver-less calls cannot bind non-standard
 module procedures across module boundaries. Private procedures are visible only
 from the same module. Resolution does not claim full VBA type inference, COM
 type-library binding, or Excel object-model dispatch.
+
+`Diagnostics` and `DiagnosticsView` share one resolution-diagnostic walker.
+The walker obtains syntax and recovery state from the base IR and obtains
+resolution facts through the view. Batch analyzer `VB052`-`VB054` resolution
+diagnostics use `DiagnosticsView` to avoid a second full-document clone. Other
+consumers that need independent snapshot ownership may continue to use
+materialized `Resolve`; this boundary does not change LSP, effects, lint,
+metrics, or public CLI/JSON behavior.
 
 ## Ranges and Determinism
 
@@ -199,6 +241,11 @@ All slices are deterministic:
   same source and build options; and
 - resolver candidates use stable qualified-name, kind, file, and location
   ordering.
+
+Resolution overlay entries use the same source-ordered procedure identity and
+revision-local call/access/event IDs on every lookup. Candidate slices are
+copied only when an owned result is requested, and candidate ordering remains
+the resolver's stable qualified-name, kind, file, and location order.
 
 Determinism is per document revision. IDs are not persistent identities across
 edits and must not be stored as workspace-global references.
@@ -292,6 +339,13 @@ run. The performance recorder reports `module_fact_builds` and
 and one procedure build per procedure, independent of the number of rule
 families that consume them.
 
+Batch resolution diagnostics attach a read-only `ResolvedDocumentView` to the
+immutable document facts. The view is procedure-local and contains only
+resolution side tables; it does not allocate a second full-size copy of the
+procedure IR. A consumer that needs an independently owned resolved snapshot
+continues to call `Resolve`/`Materialize`, which remains the compatibility
+boundary.
+
 ### Procedure features and applicability planning
 
 Each `procedureAnalysisFacts` value also owns one immutable applicability
@@ -372,6 +426,13 @@ symbol results, or LSP-owned values. Those projections preserve:
 - `VBA204` cleanup-label handling, message, reason, suggestion, nearby code,
   severity, and inline suppression; and
 - CLI byte-based and LSP UTF-16 diagnostic ranges.
+
+Read-only resolution consumers should use `ResolveView` and its lookup helpers
+so they do not depend on the storage location of project-dependent facts.
+Consumers that retain or publish an independently owned resolved snapshot may
+continue to use materialized `Resolve`. This overlay boundary is internal and
+does not add a public CLI flag, configuration key, JSON field, diagnostic ID, or
+LSP capability.
 
 Issue #426 intentionally stops at procedure syntax and conservative name/call
 resolution. The separate CFG layer defined by

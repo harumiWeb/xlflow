@@ -10,6 +10,10 @@ All notable changes to xlflow will be documented in this file.
   statement, expression, call, access, and parameter collections. Diagnostic
   and JSON/LSP contracts remain unchanged.
 
+- Added a read-only procedure-resolution overlay for batch `VB052`-`VB054`
+  diagnostics, avoiding a second full `DocumentIR` clone while preserving
+  materialized `Resolve` compatibility and deterministic resolution results.
+
 - Added immutable tri-state procedure feature summaries and applicability-based
   planning for expensive semantic analyzer domains. Proven-irrelevant domains
   can be skipped before setup, while recovered, unresolved, dynamic, or

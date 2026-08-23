@@ -904,6 +904,16 @@ func (v *singleVisitor) finalize() {
 		sort.SliceStable(procedure.Accesses, func(i, j int) bool {
 			return procedure.Accesses[i].Range.StartByte < procedure.Accesses[j].Range.StartByte
 		})
+		// Access and event identities are revision-local.  Assign them after
+		// access ordering is finalized so an incremental fragment and a full
+		// parse produce the same source-order IDs.  They are omitted from the
+		// serialized IR and are used only by resolution overlays.
+		for accessIndex := range procedure.Accesses {
+			procedure.Accesses[accessIndex].ID = accessIndex + 1
+		}
+		for eventIndex := range procedure.RaiseEvents {
+			procedure.RaiseEvents[eventIndex].ID = eventIndex + 1
+		}
 	}
 	sort.SliceStable(v.document.Procedures, func(i, j int) bool {
 		return v.document.Procedures[i].Symbol.DeclarationRange.StartByte < v.document.Procedures[j].Symbol.DeclarationRange.StartByte
