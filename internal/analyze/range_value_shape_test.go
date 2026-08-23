@@ -490,6 +490,25 @@ End Sub
 		t.Fatalf("source fallback should retain procedure-local constants for bounds: %+v", got)
 	}
 
+	selectSource := `Option Explicit
+Public Sub Run(ByVal mode As Long)
+  Dim values As Variant
+  values = Range("A1").Value2
+  Select Case mode
+    Case 1
+      values = Range("A1:B2").Value2
+    Case 2
+      values = Range("A1:B2").Value2
+  End Select
+  Debug.Print values(1, 1)
+End Sub
+`
+	selectFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(selectSource), Source: []byte(selectSource)}
+	selectProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 12}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(selectFile, selectProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("Select Case recovery should merge the scalar path: %+v", got)
+	}
+
 	continuedSource := `Option Explicit
 Public Sub Run()
   Dim values As Variant

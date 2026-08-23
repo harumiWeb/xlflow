@@ -96,6 +96,13 @@ type rangeValueSourceLoopFrame struct {
 	before rangeValueFlowState
 }
 
+type rangeValueSourceSelectFrame struct {
+	before      rangeValueFlowState
+	branches    rangeValueFlowState
+	hasBranches bool
+	exited      bool
+}
+
 var (
 	rangeValueAddressRe     = regexp.MustCompile(`(?i)^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$`)
 	rangeValueBoundRe       = regexp.MustCompile(`(?i)\b([UL])Bound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([^)]*))?\)`)
@@ -208,6 +215,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 	var guards []rangeValueSourceGuardFrame
 	var branches []rangeValueSourceBranchFrame
 	var loops []rangeValueSourceLoopFrame
+	var selects []rangeValueSourceSelectFrame
 	var findings []Finding
 	for index, source := range sourceStatements {
 		line := source.endLine
@@ -225,6 +233,9 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
 			name := strings.ToLower(match[2])
 			negated := strings.TrimSpace(match[1]) != ""
+			if state.arrayGuards[name] && negated {
+				continue
+			}
 			if rangeValueSourceEarlyExit(match[3]) {
 				if negated {
 					state.arrayGuards[name] = true
@@ -250,7 +261,39 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 			continue
 		}
 		lower := strings.ToLower(strings.TrimSpace(statement.Text))
-		if rangeValueSourceLoopStart(statement.Text) {
+		if rangeValueSourceSelectStart(statement.Text) {
+			selects = append(selects, rangeValueSourceSelectFrame{before: cloneRangeValueFlowState(state)})
+		} else if rangeValueSourceSelectCase(statement.Text) && len(selects) > 0 {
+			frame := &selects[len(selects)-1]
+			current := cloneRangeValueFlowState(state)
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
+		} else if rangeValueSourceSelectEnd(statement.Text) && len(selects) > 0 {
+			current := cloneRangeValueFlowState(state)
+			frame := selects[len(selects)-1]
+			selects = selects[:len(selects)-1]
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			if frame.hasBranches {
+				state = mergeRangeValueSourceStates(frame.before, frame.branches)
+			} else {
+				state = cloneRangeValueFlowState(frame.before)
+			}
+		} else if rangeValueSourceLoopStart(statement.Text) {
 			loops = append(loops, rangeValueSourceLoopFrame{before: cloneRangeValueFlowState(state)})
 		} else if rangeValueSourceLoopEnd(statement.Text) && len(loops) > 0 {
 			frame := loops[len(loops)-1]
@@ -326,6 +369,9 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		}
 		if rangeValueSourceEarlyExit(statement.Text) && len(branches) > 0 {
 			branches[len(branches)-1].exited = true
+		}
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) > 0 {
+			selects[len(selects)-1].exited = true
 		}
 		updateRangeValueSourceGuard(&state, &guards, statement.Text)
 		issues, next := rangeValueStatement(state, statement, facts)
@@ -425,6 +471,18 @@ func isRangeValueBlockIf(text string) bool {
 func rangeValueSourceLoopStart(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	return strings.HasPrefix(lower, "for ") || lower == "do" || strings.HasPrefix(lower, "do while ") || strings.HasPrefix(lower, "do until ") || strings.HasPrefix(lower, "while ")
+}
+
+func rangeValueSourceSelectStart(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "select case ")
+}
+
+func rangeValueSourceSelectCase(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "case")
+}
+
+func rangeValueSourceSelectEnd(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "end select")
 }
 
 func rangeValueSourceLoopEnd(text string) bool {
