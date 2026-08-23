@@ -130,6 +130,21 @@ func TestArrayKernelProjectionWorkCounters(t *testing.T) {
 	}
 }
 
+func TestArrayKernelComparisonOnlyDoesNotStartCFGWalk(t *testing.T) {
+	workload := arrayKernelBenchmarkWorkload{
+		name:          "comparison-only",
+		source:        arrayBenchmarkComparisonOnlySource(),
+		lines:         6,
+		procedures:    1,
+		arrayMarkers:  2,
+		statementHint: 4,
+	}
+	counters := runArrayKernelBenchmarkCounterFixture(t, workload, configureArrayBenchmarkRulesVBA209)
+	if counters["array_kernel_runs"] != 1 || counters["array_cfg_walks"] != 0 || counters["array_projection_runs"] != 1 {
+		t.Fatalf("VBA209-only counters = %+v, want kernel=1/cfg=0/projection=1", counters)
+	}
+}
+
 func runArrayKernelBenchmarkCounterFixture(t *testing.T, workload arrayKernelBenchmarkWorkload, configure func(*config.Config)) map[string]uint64 {
 	t.Helper()
 	root := t.TempDir()
@@ -216,6 +231,11 @@ func configureArrayBenchmarkRulesVBA227(cfg *config.Config) {
 	cfg.Analyze.DetectArrayLifecycleSafety = true
 }
 
+func configureArrayBenchmarkRulesVBA209(cfg *config.Config) {
+	configureArrayBenchmarkRules(cfg, false)
+	cfg.Analyze.DetectObjectArrayComparison = true
+}
+
 func configureArrayBenchmarkRulesAll(cfg *config.Config) {
 	configureArrayBenchmarkRules(cfg, true)
 }
@@ -284,6 +304,18 @@ Public Sub Run()
     values(1) = values(2) + 1
     If values(1) > 0 Then
         Debug.Print UBound(values)
+    End If
+End Sub
+`
+}
+
+func arrayBenchmarkComparisonOnlySource() string {
+	return `Option Explicit
+
+Public Sub Run()
+    Dim values() As Long
+    If values = 1 Then
+        Debug.Print 1
     End If
 End Sub
 `

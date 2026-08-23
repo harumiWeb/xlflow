@@ -68,6 +68,12 @@ type rangeValueSourceStatement struct {
 	text string
 }
 
+type rangeValueSourceGuardFrame struct {
+	name     string
+	previous bool
+	active   bool
+}
+
 var (
 	rangeValueAddressRe     = regexp.MustCompile(`(?i)^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$`)
 	rangeValueBoundRe       = regexp.MustCompile(`(?i)\b([UL])Bound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([^)]*))?\)`)
@@ -176,6 +182,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 	}
 	facts := rangeValueFactsForProcedure(file, proc)
 	state := newRangeValueFlowState()
+	var guards []rangeValueSourceGuardFrame
 	var findings []Finding
 	for index, source := range sourceStatements {
 		statement := procedureir.Statement{
@@ -186,11 +193,56 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				EndLine:   source.line,
 			},
 		}
+		updateRangeValueSourceGuard(&state, &guards, statement.Text)
 		issues, next := rangeValueStatement(state, statement, facts)
 		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
 		state = next
 	}
 	return findings
+}
+
+func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValueSourceGuardFrame, text string) {
+	if state == nil || guards == nil {
+		return
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.HasPrefix(lower, "end if") {
+		if len(*guards) == 0 {
+			return
+		}
+		frame := (*guards)[len(*guards)-1]
+		*guards = (*guards)[:len(*guards)-1]
+		if frame.previous {
+			state.arrayGuards[frame.name] = true
+		} else {
+			delete(state.arrayGuards, frame.name)
+		}
+		return
+	}
+	if strings.HasPrefix(lower, "else") {
+		if len(*guards) == 0 {
+			return
+		}
+		frame := &(*guards)[len(*guards)-1]
+		if frame.active {
+			delete(state.arrayGuards, frame.name)
+			frame.active = false
+		}
+		return
+	}
+	match := rangeValueGuardRe.FindStringSubmatch(text)
+	if len(match) != 3 {
+		return
+	}
+	name := strings.ToLower(match[2])
+	previous := state.arrayGuards[name]
+	frame := rangeValueSourceGuardFrame{name: name, previous: previous, active: strings.TrimSpace(match[1]) == ""}
+	*guards = append(*guards, frame)
+	if frame.active {
+		state.arrayGuards[name] = true
+	} else {
+		delete(state.arrayGuards, name)
+	}
 }
 
 func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool {

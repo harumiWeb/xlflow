@@ -80,10 +80,7 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		}
 	}
 	runtimeRequested := hasArrayVariable && a.Config.Analyze.DetectDeterministicRuntimeErrors && (!knownRuntimeRule || runtimeEnabled)
-	coreRequested := a.Config.Analyze.DetectArrayLifecycleSafety ||
-		a.Config.Analyze.DetectRedimPreserveDimension ||
-		a.Config.Analyze.DetectObjectArrayComparison ||
-		runtimeRequested
+	comparisonRequested := a.Config.Analyze.DetectObjectArrayComparison && hasArrayVariable && arrayHasComparisonExpression(proc)
 	// A procedure can contain an object array even when the explicit lifecycle
 	// switches are disabled. The shared transfer owns the always-on VBA101/
 	// VBA102 projection for that case.
@@ -98,12 +95,19 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		a.Config.Analyze.DetectRedimPreserveDimension ||
 		objectArrayApplicable ||
 		runtimeRequested
-	if coreRequested || objectArrayApplicable {
+	if coreFlowRequested || comparisonRequested {
 		var runtimeSink *[]Finding
 		if runtimeRequested {
 			runtimeSink = &result.runtimeFindings
 		}
-		result.lifecycleFindings = a.arrayLifecycleFindingsPreparedWithRuntimeEntry(file, proc, ctx, moduleDecls, result.variables, result.constants, result.capacityGuards, runtimeSink, entryState)
+		if coreFlowRequested {
+			result.lifecycleFindings = a.arrayLifecycleFindingsPreparedWithRuntimeEntry(file, proc, ctx, moduleDecls, result.variables, result.constants, result.capacityGuards, runtimeSink, entryState)
+		} else {
+			// VBA209 is an expression-only projection. Keep it out of the
+			// allocation worklist when no other core lane is applicable; this
+			// makes array_cfg_walks reflect actual fixed-point work.
+			result.lifecycleFindings = a.arrayComparisonFindings(file, proc, result.variables)
+		}
 		if proc.Graph != nil && coreFlowRequested {
 			result.cfgWalks++
 		}
