@@ -84,6 +84,13 @@ type rangeValueSourceBranchFrame struct {
 	guardNegated bool
 }
 
+type rangeValueSourceConditionalFrame struct {
+	parentActive  bool
+	active        bool
+	branchTaken   bool
+	branchUnknown bool
+}
+
 var (
 	rangeValueAddressRe     = regexp.MustCompile(`(?i)^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$`)
 	rangeValueBoundRe       = regexp.MustCompile(`(?i)\b([UL])Bound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([^)]*))?\)`)
@@ -440,6 +447,12 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		return nil
 	}
 
+	conditionalConstants := file.RangeValueModuleConstants
+	if conditionalConstants == nil {
+		conditionalConstants = rangeValueModuleIntegerConstants(lines, file.IR)
+	}
+	conditionalActive := true
+	conditionals := []rangeValueSourceConditionalFrame{}
 	var out []rangeValueSourceStatement
 	var continued strings.Builder
 	continuedLine := 0
@@ -459,9 +472,16 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		continued.Reset()
 		continuedLine = 0
 	}
-	for line := start; line <= end; line++ {
+	for line := 1; line <= end; line++ {
 		text := rangeValueStripRemComment(rawWorksheetCodeLine(lines[line-1]))
 		text = strings.TrimSpace(text)
+		if handled, active := rangeValueSourceConditionalDirective(text, &conditionals, conditionalActive, conditionalConstants); handled {
+			conditionalActive = active
+			continue
+		}
+		if line < start || !conditionalActive {
+			continue
+		}
 		if text == "" {
 			continue
 		}
@@ -484,6 +504,98 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		flush(continuedLine)
 	}
 	return out
+}
+
+func rangeValueSourceConditionalDirective(text string, stack *[]rangeValueSourceConditionalFrame, active bool, constants map[string]int) (bool, bool) {
+	if stack == nil {
+		return false, active
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case strings.HasPrefix(lower, "#if "):
+		condition := strings.TrimSpace(text[4:])
+		condition = rangeValueSourceConditionalExpression(condition)
+		parentActive := active
+		frame := rangeValueSourceConditionalFrame{parentActive: parentActive}
+		if parentActive {
+			switch rangeValueSourceConditionalValue(condition, constants) {
+			case 1:
+				frame.active, frame.branchTaken = true, true
+			case 0:
+				frame.active = false
+			default:
+				frame.active, frame.branchUnknown = true, true
+			}
+		}
+		*stack = append(*stack, frame)
+		return true, frame.active
+	case strings.HasPrefix(lower, "#elseif "):
+		if len(*stack) == 0 {
+			return true, active
+		}
+		frame := &(*stack)[len(*stack)-1]
+		if !frame.parentActive || frame.branchTaken {
+			frame.active = false
+			return true, false
+		}
+		if frame.branchUnknown {
+			frame.active = true
+			return true, true
+		}
+		condition := strings.TrimSpace(text[len("#ElseIf "):])
+		condition = rangeValueSourceConditionalExpression(condition)
+		switch rangeValueSourceConditionalValue(condition, constants) {
+		case 1:
+			frame.active, frame.branchTaken = true, true
+		case 0:
+			frame.active = false
+		default:
+			frame.active, frame.branchUnknown = true, true
+		}
+		return true, frame.active
+	case strings.HasPrefix(lower, "#else"):
+		if len(*stack) == 0 {
+			return true, active
+		}
+		frame := &(*stack)[len(*stack)-1]
+		frame.active = frame.parentActive && !frame.branchTaken
+		frame.branchTaken = frame.parentActive
+		return true, frame.active
+	case strings.HasPrefix(lower, "#end if"):
+		if len(*stack) == 0 {
+			return true, active
+		}
+		frame := (*stack)[len(*stack)-1]
+		*stack = (*stack)[:len(*stack)-1]
+		return true, frame.parentActive
+	default:
+		return false, active
+	}
+}
+
+func rangeValueSourceConditionalValue(text string, constants map[string]int) int {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "true":
+		return 1
+	case "false":
+		return 0
+	}
+	value, err := constantIntegerExpression(text, constants)
+	if err != nil {
+		return -1
+	}
+	if value == 0 {
+		return 0
+	}
+	return 1
+}
+
+func rangeValueSourceConditionalExpression(text string) string {
+	text = strings.TrimSpace(text)
+	if strings.HasSuffix(strings.ToLower(text), " then") {
+		return strings.TrimSpace(text[:len(text)-len(" then")])
+	}
+	return text
 }
 
 func rangeValueStripRemComment(text string) string {
@@ -1117,6 +1229,9 @@ func rangeValueRangeShapeText(expression string, state rangeValueFlowState, fact
 		}
 		return rangeShape{}, true
 	case "range":
+		if shape, found := rangeValueTextCellsPairShape(args, facts); found {
+			return shape, true
+		}
 		if shape, found := rangeValueTextLiteralRangeShape(args); found {
 			return shape, true
 		}
@@ -1126,6 +1241,48 @@ func rangeValueRangeShapeText(expression string, state rangeValueFlowState, fact
 	default:
 		return rangeShape{}, false
 	}
+}
+
+func rangeValueTextCellsPairShape(arguments []string, facts rangeValueFacts) (rangeShape, bool) {
+	if len(arguments) != 2 {
+		return rangeShape{}, false
+	}
+	startRow, startRowKnown, startColumn, startColumnKnown, startOK := rangeValueTextCellsCoordinates(arguments[0], facts)
+	endRow, endRowKnown, endColumn, endColumnKnown, endOK := rangeValueTextCellsCoordinates(arguments[1], facts)
+	if !startOK || !endOK {
+		return rangeShape{}, false
+	}
+	rows, rowsKnown := rangeValueAxisLength(startRow, startRowKnown, endRow, endRowKnown)
+	cols, colsKnown := rangeValueAxisLength(startColumn, startColumnKnown, endColumn, endColumnKnown)
+	return rangeShape{
+		known:   rowsKnown && colsKnown,
+		array2D: (rowsKnown && rows > 1) || (colsKnown && cols > 1),
+		rows:    rows,
+		cols:    cols,
+	}, true
+}
+
+func rangeValueTextCellsCoordinates(expression string, facts rangeValueFacts) (int, bool, int, bool, bool) {
+	text := strings.TrimSpace(expression)
+	open := firstParenOutsideString(text)
+	if open < 0 {
+		return 0, false, 0, false, false
+	}
+	close := matchingParen(text, open)
+	if close < 0 || strings.TrimSpace(text[close+1:]) != "" {
+		return 0, false, 0, false, false
+	}
+	name := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(text[:open]))))
+	if name != "cells" {
+		return 0, false, 0, false, false
+	}
+	arguments := splitArgs(text[open+1 : close])
+	if len(arguments) != 2 {
+		return 0, false, 0, false, false
+	}
+	row, rowErr := constantIntegerExpression(arguments[0], facts.constantValues())
+	column, columnErr := constantIntegerExpression(arguments[1], facts.constantValues())
+	return row, rowErr == nil, column, columnErr == nil, true
 }
 
 func rangeValueTextLiteralRangeShape(arguments []string) (rangeShape, bool) {

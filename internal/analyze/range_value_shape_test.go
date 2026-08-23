@@ -410,6 +410,36 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(colonCommentFile, colonCommentProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("colon-separated Rem comments must ignore the rest of the line: %+v", got)
 	}
+	conditionalSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+#If False Then
+  values = Range("A1").Value2
+  Debug.Print values(1)
+#Else
+  values = Range("A1:B2").Value2
+  Debug.Print values(1, 1)
+#End If
+End Sub
+`
+	conditionalFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(conditionalSource), Source: []byte(conditionalSource)}
+	conditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 11}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(conditionalFile, conditionalProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("inactive conditional-compilation source must be ignored: %+v", got)
+	}
+
+	nestedCellsSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2
+  Debug.Print values(1, 3)
+End Sub
+`
+	nestedCellsFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(nestedCellsSource), Source: []byte(nestedCellsSource)}
+	nestedCellsProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(nestedCellsFile, nestedCellsProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("source fallback should preserve nested Cells pair shape: %+v", got)
+	}
 
 	earlyExitSource := `Option Explicit
 Public Sub Run(ByVal lastCell As String)
