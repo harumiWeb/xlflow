@@ -69,10 +69,15 @@ type rangeValueSourceStatement struct {
 }
 
 type rangeValueSourceGuardFrame struct {
-	name     string
-	previous bool
-	negated  bool
-	active   bool
+	name    string
+	negated bool
+	active  bool
+}
+
+type rangeValueSourceBranchFrame struct {
+	before      rangeValueFlowState
+	branches    rangeValueFlowState
+	hasBranches bool
 }
 
 var (
@@ -91,7 +96,7 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 	if !a.Config.Analyze.DetectRangeValueArrayShape {
 		return nil
 	}
-	if len(proc.Statements) == 0 {
+	if len(proc.Statements) == 0 || rangeValueProjectionUnknown(proc) {
 		return a.rangeValueShapeFindingsFromSource(file, proc)
 	}
 	facts := rangeValueFactsForProcedure(file, proc)
@@ -185,6 +190,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 	facts := rangeValueFactsForProcedure(file, proc)
 	state := newRangeValueFlowState()
 	var guards []rangeValueSourceGuardFrame
+	var branches []rangeValueSourceBranchFrame
 	var findings []Finding
 	for index, source := range sourceStatements {
 		statement := procedureir.Statement{
@@ -213,12 +219,40 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 			state = next
 			continue
 		}
+		lower := strings.ToLower(strings.TrimSpace(statement.Text))
+		if isRangeValueBlockIf(statement.Text) {
+			branches = append(branches, rangeValueSourceBranchFrame{before: cloneRangeValueFlowState(state)})
+		} else if strings.HasPrefix(lower, "else") && len(branches) > 0 {
+			frame := &branches[len(branches)-1]
+			current := cloneRangeValueFlowState(state)
+			if frame.hasBranches {
+				frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+			} else {
+				frame.branches = current
+				frame.hasBranches = true
+			}
+			state = cloneRangeValueFlowState(frame.before)
+		} else if strings.HasPrefix(lower, "end if") && len(branches) > 0 {
+			current := cloneRangeValueFlowState(state)
+			frame := branches[len(branches)-1]
+			branches = branches[:len(branches)-1]
+			if frame.hasBranches {
+				state = mergeRangeValueSourceStates(frame.branches, current)
+			} else {
+				state = mergeRangeValueSourceStates(frame.before, current)
+			}
+		}
 		updateRangeValueSourceGuard(&state, &guards, statement.Text)
 		issues, next := rangeValueStatement(state, statement, facts)
 		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
 		state = next
 	}
 	return findings
+}
+
+func mergeRangeValueSourceStates(first, second rangeValueFlowState) rangeValueFlowState {
+	merged, _ := mergeRangeValueFlowState(first, second, true)
+	return merged
 }
 
 func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValueSourceGuardFrame, text string) {
@@ -232,9 +266,7 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 		}
 		frame := (*guards)[len(*guards)-1]
 		*guards = (*guards)[:len(*guards)-1]
-		if frame.previous {
-			state.arrayGuards[frame.name] = true
-		} else {
+		if frame.name != "" && !state.arrayGuards[frame.name] {
 			delete(state.arrayGuards, frame.name)
 		}
 		return
@@ -284,9 +316,8 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 		return
 	}
 	name := strings.ToLower(match[2])
-	previous := state.arrayGuards[name]
 	negated := strings.TrimSpace(match[1]) != ""
-	frame := rangeValueSourceGuardFrame{name: name, previous: previous, negated: negated, active: !negated}
+	frame := rangeValueSourceGuardFrame{name: name, negated: negated, active: !negated}
 	*guards = append(*guards, frame)
 	if frame.active {
 		state.arrayGuards[name] = true

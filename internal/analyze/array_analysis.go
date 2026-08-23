@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 // ArrayAnalysisResult is the immutable, procedure-local semantic result used
@@ -203,6 +204,12 @@ func arrayHasComparisonExpression(proc sourceProcedure) bool {
 // source. Unknown/recovered statements are left applicable so the existing
 // conservative scanner remains fail-open.
 func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
+	if rangeValueProjectionUnknown(proc) {
+		// A partial/recovered projection is not proof that the source lacks a
+		// Range.Value operation. Keep the domain enabled so the source fallback
+		// can make a conservative attempt.
+		return true
+	}
 	// A recovered/empty IR projection is not proof that the procedure has no
 	// Range.Value operation. Use the source lines in that case; the fallback is
 	// deliberately limited to procedures with no statement projection so the
@@ -234,6 +241,21 @@ func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
 		}
 		lower := strings.ToLower(expression.Text)
 		if strings.Contains(lower, ".value") || strings.Contains(lower, "range(") || strings.Contains(lower, "resize(") || strings.Contains(lower, "cells(") {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeValueProjectionUnknown(proc sourceProcedure) bool {
+	if proc.Features.unknown&featureRangeArray == 0 {
+		return false
+	}
+	if len(proc.Statements) == 0 || len(proc.Expressions) == 0 || proc.Graph == nil {
+		return true
+	}
+	for _, statement := range proc.Statements {
+		if statement.Recovered || statement.Kind == procedureir.StatementRecovered || statement.Kind == procedureir.StatementUnknown {
 			return true
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestVBA226DetectsOneDimensionalRangeValueUse(t *testing.T) {
@@ -348,6 +349,41 @@ End Sub
 	inlineProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(inlineFile, inlineProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("single-line IsArray guard should suppress uncertain two-dimensional access: %+v", got)
+	}
+
+	branchSource := `Option Explicit
+Public Sub Run(ByVal useArray As Boolean)
+  Dim values As Variant
+  values = Range("A1").Value2
+  If useArray Then
+    values = Range("A1:B2").Value2
+  End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	branchFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(branchSource), Source: []byte(branchSource)}
+	branchProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(branchFile, branchProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("empty-IR branch merge should retain the scalar path: %+v", got)
+	}
+
+	partialSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	partialFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(partialSource), Source: []byte(partialSource)}
+	partialProc := sourceProcedure{
+		Name:       "Run",
+		StartLine:  2,
+		EndLine:    6,
+		Statements: []procedureir.Statement{{Text: "Debug.Print values(1)"}},
+		Features:   procedureFeatureSet{unknown: featureRangeArray},
+	}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(partialFile, partialProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("unknown partial projection should use source fallback: %+v", got)
 	}
 }
 
