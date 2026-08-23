@@ -368,6 +368,19 @@ End Sub
 		t.Fatalf("single-line IsArray guard should suppress uncertain two-dimensional access: %+v", got)
 	}
 
+	inlineElseSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If IsArray(values) Then Debug.Print values(1, 1) Else Debug.Print values(1, 1)
+End Sub
+`
+	inlineElseFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(inlineElseSource), Source: []byte(inlineElseSource)}
+	inlineElseProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(inlineElseFile, inlineElseProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("inline IsArray Else branch should retain the unguarded access finding: %+v", got)
+	}
+
 	branchSource := `Option Explicit
 Public Sub Run(ByVal useArray As Boolean)
   Dim values As Variant
@@ -443,6 +456,38 @@ End Sub
 	conditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 11}
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(conditionalFile, conditionalProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("inactive conditional-compilation source must be ignored: %+v", got)
+	}
+	unknownConditionalSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+#If UNKNOWN_BUILD_FLAG Then
+  values = Range("A1:B2").Value2
+#Else
+  values = Range("A1").Value2
+#End If
+  Debug.Print values(1)
+End Sub
+`
+	unknownConditionalFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(unknownConditionalSource), Source: []byte(unknownConditionalSource)}
+	unknownConditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(unknownConditionalFile, unknownConditionalProc), "VBA226"); len(got) != 1 || !strings.Contains(got[0].Message, "used with one array index") {
+		t.Fatalf("unknown conditional branches should merge to an uncertain shape: %+v", got)
+	}
+	sameConditionalSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+#If UNKNOWN_BUILD_FLAG Then
+  values = Range("A1:B2").Value2
+#Else
+  values = Range("A1:B2").Value2
+#End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	sameConditionalFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(sameConditionalSource), Source: []byte(sameConditionalSource)}
+	sameConditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(sameConditionalFile, sameConditionalProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("unknown conditional branches with an Else should retain their common shape: %+v", got)
 	}
 
 	nestedCellsSource := `Option Explicit

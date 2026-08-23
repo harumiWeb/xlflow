@@ -92,6 +92,14 @@ type rangeValueSourceConditionalFrame struct {
 	branchUnknown bool
 }
 
+type rangeValueSourceConditionalFlowFrame struct {
+	before      rangeValueFlowState
+	branches    rangeValueFlowState
+	hasBranches bool
+	hasElse     bool
+	exited      bool
+}
+
 type rangeValueSourceLoopFrame struct {
 	before rangeValueFlowState
 }
@@ -216,6 +224,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 	var branches []rangeValueSourceBranchFrame
 	var loops []rangeValueSourceLoopFrame
 	var selects []rangeValueSourceSelectFrame
+	var conditionals []rangeValueSourceConditionalFlowFrame
 	var findings []Finding
 	for index, source := range sourceStatements {
 		line := source.endLine
@@ -229,6 +238,49 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				StartLine: line,
 				EndLine:   line,
 			},
+		}
+		if rangeValueSourceConditionalStart(statement.Text) {
+			conditionals = append(conditionals, rangeValueSourceConditionalFlowFrame{before: cloneRangeValueFlowState(state)})
+			continue
+		}
+		if (rangeValueSourceConditionalElseIf(statement.Text) || rangeValueSourceConditionalElse(statement.Text)) && len(conditionals) > 0 {
+			frame := &conditionals[len(conditionals)-1]
+			if rangeValueSourceConditionalElse(statement.Text) {
+				frame.hasElse = true
+			}
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, state)
+				} else {
+					frame.branches = cloneRangeValueFlowState(state)
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
+			continue
+		}
+		if rangeValueSourceConditionalEnd(statement.Text) && len(conditionals) > 0 {
+			frame := conditionals[len(conditionals)-1]
+			conditionals = conditionals[:len(conditionals)-1]
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, state)
+				} else {
+					frame.branches = cloneRangeValueFlowState(state)
+					frame.hasBranches = true
+				}
+			}
+			if frame.hasBranches {
+				if frame.hasElse {
+					state = cloneRangeValueFlowState(frame.branches)
+				} else {
+					state = mergeRangeValueSourceStates(frame.before, frame.branches)
+				}
+			} else {
+				state = cloneRangeValueFlowState(frame.before)
+			}
+			continue
 		}
 		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
 			name := strings.ToLower(match[2])
@@ -244,20 +296,40 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				}
 				continue
 			}
-			priorGuard := state.arrayGuards[name]
+			prior := cloneRangeValueFlowState(state)
+			thenState := cloneRangeValueFlowState(prior)
 			if !negated {
-				state.arrayGuards[name] = true
+				thenState.arrayGuards[name] = true
 			} else {
-				delete(state.arrayGuards, name)
+				delete(thenState.arrayGuards, name)
 			}
-			body := statement
-			body.Text = strings.TrimSpace(match[3])
-			issues, next := rangeValueStatement(state, body, facts)
-			if !next.arrayGuards[name] || !priorGuard {
-				delete(next.arrayGuards, name)
+			thenText, elseText, hasElse := splitRangeValueInlineElse(match[3])
+			thenStatement := statement
+			thenStatement.Text = thenText
+			issues, thenNext := rangeValueStatement(thenState, thenStatement, facts)
+			findings = appendRangeValueFindings(findings, file, proc, thenStatement, issues, a)
+			if !hasElse {
+				if !thenNext.arrayGuards[name] || !prior.arrayGuards[name] {
+					delete(thenNext.arrayGuards, name)
+				}
+				state = thenNext
+				continue
 			}
-			findings = appendRangeValueFindings(findings, file, proc, body, issues, a)
-			state = next
+			if prior.arrayGuards[name] && !negated {
+				state = thenNext
+				continue
+			}
+			elseState := cloneRangeValueFlowState(prior)
+			if negated {
+				elseState.arrayGuards[name] = true
+			} else {
+				delete(elseState.arrayGuards, name)
+			}
+			elseStatement := statement
+			elseStatement.Text = elseText
+			elseIssues, elseNext := rangeValueStatement(elseState, elseStatement, facts)
+			findings = appendRangeValueFindings(findings, file, proc, elseStatement, elseIssues, a)
+			state = mergeRangeValueSourceStates(thenNext, elseNext)
 			continue
 		}
 		lower := strings.ToLower(strings.TrimSpace(statement.Text))
@@ -373,11 +445,14 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) > 0 {
 			selects[len(selects)-1].exited = true
 		}
+		if rangeValueSourceEarlyExit(statement.Text) && len(conditionals) > 0 {
+			conditionals[len(conditionals)-1].exited = true
+		}
 		updateRangeValueSourceGuard(&state, &guards, statement.Text)
 		issues, next := rangeValueStatement(state, statement, facts)
 		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
 		state = next
-		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) == 0 {
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) == 0 && len(conditionals) == 0 {
 			break
 		}
 	}
@@ -485,6 +560,22 @@ func rangeValueSourceSelectEnd(text string) bool {
 	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "end select")
 }
 
+func rangeValueSourceConditionalStart(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "#if ")
+}
+
+func rangeValueSourceConditionalElseIf(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "#elseif ")
+}
+
+func rangeValueSourceConditionalElse(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "#else")
+}
+
+func rangeValueSourceConditionalEnd(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "#end if")
+}
+
 func rangeValueSourceLoopEnd(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	return rangeValueSourceKeywordLine(lower, "next") || rangeValueSourceKeywordLine(lower, "loop") || rangeValueSourceKeywordLine(lower, "wend")
@@ -517,6 +608,42 @@ func rangeValueSourceEarlyExit(text string) bool {
 		}
 	}
 	return false
+}
+
+func splitRangeValueInlineElse(text string) (string, string, bool) {
+	lower := strings.ToLower(text)
+	inString := false
+	parenDepth := 0
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				parenDepth++
+			}
+		case ')':
+			if !inString && parenDepth > 0 {
+				parenDepth--
+			}
+		}
+		if inString || parenDepth != 0 || index+4 > len(text) || lower[index:index+4] != "else" {
+			continue
+		}
+		if (index > 0 && rangeValueInlineIdentifierByte(text[index-1])) || (index+4 < len(text) && rangeValueInlineIdentifierByte(text[index+4])) {
+			continue
+		}
+		return strings.TrimSpace(text[:index]), strings.TrimSpace(text[index+4:]), true
+	}
+	return strings.TrimSpace(text), "", false
+}
+
+func rangeValueInlineIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
 func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeValueSourceStatement {
@@ -568,7 +695,10 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 	for line := 1; line <= end; line++ {
 		text := rangeValueStripRemComment(rawWorksheetCodeLine(lines[line-1]))
 		text = strings.TrimSpace(text)
-		if handled, active := rangeValueSourceConditionalDirective(text, &conditionals, conditionalActive, conditionalConstants); handled {
+		if handled, active, unknown := rangeValueSourceConditionalDirective(text, &conditionals, conditionalActive, conditionalConstants); handled {
+			if unknown {
+				out = append(out, rangeValueSourceStatement{line: line, endLine: line, text: text})
+			}
 			conditionalActive = active
 			continue
 		}
@@ -600,9 +730,9 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 	return out
 }
 
-func rangeValueSourceConditionalDirective(text string, stack *[]rangeValueSourceConditionalFrame, active bool, constants map[string]int) (bool, bool) {
+func rangeValueSourceConditionalDirective(text string, stack *[]rangeValueSourceConditionalFrame, active bool, constants map[string]int) (bool, bool, bool) {
 	if stack == nil {
-		return false, active
+		return false, active, false
 	}
 	lower := strings.ToLower(strings.TrimSpace(text))
 	switch {
@@ -622,19 +752,19 @@ func rangeValueSourceConditionalDirective(text string, stack *[]rangeValueSource
 			}
 		}
 		*stack = append(*stack, frame)
-		return true, frame.active
+		return true, frame.active, frame.branchUnknown
 	case strings.HasPrefix(lower, "#elseif "):
 		if len(*stack) == 0 {
-			return true, active
+			return true, active, false
 		}
 		frame := &(*stack)[len(*stack)-1]
 		if !frame.parentActive || frame.branchTaken {
 			frame.active = false
-			return true, false
+			return true, false, false
 		}
 		if frame.branchUnknown {
 			frame.active = true
-			return true, true
+			return true, true, true
 		}
 		condition := strings.TrimSpace(text[len("#ElseIf "):])
 		condition = rangeValueSourceConditionalExpression(condition)
@@ -646,24 +776,25 @@ func rangeValueSourceConditionalDirective(text string, stack *[]rangeValueSource
 		default:
 			frame.active, frame.branchUnknown = true, true
 		}
-		return true, frame.active
+		return true, frame.active, frame.branchUnknown
 	case strings.HasPrefix(lower, "#else"):
 		if len(*stack) == 0 {
-			return true, active
+			return true, active, false
 		}
 		frame := &(*stack)[len(*stack)-1]
+		unknown := frame.branchUnknown
 		frame.active = frame.parentActive && !frame.branchTaken
 		frame.branchTaken = frame.parentActive
-		return true, frame.active
+		return true, frame.active, unknown
 	case strings.HasPrefix(lower, "#end if"):
 		if len(*stack) == 0 {
-			return true, active
+			return true, active, false
 		}
 		frame := (*stack)[len(*stack)-1]
 		*stack = (*stack)[:len(*stack)-1]
-		return true, frame.parentActive
+		return true, frame.parentActive, frame.branchUnknown
 	default:
-		return false, active
+		return false, active, false
 	}
 }
 
