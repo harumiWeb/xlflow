@@ -441,6 +441,37 @@ End Sub
 		t.Fatalf("source fallback should preserve nested Cells pair shape: %+v", got)
 	}
 
+	loopSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  For index = 1 To 1
+    values = Range("A1:B2").Value2
+  Next index
+  Debug.Print values(1, 1)
+End Sub
+`
+	loopFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(loopSource), Source: []byte(loopSource)}
+	loopProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(loopFile, loopProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("loop recovery should merge the zero-iteration scalar path: %+v", got)
+	}
+
+	continuedSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Debug.Print values( _
+    1)
+End Sub
+`
+	continuedFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(continuedSource), Source: []byte(continuedSource)}
+	continuedProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 7}
+	continuedFindings := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(continuedFile, continuedProc), "VBA226")
+	if len(continuedFindings) != 1 || continuedFindings[0].Line != 6 {
+		t.Fatalf("continued-line finding should use the physical index line: %+v", continuedFindings)
+	}
+
 	earlyExitSource := `Option Explicit
 Public Sub Run(ByVal lastCell As String)
   Dim values As Variant

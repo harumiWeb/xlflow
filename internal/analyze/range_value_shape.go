@@ -64,8 +64,9 @@ type rangeValueIssue struct {
 }
 
 type rangeValueSourceStatement struct {
-	line int
-	text string
+	line    int
+	endLine int
+	text    string
 }
 
 type rangeValueSourceGuardFrame struct {
@@ -89,6 +90,10 @@ type rangeValueSourceConditionalFrame struct {
 	active        bool
 	branchTaken   bool
 	branchUnknown bool
+}
+
+type rangeValueSourceLoopFrame struct {
+	before rangeValueFlowState
 }
 
 var (
@@ -202,14 +207,19 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 	state := newRangeValueFlowState()
 	var guards []rangeValueSourceGuardFrame
 	var branches []rangeValueSourceBranchFrame
+	var loops []rangeValueSourceLoopFrame
 	var findings []Finding
 	for index, source := range sourceStatements {
+		line := source.endLine
+		if line <= 0 {
+			line = source.line
+		}
 		statement := procedureir.Statement{
 			ID:   index + 1,
 			Text: source.text,
 			Range: vbaast.Range{
-				StartLine: source.line,
-				EndLine:   source.line,
+				StartLine: line,
+				EndLine:   line,
 			},
 		}
 		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
@@ -240,7 +250,13 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 			continue
 		}
 		lower := strings.ToLower(strings.TrimSpace(statement.Text))
-		if isRangeValueBlockIf(statement.Text) {
+		if rangeValueSourceLoopStart(statement.Text) {
+			loops = append(loops, rangeValueSourceLoopFrame{before: cloneRangeValueFlowState(state)})
+		} else if rangeValueSourceLoopEnd(statement.Text) && len(loops) > 0 {
+			frame := loops[len(loops)-1]
+			loops = loops[:len(loops)-1]
+			state = mergeRangeValueSourceStates(frame.before, state)
+		} else if isRangeValueBlockIf(statement.Text) {
 			frame := rangeValueSourceBranchFrame{before: cloneRangeValueFlowState(state)}
 			if match := rangeValueGuardRe.FindStringSubmatch(statement.Text); len(match) == 3 {
 				frame.guardName = strings.ToLower(match[2])
@@ -407,6 +423,16 @@ func isRangeValueBlockIf(text string) bool {
 	return then >= 0 && strings.TrimSpace(lower[then+len(" then"):]) == ""
 }
 
+func rangeValueSourceLoopStart(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.HasPrefix(lower, "for ") || lower == "do" || strings.HasPrefix(lower, "do while ") || strings.HasPrefix(lower, "do until ") || strings.HasPrefix(lower, "while ")
+}
+
+func rangeValueSourceLoopEnd(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.HasPrefix(lower, "next") || strings.HasPrefix(lower, "loop") || lower == "wend"
+}
+
 func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool {
 	for _, source := range rangeValueSourceStatements(file, proc) {
 		code := strings.ToLower(normalizedCodeLine(source.text))
@@ -456,7 +482,8 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 	var out []rangeValueSourceStatement
 	var continued strings.Builder
 	continuedLine := 0
-	flush := func(line int) {
+	continuedEndLine := 0
+	flush := func(line, endLine int) {
 		text := strings.TrimSpace(continued.String())
 		if text != "" {
 			for _, part := range splitRangeValueSourceStatements(text) {
@@ -465,7 +492,7 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 				}
 				part = rangeValueStripRemComment(part)
 				if strings.TrimSpace(part) != "" {
-					out = append(out, rangeValueSourceStatement{line: line, text: strings.TrimSpace(part)})
+					out = append(out, rangeValueSourceStatement{line: line, endLine: endLine, text: strings.TrimSpace(part)})
 				}
 			}
 		}
@@ -488,6 +515,7 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		if continued.Len() == 0 {
 			continuedLine = line
 		}
+		continuedEndLine = line
 		continuedLineText := text
 		if vbaLineContinues(text) {
 			text = strings.TrimSpace(strings.TrimSuffix(text, "_"))
@@ -497,11 +525,11 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		}
 		continued.WriteString(text)
 		if !vbaLineContinues(continuedLineText) {
-			flush(continuedLine)
+			flush(continuedLine, continuedEndLine)
 		}
 	}
 	if continued.Len() > 0 {
-		flush(continuedLine)
+		flush(continuedLine, continuedEndLine)
 	}
 	return out
 }
