@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -62,6 +63,56 @@ type rangeValueIssue struct {
 	suggestion string
 }
 
+type rangeValueSourceStatement struct {
+	line    int
+	endLine int
+	text    string
+}
+
+type rangeValueSourceGuardFrame struct {
+	name    string
+	negated bool
+	active  bool
+}
+
+type rangeValueSourceBranchFrame struct {
+	before       rangeValueFlowState
+	branches     rangeValueFlowState
+	hasBranches  bool
+	hasElse      bool
+	exited       bool
+	guardName    string
+	guardNegated bool
+}
+
+type rangeValueSourceConditionalFrame struct {
+	parentActive  bool
+	active        bool
+	branchTaken   bool
+	branchUnknown bool
+}
+
+type rangeValueSourceConditionalFlowFrame struct {
+	before      rangeValueFlowState
+	branches    rangeValueFlowState
+	hasBranches bool
+	hasElse     bool
+	exited      bool
+}
+
+type rangeValueSourceLoopFrame struct {
+	before rangeValueFlowState
+	kind   string
+	exited bool
+}
+
+type rangeValueSourceSelectFrame struct {
+	before      rangeValueFlowState
+	branches    rangeValueFlowState
+	hasBranches bool
+	exited      bool
+}
+
 var (
 	rangeValueAddressRe     = regexp.MustCompile(`(?i)^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$`)
 	rangeValueBoundRe       = regexp.MustCompile(`(?i)\b([UL])Bound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([^)]*))?\)`)
@@ -71,11 +122,15 @@ var (
 	rangeValueForEachRe     = regexp.MustCompile(`(?i)^\s*For\s+Each\s+([A-Za-z_][A-Za-z0-9_]*)\s+In\b`)
 	rangeValueForVariableRe = regexp.MustCompile(`(?i)^\s*For\s+([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 	rangeValueIdentifierRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	rangeValueInlineGuardRe = regexp.MustCompile(`(?i)^\s*If\s+(Not\s+)?IsArray\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s+Then\s+(.+)$`)
 )
 
 func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure) []Finding {
-	if !a.Config.Analyze.DetectRangeValueArrayShape || len(proc.Statements) == 0 {
+	if !a.Config.Analyze.DetectRangeValueArrayShape {
 		return nil
+	}
+	if len(proc.Statements) == 0 || rangeValueProjectionUnknown(proc) {
+		return a.rangeValueShapeFindingsFromSource(file, proc)
 	}
 	facts := rangeValueFactsForProcedure(file, proc)
 	if proc.Graph == nil {
@@ -151,6 +206,718 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 		}
 		return out[i].Message < out[j].Message
 	})
+	return out
+}
+
+// rangeValueShapeFindingsFromSource is a deliberately narrow recovery path.
+// Procedure IR normally supplies canonical expressions and CFG edges; when a
+// recovered procedure has no statement projection, source lines are the only
+// available evidence. The textual transfer remains conservative and is used
+// only for this unpopulated projection, so it cannot change complete-IR CFG
+// semantics or add another fixed-point walk.
+func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc sourceProcedure) []Finding {
+	sourceStatements := rangeValueSourceStatements(file, proc)
+	if len(sourceStatements) == 0 {
+		return nil
+	}
+	facts := rangeValueFactsForProcedure(file, proc)
+	state := newRangeValueFlowState()
+	var guards []rangeValueSourceGuardFrame
+	var branches []rangeValueSourceBranchFrame
+	var loops []rangeValueSourceLoopFrame
+	var selects []rangeValueSourceSelectFrame
+	var conditionals []rangeValueSourceConditionalFlowFrame
+	var findings []Finding
+	for index, source := range sourceStatements {
+		line := source.endLine
+		if line <= 0 {
+			line = source.line
+		}
+		statement := procedureir.Statement{
+			ID:   index + 1,
+			Text: source.text,
+			Range: vbaast.Range{
+				StartLine: line,
+				EndLine:   line,
+			},
+		}
+		if rangeValueSourceConditionalStart(statement.Text) {
+			conditionals = append(conditionals, rangeValueSourceConditionalFlowFrame{before: cloneRangeValueFlowState(state)})
+			continue
+		}
+		if (rangeValueSourceConditionalElseIf(statement.Text) || rangeValueSourceConditionalElse(statement.Text)) && len(conditionals) > 0 {
+			frame := &conditionals[len(conditionals)-1]
+			if rangeValueSourceConditionalElse(statement.Text) {
+				frame.hasElse = true
+			}
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, state)
+				} else {
+					frame.branches = cloneRangeValueFlowState(state)
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
+			continue
+		}
+		if rangeValueSourceConditionalEnd(statement.Text) && len(conditionals) > 0 {
+			frame := conditionals[len(conditionals)-1]
+			conditionals = conditionals[:len(conditionals)-1]
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, state)
+				} else {
+					frame.branches = cloneRangeValueFlowState(state)
+					frame.hasBranches = true
+				}
+			}
+			if frame.hasBranches {
+				if frame.hasElse {
+					state = cloneRangeValueFlowState(frame.branches)
+				} else {
+					state = mergeRangeValueSourceStates(frame.before, frame.branches)
+				}
+			} else {
+				state = cloneRangeValueFlowState(frame.before)
+			}
+			continue
+		}
+		if len(loops) > 0 && loops[len(loops)-1].exited && !rangeValueSourceLoopEnd(statement.Text) {
+			continue
+		}
+		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
+			name := strings.ToLower(match[2])
+			negated := strings.TrimSpace(match[1]) != ""
+			if state.arrayGuards[name] && negated {
+				continue
+			}
+			if rangeValueSourceEarlyExit(match[3]) {
+				if negated {
+					state.arrayGuards[name] = true
+				} else {
+					delete(state.arrayGuards, name)
+				}
+				continue
+			}
+			prior := cloneRangeValueFlowState(state)
+			thenState := cloneRangeValueFlowState(prior)
+			if !negated {
+				thenState.arrayGuards[name] = true
+			} else {
+				delete(thenState.arrayGuards, name)
+			}
+			thenText, elseText, hasElse := splitRangeValueInlineElse(match[3])
+			thenStatement := statement
+			thenStatement.Text = thenText
+			issues, thenNext := rangeValueStatement(thenState, thenStatement, facts)
+			findings = appendRangeValueFindings(findings, file, proc, thenStatement, issues, a)
+			if !hasElse {
+				if !thenNext.arrayGuards[name] || !prior.arrayGuards[name] {
+					delete(thenNext.arrayGuards, name)
+				}
+				state = thenNext
+				continue
+			}
+			if prior.arrayGuards[name] && !negated {
+				state = thenNext
+				continue
+			}
+			elseState := cloneRangeValueFlowState(prior)
+			if negated {
+				elseState.arrayGuards[name] = true
+			} else {
+				delete(elseState.arrayGuards, name)
+			}
+			elseStatement := statement
+			elseStatement.Text = elseText
+			elseIssues, elseNext := rangeValueStatement(elseState, elseStatement, facts)
+			findings = appendRangeValueFindings(findings, file, proc, elseStatement, elseIssues, a)
+			state = mergeRangeValueSourceStates(thenNext, elseNext)
+			continue
+		}
+		lower := strings.ToLower(strings.TrimSpace(statement.Text))
+		if rangeValueSourceSelectStart(statement.Text) {
+			selects = append(selects, rangeValueSourceSelectFrame{before: cloneRangeValueFlowState(state)})
+		} else if rangeValueSourceSelectCase(statement.Text) && len(selects) > 0 {
+			frame := &selects[len(selects)-1]
+			current := cloneRangeValueFlowState(state)
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
+		} else if rangeValueSourceSelectEnd(statement.Text) && len(selects) > 0 {
+			current := cloneRangeValueFlowState(state)
+			frame := selects[len(selects)-1]
+			selects = selects[:len(selects)-1]
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			if frame.hasBranches {
+				state = mergeRangeValueSourceStates(frame.before, frame.branches)
+			} else {
+				state = cloneRangeValueFlowState(frame.before)
+			}
+		} else if rangeValueSourceLoopStart(statement.Text) {
+			loops = append(loops, rangeValueSourceLoopFrame{before: cloneRangeValueFlowState(state), kind: rangeValueSourceLoopKind(statement.Text)})
+		} else if rangeValueSourceLoopEnd(statement.Text) && len(loops) > 0 {
+			frame := loops[len(loops)-1]
+			loops = loops[:len(loops)-1]
+			state = mergeRangeValueSourceStates(frame.before, state)
+		} else if isRangeValueBlockIf(statement.Text) {
+			frame := rangeValueSourceBranchFrame{before: cloneRangeValueFlowState(state)}
+			if match := rangeValueGuardRe.FindStringSubmatch(statement.Text); len(match) == 3 {
+				frame.guardName = strings.ToLower(match[2])
+				frame.guardNegated = strings.TrimSpace(match[1]) != ""
+			}
+			branches = append(branches, frame)
+		} else if strings.HasPrefix(lower, "elseif ") && len(branches) > 0 {
+			frame := &branches[len(branches)-1]
+			current := cloneRangeValueFlowState(state)
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
+		} else if rangeValueSourceElse(statement.Text) && len(branches) > 0 {
+			frame := &branches[len(branches)-1]
+			current := cloneRangeValueFlowState(state)
+			frame.hasElse = true
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
+		} else if strings.HasPrefix(lower, "end if") && len(branches) > 0 {
+			current := cloneRangeValueFlowState(state)
+			frame := branches[len(branches)-1]
+			branches = branches[:len(branches)-1]
+			if frame.hasElse {
+				if frame.exited {
+					if frame.hasBranches {
+						state = frame.branches
+					} else {
+						state = cloneRangeValueFlowState(frame.before)
+					}
+				} else if frame.hasBranches {
+					state = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					state = current
+				}
+			} else if frame.hasBranches {
+				state = mergeRangeValueSourceStates(frame.before, frame.branches)
+				if !frame.exited {
+					state = mergeRangeValueSourceStates(state, current)
+				}
+			} else if frame.exited {
+				state = cloneRangeValueFlowState(frame.before)
+				if frame.guardName != "" {
+					if frame.guardNegated {
+						state.arrayGuards[frame.guardName] = true
+					} else {
+						delete(state.arrayGuards, frame.guardName)
+					}
+				}
+			} else {
+				state = mergeRangeValueSourceStates(frame.before, current)
+			}
+		}
+		if exitKind := rangeValueSourceLoopExitKind(statement.Text); exitKind != "" && len(branches) == 0 && len(selects) == 0 && len(conditionals) == 0 && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "if ") {
+			for index := len(loops) - 1; index >= 0; index-- {
+				if loops[index].kind != exitKind {
+					continue
+				}
+				for exited := index; exited < len(loops); exited++ {
+					loops[exited].exited = true
+				}
+				break
+			}
+		}
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) > 0 {
+			branches[len(branches)-1].exited = true
+		}
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) > 0 {
+			selects[len(selects)-1].exited = true
+		}
+		if rangeValueSourceEarlyExit(statement.Text) && len(conditionals) > 0 {
+			conditionals[len(conditionals)-1].exited = true
+		}
+		updateRangeValueSourceGuard(&state, &guards, statement.Text)
+		issues, next := rangeValueStatement(state, statement, facts)
+		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
+		state = next
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 && len(selects) == 0 && len(conditionals) == 0 {
+			break
+		}
+	}
+	return findings
+}
+
+func mergeRangeValueSourceStates(first, second rangeValueFlowState) rangeValueFlowState {
+	merged, _ := mergeRangeValueFlowState(first, second, true)
+	return merged
+}
+
+func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValueSourceGuardFrame, text string) {
+	if state == nil || guards == nil {
+		return
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.HasPrefix(lower, "end if") {
+		if len(*guards) == 0 {
+			return
+		}
+		frame := (*guards)[len(*guards)-1]
+		*guards = (*guards)[:len(*guards)-1]
+		if frame.name != "" && !state.arrayGuards[frame.name] {
+			delete(state.arrayGuards, frame.name)
+		}
+		return
+	}
+	if rangeValueSourceElse(text) || strings.HasPrefix(lower, "elseif ") {
+		if len(*guards) == 0 {
+			return
+		}
+		if strings.HasPrefix(lower, "elseif ") {
+			frame := &(*guards)[len(*guards)-1]
+			if frame.name != "" && frame.active {
+				delete(state.arrayGuards, frame.name)
+			}
+			frame.name = ""
+			frame.active = false
+			trimmed := strings.TrimSpace(text)
+			match := rangeValueGuardRe.FindStringSubmatch("If " + strings.TrimSpace(trimmed[len("ElseIf "):]))
+			if len(match) == 3 {
+				frame.name = strings.ToLower(match[2])
+				frame.negated = strings.TrimSpace(match[1]) != ""
+				frame.active = !frame.negated
+				if frame.active {
+					state.arrayGuards[frame.name] = true
+				}
+			}
+			return
+		}
+		frame := &(*guards)[len(*guards)-1]
+		if frame.name != "" {
+			if frame.active {
+				delete(state.arrayGuards, frame.name)
+			}
+			frame.active = frame.negated
+			if frame.active {
+				state.arrayGuards[frame.name] = true
+			}
+		}
+		return
+	}
+	if !isRangeValueBlockIf(text) {
+		return
+	}
+	match := rangeValueGuardRe.FindStringSubmatch(text)
+	if len(match) != 3 {
+		*guards = append(*guards, rangeValueSourceGuardFrame{})
+		return
+	}
+	name := strings.ToLower(match[2])
+	negated := strings.TrimSpace(match[1]) != ""
+	frame := rangeValueSourceGuardFrame{name: name, negated: negated, active: !negated}
+	*guards = append(*guards, frame)
+	if frame.active {
+		state.arrayGuards[name] = true
+	} else {
+		delete(state.arrayGuards, name)
+	}
+}
+
+func isRangeValueBlockIf(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if !strings.HasPrefix(lower, "if ") {
+		return false
+	}
+	then := strings.LastIndex(lower, " then")
+	return then >= 0 && strings.TrimSpace(lower[then+len(" then"):]) == ""
+}
+
+func rangeValueSourceLoopStart(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.HasPrefix(lower, "for ") || lower == "do" || strings.HasPrefix(lower, "do while ") || strings.HasPrefix(lower, "do until ") || strings.HasPrefix(lower, "while ")
+}
+
+func rangeValueSourceLoopKind(text string) string {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if strings.HasPrefix(lower, "for ") {
+		return "for"
+	}
+	if lower == "do" || strings.HasPrefix(lower, "do while ") || strings.HasPrefix(lower, "do until ") {
+		return "do"
+	}
+	if strings.HasPrefix(lower, "while ") {
+		return "while"
+	}
+	return ""
+}
+
+func rangeValueSourceLoopExitKind(text string) string {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "exit for":
+		return "for"
+	case "exit do":
+		return "do"
+	case "exit while":
+		return "while"
+	default:
+		return ""
+	}
+}
+
+func rangeValueSourceSelectStart(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "select case ")
+}
+
+func rangeValueSourceSelectCase(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "case")
+}
+
+func rangeValueSourceSelectEnd(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "end select")
+}
+
+func rangeValueSourceConditionalStart(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "#if ")
+}
+
+func rangeValueSourceConditionalElseIf(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "#elseif ")
+}
+
+func rangeValueSourceConditionalElse(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "#else")
+}
+
+func rangeValueSourceConditionalEnd(text string) bool {
+	return rangeValueSourceKeywordLine(strings.ToLower(strings.TrimSpace(text)), "#end if")
+}
+
+func rangeValueSourceLoopEnd(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return rangeValueSourceKeywordLine(lower, "next") || rangeValueSourceKeywordLine(lower, "loop") || rangeValueSourceKeywordLine(lower, "wend")
+}
+
+func rangeValueSourceElse(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return rangeValueSourceKeywordLine(lower, "else")
+}
+
+func rangeValueSourceKeywordLine(lower, keyword string) bool {
+	return lower == keyword || strings.HasPrefix(lower, keyword+" ")
+}
+
+func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool {
+	for _, source := range rangeValueSourceStatements(file, proc) {
+		code := strings.ToLower(normalizedCodeLine(source.text))
+		if strings.Contains(code, ".value") || strings.Contains(code, "range(") || strings.Contains(code, "resize(") || strings.Contains(code, "cells(") {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeValueSourceEarlyExit(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	// VBA Return only returns from a GoSub. It is not a procedure terminator;
+	// treating it as one would stop source recovery before the caller resumes.
+	for _, prefix := range []string{"exit sub", "exit function", "exit property"} {
+		if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func splitRangeValueInlineElse(text string) (string, string, bool) {
+	lower := strings.ToLower(text)
+	inString := false
+	parenDepth := 0
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				parenDepth++
+			}
+		case ')':
+			if !inString && parenDepth > 0 {
+				parenDepth--
+			}
+		}
+		if inString || parenDepth != 0 || index+4 > len(text) || lower[index:index+4] != "else" {
+			continue
+		}
+		if (index > 0 && rangeValueInlineIdentifierByte(text[index-1])) || (index+4 < len(text) && rangeValueInlineIdentifierByte(text[index+4])) {
+			continue
+		}
+		return strings.TrimSpace(text[:index]), strings.TrimSpace(text[index+4:]), true
+	}
+	return strings.TrimSpace(text), "", false
+}
+
+func rangeValueInlineIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
+}
+
+func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeValueSourceStatement {
+	lines := file.Lines
+	if len(lines) == 0 && len(file.Source) > 0 {
+		lines = normalizedSourceLines(string(file.Source))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	start := proc.StartLine
+	if start < 1 {
+		start = 1
+	}
+	end := proc.EndLine
+	if end <= 0 || end > len(lines) {
+		end = len(lines)
+	}
+	if start > end {
+		return nil
+	}
+
+	conditionalConstants := file.RangeValueModuleConstants
+	if conditionalConstants == nil {
+		conditionalConstants = rangeValueModuleIntegerConstants(lines, file.IR)
+	}
+	conditionalActive := true
+	conditionals := []rangeValueSourceConditionalFrame{}
+	var out []rangeValueSourceStatement
+	var continued strings.Builder
+	continuedLine := 0
+	continuedEndLine := 0
+	flush := func(line, endLine int) {
+		text := strings.TrimSpace(continued.String())
+		if text != "" {
+			for _, part := range splitRangeValueSourceStatements(text) {
+				if rangeValueIsRemComment(part) {
+					break
+				}
+				part = rangeValueStripRemComment(part)
+				if strings.TrimSpace(part) != "" {
+					out = append(out, rangeValueSourceStatement{line: line, endLine: endLine, text: strings.TrimSpace(part)})
+				}
+			}
+		}
+		continued.Reset()
+		continuedLine = 0
+	}
+	for line := 1; line <= end; line++ {
+		text := rangeValueStripRemComment(rawWorksheetCodeLine(lines[line-1]))
+		text = strings.TrimSpace(text)
+		if handled, active, unknown := rangeValueSourceConditionalDirective(text, &conditionals, conditionalActive, conditionalConstants); handled {
+			if unknown {
+				out = append(out, rangeValueSourceStatement{line: line, endLine: line, text: text})
+			}
+			conditionalActive = active
+			continue
+		}
+		if line < start || !conditionalActive {
+			continue
+		}
+		if text == "" {
+			continue
+		}
+		if continued.Len() == 0 {
+			continuedLine = line
+		}
+		continuedEndLine = line
+		continuedLineText := text
+		if vbaLineContinues(text) {
+			text = strings.TrimSpace(strings.TrimSuffix(text, "_"))
+		}
+		if continued.Len() > 0 && text != "" {
+			continued.WriteByte(' ')
+		}
+		continued.WriteString(text)
+		if !vbaLineContinues(continuedLineText) {
+			flush(continuedLine, continuedEndLine)
+		}
+	}
+	if continued.Len() > 0 {
+		flush(continuedLine, continuedEndLine)
+	}
+	return out
+}
+
+func rangeValueSourceConditionalDirective(text string, stack *[]rangeValueSourceConditionalFrame, active bool, constants map[string]int) (bool, bool, bool) {
+	if stack == nil {
+		return false, active, false
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case strings.HasPrefix(lower, "#if "):
+		condition := strings.TrimSpace(text[4:])
+		condition = rangeValueSourceConditionalExpression(condition)
+		parentActive := active
+		frame := rangeValueSourceConditionalFrame{parentActive: parentActive}
+		if parentActive {
+			switch rangeValueSourceConditionalValue(condition, constants) {
+			case 1:
+				frame.active, frame.branchTaken = true, true
+			case 0:
+				frame.active = false
+			default:
+				frame.active, frame.branchUnknown = true, true
+			}
+		}
+		*stack = append(*stack, frame)
+		return true, frame.active, frame.branchUnknown
+	case strings.HasPrefix(lower, "#elseif "):
+		if len(*stack) == 0 {
+			return true, active, false
+		}
+		frame := &(*stack)[len(*stack)-1]
+		if !frame.parentActive || frame.branchTaken {
+			frame.active = false
+			return true, false, false
+		}
+		if frame.branchUnknown {
+			frame.active = true
+			return true, true, true
+		}
+		condition := strings.TrimSpace(text[len("#ElseIf "):])
+		condition = rangeValueSourceConditionalExpression(condition)
+		switch rangeValueSourceConditionalValue(condition, constants) {
+		case 1:
+			frame.active, frame.branchTaken = true, true
+		case 0:
+			frame.active = false
+		default:
+			frame.active, frame.branchUnknown = true, true
+		}
+		return true, frame.active, frame.branchUnknown
+	case strings.HasPrefix(lower, "#else"):
+		if len(*stack) == 0 {
+			return true, active, false
+		}
+		frame := &(*stack)[len(*stack)-1]
+		unknown := frame.branchUnknown
+		frame.active = frame.parentActive && !frame.branchTaken
+		frame.branchTaken = frame.parentActive
+		return true, frame.active, unknown
+	case strings.HasPrefix(lower, "#end if"):
+		if len(*stack) == 0 {
+			return true, active, false
+		}
+		frame := (*stack)[len(*stack)-1]
+		*stack = (*stack)[:len(*stack)-1]
+		return true, frame.parentActive, frame.branchUnknown
+	default:
+		return false, active, false
+	}
+}
+
+func rangeValueSourceConditionalValue(text string, constants map[string]int) int {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "true":
+		return 1
+	case "false":
+		return 0
+	}
+	value, err := constantIntegerExpression(text, constants)
+	if err != nil {
+		return -1
+	}
+	if value == 0 {
+		return 0
+	}
+	return 1
+}
+
+func rangeValueSourceConditionalExpression(text string) string {
+	text = strings.TrimSpace(text)
+	if strings.HasSuffix(strings.ToLower(text), " then") {
+		return strings.TrimSpace(text[:len(text)-len(" then")])
+	}
+	return text
+}
+
+func rangeValueStripRemComment(text string) string {
+	if rangeValueIsRemComment(text) {
+		return ""
+	}
+	return text
+}
+
+func rangeValueIsRemComment(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) == 3 && strings.EqualFold(trimmed, "rem") {
+		return true
+	}
+	if len(trimmed) > 3 && strings.EqualFold(trimmed[:3], "rem") {
+		next := trimmed[3]
+		if next == ' ' || next == '\t' {
+			return true
+		}
+	}
+	return false
+}
+
+func splitRangeValueSourceStatements(text string) []string {
+	var out []string
+	start := 0
+	inString := false
+	depth := 0
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case ':':
+			if !inString && depth == 0 {
+				out = append(out, strings.TrimSpace(text[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	out = append(out, strings.TrimSpace(text[start:]))
 	return out
 }
 
@@ -266,6 +1033,9 @@ func rangeValueFactsForProcedure(file parsedFile, proc sourceProcedure) rangeVal
 		facts.expressions[expression.ID] = expression
 	}
 	constants := rangeValueIntegerConstants(file.RangeValueModuleConstants, proc)
+	if len(proc.Statements) == 0 || rangeValueProjectionUnknown(proc) {
+		constants = rangeValueSourceIntegerConstants(file, proc, constants)
+	}
 	facts.constants = constants
 	for _, statement := range proc.Statements {
 		text := strings.TrimSpace(excelLoopHeaderText(statement.Text))
@@ -340,6 +1110,23 @@ func rangeValueIntegerConstants(moduleConstants map[string]int, proc sourceProce
 			continue
 		}
 		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
+		if len(match) != 3 {
+			continue
+		}
+		if value, err := constantIntegerExpression(match[2], constants); err == nil {
+			constants[strings.ToLower(match[1])] = value
+		}
+	}
+	return constants
+}
+
+func rangeValueSourceIntegerConstants(file parsedFile, proc sourceProcedure, base map[string]int) map[string]int {
+	constants := make(map[string]int, len(base)+4)
+	for name, value := range base {
+		constants[name] = value
+	}
+	for _, source := range rangeValueSourceStatements(file, proc) {
+		match := constIntegerRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(source.text)))
 		if len(match) != 3 {
 			continue
 		}
@@ -427,18 +1214,28 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 	}
 
 	if left, right, ok := rangeValueAssignment(raw); ok {
-		if target, ok := rangeValueMemberReceiver(statement.Target, facts, "value", "value2"); ok {
-			if sourceName := rangeValueBareName(right); sourceName != "" {
-				if source, found := state.values[sourceName]; found {
+		if sourceName := rangeValueBareName(right); sourceName != "" {
+			if source, found := state.values[sourceName]; found {
+				if target, foundTarget := rangeValueMemberReceiver(statement.Target, facts, "value", "value2"); foundTarget {
 					if issue := rangeValueDestinationIssue(target, source, state, facts); issue != nil {
 						issues = append(issues, *issue)
+					}
+				} else if receiver, foundTarget := rangeValueMemberReceiverText(left, "value", "value2"); foundTarget {
+					if destination, recognized := rangeValueRangeShapeText(receiver, state, facts); recognized {
+						if issue := rangeValueDestinationShapeIssue(destination, source); issue != nil {
+							issues = append(issues, *issue)
+						}
 					}
 				}
 			}
 		}
 		if targetName := rangeValueBareName(left); targetName != "" {
 			delete(state.arrayGuards, targetName)
-			if source, ok := rangeValueSourceShape(statement.Value, state, facts); ok {
+			source, sourceKnown := rangeValueSourceShape(statement.Value, state, facts)
+			if !sourceKnown {
+				source, sourceKnown = rangeValueSourceShapeText(right, state, facts)
+			}
+			if sourceKnown {
 				state.values[targetName] = source
 				delete(state.ranges, targetName)
 			} else if sourceName := rangeValueBareName(right); sourceName != "" {
@@ -462,7 +1259,11 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 
 	if match := rangeValueSetRe.FindStringSubmatch(raw); len(match) == 3 {
 		name := strings.ToLower(match[1])
-		if shape, ok := rangeValueRangeShapeExpression(statement.Value, state, facts); ok {
+		shape, ok := rangeValueRangeShapeExpression(statement.Value, state, facts)
+		if !ok {
+			shape, ok = rangeValueRangeShapeText(match[2], state, facts)
+		}
+		if ok {
 			state.ranges[name] = shape
 		} else {
 			state.ranges[name] = rangeShape{}
@@ -654,6 +1455,134 @@ func rangeValueSourceShape(value *procedureir.Expression, state rangeValueFlowSt
 	return rangeValueShape{kind: rangeValueShapeUnknown}, true
 }
 
+func rangeValueSourceShapeText(value string, state rangeValueFlowState, facts rangeValueFacts) (rangeValueShape, bool) {
+	receiver, ok := rangeValueMemberReceiverText(value, "value", "value2")
+	if !ok {
+		return rangeValueShape{}, false
+	}
+	shape, recognized := rangeValueRangeShapeText(receiver, state, facts)
+	if !recognized {
+		return rangeValueShape{}, false
+	}
+	if shape.known && shape.rows == 1 && shape.cols == 1 {
+		return rangeValueShape{kind: rangeValueShapeScalar}, true
+	}
+	if shape.known || shape.array2D {
+		return rangeValueShape{kind: rangeValueShapeArray2D, rows: shape.rows, cols: shape.cols}, true
+	}
+	return rangeValueShape{kind: rangeValueShapeUnknown}, true
+}
+
+func rangeValueMemberReceiverText(expression string, members ...string) (string, bool) {
+	text := strings.TrimSpace(expression)
+	for _, member := range members {
+		suffix := "." + strings.ToLower(member)
+		lower := strings.ToLower(text)
+		if strings.HasSuffix(lower, suffix) {
+			receiver := strings.TrimSpace(text[:len(text)-len(suffix)])
+			if receiver != "" {
+				return receiver, true
+			}
+		}
+	}
+	return "", false
+}
+
+func rangeValueRangeShapeText(expression string, state rangeValueFlowState, facts rangeValueFacts) (rangeShape, bool) {
+	text := strings.TrimSpace(expression)
+	for len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' && matchingParen(text, 0) == len(text)-1 {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+	if name := rangeValueBareName(text); name != "" {
+		if shape, found := state.ranges[name]; found {
+			return shape, true
+		}
+		if facts.rangeVariables[name] {
+			return rangeShape{}, true
+		}
+		return rangeShape{}, false
+	}
+	open := firstParenOutsideString(text)
+	if open < 0 {
+		return rangeShape{}, false
+	}
+	close := matchingParen(text, open)
+	if close < 0 || strings.TrimSpace(text[close+1:]) != "" {
+		return rangeShape{}, false
+	}
+	name := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(text[:open]))))
+	args := splitArgs(text[open+1 : close])
+	switch name {
+	case "cells":
+		if len(args) == 2 {
+			return rangeShape{known: true, rows: 1, cols: 1}, true
+		}
+		return rangeShape{}, true
+	case "range":
+		if shape, found := rangeValueTextCellsPairShape(args, facts); found {
+			return shape, true
+		}
+		if shape, found := rangeValueTextLiteralRangeShape(args); found {
+			return shape, true
+		}
+		return rangeShape{}, true
+	case "offset", "resize":
+		return rangeShape{}, true
+	default:
+		return rangeShape{}, false
+	}
+}
+
+func rangeValueTextCellsPairShape(arguments []string, facts rangeValueFacts) (rangeShape, bool) {
+	if len(arguments) != 2 {
+		return rangeShape{}, false
+	}
+	startRow, startRowKnown, startColumn, startColumnKnown, startOK := rangeValueTextCellsCoordinates(arguments[0], facts)
+	endRow, endRowKnown, endColumn, endColumnKnown, endOK := rangeValueTextCellsCoordinates(arguments[1], facts)
+	if !startOK || !endOK {
+		return rangeShape{}, false
+	}
+	return rangeValueCellsPairShapeFromCoordinates(startRow, startRowKnown, startColumn, startColumnKnown, endRow, endRowKnown, endColumn, endColumnKnown), true
+}
+
+func rangeValueTextCellsCoordinates(expression string, facts rangeValueFacts) (int, bool, int, bool, bool) {
+	text := strings.TrimSpace(expression)
+	open := firstParenOutsideString(text)
+	if open < 0 {
+		return 0, false, 0, false, false
+	}
+	close := matchingParen(text, open)
+	if close < 0 || strings.TrimSpace(text[close+1:]) != "" {
+		return 0, false, 0, false, false
+	}
+	name := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(text[:open]))))
+	if name != "cells" {
+		return 0, false, 0, false, false
+	}
+	arguments := splitArgs(text[open+1 : close])
+	if len(arguments) != 2 {
+		return 0, false, 0, false, false
+	}
+	row, rowErr := constantIntegerExpression(arguments[0], facts.constantValues())
+	column, columnErr := constantIntegerExpression(arguments[1], facts.constantValues())
+	return row, rowErr == nil, column, columnErr == nil, true
+}
+
+func rangeValueTextLiteralRangeShape(arguments []string) (rangeShape, bool) {
+	if len(arguments) != 1 && len(arguments) != 2 {
+		return rangeShape{}, false
+	}
+	addresses := make([]string, len(arguments))
+	for index, argument := range arguments {
+		text := strings.TrimSpace(argument)
+		if len(text) < 2 || text[0] != '"' || text[len(text)-1] != '"' {
+			return rangeShape{}, false
+		}
+		addresses[index] = strings.ReplaceAll(text[1:len(text)-1], `""`, `"`)
+	}
+	return rangeValueLiteralRangeShapeFromAddresses(addresses)
+}
+
 func rangeValueMemberReceiver(expression *procedureir.Expression, facts rangeValueFacts, members ...string) (procedureir.Expression, bool) {
 	current, ok := rangeValueUnwrapExpression(expression, facts)
 	if !ok || current.Kind != procedureir.ExpressionMember || len(current.Children) < 2 {
@@ -768,47 +1697,18 @@ func rangeValueTerminalExpressionName(expression procedureir.Expression, facts r
 }
 
 func rangeValueLiteralRangeShape(arguments []procedureir.Expression, facts rangeValueFacts) (rangeShape, bool) {
-	if len(arguments) == 1 {
-		address, ok := rangeValueStringLiteral(arguments[0], facts)
+	if len(arguments) != 1 && len(arguments) != 2 {
+		return rangeShape{}, false
+	}
+	addresses := make([]string, len(arguments))
+	for index, argument := range arguments {
+		address, ok := rangeValueStringLiteral(argument, facts)
 		if !ok {
 			return rangeShape{}, false
 		}
-		match := rangeValueAddressRe.FindStringSubmatch(address)
-		if len(match) != 5 {
-			return rangeShape{}, false
-		}
-		startCol := excelColumnNumber(match[1])
-		startRow, _ := strconv.Atoi(match[2])
-		endCol, endRow := startCol, startRow
-		if match[3] != "" {
-			endCol = excelColumnNumber(match[3])
-			endRow, _ = strconv.Atoi(match[4])
-		}
-		if startCol > 0 && endCol >= startCol && endRow >= startRow {
-			return rangeShape{known: true, array2D: endCol > startCol || endRow > startRow, rows: endRow - startRow + 1, cols: endCol - startCol + 1}, true
-		}
-		return rangeShape{}, false
+		addresses[index] = address
 	}
-	if len(arguments) == 2 {
-		startAddress, startOK := rangeValueStringLiteral(arguments[0], facts)
-		endAddress, endOK := rangeValueStringLiteral(arguments[1], facts)
-		if !startOK || !endOK {
-			return rangeShape{}, false
-		}
-		startMatch := rangeValueAddressRe.FindStringSubmatch(startAddress)
-		endMatch := rangeValueAddressRe.FindStringSubmatch(endAddress)
-		if len(startMatch) != 5 || len(endMatch) != 5 || startMatch[3] != "" || endMatch[3] != "" {
-			return rangeShape{}, false
-		}
-		startCol := excelColumnNumber(startMatch[1])
-		startRow, _ := strconv.Atoi(startMatch[2])
-		endCol := excelColumnNumber(endMatch[1])
-		endRow, _ := strconv.Atoi(endMatch[2])
-		if startCol > 0 && endCol >= startCol && endRow >= startRow {
-			return rangeShape{known: true, array2D: endCol > startCol || endRow > startRow, rows: endRow - startRow + 1, cols: endCol - startCol + 1}, true
-		}
-	}
-	return rangeShape{}, false
+	return rangeValueLiteralRangeShapeFromAddresses(addresses)
 }
 
 func rangeValueStringLiteral(expression procedureir.Expression, facts rangeValueFacts) (string, bool) {
@@ -829,13 +1729,54 @@ func rangeValueCellsPairShape(start, end procedureir.Expression, facts rangeValu
 	if !startOK || !endOK {
 		return rangeShape{}, false
 	}
+	return rangeValueCellsPairShapeFromCoordinates(startRow, startRowKnown, startCol, startColKnown, endRow, endRowKnown, endCol, endColKnown), true
+}
+
+func rangeValueCellsPairShapeFromCoordinates(startRow int, startRowKnown bool, startColumn int, startColumnKnown bool, endRow int, endRowKnown bool, endColumn int, endColumnKnown bool) rangeShape {
 	rows, rowsKnown := rangeValueAxisLength(startRow, startRowKnown, endRow, endRowKnown)
-	cols, colsKnown := rangeValueAxisLength(startCol, startColKnown, endCol, endColKnown)
+	cols, colsKnown := rangeValueAxisLength(startColumn, startColumnKnown, endColumn, endColumnKnown)
 	return rangeShape{
 		known:   rowsKnown && colsKnown,
 		array2D: (rowsKnown && rows > 1) || (colsKnown && cols > 1),
 		rows:    rows,
 		cols:    cols,
+	}
+}
+
+func rangeValueLiteralRangeShapeFromAddresses(addresses []string) (rangeShape, bool) {
+	if len(addresses) != 1 && len(addresses) != 2 {
+		return rangeShape{}, false
+	}
+	startMatch := rangeValueAddressRe.FindStringSubmatch(addresses[0])
+	if len(startMatch) != 5 {
+		return rangeShape{}, false
+	}
+	if len(addresses) == 1 {
+		return rangeValueLiteralRangeCoordinatesShape(startMatch[1], startMatch[2], startMatch[3], startMatch[4])
+	}
+	endMatch := rangeValueAddressRe.FindStringSubmatch(addresses[1])
+	if len(endMatch) != 5 || startMatch[3] != "" || endMatch[3] != "" {
+		return rangeShape{}, false
+	}
+	return rangeValueLiteralRangeCoordinatesShape(startMatch[1], startMatch[2], endMatch[1], endMatch[2])
+}
+
+func rangeValueLiteralRangeCoordinatesShape(startColumnText, startRowText, endColumnText, endRowText string) (rangeShape, bool) {
+	startColumn := excelColumnNumber(startColumnText)
+	startRow, _ := strconv.Atoi(startRowText)
+	endColumn, endRow := startColumn, startRow
+	if endColumnText != "" {
+		endColumn = excelColumnNumber(endColumnText)
+		endRow, _ = strconv.Atoi(endRowText)
+	}
+	if startColumn <= 0 || endColumn < startColumn || endRow < startRow {
+		return rangeShape{}, false
+	}
+	return rangeShape{
+		known:   true,
+		array2D: endColumn > startColumn || endRow > startRow,
+		rows:    endRow - startRow + 1,
+		cols:    endColumn - startColumn + 1,
 	}, true
 }
 
@@ -864,11 +1805,15 @@ func rangeValueAxisLength(start int, startKnown bool, end int, endKnown bool) (i
 }
 
 func rangeValueDestinationIssue(target procedureir.Expression, source rangeValueShape, state rangeValueFlowState, facts rangeValueFacts) *rangeValueIssue {
-	if source.kind != rangeValueShapeArray2D || source.rows <= 0 || source.cols <= 0 {
-		return nil
-	}
 	destination, recognized := rangeValueRangeShapeExpression(&target, state, facts)
 	if !recognized || !destination.known {
+		return nil
+	}
+	return rangeValueDestinationShapeIssue(destination, source)
+}
+
+func rangeValueDestinationShapeIssue(destination rangeShape, source rangeValueShape) *rangeValueIssue {
+	if source.kind != rangeValueShapeArray2D || source.rows <= 0 || source.cols <= 0 || !destination.known {
 		return nil
 	}
 	if destination.rows == source.rows && destination.cols == source.cols {

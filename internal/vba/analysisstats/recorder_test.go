@@ -195,6 +195,18 @@ func TestDomainAndCounterNamesAreStable(t *testing.T) {
 	if CounterRuntimeCandidateProcedures.String() != RuntimeCandidateProceduresCounter || CounterSemanticKernelRuns.String() != SemanticKernelRunsCounter {
 		t.Fatalf("counter names = %q, %q", CounterRuntimeCandidateProcedures, CounterSemanticKernelRuns)
 	}
+	arrayCounterNames := []struct {
+		counter WorkCounter
+		want    string
+	}{
+		{CounterArrayKernelRuns, ArrayKernelRunsCounter},
+		{CounterArrayProjectionRuns, ArrayProjectionRunsCounter},
+	}
+	for _, test := range arrayCounterNames {
+		if got := test.counter.String(); got != test.want {
+			t.Errorf("array counter %d name = %q, want %q", test.counter, got, test.want)
+		}
+	}
 	plannerCounterNames := []struct {
 		counter WorkCounter
 		want    string

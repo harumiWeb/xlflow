@@ -125,9 +125,11 @@ const (
 	CounterExcelSkippedRuns
 	CounterApplicationStatePlannedRuns
 	CounterApplicationStateSkippedRuns
+	CounterArrayKernelRuns
+	CounterArrayProjectionRuns
 )
 
-const counterCount = int(CounterApplicationStateSkippedRuns) + 1
+const counterCount = int(CounterArrayProjectionRuns) + 1
 
 // WorkCounterCount is the fixed number of counter slots used by
 // DomainAggregate. It is exposed for compile-time guards in lightweight
@@ -171,6 +173,8 @@ const (
 	ExcelSkippedRunsCounter                    = "skipped_excel_runs"
 	ApplicationStatePlannedRunsCounter         = "planned_application_state_runs"
 	ApplicationStateSkippedRunsCounter         = "skipped_application_state_runs"
+	ArrayKernelRunsCounter                     = "array_kernel_runs"
+	ArrayProjectionRunsCounter                 = "array_projection_runs"
 )
 
 var counterNames = [...]string{
@@ -210,6 +214,8 @@ var counterNames = [...]string{
 	ExcelSkippedRunsCounter,
 	ApplicationStatePlannedRunsCounter,
 	ApplicationStateSkippedRunsCounter,
+	ArrayKernelRunsCounter,
+	ArrayProjectionRunsCounter,
 }
 
 // These paired array declarations fail compilation if a counter is added

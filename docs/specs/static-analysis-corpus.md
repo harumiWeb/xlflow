@@ -835,6 +835,17 @@ Traversal counters are `source_line_scans`, `runtime_cfg_walks`,
 Candidates are procedures that pass the relevant rule gate and are actually
 analyzed; traversal counters count started source/CFG traversals. These are
 workload counters and never counts of emitted findings.
+
+Array-domain profiles additionally report `array_kernel_runs`,
+`array_cfg_walks`, and `array_projection_runs`. The first counts one canonical
+array semantic-result materialization per applicable procedure revision, the
+second counts started array fixed-point walks, and the third counts enabled
+and applicable array projectors. Enabling multiple core array diagnostics must
+leave the kernel and main CFG-walk counts at one per applicable procedure;
+`VBA241` is a shared-fact projection, while an applicable `VBA226` secondary
+shape pass is recorded as an explicit additional walk. These counters measure
+work, not findings, and are compared alongside `ns/op`, `B/op`, and
+`allocs/op`.
 The CLI emits stage records with `operation="analyze/stage"` and counter
 records with `operation="analyze/counter"`; both remain stderr-only.
 
@@ -868,6 +879,16 @@ retain wall time (`ns/op`), allocations, findings, workload dimensions, and the
 `stage_*` / `counter_*` metrics derived from the attached analysis recorder;
 these are Go benchmark metrics, not stderr records from
 `analyze --performance-log`.
+
+For issue #696, the benchmark matrix also covers no-array procedures, simple
+dynamic arrays, ReDim-heavy procedures, branch-heavy array lifecycles,
+multidimensional arrays, ByRef array flows, large CFGs, and a workload with
+all compatible array projectors enabled. Record the array kernel, walk, and
+projection counters with the standard wall-time and allocation metrics. A
+repeated run must retain deterministic findings and snapshots; a performance
+comparison must show reduced array walks or allocations on array-heavy and
+ROneCOne workloads without multiplying the main fixed-point work when another
+projector is enabled.
 
 For issue #675, the benchmark matrix must also include one-file workloads with
 100, 500, 1,000, and 2,000 procedures and a many-file workload. Where the

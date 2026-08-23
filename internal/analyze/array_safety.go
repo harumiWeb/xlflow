@@ -137,6 +137,27 @@ var (
 func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
 	variables := arrayVariables(file, proc, moduleDecls)
 	capacityGuards := arrayResumeNextCapacityGuards(file, proc, variables)
+	constants := arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants)
+	return a.arrayLifecycleFindingsPrepared(file, proc, ctx, moduleDecls, variables, constants, capacityGuards)
+}
+
+// arrayLifecycleFindingsPrepared is used by the shared procedure-local array
+// result. Its preparation inputs are explicit so enabled projections do not
+// rebuild the same variable catalog, constant environment, or capacity guard
+// facts independently.
+func (a Analyzer) arrayLifecycleFindingsPrepared(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) []Finding {
+	return a.arrayLifecycleFindingsPreparedWithRuntime(file, proc, ctx, moduleDecls, variables, constants, capacityGuards, nil)
+}
+
+// arrayLifecycleFindingsPreparedWithRuntime optionally collects the
+// deterministic array runtime projection while the shared array worklist is
+// already visiting the procedure. A non-nil sink removes the historical
+// second VBA249 array walk without changing the standalone helper contract.
+func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntime(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, runtimeSink *[]Finding) []Finding {
+	return a.arrayLifecycleFindingsPreparedWithRuntimeEntry(file, proc, ctx, moduleDecls, variables, constants, capacityGuards, runtimeSink, nil)
+}
+
+func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, runtimeSink *[]Finding, preparedEntry arrayFlowState) []Finding {
 	objectArrayDiagnosticsApplicable := false
 	for _, variable := range variables {
 		if variable.isArray && variable.isObject {
@@ -144,7 +165,7 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 			break
 		}
 	}
-	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison && !objectArrayDiagnosticsApplicable {
+	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison && !objectArrayDiagnosticsApplicable && runtimeSink == nil {
 		return nil
 	}
 	vba227Variables := variables
@@ -153,34 +174,77 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	}
 	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
 	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
-	initial := arrayInitialState(variables)
-	initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
-	initial = applyArrayByRefEntryStates(initial, proc, variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
-	initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
-	// Constant bounds are scoped to the current procedure. Resolve them once
-	// for this CFG walk so every ReDim transfer shares the same table without
-	// repeatedly reparsing the module and procedure declarations.
-	constants := arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants)
+	baseLaneRequested := a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || objectArrayDiagnosticsApplicable
+	initial := preparedEntry
+	if initial == nil {
+		initial = arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, variables)
+	}
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
-		legacyFindings := a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants, capacityGuards)
-		if !a.Config.Analyze.DetectArrayLifecycleSafety {
-			findings = append(findings, legacyFindings...)
+		if !baseLaneRequested && runtimeSink == nil {
+			findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants, capacityGuards)...)
 			return uniqueArrayFindings(findings)
 		}
-		for _, finding := range legacyFindings {
-			if finding.Code != "VBA227" {
-				findings = append(findings, finding)
+		seen := map[string]bool{}
+		for _, finding := range findings {
+			seen[arrayFindingKey(finding)] = true
+		}
+		vba227Initial := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, vba227Variables)
+		baseState := initial
+		vba227State := vba227Initial
+		runtimeState := arrayInitialState(variables)
+		probe := a
+		probe.Config.Analyze.DetectArrayLifecycleSafety = true
+		runtimeSeen := map[string]bool{}
+		for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+			text := normalizedCodeLine(file.Lines[line-1])
+			if baseLaneRequested {
+				var baseIssues []Finding
+				baseState, baseIssues = a.arrayTransfer(file, proc, ctx, variables, baseState, text, line, constants, capacityGuards)
+				for _, finding := range baseIssues {
+					if a.Config.Analyze.DetectArrayLifecycleSafety && finding.Code == "VBA227" {
+						continue
+					}
+					key := arrayFindingKey(finding)
+					if !seen[key] {
+						seen[key] = true
+						findings = append(findings, finding)
+					}
+				}
+				if a.Config.Analyze.DetectArrayLifecycleSafety {
+					var lifecycleIssues []Finding
+					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards)
+					for _, finding := range lifecycleIssues {
+						if finding.Code != "VBA227" {
+							continue
+						}
+						key := arrayFindingKey(finding)
+						if !seen[key] {
+							seen[key] = true
+							findings = append(findings, finding)
+						}
+					}
+				}
+			}
+			if runtimeSink != nil {
+				for _, issue := range deterministicArrayRuntimeIssues(text, line, runtimeState, variables, constants) {
+					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
+					if runtimeSeen[key] {
+						continue
+					}
+					runtimeSeen[key] = true
+					message, reason, suggestion := deterministicRuntimeFailureText(issue.kind)
+					finding := a.simpleFinding(file, proc, issue.line, "VBA249", "error", message, reason, suggestion)
+					finding.RuntimeError = &RuntimeErrorContext{Kind: issue.kind}
+					finding.arrayOperationKey = issue.operationKey
+					*runtimeSink = append(*runtimeSink, finding)
+				}
+				runtimeState, _ = probe.arrayTransfer(file, proc, ctx, variables, runtimeState, text, line, constants, nil)
 			}
 		}
-		vba227Initial := arrayInitialState(vba227Variables)
-		vba227Initial = applyArrayInternalStorageConfiguration(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
-		vba227Initial = applyArrayByRefEntryStates(vba227Initial, proc, vba227Variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
-		vba227Initial = applyArrayModuleEntryState(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
-		for _, finding := range a.arrayVBA227LinearFindings(file, proc, ctx, vba227Variables, vba227Initial, constants, capacityGuards) {
-			if finding.Code == "VBA227" {
-				findings = append(findings, finding)
-			}
+		sortFindings(findings)
+		if runtimeSink != nil {
+			sortFindings(*runtimeSink)
 		}
 		return uniqueArrayFindings(findings)
 	}
@@ -190,58 +254,94 @@ func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, 
 	for _, finding := range findings {
 		seen[arrayFindingKey(finding)] = true
 	}
-	walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-		out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
-		for _, call := range arrayCallsAtLine(proc.Calls, line) {
-			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
-		}
-		for _, finding := range issues {
-			// VBA227 is recomputed by the source-line pass below. Keeping the
-			// historical block-level pass for the other array rules preserves
-			// their existing branch and shape contracts.
-			if finding.Code == "VBA227" {
-				continue
-			}
-			key := arrayFindingKey(finding)
-			if !seen[key] {
-				seen[key] = true
-				findings = append(findings, finding)
-			}
-		}
-		return out
-	}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-		out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
-		out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-		return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
-	})
+	lanes := make([]arrayCFGWorklistLane, 0, 3)
+	if baseLaneRequested {
+		lanes = append(lanes, arrayCFGWorklistLane{
+			Graph: proc.Graph, Initial: initial,
+			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
+				out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
+				for _, call := range arrayCallsAtLine(proc.Calls, line) {
+					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+				}
+				for _, finding := range issues {
+					if finding.Code == "VBA227" {
+						continue
+					}
+					key := arrayFindingKey(finding)
+					if !seen[key] {
+						seen[key] = true
+						findings = append(findings, finding)
+					}
+				}
+				return out
+			},
+			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+				out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
+				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
+			},
+		})
+	}
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
 		vba227Graph := arrayVBA227Graph(proc, ctx)
-		vba227Initial := arrayInitialState(vba227Variables)
-		vba227Initial = applyArrayInternalStorageConfiguration(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
-		vba227Initial = applyArrayByRefEntryStates(vba227Initial, proc, vba227Variables, ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions)
-		vba227Initial = applyArrayModuleEntryState(vba227Initial, file, proc, vba227Variables, moduleDecls, ctx.arrayModuleEntryStates)
-		vba227CapacityGuards := arrayResumeNextCapacityGuards(file, proc, vba227Variables)
-		walkArrayCFGWithSourceLines(&vba227Graph, file.Lines, vba227Initial, func(text string, line int, in arrayFlowState) arrayFlowState {
-			out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, vba227CapacityGuards)
-			for _, call := range arrayCallsAtLine(proc.Calls, line) {
-				out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
-			}
-			for _, finding := range issues {
-				if finding.Code != "VBA227" {
-					continue
+		vba227Initial := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, vba227Variables)
+		lanes = append(lanes, arrayCFGWorklistLane{
+			Graph: &vba227Graph, Initial: vba227Initial, SourceLines: true,
+			ReliableExceptional: func(statement *procedureir.Statement, in, out arrayFlowState) bool {
+				return arrayAllocationTransferIsReliable(statement, in, out)
+			},
+			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
+				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards)
+				for _, call := range arrayCallsAtLine(proc.Calls, line) {
+					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 				}
-				key := arrayFindingKey(finding)
-				if !seen[key] {
-					seen[key] = true
-					findings = append(findings, finding)
+				for _, finding := range issues {
+					if finding.Code != "VBA227" {
+						continue
+					}
+					key := arrayFindingKey(finding)
+					if !seen[key] {
+						seen[key] = true
+						findings = append(findings, finding)
+					}
 				}
-			}
-			return out
-		}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-			out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
-			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
-			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
+				return out
+			},
+			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+				out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
+				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
+				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
+			},
 		})
+	}
+	if runtimeSink != nil {
+		probe := a
+		probe.Config.Analyze.DetectArrayLifecycleSafety = true
+		runtimeSeen := map[string]bool{}
+		runtimeState := arrayInitialState(variables)
+		lanes = append(lanes, arrayCFGWorklistLane{
+			Graph: proc.Graph, Initial: runtimeState,
+			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
+				for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants) {
+					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
+					if runtimeSeen[key] {
+						continue
+					}
+					runtimeSeen[key] = true
+					message, reason, suggestion := deterministicRuntimeFailureText(issue.kind)
+					finding := a.simpleFinding(file, proc, issue.line, "VBA249", "error", message, reason, suggestion)
+					finding.RuntimeError = &RuntimeErrorContext{Kind: issue.kind}
+					finding.arrayOperationKey = issue.operationKey
+					*runtimeSink = append(*runtimeSink, finding)
+				}
+				out, _ := probe.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
+				return out
+			},
+		})
+	}
+	walkArrayCFGCombined(file.Lines, lanes)
+	if runtimeSink != nil {
+		sortFindings(*runtimeSink)
 	}
 	sortFindings(findings)
 	return findings
@@ -383,24 +483,6 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
 		var issues []Finding
 		state, issues = a.arrayTransfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants, capacityGuards)
-		for _, finding := range issues {
-			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
-			if !seen[key] {
-				seen[key] = true
-				findings = append(findings, finding)
-			}
-		}
-	}
-	sortFindings(findings)
-	return findings
-}
-
-func (a Analyzer) arrayVBA227LinearFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) []Finding {
-	var findings []Finding
-	seen := map[string]bool{}
-	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-		var issues []Finding
-		state, issues = a.arrayVBA227Transfer(file, proc, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants, capacityGuards)
 		for _, finding := range issues {
 			key := finding.Code + ":" + strconv.Itoa(finding.Line) + ":" + finding.Message
 			if !seen[key] {
@@ -920,6 +1002,212 @@ func walkArrayCFGWorklist(graph *vbacfg.Graph, lines []string, initial arrayFlow
 			}
 		}
 	}
+}
+
+// arrayCFGWorklistLane describes one array state policy that can be advanced
+// by walkArrayCFGCombined.  Lanes deliberately own their state and transfer
+// callbacks: sharing a queue must not force the block-level, source-line, and
+// runtime policies to share a merge or edge interpretation.
+//
+// Graph is normally the same graph for every lane.  It is allowed to be a
+// policy-specific copy, however (for example arrayVBA227Graph removes
+// impossible normal continuations).  Block IDs are stable across those copies
+// and the worklist remains shared even when an edge is absent from one lane.
+type arrayCFGWorklistLane struct {
+	Graph   *vbacfg.Graph
+	Initial arrayFlowState
+
+	// Visit receives a private copy of the lane's block input state and returns
+	// the state to propagate to outgoing edges.  In source-line mode it is
+	// called once for each physical line owned by the block.
+	Visit func(text string, line int, in arrayFlowState) arrayFlowState
+
+	// EdgeState applies a lane-specific normal-edge refinement (guards,
+	// Select Case facts, module configuration, and so on). It is not called for
+	// exceptional or uncertain edges, which retain the predecessor state.
+	EdgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState
+
+	// Stop can terminate propagation for this lane after visiting a statement.
+	// A stopped lane does not prevent other lanes from processing the same block.
+	Stop func(text string, line int) bool
+
+	// ReliableExceptional permits a source-line lane to carry a deterministic
+	// allocation across an exceptional edge. The historical default is the
+	// predecessor state; callers should set this only for the existing narrow
+	// reliable-allocation contract.
+	ReliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool
+
+	// SourceLines restores physical source order inside a CFG block.  False
+	// retains the historical single-statement block semantics.
+	SourceLines bool
+}
+
+// arrayCFGWorklistLaneResult contains the converged input states for a lane.
+// It is returned as a separate value per lane so callers can project facts
+// after all lanes have converged without retaining mutable worklist internals.
+type arrayCFGWorklistLaneResult struct {
+	InStates map[vbacfg.BlockID]arrayFlowState
+}
+
+// walkArrayCFGCombined advances multiple array policies with one deterministic
+// block/edge index and one queue. Each lane still has an independent state
+// lattice and callback policy, preserving semantic compatibility while
+// avoiding repeated graph scheduling and indexing work.
+//
+// Exceptional and uncertain edges retain each lane's predecessor input state.
+// A lane may opt into the existing reliable-allocation exception through
+// ReliableExceptional; this is intentionally independent from SourceLines so
+// runtime or other block-level lanes cannot accidentally inherit it.
+func walkArrayCFGCombined(lines []string, lanes []arrayCFGWorklistLane) []arrayCFGWorklistLaneResult {
+	results := make([]arrayCFGWorklistLaneResult, len(lanes))
+	if len(lanes) == 0 {
+		return results
+	}
+
+	type graphIndex struct {
+		blocks   map[vbacfg.BlockID]vbacfg.Block
+		outgoing map[vbacfg.BlockID][]vbacfg.Edge
+	}
+	type laneIndex struct {
+		graphIndex
+		inStates map[vbacfg.BlockID]arrayFlowState
+	}
+	indexes := make([]laneIndex, len(lanes))
+	graphIndexes := make(map[*vbacfg.Graph]graphIndex, len(lanes))
+	queued := map[vbacfg.BlockID]bool{}
+	for index, lane := range lanes {
+		if lane.Graph == nil {
+			continue
+		}
+		shared, ok := graphIndexes[lane.Graph]
+		if !ok {
+			blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(lane.Graph.Blocks))
+			for _, block := range lane.Graph.Blocks {
+				blocks[block.ID] = block
+			}
+			outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
+			for _, edge := range lane.Graph.Edges {
+				outgoing[edge.From] = append(outgoing[edge.From], edge)
+			}
+			shared = graphIndex{blocks: blocks, outgoing: outgoing}
+			graphIndexes[lane.Graph] = shared
+		}
+		inStates := map[vbacfg.BlockID]arrayFlowState{
+			lane.Graph.Entry: cloneArrayState(lane.Initial),
+		}
+		indexes[index] = laneIndex{graphIndex: shared, inStates: inStates}
+		queued[lane.Graph.Entry] = true
+		results[index].InStates = inStates
+	}
+
+	for len(queued) > 0 {
+		// Block IDs are ordered so convergence does not depend on Go map
+		// iteration order. A shared queue is safe even when a policy-specific
+		// graph omits an edge: that lane simply has no outgoing edge to merge.
+		var id vbacfg.BlockID
+		first := true
+		for candidate := range queued {
+			if first || candidate < id {
+				id = candidate
+				first = false
+			}
+		}
+		delete(queued, id)
+
+		for index, lane := range lanes {
+			stateIndex := &indexes[index]
+			if lane.Graph == nil || lane.Visit == nil {
+				continue
+			}
+			in, ok := stateIndex.inStates[id]
+			if !ok {
+				continue
+			}
+			block, ok := stateIndex.blocks[id]
+			if !ok {
+				continue
+			}
+
+			in = cloneArrayState(in)
+			out := cloneArrayState(in)
+			stopped := false
+			if block.Statement != nil {
+				if !lane.SourceLines {
+					line := block.Statement.Range.StartLine
+					if line == 0 {
+						line = block.Range.StartLine
+					}
+					text := block.Statement.Text
+					if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
+						text = normalizedCodeLine(lines[line-1])
+					}
+					out = lane.Visit(text, line, in)
+					stopped = lane.Stop != nil && lane.Stop(text, line)
+				} else {
+					start := block.Statement.Range.StartLine
+					if start == 0 {
+						start = block.Range.StartLine
+					}
+					end := block.Statement.Range.EndLine
+					if end < start {
+						end = start
+					}
+					if block.Statement.Kind == procedureir.StatementSelect && start >= 1 && start <= len(lines) {
+						// Select Case owns separate CFG blocks for each Case clause;
+						// do not scan all clause lines before applying the edge fact.
+						text := normalizedCodeLine(lines[start-1])
+						out = lane.Visit(text, start, out)
+						stopped = lane.Stop != nil && lane.Stop(text, start)
+					} else if start == end && start >= 1 && start <= len(lines) {
+						text := block.Statement.Text
+						if strings.TrimSpace(text) == "" {
+							text = normalizedCodeLine(lines[start-1])
+						}
+						out = lane.Visit(text, start, out)
+						stopped = lane.Stop != nil && lane.Stop(text, start)
+					} else if start >= 1 && end <= len(lines) {
+						for line := start; line <= end; line++ {
+							text := normalizedCodeLine(lines[line-1])
+							if strings.TrimSpace(text) == "" {
+								continue
+							}
+							out = lane.Visit(text, line, out)
+							if lane.Stop != nil && lane.Stop(text, line) {
+								stopped = true
+								break
+							}
+						}
+					} else {
+						text := block.Statement.Text
+						if strings.TrimSpace(text) == "" && start >= 1 && start <= len(lines) {
+							text = normalizedCodeLine(lines[start-1])
+						}
+						out = lane.Visit(text, start, out)
+						stopped = lane.Stop != nil && lane.Stop(text, start)
+					}
+				}
+			}
+			if stopped {
+				continue
+			}
+
+			for _, edge := range stateIndex.outgoing[id] {
+				next := out
+				if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
+					next = in
+					if lane.SourceLines && edge.Class == vbacfg.EdgeExceptional && lane.ReliableExceptional != nil && lane.ReliableExceptional(block.Statement, in, out) {
+						next = out
+					}
+				} else if lane.EdgeState != nil {
+					next = lane.EdgeState(block, edge, next)
+				}
+				if mergeArrayState(stateIndex.inStates, edge.To, next) {
+					queued[edge.To] = true
+				}
+			}
+		}
+	}
+	return results
 }
 
 func arrayAllocationTransferIsReliable(statement *procedureir.Statement, in, out arrayFlowState) bool {

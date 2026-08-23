@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestVBA226DetectsOneDimensionalRangeValueUse(t *testing.T) {
@@ -275,6 +276,457 @@ End Sub
 	}
 	if got, want := findingsByCode(realtime, "VBA226"), findingsByCode(batch, "VBA226"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("batch/realtime VBA226 findings differ:\nbatch=%+v\nrealtime=%+v", want, got)
+	}
+}
+
+func TestVBA226FallsBackToSourceLinesForEmptyProcedureIR(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	file := parsedFile{
+		Path:   "Main.bas",
+		Lines:  normalizedSourceLines(source),
+		Source: []byte(source),
+	}
+	proc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if !rangeValueShapeApplicable(file, proc) {
+		t.Fatal("empty procedure projection should use source-line applicability")
+	}
+	findings := (Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(file, proc)
+	got := findingsByCode(findings, "VBA226")
+	if len(got) != 1 || got[0].Line != 5 || !strings.Contains(got[0].Message, "Single-cell") {
+		t.Fatalf("source-line fallback findings = %+v, want one scalar-index finding on line 5", got)
+	}
+
+	guardedSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+	values = Range("A1:" & lastCell).Value2
+	If IsArray(values) Then
+	    If lastCell <> "" Then
+	      Debug.Print values(1, 1)
+	    End If
+	    Debug.Print values(1, 1)
+	End If
+End Sub
+`
+	guardedFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(guardedSource), Source: []byte(guardedSource)}
+	guardedProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(guardedFile, guardedProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("source-line IsArray guard should suppress uncertain two-dimensional access: %+v", got)
+	}
+
+	negatedSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If Not IsArray(values) Then
+    Debug.Print values
+  Else
+    Debug.Print values(1, 1)
+  End If
+End Sub
+`
+	negatedFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(negatedSource), Source: []byte(negatedSource)}
+	negatedProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(negatedFile, negatedProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("negative IsArray guard Else branch should suppress uncertain two-dimensional access: %+v", got)
+	}
+
+	elseIfGuardSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String, ByVal useArray As Boolean)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If useArray Then
+    Debug.Print values
+  ElseIf IsArray(values) Then
+    Debug.Print values(1, 1)
+  End If
+End Sub
+`
+	elseIfGuardFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(elseIfGuardSource), Source: []byte(elseIfGuardSource)}
+	elseIfGuardProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(elseIfGuardFile, elseIfGuardProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("ElseIf IsArray guard should suppress uncertain indexing in source recovery: %+v", got)
+	}
+
+	inlineSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If IsArray(values) Then Debug.Print values(1, 1)
+End Sub
+`
+	inlineFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(inlineSource), Source: []byte(inlineSource)}
+	inlineProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(inlineFile, inlineProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("single-line IsArray guard should suppress uncertain two-dimensional access: %+v", got)
+	}
+
+	inlineElseSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If IsArray(values) Then Debug.Print values(1, 1) Else Debug.Print values(1, 1)
+End Sub
+`
+	inlineElseFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(inlineElseSource), Source: []byte(inlineElseSource)}
+	inlineElseProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(inlineElseFile, inlineElseProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("inline IsArray Else branch should retain the unguarded access finding: %+v", got)
+	}
+
+	branchSource := `Option Explicit
+Public Sub Run(ByVal useArray As Boolean)
+  Dim values As Variant
+  values = Range("A1").Value2
+  If useArray Then
+    values = Range("A1:B2").Value2
+  End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	branchFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(branchSource), Source: []byte(branchSource)}
+	branchProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(branchFile, branchProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("empty-IR branch merge should retain the scalar path: %+v", got)
+	}
+
+	partialSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	partialFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(partialSource), Source: []byte(partialSource)}
+	partialProc := sourceProcedure{
+		Name:       "Run",
+		StartLine:  2,
+		EndLine:    6,
+		Statements: []procedureir.Statement{{Text: "Debug.Print values(1)"}},
+		Features:   procedureFeatureSet{unknown: featureRangeArray},
+	}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(partialFile, partialProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("unknown partial projection should use source fallback: %+v", got)
+	}
+
+	commentSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Rem values(1)
+End Sub
+`
+	commentFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(commentSource), Source: []byte(commentSource)}
+	commentProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(commentFile, commentProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("Rem comments must be ignored by source fallback: %+v", got)
+	}
+	colonCommentSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  values = values: Rem values(1): values(1)
+End Sub
+`
+	colonCommentFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(colonCommentSource), Source: []byte(colonCommentSource)}
+	colonCommentProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(colonCommentFile, colonCommentProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("colon-separated Rem comments must ignore the rest of the line: %+v", got)
+	}
+	conditionalSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+#If False Then
+  values = Range("A1").Value2
+  Debug.Print values(1)
+#Else
+  values = Range("A1:B2").Value2
+  Debug.Print values(1, 1)
+#End If
+End Sub
+`
+	conditionalFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(conditionalSource), Source: []byte(conditionalSource)}
+	conditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 11}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(conditionalFile, conditionalProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("inactive conditional-compilation source must be ignored: %+v", got)
+	}
+	unknownConditionalSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+#If UNKNOWN_BUILD_FLAG Then
+  values = Range("A1:B2").Value2
+#Else
+  values = Range("A1").Value2
+#End If
+  Debug.Print values(1)
+End Sub
+`
+	unknownConditionalFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(unknownConditionalSource), Source: []byte(unknownConditionalSource)}
+	unknownConditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(unknownConditionalFile, unknownConditionalProc), "VBA226"); len(got) != 1 || !strings.Contains(got[0].Message, "used with one array index") {
+		t.Fatalf("unknown conditional branches should merge to an uncertain shape: %+v", got)
+	}
+	sameConditionalSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+#If UNKNOWN_BUILD_FLAG Then
+  values = Range("A1:B2").Value2
+#Else
+  values = Range("A1:B2").Value2
+#End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	sameConditionalFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(sameConditionalSource), Source: []byte(sameConditionalSource)}
+	sameConditionalProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(sameConditionalFile, sameConditionalProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("unknown conditional branches with an Else should retain their common shape: %+v", got)
+	}
+
+	nestedCellsSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2
+  Debug.Print values(1, 3)
+End Sub
+`
+	nestedCellsFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(nestedCellsSource), Source: []byte(nestedCellsSource)}
+	nestedCellsProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(nestedCellsFile, nestedCellsProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("source fallback should preserve nested Cells pair shape: %+v", got)
+	}
+
+	loopSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  For index = 1 To 1
+    values = Range("A1:B2").Value2
+  Next index
+  Debug.Print values(1, 1)
+End Sub
+`
+	loopFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(loopSource), Source: []byte(loopSource)}
+	loopProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(loopFile, loopProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("loop recovery should merge the zero-iteration scalar path: %+v", got)
+	}
+
+	localConstSource := `Option Explicit
+Public Sub Run(ByVal ws As Worksheet, ByVal lastRow As Long)
+  Const COLUMN_COUNT As Long = 14
+  Dim values As Variant
+  values = ws.Range(ws.Cells(2, 1), ws.Cells(lastRow, COLUMN_COUNT)).Value2
+  If IsArray(values) Then
+    Debug.Print values(1, 15)
+  End If
+End Sub
+`
+	localConstFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(localConstSource), Source: []byte(localConstSource)}
+	localConstProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 9}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(localConstFile, localConstProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("source fallback should retain procedure-local constants for bounds: %+v", got)
+	}
+
+	selectSource := `Option Explicit
+Public Sub Run(ByVal mode As Long)
+  Dim values As Variant
+  values = Range("A1").Value2
+  Select Case mode
+    Case 1
+      values = Range("A1:B2").Value2
+    Case 2
+      values = Range("A1:B2").Value2
+  End Select
+  Debug.Print values(1, 1)
+End Sub
+`
+	selectFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(selectSource), Source: []byte(selectSource)}
+	selectProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 12}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(selectFile, selectProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("Select Case recovery should merge the scalar path: %+v", got)
+	}
+
+	continuedSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Debug.Print values( _
+    1)
+End Sub
+`
+	continuedFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(continuedSource), Source: []byte(continuedSource)}
+	continuedProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 7}
+	continuedFindings := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(continuedFile, continuedProc), "VBA226")
+	if len(continuedFindings) != 1 || continuedFindings[0].Line != 6 {
+		t.Fatalf("continued-line finding should use the physical index line: %+v", continuedFindings)
+	}
+
+	earlyExitSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If Not IsArray(values) Then Exit Sub
+  Debug.Print values(1, 1)
+End Sub
+`
+	earlyExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(earlyExitSource), Source: []byte(earlyExitSource)}
+	earlyExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 7}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(earlyExitFile, earlyExitProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("early-exit negative IsArray guard should preserve the surviving array path: %+v", got)
+	}
+
+	blockEarlyExitSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If Not IsArray(values) Then
+    Exit Sub
+  End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	blockEarlyExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(blockEarlyExitSource), Source: []byte(blockEarlyExitSource)}
+	blockEarlyExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 8}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(blockEarlyExitFile, blockEarlyExitProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("block early-exit negative IsArray guard should preserve the surviving array path: %+v", got)
+	}
+
+	elseIfSource := `Option Explicit
+Public Sub Run(ByVal first As Boolean, ByVal second As Boolean)
+  Dim values As Variant
+  values = Range("A1").Value2
+  If first Then
+    values = Range("A1:B2").Value2
+  ElseIf second Then
+    values = Range("A1:B2").Value2
+  End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	elseIfFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(elseIfSource), Source: []byte(elseIfSource)}
+	elseIfProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(elseIfFile, elseIfProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("ElseIf fallthrough should retain the scalar path: %+v", got)
+	}
+
+	procedureExitSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Exit Sub
+  Debug.Print values(1)
+End Sub
+`
+	procedureExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(procedureExitSource), Source: []byte(procedureExitSource)}
+	procedureExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 7}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(procedureExitFile, procedureExitProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("source after Exit Sub must be unreachable: %+v", got)
+	}
+
+	selectEarlyExitSource := `Option Explicit
+Public Sub Run(ByVal mode As Long)
+  Dim values As Variant
+  Select Case mode
+    Case 1
+      Exit Sub
+  End Select
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	selectEarlyExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(selectEarlyExitSource), Source: []byte(selectEarlyExitSource)}
+	selectEarlyExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(selectEarlyExitFile, selectEarlyExitProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("source after Select Case branch Exit Sub should still be analyzed: %+v", got)
+	}
+
+	goSubReturnSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  GoTo Main
+Handler:
+  Return
+Main:
+  GoSub Handler
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	goSubReturnFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(goSubReturnSource), Source: []byte(goSubReturnSource)}
+	goSubReturnProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 11}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(goSubReturnFile, goSubReturnProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("GoSub Return must not terminate source recovery before the caller resumes: %+v", got)
+	}
+
+	loopExitSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  For index = 1 To 1
+    Exit For
+    values = Range("A1:B2").Value2
+  Next index
+  Debug.Print values(1, 1)
+End Sub
+`
+	loopExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(loopExitSource), Source: []byte(loopExitSource)}
+	loopExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(loopExitFile, loopExitProc), "VBA226"); len(got) != 1 || !strings.Contains(got[0].Message, "Single-cell") {
+		t.Fatalf("Exit For must skip unreachable loop statements before merging: %+v", got)
+	}
+
+	doExitSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Do
+    Exit Do
+    values = Range("A1:B2").Value2
+  Loop
+  Debug.Print values(1, 1)
+End Sub
+`
+	doExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(doExitSource), Source: []byte(doExitSource)}
+	doExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(doExitFile, doExitProc), "VBA226"); len(got) != 1 || !strings.Contains(got[0].Message, "Single-cell") {
+		t.Fatalf("Exit Do must skip unreachable loop statements before merging: %+v", got)
+	}
+}
+
+func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {
+	proc := sourceProcedure{
+		Statements:  []procedureir.Statement{{Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Expressions: []procedureir.Expression{{Text: "ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Features:    procedureFeatureSet{unknown: featureRangeArray},
+	}
+	if rangeValueProjectionUnknown(proc) {
+		t.Fatal("graphless procedures with complete statement and expression IR should retain linear analysis")
+	}
+}
+
+func TestVBA226RecoveredRangeValueExpressionUsesRecoveryFallback(t *testing.T) {
+	proc := sourceProcedure{
+		Statements:  []procedureir.Statement{{ID: 1, Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Expressions: []procedureir.Expression{{ID: 1, StatementID: 1, Kind: procedureir.ExpressionUnknown, Text: "ws.Cells(2, 1)", Recovered: true}},
+	}
+	if !rangeValueProjectionUnknown(proc) {
+		t.Fatal("recovered Range.Value child expressions should select source recovery")
+	}
+}
+
+func TestVBA226RecoveryControlKeywordsRequireTokenBoundaries(t *testing.T) {
+	for _, text := range []string{"ElseValue = Range(\"A1\").Value2", "NextValue = Range(\"A1\").Value2", "LoopCount = Range(\"A1\").Value2"} {
+		if rangeValueSourceElse(text) || rangeValueSourceLoopEnd(text) {
+			t.Fatalf("identifier %q must not be treated as a control keyword", text)
+		}
 	}
 }
 

@@ -11,15 +11,24 @@ import (
 // repeated loop path. ReDim parsing deliberately stays shared with the array
 // lifecycle rules; this rule only adds the loop/performance context.
 func (a Analyzer) redimPreserveLoopFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
+	findings, _ := a.redimPreserveLoopFindingsPreparedWithApplicability(file, proc, moduleDecls, arrayVariables(file, proc, moduleDecls))
+	return findings
+}
+
+// redimPreserveLoopFindingsPreparedWithApplicability reuses the immutable
+// array catalog owned by ArrayAnalysisResult. The loop-performance projection
+// has its own reachability/dependency policy, but it must not rescan
+// declarations merely because another array projector already did so.
+func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable) ([]Finding, bool) {
 	regions := excelLoopRegions(proc)
 	if len(regions) == 0 {
-		return nil
+		return nil, false
 	}
-	variables := arrayVariables(file, proc, moduleDecls)
 	if len(variables) == 0 {
-		return nil
+		return nil, false
 	}
 	var findings []Finding
+	applicable := false
 	seen := map[string]bool{}
 	for _, statement := range proc.Statements {
 		if statement.Recovered || !arrayRedimPreserveStatement(statement.Text) {
@@ -62,6 +71,7 @@ func (a Analyzer) redimPreserveLoopFindings(file parsedFile, proc sourceProcedur
 			// VBA227 owns fixed arrays, scalar values, and unknown targets.
 			continue
 		}
+		applicable = true
 
 		dependent := false
 		for _, loop := range bodyLoops {
@@ -114,7 +124,7 @@ func (a Analyzer) redimPreserveLoopFindings(file parsedFile, proc sourceProcedur
 		}
 	}
 	sortFindings(findings)
-	return findings
+	return findings, applicable
 }
 
 // redimLoopVariables extends the shared loop-variable extraction for Do loops.

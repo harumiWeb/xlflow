@@ -1731,9 +1731,22 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	profile := newProcedureDomainProfile(ctx)
 	profile.plannerDecisions(plan)
 	defer profile.flush()
+	var arrayResult *ArrayAnalysisResult
+	if plan.runs(procedureDomainArray) {
+		arrayResult = a.buildArrayAnalysisResult(file, proc, analysisCtx, moduleDecls)
+		if arrayResult != nil {
+			profile.kernel()
+			profile.add(analysisstats.CounterArrayKernelRuns, 1)
+			profile.add(analysisstats.CounterArrayCFGWalks, arrayResult.cfgWalks)
+			profile.add(analysisstats.CounterArrayProjectionRuns, arrayResult.projectionRuns)
+			if arrayResult.projectionRuns > 0 {
+				profile.add(analysisstats.CounterArrayCandidateProcedures, 1)
+			}
+		}
+	}
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
 	if plan.runs(procedureDomainRuntime) {
-		findings = append(findings, a.deterministicRuntimeErrorFindings(file, proc, analysisCtx, moduleDecls)...)
+		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, arrayResult)...)
 	}
 	if plan.runs(procedureDomainDictionary) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
@@ -1791,14 +1804,26 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		}
 	}
 	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRangeValueArrayShape {
-		findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
+		if arrayResult != nil {
+			findings = append(findings, arrayResult.rangeShape()...)
+		} else {
+			findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
+		}
 	}
 	if plan.runs(procedureDomainArray) {
-		findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
+		if arrayResult != nil {
+			findings = append(findings, arrayResult.lifecycle()...)
+		} else {
+			findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
+		}
 		findings = suppressDeterministicArrayWarningDuplicates(findings)
 	}
 	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRedimPreserveInLoops {
-		findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
+		if arrayResult != nil {
+			findings = append(findings, arrayResult.redim()...)
+		} else {
+			findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
+		}
 	}
 	if plan.runs(procedureDomainError) && a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
@@ -2244,6 +2269,19 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	var candidateCounters uint64
 	plan := proc.analysisPlan(a.Config.Analyze, moduleDecls)
 	profile.plannerDecisions(plan)
+	var arrayResult *ArrayAnalysisResult
+	if plan.runs(procedureDomainArray) {
+		arrayResult = a.buildArrayAnalysisResult(file, proc, ctx, moduleDecls)
+		if arrayResult != nil {
+			profile.kernel()
+			profile.add(analysisstats.CounterArrayKernelRuns, 1)
+			profile.add(analysisstats.CounterArrayCFGWalks, arrayResult.cfgWalks)
+			profile.add(analysisstats.CounterArrayProjectionRuns, arrayResult.projectionRuns)
+			if arrayResult.projectionRuns > 0 {
+				profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+			}
+		}
+	}
 	otherMeasurement := profile.begin(procedureDomainOther)
 	opaqueFindings := a.opaqueBooleanArgumentFindings(file, proc, ctx.procedures)
 	if a.Config.Analyze.DetectOpaqueBooleanArguments {
@@ -2253,7 +2291,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	findings = append(findings, opaqueFindings...)
 	if plan.runs(procedureDomainRuntime) {
 		runtimeMeasurement := profile.begin(procedureDomainRuntime)
-		runtimeFindings := a.deterministicRuntimeErrorFindings(file, proc, ctx, moduleDecls)
+		runtimeFindings := a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, ctx, moduleDecls, arrayResult)
 		if enabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA249"); known && enabled {
 			profile.kernel()
 			profile.candidate(&candidateCounters, analysisstats.CounterRuntimeCandidateProcedures)
@@ -2452,8 +2490,13 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	if plan.runs(procedureDomainArray) {
 		arrayMeasurement := profile.begin(procedureDomainArray)
-		arrayFindings := a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)
-		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison {
+		arrayFindings := []Finding(nil)
+		if arrayResult != nil {
+			arrayFindings = arrayResult.lifecycle()
+		} else {
+			arrayFindings = a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)
+		}
+		if arrayResult == nil && (a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison) {
 			profile.kernel()
 			profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
 			if proc.Graph != nil {
@@ -2469,11 +2512,18 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRedimPreserveInLoops {
 		arrayMeasurement := profile.begin(procedureDomainArray)
-		redimFindings := a.redimPreserveLoopFindings(file, proc, moduleDecls)
-		profile.kernel()
-		profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
-		if proc.Graph != nil {
-			profile.add(analysisstats.CounterArrayCFGWalks, 1)
+		redimFindings := []Finding(nil)
+		if arrayResult != nil {
+			redimFindings = arrayResult.redim()
+		} else {
+			redimFindings = a.redimPreserveLoopFindings(file, proc, moduleDecls)
+		}
+		if arrayResult == nil {
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+			if proc.Graph != nil {
+				profile.add(analysisstats.CounterArrayCFGWalks, 1)
+			}
 		}
 		arrayMeasurement.finish(len(redimFindings))
 		findings = append(findings, redimFindings...)
@@ -2609,11 +2659,18 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRangeValueArrayShape {
 		arrayMeasurement := profile.begin(procedureDomainArray)
-		arrayFindings := a.rangeValueShapeFindings(file, proc)
-		profile.kernel()
-		profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
-		if proc.Graph != nil {
-			profile.add(analysisstats.CounterArrayCFGWalks, 1)
+		arrayFindings := []Finding(nil)
+		if arrayResult != nil {
+			arrayFindings = arrayResult.rangeShape()
+		} else {
+			arrayFindings = a.rangeValueShapeFindings(file, proc)
+		}
+		if arrayResult == nil {
+			profile.kernel()
+			profile.candidate(&candidateCounters, analysisstats.CounterArrayCandidateProcedures)
+			if proc.Graph != nil {
+				profile.add(analysisstats.CounterArrayCFGWalks, 1)
+			}
 		}
 		arrayMeasurement.finish(len(arrayFindings))
 		findings = append(findings, arrayFindings...)

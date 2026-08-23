@@ -145,6 +145,14 @@ document in realtime); unresolved, external, ambiguous, and effect-free
 getters are not inferred as hazards, and standalone getter predicates are
 allowed. General array allocation/dimension safety remains owned by VBA227.
 
+Array runtime projections share the same procedure-local `ArrayAnalysisResult`
+as lifecycle diagnostics. Deterministic array `VBA249` consumes proven
+allocation, shape, bound, and operation facts from that result; it does not
+start a second array CFG fixed point. The result is immutable for the current
+analysis revision and is shared by batch and realtime workers. Performance-log
+records expose `array_kernel_runs`, `array_cfg_walks`, and
+`array_projection_runs`; these counters describe analysis work, not findings.
+
 `xlflow check` aggregates `lint`, `analyze`, and `doctor`. It continues after lint/analyze findings and returns all cheap source feedback before reporting Excel COM doctor status.
 
 ## Macro Entrypoint Discovery

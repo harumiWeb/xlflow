@@ -21,6 +21,12 @@ observation into a preflight-blocking compiler claim. Local VBE oracle fixtures
 provide evidence for that boundary, while ordinary analysis remains
 Excel-free.
 
+Issue #696 identifies the cost of having each array-sensitive diagnostic
+reconstruct overlapping allocation, shape, bounds, entry-state, and operation
+facts. The reuse boundary must be large enough to amortize that work without
+making a diagnostic with intentionally different control-flow conservatism
+adopt another rule's state contract.
+
 ## Decision
 
 Extend the shared array metadata and transfer model with a reusable shape
@@ -56,10 +62,40 @@ quiet. Fixed arrays are never treated as resizable, and a scalar is never
 treated as an array or iterable source. `Erase` transitions fixed arrays to
 their reset-but-allocated state and dynamic arrays to unallocated state.
 
+The canonical procedure result is an internal, immutable
+`ArrayAnalysisResult`. It is materialized at most once for one procedure
+analysis revision after the reusable procedure/module facts have been
+prepared. The compact implementation keeps the shared variable/entry-state
+preparation and policy-lane outputs in categorized slices
+(`lifecycleFindings`, `runtimeFindings`, `redimFindings`, and
+`rangeFindings`). Projectors expose copies of those slices, so the result is
+still read-only after materialization; the stored `Finding` values do not
+carry rule enablement, suppression mutation, or a new severity contract. It
+lives only for the current procedure analysis and is safe for concurrent
+read-only projection; it is not a project-wide or cross-revision cache.
+
+The array kernel projects the result into the applicable diagnostics for both
+batch and realtime/LSP analysis. The block-level projection preserves the
+existing `VBA208`, deterministic array `VBA249`, object-array `VBA101` /
+`VBA102`, and related operation semantics. The `VBA227` lifecycle projection
+retains its physical source-line ordering, normal-edge pruning,
+`On Error Resume Next`, and reliable-allocation policy. `VBA241` consumes
+shared `ReDim` and loop-region facts without another fixed-point walk. `VBA226`
+retains its scalar/2D `Range.Value` shape lattice and may use an explicitly
+separate secondary pass when that policy requires it. These policy lanes are
+projection choices, not alternative public state models; duplicate findings
+continue to be resolved by the existing operation identity and ownership
+rules.
+
 ## Consequences
 
 - Array-sensitive diagnostics agree across declarations, assignments, calls,
   bounds, `Erase`, `ReDim`, and `For Each`.
+- Shared preparation and the main array fixed point run once per procedure
+  revision, after which multiple diagnostic projectors read the same result.
+- The performance recorder exposes `array_kernel_runs`, `array_cfg_walks`,
+  and `array_projection_runs`. Core array projections keep one kernel result
+  and one main CFG walk; an applicable `VBA226` secondary pass is explicit.
 - Existing `VBA208`, `VBA227`, `VBA228`, and `VB023` ownership boundaries remain
   stable; new compile-equivalent contracts are registered separately from
   runtime-safety warnings.
@@ -100,6 +136,7 @@ their reset-but-allocated state and dynamic arrays to unallocated state.
   runtime safety rather than compile-equivalent diagnostics.
 - `docs/specs/array-lifecycle-safety.md` and ADR-0028 for the existing
   allocation/dimension model and `VBA208` ownership.
+- Issue #696 acceptance criteria and its shared-kernel performance matrix.
 - `docs/specs/vba-analysis-ir.md` and `internal/vba/procedureir` for array
   declaration, bounds, `ParamArray`, and procedure-return facts.
 - `docs/specs/vbe-oracle.md` and ADR-0026 for compile-equivalent evidence,
@@ -119,6 +156,7 @@ None
 ## Related
 
 - Issue #593
+- Issue #696
 - ADR-0026, ADR-0028
 - `docs/specs/array-lifecycle-safety.md`
 - `docs/specs/range-value-array-shape-safety.md`
