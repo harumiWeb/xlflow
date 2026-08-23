@@ -556,6 +556,14 @@ func TestVBA226RecoveredRangeValueExpressionUsesRecoveryFallback(t *testing.T) {
 	}
 }
 
+func TestVBA226RecoveryControlKeywordsRequireTokenBoundaries(t *testing.T) {
+	for _, text := range []string{"ElseValue = Range(\"A1\").Value2", "NextValue = Range(\"A1\").Value2", "LoopCount = Range(\"A1\").Value2"} {
+		if rangeValueSourceElse(text) || rangeValueSourceLoopEnd(text) {
+			t.Fatalf("identifier %q must not be treated as a control keyword", text)
+		}
+	}
+}
+
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

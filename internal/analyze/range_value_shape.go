@@ -276,7 +276,7 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 			}
 			frame.exited = false
 			state = cloneRangeValueFlowState(frame.before)
-		} else if strings.HasPrefix(lower, "else") && len(branches) > 0 {
+		} else if rangeValueSourceElse(statement.Text) && len(branches) > 0 {
 			frame := &branches[len(branches)-1]
 			current := cloneRangeValueFlowState(state)
 			frame.hasElse = true
@@ -359,7 +359,7 @@ func updateRangeValueSourceGuard(state *rangeValueFlowState, guards *[]rangeValu
 		}
 		return
 	}
-	if strings.HasPrefix(lower, "else") {
+	if rangeValueSourceElse(text) || strings.HasPrefix(lower, "elseif ") {
 		if len(*guards) == 0 {
 			return
 		}
@@ -430,7 +430,16 @@ func rangeValueSourceLoopStart(text string) bool {
 
 func rangeValueSourceLoopEnd(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
-	return strings.HasPrefix(lower, "next") || strings.HasPrefix(lower, "loop") || lower == "wend"
+	return rangeValueSourceKeywordLine(lower, "next") || rangeValueSourceKeywordLine(lower, "loop") || rangeValueSourceKeywordLine(lower, "wend")
+}
+
+func rangeValueSourceElse(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return rangeValueSourceKeywordLine(lower, "else")
+}
+
+func rangeValueSourceKeywordLine(lower, keyword string) bool {
+	return lower == keyword || strings.HasPrefix(lower, keyword+" ")
 }
 
 func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool {
