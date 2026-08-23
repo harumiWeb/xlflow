@@ -321,6 +321,10 @@ const (
 )
 
 type VariableAccess struct {
+	// ID is stable within the procedure's IR revision and follows source
+	// order. It is intentionally omitted from the wire representation: the
+	// identity is an implementation detail used by resolution overlays.
+	ID           int              `json:"-"`
 	Name         string           `json:"name"`
 	Mode         AccessMode       `json:"mode"`
 	Scope        SymbolScope      `json:"scope"`
@@ -434,6 +438,10 @@ type EnumResolution struct {
 // Range covers only the event identifier, making it suitable for a precise
 // diagnostic while the surrounding CallSite retains legacy call-graph data.
 type RaiseEventReference struct {
+	// ID is stable within the procedure's IR revision and follows source
+	// order. It is intentionally omitted from the wire representation: the
+	// identity is an implementation detail used by resolution overlays.
+	ID                  int                 `json:"-"`
 	Name                string              `json:"name"`
 	Module              string              `json:"module"`
 	Caller              ProcedureRef        `json:"caller"`

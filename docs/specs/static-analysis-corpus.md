@@ -752,6 +752,42 @@ replacement maintains a declaration-line index, rechecks the original
 slash-normalized `EqualFold` file/name/kind and exact-line contract, preserves
 the first deterministic match, and defensively clones only that match.
 
+#### Issue #699 resolution-overlay measurements
+
+The focused overlay benchmark compares the existing materialized
+`procedureir.Resolve` path (before) with `ResolveView` construction (after) on
+the same call/access-heavy synthetic IR. Fixture and resolver construction are
+outside the timer. Run it on Windows through the CGO wrapper:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/vba/procedureir -run '^$' -bench '^BenchmarkResolutionOverlay$' -benchmem -benchtime=1x -count 5
+```
+
+The recorded environment was Windows/amd64, 12th Gen Intel(R) Core(TM)
+i7-12700, Go 1.26.6 (`go1.26.6 windows/amd64`). Median results from five
+single-iteration samples were:
+
+| procedures | path                  |      ns/op |       B/op | allocs/op |
+| ---------: | --------------------- | ---------: | ---------: | --------: |
+|        500 | materialized (before) |  6,548,100 |  9,313,912 |    39,082 |
+|        500 | overlay (after)       |  3,154,300 |  5,189,888 |    22,574 |
+|      1,000 | materialized (before) | 13,999,000 | 18,603,200 |    78,118 |
+|      1,000 | overlay (after)       |  8,495,100 | 10,373,584 |    45,116 |
+|      2,000 | materialized (before) | 36,590,300 | 37,200,208 |   156,200 |
+|      2,000 | overlay (after)       | 17,692,100 | 20,740,944 |    90,198 |
+
+The synthetic 2,000-procedure case therefore used about 44% fewer bytes, 42%
+fewer allocations, and 52% less time. These are same-machine observations, not
+CI thresholds. The existing end-to-end ROneCOne leaf was also sampled five
+times with the same wrapper and `-benchmem -benchtime=1x -count=5`, first with
+the diagnostic-only materialized clone and then with the overlay. Median
+`analyze-only` values were 28.017 s, 26,971,730,264 B/op, and 185,107,938
+allocs/op before, versus 24.999 s, 26,739,378,024 B/op, and 181,230,979
+allocs/op after (510 findings in every run). The full analyzer is dominated by
+other stages, and the five-run after set included two scheduler outliers; keep
+the leaf benchmark as end-to-end evidence rather than a fixed performance
+gate.
+
 The focused `LibJSON.ParseChars` benchmark set a target of at least 20% lower
 median runtime and 50% lower allocated bytes per operation. On the same
 Windows machine, the pre-change five-run baseline was 1.190-1.266 s,

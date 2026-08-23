@@ -8,97 +8,10 @@ import (
 
 // Resolve returns a deep copy with project-dependent call and symbol
 // resolutions applied. Syntax-local parameter/local/module scopes are kept.
+// Consumers that only need read-only resolution should use ResolveView to
+// avoid cloning the full procedure payload.
 func Resolve(in DocumentIR, resolver Resolver) DocumentIR {
-	out := Clone(in)
-	if resolver == nil {
-		return out
-	}
-	for procedureIndex := range out.Procedures {
-		procedure := &out.Procedures[procedureIndex]
-		lexicalNonCallable := declarationNames(out.Declarations, procedure.Declarations)
-		eventResolver, hasEventResolver := resolver.(interface {
-			ResolveEvent(SymbolReference) SymbolResolution
-		})
-		for callIndex := range procedure.Calls {
-			call := &procedure.Calls[callIndex]
-			if call.IsRaiseEvent {
-				// RaiseEvent is resolved from the syntax-local event facts below.
-				// A generic Resolver cannot prove same-object event visibility, so
-				// those calls remain incomplete rather than falling through to the
-				// ordinary procedure resolver.
-				continue
-			}
-			if !isAssignmentTargetCall(*call, *procedure) {
-				call.NonCallableNames = append([]string(nil), lexicalNonCallable...)
-			}
-			call.Resolution = cloneCallResolution(resolver.ResolveCall(cloneCall(*call)))
-		}
-		for eventIndex := range procedure.RaiseEvents {
-			event := &procedure.RaiseEvents[eventIndex]
-			if hasEventResolver {
-				event.Resolution = cloneSymbolResolution(eventResolver.ResolveEvent(SymbolReference{
-					Name: event.Name, Module: out.ModuleName, Caller: event.Caller, Range: event.Range,
-				}))
-			} else {
-				event.Resolution = SymbolResolution{Scope: ScopeUnresolved, Status: ResolutionIncomplete}
-			}
-		}
-		for callIndex := range procedure.Calls {
-			call := &procedure.Calls[callIndex]
-			if !call.IsRaiseEvent {
-				continue
-			}
-			call.Resolution = CallResolution{Status: ResolutionIncomplete}
-			for _, event := range procedure.RaiseEvents {
-				if !strings.EqualFold(event.Name, call.Callee.BaseName) {
-					continue
-				}
-				call.Resolution = CallResolution{Status: event.Resolution.Status, Candidates: cloneCandidates(event.Resolution.Candidates)}
-				break
-			}
-		}
-		for accessIndex := range procedure.Accesses {
-			access := &procedure.Accesses[accessIndex]
-			if access.Scope != ScopeUnresolved && access.Scope != ScopeProject {
-				// Module-scope bindings historically bypass project resolution so
-				// local variables continue to shadow imported symbols. Enum members
-				// are the exception: two visible members can share a bare name even
-				// when one is declared in this module, and only the canonical resolver
-				// can determine whether a lexical winner is unique.
-				if access.Scope == ScopeModule {
-					resolution := resolver.ResolveSymbol(SymbolReference{
-						Name: access.Name, Module: out.ModuleName,
-						Caller: ProcedureRef{
-							Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind,
-							QualifiedName: procedure.Symbol.QualifiedName,
-						}, Range: access.Range,
-					})
-					if allEnumCandidates(resolution.Candidates) {
-						access.Resolution = cloneSymbolResolution(resolution)
-						access.Scope = resolution.Scope
-						continue
-					}
-				}
-				access.Resolution = SymbolResolution{Scope: access.Scope}
-				continue
-			}
-			resolution := resolver.ResolveSymbol(SymbolReference{
-				Name: access.Name, Module: out.ModuleName,
-				Caller: ProcedureRef{
-					Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind,
-					QualifiedName: procedure.Symbol.QualifiedName,
-				},
-				Range: access.Range,
-			})
-			access.Resolution = cloneSymbolResolution(resolution)
-			access.Scope = resolution.Scope
-			if access.Scope == "" {
-				access.Scope = ScopeUnresolved
-				access.Resolution.Scope = ScopeUnresolved
-			}
-		}
-	}
-	return out
+	return ResolveView(in, resolver).Materialize()
 }
 
 func allEnumCandidates(candidates []Candidate) bool {

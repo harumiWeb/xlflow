@@ -37,53 +37,82 @@ func ResolutionSuggestion(code string) string {
 // resolved document.  Incomplete snapshots, parser recovery, external/member
 // calls, and dynamic APIs deliberately fail open.
 func Diagnostics(doc DocumentIR, complete bool) []ResolutionDiagnostic {
+	return diagnosticsFor(doc, complete, nil)
+}
+
+// DiagnosticsView projects the same resolution diagnostics from a read-only
+// syntax IR plus overlay. The syntax/recovery policy is shared with
+// Diagnostics; only project-dependent facts are read through the view.
+func DiagnosticsView(view ResolvedDocumentView, complete bool) []ResolutionDiagnostic {
+	return diagnosticsFor(view.document, complete, &view)
+}
+
+func diagnosticsFor(doc DocumentIR, complete bool, view *ResolvedDocumentView) []ResolutionDiagnostic {
 	if !complete || documentResolutionIncomplete(doc) {
 		return nil
 	}
 	out := make([]ResolutionDiagnostic, 0)
-	for _, procedure := range doc.Procedures {
+	for procedureIndex, procedure := range doc.Procedures {
 		if procedure.Symbol.Recovered {
 			continue
 		}
-		for _, call := range procedure.Calls {
+		for callIndex, call := range procedure.Calls {
 			if call.IsRaiseEvent {
 				continue
 			}
 			if !syntacticInvocation(procedure, call) {
 				continue
 			}
-			if call.Resolution.Status == ResolutionNonCallable ||
-				(call.Resolution.Status == ResolutionUnresolved && call.Resolution.ProjectLocal) {
+			resolution := call.Resolution
+			if view != nil {
+				if resolved, ok := view.resolvedCallAt(procedureIndex, callIndex); ok {
+					resolution = resolved.Resolution
+				}
+			}
+			if resolution.Status == ResolutionNonCallable ||
+				(resolution.Status == ResolutionUnresolved && resolution.ProjectLocal) {
 				name := strings.TrimSpace(call.Callee.Text)
 				message := "Call target is missing or is not callable in this project."
 				if name != "" {
 					message = "Call target " + name + " is missing or is not callable in this project."
 				}
-				out = append(out, ResolutionDiagnostic{Code: "VB052", Message: message, Range: call.Range, Candidates: append([]Candidate(nil), call.Resolution.Candidates...)})
+				out = append(out, ResolutionDiagnostic{Code: "VB052", Message: message, Range: call.Range, Candidates: append([]Candidate(nil), resolution.Candidates...)})
 			}
 		}
-		for _, event := range procedure.RaiseEvents {
-			if event.Recovered || event.Resolution.Status != ResolutionUnresolved {
+		for eventIndex, event := range procedure.RaiseEvents {
+			resolution := event.Resolution
+			if view != nil {
+				if resolved, ok := view.resolvedEventAt(procedureIndex, eventIndex); ok {
+					resolution = resolved.Resolution
+				}
+			}
+			if event.Recovered || resolution.Status != ResolutionUnresolved {
 				continue
 			}
 			out = append(out, ResolutionDiagnostic{Code: "VB054", Message: "RaiseEvent target is not declared in this object module.", Range: event.Range})
 		}
-		for _, access := range procedure.Accesses {
+		for accessIndex, access := range procedure.Accesses {
 			if accessIsQualified(procedure, access) {
 				continue
 			}
-			if access.Resolution.Status != ResolutionAmbiguous || len(access.Resolution.Candidates) < 2 {
+			resolution := access.Resolution
+			if view != nil {
+				if resolved, ok := view.resolvedAccessAt(procedureIndex, accessIndex); ok {
+					resolution = resolved.Resolution
+				}
+			}
+			if resolution.Status != ResolutionAmbiguous || len(resolution.Candidates) < 2 {
 				continue
 			}
 			allEnum := true
-			for _, candidate := range access.Resolution.Candidates {
+			for _, candidate := range resolution.Candidates {
 				if !isEnumMemberKind(candidate.Kind) {
 					allEnum = false
 					break
 				}
 			}
 			if allEnum {
-				out = append(out, ResolutionDiagnostic{Code: "VB053", Message: "Enum member reference is ambiguous; qualify the member with its Enum name.", Range: access.Range, Candidates: append([]Candidate(nil), access.Resolution.Candidates...)})
+				out = append(out, ResolutionDiagnostic{Code: "VB053", Message: "Enum member reference is ambiguous; qualify the member with its Enum name.", Range: access.Range, Candidates: append([]Candidate(nil), resolution.Candidates...)})
 			}
 		}
 	}

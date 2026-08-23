@@ -23,7 +23,9 @@ the same analysis must remain reusable by source-only CLI commands.
 The foundation in issue #426 needs exact existing diagnostic locations,
 recoverable partial analysis, deterministic output, and project resolution
 that can be refreshed without rewalking unchanged syntax. It does not yet need
-control-flow graphs or effect propagation.
+control-flow graphs or effect propagation. Issue #699 adds a performance
+constraint: batch resolution diagnostics must not deep-clone all procedure
+syntax and semantic payloads when only project-dependent facts change.
 
 ## Decision
 
@@ -36,12 +38,36 @@ copies only Go-owned values: strings, enums, stable IDs, slices, and
 the read callback. `BuildSource` owns parsing and closing for one-shot callers;
 `BuildParsed` uses a caller-owned parsed document without closing it.
 
-Separate syntax extraction from project resolution. A syntax-local
+Separate syntax extraction from project resolution. A syntax-local, immutable
 `DocumentIR` records procedures, declarations, statements, expressions, calls,
-and variable accesses. `Resolve` applies a replaceable project symbol/call
-resolver to a copy of that IR without reparsing or rescanning source. Resolution
-must explicitly represent matched, ambiguous, unresolved, external,
-built-in-like, and member-call outcomes.
+and variable accesses. `ResolveView` applies a replaceable project
+symbol/call resolver to a read-only resolution overlay without reparsing,
+rescanning source, or cloning the procedure payloads. The view exposes resolved
+calls, accesses, and events through helpers so consumers do not depend on
+whether facts are stored inline or in a side table. Resolution must explicitly
+represent matched, ambiguous, unresolved, external, built-in-like, and
+member-call outcomes.
+
+The overlay is indexed by revision-local procedure identity and stable IR fact
+IDs, not source text. A procedure identity includes document/module context,
+qualified procedure name and kind, declaration start, and source-order
+ordinal. Call IDs are reused for calls; accesses and event references receive
+the corresponding revision-local IDs. These IDs are deterministic within one
+document revision but are not workspace-global identities. Access and event
+IDs remain internal metadata and are omitted from serialized IR/JSON.
+
+`DiagnosticsView` shares the existing resolution-diagnostic walker with
+`Diagnostics` and reads syntax/recovery facts from the immutable IR while
+reading project-dependent call, access, and event facts from the overlay. Batch
+analyzer resolution diagnostics use this view. Effects, ordinary analyzer
+rules, lint, LSP, metrics, and developer-only oracle consumers retain the
+materialized path unless they independently require an overlay migration.
+
+Keep `Resolve` as the compatibility API for consumers that require an
+independently owned resolved `DocumentIR`: it may materialize a view and must
+preserve the existing input-unchanged and independent-ownership guarantees.
+`ResolveView` and materialization must also preserve behavior for a nil resolver,
+including the existing unresolved/incomplete representation.
 
 Carry module kind in resolver symbols. A receiver-less call may resolve to a
 non-standard procedure only within the same module; class, document, and
@@ -104,6 +130,9 @@ contracts.
   reuse one procedure and source-location model.
 - Positive: syntax extraction is independent of changing project symbols, so
   call resolution can be refreshed without another CST walk.
+- Positive: read-only batch resolution can refresh project-dependent facts
+  without deep-cloning statements, expressions, declarations, calls, accesses,
+  and other procedure-level payloads.
 - Positive: cached analysis values are safe after the parsed document closes
   because the IR contains no borrowed parser state.
 - Positive: a body-only edit rebuilds only changed procedure IR while safely
@@ -116,8 +145,14 @@ contracts.
   that cannot be represented by current statement or expression kinds.
 - Negative: revision-local analyzer views require every consumer and worker to
   honor the immutable ownership contract; mutable rule state must remain local.
-- Negative: snapshot and public compatibility projections still retain their
-  defensive-copy cost even though analyzer hot paths use zero-copy views.
+- Negative: defensive copies and normalization allocate more Go values than a
+  consumer-specific walk.
+- Negative: compatibility projections remain necessary while existing calls,
+  symbols, analyzer, and LSP result types continue to serve their public
+  contracts.
+- Negative: overlay indexes and revision-local fact identity add bookkeeping,
+  and consumers that need independent ownership still pay the materialization
+  cost of `Resolve`.
 - Limitation: issue #426 provides syntactic structure, not executable-path
   truth, type-complete member binding, COM type-library resolution, or
   interprocedural effects.
@@ -142,6 +177,15 @@ contracts.
 6. **Rebuild syntax whenever the project symbol snapshot changes** - Rejected
    because local syntax is unchanged; a separate resolution overlay is cheaper
    and makes unresolved or ambiguous states explicit.
+7. **Deep-clone the complete IR for every read-only diagnostic pass** - Rejected
+   because large modules duplicate syntax-local and procedure-level semantic
+   collections even though batch resolution changes only a small set of facts.
+8. **Key overlay entries by source text** - Rejected because text is not a
+   stable identity when the IR already provides deterministic revision-local
+   fact IDs and procedure identity.
+9. **Migrate every materialized consumer at once** - Rejected because LSP,
+   effects, and other consumers may require independently owned snapshots; the
+   overlay is introduced first at the batch resolution-diagnostic boundary.
 
 ## Evidence
 
@@ -155,6 +199,8 @@ contracts.
   `internal/vba/intel/analysis_snapshot_test.go`.
 - Validation consumer: `internal/analyze/analyzer.go`,
   `internal/analyze/analyzer_test.go`.
+- Resolution overlay and compatibility boundary: `internal/vba/procedureir`,
+  `internal/analyze/analyzer.go`, and issue #699.
 - Public compatibility contract: `docs/specs/cli-contract.md`.
 
 ## Related
@@ -164,4 +210,4 @@ contracts.
 - `docs/adr/ADR-0022-conservative-vba-control-flow-graph.md`
 - `docs/adr/ADR-0023-procedure-effect-summaries.md`
 - `docs/specs/vba-analysis-ir.md`
-- xlflow issues #425, #426, #427, and #428
+- xlflow issues #425, #426, #427, #428, and #699
