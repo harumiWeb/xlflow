@@ -485,6 +485,16 @@ func TestVBA226GraphlessCompleteIRDoesNotUseRecoveryFallback(t *testing.T) {
 	}
 }
 
+func TestVBA226RecoveredRangeValueExpressionUsesRecoveryFallback(t *testing.T) {
+	proc := sourceProcedure{
+		Statements:  []procedureir.Statement{{ID: 1, Text: "values = ws.Range(ws.Cells(2, 1), ws.Cells(2, 2)).Value2"}},
+		Expressions: []procedureir.Expression{{ID: 1, StatementID: 1, Kind: procedureir.ExpressionUnknown, Text: "ws.Cells(2, 1)", Recovered: true}},
+	}
+	if !rangeValueProjectionUnknown(proc) {
+		t.Fatal("recovered Range.Value child expressions should select source recovery")
+	}
+}
+
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -273,6 +273,9 @@ func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
 }
 
 func rangeValueProjectionUnknown(proc sourceProcedure) bool {
+	if rangeValueHasUnknownExpression(proc) {
+		return true
+	}
 	if proc.Features.unknown&featureRangeArray == 0 {
 		return false
 	}
@@ -288,6 +291,29 @@ func rangeValueProjectionUnknown(proc sourceProcedure) bool {
 		}
 	}
 	return false
+}
+
+func rangeValueHasUnknownExpression(proc sourceProcedure) bool {
+	rangeStatements := map[int]bool{}
+	for _, statement := range proc.Statements {
+		if rangeValueTextLooksRelevant(statement.Text) {
+			rangeStatements[statement.ID] = true
+		}
+	}
+	for _, expression := range proc.Expressions {
+		if !expression.Recovered && expression.Kind != procedureir.ExpressionUnknown {
+			continue
+		}
+		if rangeValueTextLooksRelevant(expression.Text) || (expression.StatementID != 0 && rangeStatements[expression.StatementID]) {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeValueTextLooksRelevant(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, ".value") || strings.Contains(lower, "range(") || strings.Contains(lower, "resize(") || strings.Contains(lower, "cells(")
 }
 
 func (r *ArrayAnalysisResult) lifecycle() []Finding  { return r.findings("lifecycle") }
