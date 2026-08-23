@@ -278,6 +278,31 @@ End Sub
 	}
 }
 
+func TestVBA226FallsBackToSourceLinesForEmptyProcedureIR(t *testing.T) {
+	t.Parallel()
+	source := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Debug.Print values(1)
+End Sub
+`
+	file := parsedFile{
+		Path:   "Main.bas",
+		Lines:  normalizedSourceLines(source),
+		Source: []byte(source),
+	}
+	proc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if !rangeValueShapeApplicable(file, proc) {
+		t.Fatal("empty procedure projection should use source-line applicability")
+	}
+	findings := (Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(file, proc)
+	got := findingsByCode(findings, "VBA226")
+	if len(got) != 1 || got[0].Line != 5 || !strings.Contains(got[0].Message, "Single-cell") {
+		t.Fatalf("source-line fallback findings = %+v, want one scalar-index finding on line 5", got)
+	}
+}
+
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

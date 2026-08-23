@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
@@ -62,6 +63,11 @@ type rangeValueIssue struct {
 	suggestion string
 }
 
+type rangeValueSourceStatement struct {
+	line int
+	text string
+}
+
 var (
 	rangeValueAddressRe     = regexp.MustCompile(`(?i)^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$`)
 	rangeValueBoundRe       = regexp.MustCompile(`(?i)\b([UL])Bound\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*([^)]*))?\)`)
@@ -74,8 +80,11 @@ var (
 )
 
 func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure) []Finding {
-	if !a.Config.Analyze.DetectRangeValueArrayShape || len(proc.Statements) == 0 {
+	if !a.Config.Analyze.DetectRangeValueArrayShape {
 		return nil
+	}
+	if len(proc.Statements) == 0 {
+		return a.rangeValueShapeFindingsFromSource(file, proc)
 	}
 	facts := rangeValueFactsForProcedure(file, proc)
 	if proc.Graph == nil {
@@ -151,6 +160,139 @@ func (a Analyzer) rangeValueShapeFindings(file parsedFile, proc sourceProcedure)
 		}
 		return out[i].Message < out[j].Message
 	})
+	return out
+}
+
+// rangeValueShapeFindingsFromSource is a deliberately narrow recovery path.
+// Procedure IR normally supplies canonical expressions and CFG edges; when a
+// recovered procedure has no statement projection, source lines are the only
+// available evidence. The textual transfer remains conservative and is used
+// only for this unpopulated projection, so it cannot change complete-IR CFG
+// semantics or add another fixed-point walk.
+func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc sourceProcedure) []Finding {
+	sourceStatements := rangeValueSourceStatements(file, proc)
+	if len(sourceStatements) == 0 {
+		return nil
+	}
+	facts := rangeValueFactsForProcedure(file, proc)
+	state := newRangeValueFlowState()
+	var findings []Finding
+	for index, source := range sourceStatements {
+		statement := procedureir.Statement{
+			ID:   index + 1,
+			Text: source.text,
+			Range: vbaast.Range{
+				StartLine: source.line,
+				EndLine:   source.line,
+			},
+		}
+		issues, next := rangeValueStatement(state, statement, facts)
+		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
+		state = next
+	}
+	return findings
+}
+
+func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool {
+	for _, source := range rangeValueSourceStatements(file, proc) {
+		code := strings.ToLower(normalizedCodeLine(source.text))
+		if strings.Contains(code, ".value") || strings.Contains(code, "range(") || strings.Contains(code, "resize(") || strings.Contains(code, "cells(") {
+			return true
+		}
+	}
+	return false
+}
+
+func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeValueSourceStatement {
+	lines := file.Lines
+	if len(lines) == 0 && len(file.Source) > 0 {
+		lines = normalizedSourceLines(string(file.Source))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	start := proc.StartLine
+	if start < 1 {
+		start = 1
+	}
+	end := proc.EndLine
+	if end <= 0 || end > len(lines) {
+		end = len(lines)
+	}
+	if start > end {
+		return nil
+	}
+
+	var out []rangeValueSourceStatement
+	var continued strings.Builder
+	continuedLine := 0
+	flush := func(line int) {
+		text := strings.TrimSpace(continued.String())
+		if text != "" {
+			for _, part := range splitRangeValueSourceStatements(text) {
+				if strings.TrimSpace(part) != "" {
+					out = append(out, rangeValueSourceStatement{line: line, text: strings.TrimSpace(part)})
+				}
+			}
+		}
+		continued.Reset()
+		continuedLine = 0
+	}
+	for line := start; line <= end; line++ {
+		text := strings.TrimSpace(rawWorksheetCodeLine(lines[line-1]))
+		if text == "" {
+			continue
+		}
+		if continued.Len() == 0 {
+			continuedLine = line
+		}
+		continuedLineText := text
+		if vbaLineContinues(text) {
+			text = strings.TrimSpace(strings.TrimSuffix(text, "_"))
+		}
+		if continued.Len() > 0 && text != "" {
+			continued.WriteByte(' ')
+		}
+		continued.WriteString(text)
+		if !vbaLineContinues(continuedLineText) {
+			flush(continuedLine)
+		}
+	}
+	if continued.Len() > 0 {
+		flush(continuedLine)
+	}
+	return out
+}
+
+func splitRangeValueSourceStatements(text string) []string {
+	var out []string
+	start := 0
+	inString := false
+	depth := 0
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case ':':
+			if !inString && depth == 0 {
+				out = append(out, strings.TrimSpace(text[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	out = append(out, strings.TrimSpace(text[start:]))
 	return out
 }
 
@@ -427,18 +569,28 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 	}
 
 	if left, right, ok := rangeValueAssignment(raw); ok {
-		if target, ok := rangeValueMemberReceiver(statement.Target, facts, "value", "value2"); ok {
-			if sourceName := rangeValueBareName(right); sourceName != "" {
-				if source, found := state.values[sourceName]; found {
+		if sourceName := rangeValueBareName(right); sourceName != "" {
+			if source, found := state.values[sourceName]; found {
+				if target, foundTarget := rangeValueMemberReceiver(statement.Target, facts, "value", "value2"); foundTarget {
 					if issue := rangeValueDestinationIssue(target, source, state, facts); issue != nil {
 						issues = append(issues, *issue)
+					}
+				} else if receiver, foundTarget := rangeValueMemberReceiverText(left, "value", "value2"); foundTarget {
+					if destination, recognized := rangeValueRangeShapeText(receiver, state, facts); recognized {
+						if issue := rangeValueDestinationShapeIssue(destination, source); issue != nil {
+							issues = append(issues, *issue)
+						}
 					}
 				}
 			}
 		}
 		if targetName := rangeValueBareName(left); targetName != "" {
 			delete(state.arrayGuards, targetName)
-			if source, ok := rangeValueSourceShape(statement.Value, state, facts); ok {
+			source, sourceKnown := rangeValueSourceShape(statement.Value, state, facts)
+			if !sourceKnown {
+				source, sourceKnown = rangeValueSourceShapeText(right, state, facts)
+			}
+			if sourceKnown {
 				state.values[targetName] = source
 				delete(state.ranges, targetName)
 			} else if sourceName := rangeValueBareName(right); sourceName != "" {
@@ -462,7 +614,11 @@ func rangeValueStatement(state rangeValueFlowState, statement procedureir.Statem
 
 	if match := rangeValueSetRe.FindStringSubmatch(raw); len(match) == 3 {
 		name := strings.ToLower(match[1])
-		if shape, ok := rangeValueRangeShapeExpression(statement.Value, state, facts); ok {
+		shape, ok := rangeValueRangeShapeExpression(statement.Value, state, facts)
+		if !ok {
+			shape, ok = rangeValueRangeShapeText(match[2], state, facts)
+		}
+		if ok {
 			state.ranges[name] = shape
 		} else {
 			state.ranges[name] = rangeShape{}
@@ -652,6 +808,125 @@ func rangeValueSourceShape(value *procedureir.Expression, state rangeValueFlowSt
 		return rangeValueShape{kind: rangeValueShapeArray2D, rows: shape.rows, cols: shape.cols}, true
 	}
 	return rangeValueShape{kind: rangeValueShapeUnknown}, true
+}
+
+func rangeValueSourceShapeText(value string, state rangeValueFlowState, facts rangeValueFacts) (rangeValueShape, bool) {
+	receiver, ok := rangeValueMemberReceiverText(value, "value", "value2")
+	if !ok {
+		return rangeValueShape{}, false
+	}
+	shape, recognized := rangeValueRangeShapeText(receiver, state, facts)
+	if !recognized {
+		return rangeValueShape{}, false
+	}
+	if shape.known && shape.rows == 1 && shape.cols == 1 {
+		return rangeValueShape{kind: rangeValueShapeScalar}, true
+	}
+	if shape.known || shape.array2D {
+		return rangeValueShape{kind: rangeValueShapeArray2D, rows: shape.rows, cols: shape.cols}, true
+	}
+	return rangeValueShape{kind: rangeValueShapeUnknown}, true
+}
+
+func rangeValueMemberReceiverText(expression string, members ...string) (string, bool) {
+	text := strings.TrimSpace(expression)
+	for _, member := range members {
+		suffix := "." + strings.ToLower(member)
+		lower := strings.ToLower(text)
+		if strings.HasSuffix(lower, suffix) {
+			receiver := strings.TrimSpace(text[:len(text)-len(suffix)])
+			if receiver != "" {
+				return receiver, true
+			}
+		}
+	}
+	return "", false
+}
+
+func rangeValueRangeShapeText(expression string, state rangeValueFlowState, facts rangeValueFacts) (rangeShape, bool) {
+	text := strings.TrimSpace(expression)
+	for len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' && matchingParen(text, 0) == len(text)-1 {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+	if name := rangeValueBareName(text); name != "" {
+		if shape, found := state.ranges[name]; found {
+			return shape, true
+		}
+		if facts.rangeVariables[name] {
+			return rangeShape{}, true
+		}
+		return rangeShape{}, false
+	}
+	open := firstParenOutsideString(text)
+	if open < 0 {
+		return rangeShape{}, false
+	}
+	close := matchingParen(text, open)
+	if close < 0 || strings.TrimSpace(text[close+1:]) != "" {
+		return rangeShape{}, false
+	}
+	name := strings.ToLower(cleanIdentifier(lastName(strings.TrimSpace(text[:open]))))
+	args := splitArgs(text[open+1 : close])
+	switch name {
+	case "cells":
+		if len(args) == 2 {
+			return rangeShape{known: true, rows: 1, cols: 1}, true
+		}
+		return rangeShape{}, true
+	case "range":
+		if shape, found := rangeValueTextLiteralRangeShape(args); found {
+			return shape, true
+		}
+		return rangeShape{}, true
+	case "offset", "resize":
+		return rangeShape{}, true
+	default:
+		return rangeShape{}, false
+	}
+}
+
+func rangeValueTextLiteralRangeShape(arguments []string) (rangeShape, bool) {
+	if len(arguments) != 1 && len(arguments) != 2 {
+		return rangeShape{}, false
+	}
+	addresses := make([]string, len(arguments))
+	for index, argument := range arguments {
+		text := strings.TrimSpace(argument)
+		if len(text) < 2 || text[0] != '"' || text[len(text)-1] != '"' {
+			return rangeShape{}, false
+		}
+		addresses[index] = strings.ReplaceAll(text[1:len(text)-1], `""`, `"`)
+	}
+	if len(addresses) == 1 {
+		match := rangeValueAddressRe.FindStringSubmatch(addresses[0])
+		if len(match) != 5 {
+			return rangeShape{}, false
+		}
+		startColumn := excelColumnNumber(match[1])
+		startRow, _ := strconv.Atoi(match[2])
+		endColumn, endRow := startColumn, startRow
+		if match[3] != "" {
+			endColumn = excelColumnNumber(match[3])
+			endRow, _ = strconv.Atoi(match[4])
+		}
+		if startColumn <= 0 || endColumn < startColumn || endRow < startRow {
+			return rangeShape{}, false
+		}
+		return rangeShape{known: true, array2D: endColumn > startColumn || endRow > startRow, rows: endRow - startRow + 1, cols: endColumn - startColumn + 1}, true
+	}
+	startMatch := rangeValueAddressRe.FindStringSubmatch(addresses[0])
+	endMatch := rangeValueAddressRe.FindStringSubmatch(addresses[1])
+	if len(startMatch) != 5 || len(endMatch) != 5 || startMatch[3] != "" || endMatch[3] != "" {
+		return rangeShape{}, false
+	}
+	startColumn := excelColumnNumber(startMatch[1])
+	startRow, _ := strconv.Atoi(startMatch[2])
+	endColumn := excelColumnNumber(endMatch[1])
+	endRow, _ := strconv.Atoi(endMatch[2])
+	if startColumn <= 0 || endColumn < startColumn || endRow < startRow {
+		return rangeShape{}, false
+	}
+	return rangeShape{known: true, array2D: endColumn > startColumn || endRow > startRow, rows: endRow - startRow + 1, cols: endColumn - startColumn + 1}, true
 }
 
 func rangeValueMemberReceiver(expression *procedureir.Expression, facts rangeValueFacts, members ...string) (procedureir.Expression, bool) {
@@ -864,11 +1139,15 @@ func rangeValueAxisLength(start int, startKnown bool, end int, endKnown bool) (i
 }
 
 func rangeValueDestinationIssue(target procedureir.Expression, source rangeValueShape, state rangeValueFlowState, facts rangeValueFacts) *rangeValueIssue {
-	if source.kind != rangeValueShapeArray2D || source.rows <= 0 || source.cols <= 0 {
-		return nil
-	}
 	destination, recognized := rangeValueRangeShapeExpression(&target, state, facts)
 	if !recognized || !destination.known {
+		return nil
+	}
+	return rangeValueDestinationShapeIssue(destination, source)
+}
+
+func rangeValueDestinationShapeIssue(destination rangeShape, source rangeValueShape) *rangeValueIssue {
+	if source.kind != rangeValueShapeArray2D || source.rows <= 0 || source.cols <= 0 || !destination.known {
 		return nil
 	}
 	if destination.rows == source.rows && destination.cols == source.cols {

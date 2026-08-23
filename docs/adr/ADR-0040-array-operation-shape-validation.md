@@ -65,13 +65,14 @@ their reset-but-allocated state and dynamic arrays to unallocated state.
 The canonical procedure result is an internal, immutable
 `ArrayAnalysisResult`. It is materialized at most once for one procedure
 analysis revision after the reusable procedure/module facts have been
-prepared. The result may contain variable metadata, entry-state facts,
-allocation and shape states, bounds, operation facts, `ReDim` transitions,
-branch refinements, and proven runtime failures. It contains semantic facts,
-not `Finding` values, rule enablement, suppression state, or diagnostic
-severity. It lives only for the current procedure analysis and is safe for
-concurrent read-only projection; it is not a project-wide or cross-revision
-cache.
+prepared. The compact implementation keeps the shared variable/entry-state
+preparation and policy-lane outputs in categorized slices
+(`lifecycleFindings`, `runtimeFindings`, `redimFindings`, and
+`rangeFindings`). Projectors expose copies of those slices, so the result is
+still read-only after materialization; the stored `Finding` values do not
+carry rule enablement, suppression mutation, or a new severity contract. It
+lives only for the current procedure analysis and is safe for concurrent
+read-only projection; it is not a project-wide or cross-revision cache.
 
 The array kernel projects the result into the applicable diagnostics for both
 batch and realtime/LSP analysis. The block-level projection preserves the

@@ -116,10 +116,12 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 			result.projectionRuns++
 		}
 	}
-	if a.Config.Analyze.DetectRangeValueArrayShape && rangeValueShapeApplicable(proc) {
+	if a.Config.Analyze.DetectRangeValueArrayShape && rangeValueShapeApplicable(file, proc) {
 		result.rangeFindings = a.rangeValueShapeFindings(file, proc)
 		result.projectionRuns++
-		if proc.Graph != nil {
+		// An empty statement projection uses the source-line fallback and does
+		// not start the graph worklist, even when a recovered CFG object exists.
+		if proc.Graph != nil && len(proc.Statements) > 0 {
 			result.cfgWalks++
 		}
 	}
@@ -193,7 +195,23 @@ func arrayHasComparisonExpression(proc sourceProcedure) bool {
 // start a Range.Value worklist when the procedure has no Range.Value-shaped
 // source. Unknown/recovered statements are left applicable so the existing
 // conservative scanner remains fail-open.
-func rangeValueShapeApplicable(proc sourceProcedure) bool {
+func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
+	// A recovered/empty IR projection is not proof that the procedure has no
+	// Range.Value operation. Use the source lines in that case; the fallback is
+	// deliberately limited to procedures with no statement projection so the
+	// normal IR gate remains unchanged for complete procedures.
+	if len(proc.Statements) == 0 {
+		for _, expression := range proc.Expressions {
+			if expression.Recovered {
+				return true
+			}
+			lower := strings.ToLower(expression.Text)
+			if strings.Contains(lower, ".value") || strings.Contains(lower, "range(") || strings.Contains(lower, "resize(") || strings.Contains(lower, "cells(") {
+				return true
+			}
+		}
+		return rangeValueSourceLinesApplicable(file, proc)
+	}
 	for _, statement := range proc.Statements {
 		if statement.Recovered {
 			return true

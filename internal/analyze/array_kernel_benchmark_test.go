@@ -102,23 +102,25 @@ func TestArrayKernelBenchmarkFixtureScale(t *testing.T) {
 	}
 }
 
-// TestArrayKernelProjectionWorkCounters is intentionally feature-gated while
-// the shared kernel is being introduced. It becomes an executable contract as
-// soon as the three telemetry counters from #696 are published; older
-// revisions keep the benchmark fixture useful without making this scaffolding
-// depend on an unfinished recorder API.
+// TestArrayKernelProjectionWorkCounters makes the shared-kernel telemetry an
+// executable contract. The counters are part of the current recorder API, so
+// a missing counter is a test failure rather than a reason to skip coverage.
 func TestArrayKernelProjectionWorkCounters(t *testing.T) {
 	workload := arrayKernelBenchmarkWorkloads()[2] // redim-heavy
 	single := runArrayKernelBenchmarkCounterFixture(t, workload, configureArrayBenchmarkRulesVBA227)
 	all := runArrayKernelBenchmarkCounterFixture(t, workload, configureArrayBenchmarkRulesAll)
-	if !hasArrayKernelTelemetry(single) || !hasArrayKernelTelemetry(all) {
-		t.Skip("array kernel telemetry is not available yet")
+	for mode, counters := range map[string]map[string]uint64{"single": single, "all": all} {
+		for _, name := range []string{"array_kernel_runs", "array_cfg_walks", "array_projection_runs"} {
+			if _, ok := counters[name]; !ok {
+				t.Fatalf("%s telemetry is missing %q: %+v", mode, name, counters)
+			}
+		}
 	}
 	if single["array_kernel_runs"] != 1 || all["array_kernel_runs"] != 1 {
 		t.Fatalf("array kernel runs = single %d/all %d, want one per procedure revision", single["array_kernel_runs"], all["array_kernel_runs"])
 	}
-	if all["array_projection_runs"] <= single["array_projection_runs"] {
-		t.Fatalf("array projection runs = single %d/all %d, want additional enabled projections", single["array_projection_runs"], all["array_projection_runs"])
+	if single["array_projection_runs"] != 1 || all["array_projection_runs"] != 5 {
+		t.Fatalf("array projection runs = single %d/all %d, want exact single=1/all=5", single["array_projection_runs"], all["array_projection_runs"])
 	}
 	// VBA226 is the documented exceptional secondary pass. Any increase in
 	// CFG walks beyond that one pass would indicate that projections are still
@@ -126,15 +128,6 @@ func TestArrayKernelProjectionWorkCounters(t *testing.T) {
 	if all["array_cfg_walks"] > single["array_cfg_walks"]+1 {
 		t.Fatalf("array CFG walks = single %d/all %d, want at most one secondary pass", single["array_cfg_walks"], all["array_cfg_walks"])
 	}
-}
-
-func hasArrayKernelTelemetry(counters map[string]uint64) bool {
-	for _, name := range []string{"array_kernel_runs", "array_cfg_walks", "array_projection_runs"} {
-		if _, ok := counters[name]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func runArrayKernelBenchmarkCounterFixture(t *testing.T, workload arrayKernelBenchmarkWorkload, configure func(*config.Config)) map[string]uint64 {
