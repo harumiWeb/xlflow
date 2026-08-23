@@ -120,7 +120,7 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		result.projectionRuns++
 		// An empty statement projection uses the source-line fallback and does
 		// not start the graph worklist, even when a recovered CFG object exists.
-		if proc.Graph != nil && len(proc.Statements) > 0 {
+		if proc.Graph != nil && len(proc.Statements) > 0 && !rangeValueProjectionUnknown(proc) {
 			result.cfgWalks++
 		}
 	}
@@ -172,6 +172,9 @@ func arrayLifecycleProjectionApplicable(proc sourceProcedure, variables map[stri
 		for _, statement := range proc.Statements {
 			lower := strings.ToLower(statement.Text)
 			if strings.Contains(lower, "redim") || strings.Contains(lower, "erase ") || strings.Contains(lower, "lbound(") || strings.Contains(lower, "ubound(") || strings.Contains(lower, "for each") {
+				return true
+			}
+			if len(arrayIndexedUses(statement.Text, variables)) > 0 {
 				return true
 			}
 		}

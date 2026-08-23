@@ -3,6 +3,8 @@ package analyze
 import (
 	"sync"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 // ArrayAnalysisResult is handed to independent diagnostic projectors after
@@ -49,5 +51,13 @@ func TestArrayAnalysisResultConcurrentRead(t *testing.T) {
 	copyOfFindings[0].Code = "mutated-copy"
 	if result.lifecycle()[0].Code != "VBA227" {
 		t.Fatal("projector copy mutated the immutable result")
+	}
+}
+
+func TestArrayLifecycleProjectionApplicableIncludesIndexedAccess(t *testing.T) {
+	proc := sourceProcedure{Statements: []procedureir.Statement{{Text: "Debug.Print values(2)"}}}
+	variables := map[string]arrayVariable{"values": {name: "values", isArray: true}}
+	if !arrayLifecycleProjectionApplicable(proc, variables) {
+		t.Fatal("indexed array access should make the VBA227 projection applicable")
 	}
 }

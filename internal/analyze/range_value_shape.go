@@ -75,9 +75,14 @@ type rangeValueSourceGuardFrame struct {
 }
 
 type rangeValueSourceBranchFrame struct {
-	before      rangeValueFlowState
-	branches    rangeValueFlowState
-	hasBranches bool
+	before       rangeValueFlowState
+	branches     rangeValueFlowState
+	hasBranches  bool
+	hasElse      bool
+	thenExited   bool
+	exited       bool
+	guardName    string
+	guardNegated bool
 }
 
 var (
@@ -203,8 +208,17 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		}
 		if match := rangeValueInlineGuardRe.FindStringSubmatch(statement.Text); len(match) == 4 {
 			name := strings.ToLower(match[2])
+			negated := strings.TrimSpace(match[1]) != ""
+			if rangeValueSourceEarlyExit(match[3]) {
+				if negated {
+					state.arrayGuards[name] = true
+				} else {
+					delete(state.arrayGuards, name)
+				}
+				continue
+			}
 			priorGuard := state.arrayGuards[name]
-			if strings.TrimSpace(match[1]) == "" {
+			if !negated {
 				state.arrayGuards[name] = true
 			} else {
 				delete(state.arrayGuards, name)
@@ -221,26 +235,55 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		}
 		lower := strings.ToLower(strings.TrimSpace(statement.Text))
 		if isRangeValueBlockIf(statement.Text) {
-			branches = append(branches, rangeValueSourceBranchFrame{before: cloneRangeValueFlowState(state)})
+			frame := rangeValueSourceBranchFrame{before: cloneRangeValueFlowState(state)}
+			if match := rangeValueGuardRe.FindStringSubmatch(statement.Text); len(match) == 3 {
+				frame.guardName = strings.ToLower(match[2])
+				frame.guardNegated = strings.TrimSpace(match[1]) != ""
+			}
+			branches = append(branches, frame)
 		} else if strings.HasPrefix(lower, "else") && len(branches) > 0 {
 			frame := &branches[len(branches)-1]
 			current := cloneRangeValueFlowState(state)
-			if frame.hasBranches {
+			frame.hasElse = true
+			if frame.exited {
+				frame.thenExited = true
+			} else if frame.hasBranches {
 				frame.branches = mergeRangeValueSourceStates(frame.branches, current)
 			} else {
 				frame.branches = current
 				frame.hasBranches = true
 			}
+			frame.exited = false
 			state = cloneRangeValueFlowState(frame.before)
 		} else if strings.HasPrefix(lower, "end if") && len(branches) > 0 {
 			current := cloneRangeValueFlowState(state)
 			frame := branches[len(branches)-1]
 			branches = branches[:len(branches)-1]
-			if frame.hasBranches {
+			if frame.hasElse && frame.exited {
+				if frame.hasBranches {
+					state = frame.branches
+				} else {
+					state = cloneRangeValueFlowState(frame.before)
+				}
+			} else if frame.hasElse && frame.thenExited {
+				state = current
+			} else if frame.hasBranches {
 				state = mergeRangeValueSourceStates(frame.branches, current)
+			} else if frame.exited {
+				state = cloneRangeValueFlowState(frame.before)
+				if frame.guardName != "" {
+					if frame.guardNegated {
+						state.arrayGuards[frame.guardName] = true
+					} else {
+						delete(state.arrayGuards, frame.guardName)
+					}
+				}
 			} else {
 				state = mergeRangeValueSourceStates(frame.before, current)
 			}
+		}
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) > 0 {
+			branches[len(branches)-1].exited = true
 		}
 		updateRangeValueSourceGuard(&state, &guards, statement.Text)
 		issues, next := rangeValueStatement(state, statement, facts)
@@ -345,6 +388,16 @@ func rangeValueSourceLinesApplicable(file parsedFile, proc sourceProcedure) bool
 	return false
 }
 
+func rangeValueSourceEarlyExit(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	for _, prefix := range []string{"exit sub", "exit function", "exit property", "return"} {
+		if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
 func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeValueSourceStatement {
 	lines := file.Lines
 	if len(lines) == 0 && len(file.Source) > 0 {
@@ -372,6 +425,10 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		text := strings.TrimSpace(continued.String())
 		if text != "" {
 			for _, part := range splitRangeValueSourceStatements(text) {
+				if rangeValueIsRemComment(part) {
+					break
+				}
+				part = rangeValueStripRemComment(part)
 				if strings.TrimSpace(part) != "" {
 					out = append(out, rangeValueSourceStatement{line: line, text: strings.TrimSpace(part)})
 				}
@@ -381,7 +438,8 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		continuedLine = 0
 	}
 	for line := start; line <= end; line++ {
-		text := strings.TrimSpace(rawWorksheetCodeLine(lines[line-1]))
+		text := rangeValueStripRemComment(rawWorksheetCodeLine(lines[line-1]))
+		text = strings.TrimSpace(text)
 		if text == "" {
 			continue
 		}
@@ -404,6 +462,27 @@ func rangeValueSourceStatements(file parsedFile, proc sourceProcedure) []rangeVa
 		flush(continuedLine)
 	}
 	return out
+}
+
+func rangeValueStripRemComment(text string) string {
+	if rangeValueIsRemComment(text) {
+		return ""
+	}
+	return text
+}
+
+func rangeValueIsRemComment(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) == 3 && strings.EqualFold(trimmed, "rem") {
+		return true
+	}
+	if len(trimmed) > 3 && strings.EqualFold(trimmed[:3], "rem") {
+		next := trimmed[3]
+		if next == ' ' || next == '\t' {
+			return true
+		}
+	}
+	return false
 }
 
 func splitRangeValueSourceStatements(text string) []string {

@@ -385,6 +385,61 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(partialFile, partialProc), "VBA226"); len(got) != 1 {
 		t.Fatalf("unknown partial projection should use source fallback: %+v", got)
 	}
+
+	commentSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Rem values(1)
+End Sub
+`
+	commentFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(commentSource), Source: []byte(commentSource)}
+	commentProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(commentFile, commentProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("Rem comments must be ignored by source fallback: %+v", got)
+	}
+	colonCommentSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  values = values: Rem values(1): values(1)
+End Sub
+`
+	colonCommentFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(colonCommentSource), Source: []byte(colonCommentSource)}
+	colonCommentProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 6}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(colonCommentFile, colonCommentProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("colon-separated Rem comments must ignore the rest of the line: %+v", got)
+	}
+
+	earlyExitSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If Not IsArray(values) Then Exit Sub
+  Debug.Print values(1, 1)
+End Sub
+`
+	earlyExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(earlyExitSource), Source: []byte(earlyExitSource)}
+	earlyExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 7}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(earlyExitFile, earlyExitProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("early-exit negative IsArray guard should preserve the surviving array path: %+v", got)
+	}
+
+	blockEarlyExitSource := `Option Explicit
+Public Sub Run(ByVal lastCell As String)
+  Dim values As Variant
+  values = Range("A1:" & lastCell).Value2
+  If Not IsArray(values) Then
+    Exit Sub
+  End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	blockEarlyExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(blockEarlyExitSource), Source: []byte(blockEarlyExitSource)}
+	blockEarlyExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 8}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(blockEarlyExitFile, blockEarlyExitProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("block early-exit negative IsArray guard should preserve the surviving array path: %+v", got)
+	}
 }
 
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
