@@ -71,7 +71,7 @@ func (a Analyzer) expensiveFullRangeOperationFindings(file parsedFile, proc sour
 	shadowed := vba242ShadowedRoots(file, proc)
 	var findings []Finding
 	seen := map[int]int{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered {
 			continue
 		}
@@ -231,7 +231,7 @@ func (a Analyzer) vba242Shapes(file parsedFile, shadowed map[string]bool, code s
 
 func vba242ShadowedRoots(file parsedFile, proc sourceProcedure) map[string]bool {
 	shadowed := map[string]bool{}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		name := strings.ToLower(strings.TrimSpace(declaration.Name))
 		if vba242IsRootName(name) {
 			shadowed[name] = true
@@ -249,7 +249,7 @@ func vba242ShadowedRoots(file parsedFile, proc sourceProcedure) map[string]bool 
 			shadowed[name] = true
 		}
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Scope != procedureir.ScopeLocal && access.Scope != procedureir.ScopeParameter && access.Scope != procedureir.ScopeModule && access.Scope != procedureir.ScopeProject {
 			continue
 		}
@@ -258,7 +258,7 @@ func vba242ShadowedRoots(file parsedFile, proc sourceProcedure) map[string]bool 
 			shadowed[name] = true
 		}
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		name := strings.ToLower(strings.TrimSpace(parameter.Name))
 		if vba242IsRootName(name) {
 			shadowed[name] = true

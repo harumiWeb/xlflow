@@ -75,7 +75,7 @@ func (a Analyzer) resourceLeakFindings(file parsedFile, proc sourceProcedure) []
 
 func resourceAcquisitions(proc sourceProcedure) []resourceAcquisition {
 	acquisitions := make([]resourceAcquisition, 0)
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered {
 			continue
 		}
@@ -289,7 +289,7 @@ func resourceName(value string) string {
 }
 
 func resourceLocalVariable(proc sourceProcedure, name string) bool {
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if declaration.Scope == procedureir.ScopeLocal && strings.EqualFold(declaration.Name, name) {
 			return true
 		}
@@ -298,7 +298,7 @@ func resourceLocalVariable(proc sourceProcedure, name string) bool {
 }
 
 func resourceWorkbookOwner(proc sourceProcedure, name string) bool {
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if declaration.Scope != procedureir.ScopeLocal || !strings.EqualFold(declaration.Name, name) {
 			continue
 		}

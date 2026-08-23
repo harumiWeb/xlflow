@@ -353,7 +353,7 @@ type analysisContext struct {
 type procedureSignature struct {
 	Name       string
 	ReturnType string
-	Params     []parameterInfo
+	Params     readOnlySpan[parameterInfo]
 }
 
 // parameterInfo is an internal compatibility alias. Procedure parameters are
@@ -427,7 +427,7 @@ type sourceProcedure struct {
 	EndLine          int
 	StartByte        int
 	EndByte          int
-	Params           []parameterInfo
+	Params           readOnlySpan[parameterInfo]
 	// These are read-only views over IR.  The type is deliberately private; it
 	// provides range/len compatibility for the analyzer while exposing no
 	// mutable slice through a package boundary.  New consumers should prefer
@@ -2825,12 +2825,12 @@ func sourceProceduresFromIRRef(document *procedureir.DocumentIR, controlFlow ...
 			EndLine:          procedure.Symbol.DeclarationRange.EndLine,
 			StartByte:        procedure.Symbol.DeclarationRange.StartByte,
 			EndByte:          procedure.Symbol.DeclarationRange.EndByte,
-			Params:           procedure.Symbol.Parameters,
-			Declarations:     readOnlySpan[procedureir.Declaration](procedure.Declarations),
-			Statements:       readOnlySpan[procedureir.Statement](procedure.Statements),
-			Expressions:      readOnlySpan[procedureir.Expression](procedure.Expressions),
-			Calls:            readOnlySpan[procedureir.CallSite](procedure.Calls),
-			Accesses:         readOnlySpan[procedureir.VariableAccess](procedure.Accesses),
+			Params:           newReadOnlySpan(procedure.Symbol.Parameters),
+			Declarations:     newReadOnlySpan(procedure.Declarations),
+			Statements:       newReadOnlySpan(procedure.Statements),
+			Expressions:      newReadOnlySpan(procedure.Expressions),
+			Calls:            newReadOnlySpan(procedure.Calls),
+			Accesses:         newReadOnlySpan(procedure.Accesses),
 		}
 		source.Facts = newProcedureAnalysisFactsForProcedure(procedure)
 		if len(controlFlow) > 0 && procedureIndex < len(controlFlow[0].Graphs) {
@@ -3074,17 +3074,17 @@ func vba205NonExecutableStatement(stmt string) bool {
 }
 
 func vba205ShadowedIdentifiersWithFacts(proc sourceProcedure, decls declarationScope, ctx analysisContext, facts *moduleAnalysisFacts) map[string]bool {
-	shadowed := make(map[string]bool, decls.len()+len(proc.Accesses)+len(proc.Declarations)+len(ctx.procedures))
+	shadowed := make(map[string]bool, decls.len()+proc.Accesses.Len()+proc.Declarations.Len()+len(ctx.procedures))
 	decls.forEach(func(name string, _ sourceDeclaration) {
 		shadowed[strings.ToLower(name)] = true
 	})
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		switch declaration.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
 			shadowed[strings.ToLower(declaration.Name)] = true
 		}
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		switch access.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
 			shadowed[strings.ToLower(access.Name)] = true
@@ -3283,7 +3283,7 @@ func (a Analyzer) objectArrayComparisonFindings(file parsedFile, proc sourceProc
 			reported[key] = true
 		}
 	})
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if declaration.Scope != procedureir.ScopeParameter || !sourceDeclarationIsObject(declaration, declaration.Type) {
 			continue
 		}
@@ -3302,7 +3302,7 @@ func objectNothingEqualityLineIsExecutable(proc sourceProcedure, lineNo int, stm
 	if lineNo == proc.StartLine && isProcedureHeaderLine(lower) {
 		return false
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		if !parameter.Optional || parameter.Range.StartLine == 0 || lineNo < parameter.Range.StartLine || lineNo > parameter.Range.EndLine {
 			continue
 		}
@@ -3809,7 +3809,7 @@ func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, resto
 	}
 	savedBindings := map[binding]bool{}
 	restoreBindings := map[binding]bool{}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Mode != procedureir.AccessRead || access.Scope == procedureir.ScopeUnresolved {
 			continue
 		}
@@ -3833,13 +3833,13 @@ func applicationStateGuardBindingsStable(proc sourceProcedure, savedGuard, resto
 		if key.scope != procedureir.ScopeModule && key.scope != procedureir.ScopeProject {
 			continue
 		}
-		for _, call := range proc.Calls {
+		for call := range proc.Calls.All() {
 			if call.StatementID > savedGuard.ID && call.StatementID < restoreGuard.ID {
 				return false
 			}
 		}
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID <= savedGuard.ID || access.StatementID >= restoreGuard.ID ||
 			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) {
 			continue
@@ -3876,7 +3876,7 @@ func applicationStateVariable(proc sourceProcedure, statementID int, expression 
 	if name == "" || strings.ContainsAny(name, ".() ") {
 		return "", false
 	}
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.StatementID != statementID || !strings.EqualFold(access.Name, name) {
 			continue
 		}
@@ -4062,7 +4062,7 @@ func isProjectVisibleProcedure(identity effects.ProcedureIdentity) bool {
 
 func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourceProcedure) []Finding {
 	handlerLabels := map[string]bool{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Kind != procedureir.StatementOnError {
 			continue
 		}
@@ -4081,7 +4081,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 		for _, blockID := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
 			reachable[blockID] = true
 		}
-		for _, statement := range proc.Statements {
+		for statement := range proc.Statements.All() {
 			if statement.Kind != procedureir.StatementLabel {
 				continue
 			}
@@ -4100,7 +4100,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
 					implicitEntry = true
 					if edge.Kind == vbacfg.EdgeLoopExit {
-						for _, candidate := range proc.Statements {
+						for candidate := range proc.Statements.All() {
 							if candidate.ID == edge.StatementID && candidate.Control != nil && candidate.Control.LoopVariable != "" {
 								loopExitVariables[strings.ToLower(candidate.Control.LoopVariable)] = true
 							}
@@ -4121,7 +4121,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 	}
 
 	lastCodeByParent := map[int]string{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Kind == procedureir.StatementLabel {
 			label := cleanIdentifier(statement.Label)
 			if handlerLabels[strings.ToLower(label)] &&
@@ -4170,7 +4170,7 @@ func (a Analyzer) leakedOnErrorResumeNextFindings(file parsedFile, proc sourcePr
 		reachable[id] = true
 	}
 	outcomes := map[string]resumeNextScopeOutcome{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if !isOnErrorResumeNext(statement) {
 			continue
 		}
@@ -4330,8 +4330,8 @@ func resumeNextScopeControlStatement(statement procedureir.Statement) bool {
 	}
 }
 
-func resumeNextScopeCallRisk(calls []procedureir.CallSite, statementID int) (call bool, projectCall bool) {
-	for _, candidate := range calls {
+func resumeNextScopeCallRisk(calls readOnlySpan[procedureir.CallSite], statementID int) (call bool, projectCall bool) {
+	for candidate := range calls.All() {
 		if candidate.StatementID != statementID {
 			continue
 		}
@@ -4841,7 +4841,7 @@ func isCleanupAssignment(statement procedureir.Statement) bool {
 }
 
 func isCleanupCall(proc sourceProcedure, statement procedureir.Statement) bool {
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.StatementID != statement.ID {
 			continue
 		}

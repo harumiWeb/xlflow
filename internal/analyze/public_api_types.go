@@ -97,7 +97,7 @@ func (a Analyzer) publicAPITypeFindings(file parsedFile, index *apiTypeIndex) []
 			procedure.Symbol.Kind == procedureir.ProcedurePropertyGet {
 			findings = append(findings, a.checkPublicAPIType(file, proc, index, procedure.Symbol.ReturnType, proc.StartLine, "return type")...)
 		}
-		for _, parameter := range proc.Params {
+		for parameter := range proc.Params.All() {
 			line := proc.StartLine
 			if parameter.Range.StartLine > 0 {
 				line = parameter.Range.StartLine

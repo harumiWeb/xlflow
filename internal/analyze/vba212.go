@@ -205,14 +205,14 @@ func vba212DeclarationIndexesForFile(file parsedFile, procedures []sourceProcedu
 }
 
 func addVBA212ProcedureIRDeclarations(scope *declarationScope, proc sourceProcedure) {
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		scope.addProcedureIRDeclaration(sourceDeclaration{Name: declaration.Name, Type: declaration.Type})
 	}
 }
 
 func vba212Parameters(proc sourceProcedure) map[string]sourceDeclaration {
-	parameters := make(map[string]sourceDeclaration, len(proc.Params))
-	for _, parameter := range proc.Params {
+	parameters := make(map[string]sourceDeclaration, proc.Params.Len())
+	for parameter := range proc.Params.All() {
 		key := strings.ToLower(strings.TrimSpace(parameter.Name))
 		if key == "" {
 			continue

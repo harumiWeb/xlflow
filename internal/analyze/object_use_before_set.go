@@ -213,7 +213,7 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 	}
 	plan.flowContext.vars = plan.vars
 	plan.unknownFlow = proc.Graph == nil || len(proc.Graph.UnknownFlowSources) > 0
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		plan.unknownFlow = plan.unknownFlow || statement.Recovered
 	}
 	plan.relevant = objectProcedureRelevant(proc, moduleDecls)
@@ -226,7 +226,7 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 		}
 	}
 	if !plan.relevant {
-		for _, parameter := range proc.Params {
+		for parameter := range proc.Params.All() {
 			if isObjectType(parameter.Type) {
 				plan.relevant = true
 				break
@@ -253,7 +253,7 @@ func (analysis *objectAnalysisContext) initializeObjectSummaries() {
 			ModuleAssigned: map[string]bool{},
 			ModuleWritten:  map[string]bool{},
 		}
-		for index, parameter := range plan.proc.Params {
+		for index, parameter := range plan.proc.Params.AllIndexed() {
 			summary.Params = append(summary.Params, objectParameterSummary{
 				Name:   parameter.Name,
 				Object: isObjectType(parameter.Type),
@@ -276,7 +276,7 @@ func objectInitialEntryState(plan *objectProcedurePlan) map[string]bool {
 			state[(objectVariable{Scope: procedureir.ScopeModule, Name: name}).key()] = false
 		}
 	}
-	for _, parameter := range plan.proc.Params {
+	for parameter := range plan.proc.Params.All() {
 		if isObjectType(parameter.Type) {
 			state[(objectVariable{Scope: procedureir.ScopeParameter, Name: parameter.Name}).key()] = false
 		}
@@ -290,7 +290,7 @@ func (analysis *objectAnalysisContext) buildObjectDependencies() {
 	}
 	for _, callerKey := range analysis.order {
 		caller := analysis.plans[callerKey]
-		for _, call := range caller.proc.Calls {
+		for call := range caller.proc.Calls.All() {
 			calleeKey, ok := analysis.objectCalleeKey(call)
 			if ok {
 				addSummaryDependency(calleeKey, callerKey)
@@ -537,7 +537,7 @@ func (analysis *objectAnalysisContext) buildEntryStates() map[string]map[string]
 			blockState := state[block.ID]
 			calleeSummary := analysis.summaries[callee.key]
 			if objectProcedureAllowsParameterEntry(callee.proc) {
-				for index, parameter := range callee.proc.Params {
+				for index, parameter := range callee.proc.Params.AllIndexed() {
 					if !isObjectType(parameter.Type) {
 						continue
 					}
@@ -688,7 +688,7 @@ func objectProcedureRelevant(proc sourceProcedure, moduleDecls map[string]source
 	if isObjectType(proc.ReturnType) {
 		return true
 	}
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		if isObjectType(parameter.Type) {
 			return true
 		}
@@ -697,7 +697,7 @@ func objectProcedureRelevant(proc sourceProcedure, moduleDecls map[string]source
 }
 
 func objectProcedureUsesModuleObject(proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Scope != procedureir.ScopeModule {
 			continue
 		}
@@ -710,7 +710,7 @@ func objectProcedureUsesModuleObject(proc sourceProcedure, moduleDecls map[strin
 }
 
 func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, facts *procedureAnalysisFacts) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Scope != procedureir.ScopeModule || (access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) || !strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
 			continue
 		}
@@ -723,7 +723,7 @@ func objectProcedureWritesModuleFieldIndexed(proc sourceProcedure, name string, 
 }
 
 func objectProcedureWritesParameterIndexed(proc sourceProcedure, name string, summaries map[string]objectProcedureSummary, facts *procedureAnalysisFacts) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Scope != procedureir.ScopeParameter ||
 			(access.Mode != procedureir.AccessWrite && access.Mode != procedureir.AccessReadWrite) ||
 			!strings.EqualFold(cleanIdentifier(access.Name), cleanIdentifier(name)) {
@@ -733,7 +733,7 @@ func objectProcedureWritesParameterIndexed(proc sourceProcedure, name string, su
 			return true
 		}
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		actuals := objectCallActuals(call, facts)
 		for actualIndex, actual := range actuals {
 			if actual.parenthesized {
@@ -786,7 +786,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 	var findings []Finding
 	// ProcedureIR emits accesses in source order. Keep that order directly;
 	// sorting a copied collection (or an index permutation) only adds work.
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if access.Scope != procedureir.ScopeLocal && access.Scope != procedureir.ScopeModule && access.Scope != procedureir.ScopeParameter {
 			continue
 		}
@@ -849,7 +849,7 @@ func (a Analyzer) objectUseBeforeSetIRFindingsPlan(plan *objectProcedurePlan, su
 	// `dict(key)`, `collection(i)`, and `obj.Property(...)` all dereference the
 	// object before invoking the call.  Recover those roots from CallSite.
 	// Calls are likewise source ordered in the canonical IR.
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		name := objectCallReceiverName(call)
 		if name == "" {
 			continue
@@ -909,7 +909,7 @@ func objectCallReceiverName(call procedureir.CallSite) string {
 func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 	active := false
 	validated := false
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == statementID {
 			return active || validated
 		}
@@ -954,7 +954,7 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 		return false
 	}
 	dominators := cache.dominators
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		flag, negated, ok := objectBooleanGuard(statement)
 		if !ok || !objectOpenFlagForObject(flag, objectName) {
 			continue
@@ -1033,7 +1033,7 @@ func objectOpenFlagForObject(flag, objectName string) bool {
 func objectOpenFlagAssignmentDominates(proc sourceProcedure, dominators map[vbacfg.BlockID][]vbacfg.BlockID, conditionBlock vbacfg.BlockID, conditionStatementID int, flag, objectName string) bool {
 	flag = strings.ToLower(cleanIdentifier(flag))
 	objectName = strings.ToLower(cleanIdentifier(objectName))
-	for _, flagStatement := range proc.Statements {
+	for flagStatement := range proc.Statements.All() {
 		if strings.ToLower(compactStatement(flagStatement.Text)) != flag+"=true" {
 			continue
 		}
@@ -1050,7 +1050,7 @@ func objectOpenFlagAssignmentDominates(proc sourceProcedure, dominators map[vbac
 		if !flagBeforeCondition {
 			continue
 		}
-		for _, objectStatement := range proc.Statements {
+		for objectStatement := range proc.Statements.All() {
 			if !strings.HasPrefix(strings.ToLower(compactStatement(objectStatement.Text)), "set"+objectName+"=") {
 				continue
 			}
@@ -1608,7 +1608,7 @@ func objectExpressionAssigned(proc sourceProcedure, expression procedureir.Expre
 		}
 		return state[(objectVariable{Scope: scope, Name: name}).key()]
 	case procedureir.ExpressionCall:
-		for _, call := range proc.Calls {
+		for call := range proc.Calls.All() {
 			if call.StatementID != statementID || (call.ExpressionID != 0 && call.ExpressionID != expression.ID) {
 				continue
 			}
@@ -1857,7 +1857,7 @@ func objectExcelMemberExpressionAssigned(text string, proc sourceProcedure, decl
 	}
 	declaration, _, ok := objectDeclarationBinding(root, declarations)
 	if !ok || !excelObjectUseType(declaration.Type) {
-		for _, irDeclaration := range proc.Declarations {
+		for irDeclaration := range proc.Declarations.All() {
 			if strings.EqualFold(cleanIdentifier(irDeclaration.Name), root) && isObjectType(irDeclaration.Type) {
 				declaration = sourceDeclaration{Type: irDeclaration.Type}
 				ok = true

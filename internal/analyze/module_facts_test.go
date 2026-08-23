@@ -177,7 +177,7 @@ func TestDeclarationScopeLayersWithoutModuleMapCopy(t *testing.T) {
 	proc := sourceProcedure{
 		StartLine: 1,
 		EndLine:   1,
-		Params:    []parameterInfo{{Name: "value", Type: "String"}},
+		Params:    newReadOnlySpan([]parameterInfo{{Name: "value", Type: "String"}}),
 	}
 	file := parsedFile{ModuleDeclarations: module, Lines: []string{""}}
 	scope := newDeclarationScope(file, proc)
@@ -199,7 +199,7 @@ func TestDeclarationScopeLayersWithoutModuleMapCopy(t *testing.T) {
 	arrayScope := newDeclarationScope(file, sourceProcedure{
 		StartLine: 1,
 		EndLine:   1,
-		Params:    []parameterInfo{{Name: "moduleOnly", Type: "Long()"}},
+		Params:    newReadOnlySpan([]parameterInfo{{Name: "moduleOnly", Type: "Long()"}}),
 	})
 	if !arrayScope.shadowsModule("moduleOnly") {
 		t.Fatalf("parameter declaration should shadow module array names")
@@ -212,9 +212,9 @@ func TestVBA212DeclarationScopeRetainsIRProcedureDeclarations(t *testing.T) {
 		StartLine: 1,
 		EndLine:   1,
 		StartByte: 1,
-		Declarations: []procedureir.Declaration{{
+		Declarations: newReadOnlySpan([]procedureir.Declaration{{
 			Name: "service", Type: "LocalService", Scope: procedureir.ScopeLocal,
-		}},
+		}}),
 	}
 	scope := declarationScope{module: module}
 	addVBA212ProcedureIRDeclarations(&scope, proc)

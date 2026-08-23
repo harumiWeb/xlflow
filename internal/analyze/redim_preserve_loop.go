@@ -30,7 +30,7 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 	var findings []Finding
 	applicable := false
 	seen := map[string]bool{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered || !arrayRedimPreserveStatement(statement.Text) {
 			continue
 		}
@@ -76,7 +76,7 @@ func (a Analyzer) redimPreserveLoopFindingsPreparedWithApplicability(file parsed
 		dependent := false
 		for _, loop := range bodyLoops {
 			loopVars := redimLoopVariables(loop, proc)
-			for _, access := range proc.Accesses {
+			for access := range proc.Accesses.All() {
 				if access.StatementID != statement.ID || !loopVars[strings.ToLower(access.Name)] {
 					continue
 				}
@@ -141,11 +141,11 @@ func redimLoopVariables(owner excelLoopRegion, proc sourceProcedure) map[string]
 	for name := range variables {
 		conditionVariables[name] = true
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ParentID != owner.StatementID || statement.SyntaxKind != "do_condition" {
 			continue
 		}
-		for _, access := range proc.Accesses {
+		for access := range proc.Accesses.All() {
 			if access.StatementID == statement.ID && access.Mode != procedureir.AccessWrite {
 				conditionVariables[strings.ToLower(access.Name)] = true
 			}
@@ -162,7 +162,7 @@ func redimLoopVariables(owner excelLoopRegion, proc sourceProcedure) map[string]
 }
 
 func redimLoopVariableModified(owner excelLoopRegion, proc sourceProcedure, name string) bool {
-	for _, access := range proc.Accesses {
+	for access := range proc.Accesses.All() {
 		if !owner.Body[access.StatementID] || !strings.EqualFold(access.Name, name) {
 			continue
 		}
@@ -174,7 +174,7 @@ func redimLoopVariableModified(owner excelLoopRegion, proc sourceProcedure, name
 }
 
 func procedureStatementByID(proc sourceProcedure, id int) procedureir.Statement {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == id {
 			return statement
 		}

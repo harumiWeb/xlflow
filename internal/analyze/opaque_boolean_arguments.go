@@ -26,14 +26,14 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 	if !a.Config.Analyze.DetectOpaqueBooleanArguments {
 		return nil
 	}
-	expressions := make(map[int]string, len(proc.Expressions))
-	for _, expression := range proc.Expressions {
+	expressions := make(map[int]string, proc.Expressions.Len())
+	for expression := range proc.Expressions.All() {
 		if expression.ID > 0 {
 			expressions[expression.ID] = expression.Text
 		}
 	}
 	findings := make([]Finding, 0)
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if call.Arguments.Count == 0 || len(call.Arguments.ExpressionIDs) == 0 {
 			continue
 		}
@@ -70,7 +70,7 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 		var optionalBooleanParameterCount *int
 		parameterNames := []string(nil)
 		if signatureOK {
-			for _, parameter := range signature.Params {
+			for parameter := range signature.Params.All() {
 				if strings.EqualFold(strings.TrimSpace(parameter.Type), "Boolean") && parameter.Optional {
 					optionalBooleanCount++
 				}
@@ -94,10 +94,14 @@ func (a Analyzer) opaqueBooleanArgumentFindings(file parsedFile, proc sourceProc
 		if len(parameterNames) > 0 {
 			examples := make([]string, 0, len(parameterNames))
 			for _, literal := range positionalLiterals {
-				if literal.ParameterIndex < 0 || literal.ParameterIndex >= len(signature.Params) {
+				if literal.ParameterIndex < 0 || literal.ParameterIndex >= signature.Params.Len() {
 					continue
 				}
-				if name := strings.TrimSpace(signature.Params[literal.ParameterIndex].Name); name != "" {
+				parameter, ok := signature.Params.At(literal.ParameterIndex)
+				if !ok {
+					continue
+				}
+				if name := strings.TrimSpace(parameter.Name); name != "" {
 					examples = append(examples, name+":="+literal.Value)
 				}
 			}
@@ -158,16 +162,20 @@ func opaqueBooleanCallSignature(call procedureir.CallSite, signatures map[string
 	return procedureSignature{}, false
 }
 
-func positionalParameterNames(parameters []parameterInfo, indexes []int) []string {
+func positionalParameterNames(parameters readOnlySpan[parameterInfo], indexes []int) []string {
 	if len(indexes) == 0 {
 		return nil
 	}
 	result := make([]string, 0, len(indexes))
 	for _, index := range indexes {
-		if index < 0 || index >= len(parameters) {
+		if index < 0 || index >= parameters.Len() {
 			continue
 		}
-		if name := strings.TrimSpace(parameters[index].Name); name != "" {
+		parameter, ok := parameters.At(index)
+		if !ok {
+			continue
+		}
+		if name := strings.TrimSpace(parameter.Name); name != "" {
 			result = append(result, name)
 		}
 	}

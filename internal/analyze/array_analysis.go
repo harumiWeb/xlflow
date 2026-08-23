@@ -134,7 +134,7 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		result.projectionRuns++
 		// An empty statement projection uses the source-line fallback and does
 		// not start the graph worklist, even when a recovered CFG object exists.
-		if proc.Graph != nil && len(proc.Statements) > 0 && !rangeValueProjectionUnknown(proc) {
+		if proc.Graph != nil && proc.Statements.Len() > 0 && !rangeValueProjectionUnknown(proc) {
 			result.cfgWalks++
 		}
 	}
@@ -185,7 +185,7 @@ func arrayLifecycleProjectionApplicable(file parsedFile, proc sourceProcedure, v
 	if len(variables) == 0 {
 		return false
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if arrayLifecycleTextApplicable(statement.Text, variables) {
 			return true
 		}
@@ -219,7 +219,7 @@ func arrayLifecycleTextApplicable(text string, variables map[string]arrayVariabl
 }
 
 func arrayHasRedimPreserveOperation(proc sourceProcedure) bool {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if strings.Contains(strings.ToLower(statement.Text), "redim preserve") {
 			return true
 		}
@@ -228,7 +228,7 @@ func arrayHasRedimPreserveOperation(proc sourceProcedure) bool {
 }
 
 func arrayHasComparisonExpression(proc sourceProcedure) bool {
-	for _, expression := range proc.Expressions {
+	for expression := range proc.Expressions.All() {
 		if expression.SyntaxKind == "comparison_expression" && !expression.Recovered {
 			return true
 		}
@@ -253,8 +253,8 @@ func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
 	// Range.Value operation. Use the source lines in that case; the fallback is
 	// deliberately limited to procedures with no statement projection so the
 	// normal IR gate remains unchanged for complete procedures.
-	if len(proc.Statements) == 0 {
-		for _, expression := range proc.Expressions {
+	if proc.Statements.Len() == 0 {
+		for expression := range proc.Expressions.All() {
 			if expression.Recovered {
 				return true
 			}
@@ -265,7 +265,7 @@ func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
 		}
 		return rangeValueSourceLinesApplicable(file, proc)
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered {
 			return true
 		}
@@ -274,7 +274,7 @@ func rangeValueShapeApplicable(file parsedFile, proc sourceProcedure) bool {
 			return true
 		}
 	}
-	for _, expression := range proc.Expressions {
+	for expression := range proc.Expressions.All() {
 		if expression.Recovered {
 			return true
 		}
@@ -293,13 +293,13 @@ func rangeValueProjectionUnknown(proc sourceProcedure) bool {
 	if proc.Features.unknown&featureRangeArray == 0 {
 		return false
 	}
-	if len(proc.Statements) == 0 || len(proc.Expressions) == 0 {
+	if proc.Statements.Len() == 0 || proc.Expressions.Len() == 0 {
 		return true
 	}
 	// A graphless procedure can still have a complete statement/expression
 	// projection. Keep the existing linear IR transfer for that case; only an
 	// actually incomplete projection should fall back to source text.
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered || statement.Kind == procedureir.StatementRecovered || statement.Kind == procedureir.StatementUnknown {
 			return true
 		}
@@ -309,12 +309,12 @@ func rangeValueProjectionUnknown(proc sourceProcedure) bool {
 
 func rangeValueHasUnknownExpression(proc sourceProcedure) bool {
 	rangeStatements := map[int]bool{}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if rangeValueTextLooksRelevant(statement.Text) {
 			rangeStatements[statement.ID] = true
 		}
 	}
-	for _, expression := range proc.Expressions {
+	for expression := range proc.Expressions.All() {
 		if !expression.Recovered && expression.Kind != procedureir.ExpressionUnknown {
 			continue
 		}

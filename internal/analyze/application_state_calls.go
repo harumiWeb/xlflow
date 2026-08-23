@@ -52,7 +52,7 @@ func applicationStateLeakOrigins(proc sourceProcedure, project effects.ProjectSu
 		if len(unsafe) == 0 || hasPairedApplicationRestoreProcedure(proc, property.Key, project) {
 			continue
 		}
-		for _, statement := range proc.Statements {
+		for statement := range proc.Statements.All() {
 			witness, found := unsafe[statement.ID]
 			if !found {
 				continue
@@ -125,7 +125,7 @@ func (a Analyzer) applicationStateCallEffectFindings(file parsedFile, proc sourc
 	}
 	var out []Finding
 	reported := map[string]bool{}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if !applicationStateCallReachable(proc, call) || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
 			continue
 		}
@@ -164,7 +164,7 @@ func (a Analyzer) applicationStateCallEffectFindings(file parsedFile, proc sourc
 }
 
 func applicationStateCallReachable(proc sourceProcedure, call procedureir.CallSite) bool {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == call.StatementID && statement.Recovered {
 			return false
 		}

@@ -352,7 +352,7 @@ func (a Analyzer) arrayForEachFindings(file parsedFile, proc sourceProcedure, va
 		return nil
 	}
 	var findings []Finding
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.Recovered || statement.Kind != procedureir.StatementForEach {
 			continue
 		}
@@ -447,7 +447,7 @@ func (a Analyzer) arrayComparisonFindings(file parsedFile, proc sourceProcedure,
 
 func procedureIRNonArrayNames(proc sourceProcedure) map[string]bool {
 	names := map[string]bool{}
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if declaration.Recovered || declaration.Name == "" {
 			continue
 		}
@@ -757,7 +757,7 @@ func arrayResumeNextCapacityStartsAtZero(file parsedFile, proc sourceProcedure, 
 		return false
 	}
 	declarationLine := 0
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		if declaration.Scope != procedureir.ScopeLocal || !strings.EqualFold(cleanIdentifier(declaration.Name), cleanIdentifier(capacityName)) || declaration.IsArray || !arrayKnownScalarType(declaration.Type) {
 			continue
 		}
@@ -1483,7 +1483,7 @@ func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.Graph {
 	}
 	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
 	removed := map[vbacfg.BlockID]bool{}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
 		if !ok || !arrayProcedureAlwaysRaises(target) {
 			continue
@@ -1796,10 +1796,10 @@ func applyArrayByRefEntryStates(state arrayFlowState, proc sourceProcedure, vari
 	}
 	updated := cloneArrayState(state)
 	for index, allocated := range parameters {
-		if !allocated || index < 0 || index >= len(proc.Params) {
+		if !allocated || index < 0 || index >= proc.Params.Len() {
 			continue
 		}
-		name := strings.ToLower(proc.Params[index].Name)
+		name := strings.ToLower(proc.Params.valueAt(index).Name)
 		variable, known := variables[name]
 		value, exists := updated[name]
 		if !known || !exists || !variable.isArray {
@@ -1810,10 +1810,10 @@ func applyArrayByRefEntryStates(state arrayFlowState, proc sourceProcedure, vari
 		updated[name] = value
 	}
 	for index, source := range conditionalParameters {
-		if source == "" || index < 0 || index >= len(proc.Params) {
+		if source == "" || index < 0 || index >= proc.Params.Len() {
 			continue
 		}
-		name := strings.ToLower(proc.Params[index].Name)
+		name := strings.ToLower(proc.Params.valueAt(index).Name)
 		variable, known := variables[name]
 		value, exists := updated[name]
 		if !known || !exists || !variable.isArray || value.kind == arrayAllocated && value.knownArray {
@@ -1940,7 +1940,7 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 		return nil
 	}
 	parameters := map[string]int{}
-	for index, parameter := range proc.Params {
+	for index, parameter := range proc.Params.AllIndexed() {
 		if parameterIsByRefArray(parameter) {
 			parameters[strings.ToLower(parameter.Name)] = index
 		}
@@ -1956,7 +1956,7 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 		}
 		allocated[index] = true
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		text := strings.TrimSpace(statement.Text)
 		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
 			for _, clause := range splitArgs(match[2]) {
@@ -1972,7 +1972,7 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 			}
 		}
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		if arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) || !arrayProcedureBlockDominatesNormalExit(proc, call.StatementID, dominators) {
 			continue
 		}
@@ -1989,7 +1989,7 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 			continue
 		}
 		for index := range calleeParameters {
-			if index >= len(arguments) || index >= len(target.Params) || !parameterIsByRefArray(target.Params[index]) {
+			if index >= len(arguments) || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
 				continue
 			}
 			if parameterIndex, ok := parameters[directArrayArgumentName(arguments[index])]; ok {
@@ -2046,7 +2046,7 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 		return nil
 	}
 	allocated := map[int]bool{}
-	for index, parameter := range proc.Params {
+	for index, parameter := range proc.Params.AllIndexed() {
 		if !parameterIsByRefArray(parameter) {
 			continue
 		}
@@ -2076,7 +2076,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 				continue
 			}
 			parameters := map[string]int{}
-			for index, parameter := range proc.Params {
+			for index, parameter := range proc.Params.AllIndexed() {
 				parameters[strings.ToLower(cleanIdentifier(parameter.Name))] = index
 			}
 			if len(parameters) == 0 {
@@ -2087,7 +2087,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 				line        int
 				parameter   int
 			}{}
-			for _, statement := range proc.Statements {
+			for statement := range proc.Statements.All() {
 				match := arrayByRefCountExitRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
 				if len(match) != 2 {
 					continue
@@ -2105,7 +2105,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 			if len(guards) == 0 {
 				continue
 			}
-			for _, statement := range proc.Statements {
+			for statement := range proc.Statements.All() {
 				match := arrayByRefCountRedimRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
 				if len(match) != 3 || arrayProcedureLineHasInlineConditional(file, statement.Range.StartLine) {
 					continue
@@ -2115,7 +2115,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 				if !outputOK || !guardOK || statement.Range.StartLine <= guard.line {
 					continue
 				}
-				if output < 0 || output >= len(proc.Params) || !parameterIsByRefArray(proc.Params[output]) {
+				if output < 0 || output >= proc.Params.Len() || !parameterIsByRefArray(proc.Params.valueAt(output)) {
 					continue
 				}
 				guardBlock, guardBlockOK := proc.Graph.BlockForStatement(guard.statementID)
@@ -2174,14 +2174,14 @@ func inferArrayByRefLengthAllocations(files []parsedFile) arrayByRefLengthAlloca
 				continue
 			}
 			parameters := map[string]int{}
-			for index, parameter := range proc.Params {
+			for index, parameter := range proc.Params.AllIndexed() {
 				parameters[strings.ToLower(cleanIdentifier(parameter.Name))] = index
 			}
 			if len(parameters) == 0 {
 				continue
 			}
 			dominators := arrayProcedureNormalExitDominators(proc)
-			for _, statement := range proc.Statements {
+			for statement := range proc.Statements.All() {
 				text := strings.TrimSpace(normalizedCodeLine(statement.Text))
 				match := arrayByRefLengthFullRe.FindStringSubmatch(text)
 				if len(match) == 4 && !strings.EqualFold(cleanIdentifier(match[2]), cleanIdentifier(match[3])) {
@@ -2198,7 +2198,7 @@ func inferArrayByRefLengthAllocations(files []parsedFile) arrayByRefLengthAlloca
 				}
 				lengthIndex, lengthOK := parameters[strings.ToLower(cleanIdentifier(match[1]))]
 				arrayIndex, arrayOK := parameters[strings.ToLower(cleanIdentifier(match[2]))]
-				if !lengthOK || !arrayOK || lengthIndex == arrayIndex || !parameterIsByRefScalar(proc.Params[lengthIndex]) || !parameterIsByRefArray(proc.Params[arrayIndex]) {
+				if !lengthOK || !arrayOK || lengthIndex == arrayIndex || !parameterIsByRefScalar(proc.Params.valueAt(lengthIndex)) || !parameterIsByRefArray(proc.Params.valueAt(arrayIndex)) {
 					continue
 				}
 				dominatesExit := arrayProcedureBlockDominatesNormalExit(proc, statement.ID, dominators)
@@ -2227,7 +2227,7 @@ func inferArrayByRefLengthAllocations(files []parsedFile) arrayByRefLengthAlloca
 }
 
 func arrayProcedureStatementByID(proc sourceProcedure, id int) (procedureir.Statement, bool) {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == id {
 			return statement, true
 		}
@@ -2252,7 +2252,7 @@ func arrayByRefLengthGuard(proc sourceProcedure, statementID int) (procedureir.S
 }
 
 func arrayByRefLengthHasZeroBranch(proc sourceProcedure, parentID, formulaID int, lengthName string) bool {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == formulaID || statement.ParentID != parentID {
 			continue
 		}
@@ -2301,7 +2301,7 @@ func arrayFalseBranchRequiresBlock(graph vbacfg.Graph, guardBlock, requiredBlock
 }
 
 func statementLine(proc sourceProcedure, statementID int) int {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if statement.ID == statementID {
 			return statement.Range.StartLine
 		}
@@ -2418,7 +2418,7 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	arguments := arrayCallArgumentTexts(proc, call)
 	if len(call.Arguments.Named) == 0 && len(arguments) == call.Arguments.Count {
 		for index := range ctx.arrayByRefAllocations[key] {
-			if index >= len(arguments) || index >= len(target.Params) || !parameterIsByRefArray(target.Params[index]) {
+			if index >= len(arguments) || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
 				continue
 			}
 			markArgument(arguments[index])
@@ -2586,7 +2586,7 @@ func arrayGuardProcedureRejectsInvalidState(file parsedFile, target sourceProced
 }
 
 func arrayGuardTargetsCurrentObject(target sourceProcedure, arguments []string) bool {
-	if len(target.Params) <= 1 {
+	if target.Params.Len() <= 1 {
 		return true
 	}
 	return len(arguments) > 0 && strings.EqualFold(strings.TrimSpace(arguments[0]), "me")
@@ -2717,7 +2717,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		}
 		allocated[name] = true
 	}
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		text := strings.TrimSpace(statement.Text)
 		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
 			for _, clause := range splitArgs(match[2]) {
@@ -2738,7 +2738,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 			}
 		}
 	}
-	for _, call := range proc.Calls {
+	for call := range proc.Calls.All() {
 		key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
 		if !ok {
 			continue
@@ -2764,7 +2764,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 			arguments := arrayCallArgumentTexts(proc, call)
 			if len(call.Arguments.Named) == 0 && len(arguments) == call.Arguments.Count {
 				for index := range calleeByRefArrays {
-					if index >= len(arguments) || index >= len(target.Params) || !parameterIsByRefArray(target.Params[index]) {
+					if index >= len(arguments) || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
 						continue
 					}
 					name := strings.ToLower(directArrayArgumentName(arguments[index]))
@@ -3265,7 +3265,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		moduleDecls := file.moduleDecls()
 		for _, caller := range file.procedureProjection() {
 			eligibleCaller := false
-			for _, call := range caller.Calls {
+			for call := range caller.Calls.All() {
 				_, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
 				if ok && procedureHasByRefArrayParameter(target) {
 					eligibleCaller = true
@@ -3431,9 +3431,9 @@ func arrayOptionPrivateModule(lines []string) bool {
 	return false
 }
 
-func arrayCallsAtLine(calls []procedureir.CallSite, line int) []procedureir.CallSite {
+func arrayCallsAtLine(calls readOnlySpan[procedureir.CallSite], line int) []procedureir.CallSite {
 	matched := make([]procedureir.CallSite, 0, 1)
-	for _, call := range calls {
+	for call := range calls.All() {
 		if call.IsRaiseEvent || call.Range.StartLine != line {
 			continue
 		}
@@ -3453,7 +3453,7 @@ func arrayPrivateTargetForCall(ctx analysisContext, targets map[string]sourcePro
 }
 
 func procedureHasByRefArrayParameter(proc sourceProcedure) bool {
-	for _, parameter := range proc.Params {
+	for parameter := range proc.Params.All() {
 		if parameterIsByRefArray(parameter) {
 			return true
 		}
@@ -3473,7 +3473,7 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 	if len(call.Arguments.Named) > 0 || len(arguments) != call.Arguments.Count {
 		return
 	}
-	for index, parameter := range target.Params {
+	for index, parameter := range target.Params.AllIndexed() {
 		if !parameterIsByRefArray(parameter) {
 			continue
 		}
@@ -3542,7 +3542,7 @@ func arrayByRefCallHasProvenArrayArguments(target, caller sourceProcedure, call 
 		return false, false
 	}
 	foundExpression := false
-	for index, parameter := range target.Params {
+	for index, parameter := range target.Params.AllIndexed() {
 		if !parameterIsByRefArray(parameter) {
 			continue
 		}
@@ -3590,22 +3590,22 @@ func arrayCallRangeContains(outer, inner procedureir.CallSite) bool {
 }
 
 func arrayByRefCallArrayVacuouslyUnused(target sourceProcedure, arrayIndex int, arguments []string) bool {
-	if arrayIndex < 0 || arrayIndex >= len(target.Params) {
+	if arrayIndex < 0 || arrayIndex >= target.Params.Len() {
 		return false
 	}
-	arrayName := strings.ToLower(cleanIdentifier(target.Params[arrayIndex].Name))
+	arrayName := strings.ToLower(cleanIdentifier(target.Params.valueAt(arrayIndex).Name))
 	if arrayName == "" {
 		return false
 	}
-	statements := make(map[int]procedureir.Statement, len(target.Statements))
-	for _, statement := range target.Statements {
+	statements := make(map[int]procedureir.Statement, target.Statements.Len())
+	for statement := range target.Statements.All() {
 		statements[statement.ID] = statement
 	}
 	variables := map[string]arrayVariable{
 		arrayName: {name: arrayName, isArray: true},
 	}
 	found := false
-	for _, statement := range target.Statements {
+	for statement := range target.Statements.All() {
 		if !arrayStatementReferencesArray(statement.Text, arrayName, variables) {
 			continue
 		}
@@ -3672,7 +3672,7 @@ func arrayConditionHasFalseCallArgument(condition string, target sourceProcedure
 
 func arrayProcedureParameterIndex(proc sourceProcedure, name string) (int, bool) {
 	name = strings.ToLower(cleanIdentifier(name))
-	for index, parameter := range proc.Params {
+	for index, parameter := range proc.Params.AllIndexed() {
 		if strings.ToLower(cleanIdentifier(parameter.Name)) == name {
 			return index, true
 		}
@@ -3707,10 +3707,10 @@ func arrayConditionalEntrySource(target sourceProcedure, arguments []string, arr
 		if index == arrayParameterIndex || !arrayCountExpressionMatches(argument, source) {
 			continue
 		}
-		if index < 0 || index >= len(target.Params) || parameterIsByRefArray(target.Params[index]) {
+		if index < 0 || index >= target.Params.Len() || parameterIsByRefArray(target.Params.valueAt(index)) {
 			continue
 		}
-		return strings.ToLower(target.Params[index].Name)
+		return strings.ToLower(target.Params.valueAt(index).Name)
 	}
 	return ""
 }
@@ -4043,7 +4043,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 	// The legacy line scanner intentionally ignores Const and Enum syntax.
 	// Fill those gaps from the shared procedure IR so a known scalar constant
 	// can still be classified as a non-iterable/non-array operation target.
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		key := strings.ToLower(declaration.Name)
 		if key == "" {
 			continue
@@ -4055,7 +4055,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 			Dimensions: parameterArrayDimensions(declaration.ArrayBounds, base),
 		})
 	}
-	for _, param := range proc.Params {
+	for param := range proc.Params.All() {
 		array := param.ParamArray || strings.Contains(param.Type, "()") || param.ValueShape == procedureir.ValueShapeFixedArray || param.ValueShape == procedureir.ValueShapeDynamicArray
 		decls.parameters[strings.ToLower(param.Name)] = sourceDeclaration{
 			Name: param.Name, Type: param.Type, Array: array,
@@ -4098,7 +4098,7 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 func arrayVBA227Variables(baseVariables map[string]arrayVariable, file parsedFile, proc sourceProcedure) map[string]arrayVariable {
 	overlays := make([]procedureir.Declaration, 0)
 	base := arrayOptionBase(file)
-	for _, declaration := range proc.Declarations {
+	for declaration := range proc.Declarations.All() {
 		key := strings.ToLower(strings.TrimSpace(declaration.Name))
 		if key == "" || !declaration.IsArray || declaration.ValueShape != procedureir.ValueShapeDynamicArray || !arrayDeclarationHasInlineRedim(file.Lines, declaration) {
 			continue
@@ -4876,10 +4876,10 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 		return "", false
 	}
-	if !arrayKnownScalarType(proc.ReturnType) || isObjectType(proc.ReturnType) || len(proc.Params) != 1 {
+	if !arrayKnownScalarType(proc.ReturnType) || isObjectType(proc.ReturnType) || proc.Params.Len() != 1 {
 		return "", false
 	}
-	parameter := proc.Params[0]
+	parameter := proc.Params.valueAt(0)
 	variantParameter := strings.EqualFold(cleanIdentifier(strings.TrimSpace(parameter.Type)), "variant")
 	if parameter.Name == "" || (!parameterIsArray(parameter) && !variantParameter) || proc.Name == "" {
 		return "", false
@@ -4892,7 +4892,7 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 	positiveReturns := 0
 	recoveryZeroReturns := 0
 	invalidReturn := false
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		text := strings.TrimSpace(normalizedCodeLine(statement.Text))
 		if match := arrayOnErrorGotoRe.FindStringSubmatch(text); len(match) == 2 {
 			errorLabel = strings.ToLower(match[1])
@@ -5056,7 +5056,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 }
 
 func arrayProcedureHasErrorHandling(proc sourceProcedure) bool {
-	for _, statement := range proc.Statements {
+	for statement := range proc.Statements.All() {
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "on error ") {
 			return true
 		}

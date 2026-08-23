@@ -6992,7 +6992,7 @@ func TestArrayModuleEntryStateDoesNotInitializeShadowingParameter(t *testing.T) 
 	}
 	proc := sourceProcedure{
 		Name: "Consume", Module: "Main", StartLine: 1, EndLine: 2,
-		Params: []parameterInfo{{Name: "values", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}},
+		Params: newReadOnlySpan([]parameterInfo{{Name: "values", Type: "Byte()", Passing: "ByRef", ValueShape: procedureir.ValueShapeDynamicArray}}),
 	}
 	file := parsedFile{
 		Lines:              []string{"Private Sub Consume(ByRef values() As Byte)", "End Sub"},
