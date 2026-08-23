@@ -85,7 +85,9 @@ func buildDictionaryCollectionIndex(files []parsedFile) *dictionaryCollectionInd
 	}
 	sources := map[string]source{}
 	for _, file := range files {
-		for _, proc := range file.procedures() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			if proc.Name == "" {
 				continue
 			}

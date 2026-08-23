@@ -86,13 +86,16 @@ func (a Analyzer) publicAPITypeFindings(file parsedFile, index *apiTypeIndex) []
 	if !publicAPIModule(file.IR) {
 		return nil
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	var findings []Finding
 	for i, procedure := range file.IR.Procedures {
-		if i >= len(procedures) || !publicAPIProcedure(procedure.Symbol) || procedure.Symbol.IsEventHandler {
+		if i >= procedures.Len() || !publicAPIProcedure(procedure.Symbol) || procedure.Symbol.IsEventHandler {
 			continue
 		}
-		proc := procedures[i]
+		proc, ok := procedures.At(i)
+		if !ok {
+			continue
+		}
 		if procedure.Symbol.Kind == procedureir.ProcedureFunction ||
 			procedure.Symbol.Kind == procedureir.ProcedurePropertyGet {
 			findings = append(findings, a.checkPublicAPIType(file, proc, index, procedure.Symbol.ReturnType, proc.StartLine, "return type")...)
@@ -295,14 +298,14 @@ func isSafePublicAPIType(name string) bool {
 	}
 }
 
-func (a Analyzer) propertyVisibilityFindings(file parsedFile, index *apiTypeIndex, procedures []sourceProcedure) []Finding {
+func (a Analyzer) propertyVisibilityFindings(file parsedFile, index *apiTypeIndex, procedures readOnlySpan[sourceProcedure]) []Finding {
 	type propertyAccessors struct {
 		get   []int
 		write []int
 	}
 	groups := map[string]*propertyAccessors{}
 	for i, procedure := range file.IR.Procedures {
-		if i >= len(procedures) || procedure.Symbol.IsEventHandler || !publicAPIModule(file.IR) {
+		if i >= procedures.Len() || procedure.Symbol.IsEventHandler || !publicAPIModule(file.IR) {
 			continue
 		}
 		name := strings.ToLower(procedure.Symbol.Name)
@@ -334,9 +337,17 @@ func (a Analyzer) propertyVisibilityFindings(file parsedFile, index *apiTypeInde
 		if procedureVisibilityRank(getter.Visibility) == procedureVisibilityRank(writer.Visibility) {
 			continue
 		}
-		line := procedures[group.get[0]].StartLine
+		getterProcedure, ok := procedures.At(group.get[0])
+		if !ok {
+			continue
+		}
+		writerProcedure, ok := procedures.At(group.write[0])
+		if !ok {
+			continue
+		}
+		line := getterProcedure.StartLine
 		if procedureVisibilityRank(getter.Visibility) < procedureVisibilityRank(writer.Visibility) {
-			line = procedures[group.write[0]].StartLine
+			line = writerProcedure.StartLine
 		}
 		typeName := publicAPITypeName(getter.ReturnType)
 		if typeName == "" {
@@ -351,7 +362,7 @@ func (a Analyzer) propertyVisibilityFindings(file parsedFile, index *apiTypeInde
 		message := fmt.Sprintf("Property %s has mismatched getter/setter visibility for type %s (%s getter, %s setter).", getter.Name, typeName, effectiveVisibility(getter.Visibility), effectiveVisibility(writer.Visibility))
 		reason := fmt.Sprintf("The public property %s exposes type %s through accessors with different effective visibility, so callers cannot rely on one stable public contract.", getter.Name, typeName)
 		suggestion := fmt.Sprintf("Give both accessors the same visibility and keep type %s consistently exposed.", typeName)
-		finding := a.simpleFinding(file, procedures[group.get[0]], line, publicAPITypeRule, "warning", message, reason, suggestion)
+		finding := a.simpleFinding(file, getterProcedure, line, publicAPITypeRule, "warning", message, reason, suggestion)
 		findings = append(findings, finding)
 	}
 	return findings

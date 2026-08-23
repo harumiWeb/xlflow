@@ -7,8 +7,10 @@ All notable changes to xlflow will be documented in this file.
 - Reduced giant-module analyzer allocation pressure by representing procedure
   projections as immutable views over canonical Procedure IR. Facts now retain
   compact indexes and read-only access paths instead of copied declaration,
-  statement, expression, call, access, and parameter collections. Diagnostic
-  and JSON/LSP contracts remain unchanged.
+  statement, expression, call, access, and parameter collections. Hot rule
+  consumers now iterate procedure and statement-grouped member facts without
+  defensive copies, while explicit owned-copy compatibility boundaries remain.
+  Diagnostic and JSON/LSP contracts remain unchanged.
 
 - Added a read-only procedure-resolution overlay for batch `VB052`-`VB054`
   diagnostics, avoiding a second full `DocumentIR` clone while preserving

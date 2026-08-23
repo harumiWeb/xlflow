@@ -172,7 +172,9 @@ func dataFlowInputsEnabled(cfg config.AnalyzeConfig) bool {
 
 func projectHasFeature(files []parsedFile, feature procedureFeature) bool {
 	for _, file := range files {
-		for _, procedure := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			procedure := procedures.valueAt(procedureIndex)
 			if procedure.Features.mayHave(feature) {
 				return true
 			}

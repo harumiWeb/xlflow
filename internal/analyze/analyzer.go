@@ -1048,7 +1048,7 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile, diagnostics []intel.Dia
 	if len(diagnostics) == 0 {
 		return nil
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	out := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code != "VBA206" {
@@ -1056,7 +1056,8 @@ func (a Analyzer) byRefArgumentFindings(file parsedFile, diagnostics []intel.Dia
 		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		for _, candidate := range procedures {
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			candidate := procedures.valueAt(procedureIndex)
 			if line >= candidate.StartLine && line <= candidate.EndLine {
 				proc = candidate
 				break
@@ -1103,7 +1104,7 @@ func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file par
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	out := make([]Finding, 0, len(diagnostics))
 	preflight := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
@@ -1113,7 +1114,8 @@ func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file par
 		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		for _, candidate := range procedures {
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			candidate := procedures.valueAt(procedureIndex)
 			if line >= candidate.StartLine && line <= candidate.EndLine {
 				proc = candidate
 				break
@@ -1166,7 +1168,9 @@ func compileEquivalentFindingGuidance(code string) (string, string) {
 func (a Analyzer) resolutionFinding(file parsedFile, diagnostic procedureir.ResolutionDiagnostic) Finding {
 	line := diagnostic.Range.StartLine
 	proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-	for _, candidate := range file.procedures() {
+	procedures := file.procedureView()
+	for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+		candidate := procedures.valueAt(procedureIndex)
 		if line >= candidate.StartLine && line <= candidate.EndLine {
 			proc = candidate
 			break
@@ -1298,7 +1302,7 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	out := make([]Finding, 0, len(diagnostics))
 	for i, diagnostic := range diagnostics {
 		if i&0x3f == 0 {
@@ -1308,7 +1312,8 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 		}
 		line := diagnostic.Range.Start.Line + 1
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		for _, candidate := range procedures {
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			candidate := procedures.valueAt(procedureIndex)
 			if line >= candidate.StartLine && line <= candidate.EndLine {
 				proc = candidate
 				break
@@ -2081,7 +2086,9 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 				})
 			}
 		}
-		for _, proc := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			functionName := strings.ToLower(proc.Name)
 			if functionName != "" {
 				if ctx.functionNamesSeen[functionName] {
@@ -2832,14 +2839,21 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 	return procedures
 }
 
-func (file parsedFile) procedures() []sourceProcedure {
+func (file *parsedFile) procedures() []sourceProcedure {
 	return append([]sourceProcedure(nil), file.procedureProjection()...)
 }
 
-// procedureProjection returns the materialized source-procedure view for
-// read-only analysis stages. Unlike procedures, it does not copy the outer
-// slice; callers must not mutate the returned projection.
-func (file parsedFile) procedureProjection() []sourceProcedure {
+// procedureView returns an allocation-free read-only view over the cached
+// procedure projection. Callers that need to retain or mutate procedure
+// values must use procedures instead.
+func (file *parsedFile) procedureView() readOnlySpan[sourceProcedure] {
+	return newReadOnlySpan(file.procedureProjection())
+}
+
+// procedureProjection returns the cached backing projection used to construct
+// owned copies and read-only views. Rule implementations must use procedures
+// or procedureView instead of retaining this slice.
+func (file *parsedFile) procedureProjection() []sourceProcedure {
 	if file.Procedures != nil {
 		return file.Procedures
 	}

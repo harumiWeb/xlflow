@@ -445,10 +445,11 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 
 func projectPlansDomain(cfg config.AnalyzeConfig, files []parsedFile, projectEffects effects.ProjectSummary, domain analysisstats.Domain) bool {
 	for _, file := range files {
-		procedures := file.procedureProjection()
+		procedures := file.procedureView()
 		materialized := file.Procedures != nil
 		if materialized {
-			for _, proc := range procedures {
+			for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+				proc := procedures.valueAt(procedureIndex)
 				if !proc.PlanReady {
 					materialized = false
 					break
@@ -456,9 +457,10 @@ func projectPlansDomain(cfg config.AnalyzeConfig, files []parsedFile, projectEff
 			}
 		}
 		if !materialized {
-			procedures = sourceProceduresWithEffects(file, projectEffects)
+			procedures = newReadOnlySpan(sourceProceduresWithEffects(file, projectEffects))
 		}
-		for _, proc := range procedures {
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			plan := proc.Plan
 			if !proc.PlanReady {
 				plan = proc.analysisPlan(cfg, file.moduleDecls())

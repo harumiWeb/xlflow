@@ -34,7 +34,7 @@ func (a Analyzer) excelAPIFailureContractFindingsContext(ctx context.Context, fi
 	if len(diagnostics) == 0 {
 		return nil, nil
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	aliases := a.errorGuardAliases
 	if aliases == nil {
 		aliases = isErrorGuardAliases(file.Lines)
@@ -47,7 +47,7 @@ func (a Analyzer) excelAPIFailureContractFindingsContext(ctx context.Context, fi
 			}
 		}
 		line := diagnostic.Range.Start.Line + 1
-		proc := procedureForLine(procedures, line, len(file.Lines))
+		proc := procedureForLineView(procedures, line, len(file.Lines))
 		if isExceptionContractDiagnostic(diagnostic.Message) && exceptionContractHasErrorStrategy(file.Lines, proc, line) {
 			continue
 		}
@@ -67,7 +67,12 @@ func (a Analyzer) excelAPIFailureContractFindingsContext(ctx context.Context, fi
 }
 
 func procedureForLine(procedures []sourceProcedure, line, lineCount int) sourceProcedure {
-	for _, procedure := range procedures {
+	return procedureForLineView(newReadOnlySpan(procedures), line, lineCount)
+}
+
+func procedureForLineView(procedures readOnlySpan[sourceProcedure], line, lineCount int) sourceProcedure {
+	for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+		procedure := procedures.valueAt(procedureIndex)
 		if line >= procedure.StartLine && line <= procedure.EndLine {
 			return procedure
 		}
@@ -203,7 +208,7 @@ func (a Analyzer) errorValueWrapperFindingsContext(ctx context.Context, file par
 	if len(wrappers) == 0 {
 		return nil, nil
 	}
-	procedures := file.procedures()
+	procedures := file.procedureView()
 	aliases := a.errorGuardAliases
 	if aliases == nil {
 		aliases = isErrorGuardAliases(file.Lines)
@@ -215,7 +220,7 @@ func (a Analyzer) errorValueWrapperFindingsContext(ctx context.Context, file par
 				return nil, err
 			}
 		}
-		proc := procedureForLine(procedures, irProcedure.Symbol.DeclarationRange.StartLine+1, len(file.Lines))
+		proc := procedureForLineView(procedures, irProcedure.Symbol.DeclarationRange.StartLine+1, len(file.Lines))
 		for _, call := range irProcedure.Calls {
 			if !wrapperCallMatches(call, wrappers) {
 				continue

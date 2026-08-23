@@ -333,6 +333,15 @@ revision and they are released with that analysis result. Snapshot and public
 compatibility getters may continue to return defensive copies at their
 ownership boundary.
 
+Hot analyzer rules must use the private read-only procedure span and grouped
+fact iterators for immutable reads. Procedure iteration uses indexed span
+access so large procedure values do not make range-over-function closures
+escape. Statement-grouped member-expression iteration preserves canonical
+source order and uses the compact grouped index without materializing a
+temporary slice. The owned procedure and grouped-member getters remain the
+explicit boundary for callers that mutate effect overlays, recover from an
+incomplete index, or require an independently owned compatibility value.
+
 Batch and realtime entry points construct and attach facts before rule workers
 run. The performance recorder reports `module_fact_builds` and
 `procedure_fact_builds`; a normal file revision contributes one module build

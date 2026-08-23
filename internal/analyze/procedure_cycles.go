@@ -152,9 +152,10 @@ func (a Analyzer) procedureCallCycleFindings(ctx context.Context, files []parsed
 		if !ok {
 			continue
 		}
-		procedures := file.procedures()
+		procedures := file.procedureView()
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
-		for _, candidate := range procedures {
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			candidate := procedures.valueAt(procedureIndex)
 			if strings.EqualFold(candidate.Name, cycleNodeName(cycle.Nodes[0].QualifiedName)) && candidate.StartLine == cycle.Nodes[0].Line {
 				proc = candidate
 				break

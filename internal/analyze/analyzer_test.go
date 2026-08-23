@@ -111,9 +111,20 @@ func TestParsedFileProceduresReusesMaterializedProjection(t *testing.T) {
 	if &second[0].IR.Declarations[0] != &file.IR.Procedures[0].Declarations[0] {
 		t.Fatal("procedure view does not use canonical declaration storage")
 	}
+	view := file.procedureView()
+	viewProcedure, ok := view.At(0)
+	if !ok || viewProcedure.IR != &file.IR.Procedures[0] {
+		t.Fatalf("read-only procedure view = %#v, %v", viewProcedure, ok)
+	}
+	viewProcedure.IR = nil
+	viewProcedure, ok = view.At(0)
+	if !ok || viewProcedure.IR != &file.IR.Procedures[0] {
+		t.Fatal("mutating a procedure value returned by the view changed the cached projection")
+	}
 }
 
 var benchmarkProcedureProjectionSink []sourceProcedure
+var benchmarkProcedureViewSink int
 
 func BenchmarkParsedFileProcedureProjection(b *testing.B) {
 	for _, procedureCount := range []int{100, 500, 1000, 2000} {
@@ -132,6 +143,17 @@ func BenchmarkParsedFileProcedureProjection(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
 					benchmarkProcedureProjectionSink = file.procedures()
+				}
+			})
+			b.Run("read-only-view", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					total := 0
+					view := file.procedureView()
+					for index := 0; index < view.Len(); index++ {
+						total += view.valueAt(index).StartLine
+					}
+					benchmarkProcedureViewSink = total
 				}
 			})
 		})

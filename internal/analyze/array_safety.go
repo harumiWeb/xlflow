@@ -1880,7 +1880,9 @@ type arrayModuleEntryStates map[string]map[string]bool
 func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure {
 	targets := map[string]sourceProcedure{}
 	for _, file := range files {
-		for _, proc := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			visibility := strings.TrimSpace(proc.Visibility)
 			private := strings.EqualFold(visibility, "Private") || strings.EqualFold(visibility, "Friend")
 			modulePrivate := strings.EqualFold(visibility, "Public") && arrayOptionPrivateModule(file.Lines)
@@ -1901,9 +1903,10 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 		moduleDecls map[string]sourceDeclaration
 	}, 0)
 	for _, file := range files {
-		procs := file.procedureProjection()
+		procs := file.procedureView()
 		moduleDecls := file.moduleDecls()
-		for _, proc := range procs {
+		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
+			proc := procs.valueAt(procedureIndex)
 			if !procedureHasByRefArrayParameter(proc) {
 				continue
 			}
@@ -2071,7 +2074,9 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditionalAllocations {
 	summaries := arrayByRefConditionalAllocations{}
 	for _, file := range files {
-		for _, proc := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			if proc.Graph == nil {
 				continue
 			}
@@ -2169,7 +2174,9 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 func inferArrayByRefLengthAllocations(files []parsedFile) arrayByRefLengthAllocations {
 	summaries := arrayByRefLengthAllocations{}
 	for _, file := range files {
-		for _, proc := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			if proc.Graph == nil {
 				continue
 			}
@@ -2331,7 +2338,9 @@ func inferArrayModuleConfigurationStates(files []parsedFile, summaries arrayModu
 	states := map[string]arrayModuleConfigurationState{}
 	for _, file := range files {
 		state := arrayModuleConfigurationState{byProcedure: map[string]map[string]bool{}}
-		for _, proc := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			name := strings.ToLower(strings.TrimSpace(proc.Name))
 			if !strings.HasPrefix(name, "configure") {
 				continue
@@ -2656,9 +2665,10 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 		moduleDecls map[string]sourceDeclaration
 	}, 0)
 	for _, file := range files {
-		procs := file.procedureProjection()
+		procs := file.procedureView()
 		moduleDecls := file.moduleDecls()
-		for _, proc := range procs {
+		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
+			proc := procs.valueAt(procedureIndex)
 			procedures = append(procedures, struct {
 				file        parsedFile
 				proc        sourceProcedure
@@ -2996,10 +3006,11 @@ func arrayModuleInitializationStates(files []parsedFile, summaries arrayModuleAl
 		if moduleKind != "form" && moduleKind != "class" {
 			continue
 		}
-		procs := file.procedureProjection()
+		procs := file.procedureView()
 		moduleDecls := file.moduleDecls()
 		initializer := arrayModuleInitializerName(moduleKind)
-		for _, proc := range procs {
+		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
+			proc := procs.valueAt(procedureIndex)
 			if !strings.EqualFold(strings.TrimSpace(proc.Name), initializer) {
 				continue
 			}
@@ -3076,9 +3087,10 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	moduleArrays := map[string]map[string]bool{}
 	moduleFiles := map[string]string{}
 	for _, file := range files {
-		procs := file.procedureProjection()
+		procs := file.procedureView()
 		moduleDecls := file.moduleDecls()
-		for _, proc := range procs {
+		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
+			proc := procs.valueAt(procedureIndex)
 			key := arrayProcedureKey(proc)
 			procedures = append(procedures, procedureInfo{
 				file: file, proc: proc, moduleDecls: moduleDecls,
@@ -3263,7 +3275,9 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 	callers := make([]callerInfo, 0)
 	for _, file := range files {
 		moduleDecls := file.moduleDecls()
-		for _, caller := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			caller := procedures.valueAt(procedureIndex)
 			eligibleCaller := false
 			for call := range caller.Calls.All() {
 				_, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
@@ -4850,7 +4864,9 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 	candidates := map[string][]string{}
 	procedureNames := map[string]int{}
 	for _, file := range files {
-		for _, proc := range file.procedureProjection() {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
 			name := strings.ToLower(proc.Name)
 			if name != "" {
 				procedureNames[name]++
@@ -4959,9 +4975,10 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	}
 	procedures := make([]returnProcedure, 0)
 	for _, file := range files {
-		fileProcedures := file.procedureProjection()
+		fileProcedures := file.procedureView()
 		moduleDecls := file.moduleDecls()
-		for _, proc := range fileProcedures {
+		for procedureIndex := 0; procedureIndex < fileProcedures.Len(); procedureIndex++ {
+			proc := fileProcedures.valueAt(procedureIndex)
 			if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 				continue
 			}

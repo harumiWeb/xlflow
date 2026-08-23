@@ -229,8 +229,9 @@ func eventControlTargetName(target string) string {
 func eventSafeProcedures(files []parsedFile, project effects.ProjectSummary) map[string]bool {
 	safe := map[string]bool{}
 	for _, file := range files {
-		procedures := file.procedures()
-		for index, proc := range procedures {
+		procedures := file.procedureView()
+		for index := 0; index < procedures.Len(); index++ {
+			proc := procedures.valueAt(index)
 			if index >= len(file.IR.Procedures) {
 				continue
 			}
