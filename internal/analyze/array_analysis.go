@@ -106,7 +106,7 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		if proc.Graph != nil && coreFlowRequested {
 			result.cfgWalks++
 		}
-		result.projectionRuns += arrayCoreProjectionRuns(a.Config.Analyze, proc, variables, objectArrayApplicable, runtimeRequested)
+		result.projectionRuns += arrayCoreProjectionRuns(a.Config.Analyze, file, proc, variables, objectArrayApplicable, runtimeRequested)
 	}
 	if a.Config.Analyze.DetectRedimPreserveInLoops {
 		var redimApplicable bool
@@ -140,7 +140,7 @@ func arrayObjectArrayApplicable(variables map[string]arrayVariable) bool {
 // core lane. The lane itself is one worklist, but telemetry reports the
 // enabled, applicable diagnostic projections rather than treating that lane as
 // one diagnostic. This keeps the counter independent from finding multiplicity.
-func arrayCoreProjectionRuns(cfg config.AnalyzeConfig, proc sourceProcedure, variables map[string]arrayVariable, objectArrayApplicable, runtimeRequested bool) uint64 {
+func arrayCoreProjectionRuns(cfg config.AnalyzeConfig, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, objectArrayApplicable, runtimeRequested bool) uint64 {
 	var runs uint64
 	hasArray := false
 	for _, variable := range variables {
@@ -149,7 +149,7 @@ func arrayCoreProjectionRuns(cfg config.AnalyzeConfig, proc sourceProcedure, var
 			break
 		}
 	}
-	if cfg.DetectArrayLifecycleSafety && arrayLifecycleProjectionApplicable(proc, variables) {
+	if cfg.DetectArrayLifecycleSafety && arrayLifecycleProjectionApplicable(file, proc, variables) {
 		runs++ // VBA227 lifecycle and For Each projection
 	}
 	if runtimeRequested {
@@ -167,19 +167,41 @@ func arrayCoreProjectionRuns(cfg config.AnalyzeConfig, proc sourceProcedure, var
 	return runs
 }
 
-func arrayLifecycleProjectionApplicable(proc sourceProcedure, variables map[string]arrayVariable) bool {
-	if len(variables) > 0 {
-		for _, statement := range proc.Statements {
-			lower := strings.ToLower(statement.Text)
-			if strings.Contains(lower, "redim") || strings.Contains(lower, "erase ") || strings.Contains(lower, "lbound(") || strings.Contains(lower, "ubound(") || strings.Contains(lower, "for each") {
-				return true
-			}
-			if len(arrayIndexedUses(statement.Text, variables)) > 0 {
+func arrayLifecycleProjectionApplicable(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable) bool {
+	if len(variables) == 0 {
+		return false
+	}
+	for _, statement := range proc.Statements {
+		if arrayLifecycleTextApplicable(statement.Text, variables) {
+			return true
+		}
+	}
+	if proc.Features.unknown&featureArray != 0 {
+		return true
+	}
+	start, end := proc.StartLine, proc.EndLine
+	if start < 1 {
+		start = 1
+	}
+	if end <= 0 || end > len(file.Lines) {
+		end = len(file.Lines)
+	}
+	if start <= end {
+		for line := start; line <= end; line++ {
+			if arrayLifecycleTextApplicable(normalizedCodeLine(file.Lines[line-1]), variables) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func arrayLifecycleTextApplicable(text string, variables map[string]arrayVariable) bool {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "redim") || strings.Contains(lower, "erase ") || strings.Contains(lower, "lbound(") || strings.Contains(lower, "ubound(") || strings.Contains(lower, "for each") {
+		return true
+	}
+	return len(arrayIndexedUses(text, variables)) > 0
 }
 
 func arrayHasRedimPreserveOperation(proc sourceProcedure) bool {

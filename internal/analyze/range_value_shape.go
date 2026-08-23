@@ -79,7 +79,6 @@ type rangeValueSourceBranchFrame struct {
 	branches     rangeValueFlowState
 	hasBranches  bool
 	hasElse      bool
-	thenExited   bool
 	exited       bool
 	guardName    string
 	guardNegated bool
@@ -241,17 +240,30 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 				frame.guardNegated = strings.TrimSpace(match[1]) != ""
 			}
 			branches = append(branches, frame)
+		} else if strings.HasPrefix(lower, "elseif ") && len(branches) > 0 {
+			frame := &branches[len(branches)-1]
+			current := cloneRangeValueFlowState(state)
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
+			}
+			frame.exited = false
+			state = cloneRangeValueFlowState(frame.before)
 		} else if strings.HasPrefix(lower, "else") && len(branches) > 0 {
 			frame := &branches[len(branches)-1]
 			current := cloneRangeValueFlowState(state)
 			frame.hasElse = true
-			if frame.exited {
-				frame.thenExited = true
-			} else if frame.hasBranches {
-				frame.branches = mergeRangeValueSourceStates(frame.branches, current)
-			} else {
-				frame.branches = current
-				frame.hasBranches = true
+			if !frame.exited {
+				if frame.hasBranches {
+					frame.branches = mergeRangeValueSourceStates(frame.branches, current)
+				} else {
+					frame.branches = current
+					frame.hasBranches = true
+				}
 			}
 			frame.exited = false
 			state = cloneRangeValueFlowState(frame.before)
@@ -259,16 +271,23 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 			current := cloneRangeValueFlowState(state)
 			frame := branches[len(branches)-1]
 			branches = branches[:len(branches)-1]
-			if frame.hasElse && frame.exited {
-				if frame.hasBranches {
-					state = frame.branches
+			if frame.hasElse {
+				if frame.exited {
+					if frame.hasBranches {
+						state = frame.branches
+					} else {
+						state = cloneRangeValueFlowState(frame.before)
+					}
+				} else if frame.hasBranches {
+					state = mergeRangeValueSourceStates(frame.branches, current)
 				} else {
-					state = cloneRangeValueFlowState(frame.before)
+					state = current
 				}
-			} else if frame.hasElse && frame.thenExited {
-				state = current
 			} else if frame.hasBranches {
-				state = mergeRangeValueSourceStates(frame.branches, current)
+				state = mergeRangeValueSourceStates(frame.before, frame.branches)
+				if !frame.exited {
+					state = mergeRangeValueSourceStates(state, current)
+				}
 			} else if frame.exited {
 				state = cloneRangeValueFlowState(frame.before)
 				if frame.guardName != "" {
@@ -289,6 +308,9 @@ func (a Analyzer) rangeValueShapeFindingsFromSource(file parsedFile, proc source
 		issues, next := rangeValueStatement(state, statement, facts)
 		findings = appendRangeValueFindings(findings, file, proc, statement, issues, a)
 		state = next
+		if rangeValueSourceEarlyExit(statement.Text) && len(branches) == 0 {
+			break
+		}
 	}
 	return findings
 }

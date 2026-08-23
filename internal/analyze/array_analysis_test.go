@@ -57,7 +57,16 @@ func TestArrayAnalysisResultConcurrentRead(t *testing.T) {
 func TestArrayLifecycleProjectionApplicableIncludesIndexedAccess(t *testing.T) {
 	proc := sourceProcedure{Statements: []procedureir.Statement{{Text: "Debug.Print values(2)"}}}
 	variables := map[string]arrayVariable{"values": {name: "values", isArray: true}}
-	if !arrayLifecycleProjectionApplicable(proc, variables) {
+	if !arrayLifecycleProjectionApplicable(parsedFile{}, proc, variables) {
 		t.Fatal("indexed array access should make the VBA227 projection applicable")
+	}
+}
+
+func TestArrayLifecycleProjectionApplicableIncludesRecoveredSource(t *testing.T) {
+	proc := sourceProcedure{StartLine: 1, EndLine: 3}
+	file := parsedFile{Lines: []string{"Sub Run()", "  Debug.Print values(2)", "End Sub"}}
+	variables := map[string]arrayVariable{"values": {name: "values", isArray: true}}
+	if !arrayLifecycleProjectionApplicable(file, proc, variables) {
+		t.Fatal("recovered source indexed access should make the VBA227 projection applicable")
 	}
 }

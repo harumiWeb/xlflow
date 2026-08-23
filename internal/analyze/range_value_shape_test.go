@@ -440,6 +440,38 @@ End Sub
 	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(blockEarlyExitFile, blockEarlyExitProc), "VBA226"); len(got) != 0 {
 		t.Fatalf("block early-exit negative IsArray guard should preserve the surviving array path: %+v", got)
 	}
+
+	elseIfSource := `Option Explicit
+Public Sub Run(ByVal first As Boolean, ByVal second As Boolean)
+  Dim values As Variant
+  values = Range("A1").Value2
+  If first Then
+    values = Range("A1:B2").Value2
+  ElseIf second Then
+    values = Range("A1:B2").Value2
+  End If
+  Debug.Print values(1, 1)
+End Sub
+`
+	elseIfFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(elseIfSource), Source: []byte(elseIfSource)}
+	elseIfProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 10}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(elseIfFile, elseIfProc), "VBA226"); len(got) != 1 {
+		t.Fatalf("ElseIf fallthrough should retain the scalar path: %+v", got)
+	}
+
+	procedureExitSource := `Option Explicit
+Public Sub Run()
+  Dim values As Variant
+  values = Range("A1").Value2
+  Exit Sub
+  Debug.Print values(1)
+End Sub
+`
+	procedureExitFile := parsedFile{Path: "Main.bas", Lines: normalizedSourceLines(procedureExitSource), Source: []byte(procedureExitSource)}
+	procedureExitProc := sourceProcedure{Name: "Run", StartLine: 2, EndLine: 7}
+	if got := findingsByCode((Analyzer{RootDir: ".", Config: config.Default()}).rangeValueShapeFindings(procedureExitFile, procedureExitProc), "VBA226"); len(got) != 0 {
+		t.Fatalf("source after Exit Sub must be unreachable: %+v", got)
+	}
 }
 
 func TestVBA226TracksOnlyRangeValueOrigins(t *testing.T) {
