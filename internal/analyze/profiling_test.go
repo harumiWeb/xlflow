@@ -276,6 +276,48 @@ func TestBatchAnalysisDoesNotCountDisabledRuntimeCandidates(t *testing.T) {
 	}
 }
 
+func TestBatchAnalysisReplansEffectDerivedApplicationStateCapability(t *testing.T) {
+	root := t.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `Option Explicit
+Public Sub NeedsEffects()
+  On Error Resume Next
+  Debug.Print "work"
+End Sub
+
+Public Sub ChangesCalculation()
+  With Application
+    .Calculation = xlCalculationManual
+  End With
+End Sub
+`
+	if err := os.WriteFile(filepath.Join(modules, "Main.bas"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+	cfg := config.Default()
+	cfg.Analyze.DetectErrorSuppressionPropagation = true
+	cfg.Analyze.DetectApplicationStateCallEffects = true
+	recorder := analysisstats.NewRecorder()
+	if _, err := (Analyzer{RootDir: root, Config: cfg}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder)); err != nil {
+		t.Fatal(err)
+	}
+	_, counters := recorder.Totals()
+	byName := make(map[string]uint64, len(counters))
+	for _, counter := range counters {
+		byName[counter.Name] = counter.Value
+	}
+	if byName[analysisstats.CapabilityEffectsBuildsCounter] != 1 {
+		t.Fatalf("effects capability builds = %d, want one", byName[analysisstats.CapabilityEffectsBuildsCounter])
+	}
+	if byName[analysisstats.CapabilityApplicationStateBuildsCounter] != 1 {
+		t.Fatalf("effect-derived application-state capability builds = %d, want one; counters = %+v", byName[analysisstats.CapabilityApplicationStateBuildsCounter], counters)
+	}
+}
+
 func TestBatchAnalysisProfilesHTTPOnlyDataflowWork(t *testing.T) {
 	root := t.TempDir()
 	modules := filepath.Join(root, "src", "modules")

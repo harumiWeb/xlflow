@@ -245,6 +245,7 @@ const (
 	// timed with MeasureCapabilityBuild. Keeping the two names identical makes
 	// it possible for performance-log consumers to join construction counts and
 	// elapsed time without maintaining a second name mapping.
+	CapabilityTypeDBBuildsCounter             = "capability_typedb_builds"
 	CapabilityResolutionBuildsCounter         = "capability_resolution_builds"
 	CapabilityEffectsBuildsCounter            = "capability_effects_builds"
 	CapabilityArrayBuildsCounter              = "capability_array_builds"
@@ -262,6 +263,7 @@ const (
 // capability builders. The recorder itself intentionally accepts arbitrary
 // counter names for compatibility with existing instrumentation.
 var CapabilityBuildCounters = [...]string{
+	CapabilityTypeDBBuildsCounter,
 	CapabilityResolutionBuildsCounter,
 	CapabilityEffectsBuildsCounter,
 	CapabilityArrayBuildsCounter,
@@ -575,6 +577,11 @@ func (r *Recorder) RecordCapabilityBuildWithElapsed(name string, elapsed time.Du
 	}
 	r.RecordCapabilityBuild(name)
 	r.Record(Stage{Name: name, Elapsed: elapsed, Outcome: outcome})
+}
+
+// RecordCapabilityTypeDBBuild records one TypeDB capability build.
+func (r *Recorder) RecordCapabilityTypeDBBuild() {
+	r.RecordCapabilityBuild(CapabilityTypeDBBuildsCounter)
 }
 
 // RecordCapabilityResolutionBuild records one Resolution capability build.

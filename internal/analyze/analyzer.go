@@ -669,7 +669,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishCapability(nil)
 	finishStage(1, nil)
 
-	finishStage = analysisstats.Measure(ctx, "effect_summaries")
 	var projectEffects effects.ProjectSummary
 	for i := range parsedFiles {
 		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
@@ -689,6 +688,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		}
 		finishCapability(nil)
 	}
+	finishStage = analysisstats.Measure(ctx, "effect_summaries")
 	if capabilityPlan.requires(projectCapabilityEffects) {
 		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityEffects)
 		projectEffects = buildProjectEffectsResolved(parsedFiles)
@@ -703,6 +703,11 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		for i := range parsedFiles {
 			materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		}
+		// Effects can add conservative feature seeds (for example, an
+		// application-state mutation discovered through a propagated call or a
+		// With Application member). Recompute the capability plan before any
+		// downstream project indexes are gated so those consumers are retained.
+		capabilityPlan = buildProjectCapabilityPlan(analysis.Config.Analyze, parsedFiles)
 	} else {
 		finishStage(0, nil)
 	}

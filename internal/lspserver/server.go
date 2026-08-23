@@ -432,6 +432,12 @@ func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project
 func initializeCapabilityTelemetry(ctx context.Context) {
 	if recorder := analysisstats.FromContext(ctx); recorder != nil {
 		for _, name := range analysisstats.CapabilityBuildCounters {
+			// TypeDB is loaded once during Server construction, outside the
+			// revision-scoped diagnostics recorder. Do not report a misleading
+			// per-request zero for that server-lifetime capability.
+			if name == analysisstats.CapabilityTypeDBBuildsCounter {
+				continue
+			}
 			recorder.AddSum(name, 0)
 		}
 	}

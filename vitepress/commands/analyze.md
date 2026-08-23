@@ -124,7 +124,7 @@ traversal, and kernel counters retain their existing meanings. They are
 stderr-only performance telemetry and do not change findings, their order,
 exit status, or the JSON schema.
 Project-level capability planning adds build counters for the revision-scoped
-semantic builders: `capability_resolution_builds`,
+semantic builders: `capability_typedb_builds`, `capability_resolution_builds`,
 `capability_effects_builds`, `capability_array_builds`,
 `capability_object_builds`, `capability_dataflow_builds`,
 `capability_dictionary_builds`, `capability_application_state_builds`,

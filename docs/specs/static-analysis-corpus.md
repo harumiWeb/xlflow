@@ -1328,7 +1328,8 @@ The focused planner matrix must include:
   `VBA102` contracts.
 
 For each normal analysis revision, record the capability build counters when
-the implementation exposes them: `capability_resolution_builds`,
+the implementation exposes them: `capability_typedb_builds`,
+`capability_resolution_builds`,
 `capability_effects_builds`, `capability_array_builds`,
 `capability_object_builds`, `capability_dataflow_builds`,
 `capability_dictionary_builds`, `capability_application_state_builds`,

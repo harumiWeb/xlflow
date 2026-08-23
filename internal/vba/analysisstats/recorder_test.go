@@ -91,6 +91,7 @@ func TestCapabilityBuildTelemetry(t *testing.T) {
 	// Exercise the typed helpers so each capability has one canonical counter
 	// name, while the generic helper remains available to capability planners
 	// that represent capabilities as strings.
+	recorder.RecordCapabilityTypeDBBuild()
 	recorder.RecordCapabilityResolutionBuild()
 	recorder.RecordCapabilityEffectsBuild()
 	recorder.RecordCapabilityArrayBuild()

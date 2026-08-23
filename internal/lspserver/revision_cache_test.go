@@ -1,10 +1,42 @@
 package lspserver
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 )
+
+func TestInitializeCapabilityTelemetryOmitsServerLifetimeTypeDB(t *testing.T) {
+	recorder := analysisstats.NewRecorder()
+	initializeCapabilityTelemetry(analysisstats.WithRecorder(context.Background(), recorder))
+	_, counters := recorder.Totals()
+	for _, counter := range counters {
+		if counter.Name == analysisstats.CapabilityTypeDBBuildsCounter {
+			t.Fatalf("LSP telemetry reported server-lifetime TypeDB counter: %+v", counter)
+		}
+	}
+	for _, name := range analysisstats.CapabilityBuildCounters {
+		if name == analysisstats.CapabilityTypeDBBuildsCounter {
+			continue
+		}
+		found := false
+		for _, counter := range counters {
+			if counter.Name == name {
+				found = true
+				if counter.Value != 0 {
+					t.Fatalf("LSP capability seed %q = %d, want zero", name, counter.Value)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("LSP capability seed %q missing: %+v", name, counters)
+		}
+	}
+}
 
 func TestRevisionCacheBuildsOnceForConcurrentRequests(t *testing.T) {
 	var cache revisionCache[int]
