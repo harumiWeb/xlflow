@@ -227,11 +227,11 @@ func buildProjectCapabilityPlan(cfg config.AnalyzeConfig, files []parsedFile) pr
 
 func projectHasGetterOrEagerContainer(files []parsedFile) bool {
 	for _, file := range files {
-		if vba212SourceMayHaveGetter(file) || projectHasEagerContainerDefinition([]parsedFile{file}) {
+		if vba212SourceMayHaveGetter(file) {
 			return true
 		}
 	}
-	return false
+	return projectHasEagerContainerDefinition(files)
 }
 
 func projectHasEagerContainerDefinition(files []parsedFile) bool {

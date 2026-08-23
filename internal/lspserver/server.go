@@ -248,7 +248,14 @@ func New(opts Options) (*Server, func(), error) {
 		if capabilityRequirements.Effects {
 			projectEffects = s.projectEffectSummaryWithResolution(ctx, project, resolvedProjectIR, resolutionComplete)
 		}
-		projectConstants := s.projectConstants(project, resolutionComplete, typeDB.DB)
+		// Resolution is built before planning because the planner needs its
+		// completeness and resolved IR. ProjectConstants is currently part of
+		// the unconditional compile-equivalent baseline, but keep this boundary
+		// explicit so optional plans can skip it if that contract changes.
+		var projectConstants projectConstantsResult
+		if capabilityRequirements.ProjectConstants {
+			projectConstants = s.projectConstants(project, resolutionComplete, typeDB.DB)
+		}
 		analyzer := s.analyzer
 		analyzer.VisibleConstants = projectConstants.visible
 		analyzer.ConstantValues = projectConstants.values

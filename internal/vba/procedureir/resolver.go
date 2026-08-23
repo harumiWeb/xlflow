@@ -210,36 +210,28 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 		}
 	}
 	for key := range out.byName {
-		sort.Slice(out.byName[key], func(i, j int) bool {
-			a, b := out.byName[key][i], out.byName[key][j]
-			if a.QualifiedName != b.QualifiedName {
-				return a.QualifiedName < b.QualifiedName
-			}
-			if a.Kind != b.Kind {
-				return a.Kind < b.Kind
-			}
-			if a.File != b.File {
-				return a.File < b.File
-			}
-			return a.Line < b.Line
-		})
+		sortResolverEntries(out.byName[key])
 	}
 	for key := range out.procedureByName {
-		sort.Slice(out.procedureByName[key], func(i, j int) bool {
-			a, b := out.procedureByName[key][i], out.procedureByName[key][j]
-			if a.QualifiedName != b.QualifiedName {
-				return a.QualifiedName < b.QualifiedName
-			}
-			if a.Kind != b.Kind {
-				return a.Kind < b.Kind
-			}
-			if a.File != b.File {
-				return a.File < b.File
-			}
-			return a.Line < b.Line
-		})
+		sortResolverEntries(out.procedureByName[key])
 	}
 	return out
+}
+
+func sortResolverEntries(entries []resolverEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.QualifiedName != b.QualifiedName {
+			return a.QualifiedName < b.QualifiedName
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.Line < b.Line
+	})
 }
 
 // isLegacyProjectProcedureKind mirrors the procedure IR list used by the
