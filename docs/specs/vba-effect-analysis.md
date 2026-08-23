@@ -15,9 +15,34 @@ while `VBA244` owns `detect_procedure_call_cycles` and its additive
 `internal/vba/effects` consumes the project documents already parsed and
 normalized by `internal/vba/procedureir`, their project resolution overlay, and
 the graphs already built by `internal/vba/cfg`. The analyzer constructs those
-inputs and the project effect summary once per run. Effect analysis must not
-parse source again or retain tree-sitter nodes, source buffers, CLI envelopes,
-or LSP protocol values.
+inputs and the project effect summary once per analysis revision when the
+`Effects` capability is required by the active analysis plan. When no enabled
+diagnostic requires `Effects`, no project effect summary is constructed. Effect
+analysis must not parse source again or retain tree-sitter nodes, source
+buffers, CLI envelopes, or LSP protocol values.
+
+### Capability dependency and construction
+
+`Effects` has one explicit project capability dependency: `Resolution`.
+Resolution is planned and built before effects, and the effect builder consumes
+the shared resolver and resolved IR rather than constructing a private resolver
+or project context. The `ApplicationState` and `EventReentry` capabilities
+depend transitively on `Effects`; they reuse the same immutable summary.
+
+The capability planner constructs the summary at most once per analysis
+revision. Batch analysis may perform that build eagerly after dependency
+planning, before procedure workers start. Full realtime/LSP diagnostics may
+reuse a revision-scoped immutable cache; a new document revision or a change
+between incomplete and complete project evidence invalidates the prior value.
+Individual rules must not call an effect builder as a hidden fallback after the
+plan has been established.
+
+Whenever an effect consumer is planned, the summary retains the complete
+project-local call closure required by the existing propagation and uncertainty
+contracts. Procedure participant filtering may be used by other domains, but
+it must not reduce the effect closure or remove ambiguous, unresolved, dynamic,
+or incomplete call boundaries. If resolution is incomplete, the existing
+conservative uncertainty behavior remains in force.
 
 Procedure identity combines the normalized source identity, qualified
 procedure name, procedure kind, and declaration location needed to distinguish

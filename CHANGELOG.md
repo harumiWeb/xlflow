@@ -30,6 +30,16 @@ All notable changes to xlflow will be documented in this file.
   `array_cfg_walks`, and `array_projection_runs`; findings, snapshots, exit
   codes, and normal JSON/LSP contracts remain unchanged.
 
+- Added dependency-driven project semantic capability planning. Enabled
+  diagnostics now retain only the transitive capabilities they require, with
+  shared resolution/effect/index state constructed at most once per analysis
+  revision and irrelevant project setup omitted. Batch and Full LSP analysis
+  share the same conservative dependency and participant rules; recovered,
+  ambiguous, dynamic, or incomplete evidence fails open, and
+  compile-equivalent diagnostics remain unconditional. Capability build counts
+  and optional elapsed stages are developer-only stderr telemetry; normal
+  findings, snapshots, exit codes, and CLI/LSP payloads are unchanged.
+
 - Added opt-in semantic-domain profiling beneath
   `procedure_local_diagnostics` for giant-module `xlflow analyze` workloads.
   `--performance-log` now attributes aggregate source-scan, runtime, array,

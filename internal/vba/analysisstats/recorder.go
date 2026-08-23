@@ -240,7 +240,41 @@ func (c WorkCounter) String() string {
 const (
 	ModuleFactBuildsCounter    = "module_fact_builds"
 	ProcedureFactBuildsCounter = "procedure_fact_builds"
+
+	// Capability build counters are also used as stage names when a build is
+	// timed with MeasureCapabilityBuild. Keeping the two names identical makes
+	// it possible for performance-log consumers to join construction counts and
+	// elapsed time without maintaining a second name mapping.
+	CapabilityTypeDBBuildsCounter             = "capability_typedb_builds"
+	CapabilityResolutionBuildsCounter         = "capability_resolution_builds"
+	CapabilityEffectsBuildsCounter            = "capability_effects_builds"
+	CapabilityArrayBuildsCounter              = "capability_array_builds"
+	CapabilityObjectBuildsCounter             = "capability_object_builds"
+	CapabilityDataflowBuildsCounter           = "capability_dataflow_builds"
+	CapabilityDictionaryBuildsCounter         = "capability_dictionary_builds"
+	CapabilityApplicationStateBuildsCounter   = "capability_application_state_builds"
+	CapabilityEventReentryBuildsCounter       = "capability_event_reentry_builds"
+	CapabilityPublicAPITypeIndexBuildsCounter = "capability_public_api_type_index_builds"
+	CapabilityExcelLoopSymbolsBuildsCounter   = "capability_excel_loop_symbols_builds"
 )
+
+// CapabilityBuildCounters lists the stable capability telemetry names in the
+// canonical order used by callers that need to report or validate all major
+// capability builders. The recorder itself intentionally accepts arbitrary
+// counter names for compatibility with existing instrumentation.
+var CapabilityBuildCounters = [...]string{
+	CapabilityTypeDBBuildsCounter,
+	CapabilityResolutionBuildsCounter,
+	CapabilityEffectsBuildsCounter,
+	CapabilityArrayBuildsCounter,
+	CapabilityObjectBuildsCounter,
+	CapabilityDataflowBuildsCounter,
+	CapabilityDictionaryBuildsCounter,
+	CapabilityApplicationStateBuildsCounter,
+	CapabilityEventReentryBuildsCounter,
+	CapabilityPublicAPITypeIndexBuildsCounter,
+	CapabilityExcelLoopSymbolsBuildsCounter,
+}
 
 type Recorder struct {
 	mu       sync.Mutex
@@ -519,6 +553,89 @@ func (r *Recorder) RecordProcedureFactBuilds(count uint64) {
 	r.AddSum(ProcedureFactBuildsCounter, count)
 }
 
+// RecordCapabilityBuild records one construction of a project semantic
+// capability. Builders should call this once per analysis revision, after the
+// capability has been successfully entered. A nil recorder is a no-op.
+func (r *Recorder) RecordCapabilityBuild(name string) {
+	r.RecordCapabilityBuilds(name, 1)
+}
+
+// RecordCapabilityBuilds records multiple capability constructions. It is
+// provided for callers that aggregate revisions before publishing telemetry;
+// the normal builder path should use RecordCapabilityBuild so a single build
+// contributes one observation.
+func (r *Recorder) RecordCapabilityBuilds(name string, count uint64) {
+	r.AddSum(name, count)
+}
+
+// RecordCapabilityBuildWithElapsed records one capability build and its
+// elapsed time under the same stable name used by the build counter. The
+// outcome follows the same values as Measure (normally "ok" or "error").
+func (r *Recorder) RecordCapabilityBuildWithElapsed(name string, elapsed time.Duration, outcome string) {
+	if r == nil {
+		return
+	}
+	r.RecordCapabilityBuild(name)
+	r.Record(Stage{Name: name, Elapsed: elapsed, Outcome: outcome})
+}
+
+// RecordCapabilityTypeDBBuild records one TypeDB capability build.
+func (r *Recorder) RecordCapabilityTypeDBBuild() {
+	r.RecordCapabilityBuild(CapabilityTypeDBBuildsCounter)
+}
+
+// RecordCapabilityResolutionBuild records one Resolution capability build.
+func (r *Recorder) RecordCapabilityResolutionBuild() {
+	r.RecordCapabilityBuild(CapabilityResolutionBuildsCounter)
+}
+
+// RecordCapabilityEffectsBuild records one Effects capability build.
+func (r *Recorder) RecordCapabilityEffectsBuild() {
+	r.RecordCapabilityBuild(CapabilityEffectsBuildsCounter)
+}
+
+// RecordCapabilityArrayBuild records one ArrayInterprocedural capability build.
+func (r *Recorder) RecordCapabilityArrayBuild() {
+	r.RecordCapabilityBuild(CapabilityArrayBuildsCounter)
+}
+
+// RecordCapabilityObjectBuild records one ObjectFlow capability build.
+func (r *Recorder) RecordCapabilityObjectBuild() {
+	r.RecordCapabilityBuild(CapabilityObjectBuildsCounter)
+}
+
+// RecordCapabilityDataflowBuild records one DataFlow capability build.
+func (r *Recorder) RecordCapabilityDataflowBuild() {
+	r.RecordCapabilityBuild(CapabilityDataflowBuildsCounter)
+}
+
+// RecordCapabilityDictionaryBuild records one DictionaryCollection capability build.
+func (r *Recorder) RecordCapabilityDictionaryBuild() {
+	r.RecordCapabilityBuild(CapabilityDictionaryBuildsCounter)
+}
+
+// RecordCapabilityApplicationStateBuild records one ApplicationState capability build.
+func (r *Recorder) RecordCapabilityApplicationStateBuild() {
+	r.RecordCapabilityBuild(CapabilityApplicationStateBuildsCounter)
+}
+
+// RecordCapabilityEventReentryBuild records one EventReentry capability build.
+func (r *Recorder) RecordCapabilityEventReentryBuild() {
+	r.RecordCapabilityBuild(CapabilityEventReentryBuildsCounter)
+}
+
+// RecordCapabilityPublicAPITypeIndexBuild records one PublicAPITypeIndex
+// capability build.
+func (r *Recorder) RecordCapabilityPublicAPITypeIndexBuild() {
+	r.RecordCapabilityBuild(CapabilityPublicAPITypeIndexBuildsCounter)
+}
+
+// RecordCapabilityExcelLoopSymbolsBuild records one ExcelLoopSymbols
+// capability build.
+func (r *Recorder) RecordCapabilityExcelLoopSymbolsBuild() {
+	r.RecordCapabilityBuild(CapabilityExcelLoopSymbolsBuildsCounter)
+}
+
 func (r *Recorder) Snapshot() ([]Stage, map[string]uint64) {
 	if r == nil {
 		return nil, nil
@@ -565,6 +682,32 @@ func Measure(ctx context.Context, name string) func(int, error) {
 			outcome = "canceled"
 		}
 		recorder.Record(Stage{Name: name, Elapsed: time.Since(started), Outcome: outcome, ResultCount: count})
+	}
+}
+
+// MeasureCapabilityBuild measures one capability construction. The build
+// counter is recorded on entry, so it reflects builder attempts even if a
+// later error or cancellation prevents the elapsed stage from being emitted.
+// The stage and counter deliberately share name, so a capability that was
+// skipped has no stage and a required capability normally has one counter and
+// one stage per analysis revision. A nil recorder keeps this path allocation-
+// free for unprofiled analyses.
+func MeasureCapabilityBuild(ctx context.Context, name string) func(error) {
+	recorder := FromContext(ctx)
+	if recorder == nil {
+		return func(error) {}
+	}
+	recorder.RecordCapabilityBuild(name)
+	started := time.Now()
+	return func(err error) {
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		if ctx != nil && ctx.Err() != nil {
+			outcome = "canceled"
+		}
+		recorder.Record(Stage{Name: name, Elapsed: time.Since(started), Outcome: outcome})
 	}
 }
 

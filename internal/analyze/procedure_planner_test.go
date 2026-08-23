@@ -124,6 +124,19 @@ func TestProcedureFeatureSetRecognizesQualifiedCollectionAndFileRename(t *testin
 	}
 }
 
+func TestProcedureFeatureSetRecognizesEveryApplicationStateProperty(t *testing.T) {
+	for _, property := range []string{
+		"ScreenUpdating", "EnableEvents", "DisplayAlerts", "Calculation", "StatusBar",
+		"Cursor", "Interactive", "AskToUpdateLinks", "AutomationSecurity", "CutCopyMode",
+	} {
+		var features procedureFeatureSet
+		features.observeText("Application." + property + " = False")
+		if !features.mayHave(featureApplicationState) {
+			t.Errorf("Application.%s was not classified as application state: %#v", property, features)
+		}
+	}
+}
+
 func TestProcedureFeatureSetFailsOpenForRecoveredAndDynamicIR(t *testing.T) {
 	recovered := newProcedureAnalysisFactsWithDeclarations(
 		nil,
@@ -341,6 +354,9 @@ func TestProcedureRuleRequirementsCoverEveryGatedRule(t *testing.T) {
 	seen := map[string]bool{}
 	always := map[string]bool{}
 	for _, requirement := range procedureRuleRequirements {
+		if requirement.projectOnly {
+			continue
+		}
 		key := requirement.id + "/" + requirement.domain.String()[len("procedure_local/"):]
 		_, ok := wanted[key]
 		if !ok {

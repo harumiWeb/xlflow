@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
@@ -168,6 +169,33 @@ func TestProjectEffectSummaryCachesByRevision(t *testing.T) {
 	again := s.projectEffectSummary(project)
 	if len(again.All()) != 1 {
 		t.Fatalf("cached summary procedures = %d, want 1", len(again.All()))
+	}
+}
+
+func TestProjectCapabilityCachesRecordOneBuildPerRevision(t *testing.T) {
+	input := projectTestProcedure(filepath.Join(t.TempDir(), "Main.bas"), "Main.Run", "", "", 1, "Run")
+	project := projectTestSnapshot(input)
+	project.Revision = 9
+	s := &Server{}
+	recorder := analysisstats.NewRecorder()
+	ctx := analysisstats.WithRecorder(context.Background(), recorder)
+	_, resolved, _ := s.projectResolution(ctx, project, true)
+	_, resolvedAgain, _ := s.projectResolution(ctx, project, true)
+	if len(resolved) != len(resolvedAgain) {
+		t.Fatalf("resolution cache sizes = %d and %d", len(resolved), len(resolvedAgain))
+	}
+	s.projectEffectSummaryWithResolution(ctx, project, resolved, true)
+	s.projectEffectSummaryWithResolution(ctx, project, resolved, true)
+	_, counters := recorder.Totals()
+	values := map[string]uint64{}
+	for _, counter := range counters {
+		values[counter.Name] = counter.Value
+	}
+	if values[analysisstats.CapabilityResolutionBuildsCounter] != 1 {
+		t.Fatalf("resolution builds = %d, want 1", values[analysisstats.CapabilityResolutionBuildsCounter])
+	}
+	if values[analysisstats.CapabilityEffectsBuildsCounter] != 1 {
+		t.Fatalf("effects builds = %d, want 1", values[analysisstats.CapabilityEffectsBuildsCounter])
 	}
 }
 

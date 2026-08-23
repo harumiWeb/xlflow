@@ -99,16 +99,21 @@ type Server struct {
 
 	docLifecycleMu           sync.Mutex
 	docLifecycles            map[string]*sync.Mutex
-	projectSummaryMu         sync.Mutex
-	projectSummaryRevision   uint64
-	projectSummary           effects.ProjectSummary
-	projectSummaryValid      bool
-	resolutionMu             sync.Mutex
-	resolutionRevision       uint64
-	resolutionComplete       bool
-	resolutionResolver       procedureir.Resolver
-	resolvedProjectIR        map[string]procedureir.DocumentIR
+	projectSummaryCache      revisionCache[effects.ProjectSummary]
+	resolutionCache          revisionCache[projectResolutionResult]
+	projectConstantsCache    revisionCache[projectConstantsResult]
 	resolutionTypeLibSymbols []procedureir.ResolverSymbol
+}
+
+type projectResolutionResult struct {
+	resolver           procedureir.Resolver
+	resolved           map[string]procedureir.DocumentIR
+	diagnosticResolved map[string]procedureir.DocumentIR
+}
+
+type projectConstantsResult struct {
+	visible map[string]bool
+	values  map[string]constexpr.Value
 }
 
 type diagnosticTimer interface {
@@ -221,27 +226,39 @@ func New(opts Options) (*Server, func(), error) {
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
 	s.defaultDiagnosticsRequest = reflect.ValueOf(s.diagnosticsRequest).Pointer()
-	var visibleConstantsMu sync.Mutex
-	var visibleConstantsRevision uint64
-	var visibleConstants map[string]bool
-	var constantValues map[string]constexpr.Value
 	s.projectDiagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest, project intel.ProjectAnalysisSnapshot) intel.DiagnosticResult {
-		projectEffects := s.projectEffectSummary(project)
+		initializeCapabilityTelemetry(ctx)
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
+		capabilityDocuments := make([]analyze.ProjectCapabilityDocument, 0, len(project.Documents))
 		for _, projectDocument := range project.Documents {
 			projectByPath[symbolFileKey(projectDocument.IR.Path)] = projectDocument
+			capabilityDocuments = append(capabilityDocuments, analyze.ProjectCapabilityDocument{
+				IR: projectDocument.IR, CFG: projectDocument.CFG, Source: projectDocument.Source,
+			})
 		}
-		resolutionResolver, resolvedProjectIR := s.projectResolution(project, project.Complete && typeDB.Complete)
+		resolutionComplete := project.Complete && typeDB.Complete
+		resolutionResolver, resolvedProjectIR, resolvedDiagnosticIR := s.projectResolution(ctx, project, resolutionComplete)
+		for i := range capabilityDocuments {
+			if resolved, ok := resolvedProjectIR[symbolFileKey(capabilityDocuments[i].IR.Path)]; ok {
+				capabilityDocuments[i].IR = resolved
+			}
+		}
+		capabilityRequirements := analyze.PlanProjectCapabilities(s.opts.Config.Analyze, capabilityDocuments)
+		var projectEffects effects.ProjectSummary
+		if capabilityRequirements.Effects {
+			projectEffects = s.projectEffectSummaryWithResolution(ctx, project, resolvedProjectIR, resolutionComplete)
+		}
+		// Resolution is built before planning because the planner needs its
+		// completeness and resolved IR. ProjectConstants is currently part of
+		// the unconditional compile-equivalent baseline, but keep this boundary
+		// explicit so optional plans can skip it if that contract changes.
+		var projectConstants projectConstantsResult
+		if capabilityRequirements.ProjectConstants {
+			projectConstants = s.projectConstants(project, resolutionComplete, typeDB.DB)
+		}
 		analyzer := s.analyzer
-		visibleConstantsMu.Lock()
-		if visibleConstants == nil || visibleConstantsRevision != project.Revision {
-			visibleConstants = projectVisibleConstants(project, typeDB.DB)
-			constantValues = projectConstantValues(project, typeDB.DB)
-			visibleConstantsRevision = project.Revision
-		}
-		analyzer.VisibleConstants = visibleConstants
-		analyzer.ConstantValues = constantValues
-		visibleConstantsMu.Unlock()
+		analyzer.VisibleConstants = projectConstants.visible
+		analyzer.ConstantValues = projectConstants.values
 		analyzer.RealtimeFindingsFunc = func(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document) ([]intel.RealtimeFinding, error) {
 			projectKey := symbolFileKey(ir.Path)
 			if projectDocument, ok := projectByPath[projectKey]; ok {
@@ -252,7 +269,7 @@ func New(opts Options) (*Server, func(), error) {
 				}
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, analyzer.ConstantValues)
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values)
 			if err != nil {
 				return nil, err
 			}
@@ -260,11 +277,16 @@ func New(opts Options) (*Server, func(), error) {
 			for _, finding := range findings {
 				out = append(out, intel.RealtimeFinding{Code: finding.Code, Severity: finding.Severity, Line: finding.Line, Column: finding.Column, EndLine: finding.EndLine, EndColumn: finding.EndColumn, Message: finding.Message})
 			}
-			resolvedIR := ir
-			if _, ok := resolvedProjectIR[projectKey]; !ok {
-				resolvedIR = procedureir.Resolve(ir, resolutionResolver)
+			// Compile-equivalent diagnostics use the full-resolution clone cached
+			// with this project revision. The realtime/effects path keeps the
+			// procedure-only view cached above for parity with batch analysis.
+			var resolvedForDiagnostics procedureir.DocumentIR
+			if cached, ok := resolvedDiagnosticIR[projectKey]; ok {
+				resolvedForDiagnostics = cached
+			} else {
+				resolvedForDiagnostics = procedureir.Resolve(ir, resolutionResolver)
 			}
-			for _, diagnostic := range procedureir.Diagnostics(resolvedIR, project.Complete && typeDB.Complete) {
+			for _, diagnostic := range procedureir.Diagnostics(resolvedForDiagnostics, project.Complete && typeDB.Complete) {
 				out = append(out, intel.RealtimeFinding{Code: diagnostic.Code, Severity: "error",
 					Line: diagnostic.Range.StartLine, Column: diagnostic.Range.StartColumn,
 					EndLine: diagnostic.Range.EndLine, EndColumn: diagnostic.Range.EndColumn, Message: diagnostic.Message})
@@ -394,27 +416,47 @@ func projectConstantIdentifier(text string) string {
 }
 
 func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) effects.ProjectSummary {
-	s.projectSummaryMu.Lock()
-	if s.projectSummaryValid && s.projectSummaryRevision == project.Revision {
-		summary := s.projectSummary
-		s.projectSummaryMu.Unlock()
-		return summary
-	}
-	s.projectSummaryMu.Unlock()
+	return s.projectEffectSummaryWithResolution(context.Background(), project, nil, false)
+}
 
-	documents := make([]effects.Document, len(project.Documents))
-	for i, document := range project.Documents {
-		documents[i] = effects.Document{IR: document.IR, CFG: document.CFG}
+func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, resolved map[string]procedureir.DocumentIR, complete bool) effects.ProjectSummary {
+	return s.projectSummaryCache.getOrBuild(project.Revision, complete, func() effects.ProjectSummary {
+		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityEffectsBuildsCounter)
+		documents := make([]effects.Document, len(project.Documents))
+		for i, document := range project.Documents {
+			ir := document.IR
+			if resolvedIR, ok := resolved[symbolFileKey(document.IR.Path)]; ok {
+				ir = resolvedIR
+			}
+			documents[i] = effects.Document{IR: ir, CFG: document.CFG}
+		}
+		summary := effects.Build(documents)
+		finishCapability(nil)
+		return summary
+	})
+}
+
+func initializeCapabilityTelemetry(ctx context.Context) {
+	if recorder := analysisstats.FromContext(ctx); recorder != nil {
+		for _, name := range analysisstats.CapabilityBuildCounters {
+			// TypeDB is loaded once during Server construction, outside the
+			// revision-scoped diagnostics recorder. Do not report a misleading
+			// per-request zero for that server-lifetime capability.
+			if name == analysisstats.CapabilityTypeDBBuildsCounter {
+				continue
+			}
+			recorder.AddSum(name, 0)
+		}
 	}
-	summary := effects.Build(documents)
-	s.projectSummaryMu.Lock()
-	if !s.projectSummaryValid || project.Revision >= s.projectSummaryRevision {
-		s.projectSummaryRevision = project.Revision
-		s.projectSummary = summary
-		s.projectSummaryValid = true
-	}
-	s.projectSummaryMu.Unlock()
-	return summary
+}
+
+func (s *Server) projectConstants(project intel.ProjectAnalysisSnapshot, complete bool, typeDB *vbadb.DB) projectConstantsResult {
+	return s.projectConstantsCache.getOrBuild(project.Revision, complete, func() projectConstantsResult {
+		return projectConstantsResult{
+			visible: projectVisibleConstants(project, typeDB),
+			values:  projectConstantValues(project, typeDB),
+		}
+	})
 }
 
 func newLogger(opts Options) (*log.Logger, func(), error) {
@@ -1751,6 +1793,9 @@ func (s *Server) runDiagnosticsBody(
 	measurement := s.startPerformance("diagnostics", doc)
 	recorder := analysisstats.NewRecorder()
 	runCtx = analysisstats.WithRecorder(runCtx, recorder)
+	if mode == intel.DiagnosticModeFull {
+		initializeCapabilityTelemetry(runCtx)
+	}
 	state.mu.Lock()
 	previousCache := state.diagnosticCache
 	changes := state.changes
@@ -2030,24 +2075,23 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 // IR for one workspace revision. Full diagnostics can be requested several
 // times for the same coherent snapshot; rebuilding TypeLib enum candidates
 // and resolving every document on each request is unnecessary work.
-func (s *Server) projectResolution(project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.DocumentIR) {
-	s.resolutionMu.Lock()
-	defer s.resolutionMu.Unlock()
-	if s.resolutionResolver != nil && s.resolutionRevision == project.Revision && s.resolutionComplete == complete {
-		return s.resolutionResolver, s.resolvedProjectIR
-	}
-	resolver := workspaceResolutionResolverWithTypeLib(project, complete, s.resolutionTypeLibSymbols)
-	resolved := make(map[string]procedureir.DocumentIR, len(project.Documents))
-	for _, document := range project.Documents {
-		// The workspace index resolver intentionally has no TypeDB dependency;
-		// apply the cached TypeDB-aware resolver here once per project revision.
-		resolved[symbolFileKey(document.IR.Path)] = procedureir.Resolve(document.IR, resolver)
-	}
-	s.resolutionRevision = project.Revision
-	s.resolutionComplete = complete
-	s.resolutionResolver = resolver
-	s.resolvedProjectIR = resolved
-	return resolver, resolved
+func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.DocumentIR, map[string]procedureir.DocumentIR) {
+	result := s.resolutionCache.getOrBuild(project.Revision, complete, func() projectResolutionResult {
+		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityResolutionBuildsCounter)
+		resolver := workspaceResolutionResolverWithTypeLib(project, complete, s.resolutionTypeLibSymbols)
+		procedureResolver := procedureir.ProcedureOnlyResolver(resolver)
+		resolved := make(map[string]procedureir.DocumentIR, len(project.Documents))
+		diagnosticResolved := make(map[string]procedureir.DocumentIR, len(project.Documents))
+		for _, document := range project.Documents {
+			// The workspace index resolver intentionally has no TypeDB dependency;
+			// apply the cached TypeDB-aware resolver here once per project revision.
+			resolved[symbolFileKey(document.IR.Path)] = procedureir.Resolve(document.IR, procedureResolver)
+			diagnosticResolved[symbolFileKey(document.IR.Path)] = procedureir.Resolve(document.IR, resolver)
+		}
+		finishCapability(nil)
+		return projectResolutionResult{resolver: resolver, resolved: resolved, diagnosticResolved: diagnosticResolved}
+	})
+	return result.resolver, result.resolved, result.diagnosticResolved
 }
 
 func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapshot, complete bool, typeLibSymbols []procedureir.ResolverSymbol) procedureir.Resolver {

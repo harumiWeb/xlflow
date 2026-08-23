@@ -85,6 +85,54 @@ func TestRecordFactBuildCountersNilSafe(t *testing.T) {
 	recorder.RecordProcedureFactBuild()
 }
 
+func TestCapabilityBuildTelemetry(t *testing.T) {
+	recorder := NewRecorder()
+
+	// Exercise the typed helpers so each capability has one canonical counter
+	// name, while the generic helper remains available to capability planners
+	// that represent capabilities as strings.
+	recorder.RecordCapabilityTypeDBBuild()
+	recorder.RecordCapabilityResolutionBuild()
+	recorder.RecordCapabilityEffectsBuild()
+	recorder.RecordCapabilityArrayBuild()
+	recorder.RecordCapabilityObjectBuild()
+	recorder.RecordCapabilityDataflowBuild()
+	recorder.RecordCapabilityDictionaryBuild()
+	recorder.RecordCapabilityApplicationStateBuild()
+	recorder.RecordCapabilityEventReentryBuild()
+	recorder.RecordCapabilityPublicAPITypeIndexBuild()
+	recorder.RecordCapabilityExcelLoopSymbolsBuild()
+
+	finish := MeasureCapabilityBuild(WithRecorder(context.Background(), recorder), CapabilityEffectsBuildsCounter)
+	finish(nil)
+
+	stages, counters := recorder.Totals()
+	counterByName := make(map[string]uint64, len(counters))
+	for _, counter := range counters {
+		counterByName[counter.Name] = counter.Value
+	}
+	for _, name := range CapabilityBuildCounters {
+		want := uint64(1)
+		if name == CapabilityEffectsBuildsCounter {
+			want = 2
+		}
+		if got := counterByName[name]; got != want {
+			t.Errorf("capability counter %q = %d, want %d", name, got, want)
+		}
+	}
+	if len(stages) != 1 || stages[0].Name != CapabilityEffectsBuildsCounter || stages[0].Outcome != "ok" || stages[0].Elapsed < 0 {
+		t.Fatalf("capability stages = %+v", stages)
+	}
+}
+
+func TestCapabilityBuildTelemetryNilSafe(t *testing.T) {
+	var recorder *Recorder
+	recorder.RecordCapabilityBuild(CapabilityResolutionBuildsCounter)
+	recorder.RecordCapabilityBuilds(CapabilityEffectsBuildsCounter, 1)
+	recorder.RecordCapabilityBuildWithElapsed(CapabilityArrayBuildsCounter, time.Second, "ok")
+	MeasureCapabilityBuild(context.Background(), CapabilityObjectBuildsCounter)(nil)
+}
+
 func TestMeasureRecordsCanceledOutcome(t *testing.T) {
 	recorder := NewRecorder()
 	ctx, cancel := context.WithCancel(WithRecorder(context.Background(), recorder))

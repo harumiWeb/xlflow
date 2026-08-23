@@ -16,6 +16,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
 - `analyze_total`
+- `application_state`
 - `application_state_candidate_procedures`
 - `args_invalid`
 - `argument_count`
@@ -97,6 +98,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `byref_modifier`
 - `byref_parameter_count`
 - `byref_parameters`
+- `byref_symbols`
 - `byval_modifier`
 - `cached_excel_reference`
 - `call_expression`
@@ -104,6 +106,17 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `call_fan_out`
 - `call_site_count`
 - `call_statement`
+- `capability_application_state_builds`
+- `capability_array_builds`
+- `capability_dataflow_builds`
+- `capability_dictionary_builds`
+- `capability_effects_builds`
+- `capability_event_reentry_builds`
+- `capability_excel_loop_symbols_builds`
+- `capability_object_builds`
+- `capability_public_api_type_index_builds`
+- `capability_resolution_builds`
+- `capability_typedb_builds`
 - `capability_version`
 - `capture_state`
 - `carried_streams`
@@ -362,6 +375,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `error_handling_count`
 - `event_declaration`
 - `event_reader_count`
+- `event_reentry`
 - `event_statement`
 - `event_writer_count`
 - `evidence_class`
@@ -372,6 +386,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `exceeds_keep_last`
 - `exceeds_max_count`
 - `exceeds_max_total_size`
+- `excel_api_helpers`
 - `excel_available`
 - `excel_candidate_procedures`
 - `excel_cfg_walks`
@@ -382,6 +397,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `excel_effect_count`
 - `excel_installed`
 - `excel_instance`
+- `excel_loop_symbols`
 - `excel_pid`
 - `excel_state_uncertain`
 - `exceptional_exit`
@@ -834,12 +850,14 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `prog_id`
 - `project_config`
 - `project_config_missing`
+- `project_constants`
 - `project_context`
 - `project_context_indexes`
 - `project_count`
 - `project_create`
 - `project_init`
 - `project_name`
+- `project_resolution`
 - `project_symbol_count`
 - `project_symbols`
 - `project_wide_diagnostics`
@@ -858,6 +876,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `property_value_type`
 - `protected_module`
 - `protocol_version`
+- `public_api_type_index`
 - `public_procedure_count`
 - `published_runs`
 - `pull_args_invalid`

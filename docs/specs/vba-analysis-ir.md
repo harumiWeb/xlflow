@@ -379,17 +379,82 @@ module/type/project facts therefore fail open. A hand-built source procedure
 that lacks the owned facts required for classification uses the same
 conservative unknown fallback.
 
-Project-wide indexes and effect closure remain complete whenever any procedure
-is planned for a domain. The planner may skip construction only when no
-procedure can be applicable; it must not build a reduced project index that
-would change propagated effects. Compile-equivalent diagnostics and existing
-unconditional compatibility paths retain their existing behavior.
+When a project capability is required, its builder must preserve the complete
+project closure needed by that capability. A domain may use a participant
+subset only when the feature seed and resolved caller/callee closure prove that
+the reduction preserves semantics; otherwise it retains the complete
+procedure set. The project capability planner may skip construction only when
+no enabled diagnostic requires the capability. Compile-equivalent diagnostics
+and existing unconditional compatibility paths retain their existing behavior.
 
 The summary and planner are reused by batch and realtime/LSP entry points and
 are safe for concurrent readers. The performance recorder reports one
 `planned_<domain>_runs` or `skipped_<domain>_runs` decision per procedure and
 gated domain. These are opt-in stderr telemetry only and do not change normal
 CLI JSON, LSP, diagnostic, or configuration contracts.
+
+### Project semantic capabilities
+
+Procedure applicability is only one input to project analysis planning. After
+the owned IR, module facts, resolution completeness, and procedure feature
+summaries are available, the analyzer builds an immutable project capability
+plan from the enabled diagnostic registry. Each project/domain diagnostic
+declares direct capability requirements; the planner computes their transitive
+closure before any project-wide semantic builder runs. A rule implementation
+must consume the resulting capability bundle and must not construct a missing
+project context as a private fallback.
+
+The initial internal capability vocabulary and dependencies are:
+
+| capability             | direct dependencies              |
+| ---------------------- | -------------------------------- |
+| `TypeDB`               | —                                |
+| `Resolution`           | `TypeDB`                         |
+| `ProjectConstants`     | `TypeDB`, `Resolution`           |
+| `ByRefSymbols`         | `Resolution`                     |
+| `Effects`              | `Resolution`                     |
+| `ObjectFlow`           | `Resolution`                     |
+| `ArrayInterprocedural` | `Resolution`, `ProjectConstants` |
+| `DataFlow`             | `TypeDB`                         |
+| `DictionaryCollection` | `Resolution`                     |
+| `ApplicationState`     | `Effects`                        |
+| `EventReentry`         | `Effects`                        |
+| `PublicAPITypeIndex`   | `TypeDB`, `Resolution`           |
+| `ExcelLoopSymbols`     | `TypeDB`, `Resolution`           |
+| `ExcelAPIHelpers`      | `Resolution`                     |
+| `ModuleState`          | —                                |
+
+The table is an internal completeness contract, not a public CLI or LSP
+schema. A capability is constructed at most once per analysis revision. Batch
+analysis may build the planned closure eagerly in dependency order before
+procedure workers start. Realtime/LSP analysis may memoize the same immutable
+results by revision; concurrent requests for the same revision share them,
+while a new revision or a complete/incomplete transition invalidates them.
+
+Capability planning is independent from optional runtime-analysis settings for
+compile-equivalent diagnostics. The baseline compiler-equivalent checks and
+the unconditional Intel, ByRef, assignment, local-type, CFG, array-shape,
+`VB052`--`VB054`, `VBA101`, and `VBA102` paths remain planned when their
+existing analyzer contract requires them. Optional effects, object flow,
+array interprocedural, data-flow, Dictionary/Collection, application-state,
+event-reentry, public-API, and Excel-loop work is built only when an enabled
+diagnostic requires the corresponding capability.
+
+Participant filtering is permitted only when the feature seed and resolved
+caller/callee closure prove that the reduced set preserves semantics. The
+filtered set must include related module state, ByRef state, helper procedures,
+class/document/UserForm initializers, and uncertainty boundaries. Recovered IR,
+ambiguous or dynamic calls, incomplete resolution, or an unknown module-state
+boundary fail open to the complete procedure set. Effects, `ApplicationState`,
+and `EventReentry` keep the complete project closure whenever required, while
+`PublicAPITypeIndex` may scan only the public API surface.
+
+Capability builders share the already resolved IR and resolver. In particular,
+the Effects capability must not rebuild resolution, and a project rule must not
+call an independent `buildProjectEffects`-style fallback after planning. The
+same capability plan is used by batch and Full realtime/LSP diagnostics so
+findings, uncertainty handling, and the compile-equivalent baseline remain
+consistent across entry points.
 
 ### Batch procedure-worker boundary
 

@@ -191,7 +191,10 @@ func (features *procedureFeatureSet) observeText(text string) {
 	if vba242LooksLikeRangeOperation(text) {
 		features.add(featureExcel | featureExcelOperation)
 	}
-	if containsAny(lower, "screenupdating", "enableevents", "displayalerts", "application.calculation", "statusbar") {
+	if containsAny(lower,
+		"screenupdating", "enableevents", "displayalerts", "application.calculation", "statusbar",
+		"cursor", "interactive", "asktoupdatelinks", "automationsecurity", "cutcopymode",
+	) {
 		features.add(featureApplicationState)
 	}
 }
@@ -250,49 +253,57 @@ func finalizeProcedureFeatures(features procedureFeatureSet, document procedurei
 }
 
 type procedureRuleRequirement struct {
-	id     string
-	domain analysisstats.Domain
-	any    procedureFeature
-	all    procedureFeature
-	always bool
+	id           string
+	domain       analysisstats.Domain
+	any          procedureFeature
+	all          procedureFeature
+	always       bool
+	capabilities projectCapability
+	projectOnly  bool
+	getterSource bool
 }
 
 var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA249", domain: analysisstats.DomainRuntime, any: featureRuntimeExpression | featureArray | featureCalls},
-	{id: "VBA208", domain: analysisstats.DomainArray, any: featureArray | featureReDim | featureCalls},
-	{id: "VBA209", domain: analysisstats.DomainArray, any: featureArray | featureRangeArray | featureCalls},
-	{id: "VBA226", domain: analysisstats.DomainArray, any: featureRangeArray | featureExcel | featureCalls},
-	{id: "VBA227", domain: analysisstats.DomainArray, any: featureArray | featureLoop | featureCalls},
-	{id: "VBA241", domain: analysisstats.DomainArray, all: featureReDim | featureLoop},
-	{id: "VBA249", domain: analysisstats.DomainArray, any: featureArray | featureCalls},
-	{id: "VBA101", domain: analysisstats.DomainArray, all: featureArray | featureObject, always: true},
-	{id: "VBA102", domain: analysisstats.DomainArray, all: featureArray | featureObject, always: true},
-	{id: "VBA202", domain: analysisstats.DomainObject, any: featureObject | featureMemberAccess | featureCalls},
-	{id: "VBA207", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls},
-	{id: "VBA213", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls},
-	{id: "VBA230", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls},
-	{id: "VBA231", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls},
-	{id: "VBA232", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls},
-	{id: "VBA233", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls},
-	{id: "VBA234", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls},
-	{id: "VBA235", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls},
+	{id: "VBA212", domain: analysisstats.DomainOther, capabilities: projectCapabilityEffects, projectOnly: true, getterSource: true},
+	{id: "VBA208", domain: analysisstats.DomainArray, any: featureArray | featureReDim | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA209", domain: analysisstats.DomainArray, any: featureArray | featureRangeArray | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA226", domain: analysisstats.DomainArray, any: featureRangeArray | featureExcel | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA227", domain: analysisstats.DomainArray, any: featureArray | featureLoop | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA241", domain: analysisstats.DomainArray, all: featureReDim | featureLoop, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA249", domain: analysisstats.DomainArray, any: featureArray | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA101", domain: analysisstats.DomainArray, all: featureArray | featureObject, always: true, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA102", domain: analysisstats.DomainArray, all: featureArray | featureObject, always: true, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA202", domain: analysisstats.DomainObject, any: featureObject | featureMemberAccess | featureCalls, capabilities: projectCapabilityObjectFlow},
+	{id: "VBA207", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA213", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA230", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA231", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA232", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA233", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA234", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls, capabilities: projectCapabilityDictionaryCollection},
+	{id: "VBA235", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
 	{id: "VBA204", domain: analysisstats.DomainError, any: featureOnError},
 	{id: "VBA214", domain: analysisstats.DomainError, any: featureOnError},
-	{id: "VBA237", domain: analysisstats.DomainError, any: featureOnError | featureCalls},
-	{id: "VBA224", domain: analysisstats.DomainDataflow, any: featureDataflow | featureCalls},
-	{id: "VBA236", domain: analysisstats.DomainDataflow, any: featureProcessLaunch | featureCalls},
-	{id: "VBA239", domain: analysisstats.DomainDataflow, any: featureSQL | featureCalls},
-	{id: "VBA245", domain: analysisstats.DomainDataflow, any: featureFileIO | featureCalls},
-	{id: "VBA246", domain: analysisstats.DomainDataflow, any: featureHTTP | featureCalls},
-	{id: "VBA247", domain: analysisstats.DomainDataflow, any: featureHTTP | featureCalls},
+	{id: "VBA237", domain: analysisstats.DomainError, any: featureOnError | featureCalls, capabilities: projectCapabilityEffects},
+	{id: "VBA224", domain: analysisstats.DomainDataflow, any: featureDataflow | featureCalls, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA236", domain: analysisstats.DomainDataflow, any: featureProcessLaunch | featureCalls, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA239", domain: analysisstats.DomainDataflow, any: featureSQL | featureCalls, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA245", domain: analysisstats.DomainDataflow, any: featureFileIO | featureCalls, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA246", domain: analysisstats.DomainDataflow, any: featureHTTP | featureCalls, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA247", domain: analysisstats.DomainDataflow, any: featureHTTP | featureCalls, capabilities: projectCapabilityDataFlowInputs},
 	{id: "VBA219", domain: analysisstats.DomainResource, any: featureResourceAcquire | featureCalls},
-	{id: "VBA225", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop},
-	{id: "VBA238", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop},
+	{id: "VBA225", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop, capabilities: projectCapabilityExcelLoopSymbols},
+	{id: "VBA238", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop, capabilities: projectCapabilityExcelLoopSymbols},
 	{id: "VBA242", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA243", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
-	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState | featureCalls},
-	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureCalls | featureApplicationState},
-	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState | featureCalls},
+	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState | featureCalls, capabilities: projectCapabilityApplicationState},
+	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureCalls | featureApplicationState, capabilities: projectCapabilityEventReentry},
+	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState | featureCalls, capabilities: projectCapabilityApplicationState},
+	{id: "VBA218", domain: analysisstats.DomainOther, capabilities: projectCapabilityExcelAPIHelpers, projectOnly: true},
+	{id: "VBA222", domain: analysisstats.DomainOther, capabilities: projectCapabilityPublicAPITypeIndex, projectOnly: true},
+	{id: "VBA240", domain: analysisstats.DomainOther, capabilities: projectCapabilityModuleState, projectOnly: true},
+	{id: "VBA244", domain: analysisstats.DomainOther, any: featureCalls, capabilities: projectCapabilityEffects, projectOnly: true},
 }
 
 type procedureAnalysisPlan struct {
@@ -376,6 +387,9 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 
 	var plan procedureAnalysisPlan
 	for _, requirement := range procedureRuleRequirements {
+		if requirement.projectOnly {
+			continue
+		}
 		enabled := requirement.always
 		if !enabled {
 			var known bool

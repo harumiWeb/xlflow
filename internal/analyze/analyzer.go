@@ -344,7 +344,7 @@ type analysisContext struct {
 	arrayByRefEntryStates            map[string]map[int]bool
 	arrayByRefEntryConditions        map[string]map[int]string
 	procedures                       map[string]procedureSignature
-	procedureResolver                procedureir.SymbolResolver
+	procedureResolver                procedureir.Resolver
 	objectAnalysis                   *objectAnalysisContext
 	worksheetCodenames               map[string]string
 	projectEffects                   effects.ProjectSummary
@@ -532,7 +532,8 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	// be disabled by the legacy VBA206 runtime-safety setting.
 	needsByRefAnalysis := true
 	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
-	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction
+	needsDataFlowInputs := dataFlowInputsEnabled(a.Config.Analyze)
+	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || needsDataFlowInputs
 	parsedFiles := make([]parsedFile, 0, len(files))
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -609,10 +610,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
 			constantValues = lint.ConstantValuesFromSource(string(source), &ir, nil)
 		}
-		var dataFlowModuleBindings map[string]bool
-		if a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction {
-			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
-		}
 		parsedFile := parsedFile{
 			Path:                      file,
 			Lines:                     lines,
@@ -625,7 +622,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 			IntelDocument:             intelDocument,
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
-			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
 		if a.Config.Analyze.DetectArrayLifecycleSafety || a.Config.Analyze.DetectRedimPreserveDimension || a.Config.Analyze.DetectObjectArrayComparison || a.Config.Analyze.DetectDeterministicRuntimeErrors {
 			parsedFile.ArrayOptionBase = optionBase(lines)
@@ -636,23 +632,84 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	}
 	defer closeParsedFiles(parsedFiles)
 	recordBatchWorkload(ctx, parsedFiles)
-
-	finishStage = analysisstats.Measure(ctx, "effect_summaries")
-	projectEffects := buildProjectEffects(parsedFiles)
-	finishStage(projectEffects.ProcedureCount(), nil)
-	if recorder := analysisstats.FromContext(ctx); recorder != nil {
-		stats := projectEffects.Stats()
-		recorder.AddSum("effect_summary_worklist_evaluations", stats.WorklistEvaluations)
-		recorder.AddMax("effect_summary_max_propagated_facts_per_procedure", stats.MaxPropagatedFactsPerProcedure)
-		recorder.AddSum("effect_summary_total_propagated_facts", stats.TotalPropagatedFacts)
+	initializeProjectCapabilityTelemetry(ctx)
+	analysis := a
+	var warnings []map[string]any
+	if needsTypeDB {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityTypeDB)
+		finishStage = analysisstats.Measure(ctx, "typedb_load")
+		loaded, loadErr := typedb.LoadForRuntime("")
+		finishCapability(loadErr)
+		finishStage(1, loadErr)
+		if loadErr != nil {
+			return Result{}, loadErr
+		}
+		analysis.typeDB = loaded.DB
+		analysis.typeDBResolutionIncomplete = !loaded.Complete
+		for _, warning := range loaded.Warnings {
+			warnings = append(warnings, map[string]any{
+				"code": "type_db_load_warning", "message": warning,
+			})
+		}
 	}
+
+	// Resolution is a baseline capability for compile-equivalent diagnostics.
+	// Build it before procedure facts so feature classification observes the
+	// actual call statuses instead of treating every call as unknown.
+	resolutionComplete := analysis.PathFilter == nil && !analysis.typeDBResolutionIncomplete
+	for _, file := range parsedFiles {
+		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
+			resolutionComplete = false
+			break
+		}
+	}
+	finishStage = analysisstats.Measure(ctx, "project_resolution")
+	finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityResolution)
+	resolutionResolver := buildProjectResolution(parsedFiles, resolutionComplete, analysis.typeDB)
+	finishCapability(nil)
+	finishStage(1, nil)
+
+	var projectEffects effects.ProjectSummary
 	for i := range parsedFiles {
 		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
 		parsedFiles[i].ModuleFacts = buildModuleAnalysisFacts(parsedFiles[i].Lines, parsedFiles[i].IR, procedures)
 		parsedFiles[i].ModuleDeclarations = parsedFiles[i].ModuleFacts.moduleDeclarations
-		materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, a.Config.Analyze)
+		materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		recordFactBuilds(ctx, len(procedures))
+	}
+	capabilityPlan := buildProjectCapabilityPlan(analysis.Config.Analyze, parsedFiles)
+	if capabilityPlan.requires(projectCapabilityDataFlowInputs) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityDataFlowInputs)
+		for i := range parsedFiles {
+			if projectPlansDomain(analysis.Config.Analyze, []parsedFile{parsedFiles[i]}, projectEffects, procedureDomainDataflow) {
+				parsedFiles[i].DataFlowModuleBindings = dataFlowBindings(parsedFiles[i].IR.Declarations)
+			}
+		}
+		finishCapability(nil)
+	}
+	finishStage = analysisstats.Measure(ctx, "effect_summaries")
+	if capabilityPlan.requires(projectCapabilityEffects) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityEffects)
+		projectEffects = buildProjectEffectsResolved(parsedFiles)
+		finishCapability(nil)
+		finishStage(projectEffects.ProcedureCount(), nil)
+		if recorder := analysisstats.FromContext(ctx); recorder != nil {
+			stats := projectEffects.Stats()
+			recorder.AddSum("effect_summary_worklist_evaluations", stats.WorklistEvaluations)
+			recorder.AddMax("effect_summary_max_propagated_facts_per_procedure", stats.MaxPropagatedFactsPerProcedure)
+			recorder.AddSum("effect_summary_total_propagated_facts", stats.TotalPropagatedFacts)
+		}
+		for i := range parsedFiles {
+			materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
+		}
+		// Effects can add conservative feature seeds (for example, an
+		// application-state mutation discovered through a propagated call or a
+		// With Application member). Recompute the capability plan before any
+		// downstream project indexes are gated so those consumers are retained.
+		capabilityPlan = buildProjectCapabilityPlan(analysis.Config.Analyze, parsedFiles)
+	} else {
+		finishStage(0, nil)
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -668,7 +725,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	}
 	finishStage = analysisstats.Measure(ctx, "object_procedure_summaries")
 	var objectAnalysis *objectAnalysisContext
+	var finishObjectCapability func(error)
 	if a.Config.Analyze.DetectObjectUseBeforeSet && projectPlansDomain(a.Config.Analyze, parsedFiles, projectEffects, procedureDomainObject) {
+		finishObjectCapability = beginProjectCapabilityBuild(ctx, projectCapabilityObjectFlow)
 		objectAnalysis = buildObjectAnalysisPlans(parsedFiles)
 		objectAnalysis.buildSummaries()
 		finishStage(len(objectAnalysis.summaries), nil)
@@ -682,6 +741,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishStage = analysisstats.Measure(ctx, "object_entry_states")
 	if objectAnalysis != nil {
 		objectAnalysis.buildEntryStates()
+		finishObjectCapability(nil)
 		finishStage(len(objectAnalysis.entries), nil)
 		if recorder := analysisstats.FromContext(ctx); recorder != nil {
 			recorder.AddSum("object_summary_evaluations", uint64(objectAnalysis.summaryEvaluations))
@@ -690,57 +750,50 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	} else {
 		finishStage(0, nil)
 	}
-	finishStage = analysisstats.Measure(ctx, "project_context")
-	analysisCtx := a.buildContextWithObjectAnalysis(parsedFiles, objectAnalysis)
-	finishStage(len(analysisCtx.procedures), nil)
-	analysis := a
-	var warnings []map[string]any
-	if needsTypeDB {
-		finishStage = analysisstats.Measure(ctx, "typedb_load")
-		loaded, err := typedb.LoadForRuntime("")
-		finishStage(1, err)
-		if err != nil {
-			return Result{}, err
-		}
-		analysis.typeDB = loaded.DB
-		analysis.typeDBResolutionIncomplete = !loaded.Complete
-		for _, warning := range loaded.Warnings {
-			warnings = append(warnings, map[string]any{
-				"code": "type_db_load_warning", "message": warning,
-			})
-		}
-	}
-	finishStage = analysisstats.Measure(ctx, "project_context_indexes")
+	// ProjectConstants is an explicit dependency of the interprocedural array
+	// capability. Build it before the project context so the measured capability
+	// order follows the same dependency order as the planner closure.
+	finishProjectConstants := beginProjectCapabilityBuild(ctx, projectCapabilityProjectConstants)
 	analysis.visibleConstants = projectVisibleConstants(parsedFiles, analysis.typeDB)
 	analysis.visibleConstantValues = projectConstantValues(parsedFiles, analysis.typeDB)
-	if dictionaryCollectionAnalysisEnabled(analysis.Config.Analyze) && projectPlansDomain(analysis.Config.Analyze, parsedFiles, projectEffects, procedureDomainDictionary) {
+	finishProjectConstants(nil)
+	finishStage = analysisstats.Measure(ctx, "project_context")
+	finishArrayCapability := func(error) {}
+	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
+		finishArrayCapability = beginProjectCapabilityBuild(ctx, projectCapabilityArrayInterprocedural)
+	}
+	analysisCtx := analysis.buildContextWithObjectAnalysisPlan(parsedFiles, objectAnalysis, capabilityPlan, procedureir.ProcedureOnlyResolver(resolutionResolver))
+	finishArrayCapability(nil)
+	finishStage(len(analysisCtx.procedures), nil)
+	finishStage = analysisstats.Measure(ctx, "project_context_indexes")
+	if capabilityPlan.requires(projectCapabilityDictionaryCollection) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityDictionaryCollection)
 		analysis.dictionaryCollection = buildDictionaryCollectionIndex(parsedFiles)
+		finishCapability(nil)
 	}
-	if analysis.Config.Analyze.DetectApplicationStateCallEffects {
+	if capabilityPlan.requires(projectCapabilityApplicationState) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityApplicationState)
 		analysis.applicationStateLeaks = buildApplicationStateLeakIndex(parsedFiles, projectEffects)
+		finishCapability(nil)
 	}
-	if analysis.Config.Analyze.DetectEventHandlerReentry {
+	if capabilityPlan.requires(projectCapabilityEventReentry) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityEventReentry)
 		analysis.eventSafeProcedures = eventSafeProcedures(parsedFiles, projectEffects)
+		finishCapability(nil)
 	}
 	finishStage(1, nil)
-	// Resolution completeness must include the generated TypeLib view. Load it
-	// before constructing the resolver so incomplete external symbols fail open
-	// consistently across every source file.
-	resolutionComplete := analysis.PathFilter == nil && !analysis.typeDBResolutionIncomplete
-	for _, file := range parsedFiles {
-		if file.IR.Parse.HasError || file.IR.Parse.HasMissing {
-			resolutionComplete = false
-			break
-		}
-	}
-	if analysis.Config.Analyze.DetectExcelCellAccessInLoops && projectPlansDomain(analysis.Config.Analyze, parsedFiles, projectEffects, procedureDomainExcel) {
+	if capabilityPlan.requires(projectCapabilityExcelLoopSymbols) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityExcelLoopSymbols)
 		finishStage = analysisstats.Measure(ctx, "project_symbols")
 		analysis.excelLoopAccess = buildExcelLoopAccessIndex(parsedFiles, analysis.typeDB, a.RootDir, a.Config)
+		finishCapability(nil)
 		finishStage(1, nil)
 	}
 	if needsByRefAnalysis {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityByRefSymbols)
 		finishStage = analysisstats.Measure(ctx, "project_symbols")
 		byRefSymbolIndex, symbolCount, err := projectByRefSymbolIndex(ctx, a.RootDir, a.Config, a.PathFilter, parsedFiles)
+		finishCapability(err)
 		finishStage(symbolCount, err)
 		if err != nil {
 			return Result{}, err
@@ -751,9 +804,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		}
 	}
 	findings := cycleFindings
-	finishStage = analysisstats.Measure(ctx, "project_symbols")
-	resolutionResolver := buildResolutionResolver(parsedFiles, resolutionComplete, analysis.typeDB)
-	finishStage(1, nil)
 	var resolutionPreflight []Finding
 	finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 	for i := range parsedFiles {
@@ -767,20 +817,26 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	finishStage(len(resolutionPreflight), nil)
 	var preflightFindings []Finding
 	preflightFindings = append(preflightFindings, resolutionPreflight...)
-	if analysis.Config.Analyze.DetectExcelAPIFailureContracts {
+	if capabilityPlan.requires(projectCapabilityExcelAPIHelpers) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityExcelAPIHelpers)
 		analysis.errorGuardAliases = projectIsErrorGuardAliases(parsedFiles)
 		analysis.errorValueWrappers = projectErrorValueWrappers(parsedFiles)
+		finishCapability(nil)
 	}
 	var publicAPITypeIndex *apiTypeIndex
-	if analysis.Config.Analyze.DetectPublicAPITypeSafety {
+	if capabilityPlan.requires(projectCapabilityPublicAPITypeIndex) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityPublicAPITypeIndex)
 		finishStage = analysisstats.Measure(ctx, "project_symbols")
 		publicAPITypeIndex = buildAPITypeIndex(parsedFiles, analysis.typeDB, resolutionComplete)
+		finishCapability(nil)
 		finishStage(1, nil)
 	}
 	var analysisMetrics any
-	if analysis.Config.Analyze.DetectRiskyModuleState {
+	if capabilityPlan.requires(projectCapabilityModuleState) {
+		finishCapability := beginProjectCapabilityBuild(ctx, projectCapabilityModuleState)
 		finishStage = analysisstats.Measure(ctx, "project_wide_diagnostics")
 		moduleState := buildModuleStateAnalysis(a.RootDir, a.Config, parsedFiles)
+		finishCapability(nil)
 		finishStage(len(moduleState.Findings), nil)
 		findings = append(findings, moduleState.Findings...)
 		analysisMetrics = moduleState.Metrics
@@ -1276,28 +1332,35 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 	return out, ctx.Err()
 }
 
-func buildProjectEffects(files []parsedFile) effects.ProjectSummary {
-	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
-	for _, file := range files {
-		for _, proc := range file.IR.Procedures {
-			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-				Name:       proc.Symbol.Name,
-				Module:     file.IR.ModuleName,
-				ModuleKind: file.IR.ModuleKind,
-				Kind:       string(proc.Symbol.Kind),
-				Visibility: proc.Symbol.Visibility,
-				File:       file.IR.Path,
-				Line:       proc.Symbol.DeclarationRange.StartLine,
-			})
-		}
-	}
-	resolver := procedureir.NewResolver(resolverSymbols)
+// buildProjectEffectsResolved consumes the already-resolved project revision.
+// Keeping resolution outside this function makes the project capability plan
+// able to share one resolver with compile-equivalent and procedure-local
+// consumers.
+func buildProjectEffectsResolved(files []parsedFile) effects.ProjectSummary {
 	documents := make([]effects.Document, 0, len(files))
-	for i := range files {
-		files[i].IR = procedureir.Resolve(files[i].IR, resolver)
-		documents = append(documents, effects.Document{IR: files[i].IR, CFG: files[i].CFG})
+	for _, file := range files {
+		documents = append(documents, effects.Document{IR: file.IR, CFG: file.CFG})
 	}
 	return effects.Build(documents)
+}
+
+// buildSingleFileProjectEffects is the explicit boundary for standalone and
+// realtime VBA212 callers that do not have a workspace project snapshot. Rule
+// implementations receive the resulting value; they never construct a hidden
+// project summary themselves.
+func buildSingleFileProjectEffects(file parsedFile) effects.ProjectSummary {
+	files := []parsedFile{file}
+	buildProjectResolution(files, true, nil)
+	return buildProjectEffectsResolved(files)
+}
+
+func buildProjectResolution(files []parsedFile, complete bool, typeDB *vbadb.DB) procedureir.Resolver {
+	resolver := buildResolutionResolver(files, complete, typeDB)
+	procedureResolver := procedureir.ProcedureOnlyResolver(resolver)
+	for i := range files {
+		files[i].IR = procedureir.Resolve(files[i].IR, procedureResolver)
+	}
+	return resolver
 }
 
 func projectVisibleConstants(files []parsedFile, typeDB *vbadb.DB) map[string]bool {
@@ -1446,8 +1509,12 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
 		recordFactBuilds(ctx, len(procedures))
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
+		projectEffects := effects.ProjectSummary{}
+		if vba212SourceMayHaveGetter(file) {
+			projectEffects = buildSingleFileProjectEffects(file)
+		}
 		var scanErr error
-		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
+		findings, scanErr = analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
 		if scanErr != nil {
 			return scanErr
 		}
@@ -1581,7 +1648,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			constantValues = lint.ConstantValuesFromSource(string(view.Source), &ir, projectConstants)
 		}
 		var dataFlowModuleBindings map[string]bool
-		if cfg.Analyze.DetectUntrustedDataFlow || cfg.Analyze.DetectUnsafeCommandConstruction || cfg.Analyze.DetectUnsafeSQLConstruction {
+		if dataFlowInputsEnabled(cfg.Analyze) {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
 		procedures := sourceProceduresFromIRRef(&ir, controlFlow)
@@ -1607,6 +1674,9 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			file.ArrayOptionBase = optionBase(lines)
 			file.ArrayOptionBaseSet = true
 			file.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(file)
+		}
+		if cfg.Analyze.DetectNonShortCircuitObjectGuard && len(projectEffects.AllDirect()) == 0 && vba212SourceMayHaveGetter(file) {
+			projectEffects = buildSingleFileProjectEffects(file)
 		}
 		var excelRootBindings excelRootBindingIndex
 		if cfg.Analyze.DetectExcelCellAccessInLoops {
@@ -1641,7 +1711,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			findings = append(findings, procedureFindings...)
 		}
 		if cfg.Analyze.DetectNonShortCircuitObjectGuard {
-			guardFindings, err := analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{})
+			guardFindings, err := analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
 			if err != nil {
 				return err
 			}
@@ -1961,10 +2031,10 @@ func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB
 }
 
 func (a Analyzer) buildContext(files []parsedFile) analysisContext {
-	return a.buildContextWithObjectAnalysis(files, nil)
+	return a.buildContextWithObjectAnalysisPlan(files, nil, buildProjectCapabilityPlan(a.Config.Analyze, files), nil)
 }
 
-func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnalysis *objectAnalysisContext) analysisContext {
+func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectAnalysis *objectAnalysisContext, capabilityPlan projectCapabilityPlan, projectResolver procedureir.Resolver) analysisContext {
 	ctx := analysisContext{
 		functionReturns:                  map[string]string{},
 		functionShapes:                   map[string]procedureir.ValueShapeKind{},
@@ -1985,7 +2055,10 @@ func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnaly
 		objectAnalysis:                   objectAnalysis,
 		worksheetCodenames:               map[string]string{},
 	}
-	resolverSymbols := make([]procedureir.ResolverSymbol, 0)
+	var resolverSymbols []procedureir.ResolverSymbol
+	if projectResolver == nil {
+		resolverSymbols = make([]procedureir.ResolverSymbol, 0)
+	}
 	workbookRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Workbook))
 	for _, file := range files {
 		if rel, err := filepath.Rel(workbookRoot, file.Path); err == nil && rel != "" && !strings.HasPrefix(rel, "..") && !strings.EqualFold(file.Module, "ThisWorkbook") {
@@ -1995,16 +2068,18 @@ func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnaly
 		if module == "" {
 			module = file.Module
 		}
-		for _, procedure := range file.IR.Procedures {
-			resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
-				Name:       procedure.Symbol.Name,
-				Module:     module,
-				ModuleKind: file.IR.ModuleKind,
-				Kind:       string(procedure.Symbol.Kind),
-				Visibility: procedure.Symbol.Visibility,
-				File:       file.IR.Path,
-				Line:       procedure.Symbol.DeclarationRange.StartLine,
-			})
+		if projectResolver == nil {
+			for _, procedure := range file.IR.Procedures {
+				resolverSymbols = append(resolverSymbols, procedureir.ResolverSymbol{
+					Name:       procedure.Symbol.Name,
+					Module:     module,
+					ModuleKind: file.IR.ModuleKind,
+					Kind:       string(procedure.Symbol.Kind),
+					Visibility: procedure.Symbol.Visibility,
+					File:       file.IR.Path,
+					Line:       procedure.Symbol.DeclarationRange.StartLine,
+				})
+			}
 		}
 		for _, proc := range file.procedureProjection() {
 			functionName := strings.ToLower(proc.Name)
@@ -2040,12 +2115,15 @@ func (a Analyzer) buildContextWithObjectAnalysis(files []parsedFile, objectAnaly
 			ctx.procedures[strings.ToLower(file.Module+"."+proc.Name)] = signature
 		}
 	}
-	ctx.procedureResolver = procedureir.NewResolver(resolverSymbols)
+	ctx.procedureResolver = projectResolver
+	if ctx.procedureResolver == nil {
+		ctx.procedureResolver = procedureir.NewResolver(resolverSymbols)
+	}
 	// A completely scalar project with no uncertain calls cannot produce an
 	// array diagnostic. Avoid building the interprocedural array indexes in
 	// that proven-negative case; any call or incomplete fact fails this gate
 	// open through buildProcedureAnalysisPlan.
-	if projectPlansDomain(a.Config.Analyze, files, effects.ProjectSummary{}, procedureDomainArray) {
+	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
 		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
@@ -3110,7 +3188,7 @@ func vba205ShadowedIdentifiersWithFacts(proc sourceProcedure, decls declarationS
 	return shadowed
 }
 
-func vba205ProcedureVisibleFrom(resolver procedureir.SymbolResolver, proc sourceProcedure, name string) bool {
+func vba205ProcedureVisibleFrom(resolver procedureir.Resolver, proc sourceProcedure, name string) bool {
 	caller := procedureir.ProcedureRef{
 		Name: proc.Name, Kind: proc.ProcedureKind, QualifiedName: proc.Module + "." + proc.Name,
 	}
@@ -4437,7 +4515,11 @@ type vba212ScanStats struct {
 // procedures x document-nodes traversal while preserving outer-expression
 // priority and per-procedure diagnostics.
 func (a Analyzer) nonShortCircuitObjectGuardDocumentFindings(ctx context.Context, file parsedFile, procedures []sourceProcedure, stats *vba212ScanStats) ([]Finding, error) {
-	return a.vba212ScanWithContext(ctx, file, procedures, stats, vba212Context{})
+	projectEffects := effects.ProjectSummary{}
+	if vba212SourceMayHaveGetter(file) {
+		projectEffects = buildSingleFileProjectEffects(file)
+	}
+	return a.vba212ScanWithContext(ctx, file, procedures, stats, vba212Context{projectEffects: projectEffects})
 }
 
 func vba212ProcedureAtByte(procedures []sourceProcedure, startByte, endByte int) (sourceProcedure, bool) {
