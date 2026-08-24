@@ -4062,7 +4062,10 @@ func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sour
 	declarations := newDeclarationScope(file, proc)
 	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
-	for name := range allocated {
+	for name, isAllocated := range allocated {
+		if !isAllocated {
+			continue
+		}
 		if declarations.shadowsModule(name) {
 			continue
 		}

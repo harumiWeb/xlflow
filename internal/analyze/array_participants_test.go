@@ -287,6 +287,23 @@ func TestCloneArrayNameSetPreservesUnknownEntryState(t *testing.T) {
 	}
 }
 
+func TestArrayModuleEntryStateDoesNotApplyUnallocatedEvidence(t *testing.T) {
+	file := parsedFile{Path: "M.bas", Module: "M", Lines: []string{"Sub Helper", "End Sub"}}
+	proc := sourceProcedure{Module: "M", Name: "Helper", StartLine: 1, EndLine: 2}
+	variables := map[string]arrayVariable{
+		"values": {name: "values", isArray: true},
+	}
+	initial := arrayFlowState{"values": {kind: arrayUnknown, knownArray: true}}
+	got := applyArrayModuleEntryState(initial, file, proc, variables, map[string]sourceDeclaration{
+		"values": {Name: "values", Array: true},
+	}, arrayModuleEntryStates{
+		"m.helper": {"values": false},
+	})
+	if got["values"].kind == arrayAllocated {
+		t.Fatalf("unallocated module-entry evidence was applied: %#v", got["values"])
+	}
+}
+
 func TestRealtimeProcedureProjectionPreservesEmptyIRFallback(t *testing.T) {
 	fallback := []sourceProcedure{{StartLine: 1, EndLine: 4, StartByte: 0, EndByte: 20}}
 	if got := rebindRealtimeProcedureProjection(fallback, nil); len(got) != 1 || got[0].StartLine != fallback[0].StartLine || got[0].EndLine != fallback[0].EndLine {
