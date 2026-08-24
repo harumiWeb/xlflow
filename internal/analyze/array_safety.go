@@ -1973,6 +1973,7 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 	if len(all) == 0 {
 		return map[string]bool{}
 	}
+	candidateIndex := buildArrayCandidateIndex(all)
 
 	adjacency := make(map[string]map[string]bool, len(all))
 	participants := make(map[string]bool, len(all))
@@ -2031,7 +2032,7 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 				candidate := resolution.Candidates[0]
 				target := byQualified[strings.ToLower(candidate.QualifiedName)]
 				if target == "" {
-					target = arrayCandidateKey(candidate, all)
+					target = arrayCandidateKey(candidate, all, candidateIndex)
 				}
 				// Defer resolved-edge filtering until every procedure's
 				// intrinsic seed has been classified. The source map is not
@@ -2042,7 +2043,7 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 			}
 			if resolution.Status == procedureir.ResolutionAmbiguous || resolution.Status == procedureir.ResolutionUnresolved || resolution.Status == procedureir.ResolutionDynamic || resolution.Status == procedureir.ResolutionIncomplete {
 				for _, candidate := range resolution.Candidates {
-					addEdge(arrayCandidateKey(candidate, all))
+					addEdge(arrayCandidateKey(candidate, all, candidateIndex))
 				}
 				if len(resolution.Candidates) == 0 {
 					// A candidate-bearing ambiguous/dynamic/unresolved call is
@@ -2334,10 +2335,22 @@ func ensureArrayKeySet(set map[string]bool) map[string]bool {
 	return set
 }
 
-func arrayCandidateKey(candidate procedureir.Candidate, all map[string]sourceProcedure) string {
-	qualified := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
-	if proc, ok := all[qualified]; ok {
-		return arrayProcedureKey(proc)
+type arrayCandidateLineKey struct {
+	line int
+	kind string
+}
+
+type arrayCandidateIndex struct {
+	byName        map[string]string
+	byLineAndKind map[arrayCandidateLineKey]string
+}
+
+// buildArrayCandidateIndex preserves the old sorted-key tie breaking while
+// avoiding a project-wide key collection and sort for every uncertain call.
+func buildArrayCandidateIndex(all map[string]sourceProcedure) arrayCandidateIndex {
+	index := arrayCandidateIndex{
+		byName:        make(map[string]string, len(all)),
+		byLineAndKind: make(map[arrayCandidateLineKey]string),
 	}
 	keys := make([]string, 0, len(all))
 	for key := range all {
@@ -2346,7 +2359,34 @@ func arrayCandidateKey(candidate procedureir.Candidate, all map[string]sourcePro
 	sort.Strings(keys)
 	for _, key := range keys {
 		proc := all[key]
-		if strings.EqualFold(proc.Name, candidate.QualifiedName) || (candidate.Line > 0 && proc.StartLine == candidate.Line && strings.EqualFold(proc.Name, candidate.Kind)) {
+		name := strings.ToLower(strings.TrimSpace(proc.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := index.byName[name]; !exists {
+			index.byName[name] = key
+		}
+		if proc.StartLine > 0 {
+			lineKey := arrayCandidateLineKey{line: proc.StartLine, kind: name}
+			if _, exists := index.byLineAndKind[lineKey]; !exists {
+				index.byLineAndKind[lineKey] = key
+			}
+		}
+	}
+	return index
+}
+
+func arrayCandidateKey(candidate procedureir.Candidate, all map[string]sourceProcedure, index arrayCandidateIndex) string {
+	qualified := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+	if proc, ok := all[qualified]; ok {
+		return arrayProcedureKey(proc)
+	}
+	if key, ok := index.byName[qualified]; ok {
+		return key
+	}
+	if candidate.Line > 0 {
+		lineKey := arrayCandidateLineKey{line: candidate.Line, kind: strings.ToLower(candidate.Kind)}
+		if key, ok := index.byLineAndKind[lineKey]; ok {
 			return key
 		}
 	}
@@ -5738,6 +5778,23 @@ func arrayLengthExpressionMatches(rhs, parameter string) bool {
 // Dependencies are solved to a fixed point so a private array-returning helper
 // may be declared after its caller without turning an unproved VBA function
 // contract into an allocation guarantee.
+func arrayReturnSummaryDuplicateNames(procedures []sourceProcedure) map[string]bool {
+	counts := make(map[string]int, len(procedures))
+	for _, procedure := range procedures {
+		name := strings.ToLower(strings.TrimSpace(procedure.Name))
+		if name != "" {
+			counts[name]++
+		}
+	}
+	duplicates := make(map[string]bool)
+	for name, count := range counts {
+		if count > 1 {
+			duplicates[name] = true
+		}
+	}
+	return duplicates
+}
+
 func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[string]bool, participantCtx analysisContext) map[string]arrayValue {
 	type candidate struct {
 		value arrayValue
@@ -5775,6 +5832,11 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	sort.SliceStable(procedures, func(i, j int) bool {
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})
+	returnProcedures := make([]sourceProcedure, 0, len(procedures))
+	for _, procedure := range procedures {
+		returnProcedures = append(returnProcedures, procedure.proc)
+	}
+	ambiguousReturnNames := arrayReturnSummaryDuplicateNames(returnProcedures)
 
 	evaluate := func(procedure returnProcedure, summaries map[string]arrayValue) (candidate, bool) {
 		proc := procedure.proc
@@ -5872,10 +5934,19 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	for head := 0; head < len(queue); head++ {
 		index := queue[head]
 		queued[index] = false
+		procedure := procedures[index]
+		name := strings.ToLower(strings.TrimSpace(procedure.proc.Name))
+		if ambiguousReturnNames[name] {
+			// Summary lookups use bare names for compatibility with the existing
+			// expression resolver. A duplicate bare name is therefore permanently
+			// ambiguous for this revision. Keep it at the unknown bottom of the
+			// lattice instead of allowing iteration order to delete and recreate a
+			// summary while duplicate candidates are evaluated.
+			continue
+		}
 		if head >= len(procedures) && participantCtx.arrayStats != nil {
 			participantCtx.arrayStats.revisits++
 		}
-		procedure := procedures[index]
 		key := arrayProcedureKey(procedure.proc)
 		value, hasContribution := evaluate(procedure, summaries)
 		if present[key] == hasContribution && (!hasContribution || arrayValueEqual(contributions[key].value, value.value) && contributions[key].ok == value.ok) {
@@ -5884,7 +5955,6 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		if hasContribution {
 			contributions[key] = value
 			present[key] = true
-			name := strings.ToLower(procedure.proc.Name)
 			if groups[name] == nil {
 				groups[name] = map[string]candidate{}
 			}
@@ -5892,7 +5962,6 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		} else {
 			delete(contributions, key)
 			delete(present, key)
-			name := strings.ToLower(procedure.proc.Name)
 			if group := groups[name]; group != nil {
 				delete(group, key)
 				if len(group) == 0 {
@@ -5900,7 +5969,6 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 				}
 			}
 		}
-		name := strings.ToLower(procedure.proc.Name)
 		old, hadOld := summaries[name]
 		group := groups[name]
 		if len(group) == 1 {

@@ -485,8 +485,10 @@ initializers while retaining compile-equivalent `VBA101` and `VBA102` results.
 The array fixed point uses a deterministic source-ordinal worklist and keeps
 per-participant contributions. Only a changed summary or entry contribution
 requeues dependent participants; unchanged participants are not rescanned on
-every iteration. Cancellation checkpoints remain active in both participant
-planning and CFG walks.
+every iteration. Cancellation checkpoints apply to CFG walks; participant
+closure construction does not currently accept or check a context.
+`walkArrayCFGCombined` retains its existing cancellation behavior while array
+fixed-point worklists remain deterministic.
 
 Participant telemetry is developer-only and additive:
 `array_participant_procedures` counts unique closure participants,

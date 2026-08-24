@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -96,13 +97,50 @@ func TestBuildArrayParticipantSetIncludesRecursiveSCCAndModuleFallback(t *testin
 			t.Errorf("participant %q missing from recursive/fallback closure %#v", key, got)
 		}
 	}
-	keys := make([]string, 0, len(got))
-	for key := range got {
-		keys = append(keys, key)
+}
+
+func TestArrayParticipantWorklistOrderIsDeterministic(t *testing.T) {
+	procedures := []sourceProcedure{
+		{Module: "M", Name: "B", StartLine: 30},
+		{Module: "M", Name: "A", StartLine: 20},
+		{Module: "M", Name: "C", StartLine: 10},
 	}
-	sort.Strings(keys)
-	if !sort.StringsAreSorted(keys) {
-		t.Fatalf("participant keys are not deterministic: %v", keys)
+	inputs := [][]sourceProcedure{
+		procedures,
+		{procedures[2], procedures[0], procedures[1]},
+		{procedures[1], procedures[2], procedures[0]},
+	}
+	var want []string
+	for index, input := range inputs {
+		ordered := append([]sourceProcedure(nil), input...)
+		sort.SliceStable(ordered, func(i, j int) bool {
+			return arrayProcedureLess(ordered[i], ordered[j])
+		})
+		got := make([]string, 0, len(ordered))
+		for _, procedure := range ordered {
+			got = append(got, arrayProcedureKey(procedure))
+		}
+		if index == 0 {
+			want = got
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("worklist order changed with input order: got %v want %v", got, want)
+		}
+	}
+}
+
+func TestArrayReturnSummaryDuplicateNamesRemainUnknown(t *testing.T) {
+	got := arrayReturnSummaryDuplicateNames([]sourceProcedure{
+		{Module: "First", Name: "BuildValues"},
+		{Module: "Second", Name: "buildvalues"},
+		{Module: "First", Name: "Unique"},
+	})
+	if !got["buildvalues"] {
+		t.Fatalf("duplicate return name was not marked ambiguous: %#v", got)
+	}
+	if got["unique"] {
+		t.Fatalf("unique return name was marked ambiguous: %#v", got)
 	}
 }
 
@@ -236,6 +274,18 @@ func TestArrayParticipantSyntheticTelemetryExcludesScalarProcedures(t *testing.T
 	values := make(map[string]uint64, len(counters))
 	for _, counter := range counters {
 		values[counter.Name] = counter.Value
+	}
+	for _, name := range []string{
+		analysisstats.ArrayParticipantProceduresCounter,
+		analysisstats.ArrayCandidateProceduresCounter,
+		analysisstats.ArrayInterproceduralCFGWalksCounter,
+	} {
+		if _, ok := values[name]; !ok {
+			t.Fatalf("telemetry counter %q is missing: %v", name, values)
+		}
+	}
+	if values[analysisstats.ArrayParticipantProceduresCounter] == 0 {
+		t.Fatalf("array participant counter is zero for array fixture: %v", values)
 	}
 	if values[analysisstats.ArrayParticipantProceduresCounter] >= uint64(fixture.procedures/10) {
 		t.Fatalf("array participants = %d for %d-procedure fixture, want a small dependency closure; counters=%v", values[analysisstats.ArrayParticipantProceduresCounter], fixture.procedures, values)

@@ -1702,13 +1702,13 @@ medium module allocation medians remain within the repository's +2%
 observational guard.
 
 On 2026-08-24 (Windows, 12th Gen Intel(R) Core(TM) i7-12700, Go 1.26.6,
-same checkout revision), the five serial `ronecone/analyze-only` samples had
-these medians:
+with the same machine and Go toolchain for both revisions), the five serial
+`ronecone/analyze-only` samples had these medians:
 
-| revision         | wall ns/op | array candidates | array CFG walks | interprocedural CFG walks | worklist revisits |
-| ---------------- | ---------: | ---------------: | --------------: | ------------------------: | ----------------: |
-| HEAD before #712 |     14.9e9 |            1,565 |           1,579 |          not instrumented |  not instrumented |
-| #712             |      8.7e9 |              474 |             487 |                     1,237 |               300 |
+| revision                                                      | wall ns/op | array candidates | array CFG walks | interprocedural CFG walks | worklist revisits |
+| ------------------------------------------------------------- | ---------: | ---------------: | --------------: | ------------------------: | ----------------: |
+| HEAD before #712 (`408279fc5ecd8107f5f926b1bdd92f2384337ff2`) |     14.9e9 |            1,565 |           1,579 |          not instrumented |  not instrumented |
+| #712 (`852e5eadbabdfd2ca4610cbb4ddc95c4c0e9549b`)             |      8.7e9 |              474 |             487 |                     1,237 |               300 |
 
 The baseline emitted the pre-existing `array_cfg_walks` counter; the new
 interprocedural counter is emitted only by the #712 implementation, so the

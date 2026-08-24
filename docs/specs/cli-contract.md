@@ -350,9 +350,11 @@ is seeded by direct array operations, array parameters/returns,
 object-array operations, and module-array accesses, then follows semantically
 array-shaped resolved calls, reverse callers, ByRef/return edges, module state,
 and initializer or helper edges. Resolved scalar helpers that cannot affect an
-array state are excluded. Unresolved, dynamic, recovered, or incomplete inputs fail open
-at the smallest known module/SCC/dependency boundary; unknown ownership keeps
-the complete-project fallback. The counters are additive stderr telemetry,
+array state are excluded. Ambiguous calls retain all resolved candidates and
+their related SCC/dependency boundary. Ambiguous, unresolved, dynamic,
+recovered, or incomplete inputs fail open at the smallest known
+module/SCC/dependency boundary; unknown ownership keeps the complete-project
+fallback. The counters are additive stderr telemetry,
 are deterministic for one revision, and never appear in normal JSON, LSP, or
 diagnostic payloads. Existing `array_candidate_procedures` and
 `array_cfg_walks` retain their procedure-local meanings.
