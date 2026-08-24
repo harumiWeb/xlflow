@@ -153,6 +153,64 @@ each required capability and zero for each skipped capability. The counters
 are stderr-only telemetry and are not part of normal analysis JSON or LSP
 diagnostic payloads.
 
+### Amendment: explicit semantic execution plans (#701)
+
+The main batch procedure path now receives and executes an immutable semantic
+analysis plan. The plan filters the established deterministic append sequence
+at kernel and projection boundaries instead of letting each migrated rule
+family decide applicability independently. The plan is
+materialized for one procedure and analysis revision after the procedure
+features, project capabilities, and effect facts are available. The internal
+requirement table remains the single source of truth for diagnostic
+prerequisites and declares the dependency closure for:
+
+- applicable semantic kernels;
+- diagnostic projections consuming each kernel result; and
+- semantic results required by those projections.
+
+An ordinary resolved call does not by itself schedule every semantic domain.
+The final plan instead consumes propagated effect facts and direct syntax
+features for the domain. Recovered, ambiguous, external, or unresolved calls
+remain fail-open through the feature uncertainty mask.
+
+The planner owns applicability, capability requirements, kernel scheduling, and
+result dependencies. A kernel owns its fixed point, CFG walk, or data-flow
+state and publishes an immutable semantic result. A diagnostic projection owns
+the diagnostic code, severity, message, reason, suggestion, evidence, and
+compatibility filtering. The combined source-line scan remains one shared
+kernel when its normalized statement observations can serve several textual
+projections; it must not regress to one scan per rule.
+
+Plan execution preserves the static canonical append sequence in the executor.
+Filtering an analysis plan must not reorder that sequence, depend on map
+iteration, or depend on worker completion order. Procedure results continue to
+be stored in stable procedure-indexed slots and merged through the existing source-order,
+diagnostic-sort, and suppression stages, preserving multiplicity,
+representative evidence, ranges, JSON, and LSP output.
+
+Kernel results are immutable and scoped to the owning procedure and analysis
+revision. A result is materialized at most once for one plan and may be read by
+multiple projections through a procedure-local result store. The store is
+discarded when the procedure analysis or revision ends; canceled, failed, or
+obsolete results are not published or retained. This amendment does not add
+persistent or cross-run caching. Result identity and dependency boundaries may
+support a future incremental analyzer, but no incremental or cross-process
+cache contract is introduced here.
+
+Plans execute inside the existing bounded procedure worker budget. The planner
+does not add rule-level goroutines, per-diagnostic workers, or nested semantic
+worker pools. Kernel and projection work accepts the analysis context and
+checks cancellation at the existing long-running work boundaries. A canceled
+analysis stops queued/active work and publishes no partial final findings.
+
+The plan-level performance recorder adds `analysis_plans`,
+`planned_kernel_runs`, `skipped_kernel_runs`, and
+`semantic_results_reused`. These counters are opt-in stderr-only telemetry:
+they describe plan executions, the kernel dependency closure that ran,
+proven-irrelevant enabled kernels, and additional projections reading an
+already materialized immutable result. They do not appear in normal analysis
+JSON or LSP diagnostics and do not change any public configuration or API.
+
 ## Rationale
 
 The IR and fact ownership boundaries already make procedure inputs immutable
@@ -192,6 +250,12 @@ produce a finding.
 - Participant filtering can reduce domain work, but fail-open boundaries may
   deliberately retain complete-project work when resolution or module-state
   certainty is unavailable.
+- An explicit plan makes the relationship between rule count, semantic kernel
+  work, and diagnostic projections visible without allowing rule implementations
+  to hide applicability or construct duplicate semantic state.
+- Procedure/revision result lifetime bounds memory and preserves a clean
+  cancellation boundary while leaving a future incremental analyzer free to
+  define its own cache policy.
 
 ## Alternatives Considered
 
@@ -220,6 +284,16 @@ produce a finding.
    batch dependency planning can perform one simple immutable eager build; the
    LSP revision cache provides memoization only where concurrent requests make
    it useful.
+9. **Keep the unconditional rule-family pipeline** - Rejected because enabled
+   diagnostic count would continue to imply repeated setup and semantic walks
+   even when the plan proves a domain irrelevant.
+10. **Add a worker or goroutine per rule/kernel** - Rejected because nested
+    concurrency would exceed the existing global budget, complicate merge order,
+    and make cancellation/accounting less predictable.
+11. **Persist semantic results across runs** - Rejected because this issue is
+    an execution-boundary change, not an incremental or cross-process cache
+    design; persistent invalidation and compatibility policy require a separate
+    decision.
 
 ## Evidence
 
@@ -243,6 +317,12 @@ produce a finding.
   ownership boundaries.
 - Issue #697 and the capability requirement/dependency planner, including
   revision-scoped LSP reuse and capability build telemetry.
+- Issue #701's explicit semantic plan, kernel/projector separation, bounded
+  execution, deterministic merge, and plan-level telemetry requirements.
+- Main execution and telemetry implementation: `internal/analyze/analyzer.go`,
+  `internal/analyze/procedure_planner.go`,
+  `internal/analyze/procedure_profile.go`, and
+  `internal/vba/analysisstats/recorder.go`.
 
 ## Related
 
@@ -250,6 +330,7 @@ produce a finding.
 - Issue #695
 - Issue #696
 - Issue #697
+- Issue #701
 - ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0043, ADR-0045
 - ADR-0040
 - `docs/specs/vba-analysis-ir.md`

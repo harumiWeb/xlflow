@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"regexp"
 	"sort"
 	"strconv"
@@ -264,9 +265,12 @@ func dcDeclaredKind(proc sourceProcedure, name string) dictionaryCollectionKind 
 	return dcUnknown
 }
 
-func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) []Finding {
+func (a Analyzer) dictionaryCollectionSafetyFindings(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) ([]Finding, error) {
+	if err := cancelCtx.Err(); err != nil {
+		return nil, err
+	}
 	if proc.Graph == nil {
-		return nil
+		return nil, nil
 	}
 	initial := dcInitialState(file, proc, moduleDecls)
 	in := map[vbacfg.BlockID]*dcFlowState{proc.Graph.Entry: initial}
@@ -283,6 +287,9 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 		}
 	}
 	for len(queue) > 0 {
+		if err := cancelCtx.Err(); err != nil {
+			return nil, err
+		}
 		id := queue[0]
 		queue = queue[1:]
 		queued[id] = false
@@ -328,6 +335,9 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 	var findings []Finding
 	linear := initial.clone()
 	for statement := range proc.Statements.All() {
+		if err := cancelCtx.Err(); err != nil {
+			return nil, err
+		}
 		block, ok := proc.Graph.BlockForStatement(statement.ID)
 		if !ok {
 			continue
@@ -336,7 +346,7 @@ func (a Analyzer) dictionaryCollectionSafetyFindings(file parsedFile, proc sourc
 		findings = append(findings, a.dcStatementFindings(file, proc, statement, state, loops, narrowProbes, constFacts, constNames, seen)...)
 		a.dcTransfer(file, proc, statement, linear)
 	}
-	return findings
+	return findings, nil
 }
 
 func dcInitialState(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) *dcFlowState {

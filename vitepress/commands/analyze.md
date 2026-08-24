@@ -141,6 +141,13 @@ Dictionary/Collection, and Excel-loop participant filtering is conservative:
 uncertain, recovered, ambiguous, dynamic, unresolved, or incomplete evidence
 keeps the affected domain on the complete participant set. Compile-equivalent
 diagnostics remain available regardless of optional runtime-analysis settings.
+The main procedure path also exposes plan-level counters:
+`analysis_plans` (procedure plans), `planned_kernel_runs` (kernels retained by
+the dependency closure), `skipped_kernel_runs` (enabled kernels proven
+irrelevant), and `semantic_results_reused` (additional projections reading an
+already materialized immutable result). Results are scoped to one procedure
+and analysis revision; these counters do not represent persistent or cross-run
+caching. They are stderr-only observations, not findings or JSON fields.
 Large-module profiles also expose maximum dimensions:
 `max_lines_per_file`, `max_procedures_per_file`, `max_calls_per_file`,
 `max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and

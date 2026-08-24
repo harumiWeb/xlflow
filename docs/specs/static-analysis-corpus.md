@@ -1251,6 +1251,58 @@ the profile-producing command itself remains a single `-count=1` run so profile
 files are not overwritten. These are developer observations for same-machine
 comparison, not fixed CI thresholds.
 
+### Semantic execution-plan verification record (#701)
+
+Issue #701 moves the main batch procedure path from an unconditional rule-family
+sequence to an explicit semantic execution plan. Verify the plan against a
+conservative-all execution path or equivalent focused fixture; counters alone
+are not evidence of a diagnostic change. Compare finding identity, ranges,
+severity, multiplicity, representative evidence, ordering, suppression, exit
+status, and normal JSON output. The same requirement metadata must be used by
+the Full realtime/LSP path where the rule is supported.
+
+The focused matrix must cover 100, 500, 1,000, and 2,000 procedures; scalar-only
+and mixed semantic domains; many enabled but irrelevant diagnostics; array and
+other shared-result projections; recovered/incomplete procedures; and a
+many-file project. Include cancellation coverage and serial/parallel analyzer
+runs. Confirm that one bounded worker budget remains in force: no rule-level
+goroutines or nested semantic-kernel pools are introduced.
+
+Record the plan-level counters from the same performance-log or benchmark run:
+`analysis_plans`, `planned_kernel_runs`, `skipped_kernel_runs`, and
+`semantic_results_reused`. A shared kernel must run at most once per
+procedure/revision, multiple projections must reuse its immutable result, and
+proven-irrelevant kernels must not be invoked. Results are procedure/revision
+scoped; no persistent or cross-run cache is part of this measurement. These
+counters are stderr/developer telemetry and must never be copied into corpus
+snapshots or the diagnostic review ledger.
+
+Use the existing benchmark workflows and keep fixture generation outside the
+timed analyzer region:
+
+```powershell
+rtk task bench:analyze-single-module
+rtk task bench:corpus
+rtk task corpus:test
+rtk task corpus:test
+```
+
+For ROneCOne, retain five serial `-benchtime=1x` samples with the explicit leaf
+benchmark and fixed machine, Go version, power state, SHA, filter, and command.
+Compare median wall time, `B/op`, and `allocs/op` with the third-wave baseline;
+the local acceptance target is at least a 10% median wall-time improvement,
+while small ordinary modules should remain within the existing 2%
+observational non-regression guideline. These are same-environment observations,
+not CI timing thresholds. If the target is not met, retain the profiling and
+counter evidence and revisit the execution boundary rather than weakening the
+semantic contract.
+
+Both `corpus:test` runs are verify-only. A snapshot, diagnostic, severity,
+range, multiplicity, ordering, or ledger delta is a semantic regression to
+investigate; do not update snapshots or `reviews/diagnostics.jsonl` merely to
+accept planner or kernel changes. The final report must retain the commands,
+worktree SHA, benchmark results, and any unverified scenarios.
+
 ### Analyzer procedure-view allocation record (#698)
 
 Issue #698 removes the complete declaration, statement, expression, call, and

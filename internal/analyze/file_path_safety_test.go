@@ -85,6 +85,25 @@ End Sub
 	}
 }
 
+func TestVBA245PlansParenthesizedFileOperation(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(raw As String)
+    Kill(raw)
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectUnsafeSQLConstruction = false
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA245"); len(got) != 1 {
+		t.Fatalf("parenthesized Kill findings = %+v, want one VBA245", got)
+	}
+}
+
 func TestVBA245ScopesProcedureLocalConstants(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

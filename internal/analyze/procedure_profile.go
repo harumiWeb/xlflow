@@ -129,6 +129,49 @@ func (p *procedureDomainProfile) plannerDecisions(plan procedureAnalysisPlan) {
 	}
 }
 
+// planSummary records the explicit kernel closure once per procedure. Domain
+// planner counters remain available for compatibility, while these counters
+// describe the plan actually handed to the executor. Iterating static enum
+// order keeps this on the no-allocation hot path.
+func (p *procedureDomainProfile) planSummary(plan procedureAnalysisPlan) {
+	p.planSummaryForKernelMask(plan, ^uint16(0))
+}
+
+func (p *procedureDomainProfile) realtimePlanSummary(plan procedureAnalysisPlan) {
+	mask := procedureKernelBit(procedureKernelRuntime) |
+		procedureKernelBit(procedureKernelArray) |
+		procedureKernelBit(procedureKernelDictionary) |
+		procedureKernelBit(procedureKernelError) |
+		procedureKernelBit(procedureKernelDataflow) |
+		procedureKernelBit(procedureKernelResource) |
+		procedureKernelBit(procedureKernelExcel)
+	p.planSummaryForKernelMask(plan, mask)
+}
+
+func (p *procedureDomainProfile) planSummaryForKernelMask(plan procedureAnalysisPlan, mask uint16) {
+	if p == nil {
+		return
+	}
+	p.add(analysisstats.CounterAnalysisPlans, 1)
+	for _, kernel := range canonicalProcedureKernelOrder {
+		if mask&procedureKernelBit(kernel) == 0 || !plan.enabledKernel(kernel) {
+			continue
+		}
+		if plan.runsKernel(kernel) {
+			p.add(analysisstats.CounterPlannedKernelRuns, 1)
+		} else {
+			p.add(analysisstats.CounterSkippedKernelRuns, 1)
+		}
+	}
+}
+
+func (p *procedureDomainProfile) semanticResultReused() {
+	if p == nil {
+		return
+	}
+	p.add(analysisstats.CounterSemanticResultsReused, 1)
+}
+
 func plannerCounters(domain procedureDomain) (analysisstats.WorkCounter, analysisstats.WorkCounter, bool) {
 	switch domain {
 	case procedureDomainRuntime:

@@ -1,12 +1,28 @@
 package analyze
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
+	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
+
+func TestDictionaryCollectionSafetyFindingsHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	graph := vbacfg.Graph{
+		Entry:  1,
+		Blocks: []vbacfg.Block{{ID: 1, Kind: vbacfg.BlockEntry}},
+	}
+	_, err := (Analyzer{}).dictionaryCollectionSafetyFindings(ctx, parsedFile{}, sourceProcedure{Graph: &graph}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("dictionary analysis error = %v, want context.Canceled", err)
+	}
+}
 
 func TestDictionaryCollectionSafetyRules(t *testing.T) {
 	t.Parallel()
