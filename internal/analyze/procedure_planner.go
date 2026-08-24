@@ -163,13 +163,13 @@ func (features *procedureFeatureSet) observeText(text string) {
 	if containsAny(lower, " on error ", "on error ", " resume ", "resume next") {
 		features.add(featureOnError)
 	}
-	if containsAny(lower, "shell(", "shell ", ".run(", ".exec(", "shellexecute", "cmd.exe", "powershell") {
+	if containsAny(lower, "shell(", "shell ", ".run(", ".run ", ".exec(", ".exec ", "wscript.shell.run", "wscript.shell.exec", "shellexecute", "cmd.exe", "powershell") {
 		features.add(featureDataflow | featureProcessLaunch)
 	}
 	if containsAny(lower, ".execute", ".commandtext", "adodb.command", "adodb.connection", "recordset.open") {
 		features.add(featureDataflow | featureSQL)
 	}
-	if containsAny(lower, "xmlhttp", "winhttprequest", ".open(\"get", ".open(\"post", "setrequestheader", ".send") {
+	if containsAny(lower, "xmlhttp", "winhttprequest", ".open(\"get", ".open(\"post", "open \"get", "open \"post", "open \"put", "open \"delete", "open \"patch", "setrequestheader", ".send") {
 		features.add(featureDataflow | featureHTTP)
 	}
 	if containsAny(lower, "kill ", "kill(", "rmdir ", "rmdir(", "filecopy ", "filecopy(", " open ", "open ", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") || looksLikeFileRename(lower) {
@@ -186,6 +186,9 @@ func (features *procedureFeatureSet) observeText(text string) {
 	}
 	if containsAny(compactMemberText, "workbooks.open") || strings.Contains(lower, "open ") {
 		features.add(featureResourceAcquire)
+	}
+	if containsAny(compactMemberText, "workbooks.open", "saveas") {
+		features.add(featureDataflow)
 	}
 	if containsAny(lower, ".close", "close #", "close ") {
 		features.add(featureResourceRelease)

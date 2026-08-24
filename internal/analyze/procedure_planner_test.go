@@ -324,6 +324,33 @@ func TestProcedurePlannerRecognizesParenthesizedFileAndSpacedWorkbookCalls(t *te
 	}
 }
 
+func TestProcedurePlannerRecognizesDataflowSinkTextForms(t *testing.T) {
+	tests := []struct {
+		name       string
+		text       string
+		rule       string
+		projection procedureProjection
+	}{
+		{name: "workbooks open", text: `Set book = Workbooks.Open(path)`, rule: "VBA224", projection: procedureProjectionDataflowUntrusted},
+		{name: "wscript shell run without parentheses", text: `WScript.Shell.Run raw`, rule: "VBA236", projection: procedureProjectionDataflowCommand},
+		{name: "http open with spaced method", text: `req.Open "GET", raw`, rule: "VBA246", projection: procedureProjectionDataflowHTTP},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var features procedureFeatureSet
+			features.observeText(test.text)
+			plan := buildProcedureAnalysisPlan(
+				analyzeConfigForRules(test.rule),
+				sourceProcedureWithFeatureSet(features),
+				map[string]sourceDeclaration{},
+			)
+			if !plan.runsProjection(test.projection) {
+				t.Fatalf("%s plan = %#v features = %#v, want projection %d", test.name, plan, features, test.projection)
+			}
+		})
+	}
+}
+
 func TestBuildProcedureAnalysisPlanUnknownFactsRemainPlanned(t *testing.T) {
 	cfg := analyzeConfigForRules(
 		"VBA249", "VBA202", "VBA207", "VBA204", "VBA224", "VBA219", "VBA225", "VBA203",

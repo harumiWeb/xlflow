@@ -13,6 +13,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `ambiguous_call_count`
 - `ambiguous_test_name`
 - `analysis_metrics`
+- `analysis_plans`
 - `analyze_disabled_rules_precedence`
 - `analyze_failed`
 - `analyze_total`
@@ -807,6 +808,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `planned_dictionary_runs`
 - `planned_error_runs`
 - `planned_excel_runs`
+- `planned_kernel_runs`
 - `planned_object_runs`
 - `planned_resource_runs`
 - `planned_runtime_runs`
@@ -987,6 +989,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `selected_by`
 - `selected_index`
 - `semantic_kernel_runs`
+- `semantic_results_reused`
 - `sensitive_module_constant`
 - `session_args_invalid`
 - `session_dirty`
@@ -1025,6 +1028,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `skipped_error_runs`
 - `skipped_excel_runs`
 - `skipped_invalid_entries`
+- `skipped_kernel_runs`
 - `skipped_legacy_entries`
 - `skipped_object_runs`
 - `skipped_paths`
