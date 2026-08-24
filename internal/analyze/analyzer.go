@@ -448,9 +448,13 @@ type sourceProcedure struct {
 	// Facts is the immutable procedure-local index shared by analysis rules.
 	// Its canonical backing storage is IR.  Synthetic focused tests may use
 	// the compatibility constructors in procedure_facts.go.
-	Facts   *procedureAnalysisFacts
-	Graph   *vbacfg.Graph
-	Effects *effects.ProcedureSummary
+	Facts *procedureAnalysisFacts
+	// ModuleFacts is attached only while materializing a plan so applicability
+	// can inspect visible sensitive constants without retaining a file-global
+	// cache in the plan or result store.
+	ModuleFacts *moduleAnalysisFacts
+	Graph       *vbacfg.Graph
+	Effects     *effects.ProcedureSummary
 }
 
 type sourceDeclaration struct {
@@ -1807,6 +1811,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	plan := proc.analysisPlan(a.Config.Analyze, moduleDecls)
 	profile := newProcedureDomainProfile(ctx)
 	profile.plannerDecisions(plan)
+	profile.dataflowLaneDecisions(plan)
 	profile.realtimePlanSummary(plan)
 	defer profile.flush()
 	var resultStore procedureSemanticResultStore
@@ -1935,17 +1940,12 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
 	}
 	var realtimeHTTPFindings []Finding
-	if plan.runsAnyProjection(
-		procedureProjectionDataflowUntrusted,
-		procedureProjectionDataflowCommand,
-		procedureProjectionDataflowSQL,
-		procedureProjectionDataflowHTTP,
-	) {
-		dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(ctx, file, proc)
+	if plan.runsDataflowLane(procedureDataflowLaneGeneric) || plan.runsDataflowLane(procedureDataflowLaneHTTP) {
+		dataFlowFindings, httpFindings, err := a.executeDataflowLanes(ctx, file, proc, plan, &resultStore, profile, nil)
 		if err != nil {
 			return nil, err
 		}
-		findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
+		findings = append(findings, dataFlowFindings...)
 		realtimeHTTPFindings = httpFindings
 	}
 	if plan.runsProjection(procedureProjectionDataflowFile) {
@@ -2399,6 +2399,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	var findings []Finding
 	var candidateCounters uint64
 	profile.plannerDecisions(plan)
+	profile.dataflowLaneDecisions(plan)
 	profile.planSummary(plan)
 	var resultStore procedureSemanticResultStore
 	var arrayResult *ArrayAnalysisResult
@@ -2701,24 +2702,12 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		findings = append(findings, eventFindings...)
 	}
 	var plannedHTTPFindings []Finding
-	if plan.runsAnyProjection(
-		procedureProjectionDataflowUntrusted,
-		procedureProjectionDataflowCommand,
-		procedureProjectionDataflowSQL,
-		procedureProjectionDataflowHTTP,
-	) {
-		dataflowMeasurement := profile.begin(procedureDomainDataflow)
-		dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
-		if (a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction || a.Config.Analyze.DetectUnsafeHTTPConfiguration || a.Config.Analyze.DetectMissingHTTPTimeout) && proc.Graph != nil {
-			profile.kernel()
-			profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
-			profile.add(analysisstats.CounterDataflowCFGWalks, 1)
-		}
-		dataflowMeasurement.finishOutcome(cancelCtx, len(dataFlowFindings)+len(httpFindings), err)
+	if plan.runsDataflowLane(procedureDataflowLaneGeneric) || plan.runsDataflowLane(procedureDataflowLaneHTTP) {
+		dataFlowFindings, httpFindings, err := a.executeDataflowLanes(cancelCtx, file, proc, plan, &resultStore, profile, &candidateCounters)
 		if err != nil {
 			return nil, err
 		}
-		findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
+		findings = append(findings, dataFlowFindings...)
 		plannedHTTPFindings = httpFindings
 	}
 	if plan.runsProjection(procedureProjectionDataflowFile) && a.Config.Analyze.DetectUnsafeFilePath {

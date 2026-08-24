@@ -290,6 +290,78 @@ End Sub
 	}
 }
 
+func TestVBA246SensitiveLoggingSurvivesUnresolvedCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const AuthHeader As String = "Bearer production-secret-value"
+
+Public Sub Run()
+    Call MissingExternalProcedure
+    Debug.Print AuthHeader
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			return
+		}
+	}
+	t.Fatalf("authorization logging finding was lost with an unresolved call: %+v", findings)
+}
+
+func TestVBA246ConcatenatedSensitiveLoggingSurvivesUnresolvedCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const AuthHeader As String = "Bearer " & "production-secret-value"
+
+Public Sub Run()
+    Call MissingExternalProcedure
+    Debug.Print AuthHeader
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			return
+		}
+	}
+	t.Fatalf("concatenated authorization logging finding was lost with an unresolved call: %+v", findings)
+}
+
+func TestVBA246SensitiveLoggingInsideConditionIsPlanned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+    If shouldLog Then
+        Debug.Print "Authorization: Bearer production-secret-value"
+    End If
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			return
+		}
+	}
+	t.Fatalf("conditional authorization logging finding was lost: %+v", findings)
+}
+
 func TestHTTPRulesIgnoreUnrelatedObjectsAndSafeTLS(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -506,6 +506,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `generated_files`
 - `generator_version`
 - `generator_version_changed`
+- `generic_dataflow_cfg_walks`
+- `generic_dataflow_kernel_runs`
 - `global_values`
 - `goto_count`
 - `goto_statement`
@@ -808,6 +810,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `planned_dictionary_runs`
 - `planned_error_runs`
 - `planned_excel_runs`
+- `planned_generic_dataflow_runs`
+- `planned_http_dataflow_runs`
 - `planned_kernel_runs`
 - `planned_object_runs`
 - `planned_resource_runs`
@@ -1027,6 +1031,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `skipped_dictionary_runs`
 - `skipped_error_runs`
 - `skipped_excel_runs`
+- `skipped_generic_dataflow_runs`
+- `skipped_http_dataflow_runs`
 - `skipped_invalid_entries`
 - `skipped_kernel_runs`
 - `skipped_legacy_entries`

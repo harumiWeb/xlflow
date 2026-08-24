@@ -104,7 +104,21 @@ func (features *procedureFeatureSet) observeStatement(statement procedureir.Stat
 }
 
 func (features *procedureFeatureSet) observeExpression(expression procedureir.Expression) {
-	if expression.Recovered || expression.Kind == procedureir.ExpressionUnknown {
+	if expression.Recovered {
+		features.addUnknown(allProcedureFeatures)
+		return
+	}
+	// The IR includes declaration type expressions in the expression index so
+	// ranges and ownership remain lossless. They are not executable unknown
+	// syntax; declaration facts above already classify their array/object/
+	// collection shape. Treating them as recovered execution would mark every
+	// feature unknown and defeat independent applicability lanes on ordinary
+	// typed procedures.
+	if isKnownNonValueExpressionSyntax(expression.SyntaxKind) {
+		features.observeText(expression.Text)
+		return
+	}
+	if expression.Kind == procedureir.ExpressionUnknown {
 		features.addUnknown(allProcedureFeatures)
 		return
 	}
@@ -119,6 +133,18 @@ func (features *procedureFeatureSet) observeExpression(expression procedureir.Ex
 		features.add(featureObject)
 	}
 	features.observeText(expression.Text)
+}
+
+func isKnownNonValueExpressionSyntax(syntaxKind string) bool {
+	switch syntaxKind {
+	case "case_expression", "logical_value_expression", "parenthesized_condition_expression", "type_expression", "type_of_expression":
+		// These are structural/condition nodes emitted by the VBA grammar. They
+		// do not represent an unresolved executable value; the enclosing
+		// statement text and declaration facts carry the applicable evidence.
+		return true
+	default:
+		return false
+	}
 }
 
 func (features *procedureFeatureSet) observeCall(call procedureir.CallSite) {
@@ -325,12 +351,42 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 }
 
 type procedureAnalysisPlan struct {
-	enabled            uint16
-	planned            uint16
-	enabledKernels     uint16
-	plannedKernels     uint16
-	enabledProjections uint64
-	plannedProjections uint64
+	enabled              uint16
+	planned              uint16
+	enabledKernels       uint16
+	plannedKernels       uint16
+	enabledProjections   uint64
+	plannedProjections   uint64
+	enabledDataflowLanes uint8
+	plannedDataflowLanes uint8
+}
+
+// procedureDataflowLane identifies an independently materialized dataflow
+// result. The file/path projection intentionally does not belong to either
+// lane: it has its own lexical analysis path and must remain independent.
+type procedureDataflowLane uint8
+
+const (
+	procedureDataflowLaneGeneric procedureDataflowLane = iota
+	procedureDataflowLaneHTTP
+	procedureDataflowLaneLimit
+)
+
+func procedureDataflowLaneBit(lane procedureDataflowLane) uint8 {
+	return uint8(1) << lane
+}
+
+func procedureDataflowLaneForProjection(projection procedureProjection) (procedureDataflowLane, bool) {
+	switch projection {
+	case procedureProjectionDataflowUntrusted,
+		procedureProjectionDataflowCommand,
+		procedureProjectionDataflowSQL:
+		return procedureDataflowLaneGeneric, true
+	case procedureProjectionDataflowHTTP:
+		return procedureDataflowLaneHTTP, true
+	default:
+		return 0, false
+	}
 }
 
 // procedureKernel identifies a semantic preparation pass.  Kernel values are
@@ -612,6 +668,39 @@ func (plan procedureAnalysisPlan) runsAnyProjection(projections ...procedureProj
 	return false
 }
 
+// enabledDataflowLane reports whether a lane is required by at least one
+// enabled projection. The projection fallback keeps small hand-built test
+// plans and pre-lane callers compatible while materialized production plans
+// use the explicit masks.
+func (plan procedureAnalysisPlan) enabledDataflowLane(lane procedureDataflowLane) bool {
+	if plan.enabledDataflowLanes != 0 {
+		return plan.enabledDataflowLanes&procedureDataflowLaneBit(lane) != 0
+	}
+	for projection := procedureProjectionDataflowUntrusted; projection <= procedureProjectionDataflowHTTP; projection++ {
+		mapped, ok := procedureDataflowLaneForProjection(projection)
+		if ok && mapped == lane && plan.enabledProjection(projection) {
+			return true
+		}
+	}
+	return false
+}
+
+// runsDataflowLane reports whether a lane is required by at least one
+// applicable projection. Unknown applicability is represented by the normal
+// planned projection mask and therefore remains fail-open.
+func (plan procedureAnalysisPlan) runsDataflowLane(lane procedureDataflowLane) bool {
+	if plan.plannedDataflowLanes != 0 {
+		return plan.plannedDataflowLanes&procedureDataflowLaneBit(lane) != 0
+	}
+	for projection := procedureProjectionDataflowUntrusted; projection <= procedureProjectionDataflowHTTP; projection++ {
+		mapped, ok := procedureDataflowLaneForProjection(projection)
+		if ok && mapped == lane && plan.runsProjection(projection) {
+			return true
+		}
+	}
+	return false
+}
+
 func procedureKernelForProjection(projection procedureProjection) (procedureKernel, bool) {
 	switch projection {
 	case procedureProjectionRuntime:
@@ -669,6 +758,89 @@ func buildProcedureAnalysisPlan(cfg config.AnalyzeConfig, proc sourceProcedure, 
 	return buildProcedureAnalysisPlanWithModuleFeatures(cfg, proc, moduleDeclarationFeatures(moduleDecls))
 }
 
+func httpProjectionMayApply(proc sourceProcedure, features procedureFeatureSet) bool {
+	if features.present&featureHTTP != 0 {
+		return true
+	}
+	if !features.mayHave(featureHTTP) {
+		// Sensitive logging is HTTP evidence even when surrounding condition
+		// syntax is otherwise a known non-value node.
+		return httpProcedureHasSensitiveLogging(proc)
+	}
+	// Compatibility plans may not retain canonical IR. Preserve their
+	// fail-open behavior; production plans below have enough structure to
+	// distinguish an unresolved external call from unknown local syntax.
+	if proc.Facts == nil || proc.Facts.procedure == nil || proc.Graph == nil {
+		return true
+	}
+	ir := proc.Facts.procedure
+	if proc.Document == nil || proc.Document.Parse.HasError || proc.Document.Parse.HasMissing || ir.Symbol.Recovered || len(ir.Symbol.ConditionalBranches) > 0 {
+		return true
+	}
+	for _, parameter := range ir.Symbol.Parameters {
+		if parameter.Recovered {
+			return true
+		}
+	}
+	if len(proc.Graph.UnknownFlowSources) > 0 {
+		return true
+	}
+	for _, statement := range ir.Statements {
+		if statement.Recovered || statement.Kind == procedureir.StatementRecovered || statement.Kind == procedureir.StatementUnknown || len(statement.ConditionalBranches) > 0 {
+			return true
+		}
+	}
+	for _, expression := range ir.Expressions {
+		if expression.Recovered || (expression.Kind == procedureir.ExpressionUnknown && !isKnownNonValueExpressionSyntax(expression.SyntaxKind)) {
+			return true
+		}
+	}
+	if httpProcedureHasSensitiveLogging(proc) {
+		return true
+	}
+	// HTTP246/247 operate on locally recognized transport statements. An
+	// unresolved call without any local HTTP evidence cannot contribute a
+	// state transition to that solver, while generic dataflow remains
+	// conservative and fail-open for the same call.
+	return false
+}
+
+func httpProcedureHasSensitiveLogging(proc sourceProcedure) bool {
+	if proc.Facts == nil || proc.Facts.procedure == nil {
+		return false
+	}
+	sensitiveNames := map[string]bool{}
+	if proc.ModuleFacts != nil {
+		constantState := httpAnalysisState{
+			strings:   map[string]string{},
+			known:     map[string]bool{},
+			sensitive: map[string]bool{},
+		}
+		proc.ModuleFacts.forEachConstantForProcedure(proc, func(constant moduleConstantFact) {
+			httpRecordConstant(&constantState, constant.Name, constant.Expression)
+			if constantState.sensitive[strings.ToLower(strings.TrimSpace(constant.Name))] {
+				sensitiveNames[strings.ToLower(strings.TrimSpace(constant.Name))] = true
+			}
+		})
+	}
+	for _, statement := range proc.Facts.procedure.Statements {
+		text := stripVBAFileComment(statement.Text)
+		if !httpLogRe.MatchString(text) {
+			continue
+		}
+		if httpAuthLiteralRe.MatchString(text) {
+			return true
+		}
+		lower := strings.ToLower(text)
+		for name := range sensitiveNames {
+			if name != "" && containsHTTPIdentifierToken(lower, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc sourceProcedure, moduleFeatures procedureFeatureSet) procedureAnalysisPlan {
 	features := proc.Features
 	if proc.Facts == nil {
@@ -716,11 +888,20 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 		bit := procedureDomainBit(requirement.domain)
 		plan.enabled |= bit
 		applicable := (requirement.any == 0 || features.mayHave(requirement.any)) && features.mayHaveAll(requirement.all)
+		if requirement.id == "VBA246" || requirement.id == "VBA247" {
+			applicable = applicable && httpProjectionMayApply(proc, features)
+		}
 		if kernel, ok := procedureKernelForDomain(requirement.domain); ok {
 			plan.enabledKernels |= procedureKernelBit(kernel)
 		}
 		projection := procedureProjectionForRequirement(requirement)
 		plan.enabledProjections |= procedureProjectionBit(projection)
+		if lane, ok := procedureDataflowLaneForProjection(projection); ok {
+			plan.enabledDataflowLanes |= procedureDataflowLaneBit(lane)
+			if applicable {
+				plan.plannedDataflowLanes |= procedureDataflowLaneBit(lane)
+			}
+		}
 		if applicable {
 			plan.planned |= bit
 			if kernel, ok := procedureKernelForDomain(requirement.domain); ok {
@@ -750,6 +931,7 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 	moduleFeatures := moduleDeclarationFeatures(file.moduleDecls())
 	for i := range procedures {
 		planningProcedure := procedures[i]
+		planningProcedure.ModuleFacts = file.ModuleFacts
 		if i < len(file.IR.Procedures) {
 			id := procedureEffectIdentity(file.IR, file.IR.Procedures[i].Symbol)
 			// Planning consumes the propagated summary so indirect project effects

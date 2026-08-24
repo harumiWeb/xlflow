@@ -1494,6 +1494,70 @@ public CLI/API output, Excel/VBE oracle behavior, or Go dependency-inventory
 checks. Those suites remain separate from synchronization and may run fully
 offline.
 
+### Lazy dataflow-lane verification record (#710)
+
+Issue #710 splits generic data-flow (`VBA224`, `VBA236`, `VBA239`) and HTTP
+(`VBA246`, `VBA247`) execution into independent procedure-local lanes. The
+file-path projection (`VBA245`) remains independent. The lane plan is
+validated with deterministic finding comparisons and lane-specific
+planned/skipped, kernel, and CFG-walk counters; no snapshot or normal-output
+contract is changed.
+
+The same Windows environment and base revision were used for the serial
+ROneCOne `analyze-only` benchmark:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5
+```
+
+The pre-change median was 19,923,569,800 ns/op, 26,763,467,128 B/op, and
+181,265,986 allocs/op. The post-change median was 19,223,123,300 ns/op,
+20,617,034,360 B/op, and 150,170,961 allocs/op: -3.52% wall time, -22.97%
+bytes, and -17.15% allocations. These are same-environment observations,
+not CI thresholds. The post-change ROneCOne counters recorded 1,296 planned
+generic lane runs, 13 planned HTTP lane runs, and 1,552 skipped HTTP lane
+runs; generic and HTTP kernel/CFG counters were 1,296 and 13 respectively.
+
+Targeted allocation-space profiles focused on `cloneHTTPState` were collected
+with the following developer-only workflow:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=1 -cpuprofile="$env:TEMP\xlflow-issue710-ronecone.cpu.pprof" -memprofile="$env:TEMP\xlflow-issue710-ronecone.mem.pprof" -o="$env:TEMP\xlflow-issue710-ronecone.test.exe"
+rtk go tool pprof -sample_index=alloc_space -focus=cloneHTTPState -top "$env:TEMP\xlflow-issue710-ronecone.test.exe" "$env:TEMP\xlflow-issue710-ronecone.mem.pprof"
+```
+
+The base profile attributed 5.35 GB to `cloneHTTPState`; the post-change
+profile attributed 0.06 GB, an approximately 98.9% reduction in focused
+allocation space. The focused allocation-object view fell from 3,023,703 to
+58,750 objects. Profile files are retained locally under `%TEMP%` and are not
+corpus artifacts. The required verify-only corpus workflow and snapshot review
+passed with no unexplained diagnostic delta before this record was used as
+release evidence.
+
+The small/medium single-module guard also used five serial samples with the
+same analyzer environment:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench '^BenchmarkSingleModuleSynthetic/(independent|declarations|chain|cfg-independent)/(100|500)-' -benchmem -benchtime=1x -count=5
+```
+
+Median allocation results were:
+
+| workload            | before B/op |  after B/op | before allocs/op | after allocs/op |
+| ------------------- | ----------: | ----------: | ---------------: | --------------: |
+| independent/100     |  51,651,016 |  16,522,744 |          423,569 |         196,552 |
+| independent/500     | 276,760,384 |  98,927,200 |        2,147,623 |         800,659 |
+| chain/100           |  40,344,688 |  34,126,608 |          329,980 |         259,452 |
+| chain/500           | 232,232,984 | 198,596,968 |        1,781,070 |       1,238,039 |
+| declarations/100    |  31,801,832 |  30,963,936 |           95,648 |          91,276 |
+| declarations/500    | 276,090,928 | 272,338,512 |          284,394 |         271,739 |
+| cfg-independent/100 |  28,273,248 |  28,250,960 |          212,947 |         213,233 |
+| cfg-independent/500 | 522,139,632 | 522,095,720 |          921,938 |         921,262 |
+
+No small/medium workload regressed beyond the 2% guideline in either
+allocation metric; the two `cfg-independent` cases remained within sampling
+noise while the other cases improved.
+
 Issue #548 added focused completion regressions at the analyzer boundary. Type
 inference tracks active `Set` assignments so a self-referential RHS terminates
 while still consulting an earlier same-scope assignment. Project effect

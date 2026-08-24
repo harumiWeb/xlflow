@@ -49,6 +49,14 @@ var procedureLocalProfileCounters = []string{
 	analysisstats.RuntimeCFGWalksCounter,
 	analysisstats.SourceLineScansCounter,
 	analysisstats.SemanticKernelRunsCounter,
+	analysisstats.GenericDataflowKernelRunsCounter,
+	analysisstats.HTTPDataflowKernelRunsCounter,
+	analysisstats.GenericDataflowCFGWalksCounter,
+	analysisstats.HTTPDataflowCFGWalksCounter,
+	analysisstats.GenericDataflowPlannedRunsCounter,
+	analysisstats.GenericDataflowSkippedRunsCounter,
+	analysisstats.HTTPDataflowPlannedRunsCounter,
+	analysisstats.HTTPDataflowSkippedRunsCounter,
 }
 
 func TestPhysicalSourceLineCount(t *testing.T) {
@@ -363,6 +371,89 @@ func TestBatchAnalysisProfilesHTTPOnlyDataflowWork(t *testing.T) {
 	if counterByName[analysisstats.CapabilityDataflowBuildsCounter] != 1 {
 		t.Fatalf("dataflow capability builds = %d, want one", counterByName[analysisstats.CapabilityDataflowBuildsCounter])
 	}
+}
+
+func TestBatchAnalysisRunsOnlyPlannedDataflowLanes(t *testing.T) {
+	run := func(t *testing.T, source string, rules ...string) (map[string]uint64, []Finding) {
+		t.Helper()
+		root := t.TempDir()
+		modules := filepath.Join(root, "src", "modules")
+		if err := os.MkdirAll(modules, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(modules, "Main.bas"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+		cfg := config.Default()
+		cfg.Analyze = analyzeConfigForRules(rules...)
+		recorder := analysisstats.NewRecorder()
+		result, err := (Analyzer{RootDir: root, Config: cfg}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, counters := recorder.Totals()
+		values := make(map[string]uint64, len(counters))
+		for _, counter := range counters {
+			values[counter.Name] = counter.Value
+		}
+		return values, result.Findings
+	}
+
+	t.Run("generic-only", func(t *testing.T) {
+		counters, _ := run(t, "Option Explicit\nPublic Sub Run()\n  Dim book As Object\n  Set book = Workbooks.Open(path)\nEnd Sub\n", "VBA224")
+		if counters[analysisstats.GenericDataflowPlannedRunsCounter] != 1 || counters[analysisstats.GenericDataflowKernelRunsCounter] != 1 || counters[analysisstats.GenericDataflowCFGWalksCounter] != 1 {
+			t.Fatalf("generic lane counters = %+v", counters)
+		}
+		if counters[analysisstats.HTTPDataflowKernelRunsCounter] != 0 || counters[analysisstats.HTTPDataflowCFGWalksCounter] != 0 {
+			t.Fatalf("HTTP lane ran for generic-only procedure: %+v", counters)
+		}
+	})
+
+	t.Run("HTTP-only", func(t *testing.T) {
+		counters, _ := run(t, "Option Explicit\nPublic Sub Run()\n  Dim request As Object\n  Set request = CreateObject(\"MSXML2.XMLHTTP\")\n  request.Open \"GET\", \"http://example.test\", False\n  request.Send\nEnd Sub\n", "VBA246")
+		if counters[analysisstats.HTTPDataflowPlannedRunsCounter] != 1 || counters[analysisstats.HTTPDataflowKernelRunsCounter] != 1 || counters[analysisstats.HTTPDataflowCFGWalksCounter] != 1 {
+			t.Fatalf("HTTP lane counters = %+v", counters)
+		}
+		if counters[analysisstats.GenericDataflowKernelRunsCounter] != 0 || counters[analysisstats.GenericDataflowCFGWalksCounter] != 0 {
+			t.Fatalf("generic lane ran for HTTP-only procedure: %+v", counters)
+		}
+	})
+
+	t.Run("HTTP projection skipped without HTTP constructs", func(t *testing.T) {
+		counters, _ := run(t, "Option Explicit\nPublic Sub Run()\n  value = 1\nEnd Sub\n", "VBA246")
+		if counters[analysisstats.HTTPDataflowSkippedRunsCounter] != 1 || counters[analysisstats.HTTPDataflowPlannedRunsCounter] != 0 {
+			t.Fatalf("HTTP planner counters = %+v", counters)
+		}
+		if counters[analysisstats.HTTPDataflowKernelRunsCounter] != 0 || counters[analysisstats.HTTPDataflowCFGWalksCounter] != 0 {
+			t.Fatalf("HTTP lane ran without HTTP constructs: %+v", counters)
+		}
+	})
+
+	t.Run("both lanes preserve deterministic findings", func(t *testing.T) {
+		source := "Option Explicit\nPublic Sub Run()\n  Dim request As Object\n  Dim book As Object\n  Set request = CreateObject(\"MSXML2.XMLHTTP\")\n  request.Open \"GET\", \"http://example.test\", False\n  request.Send\n  Set book = Workbooks.Open(path)\nEnd Sub\n"
+		counters, first := run(t, source, "VBA224", "VBA246")
+		if counters[analysisstats.GenericDataflowKernelRunsCounter] != 1 || counters[analysisstats.HTTPDataflowKernelRunsCounter] != 1 {
+			t.Fatalf("both lane counters = %+v", counters)
+		}
+		root := t.TempDir()
+		modules := filepath.Join(root, "src", "modules")
+		if err := os.MkdirAll(modules, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(modules, "Main.bas"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.Default()
+		cfg.Analyze = analyzeConfigForRules("VBA224", "VBA246")
+		repeated, err := (Analyzer{RootDir: root, Config: cfg}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(first, repeated) {
+			t.Fatalf("both-lane findings are not deterministic:\nfirst: %#v\nsecond: %#v", first, repeated)
+		}
+	})
 }
 
 func TestVBA202WorklistEvaluationCountScalesWithDependencyChain(t *testing.T) {

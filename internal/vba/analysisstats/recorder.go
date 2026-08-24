@@ -119,6 +119,14 @@ const (
 	CounterErrorSkippedRuns
 	CounterDataflowPlannedRuns
 	CounterDataflowSkippedRuns
+	CounterGenericDataflowPlannedRuns
+	CounterGenericDataflowSkippedRuns
+	CounterHTTPDataflowPlannedRuns
+	CounterHTTPDataflowSkippedRuns
+	CounterGenericDataflowKernelRuns
+	CounterHTTPDataflowKernelRuns
+	CounterGenericDataflowCFGWalks
+	CounterHTTPDataflowCFGWalks
 	CounterResourcePlannedRuns
 	CounterResourceSkippedRuns
 	CounterExcelPlannedRuns
@@ -171,6 +179,14 @@ const (
 	ErrorSkippedRunsCounter                    = "skipped_error_runs"
 	DataflowPlannedRunsCounter                 = "planned_dataflow_runs"
 	DataflowSkippedRunsCounter                 = "skipped_dataflow_runs"
+	GenericDataflowPlannedRunsCounter          = "planned_generic_dataflow_runs"
+	GenericDataflowSkippedRunsCounter          = "skipped_generic_dataflow_runs"
+	HTTPDataflowPlannedRunsCounter             = "planned_http_dataflow_runs"
+	HTTPDataflowSkippedRunsCounter             = "skipped_http_dataflow_runs"
+	GenericDataflowKernelRunsCounter           = "generic_dataflow_kernel_runs"
+	HTTPDataflowKernelRunsCounter              = "http_dataflow_kernel_runs"
+	GenericDataflowCFGWalksCounter             = "generic_dataflow_cfg_walks"
+	HTTPDataflowCFGWalksCounter                = "http_dataflow_cfg_walks"
 	ResourcePlannedRunsCounter                 = "planned_resource_runs"
 	ResourceSkippedRunsCounter                 = "skipped_resource_runs"
 	ExcelPlannedRunsCounter                    = "planned_excel_runs"
@@ -216,6 +232,14 @@ var counterNames = [...]string{
 	ErrorSkippedRunsCounter,
 	DataflowPlannedRunsCounter,
 	DataflowSkippedRunsCounter,
+	GenericDataflowPlannedRunsCounter,
+	GenericDataflowSkippedRunsCounter,
+	HTTPDataflowPlannedRunsCounter,
+	HTTPDataflowSkippedRunsCounter,
+	GenericDataflowKernelRunsCounter,
+	HTTPDataflowKernelRunsCounter,
+	GenericDataflowCFGWalksCounter,
+	HTTPDataflowCFGWalksCounter,
 	ResourcePlannedRunsCounter,
 	ResourceSkippedRunsCounter,
 	ExcelPlannedRunsCounter,

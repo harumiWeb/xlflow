@@ -129,6 +129,36 @@ func (p *procedureDomainProfile) plannerDecisions(plan procedureAnalysisPlan) {
 	}
 }
 
+func (p *procedureDomainProfile) dataflowLaneDecisions(plan procedureAnalysisPlan) {
+	if p == nil {
+		return
+	}
+	for _, lane := range [...]procedureDataflowLane{
+		procedureDataflowLaneGeneric,
+		procedureDataflowLaneHTTP,
+	} {
+		if !plan.enabledDataflowLane(lane) {
+			continue
+		}
+		var planned, skipped analysisstats.WorkCounter
+		switch lane {
+		case procedureDataflowLaneGeneric:
+			planned = analysisstats.CounterGenericDataflowPlannedRuns
+			skipped = analysisstats.CounterGenericDataflowSkippedRuns
+		case procedureDataflowLaneHTTP:
+			planned = analysisstats.CounterHTTPDataflowPlannedRuns
+			skipped = analysisstats.CounterHTTPDataflowSkippedRuns
+		default:
+			continue
+		}
+		if plan.runsDataflowLane(lane) {
+			p.add(planned, 1)
+		} else {
+			p.add(skipped, 1)
+		}
+	}
+}
+
 // planSummary records the explicit kernel closure once per procedure. Domain
 // planner counters remain available for compatibility, while these counters
 // describe the plan actually handed to the executor. Iterating static enum
