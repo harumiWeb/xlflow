@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -80,18 +81,29 @@ var (
 	httpDeclarationTypeRe  = regexp.MustCompile(`(?i)\bas\s+(?:new\s+)?([A-Za-z_][A-Za-z0-9_.]*)`)
 )
 
-func (a Analyzer) httpTransportFindings(file parsedFile, proc sourceProcedure) []Finding {
+func (a Analyzer) httpTransportFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure) ([]Finding, error) {
 	if (!a.Config.Analyze.DetectUnsafeHTTPConfiguration && !a.Config.Analyze.DetectMissingHTTPTimeout) || proc.Graph == nil {
-		return nil
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	ir, ok := procedureIRForSource(file.IR, proc)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	initial := newHTTPAnalysisState(file, ir)
-	entryStates := solveHTTPStates(a, file, proc, *proc.Graph, initial)
+	entryStates, err := solveHTTPStates(ctx, a, file, proc, *proc.Graph, initial)
+	if err != nil {
+		return nil, err
+	}
 	var specs []httpFindingSpec
-	for _, block := range proc.Graph.Blocks {
+	for index, block := range proc.Graph.Blocks {
+		if index&0xff == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if block.Statement == nil || block.Statement.Recovered {
 			continue
 		}
@@ -122,11 +134,26 @@ func (a Analyzer) httpTransportFindings(file parsedFile, proc sourceProcedure) [
 		finding := a.httpFinding(file, proc, spec)
 		findings = append(findings, finding)
 	}
-	return findings
+	return findings, nil
 }
 
 func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnalysisState {
 	state := httpAnalysisState{objects: map[string]httpObjectState{}, launchers: map[string]string{}, strings: map[string]string{}, known: map[string]bool{}, sensitive: map[string]bool{}}
+	seedDeclaration := func(declaration sourceDeclaration) {
+		kind := httpKindFromText(declaration.Type)
+		if kind == httpUnknown && declaration.Line > 0 && declaration.Line <= len(file.Lines) {
+			if match := httpDeclarationTypeRe.FindStringSubmatch(file.Lines[declaration.Line-1]); len(match) == 2 {
+				kind = httpKindFromText(match[1])
+			}
+		}
+		if kind == httpUnknown {
+			return
+		}
+		name := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if name != "" {
+			state.objects[name] = newHTTPObjectState(kind, name)
+		}
+	}
 	// The normal batch/realtime setup attaches ModuleFacts before any rule
 	// worker runs. Do not rebuild facts from a standalone parsedFile on every
 	// statement; retain the old IR fallback for package-local callers that do
@@ -135,6 +162,9 @@ func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnaly
 		facts.forEachConstant(func(constant moduleConstantFact) {
 			httpRecordConstant(&state, constant.Name, constant.Expression)
 		})
+		for _, declaration := range facts.moduleDeclarations {
+			seedDeclaration(declaration)
+		}
 	} else {
 		for _, line := range file.Lines {
 			name, expr, ok := fileConstDeclaration(line)
@@ -144,16 +174,7 @@ func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnaly
 		}
 	}
 	for _, declaration := range ir.Declarations {
-		kind := httpKindFromText(declaration.Type)
-		if kind == httpUnknown && declaration.Range.StartLine > 0 && declaration.Range.StartLine <= len(file.Lines) {
-			if match := httpDeclarationTypeRe.FindStringSubmatch(file.Lines[declaration.Range.StartLine-1]); len(match) == 2 {
-				kind = httpKindFromText(match[1])
-			}
-		}
-		if kind != httpUnknown {
-			name := strings.ToLower(declaration.Name)
-			state.objects[name] = newHTTPObjectState(kind, name)
-		}
+		seedDeclaration(sourceDeclaration{Name: declaration.Name, Type: declaration.Type, Line: declaration.Range.StartLine})
 	}
 	return state
 }
@@ -174,7 +195,7 @@ func httpRecordConstant(state *httpAnalysisState, name, expression string) {
 	}
 }
 
-func solveHTTPStates(a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) map[vbacfg.BlockID]httpAnalysisState {
+func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) (map[vbacfg.BlockID]httpAnalysisState, error) {
 	states := map[vbacfg.BlockID]httpAnalysisState{graph.Entry: cloneHTTPState(initial)}
 	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
 	type httpEdge struct {
@@ -191,6 +212,9 @@ func solveHTTPStates(a Analyzer, file parsedFile, proc sourceProcedure, graph vb
 	queue := []vbacfg.BlockID{graph.Entry}
 	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		id := queue[0]
 		queue = queue[1:]
 		queued[id] = false
@@ -219,7 +243,7 @@ func solveHTTPStates(a Analyzer, file parsedFile, proc sourceProcedure, graph vb
 			}
 		}
 	}
-	return states
+	return states, nil
 }
 
 func (a Analyzer) transferHTTPStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state httpAnalysisState, collect bool) (httpAnalysisState, []httpFindingSpec) {

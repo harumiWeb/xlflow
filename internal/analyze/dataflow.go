@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbadf "github.com/harumiWeb/xlflow/internal/vba/dataflow"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
@@ -96,13 +97,56 @@ func (a Analyzer) dataFlowFindingsContext(ctx context.Context, file parsedFile, 
 	return findings, nil
 }
 
-func (a Analyzer) httpDataFlowFindingsContext(ctx context.Context, file parsedFile, proc sourceProcedure) ([]Finding, []Finding, error) {
-	httpFindings := a.httpTransportFindings(file, proc)
-	dataFlowFindings, err := a.dataFlowFindingsContext(ctx, file, proc)
-	if err != nil {
-		return nil, nil, err
+// executeDataflowLanes materializes only the dataflow lanes selected by the
+// procedure plan. HTTP is materialized first so the generic projection can
+// preserve the established ownership rule for HTTP header sinks. The result
+// store scopes both results to this procedure/revision and makes repeated
+// projections at-most-once.
+func (a Analyzer) executeDataflowLanes(ctx context.Context, file parsedFile, proc sourceProcedure, plan procedureAnalysisPlan, store *procedureSemanticResultStore, profile *procedureDomainProfile, candidateCounters *uint64) ([]Finding, []Finding, error) {
+	measurement := profile.begin(procedureDomainDataflow)
+	var genericFindings []Finding
+	var httpFindings []Finding
+	executed := false
+
+	if plan.runsDataflowLane(procedureDataflowLaneHTTP) {
+		executed = true
+		findings, err := store.materializeHTTPDataflow(ctx, a, file, proc)
+		if err != nil {
+			measurement.finishOutcome(ctx, 0, err)
+			return nil, nil, err
+		}
+		httpFindings = findings
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterHTTPDataflowKernelRuns, 1)
+			profile.add(analysisstats.CounterHTTPDataflowCFGWalks, 1)
+		}
 	}
-	return suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings), httpFindings, nil
+	if plan.runsDataflowLane(procedureDataflowLaneGeneric) {
+		executed = true
+		findings, err := store.materializeGenericDataflow(ctx, a, file, proc)
+		if err != nil {
+			measurement.finishOutcome(ctx, len(httpFindings), err)
+			return nil, nil, err
+		}
+		genericFindings = findings
+		if proc.Graph != nil {
+			profile.add(analysisstats.CounterGenericDataflowKernelRuns, 1)
+			profile.add(analysisstats.CounterGenericDataflowCFGWalks, 1)
+		}
+	}
+	if executed && proc.Graph != nil {
+		// Keep the aggregate counters as compatibility telemetry for existing
+		// consumers. A procedure with both lanes still contributes one
+		// aggregate dataflow candidate and CFG walk, while the lane counters
+		// expose the actual independent work.
+		profile.kernel()
+		profile.candidate(candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
+		profile.add(analysisstats.CounterDataflowCFGWalks, 1)
+	}
+
+	genericFindings = suppressHTTPDataFlowDuplicates(genericFindings, httpFindings)
+	measurement.finishOutcome(ctx, len(genericFindings)+len(httpFindings), nil)
+	return genericFindings, httpFindings, nil
 }
 
 // isCommandExecutionSink is intentionally name-based rather than tied to a

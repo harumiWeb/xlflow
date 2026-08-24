@@ -394,6 +394,21 @@ caching. They use the existing `operation="analyze/counter"` stderr shape and
 are developer telemetry only. They never appear in normal analysis JSON or LSP
 diagnostic payloads.
 
+Data-flow planning also reports independent lane decisions and work:
+`planned_generic_dataflow_runs` / `skipped_generic_dataflow_runs` for
+`VBA224`, `VBA236`, and `VBA239`, and
+`planned_http_dataflow_runs` / `skipped_http_dataflow_runs` for `VBA246` and
+`VBA247`. `generic_dataflow_kernel_runs` and
+`http_dataflow_kernel_runs` count materialized lane results, while
+`generic_dataflow_cfg_walks` and `http_dataflow_cfg_walks` count the
+corresponding started CFG traversals. A lane is counted once per procedure
+decision and materialized at most once per procedure and analysis revision;
+an unplanned lane starts neither its CFG walk nor its kernel. Existing
+aggregate `dataflow_cfg_walks` and `semantic_kernel_runs` counters remain
+compatibility measurements and are not defined as the sum of lane counters.
+These records use the same stderr counter shape and never appear in normal
+CLI JSON or LSP diagnostic payloads.
+
 The effect-summary stage may additionally report
 `effect_summary_worklist_evaluations`,
 `effect_summary_max_propagated_facts_per_procedure`, and

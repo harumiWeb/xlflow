@@ -507,6 +507,24 @@ persistent or cross-run cache. Result identity and dependencies may be useful
 to a future incremental analyzer, but no incremental or cross-process cache
 contract is defined here.
 
+Data-flow execution is split into independent lazy lanes inside that same
+procedure-local boundary. The generic lane serves `VBA224`, `VBA236`, and
+`VBA239`; the HTTP lane serves `VBA246` and `VBA247`; and the file-path
+`VBA245` projection remains independent. The plan records enabled and planned
+lane masks separately. A lane with no planned projection does not start its
+CFG walk or kernel. Each planned lane is materialized at most once, with HTTP
+materialized before generic data-flow so the established `VBA224` ownership
+and suppression behavior is preserved. The canonical append sequence and
+source-order merge remain authoritative after lane execution.
+
+Unknown and recovered canonical inputs remain conservative. For complete
+canonical procedure IR, an unresolved external call without local HTTP syntax
+may skip the HTTP lane because the procedure-local HTTP solver has no local
+state transition for that call; recovered documents, unknown CFG flow,
+recovered or conditional statements/expressions, missing canonical inputs, and
+explicit HTTP evidence, including sensitive logging or constants, keep the lane
+planned.
+
 Plans execute inside the existing bounded procedure-worker budget. The analyzer
 does not create rule-level goroutines, per-diagnostic workers, or nested
 semantic-kernel pools. Kernel and projection work accepts the analysis context
@@ -520,6 +538,14 @@ proven irrelevant), and `semantic_results_reused` (additional projections
 reading an already materialized immutable result). These counters never appear
 in normal analysis JSON or LSP diagnostics and do not change public
 configuration or API contracts.
+
+Data-flow lane telemetry additionally exposes
+`planned_generic_dataflow_runs`, `skipped_generic_dataflow_runs`,
+`planned_http_dataflow_runs`, `skipped_http_dataflow_runs`,
+`generic_dataflow_kernel_runs`, `http_dataflow_kernel_runs`,
+`generic_dataflow_cfg_walks`, and `http_dataflow_cfg_walks`. Existing aggregate
+`dataflow_cfg_walks` and `semantic_kernel_runs` counters remain compatibility
+measurements for the procedure execution and are not lane sums.
 
 ### Batch procedure-worker boundary
 

@@ -11,13 +11,18 @@ import (
 // project summaries, configuration, and source revisions are all inputs to a
 // result and must not leak between workers or requests.
 //
-// ArrayAnalysisResult is currently the shared result with more than one
-// projection. Keeping the store explicit makes the lifetime and reuse
-// contract visible and gives future kernels the same bounded extension point.
+// ArrayAnalysisResult and the two dataflow lane results are procedure-local
+// values with bounded lifetimes. Keeping the store explicit makes the
+// at-most-once materialization contract visible without introducing a
+// cross-procedure cache.
 type procedureSemanticResultStore struct {
-	array      *ArrayAnalysisResult
-	arrayBuilt bool
-	arrayReads uint8
+	array                *ArrayAnalysisResult
+	arrayBuilt           bool
+	arrayReads           uint8
+	genericDataflow      []Finding
+	genericDataflowBuilt bool
+	httpDataflow         []Finding
+	httpDataflowBuilt    bool
 }
 
 func (s *procedureSemanticResultStore) materializeArray(cancelCtx context.Context, a Analyzer, file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, plan procedureAnalysisPlan) (*ArrayAnalysisResult, error) {
@@ -49,6 +54,36 @@ func (s *procedureSemanticResultStore) arrayProjection(profile *procedureDomainP
 	}
 	s.arrayReads++
 	return s.array
+}
+
+func (s *procedureSemanticResultStore) materializeGenericDataflow(ctx context.Context, a Analyzer, file parsedFile, proc sourceProcedure) ([]Finding, error) {
+	if s == nil {
+		return a.dataFlowFindingsContext(ctx, file, proc)
+	}
+	if !s.genericDataflowBuilt {
+		findings, err := a.dataFlowFindingsContext(ctx, file, proc)
+		if err != nil {
+			return nil, err
+		}
+		s.genericDataflow = findings
+		s.genericDataflowBuilt = true
+	}
+	return s.genericDataflow, nil
+}
+
+func (s *procedureSemanticResultStore) materializeHTTPDataflow(ctx context.Context, a Analyzer, file parsedFile, proc sourceProcedure) ([]Finding, error) {
+	if s == nil {
+		return a.httpTransportFindingsContext(ctx, file, proc)
+	}
+	if !s.httpDataflowBuilt {
+		findings, err := a.httpTransportFindingsContext(ctx, file, proc)
+		if err != nil {
+			return nil, err
+		}
+		s.httpDataflow = findings
+		s.httpDataflowBuilt = true
+	}
+	return s.httpDataflow, nil
 }
 
 // Keep the store's telemetry dependency explicit at compile time. This also

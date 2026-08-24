@@ -148,6 +148,20 @@ irrelevant), and `semantic_results_reused` (additional projections reading an
 already materialized immutable result). Results are scoped to one procedure
 and analysis revision; these counters do not represent persistent or cross-run
 caching. They are stderr-only observations, not findings or JSON fields.
+
+Data-flow planning also exposes independent lane decisions and work:
+`planned_generic_dataflow_runs` / `skipped_generic_dataflow_runs` cover
+`VBA224`, `VBA236`, and `VBA239`, while
+`planned_http_dataflow_runs` / `skipped_http_dataflow_runs` cover `VBA246` and
+`VBA247`. `generic_dataflow_kernel_runs` and
+`http_dataflow_kernel_runs` count materialized lane results;
+`generic_dataflow_cfg_walks` and `http_dataflow_cfg_walks` count their CFG
+walks. Each lane is decided once per procedure and materialized at most once
+per procedure and analysis revision. An unplanned lane starts neither its CFG
+walk nor its kernel. Existing aggregate `dataflow_cfg_walks` and
+`semantic_kernel_runs` remain compatibility measurements and are not lane
+sums. All these values are stderr-only and do not change findings, JSON, or
+LSP diagnostics.
 Large-module profiles also expose maximum dimensions:
 `max_lines_per_file`, `max_procedures_per_file`, `max_calls_per_file`,
 `max_statements_per_procedure`, `max_cfg_blocks_per_procedure`, and

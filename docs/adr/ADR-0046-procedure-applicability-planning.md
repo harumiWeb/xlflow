@@ -211,6 +211,43 @@ proven-irrelevant enabled kernels, and additional projections reading an
 already materialized immutable result. They do not appear in normal analysis
 JSON or LSP diagnostics and do not change any public configuration or API.
 
+### Amendment: independent lazy dataflow execution lanes (#710)
+
+The procedure plan now keeps the generic dataflow lane
+(`VBA224`, `VBA236`, and `VBA239`) independent from the HTTP lane
+(`VBA246` and `VBA247`). The file-path lane (`VBA245`) remains an independent
+projection. Enabled lanes and planned lanes are represented separately, so a
+procedure with no planned HTTP projection does not walk its CFG or invoke the
+HTTP solver, and a procedure with no planned generic projection does not invoke
+the generic dataflow kernel. The existing bounded procedure-worker budget and
+analysis-context cancellation contract are unchanged.
+
+Each lane has a procedure-local result slot and is materialized at most once
+for one procedure and analysis revision. The HTTP result is materialized before
+the generic result so the established `VBA224` ownership and duplicate
+suppression behavior remains unchanged. Results are then appended through the
+existing canonical procedure sequence, source-order merge, diagnostic sorting,
+and suppression stages; lane splitting must not change finding identity,
+evidence, ranges, severity, multiplicity, ordering, exit status, JSON, or LSP
+output.
+
+The general fail-open rule for recovered, incomplete, ambiguous, or unknown
+analysis remains in force. One intentionally narrow exception is allowed for
+complete canonical procedure IR whose only uncertainty is an unresolved
+external call and whose local syntax contains no HTTP evidence: the current
+HTTP state solver has no procedure-local state transition for that external
+call, so scheduling HTTP work cannot produce a local `VBA246`/`VBA247` finding.
+Recovered documents, recovered or conditional statements/expressions,
+unknown CFG flow, missing canonical inputs, and explicit HTTP evidence
+(including sensitive logging or constants) continue to plan the HTTP lane
+conservatively.
+
+The performance recorder adds lane-level planned/skipped decisions and
+lane-specific kernel/CFG-walk counters. Existing aggregate dataflow counters
+remain for compatibility and are not defined as the sum of the two lanes.
+These counters are additive, opt-in stderr telemetry only; no public CLI,
+configuration, JSON, or LSP schema is introduced.
+
 ## Rationale
 
 The IR and fact ownership boundaries already make procedure inputs immutable

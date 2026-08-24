@@ -126,6 +126,40 @@ End Sub
 	}
 }
 
+func TestModuleScopedHTTPDeclarationReachesBatchAndRealtime(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Private request As New WinHttp.WinHttpRequest.5.1
+
+Public Sub Run()
+    request.Open "GET", "http://example.test", False
+    request.SetCredentials "user", "password", 0
+    request.Send
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", string(source))
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := SourceRealtimeFindings(dir, filepath.Join(dir, "src", "modules", "Main.bas"), cfg, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, findings := range map[string][]Finding{"batch": batch, "realtime": realtime} {
+		if got := findingsByCode(findings, "VBA247"); len(got) != 1 || got[0].HTTPReliability == nil || got[0].HTTPReliability.TimeoutState != "missing" {
+			t.Fatalf("%s module-scoped VBA247 findings = %+v", name, got)
+		}
+		got := findingsByCode(findings, "VBA246")
+		if len(got) == 0 || got[0].HTTPSecurity == nil || got[0].HTTPSecurity.RiskKind != "plain_http_credentials" {
+			t.Fatalf("%s module-scoped VBA246 findings = %+v", name, got)
+		}
+	}
+}
+
 func TestVBA246HonorsDevelopmentOriginsButNeverURLCredentials(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -288,6 +322,78 @@ End Sub
 	if authLogs != 1 {
 		t.Fatalf("authorization logging findings = %d, findings = %+v", authLogs, findings)
 	}
+}
+
+func TestVBA246SensitiveLoggingSurvivesUnresolvedCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const AuthHeader As String = "Bearer production-secret-value"
+
+Public Sub Run()
+    Call MissingExternalProcedure
+    Debug.Print AuthHeader
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			return
+		}
+	}
+	t.Fatalf("authorization logging finding was lost with an unresolved call: %+v", findings)
+}
+
+func TestVBA246ConcatenatedSensitiveLoggingSurvivesUnresolvedCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Private Const AuthHeader As String = "Bearer " & "production-secret-value"
+
+Public Sub Run()
+    Call MissingExternalProcedure
+    Debug.Print AuthHeader
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			return
+		}
+	}
+	t.Fatalf("concatenated authorization logging finding was lost with an unresolved call: %+v", findings)
+}
+
+func TestVBA246SensitiveLoggingInsideConditionIsPlanned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+
+Public Sub Run()
+    If shouldLog Then
+        Debug.Print "Authorization: Bearer production-secret-value"
+    End If
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "authorization_logging" {
+			return
+		}
+	}
+	t.Fatalf("conditional authorization logging finding was lost: %+v", findings)
 }
 
 func TestHTTPRulesIgnoreUnrelatedObjectsAndSafeTLS(t *testing.T) {

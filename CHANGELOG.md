@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Split procedure data-flow execution into lazy generic and HTTP lanes, so
+  procedures with no applicable HTTP projections avoid HTTP CFG/state work
+  while preserving diagnostic ownership, ordering, suppression, and output
+  contracts. Added lane-level planned/skipped, kernel, and CFG telemetry to
+  the opt-in performance log; normal CLI JSON and LSP payloads are unchanged.
+
 - Reduced giant-module analyzer allocation pressure by representing procedure
   projections as immutable views over canonical Procedure IR. Facts now retain
   compact indexes and read-only access paths instead of copied declaration,

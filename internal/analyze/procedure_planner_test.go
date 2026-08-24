@@ -89,6 +89,40 @@ func TestProcedureFeatureSetProvesScalarProcedureAbsent(t *testing.T) {
 	}
 }
 
+func TestProcedureFeatureSetIgnoresDeclarationTypeExpressions(t *testing.T) {
+	for _, syntaxKind := range []string{
+		"case_expression", "logical_value_expression", "parenthesized_condition_expression", "type_expression", "type_of_expression",
+	} {
+		facts := newProcedureAnalysisFactsWithDeclarations(
+			[]procedureir.Declaration{{ID: 1, Name: "value", Type: "Long"}},
+			nil,
+			[]procedureir.Expression{{ID: 2, Kind: procedureir.ExpressionUnknown, SyntaxKind: syntaxKind, Text: "Long"}},
+			nil,
+			nil,
+		)
+		if facts.features.present != 0 || facts.features.unknown != 0 {
+			t.Fatalf("known non-value expression %q changed feature certainty: %#v", syntaxKind, facts.features)
+		}
+	}
+}
+
+func TestProcedureFeatureSetTreatsRecoveredStructuralExpressionsAsUnknown(t *testing.T) {
+	for _, syntaxKind := range []string{
+		"case_expression", "logical_value_expression", "parenthesized_condition_expression", "type_expression", "type_of_expression",
+	} {
+		facts := newProcedureAnalysisFactsWithDeclarations(
+			nil,
+			nil,
+			[]procedureir.Expression{{ID: 2, Kind: procedureir.ExpressionUnknown, SyntaxKind: syntaxKind, Text: "Long", Recovered: true}},
+			nil,
+			nil,
+		)
+		if facts.features.unknown != allProcedureFeatures {
+			t.Fatalf("recovered expression %q certainty = %#v, want all features unknown", syntaxKind, facts.features)
+		}
+	}
+}
+
 func TestProcedureFeatureSetRecognizesQualifiedCollectionAndFileRename(t *testing.T) {
 	for _, typeName := range []string{"VBA.Collection", "Scripting.Dictionary"} {
 		facts := newProcedureAnalysisFactsWithDeclarations(
@@ -356,6 +390,106 @@ func TestProcedurePlannerRecognizesDataflowSinkTextForms(t *testing.T) {
 				t.Fatalf("%s plan = %#v features = %#v, want projection %d", test.name, plan, features, test.projection)
 			}
 		})
+	}
+}
+
+func TestProcedureAnalysisPlanSelectsIndependentDataflowLanes(t *testing.T) {
+	tests := []struct {
+		name           string
+		config         config.AnalyzeConfig
+		features       procedureFeatureSet
+		wantGenericRun bool
+		wantHTTPRun    bool
+	}{
+		{
+			name:           "generic projection only",
+			config:         analyzeConfigForRules("VBA224"),
+			features:       procedureFeatureSet{present: featureDataflow},
+			wantGenericRun: true,
+		},
+		{
+			name:        "HTTP projection only",
+			config:      analyzeConfigForRules("VBA246"),
+			features:    procedureFeatureSet{present: featureHTTP},
+			wantHTTPRun: true,
+		},
+		{
+			name:           "both projections",
+			config:         analyzeConfigForRules("VBA224", "VBA246"),
+			features:       procedureFeatureSet{present: featureDataflow | featureHTTP},
+			wantGenericRun: true,
+			wantHTTPRun:    true,
+		},
+		{
+			name:     "file projection remains independent",
+			config:   analyzeConfigForRules("VBA245"),
+			features: procedureFeatureSet{present: featureDataflow | featureFileIO},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan := buildProcedureAnalysisPlan(
+				test.config,
+				sourceProcedureWithFeatureSet(test.features),
+				map[string]sourceDeclaration{},
+			)
+			if got := plan.runsDataflowLane(procedureDataflowLaneGeneric); got != test.wantGenericRun {
+				t.Fatalf("generic lane = %v, want %v; plan = %#v", got, test.wantGenericRun, plan)
+			}
+			if got := plan.runsDataflowLane(procedureDataflowLaneHTTP); got != test.wantHTTPRun {
+				t.Fatalf("HTTP lane = %v, want %v; plan = %#v", got, test.wantHTTPRun, plan)
+			}
+			if plan.runsProjection(procedureProjectionDataflowFile) && (test.wantGenericRun || test.wantHTTPRun) {
+				t.Fatalf("file projection unexpectedly selected a dataflow lane: %#v", plan)
+			}
+		})
+	}
+}
+
+func TestProcedureAnalysisPlanSkipsHTTPForResolvedIRWithoutLocalHTTPSyntax(t *testing.T) {
+	ir := procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{Name: "Caller", Kind: procedureir.ProcedureSub},
+		Calls: []procedureir.CallSite{{
+			ID: 1, Callee: procedureir.Callee{Text: "ExternalProcedure"},
+			Resolution: procedureir.CallResolution{Status: procedureir.ResolutionDynamic},
+		}},
+	}
+	facts := newProcedureAnalysisFactsForProcedure(&ir)
+	proc := sourceProcedure{
+		Document: &procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{ir}},
+		Facts:    facts,
+		IR:       &ir,
+		Graph:    &cfg.Graph{},
+		Features: procedureFeatureSet{unknown: allProcedureFeatures},
+	}
+	plan := buildProcedureAnalysisPlan(analyzeConfigForRules("VBA246"), proc, nil)
+	if plan.runsDataflowLane(procedureDataflowLaneHTTP) {
+		t.Fatalf("HTTP lane planned for a complete procedure with no local HTTP syntax: %#v", plan)
+	}
+}
+
+func TestProcedureAnalysisPlanKeepsHTTPForSensitiveLoggingWithUnresolvedCall(t *testing.T) {
+	ir := procedureir.ProcedureIR{
+		Symbol: procedureir.ProcedureSymbol{Name: "Caller", Kind: procedureir.ProcedureSub},
+		Statements: []procedureir.Statement{{
+			ID: 1, Kind: procedureir.StatementCall, Text: `Debug.Print "Authorization: Bearer production-token"`,
+		}},
+		Calls: []procedureir.CallSite{{
+			ID: 2, Callee: procedureir.Callee{Text: "ExternalProcedure"},
+			Resolution: procedureir.CallResolution{Status: procedureir.ResolutionDynamic},
+		}},
+	}
+	facts := newProcedureAnalysisFactsForProcedure(&ir)
+	proc := sourceProcedure{
+		Document: &procedureir.DocumentIR{Procedures: []procedureir.ProcedureIR{ir}},
+		Facts:    facts,
+		IR:       &ir,
+		Graph:    &cfg.Graph{},
+		Features: procedureFeatureSet{unknown: allProcedureFeatures},
+	}
+	plan := buildProcedureAnalysisPlan(analyzeConfigForRules("VBA246"), proc, nil)
+	if !plan.runsDataflowLane(procedureDataflowLaneHTTP) {
+		t.Fatalf("HTTP lane skipped sensitive logging with an unresolved call: %#v", plan)
 	}
 }
 
