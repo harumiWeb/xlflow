@@ -276,6 +276,11 @@ func (c WorkCounter) String() string {
 const (
 	ModuleFactBuildsCounter    = "module_fact_builds"
 	ProcedureFactBuildsCounter = "procedure_fact_builds"
+	// ModuleOptionScansCounter records the number of module-wide option scans
+	// performed while constructing immutable module facts. It is deliberately
+	// an additive counter: one module/revision contributes one observation even
+	// when the module has many procedures.
+	ModuleOptionScansCounter = "module_option_scans"
 
 	// Capability build counters are also used as stage names when a build is
 	// timed with MeasureCapabilityBuild. Keeping the two names identical makes
@@ -572,6 +577,19 @@ func (r *Recorder) AddMax(name string, value uint64) {
 // facts for an analysis revision. A nil recorder is intentionally a no-op.
 func (r *Recorder) RecordModuleFactBuild() {
 	r.AddSum(ModuleFactBuildsCounter, 1)
+}
+
+// RecordModuleOptionScan records one module-wide option scan. A nil recorder
+// is intentionally a no-op, matching the other typed telemetry helpers.
+func (r *Recorder) RecordModuleOptionScan() {
+	r.RecordModuleOptionScans(1)
+}
+
+// RecordModuleOptionScans records multiple module-wide option scans in one
+// counter update. The batch form avoids taking one recorder lock per module
+// when a caller publishes already-aggregated observations.
+func (r *Recorder) RecordModuleOptionScans(count uint64) {
+	r.AddSum(ModuleOptionScansCounter, count)
 }
 
 // RecordProcedureFactBuild records one construction of the immutable

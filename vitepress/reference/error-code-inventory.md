@@ -689,6 +689,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `module_new_failed`
 - `module_not_found`
 - `module_only_declaration_in_procedure`
+- `module_option_scans`
 - `module_path`
 - `module_score_threshold`
 - `module_state`

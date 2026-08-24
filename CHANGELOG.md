@@ -4,6 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Precomputed immutable module semantic facts once per module/revision,
+  including conservative `Option Private Module` state and the compact array
+  operation observations used by idempotent setup analysis. Procedure workers
+  now share the facts safely, avoiding repeated module-wide source scans and
+  normalization while preserving diagnostic, snapshot, CLI JSON, and LSP
+  contracts. Extended the opt-in fact-build telemetry with
+  `module_option_scans`; cross-revision caching and a complete normalized AST
+  remain out of scope.
+
 - Split procedure data-flow execution into lazy generic and HTTP lanes, so
   procedures with no applicable HTTP projections avoid HTTP CFG/state work
   while preserving diagnostic ownership, ordering, suppression, and output

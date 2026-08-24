@@ -158,7 +158,8 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 		"file_count", "procedure_count", "statement_count", "expression_count",
 		"call_site_count", "cfg_block_count", "cfg_edge_count", "project_symbol_count",
 		"byref_diagnostic_passes", "line_count", "module_declaration_count",
-		analysisstats.ModuleFactBuildsCounter, analysisstats.ProcedureFactBuildsCounter,
+		analysisstats.ModuleFactBuildsCounter, analysisstats.ModuleOptionScansCounter,
+		analysisstats.ProcedureFactBuildsCounter,
 		"max_lines_per_file", "max_procedures_per_file", "max_calls_per_file",
 		"max_statements_per_procedure", "max_cfg_blocks_per_procedure", "max_cfg_edges_per_procedure",
 	} {
@@ -193,6 +194,9 @@ func TestBatchAnalysisProfilingPreservesResultsAndReportsWorkload(t *testing.T) 
 	}
 	if counterByName[analysisstats.ModuleFactBuildsCounter] != 1 || counterByName[analysisstats.ProcedureFactBuildsCounter] != 1 {
 		t.Fatalf("shared fact builds = module %d, procedure %d; want one each for one file/procedure revision", counterByName[analysisstats.ModuleFactBuildsCounter], counterByName[analysisstats.ProcedureFactBuildsCounter])
+	}
+	if counterByName[analysisstats.ModuleOptionScansCounter] != 1 {
+		t.Fatalf("module option scans = %d, want one for the file revision", counterByName[analysisstats.ModuleOptionScansCounter])
 	}
 	wantLineCount := uint64(len(normalizedSourceLines(source)) - 1)
 	if counterByName["line_count"] != wantLineCount ||

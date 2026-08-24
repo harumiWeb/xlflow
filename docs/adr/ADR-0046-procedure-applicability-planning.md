@@ -248,6 +248,49 @@ remain for compatibility and are not defined as the sum of the two lanes.
 These counters are additive, opt-in stderr telemetry only; no public CLI,
 configuration, JSON, or LSP schema is introduced.
 
+### Amendment: immutable module semantic facts (#711)
+
+`moduleAnalysisFacts` now owns a small immutable semantic projection for one
+module and analysis revision. The projection is built from the canonical
+`DocumentIR`/`ProcedureIR` and the existing source-line normalization path in
+one bounded module pass. It is not a second AST, a persistent cache, or a
+replacement for the canonical IR.
+
+The module projection records the option state needed by procedure planning,
+including `Option Private Module`, using the same conservative tri-state
+contract as other analyzer facts: `present` only for an exact declaration in
+complete canonical input, `absent` when complete input proves it is missing,
+and `unknown` for recovered, incomplete, or ambiguous module options. An
+unknown option fails open: private-procedure applicability must retain the
+possibility that the module is externally visible. Comments and string
+contents are excluded from the declaration check, and a procedure loop must
+not rescan the module source.
+
+The same pass may retain only the array-operation observations required by the
+idempotent array setup query: canonical lowercase identifier keys and compact
+facts for scalar assignment, direct `ReDim`, `Erase`, and whole-array
+assignment. Shared maps and slices remain private to the facts value. Accessors
+return scalar values, enums, or small owned copies and never expose mutable
+shared storage. The operation projection does not build an array participant
+graph or data-flow state.
+
+Facts are attached before batch, realtime, or LSP procedure workers start.
+They are immutable after construction and safe for concurrent procedure reads.
+Their lifetime is bounded by the owning parsed-file/IR revision; an edit, a
+new revision, or a complete/incomplete transition builds a new value. No
+cross-revision or cross-run persistence is introduced, and normal compatibility
+or synthetic callers must pass one explicitly owned facts value rather than
+silently rebuilding it in a procedure loop.
+
+The performance recorder adds `module_fact_builds` and
+`module_option_scans`. For a normal module revision each is at most one, and
+the option scan is independent of the number of public procedures. These
+counters are opt-in stderr-only telemetry and are absent from normal analysis
+JSON and LSP payloads. `BenchmarkModuleAnalysisFacts` and the existing
+`BenchmarkRealWorldCorpus/ronecone/analyze-only` profile comparison measure
+construction/reuse, source-normalization CPU and allocation cost, and the
+small-module regression guard.
+
 ## Rationale
 
 The IR and fact ownership boundaries already make procedure inputs immutable
@@ -360,6 +403,8 @@ produce a finding.
   `internal/analyze/procedure_planner.go`,
   `internal/analyze/procedure_profile.go`, and
   `internal/vba/analysisstats/recorder.go`.
+- Issue #711's module-fact construction, immutable accessors, option-scan
+  counter, and module-fact benchmark requirements.
 
 ## Related
 
@@ -368,6 +413,7 @@ produce a finding.
 - Issue #696
 - Issue #697
 - Issue #701
+- Issue #711
 - ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0043, ADR-0045
 - ADR-0040
 - `docs/specs/vba-analysis-ir.md`

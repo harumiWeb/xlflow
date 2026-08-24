@@ -1894,13 +1894,17 @@ type arrayModuleEntryStates map[string]map[string]bool
 
 func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure {
 	targets := map[string]sourceProcedure{}
+	for index := range files {
+		files[index].ensureModuleAnalysisFacts()
+	}
 	for _, file := range files {
+		facts := file.ModuleFacts
 		procedures := file.procedureView()
 		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
 			proc := procedures.valueAt(procedureIndex)
 			visibility := strings.TrimSpace(proc.Visibility)
 			private := strings.EqualFold(visibility, "Private") || strings.EqualFold(visibility, "Friend")
-			modulePrivate := strings.EqualFold(visibility, "Public") && arrayOptionPrivateModule(file.Lines)
+			modulePrivate := strings.EqualFold(visibility, "Public") && facts.privateModulePresent()
 			if !private && !modulePrivate {
 				continue
 			}
@@ -2679,6 +2683,12 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 		proc        sourceProcedure
 		moduleDecls map[string]sourceDeclaration
 	}, 0)
+	// Package-local synthetic callers may omit ModuleFacts. Attach one local
+	// immutable instance before expanding the procedure list so compatibility
+	// paths do not rebuild and rescan module source once per procedure.
+	for index := range files {
+		files[index].ensureModuleAnalysisFacts()
+	}
 	for _, file := range files {
 		procs := file.procedureView()
 		moduleDecls := file.moduleDecls()
@@ -2822,17 +2832,17 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 	}
 	end := min(len(file.Lines), proc.EndLine)
 	start := max(0, proc.StartLine-1)
+	facts := file.moduleAnalysisFacts()
 	type setupGuard struct {
 		name    string
 		checkAt int
 	}
 	guards := make([]setupGuard, 0)
 	for index := start; index < end; index++ {
-		match := arraySetupGuardRe.FindStringSubmatch(normalizedCodeLine(file.Lines[index]))
-		if len(match) != 2 {
+		name, ok := facts.sourceLineSetupGuard(index)
+		if !ok {
 			continue
 		}
-		name := strings.ToLower(cleanIdentifier(match[1]))
 		declaration, ok := moduleDecls[name]
 		if !ok || declaration.Array || declaration.Parameter || !strings.EqualFold(strings.TrimSpace(declaration.Type), "Boolean") {
 			continue
@@ -2845,8 +2855,7 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 
 	lastExecutable := -1
 	for index := start; index < end; index++ {
-		text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(file.Lines[index])))
-		if text != "" && text != "end sub" && text != "end function" && text != "end property" {
+		if facts.sourceLineIsExecutable(index) {
 			lastExecutable = index
 		}
 	}
@@ -2858,20 +2867,16 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 		line int
 		rhs  string
 	}{}
-	for index, line := range file.Lines {
-		lhs, rhs, indexed, assigned := arrayAssignment(normalizedCodeLine(line))
-		if !assigned || indexed {
-			continue
-		}
-		name := strings.ToLower(cleanIdentifier(lhs))
-		for _, guard := range guards {
-			if name == guard.name {
-				guardWrites[name] = append(guardWrites[name], struct {
-					line int
-					rhs  string
-				}{line: index, rhs: strings.TrimSpace(rhs)})
+	for _, guard := range guards {
+		facts.forEachArrayOperationFor(guard.name, func(operation moduleArrayOperationFact) {
+			if operation.Kind != moduleArrayWholeAssignment {
+				return
 			}
-		}
+			guardWrites[guard.name] = append(guardWrites[guard.name], struct {
+				line int
+				rhs  string
+			}{line: operation.Line, rhs: operation.RHS})
+		})
 	}
 
 	result := map[string]bool{}
@@ -2882,25 +2887,20 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 		}
 		setAt := writes[0].line
 		for index := guard.checkAt + 1; index < setAt; index++ {
-			match := arrayRedimRe.FindStringSubmatch(normalizedCodeLine(file.Lines[index]))
-			if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
-				continue
-			}
-			for _, clause := range splitArgs(match[2]) {
-				redim, direct := parseDirectArrayRedimClause(clause)
-				if !direct {
-					continue
+			facts.forEachArrayOperationAt(index, func(operation moduleArrayOperationFact) {
+				if operation.Kind != moduleArrayDirectRedim || operation.Preserve {
+					return
 				}
-				name := strings.ToLower(cleanIdentifier(redim.name))
+				name := operation.Name
 				declaration, declared := moduleDecls[name]
 				if !declared || !declaration.Array || declaration.Parameter {
-					continue
+					return
 				}
-				if arrayModuleIdempotentSetupArrayHasOtherWrite(file, name, index) {
-					continue
+				if moduleArrayOperationHasOtherWrite(facts, name, index) {
+					return
 				}
 				result[name] = true
-			}
+			})
 		}
 	}
 	if len(result) == 0 {
@@ -2909,31 +2909,19 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 	return result
 }
 
-func arrayModuleIdempotentSetupArrayHasOtherWrite(file parsedFile, name string, setupLine int) bool {
+func moduleArrayOperationHasOtherWrite(facts *moduleAnalysisFacts, name string, setupLine int) bool {
 	name = strings.ToLower(cleanIdentifier(name))
-	for index, line := range file.Lines {
-		text := normalizedCodeLine(line)
-		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
-			for _, target := range splitArgs(match[1]) {
-				if strings.EqualFold(strings.TrimSpace(target), name) {
-					return true
-				}
-			}
+	otherWrite := false
+	facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+		if otherWrite {
+			return
 		}
-		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
-			for _, clause := range splitArgs(match[2]) {
-				redim, direct := parseDirectArrayRedimClause(clause)
-				if direct && strings.EqualFold(cleanIdentifier(redim.name), name) && index != setupLine {
-					return true
-				}
-			}
+		if operation.Kind == moduleArrayDirectRedim && operation.Line == setupLine {
+			return
 		}
-		lhs, _, indexed, assigned := arrayAssignment(text)
-		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
-			return true
-		}
-	}
-	return false
+		otherWrite = true
+	})
+	return otherWrite
 }
 
 func arrayProcedureLineHasInlineConditional(file parsedFile, line int) bool {

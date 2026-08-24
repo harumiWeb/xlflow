@@ -66,12 +66,15 @@ func TestTotalsAggregateStagesAndSortCounters(t *testing.T) {
 func TestRecordFactBuildCounters(t *testing.T) {
 	recorder := NewRecorder()
 	recorder.RecordModuleFactBuild()
+	recorder.RecordModuleOptionScan()
+	recorder.RecordModuleOptionScans(2)
 	recorder.RecordProcedureFactBuild()
 	recorder.RecordProcedureFactBuilds(1)
 
 	_, counters := recorder.Totals()
 	want := []Counter{
 		{Name: ModuleFactBuildsCounter, Value: 1},
+		{Name: ModuleOptionScansCounter, Value: 3},
 		{Name: ProcedureFactBuildsCounter, Value: 2},
 	}
 	if !reflect.DeepEqual(counters, want) {
@@ -82,6 +85,8 @@ func TestRecordFactBuildCounters(t *testing.T) {
 func TestRecordFactBuildCountersNilSafe(t *testing.T) {
 	var recorder *Recorder
 	recorder.RecordModuleFactBuild()
+	recorder.RecordModuleOptionScan()
+	recorder.RecordModuleOptionScans(2)
 	recorder.RecordProcedureFactBuild()
 }
 

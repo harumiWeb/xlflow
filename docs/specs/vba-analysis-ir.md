@@ -355,6 +355,50 @@ procedure IR. A consumer that needs an independently owned resolved snapshot
 continues to call `Resolve`/`Materialize`, which remains the compatibility
 boundary.
 
+### Module semantic facts
+
+`moduleAnalysisFacts` may also own the immutable module-wide semantic facts
+needed by analyzer kernels. They are derived from the canonical
+`DocumentIR`/`ProcedureIR` and existing source normalization in one bounded
+pass for one module/revision. They are an implementation-level projection,
+not a complete normalized AST and not a replacement for the IR or resolution
+overlay.
+
+The module option projection includes `Option Private Module` as a tri-state
+value: `present` for an exact declaration in complete canonical input,
+`absent` when complete input proves no declaration exists, and `unknown` for
+recovered, incomplete, or ambiguous option syntax. Comment and string content
+cannot establish the option. Consumers must fail open for `unknown`, retaining
+the existing possibility that a procedure is externally visible. A module-wide
+option check is performed at most once per module/revision; procedure loops
+must consume the stored value and must not scan all source lines.
+
+The same immutable pass may index only the operation facts required by
+idempotent array setup: canonical lowercase identifier keys and compact
+observations for scalar assignment, direct `ReDim`, `Erase`, and whole-array
+assignment. This is not an array participant graph or a data-flow state. Shared
+maps and slices are private implementation details. Read access uses scalar,
+enum, or small owned-copy accessors; no mutable slice or map is exposed to a
+kernel.
+
+Module facts are attached before procedure workers run in batch, realtime, and
+LSP analysis. They are safe for concurrent readers and immutable after
+construction. Their lifetime is the parsed-file/IR revision; edits and
+complete/incomplete transitions require rebuilding the facts, and no
+cross-revision persistent cache is defined. Compatibility and synthetic
+callers must share one caller-owned facts value rather than triggering an
+implicit rebuild.
+
+The opt-in performance recorder reports `module_fact_builds` and
+`module_option_scans` as stderr-only counters. A normal module revision
+contributes at most one of each, regardless of its public procedure count.
+These counters are not part of CLI JSON, LSP payloads, or diagnostic output.
+`BenchmarkModuleAnalysisFacts` covers small, many-procedure, and
+operation-heavy construction/reuse cases; the real-world corpus benchmark
+`BenchmarkRealWorldCorpus/ronecone/analyze-only` is used for before/after CPU,
+heap, and allocation measurements. Small-module benchmark medians are kept as
+a regression guard while giant-module profiles verify normalization reuse.
+
 ### Procedure features and applicability planning
 
 Each `procedureAnalysisFacts` value also owns one immutable applicability
