@@ -139,6 +139,21 @@ func (a Analyzer) httpTransportFindingsContext(ctx context.Context, file parsedF
 
 func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnalysisState {
 	state := httpAnalysisState{objects: map[string]httpObjectState{}, launchers: map[string]string{}, strings: map[string]string{}, known: map[string]bool{}, sensitive: map[string]bool{}}
+	seedDeclaration := func(declaration sourceDeclaration) {
+		kind := httpKindFromText(declaration.Type)
+		if kind == httpUnknown && declaration.Line > 0 && declaration.Line <= len(file.Lines) {
+			if match := httpDeclarationTypeRe.FindStringSubmatch(file.Lines[declaration.Line-1]); len(match) == 2 {
+				kind = httpKindFromText(match[1])
+			}
+		}
+		if kind == httpUnknown {
+			return
+		}
+		name := strings.ToLower(strings.TrimSpace(declaration.Name))
+		if name != "" {
+			state.objects[name] = newHTTPObjectState(kind, name)
+		}
+	}
 	// The normal batch/realtime setup attaches ModuleFacts before any rule
 	// worker runs. Do not rebuild facts from a standalone parsedFile on every
 	// statement; retain the old IR fallback for package-local callers that do
@@ -147,6 +162,9 @@ func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnaly
 		facts.forEachConstant(func(constant moduleConstantFact) {
 			httpRecordConstant(&state, constant.Name, constant.Expression)
 		})
+		for _, declaration := range facts.moduleDeclarations {
+			seedDeclaration(declaration)
+		}
 	} else {
 		for _, line := range file.Lines {
 			name, expr, ok := fileConstDeclaration(line)
@@ -156,16 +174,7 @@ func newHTTPAnalysisState(file parsedFile, ir procedureir.ProcedureIR) httpAnaly
 		}
 	}
 	for _, declaration := range ir.Declarations {
-		kind := httpKindFromText(declaration.Type)
-		if kind == httpUnknown && declaration.Range.StartLine > 0 && declaration.Range.StartLine <= len(file.Lines) {
-			if match := httpDeclarationTypeRe.FindStringSubmatch(file.Lines[declaration.Range.StartLine-1]); len(match) == 2 {
-				kind = httpKindFromText(match[1])
-			}
-		}
-		if kind != httpUnknown {
-			name := strings.ToLower(declaration.Name)
-			state.objects[name] = newHTTPObjectState(kind, name)
-		}
+		seedDeclaration(sourceDeclaration{Name: declaration.Name, Type: declaration.Type, Line: declaration.Range.StartLine})
 	}
 	return state
 }

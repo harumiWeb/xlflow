@@ -522,6 +522,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `height_px`
 - `horizontal_alignment`
 - `html_url`
+- `http_dataflow_cfg_walks`
+- `http_dataflow_kernel_runs`
 - `if_statement`
 - `ignore_server_ssl_cert`
 - `image_capture_failed`

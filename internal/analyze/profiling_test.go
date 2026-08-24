@@ -430,6 +430,16 @@ func TestBatchAnalysisRunsOnlyPlannedDataflowLanes(t *testing.T) {
 		}
 	})
 
+	t.Run("generic projection skipped without generic constructs", func(t *testing.T) {
+		counters, _ := run(t, "Option Explicit\nPublic Sub Run()\n  value = 1\nEnd Sub\n", "VBA224")
+		if counters[analysisstats.GenericDataflowSkippedRunsCounter] != 1 || counters[analysisstats.GenericDataflowPlannedRunsCounter] != 0 {
+			t.Fatalf("generic planner counters = %+v", counters)
+		}
+		if counters[analysisstats.GenericDataflowKernelRunsCounter] != 0 || counters[analysisstats.GenericDataflowCFGWalksCounter] != 0 {
+			t.Fatalf("generic lane ran without generic constructs: %+v", counters)
+		}
+	})
+
 	t.Run("both lanes preserve deterministic findings", func(t *testing.T) {
 		source := "Option Explicit\nPublic Sub Run()\n  Dim request As Object\n  Dim book As Object\n  Set request = CreateObject(\"MSXML2.XMLHTTP\")\n  request.Open \"GET\", \"http://example.test\", False\n  request.Send\n  Set book = Workbooks.Open(path)\nEnd Sub\n"
 		counters, first := run(t, source, "VBA224", "VBA246")

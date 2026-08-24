@@ -817,9 +817,11 @@ func httpProcedureHasSensitiveLogging(proc sourceProcedure) bool {
 			sensitive: map[string]bool{},
 		}
 		proc.ModuleFacts.forEachConstantForProcedure(proc, func(constant moduleConstantFact) {
-			httpRecordConstant(&constantState, constant.Name, constant.Expression)
-			if constantState.sensitive[strings.ToLower(strings.TrimSpace(constant.Name))] {
-				sensitiveNames[strings.ToLower(strings.TrimSpace(constant.Name))] = true
+			name := strings.TrimSpace(constant.Name)
+			httpRecordConstant(&constantState, name, constant.Expression)
+			key := strings.ToLower(name)
+			if constantState.sensitive[key] {
+				sensitiveNames[key] = true
 			}
 		})
 	}

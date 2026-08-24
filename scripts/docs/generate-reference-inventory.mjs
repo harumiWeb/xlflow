@@ -110,6 +110,10 @@ const excludedErrorInventoryLiterals = new Set([
   "role_list",
   "third_party",
 ]);
+const includedTelemetryInventoryLiterals = new Set([
+  "http_dataflow_cfg_walks",
+  "http_dataflow_kernel_runs",
+]);
 const errors = [
   ...new Set([...source.matchAll(/"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g)].map((m) => m[1])),
 ]
@@ -117,7 +121,7 @@ const errors = [
     (code) =>
       code.length < 80 &&
       !code.startsWith("go_") &&
-      !code.startsWith("http_") &&
+      (!code.startsWith("http_") || includedTelemetryInventoryLiterals.has(code)) &&
       code !== "default_enabled" &&
       code !== "default_severity" &&
       !excludedErrorInventoryLiterals.has(code),
