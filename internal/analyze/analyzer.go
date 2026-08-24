@@ -342,14 +342,25 @@ type analysisContext struct {
 	arrayModuleEntryStates           arrayModuleEntryStates
 	arrayPrivateTargets              map[string]sourceProcedure
 	arrayParticipants                map[string]bool
-	arrayStats                       *arrayInterproceduralStats
-	arrayByRefEntryStates            map[string]map[int]bool
-	arrayByRefEntryConditions        map[string]map[int]string
-	procedures                       map[string]procedureSignature
-	procedureResolver                procedureir.Resolver
-	objectAnalysis                   *objectAnalysisContext
-	worksheetCodenames               map[string]string
-	projectEffects                   effects.ProjectSummary
+	// arrayInterproceduralParticipants excludes complete procedures whose only
+	// evidence is an unknown array capability. Those procedures remain in the
+	// local participant plan for fail-open diagnostics, but cannot by themselves
+	// widen every fixed-point lane in a large module.
+	arrayInterproceduralParticipants map[string]bool
+	// arrayIgnoreFeatureUnknown is used only while deriving the legacy
+	// interprocedural boundary. Complete IR with an unknown array capability is
+	// retained in the local participant plan, but the fixed-point boundary is
+	// kept compatible with the proven semantic closure unless a real seed
+	// reaches that procedure.
+	arrayIgnoreFeatureUnknown bool
+	arrayStats                *arrayInterproceduralStats
+	arrayByRefEntryStates     map[string]map[int]bool
+	arrayByRefEntryConditions map[string]map[int]string
+	procedures                map[string]procedureSignature
+	procedureResolver         procedureir.Resolver
+	objectAnalysis            *objectAnalysisContext
+	worksheetCodenames        map[string]string
+	projectEffects            effects.ProjectSummary
 }
 
 type arrayInterproceduralStats struct {
@@ -2191,6 +2202,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants = buildArrayParticipantSet(files, ctx)
+		ctx.arrayInterproceduralParticipants = buildArrayInterproceduralParticipantSet(files, ctx, ctx.arrayParticipants)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants)
 		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)

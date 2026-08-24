@@ -2001,7 +2001,7 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 			module := strings.ToLower(strings.TrimSpace(proc.Module))
 			moduleArrayUsers[module] = append(moduleArrayUsers[module], key)
 		}
-		if procedureArrayFactsUncertain(proc) {
+		if arrayParticipantFactsUncertain(proc, ctx.arrayIgnoreFeatureUnknown) {
 			// Recovered statements, missing CFGs, and conditional IR facts are
 			// bounded uncertainty. Keep the known module-array cluster fail-open
 			// until resolution can prove a smaller dependency boundary.
@@ -2082,7 +2082,7 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 		}
 	}
 	closeArrayParticipantClosure(participants, adjacency, reverse)
-	addResolvedCallerBoundary(participants, resolvedReverse, all, byModule)
+	addResolvedCallerBoundary(participants, resolvedReverse, all, byModule, ctx.arrayIgnoreFeatureUnknown)
 	closeArrayParticipantClosure(participants, adjacency, reverse)
 	globalFallback := false
 	for key := range uncertainFacts {
@@ -2103,6 +2103,12 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 	}
 	for key := range uncertainCalls {
 		if !participants[key] {
+			continue
+		}
+		// An unknown-only procedure remains a local participant for fail-open
+		// diagnostics, but it must not open an entire giant module before a
+		// semantic array seed reaches the uncertainty boundary.
+		if !intrinsicSeeds[key] && !ctx.arrayIgnoreFeatureUnknown {
 			continue
 		}
 		module := strings.ToLower(strings.TrimSpace(all[key].Module))
@@ -2129,9 +2135,105 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 	return participants
 }
 
+// buildArrayInterproceduralParticipantSet keeps the local fail-open plan
+// separate from the fixed-point scope. A complete procedure that has no
+// semantic array seed but carries an unknown array capability must retain its
+// local array kernel/projection; it must not, by itself, make every array
+// summary and module-entry solver walk the surrounding module.
+func buildArrayInterproceduralParticipantSet(files []parsedFile, ctx analysisContext, participants map[string]bool) map[string]bool {
+	if len(participants) == 0 {
+		return map[string]bool{}
+	}
+	// Rebuild the fixed-point boundary with feature-unknown bits ignored. This
+	// preserves the proven semantic closure used before an unknown-only local
+	// participant was added, while the outer participant plan still retains that
+	// procedure for local fail-open diagnostics.
+	legacyCtx := ctx
+	legacyCtx.arrayIgnoreFeatureUnknown = true
+	legacy := buildArrayParticipantSet(files, legacyCtx)
+	legacyResult := make(map[string]bool, len(legacy))
+	for key := range legacy {
+		if participants[key] {
+			legacyResult[key] = true
+		}
+	}
+	all := make(map[string]sourceProcedure, len(participants))
+	fileByKey := make(map[string]parsedFile, len(participants))
+	byQualified := make(map[string]string, len(participants))
+	moduleSizes := make(map[string]int)
+	for _, file := range files {
+		procedures := file.procedureView()
+		for index := 0; index < procedures.Len(); index++ {
+			proc := procedures.valueAt(index)
+			key := arrayProcedureKey(proc)
+			if key == "" {
+				continue
+			}
+			all[key] = proc
+			fileByKey[key] = file
+			moduleSizes[strings.ToLower(strings.TrimSpace(proc.Module))]++
+			qualified := strings.ToLower(strings.TrimSpace(proc.Module + "." + proc.Name))
+			if qualified != "." {
+				byQualified[qualified] = key
+			}
+		}
+	}
+	index := buildArrayCandidateIndex(all)
+	connected := make(map[string]bool)
+	for key, proc := range all {
+		if !participants[key] {
+			continue
+		}
+		for call := range proc.Calls.All() {
+			resolution := call.Resolution
+			if ctx.procedureResolver != nil {
+				resolution = ctx.procedureResolver.ResolveCall(call)
+			}
+			addCandidate := func(candidate procedureir.Candidate) {
+				target := byQualified[strings.ToLower(strings.TrimSpace(candidate.QualifiedName))]
+				if target == "" {
+					target = arrayCandidateKey(candidate, all, index)
+				}
+				if target == "" || !participants[target] {
+					return
+				}
+				if legacy[key] {
+					connected[target] = true
+				}
+				if legacy[target] {
+					connected[key] = true
+				}
+			}
+			switch resolution.Status {
+			case procedureir.ResolutionMatched, procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete:
+				for _, candidate := range resolution.Candidates {
+					addCandidate(candidate)
+				}
+			}
+		}
+	}
+	for key := range connected {
+		if legacyResult[key] {
+			continue
+		}
+		proc := all[key]
+		if !procedureArrayFactsUncertain(proc) || !procedureHasCompleteArrayFacts(proc) || proc.Features.unknown&arrayParticipantUnknownFeatures == 0 {
+			continue
+		}
+		module := strings.ToLower(strings.TrimSpace(proc.Module))
+		if moduleSizes[module] > arrayResolvedCallerModuleLimit {
+			if !procedureHasDirectModuleArrayOperation(fileByKey[key], proc, fileByKey[key].moduleDecls()) {
+				continue
+			}
+		}
+		legacyResult[key] = true
+	}
+	return legacyResult
+}
+
 const arrayResolvedCallerModuleLimit = 512
 
-func addResolvedCallerBoundary(participants map[string]bool, reverse map[string]map[string]bool, all map[string]sourceProcedure, byModule map[string][]string) {
+func addResolvedCallerBoundary(participants map[string]bool, reverse map[string]map[string]bool, all map[string]sourceProcedure, byModule map[string][]string, ignoreFeatureUnknown bool) {
 	keys := make([]string, 0, len(participants))
 	for key := range participants {
 		keys = append(keys, key)
@@ -2139,7 +2241,7 @@ func addResolvedCallerBoundary(participants map[string]bool, reverse map[string]
 	sort.Strings(keys)
 	for _, target := range keys {
 		procedure, ok := all[target]
-		if !ok || procedureArrayFactsUncertain(procedure) || len(byModule[strings.ToLower(strings.TrimSpace(procedure.Module))]) > arrayResolvedCallerModuleLimit {
+		if !ok || arrayParticipantFactsUncertain(procedure, ignoreFeatureUnknown) || len(byModule[strings.ToLower(strings.TrimSpace(procedure.Module))]) > arrayResolvedCallerModuleLimit {
 			continue
 		}
 		for caller := range reverse[target] {
@@ -2151,7 +2253,7 @@ func addResolvedCallerBoundary(participants map[string]bool, reverse map[string]
 const arrayParticipantUnknownFeatures = featureArray | featureRangeArray | featureObject
 
 func procedureArraySeed(proc sourceProcedure) bool {
-	if proc.Features.present&(featureArray|featureRangeArray) != 0 || proc.Features.unknown&arrayParticipantUnknownFeatures != 0 {
+	if proc.Features.present&(featureArray|featureRangeArray) != 0 {
 		return true
 	}
 	// Resolved scalar calls without array-shaped evidence remain excluded. Any
@@ -2167,28 +2269,49 @@ func procedureArrayFactsUncertain(proc sourceProcedure) bool {
 	if proc.IR == nil {
 		return proc.Features.unknown != 0
 	}
+	return !procedureHasCompleteArrayFacts(proc)
+}
+
+func arrayParticipantFactsUncertain(proc sourceProcedure, ignoreFeatureUnknown bool) bool {
+	if !ignoreFeatureUnknown {
+		return procedureArrayFactsUncertain(proc)
+	}
+	if proc.IR == nil {
+		return proc.Features.unknown != 0
+	}
+	return !procedureHasCompleteArrayFacts(proc)
+}
+
+// procedureHasCompleteArrayFacts reports whether the procedure's structural
+// IR facts are complete. Feature unknowns are intentionally checked by the
+// caller so complete IR with an unknown array capability can remain a local
+// fail-open participant without widening the interprocedural scope.
+func procedureHasCompleteArrayFacts(proc sourceProcedure) bool {
+	if proc.IR == nil {
+		return false
+	}
 	if proc.Document == nil || proc.Document.Parse.HasError || proc.Document.Parse.HasMissing || proc.IR.Symbol.Recovered || len(proc.IR.Symbol.ConditionalBranches) > 0 || proc.Graph == nil {
-		return true
+		return false
 	}
 	if len(proc.Graph.UnknownFlowSources) > 0 {
-		return true
+		return false
 	}
 	for declaration := range proc.Declarations.All() {
 		if declaration.Recovered || len(declaration.ConditionalBranches) > 0 {
-			return true
+			return false
 		}
 	}
 	for statement := range proc.Statements.All() {
 		if statement.Recovered || statement.Kind == procedureir.StatementUnknown || statement.Kind == procedureir.StatementRecovered || len(statement.ConditionalBranches) > 0 {
-			return true
+			return false
 		}
 	}
 	for expression := range proc.Expressions.All() {
 		if expression.Recovered || expression.Kind == procedureir.ExpressionUnknown && !isKnownNonValueExpressionSyntax(expression.SyntaxKind) {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func closeArrayParticipantClosure(participants map[string]bool, adjacency, reverse map[string]map[string]bool) {
@@ -2310,6 +2433,54 @@ func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls
 	return false
 }
 
+func procedureHasDirectModuleArrayOperation(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	for statement := range proc.Statements.All() {
+		text := strings.TrimSpace(statement.Text)
+		for name, declaration := range moduleDecls {
+			if declaration.Array && !declaration.Parameter && moduleArrayIndexedIdentifier(text, name) {
+				return true
+			}
+		}
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct {
+					if declaration, ok := moduleDecls[strings.ToLower(cleanIdentifier(redim.name))]; ok && declaration.Array && !declaration.Parameter {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func moduleArrayIndexedIdentifier(text, name string) bool {
+	text = strings.ToLower(text)
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	for start := 0; start <= len(text)-len(name); {
+		relative := strings.Index(text[start:], name)
+		if relative < 0 {
+			return false
+		}
+		index := start + relative
+		end := index + len(name)
+		if (index == 0 || !isIdentifierPart(text[index-1])) && (end == len(text) || !isIdentifierPart(text[end])) {
+			for end < len(text) && (text[end] == ' ' || text[end] == '\t') {
+				end++
+			}
+			if end < len(text) && text[end] == '(' {
+				return true
+			}
+		}
+		start = index + len(name)
+	}
+	return false
+}
+
 func procedureHasArrayForEach(proc sourceProcedure) bool {
 	for statement := range proc.Statements.All() {
 		if statement.Kind == procedureir.StatementForEach {
@@ -2398,10 +2569,14 @@ func arrayCandidateKey(candidate procedureir.Candidate, all map[string]sourcePro
 }
 
 func arrayProcedureIsParticipant(ctx analysisContext, proc sourceProcedure) bool {
-	if ctx.arrayParticipants == nil {
+	participants := ctx.arrayInterproceduralParticipants
+	if participants == nil {
+		participants = ctx.arrayParticipants
+	}
+	if participants == nil {
 		return true
 	}
-	return ctx.arrayParticipants[arrayProcedureKey(proc)]
+	return participants[arrayProcedureKey(proc)]
 }
 
 func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext, targets map[string]sourceProcedure) arrayByRefAllocationSummaries {

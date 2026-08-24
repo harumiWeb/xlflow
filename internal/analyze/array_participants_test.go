@@ -227,6 +227,58 @@ func TestBuildArrayParticipantSetFailsOpenForUnknownOnlyProcedure(t *testing.T) 
 	}
 }
 
+func TestArrayInterproceduralBoundaryAdmitsConnectedUnknownArrayOperation(t *testing.T) {
+	matched := func(callee, caller string) procedureir.CallSite {
+		return procedureir.CallSite{
+			Caller: procedureir.ProcedureRef{QualifiedName: caller},
+			Callee: procedureir.Callee{BaseName: callee, Text: callee},
+			Resolution: procedureir.CallResolution{
+				Status:     procedureir.ResolutionMatched,
+				Candidates: []procedureir.Candidate{{QualifiedName: "M." + callee}},
+			},
+		}
+	}
+	worker := sourceProcedure{
+		Module:   "M",
+		Name:     "ArrayWorker",
+		Features: procedureFeatureSet{present: featureArray},
+		Calls:    newReadOnlySpan([]procedureir.CallSite{matched("UnknownArray", "M.ArrayWorker")}),
+	}
+	unknownArray := sourceProcedure{
+		Module:     "M",
+		Name:       "UnknownArray",
+		Document:   &procedureir.DocumentIR{},
+		IR:         &procedureir.ProcedureIR{},
+		Graph:      &cfg.Graph{},
+		Features:   procedureFeatureSet{unknown: featureArray},
+		Statements: newReadOnlySpan([]procedureir.Statement{{Text: "values(1) = 0"}}),
+	}
+	unrelatedUnknown := sourceProcedure{
+		Module:   "M",
+		Name:     "UnrelatedUnknown",
+		Document: &procedureir.DocumentIR{},
+		IR:       &procedureir.ProcedureIR{},
+		Graph:    &cfg.Graph{},
+		Features: procedureFeatureSet{unknown: featureArray},
+	}
+	file := parsedFile{
+		Path: "M.bas", Module: "M",
+		ModuleDeclarations: map[string]sourceDeclaration{"values": {Name: "values", Array: true}},
+		Procedures:         []sourceProcedure{worker, unknownArray, unrelatedUnknown},
+	}
+	participants := buildArrayParticipantSet([]parsedFile{file}, analysisContext{})
+	interprocedural := buildArrayInterproceduralParticipantSet([]parsedFile{file}, analysisContext{}, participants)
+	if !participants["m.unknownarray"] || !participants["m.unrelatedunknown"] {
+		t.Fatalf("unknown local participants = %#v", participants)
+	}
+	if !interprocedural["m.unknownarray"] {
+		t.Fatalf("connected unknown array operation was excluded from fixed-point boundary: %#v", interprocedural)
+	}
+	if interprocedural["m.unrelatedunknown"] {
+		t.Fatalf("unrelated unknown procedure widened fixed-point boundary: %#v", interprocedural)
+	}
+}
+
 func TestCloneArrayNameSetPreservesUnknownEntryState(t *testing.T) {
 	input := map[string]bool{"allocated": true, "unknown": false}
 	got := cloneArrayNameSet(input)
