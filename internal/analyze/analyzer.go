@@ -2628,7 +2628,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 			findings = append(findings, objectFindings...)
 		}
 	}
-	if plan.runsAnyProjection(procedureProjectionArrayLifecycle, procedureProjectionArrayRedim) {
+	if plan.runsAnyProjection(procedureProjectionArrayLifecycle, procedureProjectionArrayRedim, procedureProjectionArrayComparison) {
 		arrayMeasurement := profile.begin(procedureDomainArray)
 		arrayFindings := []Finding(nil)
 		if result := resultStore.arrayProjection(profile); result != nil {

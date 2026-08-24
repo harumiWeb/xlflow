@@ -1800,6 +1800,42 @@ End Sub
 	}
 }
 
+func TestAnalyzerAndRealtimeFindArrayComparison(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  Dim values() As Variant
+  Dim scalar As Variant
+  If values = scalar Then Debug.Print "same"
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = false
+	cfg.Analyze.DetectRedimPreserveDimension = false
+	cfg.Analyze.DetectRedimPreserveInLoops = false
+	cfg.Analyze.DetectRangeValueArrayShape = false
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchFindings := findingsByCode(batch, "VBA209")
+	realtimeFindings := findingsByCode(realtime, "VBA209")
+	if len(batchFindings) != 1 || len(realtimeFindings) != 1 {
+		t.Fatalf("batch/realtime array VBA209 findings = %+v / %+v, want one each", batchFindings, realtimeFindings)
+	}
+	if batchFindings[0].Line != realtimeFindings[0].Line {
+		t.Fatalf("batch/realtime array VBA209 lines = %d / %d, want equal", batchFindings[0].Line, realtimeFindings[0].Line)
+	}
+}
+
 func TestAnalyzerDetectsAmbiguousExcelScopeRoots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
