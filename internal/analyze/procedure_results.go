@@ -25,12 +25,12 @@ func (s *procedureSemanticResultStore) materializeArray(cancelCtx context.Contex
 		return a.buildArrayAnalysisResultContext(cancelCtx, file, proc, ctx, moduleDecls, plan)
 	}
 	if !s.arrayBuilt {
-		s.arrayBuilt = true
-		var err error
-		s.array, err = a.buildArrayAnalysisResultContext(cancelCtx, file, proc, ctx, moduleDecls, plan)
+		array, err := a.buildArrayAnalysisResultContext(cancelCtx, file, proc, ctx, moduleDecls, plan)
 		if err != nil {
 			return nil, err
 		}
+		s.array = array
+		s.arrayBuilt = true
 	}
 	return s.array, nil
 }

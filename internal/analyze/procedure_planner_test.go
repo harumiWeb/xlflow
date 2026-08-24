@@ -324,6 +324,14 @@ func TestProcedurePlannerRecognizesParenthesizedFileAndSpacedWorkbookCalls(t *te
 	}
 }
 
+func TestProcedurePlannerIgnoresUnrelatedOpenText(t *testing.T) {
+	var features procedureFeatureSet
+	features.observeText(`Debug.Print "open text"`)
+	if features.mayHave(featureFileIO) || features.mayHave(featureResourceAcquire) {
+		t.Fatalf("unrelated open text was classified as file/resource I/O: %#v", features)
+	}
+}
+
 func TestProcedurePlannerRecognizesDataflowSinkTextForms(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -172,9 +172,6 @@ func (features *procedureFeatureSet) observeText(text string) {
 	if containsAny(lower, "xmlhttp", "winhttprequest", ".open(\"get", ".open(\"post", "open \"get", "open \"post", "open \"put", "open \"delete", "open \"patch", "setrequestheader", ".send") {
 		features.add(featureDataflow | featureHTTP)
 	}
-	if containsAny(lower, "kill ", "kill(", "rmdir ", "rmdir(", "filecopy ", "filecopy(", " open ", "open ", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") || looksLikeFileRename(lower) {
-		features.add(featureDataflow | featureFileIO)
-	}
 	compactMemberText := lower
 	if strings.Contains(lower, "workbooks") && strings.Contains(lower, ".") {
 		compactMemberText = strings.Map(func(r rune) rune {
@@ -184,7 +181,15 @@ func (features *procedureFeatureSet) observeText(text string) {
 			return r
 		}, lower)
 	}
-	if containsAny(compactMemberText, "workbooks.open") || strings.Contains(lower, "open ") {
+	trimmedLower := strings.TrimSpace(lower)
+	openStatement := strings.HasPrefix(trimmedLower, "open ")
+	openMember := strings.Contains(lower, ".open") || strings.Contains(compactMemberText, ".open")
+	httpOpen := containsAny(lower, ".open(\"get", ".open(\"post", "open \"get", "open \"post", "open \"put", "open \"delete", "open \"patch")
+	fileOpen := openStatement || (openMember && !httpOpen)
+	if containsAny(lower, "kill ", "kill(", "rmdir ", "rmdir(", "filecopy ", "filecopy(", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") || fileOpen || looksLikeFileRename(lower) {
+		features.add(featureDataflow | featureFileIO)
+	}
+	if containsAny(compactMemberText, "workbooks.open") || fileOpen {
 		features.add(featureResourceAcquire)
 	}
 	if containsAny(compactMemberText, "workbooks.open", "saveas") {

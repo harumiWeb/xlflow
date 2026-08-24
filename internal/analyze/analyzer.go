@@ -1840,7 +1840,11 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		procedureProjectionDictionaryCollectionMutation,
 		procedureProjectionDictionaryIndexOrigin,
 	) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
-		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
+		dictionaryFindings, err := a.dictionaryCollectionSafetyFindings(ctx, file, proc, moduleDecls)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, dictionaryFindings...)
 	}
 	if plan.runsProjection(procedureProjectionDictionaryIteration) && a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
@@ -2444,7 +2448,11 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		procedureProjectionDictionaryIndexOrigin,
 	) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		dictionaryMeasurement := profile.begin(procedureDomainDictionary)
-		dictionaryFindings := a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)
+		dictionaryFindings, err := a.dictionaryCollectionSafetyFindings(cancelCtx, file, proc, moduleDecls)
+		if err != nil {
+			dictionaryMeasurement.finishOutcome(cancelCtx, 0, err)
+			return nil, err
+		}
 		if proc.Graph != nil {
 			profile.kernel()
 			profile.candidate(&candidateCounters, analysisstats.CounterDictionaryCandidateProcedures)
