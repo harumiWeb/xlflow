@@ -879,6 +879,9 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 		if requirement.projectOnly {
 			continue
 		}
+		if proc.ArrayParticipantReady && !proc.ArrayParticipant && requirement.domain == analysisstats.DomainArray {
+			continue
+		}
 		enabled := requirement.always
 		if !enabled {
 			var known bool
@@ -950,6 +953,58 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 		procedures[i].PlanReady = true
 	}
 	file.Procedures = procedures
+}
+
+// materializeArrayParticipantPlans applies the resolved array closure after
+// project resolution. The first planning pass remains intentionally broad so
+// capability discovery cannot miss a module-array dependency; this pass is
+// the execution boundary that removes array work from proven-unrelated
+// procedures.
+func materializeArrayParticipantPlans(files []parsedFile, cfg config.AnalyzeConfig, participants map[string]bool) {
+	for fileIndex := range files {
+		file := &files[fileIndex]
+		procedures := file.Procedures
+		if procedures == nil {
+			procedures = sourceProceduresFromIRRef(&file.IR, file.CFG)
+		}
+		for index := range procedures {
+			proc := procedures[index]
+			proc.ArrayParticipant = participants[arrayProcedureKey(proc)]
+			proc.ArrayParticipantReady = true
+			if proc.PlanReady {
+				proc.Plan = restrictArrayProcedurePlan(proc.Plan, proc.ArrayParticipant)
+			}
+			procedures[index] = proc
+		}
+		file.Procedures = procedures
+		// Compatibility callers can enter this phase without a first planning
+		// pass. Production revisions already have a plan with propagated effects;
+		// preserve that plan and only restrict its array work above.
+		needsMaterialization := false
+		for index := range procedures {
+			if !procedures[index].PlanReady {
+				needsMaterialization = true
+				break
+			}
+		}
+		if needsMaterialization {
+			materializeProcedureAnalysisPlans(file, effects.ProjectSummary{}, cfg)
+		}
+	}
+}
+
+func restrictArrayProcedurePlan(plan procedureAnalysisPlan, participant bool) procedureAnalysisPlan {
+	if participant {
+		return plan
+	}
+	plan.planned &^= procedureDomainBit(procedureDomainArray)
+	plan.plannedKernels &^= procedureKernelBit(procedureKernelArray)
+	for projection := procedureProjectionRuntime; projection < procedureProjectionLimit; projection++ {
+		if kernel, ok := procedureKernelForProjection(projection); ok && kernel == procedureKernelArray {
+			plan.plannedProjections &^= procedureProjectionBit(projection)
+		}
+	}
+	return plan
 }
 
 func projectPlansDomain(cfg config.AnalyzeConfig, files []parsedFile, projectEffects effects.ProjectSummary, domain analysisstats.Domain) bool {

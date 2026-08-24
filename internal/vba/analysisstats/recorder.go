@@ -91,6 +91,7 @@ type WorkCounter uint8
 const (
 	CounterRuntimeCandidateProcedures WorkCounter = iota
 	CounterArrayCandidateProcedures
+	CounterArrayParticipantProcedures
 	CounterObjectCandidateProcedures
 	CounterDictionaryCandidateProcedures
 	CounterErrorCandidateProcedures
@@ -101,6 +102,7 @@ const (
 	CounterSourceLineScans
 	CounterRuntimeCFGWalks
 	CounterArrayCFGWalks
+	CounterArrayInterproceduralCFGWalks
 	CounterDictionaryCFGWalks
 	CounterErrorCFGWalks
 	CounterDataflowCFGWalks
@@ -135,6 +137,7 @@ const (
 	CounterApplicationStateSkippedRuns
 	CounterArrayKernelRuns
 	CounterArrayProjectionRuns
+	CounterArrayWorklistRevisits
 	CounterAnalysisPlans
 	CounterPlannedKernelRuns
 	CounterSkippedKernelRuns
@@ -151,6 +154,7 @@ const WorkCounterCount = counterCount
 const (
 	RuntimeCandidateProceduresCounter          = "runtime_candidate_procedures"
 	ArrayCandidateProceduresCounter            = "array_candidate_procedures"
+	ArrayParticipantProceduresCounter          = "array_participant_procedures"
 	ObjectCandidateProceduresCounter           = "object_candidate_procedures"
 	DictionaryCandidateProceduresCounter       = "dictionary_candidate_procedures"
 	ErrorCandidateProceduresCounter            = "error_candidate_procedures"
@@ -161,6 +165,7 @@ const (
 	SourceLineScansCounter                     = "source_line_scans"
 	RuntimeCFGWalksCounter                     = "runtime_cfg_walks"
 	ArrayCFGWalksCounter                       = "array_cfg_walks"
+	ArrayInterproceduralCFGWalksCounter        = "array_interprocedural_cfg_walks"
 	DictionaryCFGWalksCounter                  = "dictionary_cfg_walks"
 	ErrorCFGWalksCounter                       = "error_cfg_walks"
 	DataflowCFGWalksCounter                    = "dataflow_cfg_walks"
@@ -195,6 +200,7 @@ const (
 	ApplicationStateSkippedRunsCounter         = "skipped_application_state_runs"
 	ArrayKernelRunsCounter                     = "array_kernel_runs"
 	ArrayProjectionRunsCounter                 = "array_projection_runs"
+	ArrayWorklistRevisitsCounter               = "array_worklist_revisits"
 	AnalysisPlansCounter                       = "analysis_plans"
 	PlannedKernelRunsCounter                   = "planned_kernel_runs"
 	SkippedKernelRunsCounter                   = "skipped_kernel_runs"
@@ -204,6 +210,7 @@ const (
 var counterNames = [...]string{
 	RuntimeCandidateProceduresCounter,
 	ArrayCandidateProceduresCounter,
+	ArrayParticipantProceduresCounter,
 	ObjectCandidateProceduresCounter,
 	DictionaryCandidateProceduresCounter,
 	ErrorCandidateProceduresCounter,
@@ -214,6 +221,7 @@ var counterNames = [...]string{
 	SourceLineScansCounter,
 	RuntimeCFGWalksCounter,
 	ArrayCFGWalksCounter,
+	ArrayInterproceduralCFGWalksCounter,
 	DictionaryCFGWalksCounter,
 	ErrorCFGWalksCounter,
 	DataflowCFGWalksCounter,
@@ -248,6 +256,7 @@ var counterNames = [...]string{
 	ApplicationStateSkippedRunsCounter,
 	ArrayKernelRunsCounter,
 	ArrayProjectionRunsCounter,
+	ArrayWorklistRevisitsCounter,
 	AnalysisPlansCounter,
 	PlannedKernelRunsCounter,
 	SkippedKernelRunsCounter,

@@ -4,6 +4,16 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Restricted array interprocedural fixed-point planning to semantic
+  participants discovered from array operations, parameters/returns,
+  ByRef/module-state dependencies, and resolved caller/callee closure.
+  Deterministic worklist requeues now avoid rescanning unchanged participants,
+  while unresolved, dynamic, recovered, and incomplete boundaries fail open
+  within the smallest known dependency boundary. Added developer-only
+  `array_participant_procedures`, `array_interprocedural_cfg_walks`, and
+  `array_worklist_revisits` telemetry; diagnostic, snapshot, CLI JSON, and LSP
+  contracts remain unchanged.
+
 - Precomputed immutable module semantic facts once per module/revision,
   including conservative `Option Private Module` state and the compact array
   operation observations used by idempotent setup analysis. Procedure workers

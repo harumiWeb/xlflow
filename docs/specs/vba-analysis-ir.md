@@ -446,6 +446,55 @@ are safe for concurrent readers. The performance recorder reports one
 gated domain. These are opt-in stderr telemetry only and do not change normal
 CLI JSON, LSP, diagnostic, or configuration contracts.
 
+#### Array participant closure
+
+Array interprocedural planning derives one immutable participant set per
+analysis revision after resolution and module facts are complete enough for
+the closure. Seeds are procedures with direct array operations or accesses,
+array parameters or returns (including `ParamArray`), object-array use, or a
+module-array read/write. A module-array declaration with no procedure access
+does not seed unrelated procedures.
+
+The closure follows semantically array-shaped resolved callees and reverse
+callers, array ByRef arguments/results, array-return chains, shared module-array users, and
+initializer/setup/helper edges for class, document, and UserForm modules. It
+is built from stable procedure identity and source ordinal; adjacency and the
+worklist are sorted before traversal. `inferArrayReturnSummaries`, ByRef and
+module allocation, module-entry state, and ByRef-entry state all receive this
+same set. A procedure outside the set must not be scanned by an array
+interprocedural fixed point when its absence is proven.
+
+For resolved reverse callers, the planner permits one additional hop only when
+the target has complete facts and its module contains at most 512 procedures.
+This preserves short wrapper/helper chains while preventing a generic call hub
+in a giant module from expanding the array closure; a caller with its own
+array seed is still included independently. Recovered or incomplete targets
+use the bounded uncertainty policy below.
+
+Fail-open is bounded by the best available ownership boundary. An ambiguous
+call keeps all resolved candidates and the related SCC; an unresolved or
+dynamic call keeps known project-local candidates, or the containing module
+when target identity is unavailable. External/member calls preserve unknown
+state without adding unrelated project procedures. Recovered/incomplete IR
+expands through known procedures, SCCs, and the module-array cluster before
+using the containing module. Inputs with no reliable module/file ownership
+retain the complete-project fallback for compatibility. This policy preserves
+array propagation through module state, ByRef arrays, returns, and
+initializers while retaining compile-equivalent `VBA101` and `VBA102` results.
+
+The array fixed point uses a deterministic source-ordinal worklist and keeps
+per-participant contributions. Only a changed summary or entry contribution
+requeues dependent participants; unchanged participants are not rescanned on
+every iteration. Cancellation checkpoints remain active in both participant
+planning and CFG walks.
+
+Participant telemetry is developer-only and additive:
+`array_participant_procedures` counts unique closure participants,
+`array_interprocedural_cfg_walks` counts started CFG walks in array summary or
+entry fixed points, and `array_worklist_revisits` counts post-initial
+participant evaluations. Existing local `array_cfg_walks` and candidate
+counters keep their prior meanings.
+
 ### Project semantic capabilities
 
 Procedure applicability is only one input to project analysis planning. After
@@ -582,6 +631,15 @@ proven irrelevant), and `semantic_results_reused` (additional projections
 reading an already materialized immutable result). These counters never appear
 in normal analysis JSON or LSP diagnostics and do not change public
 configuration or API contracts.
+
+Array participant planning additionally reports
+`array_participant_procedures`, `array_interprocedural_cfg_walks`, and
+`array_worklist_revisits`. These counters describe one revision's semantic
+closure and fixed-point work; they are not findings and are not a public IR,
+CLI, JSON, or LSP field. The participant counter is a unique closure size,
+the interprocedural CFG counter counts walks actually started by array
+summaries/entry propagation, and the revisit counter excludes each
+participant's initial evaluation.
 
 Data-flow lane telemetry additionally exposes
 `planned_generic_dataflow_runs`, `skipped_generic_dataflow_runs`,

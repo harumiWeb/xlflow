@@ -1655,6 +1655,88 @@ change was accepted as part of this performance work. `rtk task corpus:metrics`
 and two verify-only `rtk task corpus:test` runs are required before merging;
 any snapshot delta remains a stop-and-investigate condition.
 
+### Semantic array participant verification record (#712)
+
+Issue #712 restricts array interprocedural fixed points to the semantic
+participant closure while preserving the existing array lattice and diagnostic
+contracts. The closure is seeded by direct array operations, array parameters
+or returns, object-array operations, and module-array accesses. It follows
+resolved calls, reverse callers, array ByRef/return edges, module-state
+boundaries, and initializer/helper chains. Unresolved, dynamic, ambiguous,
+recovered, and incomplete inputs must fail open at the smallest known
+module/SCC/dependency boundary; missing ownership retains the complete-project
+fallback. This section records the required before/after evidence; counters
+alone are not evidence of a diagnostic change.
+
+Resolved reverse-caller expansion is bounded for giant modules: complete
+modules with at most 512 procedures receive one additional wrapper/helper hop;
+larger modules retain direct semantic edges and independently seeded array
+procedures. This keeps generic call hubs from widening the fixed point while
+preserving the conservative uncertainty fallback.
+
+The focused participant and fixed-point matrix must cover direct and
+transitive dependencies, mutual recursion, array ByRef arguments, array
+returns, module-array users, initializer/helper chains, unrelated scalar
+procedures, and unresolved/dynamic/recovered calls. Compare findings,
+ranges, severity, evidence, multiplicity, ordering, suppression, exit status,
+and normal JSON with a conservative-all reference. Confirm `VBA101` and
+`VBA102` compile-equivalent behavior explicitly.
+
+Run the focused tests and race checks through the Windows Go wrapper:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze ./internal/vba/analysisstats ./internal/lspserver
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze ./internal/vba/analysisstats
+```
+
+The synthetic benchmark must include a 2,000-procedure module with a small
+array dependency graph and many unrelated scalar procedures. Record
+`array_candidate_procedures`, `array_participant_procedures`,
+`array_cfg_walks`, `array_interprocedural_cfg_walks`, and
+`array_worklist_revisits` together with `ns/op`, `B/op`, and `allocs/op`.
+For `BenchmarkRealWorldCorpus/ronecone/analyze-only`, use five serial
+`-benchtime=1x` samples on the same revision and machine, and retain CPU and
+heap profiles for the before/after comparison. The participant and
+interprocedural CFG counts should decrease substantially while small and
+medium module allocation medians remain within the repository's +2%
+observational guard.
+
+On 2026-08-24 (Windows, 12th Gen Intel(R) Core(TM) i7-12700, Go 1.26.6,
+same checkout revision), the five serial `ronecone/analyze-only` samples had
+these medians:
+
+| revision         | wall ns/op | array candidates | array CFG walks | interprocedural CFG walks | worklist revisits |
+| ---------------- | ---------: | ---------------: | --------------: | ------------------------: | ----------------: |
+| HEAD before #712 |     14.9e9 |            1,565 |           1,579 |          not instrumented |  not instrumented |
+| #712             |      8.7e9 |              474 |             487 |                     1,237 |               300 |
+
+The baseline emitted the pre-existing `array_cfg_walks` counter; the new
+interprocedural counter is emitted only by the #712 implementation, so the
+baseline fixed-point work was compared using its stage/profile evidence. A
+CPU and heap profile was captured for each one-sample run at
+`C:\Users\HARUMI\AppData\Local\Temp\xlflow-array-712\before.cpu.pprof`,
+`before.heap.pprof`, `after.cpu.pprof`, and `after.heap.pprof`.
+
+The 2,000-procedure synthetic module measured 1.06–1.11e9 ns/op,
+approximately 1.39e9 B/op and 10.18e6 allocs/op across five samples, with
+three array candidates/participants, six interprocedural CFG walks, and three
+worklist revisits per analysis. The verify-only corpus snapshot run completed
+without a snapshot delta; no snapshot or review-ledger files were changed.
+
+The corpus commands are verify-only and must be run twice without refreshing
+snapshots:
+
+```powershell
+rtk task corpus:metrics
+rtk task corpus:test
+rtk task corpus:test
+```
+
+Any unexplained snapshot delta, diagnostic identity/range/severity change, or
+non-deterministic participant/worklist order is a stop-and-investigate
+condition. The three new counters are developer-only stderr telemetry and
+must never be copied into snapshots or the diagnostic review ledger.
+
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`
