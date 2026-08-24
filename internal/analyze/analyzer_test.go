@@ -1769,6 +1769,37 @@ End Sub
 	}
 }
 
+func TestAnalyzerAndRealtimeFindObjectComparison(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Option Explicit
+Public Sub Run()
+  Dim ws As Worksheet
+  Set ws = Nothing
+  If ws = Nothing Then Debug.Print "missing"
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "src", "modules", "Main.bas")
+	realtime, err := SourceRealtimeFindings(dir, path, cfg, []byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchFindings := findingsByCode(batch, "VBA209")
+	realtimeFindings := findingsByCode(realtime, "VBA209")
+	if len(batchFindings) != 1 || len(realtimeFindings) != 1 {
+		t.Fatalf("batch/realtime VBA209 findings = %+v / %+v, want one each", batchFindings, realtimeFindings)
+	}
+	if batchFindings[0].Line != realtimeFindings[0].Line {
+		t.Fatalf("batch/realtime VBA209 lines = %d / %d, want equal", batchFindings[0].Line, realtimeFindings[0].Line)
+	}
+}
+
 func TestAnalyzerDetectsAmbiguousExcelScopeRoots(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -1893,6 +1893,14 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		if a.Config.Analyze.DetectRangeFindNothingCheck {
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
 		}
+		if plan.runsProjection(procedureProjectionArrayComparison) && objectNothingEqualityLineIsExecutable(proc, lineNo, stmt) {
+			arrayMeasurement := profile.begin(procedureDomainArray)
+			arrayFindings := a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)
+			profile.kernel()
+			profile.add(analysisstats.CounterArrayCandidateProcedures, 1)
+			arrayMeasurement.finish(len(arrayFindings))
+			findings = append(findings, arrayFindings...)
+		}
 	}
 	if plan.runsProjection(procedureProjectionArrayRangeShape) {
 		if result := resultStore.arrayProjection(profile); result != nil {
