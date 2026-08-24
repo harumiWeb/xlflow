@@ -2148,18 +2148,22 @@ func addResolvedCallerBoundary(participants map[string]bool, reverse map[string]
 	}
 }
 
+const arrayParticipantUnknownFeatures = featureArray | featureRangeArray | featureObject
+
 func procedureArraySeed(proc sourceProcedure) bool {
-	if proc.Features.present&(featureArray|featureRangeArray) != 0 {
+	if proc.Features.present&(featureArray|featureRangeArray) != 0 || proc.Features.unknown&arrayParticipantUnknownFeatures != 0 {
 		return true
 	}
-	// Call uncertainty is recorded separately while building the graph. It is
-	// applied only after an array-shaped seed reaches the boundary, so a scalar
-	// procedure containing an unrelated unresolved/member call cannot seed an
-	// entire giant module by itself.
+	// Resolved scalar calls without array-shaped evidence remain excluded. Any
+	// unresolved/external call that leaves an array capability unknown is a seed
+	// and is bounded by the uncertainty policy below.
 	return false
 }
 
 func procedureArrayFactsUncertain(proc sourceProcedure) bool {
+	if proc.Features.unknown&arrayParticipantUnknownFeatures != 0 {
+		return true
+	}
 	if proc.IR == nil {
 		return proc.Features.unknown != 0
 	}
@@ -2915,8 +2919,8 @@ func cloneArrayNameSet(values map[string]bool) map[string]bool {
 		return nil
 	}
 	clone := make(map[string]bool, len(values))
-	for name := range values {
-		clone[name] = true
+	for name, allocated := range values {
+		clone[name] = allocated
 	}
 	return clone
 }

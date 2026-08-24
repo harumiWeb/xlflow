@@ -9,6 +9,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
+	"github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
@@ -198,20 +199,39 @@ func TestBuildArrayParticipantSetFailsOpenForUnknownOnlyProcedure(t *testing.T) 
 		Name:     "Recovered",
 		Features: procedureFeatureSet{unknown: featureArray},
 	}
+	completeUnknown := sourceProcedure{
+		Module:   "M",
+		Name:     "CompleteUnknown",
+		Document: &procedureir.DocumentIR{},
+		IR:       &procedureir.ProcedureIR{},
+		Graph:    &cfg.Graph{},
+		Features: procedureFeatureSet{unknown: featureArray},
+	}
 	scalar := sourceProcedure{Module: "M", Name: "Scalar"}
 	file := parsedFile{
 		Path: "M.bas", Module: "M",
 		ModuleDeclarations: map[string]sourceDeclaration{
 			"values": {Name: "values", Array: true},
 		},
-		Procedures: []sourceProcedure{recovered, scalar},
+		Procedures: []sourceProcedure{recovered, completeUnknown, scalar},
 	}
 	got := buildArrayParticipantSet([]parsedFile{file}, analysisContext{})
 	if !got["m.recovered"] {
 		t.Fatalf("unknown-only procedure was excluded from fail-open closure: %#v", got)
 	}
+	if !got["m.completeunknown"] {
+		t.Fatalf("complete IR with unknown array capability was excluded from fail-open closure: %#v", got)
+	}
 	if got["m.scalar"] {
 		t.Fatalf("module-only scalar procedure entered unknown-only closure: %#v", got)
+	}
+}
+
+func TestCloneArrayNameSetPreservesUnknownEntryState(t *testing.T) {
+	input := map[string]bool{"allocated": true, "unknown": false}
+	got := cloneArrayNameSet(input)
+	if !reflect.DeepEqual(got, input) {
+		t.Fatalf("cloned module entry state changed evidence: got %#v want %#v", got, input)
 	}
 }
 
