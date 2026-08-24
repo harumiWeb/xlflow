@@ -771,6 +771,7 @@ func TestAnalyzePerformanceLogFlagIsOptInAndPreservesJSON(t *testing.T) {
 		`counter="skipped_array_runs"`, `counter="skipped_excel_runs"`,
 		`counter="skipped_runtime_runs"`, `counter="skipped_dictionary_runs"`,
 		`counter="source_line_scans"`, `counter="semantic_kernel_runs"`,
+		`counter="analysis_plans"`, `counter="skipped_kernel_runs"`,
 	} {
 		if !strings.Contains(profiledStderr, expected) {
 			t.Fatalf("performance output missing %q:\n%s", expected, profiledStderr)
@@ -815,6 +816,7 @@ func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
 		"planned_resource_runs", "skipped_resource_runs",
 		"planned_excel_runs", "skipped_excel_runs",
 		"planned_application_state_runs", "skipped_application_state_runs",
+		"analysis_plans", "planned_kernel_runs", "skipped_kernel_runs", "semantic_results_reused",
 	} {
 		recorder.AddSum(name, 1)
 	}
@@ -851,6 +853,8 @@ func TestWriteAnalyzePerformanceReportsWorkloadCounters(t *testing.T) {
 		`counter="planned_resource_runs"`, `counter="skipped_resource_runs"`,
 		`counter="planned_excel_runs"`, `counter="skipped_excel_runs"`,
 		`counter="planned_application_state_runs"`, `counter="skipped_application_state_runs"`,
+		`counter="analysis_plans"`, `counter="planned_kernel_runs"`,
+		`counter="skipped_kernel_runs"`, `counter="semantic_results_reused"`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("performance output missing %q:\n%s", expected, output)

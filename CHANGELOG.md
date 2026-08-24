@@ -42,6 +42,16 @@ All notable changes to xlflow will be documented in this file.
   and optional elapsed stages are developer-only stderr telemetry; normal
   findings, snapshots, exit codes, and CLI/LSP payloads are unchanged.
 
+- Added explicit procedure semantic execution plans. The planner now selects
+  applicable kernels, projections, and semantic-result dependencies in a
+  canonical deterministic order, while immutable kernel results are reused only
+  within one procedure/revision. Existing bounded procedure workers and
+  cancellation remain in force; rule-level or nested kernel pools and
+  persistent cross-run caching are out of scope. `--performance-log` adds
+  `analysis_plans`, `planned_kernel_runs`, `skipped_kernel_runs`, and
+  `semantic_results_reused` as stderr-only telemetry; findings, snapshots, exit
+  codes, and normal JSON/LSP contracts remain unchanged.
+
 - Added opt-in semantic-domain profiling beneath
   `procedure_local_diagnostics` for giant-module `xlflow analyze` workloads.
   `--performance-log` now attributes aggregate source-scan, runtime, array,

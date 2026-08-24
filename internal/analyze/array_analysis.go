@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/config"
@@ -74,11 +75,14 @@ func arrayAnalysisEnabled(cfg config.AnalyzeConfig) bool {
 // buildArrayAnalysisResult materializes all procedure-local array preparation
 // once.  Project-wide ByRef/module/return summaries are supplied by ctx and
 // remain owned by the existing analysis-context fixed points.
-func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) *ArrayAnalysisResult {
+func (a Analyzer) buildArrayAnalysisResultContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, plan procedureAnalysisPlan) (*ArrayAnalysisResult, error) {
+	if err := cancelCtx.Err(); err != nil {
+		return nil, err
+	}
 	variables := arrayVariables(file, proc, moduleDecls)
 	objectArrayApplicable := arrayObjectArrayApplicable(variables)
 	if !arrayAnalysisEnabled(a.Config.Analyze) && !objectArrayApplicable {
-		return nil
+		return nil, nil
 	}
 	result := &ArrayAnalysisResult{
 		variables:      variables,
@@ -95,22 +99,29 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 			break
 		}
 	}
-	runtimeRequested := hasArrayVariable && a.Config.Analyze.DetectDeterministicRuntimeErrors && (!knownRuntimeRule || runtimeEnabled)
-	comparisonRequested := a.Config.Analyze.DetectObjectArrayComparison && hasArrayVariable && arrayHasComparisonExpression(proc)
+	runtimeRequested := plan.runsProjection(procedureProjectionRuntime) && hasArrayVariable && a.Config.Analyze.DetectDeterministicRuntimeErrors && (!knownRuntimeRule || runtimeEnabled)
+	comparisonRequested := plan.runsProjection(procedureProjectionArrayComparison) && a.Config.Analyze.DetectObjectArrayComparison && hasArrayVariable && arrayHasComparisonExpression(proc)
 	// A procedure can contain an object array even when the explicit lifecycle
 	// switches are disabled. The shared transfer owns the always-on VBA101/
 	// VBA102 projection for that case.
-	coreFlowRequested := a.Config.Analyze.DetectArrayLifecycleSafety ||
-		a.Config.Analyze.DetectRedimPreserveDimension ||
-		objectArrayApplicable ||
+	coreFlowRequested := (plan.runsProjection(procedureProjectionArrayLifecycle) && (a.Config.Analyze.DetectArrayLifecycleSafety || objectArrayApplicable)) ||
+		(plan.runsProjection(procedureProjectionArrayRedim) && a.Config.Analyze.DetectRedimPreserveDimension) ||
 		runtimeRequested
 	if coreFlowRequested || comparisonRequested {
+		kernelAnalyzer := a
+		kernelAnalyzer.Config.Analyze.DetectArrayLifecycleSafety = plan.runsProjection(procedureProjectionArrayLifecycle) && a.Config.Analyze.DetectArrayLifecycleSafety
+		kernelAnalyzer.Config.Analyze.DetectRedimPreserveDimension = plan.runsProjection(procedureProjectionArrayRedim) && a.Config.Analyze.DetectRedimPreserveDimension
+		kernelAnalyzer.Config.Analyze.DetectObjectArrayComparison = plan.runsProjection(procedureProjectionArrayComparison) && a.Config.Analyze.DetectObjectArrayComparison
 		var runtimeSink *[]Finding
 		if runtimeRequested {
 			runtimeSink = &result.runtimeFindings
 		}
 		if coreFlowRequested {
-			result.lifecycleFindings = a.arrayLifecycleFindingsPreparedWithRuntimeEntry(file, proc, ctx, moduleDecls, result.variables, result.constants, result.capacityGuards, runtimeSink, entryState)
+			var err error
+			result.lifecycleFindings, err = kernelAnalyzer.arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCtx, file, proc, ctx, moduleDecls, result.variables, result.constants, result.capacityGuards, runtimeSink, entryState)
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			// VBA209 is an expression-only projection. Keep it out of the
 			// allocation worklist when no other core lane is applicable; this
@@ -120,16 +131,16 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 		if proc.Graph != nil && coreFlowRequested {
 			result.cfgWalks++
 		}
-		result.projectionRuns += arrayCoreProjectionRuns(a.Config.Analyze, file, proc, variables, objectArrayApplicable, runtimeRequested)
+		result.projectionRuns += arrayCoreProjectionRuns(kernelAnalyzer.Config.Analyze, file, proc, variables, objectArrayApplicable && plan.runsProjection(procedureProjectionArrayLifecycle), runtimeRequested)
 	}
-	if a.Config.Analyze.DetectRedimPreserveInLoops {
+	if plan.runsProjection(procedureProjectionArrayRedimLoop) && a.Config.Analyze.DetectRedimPreserveInLoops {
 		var redimApplicable bool
 		result.redimFindings, redimApplicable = a.redimPreserveLoopFindingsPreparedWithApplicability(file, proc, moduleDecls, result.variables)
 		if redimApplicable {
 			result.projectionRuns++
 		}
 	}
-	if a.Config.Analyze.DetectRangeValueArrayShape && rangeValueShapeApplicable(file, proc) {
+	if plan.runsProjection(procedureProjectionArrayRangeShape) && a.Config.Analyze.DetectRangeValueArrayShape && rangeValueShapeApplicable(file, proc) {
 		result.rangeFindings = a.rangeValueShapeFindings(file, proc)
 		result.projectionRuns++
 		// An empty statement projection uses the source-line fallback and does
@@ -138,7 +149,7 @@ func (a Analyzer) buildArrayAnalysisResult(file parsedFile, proc sourceProcedure
 			result.cfgWalks++
 		}
 	}
-	return result
+	return result, cancelCtx.Err()
 }
 
 func arrayObjectArrayApplicable(variables map[string]arrayVariable) bool {

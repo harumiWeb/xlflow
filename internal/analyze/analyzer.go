@@ -1807,10 +1807,16 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	plan := proc.analysisPlan(a.Config.Analyze, moduleDecls)
 	profile := newProcedureDomainProfile(ctx)
 	profile.plannerDecisions(plan)
+	profile.realtimePlanSummary(plan)
 	defer profile.flush()
+	var resultStore procedureSemanticResultStore
 	var arrayResult *ArrayAnalysisResult
-	if plan.runs(procedureDomainArray) {
-		arrayResult = a.buildArrayAnalysisResult(file, proc, analysisCtx, moduleDecls)
+	if plan.runsKernel(procedureKernelArray) {
+		var err error
+		arrayResult, err = resultStore.materializeArray(ctx, a, file, proc, analysisCtx, moduleDecls, plan)
+		if err != nil {
+			return nil, err
+		}
 		if arrayResult != nil {
 			profile.kernel()
 			profile.add(analysisstats.CounterArrayKernelRuns, 1)
@@ -1822,13 +1828,21 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		}
 	}
 	findings = append(findings, a.opaqueBooleanArgumentFindings(file, proc, analysisCtx.procedures)...)
-	if plan.runs(procedureDomainRuntime) {
-		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, arrayResult)...)
+	if plan.runsProjection(procedureProjectionRuntime) {
+		findings = append(findings, a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, analysisCtx, moduleDecls, resultStore.arrayProjection(profile))...)
 	}
-	if plan.runs(procedureDomainDictionary) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
+	if plan.runsAnyProjection(
+		procedureProjectionDictionaryGuard,
+		procedureProjectionDictionaryCompareMode,
+		procedureProjectionDictionaryLoop,
+		procedureProjectionDictionaryKeyNormalization,
+		procedureProjectionDictionaryLateBound,
+		procedureProjectionDictionaryCollectionMutation,
+		procedureProjectionDictionaryIndexOrigin,
+	) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		findings = append(findings, a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)...)
 	}
-	if plan.runs(procedureDomainDictionary) && a.Config.Analyze.DetectDictionaryIterationValueUsage {
+	if plan.runsProjection(procedureProjectionDictionaryIteration) && a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		findings = append(findings, a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)...)
 	}
 	for i := proc.StartLine - 1; i < proc.EndLine && i < len(file.Lines); i++ {
@@ -1880,56 +1894,65 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 			findings = append(findings, a.rangeFindFindings(file, proc, lineNo, stmt, findAssignments, guardedFinds)...)
 		}
 	}
-	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRangeValueArrayShape {
-		if arrayResult != nil {
-			findings = append(findings, arrayResult.rangeShape()...)
+	if plan.runsProjection(procedureProjectionArrayRangeShape) {
+		if result := resultStore.arrayProjection(profile); result != nil {
+			findings = append(findings, result.rangeShape()...)
 		} else {
 			findings = append(findings, a.rangeValueShapeFindings(file, proc)...)
 		}
 	}
-	if plan.runs(procedureDomainArray) {
-		if arrayResult != nil {
-			findings = append(findings, arrayResult.lifecycle()...)
+	if plan.runsAnyProjection(procedureProjectionArrayLifecycle, procedureProjectionArrayRedim, procedureProjectionArrayComparison) {
+		if result := resultStore.arrayProjection(profile); result != nil {
+			findings = append(findings, result.lifecycle()...)
 		} else {
 			findings = append(findings, a.arrayLifecycleFindings(file, proc, analysisCtx, moduleDecls)...)
 		}
 		findings = suppressDeterministicArrayWarningDuplicates(findings)
 	}
-	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRedimPreserveInLoops {
-		if arrayResult != nil {
-			findings = append(findings, arrayResult.redim()...)
+	if plan.runsProjection(procedureProjectionArrayRedimLoop) {
+		if result := resultStore.arrayProjection(profile); result != nil {
+			findings = append(findings, result.redim()...)
 		} else {
 			findings = append(findings, a.redimPreserveLoopFindings(file, proc, moduleDecls)...)
 		}
 	}
-	if plan.runs(procedureDomainError) && a.Config.Analyze.DetectErrorHandlerFallthrough {
+	if plan.runsProjection(procedureProjectionErrorHandler) && a.Config.Analyze.DetectErrorHandlerFallthrough {
 		findings = append(findings, a.errorHandlerFallthroughFindings(file, proc)...)
 	}
-	if plan.runs(procedureDomainError) && a.Config.Analyze.DetectErrorSuppressionPropagation {
+	if plan.runsProjection(procedureProjectionErrorSuppression) && a.Config.Analyze.DetectErrorSuppressionPropagation {
 		findings = append(findings, a.errorSuppressionFindings(file, proc, analysisCtx.projectEffects)...)
 	}
-	if plan.runs(procedureDomainDataflow) {
+	var realtimeHTTPFindings []Finding
+	if plan.runsAnyProjection(
+		procedureProjectionDataflowUntrusted,
+		procedureProjectionDataflowCommand,
+		procedureProjectionDataflowSQL,
+		procedureProjectionDataflowHTTP,
+	) {
 		dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(ctx, file, proc)
 		if err != nil {
 			return nil, err
 		}
 		findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
-		findings = append(findings, a.filePathSafetyFindings(file, proc)...)
-		findings = append(findings, httpFindings...)
+		realtimeHTTPFindings = httpFindings
 	}
-	if plan.runs(procedureDomainResource) && a.Config.Analyze.DetectResourceLeaks {
+	if plan.runsProjection(procedureProjectionDataflowFile) {
+		findings = append(findings, a.filePathSafetyFindings(file, proc)...)
+	}
+	findings = append(findings, realtimeHTTPFindings...)
+	if plan.runsProjection(procedureProjectionResource) && a.Config.Analyze.DetectResourceLeaks {
 		findings = append(findings, a.resourceLeakFindings(file, proc)...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectExcelCellAccessInLoops {
+	if plan.runsProjection(procedureProjectionExcelLoop) && a.Config.Analyze.DetectExcelCellAccessInLoops {
 		findings = append(findings, a.excelLoopAccessFindings(file, proc)...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectLoopInvariantExcelObjectResolution {
+	if plan.runsProjection(procedureProjectionExcelInvariant) && a.Config.Analyze.DetectLoopInvariantExcelObjectResolution {
 		findings = append(findings, a.excelLoopInvariantFindings(file, proc)...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectExpensiveFullRangeOperations {
+	if plan.runsProjection(procedureProjectionExcelRange) && a.Config.Analyze.DetectExpensiveFullRangeOperations {
 		findings = append(findings, a.expensiveFullRangeOperationFindings(file, proc)...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectValue2PerformanceOpportunities {
+	if plan.runsProjection(procedureProjectionExcelValue2) && a.Config.Analyze.DetectValue2PerformanceOpportunities {
 		findings = append(findings, a.value2PerformanceFindings(file, proc)...)
 	}
 	return findings, ctx.Err()
@@ -2342,6 +2365,15 @@ func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, fil
 }
 
 func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool, profile *procedureDomainProfile) ([]Finding, error) {
+	plan := proc.analysisPlan(a.Config.Analyze, moduleDecls)
+	return a.executeProcedureAnalysisPlan(cancelCtx, file, proc, moduleDecls, ctx, projectEffects, reportedMissingHelpers, profile, plan)
+}
+
+// executeProcedureAnalysisPlan evaluates one immutable procedure plan. The
+// body keeps the established canonical finding append order; all semantic
+// preparation is selected through plan kernel/projection masks, so callers
+// never derive execution from worker completion order or a map iteration.
+func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, reportedMissingHelpers map[string]bool, profile *procedureDomainProfile, plan procedureAnalysisPlan) ([]Finding, error) {
 	if err := cancelCtx.Err(); err != nil {
 		return nil, err
 	}
@@ -2354,11 +2386,16 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	worksheetRoots := newWorksheetRootTracker(ctx.worksheetCodenames)
 	var findings []Finding
 	var candidateCounters uint64
-	plan := proc.analysisPlan(a.Config.Analyze, moduleDecls)
 	profile.plannerDecisions(plan)
+	profile.planSummary(plan)
+	var resultStore procedureSemanticResultStore
 	var arrayResult *ArrayAnalysisResult
-	if plan.runs(procedureDomainArray) {
-		arrayResult = a.buildArrayAnalysisResult(file, proc, ctx, moduleDecls)
+	if plan.runsKernel(procedureKernelArray) {
+		var err error
+		arrayResult, err = resultStore.materializeArray(cancelCtx, a, file, proc, ctx, moduleDecls, plan)
+		if err != nil {
+			return nil, err
+		}
 		if arrayResult != nil {
 			profile.kernel()
 			profile.add(analysisstats.CounterArrayKernelRuns, 1)
@@ -2376,9 +2413,9 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 	}
 	otherMeasurement.finish(len(opaqueFindings))
 	findings = append(findings, opaqueFindings...)
-	if plan.runs(procedureDomainRuntime) {
+	if plan.runsProjection(procedureProjectionRuntime) {
 		runtimeMeasurement := profile.begin(procedureDomainRuntime)
-		runtimeFindings := a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, ctx, moduleDecls, arrayResult)
+		runtimeFindings := a.deterministicRuntimeErrorFindingsWithArrayResult(file, proc, ctx, moduleDecls, resultStore.arrayProjection(profile))
 		if enabled, known := config.AnalyzeRuleEnabled(a.Config.Analyze, "VBA249"); known && enabled {
 			profile.kernel()
 			profile.candidate(&candidateCounters, analysisstats.CounterRuntimeCandidateProcedures)
@@ -2389,7 +2426,15 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		runtimeMeasurement.finish(len(runtimeFindings))
 		findings = append(findings, runtimeFindings...)
 	}
-	if plan.runs(procedureDomainDictionary) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
+	if plan.runsAnyProjection(
+		procedureProjectionDictionaryGuard,
+		procedureProjectionDictionaryCompareMode,
+		procedureProjectionDictionaryLoop,
+		procedureProjectionDictionaryKeyNormalization,
+		procedureProjectionDictionaryLateBound,
+		procedureProjectionDictionaryCollectionMutation,
+		procedureProjectionDictionaryIndexOrigin,
+	) && dictionaryCollectionAnalysisEnabled(a.Config.Analyze) {
 		dictionaryMeasurement := profile.begin(procedureDomainDictionary)
 		dictionaryFindings := a.dictionaryCollectionSafetyFindings(file, proc, moduleDecls)
 		if proc.Graph != nil {
@@ -2400,7 +2445,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		dictionaryMeasurement.finish(len(dictionaryFindings))
 		findings = append(findings, dictionaryFindings...)
 	}
-	if plan.runs(procedureDomainDictionary) && a.Config.Analyze.DetectDictionaryIterationValueUsage {
+	if plan.runsProjection(procedureProjectionDictionaryIteration) && a.Config.Analyze.DetectDictionaryIterationValueUsage {
 		dictionaryMeasurement := profile.begin(procedureDomainDictionary)
 		dictionaryFindings := a.dictionaryIterationValueUsageFindings(file, proc, moduleDecls)
 		profile.kernel()
@@ -2554,7 +2599,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			excelMeasurement.finish(len(excelFindings))
 			findings = append(findings, excelFindings...)
 		}
-		if a.Config.Analyze.DetectObjectArrayComparison && objectNothingEqualityLineIsExecutable(proc, lineNo, stmt) {
+		if plan.runsProjection(procedureProjectionArrayComparison) && objectNothingEqualityLineIsExecutable(proc, lineNo, stmt) {
 			arrayMeasurement := profile.begin(procedureDomainArray)
 			arrayFindings := a.objectArrayComparisonFindings(file, proc, lineNo, stmt, decls)
 			profile.kernel()
@@ -2564,7 +2609,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		}
 	}
 	sourceMeasurement.finish(len(findings) - sourceFindingStart)
-	if plan.runs(procedureDomainObject) && a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
+	if plan.runsProjection(procedureProjectionObject) && a.Config.Analyze.DetectObjectUseBeforeSet && ctx.objectAnalysis != nil {
 		key := objectSummaryKey(file.IR.Path, objectProcedureQualifiedName(proc), string(proc.ProcedureKind), proc.StartLine)
 		if objectPlan := ctx.objectAnalysis.plans[key]; objectPlan != nil {
 			objectMeasurement := profile.begin(procedureDomainObject)
@@ -2575,11 +2620,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			findings = append(findings, objectFindings...)
 		}
 	}
-	if plan.runs(procedureDomainArray) {
+	if plan.runsAnyProjection(procedureProjectionArrayLifecycle, procedureProjectionArrayRedim) {
 		arrayMeasurement := profile.begin(procedureDomainArray)
 		arrayFindings := []Finding(nil)
-		if arrayResult != nil {
-			arrayFindings = arrayResult.lifecycle()
+		if result := resultStore.arrayProjection(profile); result != nil {
+			arrayFindings = result.lifecycle()
 		} else {
 			arrayFindings = a.arrayLifecycleFindings(file, proc, ctx, moduleDecls)
 		}
@@ -2597,11 +2642,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		findings = append(findings, arrayFindings...)
 		findings = suppressDeterministicArrayWarningDuplicates(findings)
 	}
-	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRedimPreserveInLoops {
+	if plan.runsProjection(procedureProjectionArrayRedimLoop) {
 		arrayMeasurement := profile.begin(procedureDomainArray)
 		redimFindings := []Finding(nil)
-		if arrayResult != nil {
-			redimFindings = arrayResult.redim()
+		if result := resultStore.arrayProjection(profile); result != nil {
+			redimFindings = result.redim()
 		} else {
 			redimFindings = a.redimPreserveLoopFindings(file, proc, moduleDecls)
 		}
@@ -2615,7 +2660,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		arrayMeasurement.finish(len(redimFindings))
 		findings = append(findings, redimFindings...)
 	}
-	if plan.runs(procedureDomainApplicationState) && a.Config.Analyze.DetectApplicationStateRestore {
+	if plan.runsProjection(procedureProjectionApplicationRestore) && a.Config.Analyze.DetectApplicationStateRestore {
 		applicationMeasurement := profile.begin(procedureDomainApplicationState)
 		applicationFindings := a.applicationStateFindings(file, proc, projectEffects)
 		profile.kernel()
@@ -2623,7 +2668,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		applicationMeasurement.finish(len(applicationFindings))
 		findings = append(findings, applicationFindings...)
 	}
-	if plan.runs(procedureDomainApplicationState) && a.Config.Analyze.DetectApplicationStateCallEffects {
+	if plan.runsProjection(procedureProjectionApplicationEffects) && a.Config.Analyze.DetectApplicationStateCallEffects {
 		applicationMeasurement := profile.begin(procedureDomainApplicationState)
 		applicationFindings := a.applicationStateCallEffectFindings(file, proc, projectEffects)
 		profile.kernel()
@@ -2631,7 +2676,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		applicationMeasurement.finish(len(applicationFindings))
 		findings = append(findings, applicationFindings...)
 	}
-	if plan.runs(procedureDomainApplicationState) && a.Config.Analyze.DetectEventHandlerReentry {
+	if plan.runsProjection(procedureProjectionApplicationReentry) && a.Config.Analyze.DetectEventHandlerReentry {
 		applicationMeasurement := profile.begin(procedureDomainApplicationState)
 		eventFindings := a.eventHandlerReentryFindings(file, proc, projectEffects)
 		profile.kernel()
@@ -2639,7 +2684,13 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		applicationMeasurement.finish(len(eventFindings))
 		findings = append(findings, eventFindings...)
 	}
-	if plan.runs(procedureDomainDataflow) {
+	var plannedHTTPFindings []Finding
+	if plan.runsAnyProjection(
+		procedureProjectionDataflowUntrusted,
+		procedureProjectionDataflowCommand,
+		procedureProjectionDataflowSQL,
+		procedureProjectionDataflowHTTP,
+	) {
 		dataflowMeasurement := profile.begin(procedureDomainDataflow)
 		dataFlowFindings, httpFindings, err := a.httpDataFlowFindingsContext(cancelCtx, file, proc)
 		if (a.Config.Analyze.DetectUntrustedDataFlow || a.Config.Analyze.DetectUnsafeCommandConstruction || a.Config.Analyze.DetectUnsafeSQLConstruction || a.Config.Analyze.DetectUnsafeHTTPConfiguration || a.Config.Analyze.DetectMissingHTTPTimeout) && proc.Graph != nil {
@@ -2652,17 +2703,18 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 			return nil, err
 		}
 		findings = append(findings, suppressHTTPDataFlowDuplicates(dataFlowFindings, httpFindings)...)
-		if a.Config.Analyze.DetectUnsafeFilePath {
-			filePathMeasurement := profile.begin(procedureDomainDataflow)
-			filePathFindings := a.filePathSafetyFindings(file, proc)
-			profile.kernel()
-			profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
-			filePathMeasurement.finish(len(filePathFindings))
-			findings = append(findings, filePathFindings...)
-		}
-		findings = append(findings, httpFindings...)
+		plannedHTTPFindings = httpFindings
 	}
-	if plan.runs(procedureDomainResource) && a.Config.Analyze.DetectResourceLeaks {
+	if plan.runsProjection(procedureProjectionDataflowFile) && a.Config.Analyze.DetectUnsafeFilePath {
+		filePathMeasurement := profile.begin(procedureDomainDataflow)
+		filePathFindings := a.filePathSafetyFindings(file, proc)
+		profile.kernel()
+		profile.candidate(&candidateCounters, analysisstats.CounterDataflowCandidateProcedures)
+		filePathMeasurement.finish(len(filePathFindings))
+		findings = append(findings, filePathFindings...)
+	}
+	findings = append(findings, plannedHTTPFindings...)
+	if plan.runsProjection(procedureProjectionResource) && a.Config.Analyze.DetectResourceLeaks {
 		resourceMeasurement := profile.begin(procedureDomainResource)
 		resourceFindings := a.resourceLeakFindings(file, proc)
 		if proc.Graph != nil {
@@ -2673,7 +2725,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		resourceMeasurement.finish(len(resourceFindings))
 		findings = append(findings, resourceFindings...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectExcelCellAccessInLoops {
+	if plan.runsProjection(procedureProjectionExcelLoop) && a.Config.Analyze.DetectExcelCellAccessInLoops {
 		excelMeasurement := profile.begin(procedureDomainExcel)
 		excelFindings := a.excelLoopAccessFindings(file, proc)
 		if a.typeDB != nil && proc.Graph != nil {
@@ -2684,7 +2736,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		excelMeasurement.finish(len(excelFindings))
 		findings = append(findings, excelFindings...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectLoopInvariantExcelObjectResolution {
+	if plan.runsProjection(procedureProjectionExcelInvariant) && a.Config.Analyze.DetectLoopInvariantExcelObjectResolution {
 		excelMeasurement := profile.begin(procedureDomainExcel)
 		excelFindings := a.excelLoopInvariantFindings(file, proc)
 		if a.typeDB != nil && proc.Graph != nil {
@@ -2695,7 +2747,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		excelMeasurement.finish(len(excelFindings))
 		findings = append(findings, excelFindings...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectExpensiveFullRangeOperations {
+	if plan.runsProjection(procedureProjectionExcelRange) && a.Config.Analyze.DetectExpensiveFullRangeOperations {
 		excelMeasurement := profile.begin(procedureDomainExcel)
 		excelFindings := a.expensiveFullRangeOperationFindings(file, proc)
 		profile.kernel()
@@ -2703,7 +2755,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		excelMeasurement.finish(len(excelFindings))
 		findings = append(findings, excelFindings...)
 	}
-	if plan.runs(procedureDomainExcel) && a.Config.Analyze.DetectValue2PerformanceOpportunities {
+	if plan.runsProjection(procedureProjectionExcelValue2) && a.Config.Analyze.DetectValue2PerformanceOpportunities {
 		excelMeasurement := profile.begin(procedureDomainExcel)
 		excelFindings := a.value2PerformanceFindings(file, proc)
 		profile.kernel()
@@ -2711,7 +2763,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		excelMeasurement.finish(len(excelFindings))
 		findings = append(findings, excelFindings...)
 	}
-	if plan.runs(procedureDomainError) && a.Config.Analyze.DetectErrorHandlerFallthrough {
+	if plan.runsProjection(procedureProjectionErrorHandler) && a.Config.Analyze.DetectErrorHandlerFallthrough {
 		errorMeasurement := profile.begin(procedureDomainError)
 		errorFindings := a.errorHandlerFallthroughFindings(file, proc)
 		profile.kernel()
@@ -2722,7 +2774,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		errorMeasurement.finish(len(errorFindings))
 		findings = append(findings, errorFindings...)
 	}
-	if plan.runs(procedureDomainError) && a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
+	if plan.runsProjection(procedureProjectionErrorResume) && a.Config.Analyze.DetectLeakedOnErrorResumeNextScopes {
 		errorMeasurement := profile.begin(procedureDomainError)
 		errorFindings := a.leakedOnErrorResumeNextFindings(file, proc)
 		profile.kernel()
@@ -2733,7 +2785,7 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		errorMeasurement.finish(len(errorFindings))
 		findings = append(findings, errorFindings...)
 	}
-	if plan.runs(procedureDomainError) && a.Config.Analyze.DetectErrorSuppressionPropagation {
+	if plan.runsProjection(procedureProjectionErrorSuppression) && a.Config.Analyze.DetectErrorSuppressionPropagation {
 		errorMeasurement := profile.begin(procedureDomainError)
 		errorFindings := a.errorSuppressionFindings(file, proc, projectEffects)
 		profile.kernel()
@@ -2744,11 +2796,11 @@ func (a Analyzer) analyzeProcedureContext(cancelCtx context.Context, file parsed
 		errorMeasurement.finish(len(errorFindings))
 		findings = append(findings, errorFindings...)
 	}
-	if plan.runs(procedureDomainArray) && a.Config.Analyze.DetectRangeValueArrayShape {
+	if plan.runsProjection(procedureProjectionArrayRangeShape) {
 		arrayMeasurement := profile.begin(procedureDomainArray)
 		arrayFindings := []Finding(nil)
-		if arrayResult != nil {
-			arrayFindings = arrayResult.rangeShape()
+		if result := resultStore.arrayProjection(profile); result != nil {
+			arrayFindings = result.rangeShape()
 		} else {
 			arrayFindings = a.rangeValueShapeFindings(file, proc)
 		}

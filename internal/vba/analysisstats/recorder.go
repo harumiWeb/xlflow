@@ -127,9 +127,13 @@ const (
 	CounterApplicationStateSkippedRuns
 	CounterArrayKernelRuns
 	CounterArrayProjectionRuns
+	CounterAnalysisPlans
+	CounterPlannedKernelRuns
+	CounterSkippedKernelRuns
+	CounterSemanticResultsReused
 )
 
-const counterCount = int(CounterArrayProjectionRuns) + 1
+const counterCount = int(CounterSemanticResultsReused) + 1
 
 // WorkCounterCount is the fixed number of counter slots used by
 // DomainAggregate. It is exposed for compile-time guards in lightweight
@@ -175,6 +179,10 @@ const (
 	ApplicationStateSkippedRunsCounter         = "skipped_application_state_runs"
 	ArrayKernelRunsCounter                     = "array_kernel_runs"
 	ArrayProjectionRunsCounter                 = "array_projection_runs"
+	AnalysisPlansCounter                       = "analysis_plans"
+	PlannedKernelRunsCounter                   = "planned_kernel_runs"
+	SkippedKernelRunsCounter                   = "skipped_kernel_runs"
+	SemanticResultsReusedCounter               = "semantic_results_reused"
 )
 
 var counterNames = [...]string{
@@ -216,6 +224,10 @@ var counterNames = [...]string{
 	ApplicationStateSkippedRunsCounter,
 	ArrayKernelRunsCounter,
 	ArrayProjectionRunsCounter,
+	AnalysisPlansCounter,
+	PlannedKernelRunsCounter,
+	SkippedKernelRunsCounter,
+	SemanticResultsReusedCounter,
 }
 
 // These paired array declarations fail compilation if a counter is added

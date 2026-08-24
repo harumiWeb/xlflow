@@ -383,6 +383,17 @@ recovered, or incomplete project evidence keeps the affected domain on the
 complete participant set. Compile-equivalent diagnostics retain their existing
 unconditional availability regardless of optional runtime-analysis settings.
 
+The main procedure path also reports plan-level counters when profiling is
+enabled: `analysis_plans` counts procedure plans executed,
+`planned_kernel_runs` counts kernels retained after the plan's dependency
+closure, `skipped_kernel_runs` counts enabled kernels proven irrelevant, and
+`semantic_results_reused` counts additional diagnostic projections that read an
+already materialized immutable result. A result is scoped to one procedure and
+analysis revision; these counters do not imply persistent or cross-run
+caching. They use the existing `operation="analyze/counter"` stderr shape and
+are developer telemetry only. They never appear in normal analysis JSON or LSP
+diagnostic payloads.
+
 The effect-summary stage may additionally report
 `effect_summary_worklist_evaluations`,
 `effect_summary_max_propagated_facts_per_procedure`, and

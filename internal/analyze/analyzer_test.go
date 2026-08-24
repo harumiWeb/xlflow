@@ -1156,6 +1156,23 @@ End Sub
 	}
 }
 
+func TestVBA219PlansSpacedWorkbookOpen(t *testing.T) {
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(path As String)
+  Dim book As Workbook
+  Set book = Workbooks  .  Open(path)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA219"); len(got) != 1 {
+		t.Fatalf("spaced Workbooks.Open findings = %+v, want one VBA219", got)
+	}
+}
+
 func TestVBA219RequiresWorkbookTypedAcquisitionOwner(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -5213,6 +5230,11 @@ End Sub
 `
 	writeModule(t, dir, "Main.bas", source)
 	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = false
+	cfg.Analyze.DetectRedimPreserveDimension = false
+	cfg.Analyze.DetectRangeValueArrayShape = false
+	cfg.Analyze.DetectRedimPreserveInLoops = false
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
 	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
 	if err != nil {
 		t.Fatal(err)
@@ -5224,6 +5246,28 @@ End Sub
 	}
 	if got, want := findingsByCode(realtime, "VBA209"), findingsByCode(batch, "VBA209"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("batch/realtime VBA209 findings differ:\nbatch=%+v\nrealtime=%+v", want, got)
+	}
+}
+
+func TestVBA209ObjectOnlyComparisonIsPlanned(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim obj As Object
+  If obj = Nothing Then
+  End If
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA209")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA209")
+	if len(got) != 1 || got[0].Line != 4 || !strings.Contains(got[0].Message, "obj") {
+		t.Fatalf("object-only comparison must produce VBA209: %+v", got)
 	}
 }
 
@@ -8142,6 +8186,34 @@ End Sub
 	got := findingsByCode(findings, "VBA208")
 	if len(got) != 1 || got[0].Line != 5 {
 		t.Fatalf("a changed symbolic non-final dimension should report once: %+v", got)
+	}
+}
+
+func TestVBA208ProjectsWhenOtherArrayRulesAreDisabled(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal rowCount As Long, ByVal actualRows As Long)
+  Dim matrix() As Variant
+  ReDim matrix(1 To rowCount, 1 To 1)
+  ReDim Preserve matrix(1 To actualRows, 1 To 2)
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = false
+	cfg.Analyze.DetectObjectArrayComparison = false
+	cfg.Analyze.DetectRangeValueArrayShape = false
+	cfg.Analyze.DetectRedimPreserveInLoops = false
+	cfg.Analyze.DetectDeterministicRuntimeErrors = false
+
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA208")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("VBA208-only array projection = %+v, want one finding on line 5", got)
 	}
 }
 

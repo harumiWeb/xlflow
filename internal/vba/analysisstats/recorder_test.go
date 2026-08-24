@@ -283,7 +283,42 @@ func TestDomainAndCounterNamesAreStable(t *testing.T) {
 			t.Errorf("counter %d name = %q, want %q", test.counter, got, test.want)
 		}
 	}
+	planCounterNames := []struct {
+		counter WorkCounter
+		want    string
+	}{
+		{CounterAnalysisPlans, AnalysisPlansCounter},
+		{CounterPlannedKernelRuns, PlannedKernelRunsCounter},
+		{CounterSkippedKernelRuns, SkippedKernelRunsCounter},
+		{CounterSemanticResultsReused, SemanticResultsReusedCounter},
+	}
+	for _, test := range planCounterNames {
+		if got := test.counter.String(); got != test.want {
+			t.Errorf("counter %d name = %q, want %q", test.counter, got, test.want)
+		}
+	}
 	if Domain(255).String() != ProcedureLocalOther || WorkCounter(255).String() != "" {
 		t.Fatalf("invalid enum names = %q, %q", Domain(255), WorkCounter(255))
+	}
+}
+
+func TestAnalysisPlanCountersMergeAsFixedWorkCounters(t *testing.T) {
+	recorder := NewRecorder()
+	aggregate := NewAggregate(recorder)
+	aggregate.AddCounter(CounterAnalysisPlans, 2)
+	aggregate.AddCounter(CounterPlannedKernelRuns, 3)
+	aggregate.AddCounter(CounterSkippedKernelRuns, 1)
+	aggregate.AddCounter(CounterSemanticResultsReused, 4)
+	aggregate.Merge()
+
+	_, counters := recorder.Totals()
+	want := []Counter{
+		{Name: AnalysisPlansCounter, Value: 2},
+		{Name: PlannedKernelRunsCounter, Value: 3},
+		{Name: SemanticResultsReusedCounter, Value: 4},
+		{Name: SkippedKernelRunsCounter, Value: 1},
+	}
+	if !reflect.DeepEqual(counters, want) {
+		t.Fatalf("analysis plan counters = %+v, want %+v", counters, want)
 	}
 }

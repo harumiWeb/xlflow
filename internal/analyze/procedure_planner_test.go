@@ -285,6 +285,45 @@ func TestProcedurePlannerKeepsCompatibilityAndIndirectPrerequisitesApplicable(t 
 	}
 }
 
+func TestProcedurePlannerDoesNotFailOpenEveryDomainForResolvedCall(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA249", "VBA202", "VBA224", "VBA203")
+	proc := sourceProcedureWithFeatureSet(procedureFeatureSet{present: featureCalls})
+	plan := buildProcedureAnalysisPlan(cfg, proc, map[string]sourceDeclaration{})
+	for _, domain := range []procedureDomain{
+		procedureDomainObject,
+		procedureDomainDataflow,
+		procedureDomainApplicationState,
+	} {
+		if plan.runs(domain) {
+			t.Errorf("resolved call planned unrelated %s domain: %#v", domain, plan)
+		}
+	}
+}
+
+func TestProcedurePlannerRecognizesParenthesizedFileAndSpacedWorkbookCalls(t *testing.T) {
+	var fileFeatures procedureFeatureSet
+	fileFeatures.observeText(`Kill(path)`)
+	filePlan := buildProcedureAnalysisPlan(
+		analyzeConfigForRules("VBA245"),
+		sourceProcedureWithFeatureSet(fileFeatures),
+		map[string]sourceDeclaration{},
+	)
+	if !filePlan.runsProjection(procedureProjectionDataflowFile) {
+		t.Fatalf("parenthesized Kill plan = %#v, want VBA245 projection", filePlan)
+	}
+
+	var resourceFeatures procedureFeatureSet
+	resourceFeatures.observeText(`Set book = Workbooks  .  Open(path)`)
+	resourcePlan := buildProcedureAnalysisPlan(
+		analyzeConfigForRules("VBA219"),
+		sourceProcedureWithFeatureSet(resourceFeatures),
+		map[string]sourceDeclaration{},
+	)
+	if !resourcePlan.runsProjection(procedureProjectionResource) {
+		t.Fatalf("spaced Workbooks.Open plan = %#v, want VBA219 projection", resourcePlan)
+	}
+}
+
 func TestBuildProcedureAnalysisPlanUnknownFactsRemainPlanned(t *testing.T) {
 	cfg := analyzeConfigForRules(
 		"VBA249", "VBA202", "VBA207", "VBA204", "VBA224", "VBA219", "VBA225", "VBA203",
@@ -329,6 +368,120 @@ func TestPlannerCountersCoverEveryGatedDomain(t *testing.T) {
 	for _, domain := range gatedProcedureDomains {
 		if _, _, ok := plannerCounters(domain); !ok {
 			t.Errorf("gated domain %s has no planner counters", domain)
+		}
+	}
+}
+
+func TestProcedureAnalysisPlanMaterializesKernelAndProjectionClosure(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA249", "VBA208", "VBA209", "VBA226", "VBA227", "VBA241", "VBA202", "VBA207", "VBA224", "VBA219", "VBA225", "VBA203")
+	proc := sourceProcedureWithFeatureSet(procedureFeatureSet{present: allProcedureFeatures})
+	plan := buildProcedureAnalysisPlan(cfg, proc, map[string]sourceDeclaration{})
+	for _, kernel := range []procedureKernel{
+		procedureKernelRuntime, procedureKernelArray, procedureKernelObject,
+		procedureKernelDictionary, procedureKernelDataflow, procedureKernelResource,
+		procedureKernelExcel, procedureKernelApplicationState,
+	} {
+		if !plan.enabledKernel(kernel) || !plan.runsKernel(kernel) {
+			t.Errorf("kernel %d missing from materialized plan: %#v", kernel, plan)
+		}
+	}
+	for _, projection := range []procedureProjection{
+		procedureProjectionRuntime, procedureProjectionArrayRedim,
+		procedureProjectionArrayComparison, procedureProjectionArrayRangeShape,
+		procedureProjectionArrayLifecycle, procedureProjectionArrayRedimLoop,
+		procedureProjectionObject, procedureProjectionDictionaryGuard,
+		procedureProjectionDataflowUntrusted, procedureProjectionResource,
+		procedureProjectionExcelLoop, procedureProjectionApplicationRestore,
+	} {
+		if !plan.enabledProjection(projection) || !plan.runsProjection(projection) {
+			t.Errorf("projection %d missing from materialized plan: %#v", projection, plan)
+		}
+	}
+}
+
+func TestProcedureAnalysisPlanUnknownFactsFailOpenForKernels(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA249", "VBA202", "VBA207", "VBA224", "VBA219", "VBA225", "VBA203")
+	plan := buildProcedureAnalysisPlan(cfg, sourceProcedureWithFeatureSet(procedureFeatureSet{unknown: allProcedureFeatures}), nil)
+	for _, kernel := range canonicalProcedureKernelOrder {
+		if plan.enabledKernel(kernel) && !plan.runsKernel(kernel) {
+			t.Errorf("unknown facts skipped enabled kernel %d: %#v", kernel, plan)
+		}
+	}
+}
+
+func TestProcedureAnalysisPlanSchedulesVBA209ForObjectComparison(t *testing.T) {
+	cfg := analyzeConfigForRules("VBA209")
+	proc := sourceProcedureWithFeatureSet(procedureFeatureSet{present: featureObject})
+	plan := buildProcedureAnalysisPlan(cfg, proc, nil)
+	if !plan.runsKernel(procedureKernelArray) || !plan.runsProjection(procedureProjectionArrayComparison) {
+		t.Fatalf("object-only VBA209 comparison was not planned: %#v", plan)
+	}
+}
+
+func TestProcedureDomainProfilePlanAndResultReuseTelemetry(t *testing.T) {
+	recorder := analysisstats.NewRecorder()
+	profile := newProcedureDomainProfile(analysisstats.WithRecorder(context.Background(), recorder))
+	plan := procedureAnalysisPlan{
+		enabledKernels: procedureKernelBit(procedureKernelArray) | procedureKernelBit(procedureKernelRuntime),
+		plannedKernels: procedureKernelBit(procedureKernelArray),
+	}
+	profile.planSummary(plan)
+	store := procedureSemanticResultStore{array: &ArrayAnalysisResult{}}
+	first := store.arrayProjection(profile)
+	second := store.arrayProjection(profile)
+	if first == nil || second == nil {
+		t.Fatal("array result store did not return its immutable result")
+	}
+	profile.flush()
+	_, counters := recorder.Totals()
+	values := map[string]uint64{}
+	for _, counter := range counters {
+		values[counter.Name] = counter.Value
+	}
+	if values[analysisstats.AnalysisPlansCounter] != 1 || values[analysisstats.PlannedKernelRunsCounter] != 1 || values[analysisstats.SkippedKernelRunsCounter] != 1 {
+		t.Fatalf("plan counters = %#v", values)
+	}
+	if values[analysisstats.SemanticResultsReusedCounter] != 1 {
+		t.Fatalf("reuse counter = %#v", values)
+	}
+}
+
+func TestRealtimePlanSummaryCountsOnlyRealtimeKernels(t *testing.T) {
+	recorder := analysisstats.NewRecorder()
+	profile := newProcedureDomainProfile(analysisstats.WithRecorder(context.Background(), recorder))
+	plan := procedureAnalysisPlan{
+		enabledKernels: procedureKernelBit(procedureKernelRuntime) |
+			procedureKernelBit(procedureKernelObject) |
+			procedureKernelBit(procedureKernelApplicationState),
+		plannedKernels: procedureKernelBit(procedureKernelRuntime) |
+			procedureKernelBit(procedureKernelObject) |
+			procedureKernelBit(procedureKernelApplicationState),
+	}
+	profile.realtimePlanSummary(plan)
+	profile.flush()
+	_, counters := recorder.Totals()
+	values := map[string]uint64{}
+	for _, counter := range counters {
+		values[counter.Name] = counter.Value
+	}
+	if values[analysisstats.AnalysisPlansCounter] != 1 || values[analysisstats.PlannedKernelRunsCounter] != 1 {
+		t.Fatalf("realtime plan counters = %#v, want only the runtime kernel", values)
+	}
+}
+
+func TestProcedureProjectionRequirementMappingsAreDistinct(t *testing.T) {
+	for _, test := range []struct {
+		id   string
+		want procedureProjection
+	}{
+		{id: "VBA208", want: procedureProjectionArrayRedim},
+		{id: "VBA227", want: procedureProjectionArrayLifecycle},
+		{id: "VBA225", want: procedureProjectionExcelLoop},
+		{id: "VBA238", want: procedureProjectionExcelInvariant},
+	} {
+		got := procedureProjectionForRequirement(procedureRuleRequirement{id: test.id})
+		if got != test.want {
+			t.Errorf("projection for %s = %d, want %d", test.id, got, test.want)
 		}
 	}
 }

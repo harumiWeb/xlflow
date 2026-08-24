@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
@@ -171,10 +172,19 @@ func (features *procedureFeatureSet) observeText(text string) {
 	if containsAny(lower, "xmlhttp", "winhttprequest", ".open(\"get", ".open(\"post", "setrequestheader", ".send") {
 		features.add(featureDataflow | featureHTTP)
 	}
-	if containsAny(lower, "kill ", "rmdir ", "filecopy ", " open ", "open ", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") || looksLikeFileRename(lower) {
+	if containsAny(lower, "kill ", "kill(", "rmdir ", "rmdir(", "filecopy ", "filecopy(", " open ", "open ", "saveas", "deletefile", "copyfile", "movefile", "opentextfile") || looksLikeFileRename(lower) {
 		features.add(featureDataflow | featureFileIO)
 	}
-	if containsAny(lower, "workbooks.open", "open ") {
+	compactMemberText := lower
+	if strings.Contains(lower, "workbooks") && strings.Contains(lower, ".") {
+		compactMemberText = strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return -1
+			}
+			return r
+		}, lower)
+	}
+	if containsAny(compactMemberText, "workbooks.open") || strings.Contains(lower, "open ") {
 		features.add(featureResourceAcquire)
 	}
 	if containsAny(lower, ".close", "close #", "close ") {
@@ -267,14 +277,14 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA249", domain: analysisstats.DomainRuntime, any: featureRuntimeExpression | featureArray | featureCalls},
 	{id: "VBA212", domain: analysisstats.DomainOther, capabilities: projectCapabilityEffects, projectOnly: true, getterSource: true},
 	{id: "VBA208", domain: analysisstats.DomainArray, any: featureArray | featureReDim | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
-	{id: "VBA209", domain: analysisstats.DomainArray, any: featureArray | featureRangeArray | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
+	{id: "VBA209", domain: analysisstats.DomainArray, any: featureArray | featureRangeArray | featureObject | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
 	{id: "VBA226", domain: analysisstats.DomainArray, any: featureRangeArray | featureExcel | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
 	{id: "VBA227", domain: analysisstats.DomainArray, any: featureArray | featureLoop | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
 	{id: "VBA241", domain: analysisstats.DomainArray, all: featureReDim | featureLoop, capabilities: projectCapabilityArrayInterprocedural},
 	{id: "VBA249", domain: analysisstats.DomainArray, any: featureArray | featureCalls, capabilities: projectCapabilityArrayInterprocedural},
 	{id: "VBA101", domain: analysisstats.DomainArray, all: featureArray | featureObject, always: true, capabilities: projectCapabilityArrayInterprocedural},
 	{id: "VBA102", domain: analysisstats.DomainArray, all: featureArray | featureObject, always: true, capabilities: projectCapabilityArrayInterprocedural},
-	{id: "VBA202", domain: analysisstats.DomainObject, any: featureObject | featureMemberAccess | featureCalls, capabilities: projectCapabilityObjectFlow},
+	{id: "VBA202", domain: analysisstats.DomainObject, any: featureObject | featureMemberAccess, capabilities: projectCapabilityObjectFlow},
 	{id: "VBA207", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
 	{id: "VBA213", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureLoop | featureCalls, capabilities: projectCapabilityDictionaryCollection},
 	{id: "VBA230", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
@@ -285,21 +295,21 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 	{id: "VBA235", domain: analysisstats.DomainDictionary, any: featureDictionaryCollection | featureCalls, capabilities: projectCapabilityDictionaryCollection},
 	{id: "VBA204", domain: analysisstats.DomainError, any: featureOnError},
 	{id: "VBA214", domain: analysisstats.DomainError, any: featureOnError},
-	{id: "VBA237", domain: analysisstats.DomainError, any: featureOnError | featureCalls, capabilities: projectCapabilityEffects},
-	{id: "VBA224", domain: analysisstats.DomainDataflow, any: featureDataflow | featureCalls, capabilities: projectCapabilityDataFlowInputs},
-	{id: "VBA236", domain: analysisstats.DomainDataflow, any: featureProcessLaunch | featureCalls, capabilities: projectCapabilityDataFlowInputs},
-	{id: "VBA239", domain: analysisstats.DomainDataflow, any: featureSQL | featureCalls, capabilities: projectCapabilityDataFlowInputs},
-	{id: "VBA245", domain: analysisstats.DomainDataflow, any: featureFileIO | featureCalls, capabilities: projectCapabilityDataFlowInputs},
-	{id: "VBA246", domain: analysisstats.DomainDataflow, any: featureHTTP | featureCalls, capabilities: projectCapabilityDataFlowInputs},
-	{id: "VBA247", domain: analysisstats.DomainDataflow, any: featureHTTP | featureCalls, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA237", domain: analysisstats.DomainError, any: featureOnError, capabilities: projectCapabilityEffects},
+	{id: "VBA224", domain: analysisstats.DomainDataflow, any: featureDataflow, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA236", domain: analysisstats.DomainDataflow, any: featureProcessLaunch, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA239", domain: analysisstats.DomainDataflow, any: featureSQL, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA245", domain: analysisstats.DomainDataflow, any: featureFileIO, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA246", domain: analysisstats.DomainDataflow, any: featureHTTP, capabilities: projectCapabilityDataFlowInputs},
+	{id: "VBA247", domain: analysisstats.DomainDataflow, any: featureHTTP, capabilities: projectCapabilityDataFlowInputs},
 	{id: "VBA219", domain: analysisstats.DomainResource, any: featureResourceAcquire | featureCalls},
 	{id: "VBA225", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop, capabilities: projectCapabilityExcelLoopSymbols},
 	{id: "VBA238", domain: analysisstats.DomainExcel, any: featureExcel | featureCalls | featureMemberAccess, all: featureLoop, capabilities: projectCapabilityExcelLoopSymbols},
 	{id: "VBA242", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
 	{id: "VBA243", domain: analysisstats.DomainExcel, any: featureExcel | featureExcelOperation},
-	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState | featureCalls, capabilities: projectCapabilityApplicationState},
-	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureCalls | featureApplicationState, capabilities: projectCapabilityEventReentry},
-	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState | featureCalls, capabilities: projectCapabilityApplicationState},
+	{id: "VBA203", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
+	{id: "VBA220", domain: analysisstats.DomainApplicationState, any: featureEventHandler | featureApplicationState, capabilities: projectCapabilityEventReentry},
+	{id: "VBA221", domain: analysisstats.DomainApplicationState, any: featureApplicationState, capabilities: projectCapabilityApplicationState},
 	{id: "VBA218", domain: analysisstats.DomainOther, capabilities: projectCapabilityExcelAPIHelpers, projectOnly: true},
 	{id: "VBA222", domain: analysisstats.DomainOther, capabilities: projectCapabilityPublicAPITypeIndex, projectOnly: true},
 	{id: "VBA240", domain: analysisstats.DomainOther, capabilities: projectCapabilityModuleState, projectOnly: true},
@@ -307,8 +317,218 @@ var procedureRuleRequirements = [...]procedureRuleRequirement{
 }
 
 type procedureAnalysisPlan struct {
-	enabled uint16
-	planned uint16
+	enabled            uint16
+	planned            uint16
+	enabledKernels     uint16
+	plannedKernels     uint16
+	enabledProjections uint64
+	plannedProjections uint64
+}
+
+// procedureKernel identifies a semantic preparation pass.  Kernel values are
+// intentionally compact and are used as indexes into the static canonical
+// order below; a procedure plan therefore does not allocate slices or maps.
+type procedureKernel uint8
+
+const (
+	procedureKernelRuntime procedureKernel = iota
+	procedureKernelArray
+	procedureKernelObject
+	procedureKernelDictionary
+	procedureKernelError
+	procedureKernelDataflow
+	procedureKernelResource
+	procedureKernelExcel
+	procedureKernelApplicationState
+	procedureKernelLimit
+)
+
+const procedureKernelMaskWidth = 16
+
+var _ [procedureKernelMaskWidth - int(procedureKernelLimit)]struct{}
+
+var canonicalProcedureKernelOrder = [...]procedureKernel{
+	procedureKernelRuntime,
+	procedureKernelArray,
+	procedureKernelObject,
+	procedureKernelDictionary,
+	procedureKernelError,
+	procedureKernelDataflow,
+	procedureKernelResource,
+	procedureKernelExcel,
+	procedureKernelApplicationState,
+}
+
+func procedureKernelBit(kernel procedureKernel) uint16 { return uint16(1) << kernel }
+
+// procedureProjection is the stable, diagnostic-facing part of a kernel. A
+// projection only turns an already materialized semantic result into findings;
+// it must never rebuild the result. The executor preserves its established
+// static append sequence while consulting these bits at every migrated step.
+type procedureProjection uint8
+
+const (
+	procedureProjectionRuntime procedureProjection = iota
+	procedureProjectionArrayRedim
+	procedureProjectionArrayComparison
+	procedureProjectionArrayRangeShape
+	procedureProjectionArrayLifecycle
+	procedureProjectionArrayRedimLoop
+	procedureProjectionObject
+	procedureProjectionDictionaryGuard
+	procedureProjectionDictionaryIteration
+	procedureProjectionDictionaryCompareMode
+	procedureProjectionDictionaryLoop
+	procedureProjectionDictionaryKeyNormalization
+	procedureProjectionDictionaryLateBound
+	procedureProjectionDictionaryCollectionMutation
+	procedureProjectionDictionaryIndexOrigin
+	procedureProjectionErrorHandler
+	procedureProjectionErrorResume
+	procedureProjectionErrorSuppression
+	procedureProjectionDataflowUntrusted
+	procedureProjectionDataflowCommand
+	procedureProjectionDataflowSQL
+	procedureProjectionDataflowFile
+	procedureProjectionDataflowHTTP
+	procedureProjectionResource
+	procedureProjectionExcelLoop
+	procedureProjectionExcelInvariant
+	procedureProjectionExcelRange
+	procedureProjectionExcelValue2
+	procedureProjectionApplicationRestore
+	procedureProjectionApplicationEffects
+	procedureProjectionApplicationReentry
+	procedureProjectionLimit
+)
+
+const procedureProjectionMaskWidth = 64
+
+var _ [procedureProjectionMaskWidth - int(procedureProjectionLimit)]struct{}
+
+func procedureProjectionBit(projection procedureProjection) uint64 { return uint64(1) << projection }
+
+func procedureKernelForDomain(domain analysisstats.Domain) (procedureKernel, bool) {
+	switch domain {
+	case procedureDomainRuntime:
+		return procedureKernelRuntime, true
+	case procedureDomainArray:
+		return procedureKernelArray, true
+	case procedureDomainObject:
+		return procedureKernelObject, true
+	case procedureDomainDictionary:
+		return procedureKernelDictionary, true
+	case procedureDomainError:
+		return procedureKernelError, true
+	case procedureDomainDataflow:
+		return procedureKernelDataflow, true
+	case procedureDomainResource:
+		return procedureKernelResource, true
+	case procedureDomainExcel:
+		return procedureKernelExcel, true
+	case procedureDomainApplicationState:
+		return procedureKernelApplicationState, true
+	default:
+		return 0, false
+	}
+}
+
+func procedureProjectionForRequirement(requirement procedureRuleRequirement) procedureProjection {
+	// VBA249 has two independent projections: runtime expressions and the
+	// array transfer. Keep this split explicit so both can consume one array
+	// result without making the runtime kernel own array diagnostics.
+	if requirement.id == "VBA249" && requirement.domain == procedureDomainArray {
+		return procedureProjectionArrayRedim
+	}
+	switch requirement.id {
+	case "VBA249":
+		return procedureProjectionRuntime
+	case "VBA208":
+		return procedureProjectionArrayRedim
+	case "VBA209":
+		return procedureProjectionArrayComparison
+	case "VBA226":
+		return procedureProjectionArrayRangeShape
+	case "VBA227":
+		return procedureProjectionArrayLifecycle
+	case "VBA241":
+		return procedureProjectionArrayRedimLoop
+	case "VBA101", "VBA102":
+		return procedureProjectionArrayLifecycle
+	case "VBA202":
+		return procedureProjectionObject
+	case "VBA207":
+		return procedureProjectionDictionaryGuard
+	case "VBA213":
+		return procedureProjectionDictionaryIteration
+	case "VBA230":
+		return procedureProjectionDictionaryCompareMode
+	case "VBA231":
+		return procedureProjectionDictionaryLoop
+	case "VBA232":
+		return procedureProjectionDictionaryKeyNormalization
+	case "VBA233":
+		return procedureProjectionDictionaryLateBound
+	case "VBA234":
+		return procedureProjectionDictionaryCollectionMutation
+	case "VBA235":
+		return procedureProjectionDictionaryIndexOrigin
+	case "VBA204":
+		return procedureProjectionErrorHandler
+	case "VBA214":
+		return procedureProjectionErrorResume
+	case "VBA237":
+		return procedureProjectionErrorSuppression
+	case "VBA224":
+		return procedureProjectionDataflowUntrusted
+	case "VBA236":
+		return procedureProjectionDataflowCommand
+	case "VBA239":
+		return procedureProjectionDataflowSQL
+	case "VBA245":
+		return procedureProjectionDataflowFile
+	case "VBA246", "VBA247":
+		return procedureProjectionDataflowHTTP
+	case "VBA219":
+		return procedureProjectionResource
+	case "VBA225":
+		return procedureProjectionExcelLoop
+	case "VBA238":
+		return procedureProjectionExcelInvariant
+	case "VBA242":
+		return procedureProjectionExcelRange
+	case "VBA243":
+		return procedureProjectionExcelValue2
+	case "VBA203":
+		return procedureProjectionApplicationRestore
+	case "VBA221":
+		return procedureProjectionApplicationEffects
+	case "VBA220":
+		return procedureProjectionApplicationReentry
+	}
+	// A future requirement must still be represented in a plan. Falling back
+	// to the first projection in its domain is conservative and keeps unknown
+	// facts fail-open until a dedicated projection is registered.
+	switch requirement.domain {
+	case procedureDomainArray:
+		return procedureProjectionArrayLifecycle
+	case procedureDomainObject:
+		return procedureProjectionObject
+	case procedureDomainDictionary:
+		return procedureProjectionDictionaryGuard
+	case procedureDomainError:
+		return procedureProjectionErrorHandler
+	case procedureDomainDataflow:
+		return procedureProjectionDataflowUntrusted
+	case procedureDomainResource:
+		return procedureProjectionResource
+	case procedureDomainExcel:
+		return procedureProjectionExcelLoop
+	case procedureDomainApplicationState:
+		return procedureProjectionApplicationRestore
+	default:
+		return procedureProjectionRuntime
+	}
 }
 
 func procedureDomainBit(domain analysisstats.Domain) uint16 { return uint16(1) << uint(domain) }
@@ -326,6 +546,95 @@ func (plan procedureAnalysisPlan) enabledDomain(domain analysisstats.Domain) boo
 
 func (plan procedureAnalysisPlan) runs(domain analysisstats.Domain) bool {
 	return plan.planned&procedureDomainBit(domain) != 0
+}
+
+func (plan procedureAnalysisPlan) enabledKernel(kernel procedureKernel) bool {
+	if plan.enabledKernels != 0 {
+		return plan.enabledKernels&procedureKernelBit(kernel) != 0
+	}
+	// Plans constructed by older callers (and small unit fixtures) only carry
+	// domain masks. Deriving the kernel closure keeps that representation
+	// compatible while all materialized plans use explicit kernel bits.
+	for domain := analysisstats.DomainRuntime; domain < procedureDomainOther; domain++ {
+		mapped, ok := procedureKernelForDomain(domain)
+		if ok && mapped == kernel && plan.enabledDomain(domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func (plan procedureAnalysisPlan) runsKernel(kernel procedureKernel) bool {
+	if plan.plannedKernels != 0 {
+		return plan.plannedKernels&procedureKernelBit(kernel) != 0
+	}
+	for domain := analysisstats.DomainRuntime; domain < procedureDomainOther; domain++ {
+		mapped, ok := procedureKernelForDomain(domain)
+		if ok && mapped == kernel && plan.runs(domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func (plan procedureAnalysisPlan) enabledProjection(projection procedureProjection) bool {
+	if plan.enabledProjections == 0 {
+		if kernel, ok := procedureKernelForProjection(projection); ok {
+			return plan.enabledKernel(kernel)
+		}
+	}
+	return plan.enabledProjections&procedureProjectionBit(projection) != 0
+}
+
+func (plan procedureAnalysisPlan) runsProjection(projection procedureProjection) bool {
+	if plan.plannedProjections == 0 {
+		if kernel, ok := procedureKernelForProjection(projection); ok {
+			return plan.runsKernel(kernel)
+		}
+	}
+	return plan.plannedProjections&procedureProjectionBit(projection) != 0
+}
+
+func (plan procedureAnalysisPlan) runsAnyProjection(projections ...procedureProjection) bool {
+	for _, projection := range projections {
+		if plan.runsProjection(projection) {
+			return true
+		}
+	}
+	return false
+}
+
+func procedureKernelForProjection(projection procedureProjection) (procedureKernel, bool) {
+	switch projection {
+	case procedureProjectionRuntime:
+		return procedureKernelRuntime, true
+	case procedureProjectionArrayRedim, procedureProjectionArrayComparison,
+		procedureProjectionArrayRangeShape, procedureProjectionArrayLifecycle,
+		procedureProjectionArrayRedimLoop:
+		return procedureKernelArray, true
+	case procedureProjectionObject:
+		return procedureKernelObject, true
+	case procedureProjectionDictionaryGuard, procedureProjectionDictionaryIteration,
+		procedureProjectionDictionaryCompareMode, procedureProjectionDictionaryLoop,
+		procedureProjectionDictionaryKeyNormalization, procedureProjectionDictionaryLateBound,
+		procedureProjectionDictionaryCollectionMutation, procedureProjectionDictionaryIndexOrigin:
+		return procedureKernelDictionary, true
+	case procedureProjectionErrorHandler, procedureProjectionErrorResume, procedureProjectionErrorSuppression:
+		return procedureKernelError, true
+	case procedureProjectionDataflowUntrusted, procedureProjectionDataflowCommand,
+		procedureProjectionDataflowSQL, procedureProjectionDataflowFile, procedureProjectionDataflowHTTP:
+		return procedureKernelDataflow, true
+	case procedureProjectionResource:
+		return procedureKernelResource, true
+	case procedureProjectionExcelLoop, procedureProjectionExcelInvariant,
+		procedureProjectionExcelRange, procedureProjectionExcelValue2:
+		return procedureKernelExcel, true
+	case procedureProjectionApplicationRestore, procedureProjectionApplicationEffects,
+		procedureProjectionApplicationReentry:
+		return procedureKernelApplicationState, true
+	default:
+		return 0, false
+	}
 }
 
 func moduleDeclarationFeatures(moduleDecls map[string]sourceDeclaration) procedureFeatureSet {
@@ -381,8 +690,6 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 		if proc.Effects.Has(effects.OpensWorkbook) {
 			features.add(featureResourceAcquire)
 		}
-	} else if features.mayHave(featureCalls) {
-		features.addUnknown(featureApplicationState | featureOnError | featureDataflow | featureArray | featureObject)
 	}
 
 	var plan procedureAnalysisPlan
@@ -400,8 +707,18 @@ func buildProcedureAnalysisPlanWithModuleFeatures(cfg config.AnalyzeConfig, proc
 		}
 		bit := procedureDomainBit(requirement.domain)
 		plan.enabled |= bit
-		if (requirement.any == 0 || features.mayHave(requirement.any)) && features.mayHaveAll(requirement.all) {
+		applicable := (requirement.any == 0 || features.mayHave(requirement.any)) && features.mayHaveAll(requirement.all)
+		if kernel, ok := procedureKernelForDomain(requirement.domain); ok {
+			plan.enabledKernels |= procedureKernelBit(kernel)
+		}
+		projection := procedureProjectionForRequirement(requirement)
+		plan.enabledProjections |= procedureProjectionBit(projection)
+		if applicable {
 			plan.planned |= bit
+			if kernel, ok := procedureKernelForDomain(requirement.domain); ok {
+				plan.plannedKernels |= procedureKernelBit(kernel)
+			}
+			plan.plannedProjections |= procedureProjectionBit(projection)
 		}
 	}
 	return plan

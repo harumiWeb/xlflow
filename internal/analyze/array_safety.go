@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"context"
 	"regexp"
 	"sort"
 	"strconv"
@@ -158,6 +159,14 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntime(file parsedFile, pro
 }
 
 func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, runtimeSink *[]Finding, preparedEntry arrayFlowState) []Finding {
+	findings, _ := a.arrayLifecycleFindingsPreparedWithRuntimeEntryContext(context.Background(), file, proc, ctx, moduleDecls, variables, constants, capacityGuards, runtimeSink, preparedEntry)
+	return findings
+}
+
+func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCtx context.Context, file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration, variables map[string]arrayVariable, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, runtimeSink *[]Finding, preparedEntry arrayFlowState) ([]Finding, error) {
+	if err := cancelCtx.Err(); err != nil {
+		return nil, err
+	}
 	objectArrayDiagnosticsApplicable := false
 	for _, variable := range variables {
 		if variable.isArray && variable.isObject {
@@ -166,7 +175,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile
 		}
 	}
 	if !a.Config.Analyze.DetectArrayLifecycleSafety && !a.Config.Analyze.DetectRedimPreserveDimension && !a.Config.Analyze.DetectObjectArrayComparison && !objectArrayDiagnosticsApplicable && runtimeSink == nil {
-		return nil
+		return nil, nil
 	}
 	vba227Variables := variables
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
@@ -183,7 +192,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile
 		findings := append([]Finding(nil), comparisonFindings...)
 		if !baseLaneRequested && runtimeSink == nil {
 			findings = append(findings, a.arrayLifecycleLinearFindings(file, proc, ctx, variables, initial, constants, capacityGuards)...)
-			return uniqueArrayFindings(findings)
+			return uniqueArrayFindings(findings), nil
 		}
 		seen := map[string]bool{}
 		for _, finding := range findings {
@@ -197,6 +206,11 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile
 		probe.Config.Analyze.DetectArrayLifecycleSafety = true
 		runtimeSeen := map[string]bool{}
 		for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+			if line&255 == 0 {
+				if err := cancelCtx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			text := normalizedCodeLine(file.Lines[line-1])
 			if baseLaneRequested {
 				var baseIssues []Finding
@@ -246,7 +260,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile
 		if runtimeSink != nil {
 			sortFindings(*runtimeSink)
 		}
-		return uniqueArrayFindings(findings)
+		return uniqueArrayFindings(findings), nil
 	}
 
 	findings := append([]Finding(nil), comparisonFindings...)
@@ -339,12 +353,14 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntry(file parsedFile
 			},
 		})
 	}
-	walkArrayCFGCombined(file.Lines, lanes)
+	if err := walkArrayCFGCombined(cancelCtx, file.Lines, lanes); err != nil {
+		return nil, err
+	}
 	if runtimeSink != nil {
 		sortFindings(*runtimeSink)
 	}
 	sortFindings(findings)
-	return findings
+	return findings, nil
 }
 
 func (a Analyzer) arrayForEachFindings(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, ctx analysisContext) []Finding {
@@ -1042,13 +1058,6 @@ type arrayCFGWorklistLane struct {
 	SourceLines bool
 }
 
-// arrayCFGWorklistLaneResult contains the converged input states for a lane.
-// It is returned as a separate value per lane so callers can project facts
-// after all lanes have converged without retaining mutable worklist internals.
-type arrayCFGWorklistLaneResult struct {
-	InStates map[vbacfg.BlockID]arrayFlowState
-}
-
 // walkArrayCFGCombined advances multiple array policies with one deterministic
 // block/edge index and one queue. Each lane still has an independent state
 // lattice and callback policy, preserving semantic compatibility while
@@ -1058,10 +1067,9 @@ type arrayCFGWorklistLaneResult struct {
 // A lane may opt into the existing reliable-allocation exception through
 // ReliableExceptional; this is intentionally independent from SourceLines so
 // runtime or other block-level lanes cannot accidentally inherit it.
-func walkArrayCFGCombined(lines []string, lanes []arrayCFGWorklistLane) []arrayCFGWorklistLaneResult {
-	results := make([]arrayCFGWorklistLaneResult, len(lanes))
+func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGWorklistLane) error {
 	if len(lanes) == 0 {
-		return results
+		return ctx.Err()
 	}
 
 	type graphIndex struct {
@@ -1097,10 +1105,12 @@ func walkArrayCFGCombined(lines []string, lanes []arrayCFGWorklistLane) []arrayC
 		}
 		indexes[index] = laneIndex{graphIndex: shared, inStates: inStates}
 		queued[lane.Graph.Entry] = true
-		results[index].InStates = inStates
 	}
 
 	for len(queued) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Block IDs are ordered so convergence does not depend on Go map
 		// iteration order. A shared queue is safe even when a policy-specific
 		// graph omits an edge: that lane simply has no outgoing edge to merge.
@@ -1167,6 +1177,11 @@ func walkArrayCFGCombined(lines []string, lanes []arrayCFGWorklistLane) []arrayC
 						stopped = lane.Stop != nil && lane.Stop(text, start)
 					} else if start >= 1 && end <= len(lines) {
 						for line := start; line <= end; line++ {
+							if line&255 == 0 {
+								if err := ctx.Err(); err != nil {
+									return err
+								}
+							}
 							text := normalizedCodeLine(lines[line-1])
 							if strings.TrimSpace(text) == "" {
 								continue
@@ -1207,7 +1222,7 @@ func walkArrayCFGCombined(lines []string, lanes []arrayCFGWorklistLane) []arrayC
 			}
 		}
 	}
-	return results
+	return nil
 }
 
 func arrayAllocationTransferIsReliable(statement *procedureir.Statement, in, out arrayFlowState) bool {

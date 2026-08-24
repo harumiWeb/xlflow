@@ -465,6 +465,62 @@ same capability plan is used by batch and Full realtime/LSP diagnostics so
 findings, uncertainty handling, and the compile-equivalent baseline remain
 consistent across entry points.
 
+### Procedure execution plans and semantic result dependencies
+
+The main procedure analyzer executes an immutable `procedureAnalysisPlan` for
+each procedure and analysis revision. The plan is derived after procedure
+features, project capabilities, and effect facts are available. The internal
+diagnostic requirement table is the single source of truth for the plan's
+kernel, projection, and semantic-result dependency closure. A plan contains
+only the applicable kernels and projections; a proven-absent requirement may
+skip work, while unknown, recovered, incomplete, ambiguous, or unresolved
+inputs remain planned.
+
+Resolved calls use their propagated effect facts plus direct syntax features;
+the mere presence of a resolved call is not sufficient to schedule every
+domain. Recovered, ambiguous, external, and unresolved call evidence remains
+fail-open.
+
+The planner owns applicability, capability requirements, kernel scheduling, and
+result dependencies. A semantic kernel owns its CFG walk, fixed point, or
+data-flow state and publishes an immutable result. A diagnostic projection owns
+diagnostic code, severity, message, reason, suggestion, evidence, and
+compatibility filtering. The existing combined source-line scan remains one
+shared kernel when its normalized statement observations can serve multiple
+textual projections. It must not be split into one source traversal per rule.
+
+Kernel and projection execution follows the executor's static canonical append
+sequence. Plan materialization, map iteration, and worker completion cannot
+change that order.
+Procedure workers write to stable procedure-indexed result slots; the existing
+source-order merge, final diagnostic sort, and suppression stages remain the
+authority for observable finding order and multiplicity. Batch and Full
+realtime/LSP entry points use the same requirement metadata and conservative
+ordering semantics.
+
+Semantic results are immutable and scoped to one procedure and analysis
+revision. A result is materialized at most once for that plan and can be read
+by multiple projections through a procedure-local result store. The store is
+released with the procedure analysis or revision; canceled, failed, and
+obsolete results are not published or retained. This boundary does not add a
+persistent or cross-run cache. Result identity and dependencies may be useful
+to a future incremental analyzer, but no incremental or cross-process cache
+contract is defined here.
+
+Plans execute inside the existing bounded procedure-worker budget. The analyzer
+does not create rule-level goroutines, per-diagnostic workers, or nested
+semantic-kernel pools. Kernel and projection work accepts the analysis context
+and checks cancellation at long-running work boundaries. Cancellation stops
+queued or active work and publishes no partial final findings.
+
+The performance recorder exposes additive, stderr-only counters:
+`analysis_plans` (procedure plans executed), `planned_kernel_runs` (kernels
+remaining after dependency closure), `skipped_kernel_runs` (enabled kernels
+proven irrelevant), and `semantic_results_reused` (additional projections
+reading an already materialized immutable result). These counters never appear
+in normal analysis JSON or LSP diagnostics and do not change public
+configuration or API contracts.
+
 ### Batch procedure-worker boundary
 
 Batch `analyze` may evaluate procedures concurrently for a large file after
