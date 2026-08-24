@@ -1605,7 +1605,7 @@ The accessor-only benchmark was added to verify that repeated operation and
 option reads reuse the frozen maps and slices without exposing mutable storage;
 its `B/op` and `allocs/op` must remain zero in normal runs. The small-module
 test also enforces the recorded pre-#711 baseline of 60,560 B/op and 295
-allocs/op with a +2% guard (61,771 B/op and 301 allocs/op).
+allocs/op with a +2% guard (61,771 B/op and 300 allocs/op).
 
 For the required ROneCOne leaf, five serial samples used the same explicit
 benchmark command as earlier records:
