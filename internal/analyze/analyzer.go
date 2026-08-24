@@ -499,6 +499,7 @@ func recordFactBuilds(ctx context.Context, procedureCount int) {
 		return
 	}
 	recorder.RecordModuleFactBuild()
+	recorder.RecordModuleOptionScan()
 	if procedureCount > 0 {
 		recorder.RecordProcedureFactBuilds(uint64(procedureCount))
 	}
@@ -677,8 +678,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	for i := range parsedFiles {
 		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
-		parsedFiles[i].ModuleFacts = buildModuleAnalysisFacts(parsedFiles[i].Lines, parsedFiles[i].IR, procedures)
-		parsedFiles[i].ModuleDeclarations = parsedFiles[i].ModuleFacts.moduleDeclarations
+		parsedFiles[i].ensureModuleAnalysisFacts()
 		materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		recordFactBuilds(ctx, len(procedures))
 	}
@@ -1514,8 +1514,7 @@ func SourceNonShortCircuitObjectGuardFindingsParsedContext(ctx context.Context, 
 			IR:         ir,
 			Procedures: procedures,
 		}
-		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
-		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
+		file.ensureModuleAnalysisFacts()
 		recordFactBuilds(ctx, len(procedures))
 		analyzer := Analyzer{RootDir: rootDir, Config: cfg}
 		projectEffects := effects.ProjectSummary{}
@@ -1675,8 +1674,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
-		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
-		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
+		file.ensureModuleAnalysisFacts()
 		materializeProcedureAnalysisPlans(&file, projectEffects, cfg.Analyze)
 		recordFactBuilds(ctx, len(procedures))
 		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
@@ -2226,6 +2224,7 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 	if err := cancelCtx.Err(); err != nil {
 		return nil, err
 	}
+	file.ensureModuleAnalysisFacts()
 	var findings []Finding
 	procedures := sourceProceduresWithEffects(file, projectEffects)
 	moduleDecls := file.moduleDecls()
@@ -2242,6 +2241,10 @@ func (a Analyzer) analyzeParsedFileContext(cancelCtx context.Context, ctx analys
 // shared analysis execution budget. Each result is stored by source index and
 // merged in that order, so worker completion order cannot affect findings.
 func (a Analyzer) analyzeProcedureContextsBounded(cancelCtx context.Context, file parsedFile, procedures []sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, projectEffects effects.ProjectSummary, filePermitHeld bool) ([]Finding, error) {
+	file.ensureModuleAnalysisFacts()
+	if moduleDecls == nil {
+		moduleDecls = file.moduleDecls()
+	}
 	if len(procedures) == 0 {
 		proc := sourceProcedure{StartLine: 1, EndLine: len(file.Lines)}
 		profile := newProcedureDomainProfile(cancelCtx)

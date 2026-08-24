@@ -90,8 +90,7 @@ func PlanProjectCapabilities(cfg config.AnalyzeConfig, documents []ProjectCapabi
 			CFG:        document.CFG,
 			Procedures: procedures,
 		}
-		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, procedures)
-		file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
+		file.ensureModuleAnalysisFacts()
 		materializeProcedureAnalysisPlans(&file, effects.ProjectSummary{}, cfg)
 		files = append(files, file)
 	}

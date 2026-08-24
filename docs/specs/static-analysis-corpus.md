@@ -1575,6 +1575,86 @@ path-witness contracts. Snapshot review removed three pre-existing `VBA224`
 rows that arose only from transient, partially propagated FIFO states; all
 remaining diagnostics are stable across repeated verify-only runs.
 
+### Immutable module semantic facts verification record (#711)
+
+Issue #711 moves the `Option Private Module` decision and the profiler-backed
+module array-operation index into the immutable facts object attached to one
+parsed-file/IR revision. The public analyzer and corpus JSON contracts remain
+unchanged. The focused scan counter is emitted only through developer
+telemetry; a normal module revision reports one `module_fact_builds` and one
+`module_option_scans`, independent of public procedure count.
+
+The regression and focused benchmark commands were:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run 'TestModuleAnalysisFacts|TestArrayOptionPrivateModuleNormalization|TestModuleArrayOperationIndexMatchesLegacySourceScan|TestModuleIdempotentSetupPreservesNonCandidateExecutableTail|TestModuleOptionScanCountDoesNotScaleWithPublicProcedures' -count=1
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/analyze -run '^$' -bench '^BenchmarkModuleAnalysisFacts(OperationHeavy|OperationAccessors)?$' -benchmem -benchtime=1x -count=1
+```
+
+The module-facts benchmark recorded the following post-change observations on
+the Windows Go toolchain used for this record:
+
+| workload                         |     ns/op |      B/op | allocs/op |
+| -------------------------------- | --------: | --------: | --------: |
+| small                            |    53,900 |    60,608 |       295 |
+| hundreds                         | 1,120,000 | 1,256,360 |    16,626 |
+| thousands                        | 8,086,400 | 5,763,832 |    72,076 |
+| operation-heavy (500 procedures) | 4,044,100 | 2,302,192 |    41,166 |
+
+The accessor-only benchmark was added to verify that repeated operation and
+option reads reuse the frozen maps and slices without exposing mutable storage;
+its `B/op` and `allocs/op` must remain zero in normal runs. The small-module
+test also enforces the recorded pre-#711 baseline of 60,560 B/op and 295
+allocs/op with a +2% guard (61,771 B/op and 301 allocs/op).
+
+For the required ROneCOne leaf, five serial samples used the same explicit
+benchmark command as earlier records:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5
+```
+
+The post-change samples were 19.701, 16.207, 16.428, 16.794, and 16.363 s;
+the median was 16.428 s, 18,418,130,784 B/op, and 99,679,756 allocs/op. The
+earlier same-worktree baseline was 20.958 s, 20,957,546,080 B/op, and
+153,741,582 allocs/op. This is an environment observation, not a CI threshold;
+all five samples reported 510 findings, `module_fact_builds=1`, and
+`module_option_scans=1`.
+
+The post-change profile was captured with:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -Command '$cpu = Join-Path $env:TEMP "xlflow-issue711-after2-ronecone.cpu.pprof"; $mem = Join-Path $env:TEMP "xlflow-issue711-after2-ronecone.mem.pprof"; $bin = Join-Path $env:TEMP "xlflow-issue711-after2-ronecone.test.exe"; $args = @("test", "./internal/staticanalysis/corpus", "-run", "^$", "-bench", "^BenchmarkRealWorldCorpus/ronecone/analyze-only$", "-benchtime=1x", "-count=1", "-cpuprofile=$cpu", "-memprofile=$mem", "-o=$bin"); & ".\scripts\dev\go.ps1" @args'
+rtk proxy go tool pprof -sample_index=alloc_space -focus 'strings\.Fields' -top C:\temp\xlflow-issue711-after2-ronecone.test.exe C:\temp\xlflow-issue711-after2-ronecone.mem.pprof
+```
+
+`strings.Fields` fell to 60.01 MB and 979,713 allocation objects in the
+focused allocation profile (from 1,108.09 MB and 18,315,928 objects). The
+`arrayOptionPrivateModule` focus had no samples after the procedure-loop scan
+was removed; `normalizedCodeLine` was 89.01 MB and 1,725,823 objects (from
+1,092.58 MB and 18,084,039 objects). The CPU focus likewise showed no
+`arrayOptionPrivateModule` samples.
+
+The small/medium synthetic guard used five serial samples of
+`BenchmarkSingleModuleSynthetic`; the post-change medians were:
+
+| workload            |        B/op | allocs/op |
+| ------------------- | ----------: | --------: |
+| independent/100     |  16,658,824 |   196,759 |
+| independent/500     |  99,605,592 |   803,748 |
+| chain/100           |  34,585,936 |   260,675 |
+| chain/500           | 200,302,824 | 1,241,100 |
+| declarations/100    |  31,056,344 |    92,556 |
+| declarations/500    | 272,754,864 |   277,278 |
+| cfg-independent/100 |  28,357,888 |   214,094 |
+| cfg-independent/500 | 522,708,336 |   928,796 |
+
+The repository's +2% small-module guard passed. No analyzer finding identity,
+range, severity, evidence, multiplicity, ordering, snapshot, or review-ledger
+change was accepted as part of this performance work. `rtk task corpus:metrics`
+and two verify-only `rtk task corpus:test` runs are required before merging;
+any snapshot delta remains a stop-and-investigate condition.
+
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`

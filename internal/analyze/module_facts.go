@@ -28,6 +28,47 @@ type moduleAnalysisFacts struct {
 	moduleConstantNames    map[string]struct{}
 	procedureConstantNames map[int]map[string]struct{}
 	procedureNames         map[string]struct{}
+	// privateModule records the module option once for this source revision.
+	// The zero value is unknown so incomplete/recovered syntax fails open.
+	privateModule moduleOptionState
+
+	// arrayOperationsByName and arrayOperationsByLine are immutable indexes over
+	// the small set of module-wide operations used by array interprocedural
+	// summaries. Values are only exposed through callback accessors below; in
+	// particular, callers cannot retain or mutate the backing slices.
+	arrayOperationsByName map[string][]moduleArrayOperationFact
+	arrayOperationsByLine map[int][]moduleArrayOperationFact
+	lineFacts             []moduleSourceLineFact
+}
+
+type moduleOptionState uint8
+
+const (
+	moduleOptionUnknown moduleOptionState = iota
+	moduleOptionAbsent
+	moduleOptionPresent
+)
+
+type moduleArrayOperationKind uint8
+
+const (
+	moduleArrayWholeAssignment moduleArrayOperationKind = iota + 1
+	moduleArrayDirectRedim
+	moduleArrayErase
+)
+
+type moduleArrayOperationFact struct {
+	Name       string
+	Line       int
+	RHS        string
+	Dimensions string
+	Preserve   bool
+	Kind       moduleArrayOperationKind
+}
+
+type moduleSourceLineFact struct {
+	executable     bool
+	setupGuardName string
 }
 
 type moduleConstantFact struct {
@@ -46,6 +87,7 @@ func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, p
 		procedureLineOwners: make([]int, len(lines)+1),
 		procedureDecls:      make(map[int]map[string]sourceDeclaration, len(procedures)),
 	}
+	facts.privateModule = buildModuleSourceFacts(lines, facts, document.Parse.HasError || document.Parse.HasMissing)
 	if len(procedures) > 0 {
 		facts.procedureFactsByStart = make(map[int]*procedureAnalysisFacts, len(procedures))
 	}
@@ -159,6 +201,166 @@ func buildModuleAnalysisFacts(lines []string, document procedureir.DocumentIR, p
 		facts.moduleDeclarations = moduleDeclarationsFromSource(lines, facts.procedureLineOwners)
 	}
 	return facts
+}
+
+// buildModuleSourceFacts performs the one source-line pass needed by the
+// module-wide array summaries. normalizedCodeLine is intentionally called only
+// here for these facts; procedure consumers read the resulting immutable
+// operation/index values through accessors instead of repeating the scan.
+func buildModuleSourceFacts(lines []string, facts *moduleAnalysisFacts, parseIncomplete bool) moduleOptionState {
+	if facts == nil {
+		return moduleOptionUnknown
+	}
+	privateModule := moduleOptionAbsent
+	privateModuleCandidate := false
+	for lineNo, rawLine := range lines {
+		candidate := moduleFactCandidateLine(rawLine)
+		// Before a setup guard is found, only lines that can contribute to the
+		// indexed facts need normalization. Once lineFacts is materialized, the
+		// remainder of the procedure must also be normalized so the final
+		// executable-line check preserves the legacy all-line behavior.
+		if !candidate && facts.lineFacts == nil {
+			continue
+		}
+		text := normalizedCodeLine(rawLine)
+		lower := strings.ToLower(strings.TrimSpace(text))
+		if strings.HasPrefix(lower, "if ") {
+			match := arraySetupGuardRe.FindStringSubmatch(text)
+			if len(match) == 2 {
+				facts.ensureLineFacts(lines, lineNo)
+				facts.lineFacts[lineNo].setupGuardName = strings.ToLower(cleanIdentifier(match[1]))
+			}
+		}
+		if facts.lineFacts != nil {
+			facts.lineFacts[lineNo].executable = lower != "" && lower != "end sub" && lower != "end function" && lower != "end property"
+		}
+		if !candidate {
+			continue
+		}
+		if strings.Contains(lower, "=") {
+			if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed {
+				facts.addModuleArrayOperation(moduleArrayOperationFact{
+					Name: strings.ToLower(cleanIdentifier(lhs)), Line: lineNo,
+					RHS: strings.TrimSpace(rhs), Kind: moduleArrayWholeAssignment,
+				})
+			}
+		}
+		if strings.HasPrefix(lower, "redim ") {
+			match := arrayRedimRe.FindStringSubmatch(text)
+			if len(match) > 0 {
+				preserve := strings.TrimSpace(match[1]) != ""
+				for _, clause := range splitArgs(match[2]) {
+					redim, direct := parseDirectArrayRedimClause(clause)
+					if !direct {
+						continue
+					}
+					facts.addModuleArrayOperation(moduleArrayOperationFact{
+						Name: strings.ToLower(cleanIdentifier(redim.name)), Line: lineNo,
+						Dimensions: redim.dimensions, Preserve: preserve,
+						Kind: moduleArrayDirectRedim,
+					})
+				}
+			}
+		}
+		if strings.HasPrefix(lower, "erase ") {
+			match := arrayEraseRe.FindStringSubmatch(text)
+			if len(match) == 2 {
+				for _, target := range splitArgs(match[1]) {
+					name := strings.ToLower(strings.TrimSpace(target))
+					if !arrayEraseNameRe.MatchString(name) {
+						continue
+					}
+					facts.addModuleArrayOperation(moduleArrayOperationFact{
+						Name: name, Line: lineNo, Kind: moduleArrayErase,
+					})
+				}
+			}
+		}
+		switch lower {
+		case "option private module":
+			privateModule = moduleOptionPresent
+		case "option private":
+			privateModuleCandidate = true
+		default:
+			if strings.HasPrefix(lower, "option private ") {
+				privateModuleCandidate = true
+			}
+		}
+	}
+	if privateModuleCandidate || parseIncomplete {
+		return moduleOptionUnknown
+	}
+	return privateModule
+}
+
+// moduleFactCandidateLine is a cheap lexical gate for the small subset of
+// source lines that can contribute module options or array operation facts.
+// Most lines in ordinary modules are declarations or procedure boundaries;
+// avoiding normalization for those lines keeps the shared-facts fast path
+// allocation-light without changing the conservative parser-backed matching
+// below. False positives are harmless because the full normalizer still runs.
+func moduleFactCandidateLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if asciiFoldPrefix(trimmed, "option") ||
+		asciiFoldKeywordPrefix(trimmed, "if") ||
+		asciiFoldKeywordPrefix(trimmed, "redim") ||
+		asciiFoldKeywordPrefix(trimmed, "erase") {
+		return true
+	}
+	return strings.Contains(trimmed, "=")
+}
+
+func asciiFoldPrefix(value, prefix string) bool {
+	if len(value) < len(prefix) {
+		return false
+	}
+	for index := range prefix {
+		left, right := value[index], prefix[index]
+		if left >= 'A' && left <= 'Z' {
+			left += 'a' - 'A'
+		}
+		if right >= 'A' && right <= 'Z' {
+			right += 'a' - 'A'
+		}
+		if left != right {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiFoldKeywordPrefix(value, keyword string) bool {
+	return asciiFoldPrefix(value, keyword) && len(value) > len(keyword) &&
+		(value[len(keyword)] == ' ' || value[len(keyword)] == '\t')
+}
+
+func (facts *moduleAnalysisFacts) addModuleArrayOperation(operation moduleArrayOperationFact) {
+	if facts == nil || operation.Name == "" {
+		return
+	}
+	if facts.arrayOperationsByName == nil {
+		facts.arrayOperationsByName = make(map[string][]moduleArrayOperationFact)
+		facts.arrayOperationsByLine = make(map[int][]moduleArrayOperationFact)
+	}
+	facts.arrayOperationsByName[operation.Name] = append(facts.arrayOperationsByName[operation.Name], operation)
+	facts.arrayOperationsByLine[operation.Line] = append(facts.arrayOperationsByLine[operation.Line], operation)
+}
+
+func (facts *moduleAnalysisFacts) ensureLineFacts(lines []string, through int) {
+	if facts == nil || facts.lineFacts != nil {
+		return
+	}
+	facts.lineFacts = make([]moduleSourceLineFact, len(lines))
+	if through >= len(lines) {
+		through = len(lines) - 1
+	}
+	for lineNo := 0; lineNo <= through; lineNo++ {
+		lower := strings.ToLower(strings.TrimSpace(normalizedCodeLine(lines[lineNo])))
+		facts.lineFacts[lineNo].executable = lower != "" && lower != "end sub" && lower != "end function" && lower != "end property"
+	}
 }
 
 func isSourceModuleDeclaration(declaration procedureir.Declaration) bool {
@@ -353,6 +555,50 @@ func (facts *moduleAnalysisFacts) hasProcedure(name string) bool {
 	return ok
 }
 
+func (facts *moduleAnalysisFacts) privateModuleState() moduleOptionState {
+	if facts == nil {
+		return moduleOptionUnknown
+	}
+	return facts.privateModule
+}
+
+func (facts *moduleAnalysisFacts) privateModulePresent() bool {
+	return facts.privateModuleState() == moduleOptionPresent
+}
+
+// forEachArrayOperationFor visits a copy of each operation for one canonical
+// identifier. The callback API deliberately keeps the immutable backing slice
+// private to moduleAnalysisFacts.
+func (facts *moduleAnalysisFacts) forEachArrayOperationFor(name string, visit func(moduleArrayOperationFact)) {
+	if facts == nil || visit == nil {
+		return
+	}
+	for _, operation := range facts.arrayOperationsByName[strings.ToLower(cleanIdentifier(name))] {
+		visit(operation)
+	}
+}
+
+func (facts *moduleAnalysisFacts) forEachArrayOperationAt(line int, visit func(moduleArrayOperationFact)) {
+	if facts == nil || visit == nil {
+		return
+	}
+	for _, operation := range facts.arrayOperationsByLine[line] {
+		visit(operation)
+	}
+}
+
+func (facts *moduleAnalysisFacts) sourceLineIsExecutable(line int) bool {
+	return facts != nil && line >= 0 && line < len(facts.lineFacts) && facts.lineFacts[line].executable
+}
+
+func (facts *moduleAnalysisFacts) sourceLineSetupGuard(line int) (string, bool) {
+	if facts == nil || line < 0 || line >= len(facts.lineFacts) {
+		return "", false
+	}
+	name := facts.lineFacts[line].setupGuardName
+	return name, name != ""
+}
+
 func moduleDeclarationsFromSource(lines []string, procedureLineOwners []int) map[string]sourceDeclaration {
 	decls := make(map[string]sourceDeclaration)
 	for lineNo, rawLine := range lines {
@@ -383,11 +629,25 @@ func moduleDeclarationsFromSource(lines []string, procedureLineOwners []int) map
 	return decls
 }
 
-func (file parsedFile) moduleAnalysisFacts() *moduleAnalysisFacts {
-	if file.ModuleFacts != nil {
-		return file.ModuleFacts
+// ensureModuleAnalysisFacts attaches the immutable facts object to the
+// caller-owned parsed-file revision. Normal batch/realtime setup attaches it
+// before worker launch; this helper is the explicit compatibility boundary for
+// package-local synthetic callers.
+func (file *parsedFile) ensureModuleAnalysisFacts() *moduleAnalysisFacts {
+	if file == nil {
+		return nil
 	}
-	return buildModuleAnalysisFacts(file.Lines, file.IR, file.procedureProjection())
+	if file.ModuleFacts == nil {
+		file.ModuleFacts = buildModuleAnalysisFacts(file.Lines, file.IR, file.procedureProjection())
+		if file.ModuleDeclarations == nil && file.ModuleFacts != nil {
+			file.ModuleDeclarations = file.ModuleFacts.moduleDeclarations
+		}
+	}
+	return file.ModuleFacts
+}
+
+func (file *parsedFile) moduleAnalysisFacts() *moduleAnalysisFacts {
+	return file.ensureModuleAnalysisFacts()
 }
 
 func (file parsedFile) procedureDeclarationsFor(proc sourceProcedure) map[string]sourceDeclaration {
