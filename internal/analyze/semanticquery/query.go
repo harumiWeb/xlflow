@@ -100,6 +100,11 @@ type cacheValue struct {
 	value any
 }
 
+// dependencyRecord is an eviction-tracked placeholder for a query whose
+// value was published outside Evaluate. It keeps RecordDependencies metadata
+// bounded without making a metadata-only record look like a cache hit.
+type dependencyRecord struct{}
+
 type pendingValue struct {
 	done chan struct{}
 }
@@ -241,6 +246,11 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 		}
 		s.mu.Lock()
 		if cached, ok := s.entries[stable]; ok {
+			if _, metadataOnly := cached.value.(dependencyRecord); metadataOnly {
+				s.removeNodeLocked(stable)
+				s.mu.Unlock()
+				continue
+			}
 			if !s.dependenciesMatchLocked(stable, dependencies) {
 				s.invalidateIDsLocked([]string{stable}, metrics)
 				s.mu.Unlock()
@@ -382,13 +392,21 @@ func (s *Store) recordDependenciesLocked(parent string, parentKey Key, dependenc
 
 // RecordDependencies records a dependency for an already-computed query. It
 // is useful for capability builders that publish an immutable value outside
-// Evaluate but still need reverse invalidation edges.
+// Evaluate but still need reverse invalidation edges. Metadata-only records
+// are represented by an eviction-tracked placeholder so repeated external
+// registrations cannot bypass MaxEntries.
 func (s *Store) RecordDependencies(parent Key, dependencies ...Key) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	s.recordDependenciesLocked(parent.String(), parent, dependencies)
+	stable := parent.String()
+	if _, ok := s.entries[stable]; !ok {
+		s.entries[stable] = cacheValue{key: parent, value: dependencyRecord{}}
+		s.order = append(s.order, stable)
+	}
+	s.recordDependenciesLocked(stable, parent, dependencies)
+	s.pruneEntriesLocked()
 	s.mu.Unlock()
 }
 

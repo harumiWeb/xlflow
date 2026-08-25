@@ -207,3 +207,15 @@ func TestEvictionBoundsDependencyMetadata(t *testing.T) {
 		t.Fatalf("dependency metadata exceeded bounds: entries=%d keys=%d reverse=%d order=%d", len(store.entries), len(store.keys), len(store.reverse), len(store.order))
 	}
 }
+
+func TestRecordDependenciesBoundsMetadata(t *testing.T) {
+	store := New(Options{MaxEntries: 2})
+	for index := 0; index < 32; index++ {
+		parent := Key{Procedure: "M.Parent", Fingerprint: Hash(fmt.Sprintf("parent-%d", index)), Kernel: "summary"}
+		dependency := Key{Procedure: "M.Dependency", Fingerprint: Hash(fmt.Sprintf("dependency-%d", index)), Kernel: "module"}
+		store.RecordDependencies(parent, dependency)
+	}
+	if len(store.entries) > 2 || len(store.keys) > 4 || len(store.reverse) > 2 || len(store.deps) > 2 || len(store.order) > 4 {
+		t.Fatalf("recorded dependency metadata exceeded bounds: entries=%d keys=%d reverse=%d deps=%d order=%d", len(store.entries), len(store.keys), len(store.reverse), len(store.deps), len(store.order))
+	}
+}
