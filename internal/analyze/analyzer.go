@@ -14,6 +14,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/harumiWeb/xlflow/internal/analyze/semanticquery"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/gui"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -361,6 +362,7 @@ type analysisContext struct {
 	objectAnalysis            *objectAnalysisContext
 	worksheetCodenames        map[string]string
 	projectEffects            effects.ProjectSummary
+	queryRevision             *semanticquery.Revision
 }
 
 type arrayInterproceduralStats struct {
@@ -400,6 +402,7 @@ type parsedFile struct {
 	// ModuleFacts owns the immutable module declaration and procedure ownership
 	// indexes shared by all rule stages for this file revision.
 	ModuleFacts                 *moduleAnalysisFacts
+	moduleFactsFingerprint      string
 	Parsed                      *vbaast.ParsedDocument
 	IntelDocument               intel.Document
 	RangeValueModuleConstants   map[string]int
@@ -545,6 +548,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx, queryContext := withSemanticQueryContext(ctx)
 	finishTotal := analysisstats.Measure(ctx, "analyze_total")
 	defer func() { finishTotal(len(result.Findings), err) }()
 	if err := ctx.Err(); err != nil {
@@ -660,6 +664,15 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		parsedFiles = append(parsedFiles, parsedFile)
 	}
 	defer closeParsedFiles(parsedFiles)
+	var queryRevision *semanticquery.Revision
+	if queryContext.Store != nil {
+		revisionID := queryContext.Revision
+		if revisionID == "" {
+			revisionID = semanticQueryRevisionID(a.RootDir, a.Config, parsedFiles)
+		}
+		queryRevision = queryContext.Store.Begin(revisionID)
+		defer queryRevision.Close()
+	}
 	recordBatchWorkload(ctx, parsedFiles)
 	initializeProjectCapabilityTelemetry(ctx)
 	analysis := a
@@ -703,6 +716,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
 		parsedFiles[i].ensureModuleAnalysisFacts()
+		parsedFiles[i].moduleFactsFingerprint = semanticModuleFactsFingerprint(parsedFiles[i])
 		materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		recordFactBuilds(ctx, len(procedures))
 	}
@@ -791,6 +805,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		finishArrayCapability = beginProjectCapabilityBuild(ctx, projectCapabilityArrayInterprocedural)
 	}
 	analysisCtx := analysis.buildContextWithObjectAnalysisPlan(parsedFiles, objectAnalysis, capabilityPlan, procedureir.ProcedureOnlyResolver(resolutionResolver))
+	analysisCtx.queryRevision = queryRevision
 	recordArrayInterproceduralTelemetry(ctx, analysisCtx)
 	finishArrayCapability(nil)
 	finishStage(len(analysisCtx.procedures), nil)
@@ -1652,6 +1667,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	ctx, queryContext := withSemanticQueryContext(ctx)
 	if !sourceRealtimeAnalysisEnabled(cfg.Analyze) {
 		return nil, nil
 	}
@@ -1663,6 +1679,12 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		}
 	}
 	var findings []Finding
+	var queryRevision *semanticquery.Revision
+	defer func() {
+		if queryRevision != nil {
+			queryRevision.Close()
+		}
+	}()
 	err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1700,6 +1722,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
 		file.ensureModuleAnalysisFacts()
+		file.moduleFactsFingerprint = semanticModuleFactsFingerprint(file)
 		materializeProcedureAnalysisPlans(&file, projectEffects, cfg.Analyze)
 		recordFactBuilds(ctx, len(procedures))
 		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
@@ -1729,7 +1752,15 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
 		contextFiles := []parsedFile{file}
+		if queryContext.Store != nil && queryRevision == nil {
+			revisionID := queryContext.Revision
+			if revisionID == "" {
+				revisionID = semanticQueryRevisionID(rootDir, cfg, contextFiles)
+			}
+			queryRevision = queryContext.Store.Begin(revisionID)
+		}
 		analysisCtx := analyzer.buildContext(contextFiles)
+		analysisCtx.queryRevision = queryRevision
 		// buildContext materializes the participant-restricted plan after the
 		// initial procedure projection above was copied. Rebind the realtime
 		// projection to that materialized revision so batch and realtime execute
@@ -1847,6 +1878,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 	profile.realtimePlanSummary(plan)
 	defer profile.flush()
 	var resultStore procedureSemanticResultStore
+	resultStore.queryRevision = analysisCtx.queryRevision
 	var arrayResult *ArrayAnalysisResult
 	if plan.runsKernel(procedureKernelArray) {
 		var err error
@@ -1854,7 +1886,7 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		if err != nil {
 			return nil, err
 		}
-		if arrayResult != nil {
+		if arrayResult != nil && !resultStore.arrayHit {
 			profile.kernel()
 			profile.add(analysisstats.CounterArrayKernelRuns, 1)
 			profile.add(analysisstats.CounterArrayCFGWalks, arrayResult.cfgWalks)
@@ -2454,6 +2486,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 	profile.dataflowLaneDecisions(plan)
 	profile.planSummary(plan)
 	var resultStore procedureSemanticResultStore
+	resultStore.queryRevision = ctx.queryRevision
 	var arrayResult *ArrayAnalysisResult
 	if plan.runsKernel(procedureKernelArray) {
 		var err error
@@ -2461,7 +2494,7 @@ func (a Analyzer) executeProcedureAnalysisPlan(cancelCtx context.Context, file p
 		if err != nil {
 			return nil, err
 		}
-		if arrayResult != nil {
+		if arrayResult != nil && !resultStore.arrayHit {
 			profile.kernel()
 			profile.add(analysisstats.CounterArrayKernelRuns, 1)
 			profile.add(analysisstats.CounterArrayCFGWalks, arrayResult.cfgWalks)

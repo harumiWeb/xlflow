@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added process-local, revision-scoped semantic query reuse for unchanged
+  analyzer work. Dependency-aware invalidation, cancellation safety, and
+  stderr-only query telemetry preserve existing batch/LSP diagnostics; disk
+  and cross-process caching remain out of scope.
+
 - Replaced copied derived CFGs with immutable, revision-scoped `CFGView`
   values. Stable block ordinals, canonical filter identities, shared
   adjacency/query indexes, reachability, and dominators are reused across

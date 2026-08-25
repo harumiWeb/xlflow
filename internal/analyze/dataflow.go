@@ -107,34 +107,41 @@ func (a Analyzer) executeDataflowLanes(ctx context.Context, file parsedFile, pro
 	var genericFindings []Finding
 	var httpFindings []Finding
 	executed := false
+	executedWork := false
 
 	if plan.runsDataflowLane(procedureDataflowLaneHTTP) {
 		executed = true
-		findings, err := store.materializeHTTPDataflow(ctx, a, file, proc)
+		findings, err := store.materializeHTTPDataflow(ctx, a, file, proc, plan)
 		if err != nil {
 			measurement.finishOutcome(ctx, 0, err)
 			return nil, nil, err
 		}
 		httpFindings = findings
-		if proc.Graph != nil {
+		if !store.httpDataflowHit {
+			executedWork = true
+		}
+		if proc.Graph != nil && !store.httpDataflowHit {
 			profile.add(analysisstats.CounterHTTPDataflowKernelRuns, 1)
 			profile.add(analysisstats.CounterHTTPDataflowCFGWalks, 1)
 		}
 	}
 	if plan.runsDataflowLane(procedureDataflowLaneGeneric) {
 		executed = true
-		findings, err := store.materializeGenericDataflow(ctx, a, file, proc)
+		findings, err := store.materializeGenericDataflow(ctx, a, file, proc, plan)
 		if err != nil {
 			measurement.finishOutcome(ctx, len(httpFindings), err)
 			return nil, nil, err
 		}
 		genericFindings = findings
-		if proc.Graph != nil {
+		if !store.genericDataflowHit {
+			executedWork = true
+		}
+		if proc.Graph != nil && !store.genericDataflowHit {
 			profile.add(analysisstats.CounterGenericDataflowKernelRuns, 1)
 			profile.add(analysisstats.CounterGenericDataflowCFGWalks, 1)
 		}
 	}
-	if executed && proc.Graph != nil {
+	if executed && executedWork && proc.Graph != nil {
 		// Keep the aggregate counters as compatibility telemetry for existing
 		// consumers. A procedure with both lanes still contributes one
 		// aggregate dataflow candidate and CFG walk, while the lane counters

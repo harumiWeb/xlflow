@@ -90,6 +90,41 @@ func TestRecordFactBuildCountersNilSafe(t *testing.T) {
 	recorder.RecordProcedureFactBuild()
 }
 
+func TestSemanticQueryTelemetryCounters(t *testing.T) {
+	recorder := NewRecorder()
+	recorder.RecordSemanticQueryHit()
+	recorder.RecordSemanticQueryHits(2)
+	recorder.RecordSemanticQueryMiss()
+	recorder.RecordSemanticQueryMisses(3)
+	recorder.RecordSemanticQueryInvalidatedProcedure()
+	recorder.RecordSemanticQueryInvalidatedProcedures(4)
+	recorder.RecordSemanticQueryRecomputedKernel()
+	recorder.RecordSemanticQueryRecomputedKernels(5)
+
+	_, counters := recorder.Totals()
+	want := []Counter{
+		{Name: SemanticQueryHitsCounter, Value: 3},
+		{Name: SemanticQueryInvalidatedProceduresCounter, Value: 5},
+		{Name: SemanticQueryMissesCounter, Value: 4},
+		{Name: SemanticQueryRecomputedKernelsCounter, Value: 6},
+	}
+	if !reflect.DeepEqual(counters, want) {
+		t.Fatalf("semantic query counters = %+v, want %+v", counters, want)
+	}
+}
+
+func TestSemanticQueryTelemetryCountersNilSafe(t *testing.T) {
+	var recorder *Recorder
+	recorder.RecordSemanticQueryHit()
+	recorder.RecordSemanticQueryHits(2)
+	recorder.RecordSemanticQueryMiss()
+	recorder.RecordSemanticQueryMisses(2)
+	recorder.RecordSemanticQueryInvalidatedProcedure()
+	recorder.RecordSemanticQueryInvalidatedProcedures(2)
+	recorder.RecordSemanticQueryRecomputedKernel()
+	recorder.RecordSemanticQueryRecomputedKernels(2)
+}
+
 func TestCapabilityBuildTelemetry(t *testing.T) {
 	recorder := NewRecorder()
 
@@ -307,6 +342,10 @@ func TestDomainAndCounterNamesAreStable(t *testing.T) {
 		{CounterPlannedKernelRuns, PlannedKernelRunsCounter},
 		{CounterSkippedKernelRuns, SkippedKernelRunsCounter},
 		{CounterSemanticResultsReused, SemanticResultsReusedCounter},
+		{CounterSemanticQueryHits, SemanticQueryHitsCounter},
+		{CounterSemanticQueryMisses, SemanticQueryMissesCounter},
+		{CounterSemanticQueryInvalidatedProcedures, SemanticQueryInvalidatedProceduresCounter},
+		{CounterSemanticQueryRecomputedKernels, SemanticQueryRecomputedKernelsCounter},
 	}
 	for _, test := range planCounterNames {
 		if got := test.counter.String(); got != test.want {
@@ -325,12 +364,20 @@ func TestAnalysisPlanCountersMergeAsFixedWorkCounters(t *testing.T) {
 	aggregate.AddCounter(CounterPlannedKernelRuns, 3)
 	aggregate.AddCounter(CounterSkippedKernelRuns, 1)
 	aggregate.AddCounter(CounterSemanticResultsReused, 4)
+	aggregate.AddCounter(CounterSemanticQueryHits, 5)
+	aggregate.AddCounter(CounterSemanticQueryMisses, 6)
+	aggregate.AddCounter(CounterSemanticQueryInvalidatedProcedures, 7)
+	aggregate.AddCounter(CounterSemanticQueryRecomputedKernels, 8)
 	aggregate.Merge()
 
 	_, counters := recorder.Totals()
 	want := []Counter{
 		{Name: AnalysisPlansCounter, Value: 2},
 		{Name: PlannedKernelRunsCounter, Value: 3},
+		{Name: SemanticQueryHitsCounter, Value: 5},
+		{Name: SemanticQueryInvalidatedProceduresCounter, Value: 7},
+		{Name: SemanticQueryMissesCounter, Value: 6},
+		{Name: SemanticQueryRecomputedKernelsCounter, Value: 8},
 		{Name: SemanticResultsReusedCounter, Value: 4},
 		{Name: SkippedKernelRunsCounter, Value: 1},
 	}

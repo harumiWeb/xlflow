@@ -27,6 +27,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/harumiWeb/xlflow/internal/analyze"
+	"github.com/harumiWeb/xlflow/internal/analyze/semanticquery"
 	"github.com/harumiWeb/xlflow/internal/config"
 	formsintel "github.com/harumiWeb/xlflow/internal/excel/forms/intel"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -97,12 +98,15 @@ type Server struct {
 	overlayBuilds       atomic.Uint64
 	overlayPublications atomic.Uint64
 
-	docLifecycleMu           sync.Mutex
-	docLifecycles            map[string]*sync.Mutex
-	projectSummaryCache      revisionCache[effects.ProjectSummary]
-	resolutionCache          revisionCache[projectResolutionResult]
-	projectConstantsCache    revisionCache[projectConstantsResult]
-	resolutionTypeLibSymbols []procedureir.ResolverSymbol
+	docLifecycleMu            sync.Mutex
+	docLifecycles             map[string]*sync.Mutex
+	projectSummaryCache       revisionCache[effects.ProjectSummary]
+	resolutionCache           revisionCache[projectResolutionResult]
+	projectConstantsCache     revisionCache[projectConstantsResult]
+	semanticQueries           *semanticquery.Store
+	semanticInvalidationMu    sync.Mutex
+	semanticInvalidationPaths map[string]struct{}
+	resolutionTypeLibSymbols  []procedureir.ResolverSymbol
 }
 
 type projectResolutionResult struct {
@@ -209,13 +213,15 @@ func New(opts Options) (*Server, func(), error) {
 				return out, nil
 			},
 		},
-		docs:            docs,
-		logger:          logger,
-		semanticTokens:  newSemanticTokenCache(),
-		codeLensConfig:  intel.DefaultCodeLensConfig(),
-		diagStates:      make(map[string]*diagnosticState),
-		docLifecycles:   make(map[string]*sync.Mutex),
-		analysisPermits: make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
+		docs:                      docs,
+		logger:                    logger,
+		semanticTokens:            newSemanticTokenCache(),
+		codeLensConfig:            intel.DefaultCodeLensConfig(),
+		diagStates:                make(map[string]*diagnosticState),
+		docLifecycles:             make(map[string]*sync.Mutex),
+		semanticQueries:           semanticquery.DefaultStore(),
+		semanticInvalidationPaths: make(map[string]struct{}),
+		analysisPermits:           make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
 	}
 	s.analysis = s.newWorkspaceAnalysisIndex()
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
@@ -227,6 +233,11 @@ func New(opts Options) (*Server, func(), error) {
 	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
 	s.defaultDiagnosticsRequest = reflect.ValueOf(s.diagnosticsRequest).Pointer()
 	s.projectDiagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest, project intel.ProjectAnalysisSnapshot) intel.DiagnosticResult {
+		ctx = semanticquery.WithContext(ctx, semanticquery.Context{
+			Store:    s.semanticQueries,
+			Revision: fmt.Sprintf("lsp-%d", project.Revision),
+			Metrics:  analysisstats.FromContext(ctx),
+		})
 		initializeCapabilityTelemetry(ctx)
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
 		capabilityDocuments := make([]analyze.ProjectCapabilityDocument, 0, len(project.Documents))
@@ -714,6 +725,16 @@ func (s *Server) scheduleByRefDependentDiagnostics(ctx *glsp.Context, changedURI
 }
 
 func (s *Server) scheduleProjectDependentDiagnostics(ctx *glsp.Context, changedURI string, paths []string) {
+	if s.semanticQueries != nil && len(paths) > 0 {
+		s.semanticInvalidationMu.Lock()
+		if s.semanticInvalidationPaths == nil {
+			s.semanticInvalidationPaths = make(map[string]struct{})
+		}
+		for _, path := range paths {
+			s.semanticInvalidationPaths[path] = struct{}{}
+		}
+		s.semanticInvalidationMu.Unlock()
+	}
 	if !s.opts.Config.Analyze.DetectErrorSuppressionPropagation || len(paths) == 0 {
 		return
 	}
@@ -727,6 +748,22 @@ func (s *Server) scheduleProjectDependentDiagnostics(ctx *glsp.Context, changedU
 		if caller, ok := openByPath[symbolFileKey(path)]; ok {
 			s.scheduleDiagnosticsOnly(ctx, caller)
 		}
+	}
+}
+
+func (s *Server) flushSemanticInvalidations(ctx context.Context) {
+	if s.semanticQueries == nil {
+		return
+	}
+	s.semanticInvalidationMu.Lock()
+	paths := make([]string, 0, len(s.semanticInvalidationPaths))
+	for path := range s.semanticInvalidationPaths {
+		paths = append(paths, path)
+	}
+	s.semanticInvalidationPaths = make(map[string]struct{})
+	s.semanticInvalidationMu.Unlock()
+	if len(paths) > 0 {
+		s.semanticQueries.InvalidateProceduresContext(ctx, paths...)
 	}
 }
 
@@ -1793,6 +1830,8 @@ func (s *Server) runDiagnosticsBody(
 	measurement := s.startPerformance("diagnostics", doc)
 	recorder := analysisstats.NewRecorder()
 	runCtx = analysisstats.WithRecorder(runCtx, recorder)
+	runCtx = semanticquery.WithContext(runCtx, semanticquery.Context{Store: s.semanticQueries, Metrics: recorder})
+	s.flushSemanticInvalidations(runCtx)
 	if mode == intel.DiagnosticModeFull {
 		initializeCapabilityTelemetry(runCtx)
 	}

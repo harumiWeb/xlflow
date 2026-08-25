@@ -147,6 +147,12 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 TypeDB is loaded once during LSP server construction, outside the revision-scoped diagnostics recorder; `capability_typedb_builds` is therefore not emitted by LSP performance telemetry.
 
+Revision-scoped semantic query reuse in Full diagnostics follows the
+process-local ownership, key, invalidation, and cancellation contract in
+`docs/specs/vba-semantic-query-dag.md`. Its hit, miss, invalidation, and kernel
+recomputation counters remain stderr-only developer telemetry and never become
+LSP diagnostic fields.
+
 `didOpen` synchronously registers the snapshot, reserves its analysis generation, and schedules workspace-overlay and Full diagnostics work, but does not wait for either result. `didChange` publishes the incremental snapshot, schedules procedure-scoped Fast diagnostics after a 300 ms debounce, builds the matching overlay after Fast publication, and schedules Full diagnostics after two seconds of editor idle; each open document has at most one active worker. A Full publication completely replaces Fast and a lower phase cannot overwrite a higher phase for the same generation. Fast results recalculate changed procedures, rebase safe unchanged procedure diagnostics, reapply current suppressions, and omit stale interprocedural findings until Full validation. Overlay and diagnostics results are therefore eventually published rather than being available before the lifecycle handler returns. While the newest overlay is pending, workspace-wide symbol and Call Hierarchy queries mask that document's saved and previously published entries, so they may be temporarily incomplete but never return stale information for the open buffer. Diagnostic call resolution constructs one immutable indexed workspace view and merges current open-document declarations once per request. Document-local completion, hover, and signature help read the current snapshot directly and do not wait for overlay analysis. Only work whose generation, lifecycle, snapshot, and publication phase still match the newest open document may publish. Superseding edits, `didClose`, reopen, and shutdown cancel obsolete work; internal analysis loops observe cancellation, publish no partial diagnostics, and do not retain canceled IR or control-flow builds as completed cache entries. Different documents may be analyzed concurrently. `didClose` invalidates the generation, stops both timers, drops lifecycle-local diagnostic/artifact reuse, restores the saved workspace entry, and publishes an empty diagnostic result that cannot be followed by results from an older lifecycle. Diagnostics use `source="xlflow"` and xlflow rule IDs such as `VB001`, `VB005`, `VB014`, and `VB020`. LSP diagnostics reuse the file-local lint rules used by `xlflow lint` against the current in-memory buffer; CLI `lint` and `analyze` always run Full analysis, and project-wide/filesystem-only lint checks such as unused private procedure detection remain CLI-only.
 
 The VBA LSP recognizes xlflow documentation comments written as consecutive `'''` lines directly before a declaration, with optional blank lines and Rubberduck annotation lines between the comment block and the declaration. The first paragraph is the summary; `Args:` entries of the form `name: description` are matched to procedure parameters; `Returns:` describes function and `Property Get` results; `Errors:`, `Remarks:`, `Examples:`, `See Also:`, `Deprecated:`, and unknown sections are preserved as markdown body content. Rubberduck `@ModuleDescription`, `@Description`, and `@VariableDescription` annotations are accepted as fallback descriptions, with `'''` documentation taking precedence. Hover, Signature Help, and Completion documentation use the same parsed model. Completion is triggered by `.`, `"`, `'`, and `@`; when a line contains only `'''` immediately before a supported procedure declaration, completion offers a `Generate documentation comment for <name>` snippet, and when `@` is typed inside an apostrophe comment, completion offers Rubberduck description annotation snippets. Code actions offer the same documentation comment generation for supported declarations without existing documentation.
@@ -415,6 +421,24 @@ analysis revision; these counters do not imply persistent or cross-run
 caching. They use the existing `operation="analyze/counter"` stderr shape and
 are developer telemetry only. They never appear in normal analysis JSON or LSP
 diagnostic payloads.
+
+Revision-scoped semantic query reuse adds the developer-only counters
+`semantic_query_hits`, `semantic_query_misses`,
+`semantic_query_invalidated_procedures`, and
+`semantic_query_recomputed_kernels`. They use the same stderr counter shape
+and are scoped to the process-local query store and its immutable revision
+dependencies. A query result may be reused only when its procedure fingerprint,
+kernel or projection identity, relevant configuration hash, capability or
+resolution revision, and recorded dependency edges still match. Body,
+signature, resolution, call/effect, module, capability, and relevant
+configuration changes invalidate the affected reverse dependency closure;
+recovered, ambiguous, dynamic, incomplete, or unknown ownership fails open at
+the smallest reliable boundary. Canceled or superseded work publishes no
+partial result, and a late older revision cannot overwrite a newer one. These
+counters never appear in normal CLI JSON, LSP payloads, corpus snapshots, or
+the diagnostic review ledger. The store has no disk, serialization,
+cross-process, or cache-file compatibility contract; see
+`docs/specs/vba-semantic-query-dag.md` and ADR-0048.
 
 Data-flow planning also reports independent lane decisions and work:
 `planned_generic_dataflow_runs` / `skipped_generic_dataflow_runs` for

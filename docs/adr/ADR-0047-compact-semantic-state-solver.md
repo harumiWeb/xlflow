@@ -181,4 +181,5 @@ domains remain outside this decision.
 - Issue #713: `perf(dataflow): introduce a compact semantic state solver`
 - Issue #693: shared semantic analysis kernel performance wave
 - ADR-0021, ADR-0022,
-  `docs/adr/ADR-0044-bounded-procedure-effect-summaries.md`, and ADR-0046
+  `docs/adr/ADR-0044-bounded-procedure-effect-summaries.md`, ADR-0046, and
+  ADR-0048

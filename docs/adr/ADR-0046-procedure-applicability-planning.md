@@ -470,5 +470,7 @@ produce a finding.
 - Issue #711
 - ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0043, ADR-0045
 - ADR-0040
+- ADR-0048
 - `docs/specs/vba-analysis-ir.md`
+- `docs/specs/vba-semantic-query-dag.md`
 - `docs/specs/static-analysis-corpus.md`
