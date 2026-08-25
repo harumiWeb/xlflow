@@ -130,8 +130,10 @@ edge ordering, and never removes the exceptional edge or changes `On Error`,
 outlive the immutable procedure/revision that owns it.
 
 Derived query state is keyed by the immutable graph revision and canonical
-filter identity. Query indexes, filtered adjacency, reachability sets,
-dominators, and other derived results are built lazily, reused by equivalent
+filter identity. This supersedes the earlier Decision statement that the
+query index eagerly retains reachability sets for the supported edge-filter
+views. Query indexes, filtered adjacency, reachability sets, dominators, and
+other derived results are built lazily, reused by equivalent
 views in that revision, and published for concurrent readers with deterministic
 results and traversal order. Caches are bounded by the procedure/revision
 lifetime; no derived result is reused across an incompatible revision and no

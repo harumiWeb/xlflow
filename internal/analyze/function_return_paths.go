@@ -46,8 +46,17 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 	}
 
 	variable := returnSlotVariable(proc.Name)
+	returnKinds := map[int]returnAssignmentKind{}
 	definite := graph.DefiniteAssignmentsWith(func(block vbacfg.Block, assigned vbacfg.Variable) bool {
-		if block.Statement == nil || returnAssignmentKindForStatement(proc, *block.Statement) != returnAssignmentInvalid {
+		if block.Statement == nil {
+			return true
+		}
+		kind, cached := returnKinds[block.Statement.ID]
+		if !cached {
+			kind = returnAssignmentKindForStatement(proc, *block.Statement)
+			returnKinds[block.Statement.ID] = kind
+		}
+		if kind != returnAssignmentInvalid {
 			return true
 		}
 		return assigned.Scope != variable.Scope || !strings.EqualFold(assigned.Name, variable.Name)
