@@ -597,10 +597,10 @@ Semantic results are immutable and scoped to one procedure and analysis
 revision. A result is materialized at most once for that plan and can be read
 by multiple projections through a procedure-local result store. The store is
 released with the procedure analysis or revision; canceled, failed, and
-obsolete results are not published or retained. This boundary does not add a
-persistent or cross-run cache. Result identity and dependencies may be useful
-to a future incremental analyzer, but no incremental or cross-process cache
-contract is defined here.
+obsolete results are not published or retained. The procedure-local store
+does not itself add a persistent or cross-run cache. Cross-revision reuse, when
+available, is owned by the separate process-local query DAG specified below;
+that DAG may retain only immutable values whose dependencies remain valid.
 
 Data-flow execution is split into independent lazy lanes inside that same
 procedure-local boundary. The generic lane serves `VBA224`, `VBA236`, and
@@ -650,6 +650,52 @@ Data-flow lane telemetry additionally exposes
 `generic_dataflow_cfg_walks`, and `http_dataflow_cfg_walks`. Existing aggregate
 `dataflow_cfg_walks` and `semantic_kernel_runs` counters remain compatibility
 measurements for the procedure execution and are not lane sums.
+
+### Revision-scoped semantic query DAG
+
+Issue #715 adds a process-local query store above the procedure/revision result
+store. Batch and LSP may use the same store in one process, but the store does
+not own parser state, source buffers, mutable solver scratch, findings, or
+revision-local IR/CFG IDs. Query values are immutable Go-owned projections and
+are released when no current or actively referenced revision can reach them.
+Close/reopen starts a new lifecycle.
+
+Each query key combines canonical procedure identity, distinguishable body,
+signature, and module-context fingerprints, semantic kernel or projection
+identity, the relevant configuration hash, and the relevant project
+capability/resolution revision. Dependency edges record the source/module,
+capability, procedure, call/effect-summary, kernel, and projection inputs that
+were actually read. Revision-local IR and CFG IDs are lookup metadata, not
+persistent workspace identities.
+
+When a new revision is built, changed leaves and reverse dependents are found
+from both the old and new edge sets so call removal and redirection invalidate
+former consumers. Red entries are reevaluated deterministically. An unchanged
+output fingerprint turns an entry green and stops propagation; a changed
+output continues invalidation through its reverse dependents. Body, signature,
+resolution, call/effect, module, capability, and relevant configuration
+changes therefore invalidate only their recorded semantic closure. Recovered,
+ambiguous, dynamic, incomplete, or unknown ownership fails open at the
+smallest reliable module, SCC, or project boundary.
+
+Same-revision readers share one in-flight key evaluation. Cancellation,
+failure, and panic commit neither a value nor dependency edges; waiters may
+retry. A late result from an older revision cannot publish over a newer one,
+and no partial diagnostic projection is retained. Existing bounded worker,
+canonical ordering, suppression, and defensive-copy boundaries remain in
+force.
+
+The performance recorder adds `semantic_query_hits`,
+`semantic_query_misses`, `semantic_query_invalidated_procedures`, and
+`semantic_query_recomputed_kernels`. They are stderr-only developer telemetry
+and never appear in normal CLI JSON, LSP payloads, corpus snapshots, or the
+diagnostic review ledger. The query store is process-local and has no disk
+cache, serialization, cross-process, or cache-file compatibility contract.
+
+The full ownership, key, invalidation, cancellation, and no-disk-cache
+rationale is recorded in
+`docs/adr/ADR-0048-revision-scoped-semantic-query-dag.md` and the detailed
+verification matrix is in `docs/specs/vba-semantic-query-dag.md`.
 
 ### Indexed semantic-state solver boundary
 

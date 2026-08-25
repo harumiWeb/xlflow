@@ -209,5 +209,6 @@ contracts.
 - `docs/adr/ADR-0014-reusable-vba-lsp-server.md`
 - `docs/adr/ADR-0022-conservative-vba-control-flow-graph.md`
 - `docs/adr/ADR-0023-procedure-effect-summaries.md`
+- `docs/adr/ADR-0048-revision-scoped-semantic-query-dag.md`
 - `docs/specs/vba-analysis-ir.md`
 - xlflow issues #425, #426, #427, #428, and #699

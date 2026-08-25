@@ -9,9 +9,9 @@ import (
 )
 
 // ArrayAnalysisResult is the immutable, procedure-local semantic result used
-// by array diagnostic projections.  It intentionally has no public fields:
-// the result is an implementation detail of one analysis revision and must
-// not become a cross-revision cache or a mutable rule API.
+// by array diagnostic projections. It intentionally has no public fields and
+// is safe for the process-local semantic query store to retain while the key's
+// revision inputs remain valid.
 //
 // The slices and maps are populated before the result is handed to any
 // projector.  Projectors only read them and create Finding values, which makes
@@ -52,14 +52,7 @@ func (r *ArrayAnalysisResult) findings(kind string) []Finding {
 	}
 	findings := make([]Finding, len(source))
 	for index, finding := range source {
-		findings[index] = finding
-		if finding.NearbyCode != nil {
-			findings[index].NearbyCode = append([]string(nil), finding.NearbyCode...)
-		}
-		if finding.RuntimeError != nil {
-			runtimeError := *finding.RuntimeError
-			findings[index].RuntimeError = &runtimeError
-		}
+		findings[index] = cloneFinding(finding)
 	}
 	return findings
 }

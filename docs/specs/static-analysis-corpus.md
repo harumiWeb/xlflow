@@ -1759,6 +1759,44 @@ remain explicitly on the compatibility walker and require a follow-up
 migration with differential evidence. No corpus snapshot or review-ledger
 change is justified by this partial migration.
 
+### Revision-scoped semantic query DAG verification requirements (#715)
+
+Issue #715 adds process-local, revision-scoped reuse for immutable semantic
+kernel and diagnostic-projection values. The query key and dependency graph
+must include procedure fingerprints, kernel/projection identity, relevant
+configuration, capability/resolution revisions, and the source, module, call,
+effect, and project-summary edges actually read. Body, signature, resolution,
+call/effect, module, capability, and relevant configuration changes must
+invalidate the affected reverse dependency closure; recovered, ambiguous,
+dynamic, incomplete, or unknown ownership must fail open at the smallest
+reliable boundary.
+
+The focused verification matrix must cover query-key stability and dependency
+recording; body, signature, configuration, resolution, callee/effect summary,
+call add/remove/redirect, and module/project invalidation; red/green output
+comparison; same-revision single-flight; cancellation and retry; revision
+replacement; and bounded eviction. Differential tests compare warm batch and
+LSP results with a fresh full recomputation and must match findings, ranges,
+severity, evidence, multiplicity, ordering, suppression, exit status, and
+normal JSON/protocol output. `go test -race` and concurrent-revision tests
+must report no new races or stale publication.
+
+The required ROneCOne and many-file benchmarks record cold/full, warm,
+same-revision, body, signature, resolution, configuration, and local-edit
+work. Record `semantic_query_hits`, `semantic_query_misses`,
+`semantic_query_invalidated_procedures`, and
+`semantic_query_recomputed_kernels` with the benchmark revision. These are
+stderr/developer telemetry only and must never be copied into snapshots or
+`reviews/diagnostics.jsonl`; wall-clock observations are not CI thresholds.
+Run corpus verification in read-only mode twice. Any unexplained snapshot,
+diagnostic identity, range, severity, evidence, multiplicity, ordering, or
+review-ledger delta is a stop-and-investigate condition; no snapshot update is
+justified merely because a query cache was added. Persistent disk caching,
+cross-process reuse, and cache-file compatibility are out of scope. The full
+ownership and invalidation contract is in
+`docs/specs/vba-semantic-query-dag.md` and
+`docs/adr/ADR-0048-revision-scoped-semantic-query-dag.md`.
+
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`
@@ -1767,6 +1805,8 @@ change is justified by this partial migration.
 - `docs/adr/ADR-0032-reviewed-static-analysis-corpus-evidence.md`
 - `docs/adr/ADR-0024-shared-static-analysis-rule-registry.md`
 - `docs/adr/ADR-0026-local-vbe-oracle-evidence.md`
+- `docs/adr/ADR-0048-revision-scoped-semantic-query-dag.md`
+- `docs/specs/vba-semantic-query-dag.md`
 - Issue #530
 - Issue #531
 - Issue #537

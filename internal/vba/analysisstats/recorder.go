@@ -142,9 +142,16 @@ const (
 	CounterPlannedKernelRuns
 	CounterSkippedKernelRuns
 	CounterSemanticResultsReused
+	// Semantic query counters are kept at the end of the fixed enum so adding
+	// them does not renumber the counters used by existing procedure-profile
+	// bitsets.
+	CounterSemanticQueryHits
+	CounterSemanticQueryMisses
+	CounterSemanticQueryInvalidatedProcedures
+	CounterSemanticQueryRecomputedKernels
 )
 
-const counterCount = int(CounterSemanticResultsReused) + 1
+const counterCount = int(CounterSemanticQueryRecomputedKernels) + 1
 
 // WorkCounterCount is the fixed number of counter slots used by
 // DomainAggregate. It is exposed for compile-time guards in lightweight
@@ -205,6 +212,10 @@ const (
 	PlannedKernelRunsCounter                   = "planned_kernel_runs"
 	SkippedKernelRunsCounter                   = "skipped_kernel_runs"
 	SemanticResultsReusedCounter               = "semantic_results_reused"
+	SemanticQueryHitsCounter                   = "semantic_query_hits"
+	SemanticQueryMissesCounter                 = "semantic_query_misses"
+	SemanticQueryInvalidatedProceduresCounter  = "semantic_query_invalidated_procedures"
+	SemanticQueryRecomputedKernelsCounter      = "semantic_query_recomputed_kernels"
 )
 
 var counterNames = [...]string{
@@ -261,6 +272,10 @@ var counterNames = [...]string{
 	PlannedKernelRunsCounter,
 	SkippedKernelRunsCounter,
 	SemanticResultsReusedCounter,
+	SemanticQueryHitsCounter,
+	SemanticQueryMissesCounter,
+	SemanticQueryInvalidatedProceduresCounter,
+	SemanticQueryRecomputedKernelsCounter,
 }
 
 // These paired array declarations fail compilation if a counter is added
@@ -580,6 +595,43 @@ func (r *Recorder) AddMax(name string, value uint64) {
 		r.counters[name] = value
 	}
 	r.mu.Unlock()
+}
+
+// Semantic query counters describe process-local revision-scoped query-store
+// activity. They are additive, opt-in telemetry and are emitted only through
+// the existing performance-log paths; they are not part of analysis results.
+// The singular helpers record one observation, while the plural forms allow a
+// caller that already has an aggregate count to publish it with one lock.
+func (r *Recorder) RecordSemanticQueryHit() {
+	r.RecordSemanticQueryHits(1)
+}
+
+func (r *Recorder) RecordSemanticQueryHits(count uint64) {
+	r.AddSum(SemanticQueryHitsCounter, count)
+}
+
+func (r *Recorder) RecordSemanticQueryMiss() {
+	r.RecordSemanticQueryMisses(1)
+}
+
+func (r *Recorder) RecordSemanticQueryMisses(count uint64) {
+	r.AddSum(SemanticQueryMissesCounter, count)
+}
+
+func (r *Recorder) RecordSemanticQueryInvalidatedProcedure() {
+	r.RecordSemanticQueryInvalidatedProcedures(1)
+}
+
+func (r *Recorder) RecordSemanticQueryInvalidatedProcedures(count uint64) {
+	r.AddSum(SemanticQueryInvalidatedProceduresCounter, count)
+}
+
+func (r *Recorder) RecordSemanticQueryRecomputedKernel() {
+	r.RecordSemanticQueryRecomputedKernels(1)
+}
+
+func (r *Recorder) RecordSemanticQueryRecomputedKernels(count uint64) {
+	r.AddSum(SemanticQueryRecomputedKernelsCounter, count)
 }
 
 // RecordModuleFactBuild records one construction of the immutable file-level
