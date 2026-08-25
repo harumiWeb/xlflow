@@ -19,6 +19,11 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
+const (
+	jsonrpcDiagnosticsWaitTimeout = 10 * time.Second
+	jsonrpcIntegrationTimeout     = 15 * time.Second
+)
+
 func TestCheckLoadsBuiltinDatabase(t *testing.T) {
 	if err := Check(Options{RootDir: t.TempDir(), Config: config.Default()}); err != nil {
 		t.Fatal(err)
@@ -622,7 +627,7 @@ func TestCompletionReturnsTypeCandidates(t *testing.T) {
 }
 
 func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), jsonrpcIntegrationTimeout)
 	defer cancel()
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
@@ -789,10 +794,11 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 	if !ok || args["name"] != "UnsavedRun" || args["moduleName"] != "Main" || args["qualifiedName"] != "Main.UnsavedRun" || args["kind"] != "sub" {
 		t.Fatalf("code lens args = %#v", lenses[0].Command.Arguments)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), jsonrpcDiagnosticsWaitTimeout)
+	published := recorder.waitForDiagnostics(waitCtx, func(params []protocol.PublishDiagnosticsParams) bool {
+		return len(params) > 0
+	})
+	waitCancel()
 
 	var shutdown any
 	if err := clientConn.Call(ctx, string(protocol.MethodShutdown), nil, &shutdown); err != nil {
@@ -802,7 +808,7 @@ func TestJSONRPCIntegrationInitializeOpenCompletionAndExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = serverConn.Close()
-	if !recorder.seen(string(protocol.ServerTextDocumentPublishDiagnostics)) {
+	if !published {
 		t.Fatalf("expected publishDiagnostics notification, got %v", recorder.methods())
 	}
 }
@@ -1224,11 +1230,11 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(time.Second)
 	seenCountMismatch := false
 	seenArrayObjectMismatch := false
-	for time.Now().Before(deadline) {
-		for _, params := range recorder.publishDiagnostics() {
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), jsonrpcDiagnosticsWaitTimeout)
+	matched := recorder.waitForDiagnostics(waitCtx, func(params []protocol.PublishDiagnosticsParams) bool {
+		for _, params := range params {
 			for _, diag := range params.Diagnostics {
 				if strings.Contains(diag.Message, "Argument count mismatch") {
 					seenCountMismatch = true
@@ -1238,11 +1244,12 @@ func TestJSONRPCPublishesArgumentDiagnostics(t *testing.T) {
 				}
 			}
 		}
-		if seenCountMismatch && seenArrayObjectMismatch {
-			_ = serverConn.Close()
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+		return seenCountMismatch && seenArrayObjectMismatch
+	})
+	waitCancel()
+	if matched {
+		_ = serverConn.Close()
+		return
 	}
 	_ = serverConn.Close()
 	t.Fatalf("VB030 publishDiagnostics missing count=%t array/Object=%t: %+v", seenCountMismatch, seenArrayObjectMismatch, recorder.publishDiagnostics())
@@ -1385,9 +1392,9 @@ func TestJSONRPCPublishesParserRecoveryContextAndRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, params := range recorder.publishDiagnostics() {
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), jsonrpcDiagnosticsWaitTimeout)
+	matched := recorder.waitForDiagnostics(waitCtx, func(params []protocol.PublishDiagnosticsParams) bool {
+		for _, params := range params {
 			for _, diagnostic := range params.Diagnostics {
 				if diagnostic.Message != expected.Message {
 					continue
@@ -1398,10 +1405,14 @@ func TestJSONRPCPublishesParserRecoveryContextAndRange(t *testing.T) {
 					int(diagnostic.Range.End.Character) != expected.Range.End.Character {
 					t.Fatalf("published VB014 = %+v, want message and range from %+v", diagnostic, expected)
 				}
-				return
+				return true
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		return false
+	})
+	waitCancel()
+	if matched {
+		return
 	}
 	t.Fatalf("VB014 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
 }
@@ -1438,25 +1449,19 @@ func TestJSONRPCPublishesProcedureNameConstantDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(time.Second)
 	seenMismatch := false
-	for time.Now().Before(deadline) {
-		for _, params := range recorder.publishDiagnostics() {
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), jsonrpcDiagnosticsWaitTimeout)
+	seenMismatch = recorder.waitForDiagnostics(waitCtx, func(params []protocol.PublishDiagnosticsParams) bool {
+		for _, params := range params {
 			for _, diag := range params.Diagnostics {
 				if strings.Contains(diag.Message, `Local constant "PROCEDURE_NAME" is "OldName" but its enclosing procedure is "Foo".`) {
-					seenMismatch = true
-					break
+					return true
 				}
 			}
-			if seenMismatch {
-				break
-			}
 		}
-		if seenMismatch {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return false
+	})
+	waitCancel()
 	if !seenMismatch {
 		_ = serverConn.Close()
 		t.Fatalf("VB044 publishDiagnostics missing: %+v", recorder.publishDiagnostics())
@@ -1472,24 +1477,23 @@ func TestJSONRPCPublishesProcedureNameConstantDiagnostics(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		published := recorder.publishDiagnostics()
-		if len(published) > before {
-			latest := published[len(published)-1]
-			hasVB044 := false
-			for _, diag := range latest.Diagnostics {
-				if strings.Contains(diag.Message, "enclosing procedure") {
-					hasVB044 = true
-					break
-				}
-			}
-			if !hasVB044 {
-				_ = serverConn.Close()
-				return
+	waitCtx, waitCancel = context.WithTimeout(context.Background(), jsonrpcDiagnosticsWaitTimeout)
+	cleared := recorder.waitForDiagnostics(waitCtx, func(published []protocol.PublishDiagnosticsParams) bool {
+		if len(published) <= before {
+			return false
+		}
+		latest := published[len(published)-1]
+		for _, diag := range latest.Diagnostics {
+			if strings.Contains(diag.Message, "enclosing procedure") {
+				return false
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		return true
+	})
+	waitCancel()
+	if cleared {
+		_ = serverConn.Close()
+		return
 	}
 	_ = serverConn.Close()
 	t.Fatalf("VB044 diagnostic did not clear after didChange: %+v", recorder.publishDiagnostics())
@@ -1531,12 +1535,12 @@ func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), jsonrpcDiagnosticsWaitTimeout)
+	matched := recorder.waitForDiagnostics(waitCtx, func(params []protocol.PublishDiagnosticsParams) bool {
 		seenRangeFind := false
 		seenObjectGuard := false
 		seenDictionaryIteration := false
-		for _, params := range recorder.publishDiagnostics() {
+		for _, params := range params {
 			for _, diag := range params.Diagnostics {
 				if strings.Contains(diag.Message, "Range.Find result found is dereferenced") {
 					seenRangeFind = true
@@ -1549,11 +1553,12 @@ func TestJSONRPCPublishesAnalyzerDiagnostics(t *testing.T) {
 				}
 			}
 		}
-		if seenRangeFind && seenObjectGuard && seenDictionaryIteration {
-			_ = serverConn.Close()
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+		return seenRangeFind && seenObjectGuard && seenDictionaryIteration
+	})
+	waitCancel()
+	if matched {
+		_ = serverConn.Close()
+		return
 	}
 	_ = serverConn.Close()
 	t.Fatalf("analyzer publishDiagnostics missing VBA201, VBA212, or VBA213: %+v", recorder.publishDiagnostics())
@@ -2038,9 +2043,10 @@ func TestSemanticTokensFullUsesOpenDocumentAndValidEncoding(t *testing.T) {
 }
 
 type rpcRecorder struct {
-	mu          sync.Mutex
-	methodsSeen []string
-	paramsSeen  map[string][]json.RawMessage
+	mu                sync.Mutex
+	methodsSeen       []string
+	paramsSeen        map[string][]json.RawMessage
+	diagnosticsSignal chan struct{}
 }
 
 func (r *rpcRecorder) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
@@ -2053,21 +2059,19 @@ func (r *rpcRecorder) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *json
 		copied := append(json.RawMessage(nil), (*req.Params)...)
 		r.paramsSeen[req.Method] = append(r.paramsSeen[req.Method], copied)
 	}
+	if req.Method == string(protocol.ServerTextDocumentPublishDiagnostics) {
+		if r.diagnosticsSignal == nil {
+			r.diagnosticsSignal = make(chan struct{}, 1)
+		}
+		select {
+		case r.diagnosticsSignal <- struct{}{}:
+		default:
+		}
+	}
 	r.mu.Unlock()
 	if !req.Notif {
 		_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeMethodNotFound, Message: "method not found"})
 	}
-}
-
-func (r *rpcRecorder) seen(method string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, candidate := range r.methodsSeen {
-		if candidate == method {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *rpcRecorder) methods() []string {
@@ -2087,6 +2091,28 @@ func (r *rpcRecorder) publishDiagnostics() []protocol.PublishDiagnosticsParams {
 		}
 	}
 	return out
+}
+
+func (r *rpcRecorder) waitForDiagnostics(ctx context.Context, predicate func([]protocol.PublishDiagnosticsParams) bool) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if predicate(r.publishDiagnostics()) {
+			return true
+		}
+		r.mu.Lock()
+		if r.diagnosticsSignal == nil {
+			r.diagnosticsSignal = make(chan struct{}, 1)
+		}
+		signal := r.diagnosticsSignal
+		r.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return false
+		case <-signal:
+		}
+	}
 }
 
 func hasCompletionItem(items []protocol.CompletionItem, label string) bool {
