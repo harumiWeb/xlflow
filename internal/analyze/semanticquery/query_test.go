@@ -219,3 +219,18 @@ func TestRecordDependenciesBoundsMetadata(t *testing.T) {
 		t.Fatalf("recorded dependency metadata exceeded bounds: entries=%d keys=%d reverse=%d deps=%d order=%d", len(store.entries), len(store.keys), len(store.reverse), len(store.deps), len(store.order))
 	}
 }
+
+func TestRecordDependenciesPlaceholderDoesNotHit(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("r1")
+	defer revision.Close()
+	parent := Key{Procedure: "M.Parent", Fingerprint: Hash("parent"), Kernel: "summary"}
+	dependency := Key{Procedure: "M.Dependency", Fingerprint: Hash("dependency"), Kernel: "module"}
+	store.RecordDependencies(parent, dependency)
+	value, hit, err := Evaluate(context.Background(), revision, parent, []Key{dependency}, func(context.Context) (int, error) {
+		return 42, nil
+	})
+	if err != nil || hit || value != 42 {
+		t.Fatalf("metadata placeholder evaluation = %d, hit %v, err %v", value, hit, err)
+	}
+}
