@@ -3,6 +3,8 @@ package cfg
 import (
 	"strconv"
 	"testing"
+
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 var (
@@ -12,6 +14,7 @@ var (
 	benchmarkReachableSink   []BlockID
 	benchmarkPredecessorSink []BlockID
 	benchmarkOutgoingSink    []Edge
+	benchmarkViewSink        CFGView
 )
 
 func BenchmarkCFGQuery(b *testing.B) {
@@ -107,6 +110,33 @@ func BenchmarkCFGIndexedLookup(b *testing.B) {
 	})
 }
 
+// BenchmarkCFGViewReuse contrasts the compatibility materialization boundary
+// with the immutable view used by migrated analyzers. The view path performs
+// one lazy reachability/dominator build and reuses it for every query; the
+// materialized path copies graph storage and rebuilds its revision on every
+// iteration.
+func BenchmarkCFGViewReuse(b *testing.B) {
+	graph := benchmarkRaiseQueryGraph(5000)
+	b.Run("materialized", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			filtered := graph.WithoutNormalErrRaiseContinuation()
+			benchmarkIsReachableSink = filtered.IsReachable(filtered.NormalExit, EdgeFilter{})
+			benchmarkViewSink = filtered.View(EdgeFilter{})
+		}
+	})
+	b.Run("shared-view", func(b *testing.B) {
+		view := graph.WithoutNormalErrRaiseContinuationView()
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchmarkIsReachableSink = view.IsReachable(view.NormalExit())
+			benchmarkViewSink = view
+		}
+	})
+}
+
 func benchmarkSizeName(size int) string {
 	return strconv.Itoa(size)
 }
@@ -138,6 +168,15 @@ func benchmarkQueryGraph(size int) Graph {
 	}
 	edges = append(edges, Edge{From: BlockID(size + 5), To: 2, Class: EdgeNormal})
 	graph := Graph{Blocks: blocks, Edges: edges, Entry: 1, NormalExit: 2, ExceptionalExit: 3, TerminationExit: 4, UnknownExit: 5}
+	graph.query = buildQueryIndex(graph)
+	return graph
+}
+
+func benchmarkRaiseQueryGraph(size int) Graph {
+	graph := benchmarkQueryGraph(size)
+	if len(graph.Blocks) > 5 {
+		graph.Blocks[5].Statement = &procedureir.Statement{Text: "Err.Raise 5"}
+	}
 	graph.query = buildQueryIndex(graph)
 	return graph
 }

@@ -63,7 +63,7 @@ func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR
 				continue
 			}
 			addErrorEvidence(summary, statement.Range, statement.ID, 0, ErrorHasHandler, errorTargetHandler, target)
-			outcome := inspectHandler(proc, graph, label.ID, candidateKeys, loggerTargets, rethrowTargets, terminalTargets)
+			outcome := inspectHandler(proc, graph.WithoutNormalErrRaiseContinuationView(), label.ID, candidateKeys, loggerTargets, rethrowTargets, terminalTargets)
 			if outcome.swallows {
 				fallback, ok := dominatingResultFallback(proc, graph, statement.ID)
 				if !ok {
@@ -209,8 +209,7 @@ type handlerOutcome struct {
 // inspectHandler walks the actual exceptional target subgraph. A path is
 // intentionally handled when it explicitly raises, resumes, or returns a
 // fallback value. Any remaining path to normal exit loses the original error.
-func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatementID int, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) handlerOutcome {
-	graph = graph.WithoutNormalErrRaiseContinuation()
+func inspectHandler(proc procedureir.ProcedureIR, graph cfg.CFGView, labelStatementID int, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) handlerOutcome {
 	start, ok := graph.BlockForStatement(labelStatementID)
 	if !ok {
 		return handlerOutcome{swallows: true}
@@ -234,13 +233,13 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 			continue
 		}
 		seen[current] = true
-		if current.block == graph.NormalExit {
+		if current.block == graph.NormalExit() {
 			if !current.returned && !current.recovered {
 				out.swallows = true
 			}
 			continue
 		}
-		if current.block == graph.ExceptionalExit || current.block == graph.TerminationExit || current.block == graph.UnknownExit {
+		if current.block == graph.ExceptionalExit() || current.block == graph.TerminationExit() || current.block == graph.UnknownExit() {
 			continue
 		}
 		block, _ := graph.BlockByID(current.block)
@@ -283,17 +282,17 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 			}
 			errorGuard = errorPresentCondition(statement)
 		}
-		for _, edge := range graph.OutgoingEdges(current.block) {
+		graph.ForEachOutgoing(current.block, func(edge cfg.Edge) bool {
 			// Fault transitions from statements in the handler describe a new
 			// error, not an outcome of the original exceptional path.
 			if edge.Kind == cfg.EdgeError && edge.Class == cfg.EdgeExceptional {
-				continue
+				return true
 			}
 			if errorGuard == errorGuardTrue && edge.Kind == cfg.EdgeBranchFalse {
-				continue
+				return true
 			}
 			if errorGuard == errorGuardFalse && edge.Kind == cfg.EdgeBranchTrue {
-				continue
+				return true
 			}
 			recovered := current.recovered
 			if hasGuardedRethrow {
@@ -302,7 +301,8 @@ func inspectHandler(proc procedureir.ProcedureIR, graph cfg.Graph, labelStatemen
 				}
 			}
 			queue = append(queue, state{block: edge.To, returned: current.returned, recovered: recovered, errorValues: current.errorValues, errorNumber: current.errorNumber})
-		}
+			return true
+		})
 	}
 	return out
 }
@@ -365,7 +365,7 @@ func procedureAlwaysTerminates(proc procedureir.ProcedureIR, graph cfg.Graph, ca
 			sawTerminal = true
 			continue
 		}
-		block := graphBlock(graph, current)
+		block, _ := graph.BlockByID(current)
 		if block.Statement != nil {
 			statement := byID[block.StatementID]
 			if isRaiseStatement(proc, statement) || callsKnownTarget(proc, statement, candidateKeys, known) {
@@ -429,7 +429,7 @@ func callsKnownTarget(proc procedureir.ProcedureIR, statement procedureir.Statem
 	return false
 }
 
-func handlerSubgraphHasRaise(proc procedureir.ProcedureIR, graph cfg.Graph, start cfg.BlockID) bool {
+func handlerSubgraphHasRaise(proc procedureir.ProcedureIR, graph cfg.CFGView, start cfg.BlockID) bool {
 	byID := statementIndex(proc)
 	queue := []cfg.BlockID{start}
 	seen := map[cfg.BlockID]bool{}
@@ -440,15 +440,16 @@ func handlerSubgraphHasRaise(proc procedureir.ProcedureIR, graph cfg.Graph, star
 			continue
 		}
 		seen[current] = true
-		block := graphBlock(graph, current)
+		block, _ := graph.BlockByID(current)
 		if block.Statement != nil && isRaiseStatement(proc, byID[block.StatementID]) {
 			return true
 		}
-		for _, edge := range graph.OutgoingEdges(current) {
+		graph.ForEachOutgoing(current, func(edge cfg.Edge) bool {
 			if edge.Kind != cfg.EdgeError {
 				queue = append(queue, edge.To)
 			}
-		}
+			return true
+		})
 	}
 	return false
 }

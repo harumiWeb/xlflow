@@ -182,45 +182,58 @@ type Index struct {
 	entryID  cfg.BlockID
 }
 
-// NewIndex builds deterministic ordinals by sorting the graph's stable block
-// IDs. Outgoing edges are ordered by stable edge ID (then destination and edge
-// kind as tie-breakers) to keep adapter traversal reproducible while retaining
-// CFG builder branch precedence.
+// NewIndex builds deterministic ordinals from the CFG view's stable base
+// storage positions. Outgoing edges are ordered by stable edge ID (then
+// destination and edge kind as tie-breakers) to keep adapter traversal
+// reproducible while retaining CFG builder branch precedence.
 func NewIndex(graph cfg.Graph) (*Index, error) {
-	if len(graph.Blocks) == 0 {
+	return NewIndexView(graph.View(cfg.EdgeFilter{}))
+}
+
+// NewIndexView builds the solver index from a read-only CFGView. The view
+// owns the graph revision and filter; this adapter keeps the solver's compact
+// lane representation while avoiding a materialized filtered Graph copy.
+func NewIndexView(view cfg.CFGView) (*Index, error) {
+	if view.BlockCount() == 0 {
 		return nil, fmt.Errorf("semanticstate: CFG has no blocks")
 	}
-	ids := make([]cfg.BlockID, 0, len(graph.Blocks))
-	seen := make(map[cfg.BlockID]struct{}, len(graph.Blocks))
-	for _, block := range graph.Blocks {
+	blocks := make([]Block, view.BlockCount())
+	byID := make(map[cfg.BlockID]BlockOrdinal, view.BlockCount())
+	seen := make(map[cfg.BlockID]struct{}, view.BlockCount())
+	viewErr := error(nil)
+	view.ForEachBlockOrdinal(func(ordinal cfg.BlockOrdinal, block cfg.Block) bool {
 		if _, ok := seen[block.ID]; ok {
-			return nil, fmt.Errorf("semanticstate: duplicate CFG block %d", block.ID)
+			viewErr = fmt.Errorf("semanticstate: duplicate CFG block %d", block.ID)
+			return false
 		}
 		seen[block.ID] = struct{}{}
-		ids = append(ids, block.ID)
+		byID[block.ID] = BlockOrdinal(ordinal)
+		blocks[ordinal] = Block{Ordinal: BlockOrdinal(ordinal), ID: block.ID}
+		return true
+	})
+	if viewErr != nil {
+		return nil, viewErr
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	byID := make(map[cfg.BlockID]BlockOrdinal, len(ids))
-	blocks := make([]Block, len(ids))
-	for ordinal, id := range ids {
-		byID[id] = BlockOrdinal(ordinal)
-		blocks[ordinal] = Block{Ordinal: BlockOrdinal(ordinal), ID: id}
-	}
-	entry, ok := byID[graph.Entry]
+	entry, ok := byID[view.Entry()]
 	if !ok {
-		return nil, fmt.Errorf("semanticstate: CFG entry %d is not a block", graph.Entry)
+		return nil, fmt.Errorf("semanticstate: CFG entry %d is not a block", view.Entry())
 	}
 	outgoing := make([][]Edge, len(blocks))
-	for _, source := range graph.Edges {
+	view.ForEachEdge(func(source cfg.Edge) bool {
 		from, fromOK := byID[source.From]
 		to, toOK := byID[source.To]
 		if !fromOK || !toOK {
-			return nil, fmt.Errorf("semanticstate: edge %d references unknown block", source.ID)
+			viewErr = fmt.Errorf("semanticstate: edge %d references unknown block", source.ID)
+			return false
 		}
 		outgoing[from] = append(outgoing[from], Edge{
 			ID: source.ID, From: from, To: to, Kind: source.Kind,
 			Class: source.Class, Uncertain: source.Uncertain,
 		})
+		return true
+	})
+	if viewErr != nil {
+		return nil, viewErr
 	}
 	for i := range outgoing {
 		sort.SliceStable(outgoing[i], func(a, b int) bool {
@@ -243,7 +256,7 @@ func NewIndex(graph cfg.Graph) (*Index, error) {
 			return !left.Uncertain && right.Uncertain
 		})
 	}
-	return &Index{blocks: blocks, byID: byID, outgoing: outgoing, entry: entry, entryID: graph.Entry}, nil
+	return &Index{blocks: blocks, byID: byID, outgoing: outgoing, entry: entry, entryID: view.Entry()}, nil
 }
 
 // BlockCount returns the number of blocks in the indexed graph.

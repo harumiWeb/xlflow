@@ -200,13 +200,10 @@ func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sour
 	// solver owns scheduling, edge classification, cancellation, and snapshot
 	// isolation; the adapter preserves the established transfer/join semantics
 	// while the HTTP domain is incrementally migrated to scalar slots.
-	index, err := semanticstate.NewIndex(graph)
+	view := graph.View(vbacfg.EdgeFilter{})
+	index, err := semanticstate.NewIndexView(view)
 	if err != nil {
 		return nil, err
-	}
-	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
-	for _, block := range graph.Blocks {
-		blocks[block.ID] = block
 	}
 	environment := semanticstate.NewEnvironment([]string{"http-state"}, []string{"http-state"})
 	const lane semanticstate.LaneOrdinal = 0
@@ -223,11 +220,11 @@ func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sour
 				if !ok {
 					return nil
 				}
-				cfgBlock, ok := index.Block(block)
+				_, ok = index.Block(block)
 				if !ok {
 					return nil
 				}
-				candidate, ok := blocks[cfgBlock.ID]
+				candidate, ok := view.BlockAtOrdinal(vbacfg.BlockOrdinal(block))
 				if !ok || candidate.Statement == nil || candidate.Statement.Recovered {
 					output.Set(symbol, value)
 					return nil

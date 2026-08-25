@@ -108,6 +108,53 @@ converts byte ranges to UTF-16 only at the protocol boundary. This keeps
 `VB055`--`VB058` parity and prevents a second control-flow parser from being
 introduced in an adapter.
 
+### Amendment: immutable CFG views and bounded derived-query ownership (Issue #714)
+
+The graph storage for a procedure is an immutable base revision. The revision
+owns its blocks, edges, stable dense block ordinals, block-ID lookup, and base
+normal/incoming/outgoing adjacency in deterministic order. Block ordinals are
+internal positions within that revision; they do not replace the public
+meaning of sparse or non-contiguous `BlockID` values, and the defensive
+handling of duplicate IDs, zero IDs, and directly constructed graph values
+remains part of the compatibility contract. A graph transformation or
+defensive clone creates a new revision; indexed graph storage is never changed
+in place.
+
+`CFGView` is a read-only, borrowed view over that base revision. It carries a
+canonical edge-filter identity and an optional edge mask, such as the mask
+that excludes the normal continuation after `Err.Raise`. Constructing a view
+does not copy blocks, edges, procedure IR, or adjacency. View iteration uses
+the base adjacency (or an allocation-free filtered traversal), preserves base
+edge ordering, and never removes the exceptional edge or changes `On Error`,
+`Resume Next`, or `Error` semantics. A view cannot expose mutable slices or
+outlive the immutable procedure/revision that owns it.
+
+Derived query state is keyed by the immutable graph revision and canonical
+filter identity. Query indexes, filtered adjacency, reachability sets,
+dominators, and other derived results are built lazily, reused by equivalent
+views in that revision, and published for concurrent readers with deterministic
+results and traversal order. Caches are bounded by the procedure/revision
+lifetime; no derived result is reused across an incompatible revision and no
+persistent cross-revision cache is introduced. A failed or canceled build is
+not published as a reusable result.
+
+Existing `Graph` construction, query, clone, and materialization APIs remain
+compatibility boundaries. The legacy
+`WithoutNormalErrRaiseContinuation` entry point remains available with its
+existing owned-Graph return and defensive-value behavior; internal consumers
+use the equivalent read-only view directly. A caller that needs independent
+mutable storage must request an explicit defensive clone/materialization. This
+preserves ownership for existing Graph callers while allowing Array, Object,
+Error, and return-path consumers to share one base revision and its derived
+queries.
+
+This amendment is an implementation and ownership change only. It does not
+change CFG construction semantics, diagnostic meaning or ordering, diagnostic
+IDs, CLI configuration or JSON, LSP capabilities or ranges, or the public
+behavior of `VBA204`, `VBA210`, and related consumers. Exceptional flow and
+uncertainty remain conservative, and performance telemetry remains
+observability rather than a new user-facing contract.
+
 ## Consequences
 
 - Positive: batch and LSP reliability checks share one deterministic
@@ -118,14 +165,16 @@ introduced in an adapter.
   false confidence on malformed or dynamically targeted control flow.
 - Positive: the graph remains protocol-neutral and safe after parser retirement
   because it contains only Go-owned IR values and ranges.
-- Positive: repeated analyzer queries reuse immutable lookup, adjacency, and
-  reachability data instead of rebuilding maps or scanning all edges.
+- Positive: repeated analyzer queries and equivalent filtered views reuse
+  immutable ordinal, adjacency, reachability, and dominator data instead of
+  copying graphs or rebuilding maps and scans.
 - Negative: treating every executable statement as a potential fault site adds
   edges and can reduce precision; ADR-0023 does not narrow this fallback.
 - Negative: path-sensitive error modes and conservative unknown flow make graph
   construction and query testing more complex than a structured-only CFG.
-- Negative: each built graph retains additional index memory, and transformed
-  graphs must rebuild the index when their edge set changes.
+- Negative: each procedure/revision retains bounded derived-query state, and
+  transformed graphs must rebuild revision-local indexes when their edge set
+  changes.
 - Negative: callers must choose a flow view deliberately; using a normal-only
   view for a general guarantee would be unsound.
 - Limitation: graph IDs are stable only for the same document revision and are

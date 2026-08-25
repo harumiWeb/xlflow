@@ -162,7 +162,8 @@ func (a Analyzer) deterministicArrayRuntimeFindings(file parsedFile, proc source
 		return out
 	}
 	if proc.Graph != nil {
-		walkArrayCFG(proc.Graph, file.Lines, state, visit)
+		view := proc.Graph.View(vbacfg.EdgeFilter{})
+		walkArrayCFG(&view, file.Lines, state, visit)
 	} else {
 		for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
 			state = visit(normalizedCodeLine(file.Lines[line-1]), line, state)

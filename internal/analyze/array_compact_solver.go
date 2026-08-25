@@ -87,18 +87,14 @@ func (a arrayCompactAdapter) initialState(state *semanticstate.State[arrayValue]
 // solver. Callback compatibility is intentionally retained at this boundary,
 // so diagnostic/evidence code still receives arrayFlowState while joins happen
 // directly in indexed slots without union-map allocation.
-func walkArrayCFGCompact(ctx context.Context, graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, sourceLines bool) error {
+func walkArrayCFGCompact(ctx context.Context, graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, sourceLines bool) error {
 	if graph == nil {
 		return nil
 	}
 	adapter := newArrayCompactAdapter(initial)
-	index, err := semanticstate.NewIndex(*graph)
+	index, err := semanticstate.NewIndexView(*graph)
 	if err != nil {
 		return err
-	}
-	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
-	for _, block := range graph.Blocks {
-		blocks[block.ID] = block
 	}
 	lattice := arrayCompactLattice{}
 	lane := semanticstate.Lane[arrayValue]{
@@ -107,11 +103,11 @@ func walkArrayCFGCompact(ctx context.Context, graph *vbacfg.Graph, lines []strin
 			return nil
 		},
 		Transfer: func(_ context.Context, _ semanticstate.LaneOrdinal, ordinal semanticstate.BlockOrdinal, input semanticstate.StateView[arrayValue], output *semanticstate.State[arrayValue]) error {
-			indexed, ok := index.Block(ordinal)
+			_, ok := index.Block(ordinal)
 			if !ok {
 				return nil
 			}
-			block, ok := blocks[indexed.ID]
+			block, ok := graph.BlockAtOrdinal(vbacfg.BlockOrdinal(ordinal))
 			if !ok {
 				return nil
 			}
@@ -127,19 +123,19 @@ func walkArrayCFGCompact(ctx context.Context, graph *vbacfg.Graph, lines []strin
 			if edgeState == nil || edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
 				return nil
 			}
-			fromIndexed, ok := index.Block(edge.From)
+			_, ok := index.Block(edge.From)
 			if !ok {
 				return nil
 			}
-			from, ok := blocks[fromIndexed.ID]
+			from, ok := graph.BlockAtOrdinal(vbacfg.BlockOrdinal(edge.From))
 			if !ok {
 				return nil
 			}
-			toIndexed, ok := index.Block(edge.To)
+			_, ok = index.Block(edge.To)
 			if !ok {
 				return nil
 			}
-			to, ok := blocks[toIndexed.ID]
+			to, ok := graph.BlockAtOrdinal(vbacfg.BlockOrdinal(edge.To))
 			if !ok {
 				return nil
 			}

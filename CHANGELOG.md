@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Replaced copied derived CFGs with immutable, revision-scoped `CFGView`
+  values. Stable block ordinals, canonical filter identities, shared
+  adjacency/query indexes, reachability, and dominators are reused across
+  equivalent views with bounded procedure/revision lifetime and safe
+  concurrent reads. Existing Graph compatibility and defensive ownership
+  boundaries remain available; Array, Object, Error, and return-path
+  diagnostics, CLI JSON, and LSP contracts are unchanged.
+
 - Introduced the internal indexed semantic-state solver at the HTTP transport
   scheduling boundary and for the ordinary Array CFG walk. Revision-local
   `SymbolID` and `BlockOrdinal` indexes, dense/sparse slot storage, in-place

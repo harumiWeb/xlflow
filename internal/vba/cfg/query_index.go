@@ -8,8 +8,8 @@ type queryIndex struct {
 	blocksByID         map[BlockID]int
 	outgoing           map[BlockID][]Edge
 	incoming           map[BlockID][]Edge
-	reachableAll       map[BlockID]bool
-	reachableNormal    map[BlockID]bool
+	nonReturningRaise  map[BlockID]bool
+	viewCaches         [4]viewCache
 	blocksBase         *Block
 	blocksLen          int
 	edgesBase          *Edge
@@ -25,6 +25,7 @@ func buildQueryIndex(g Graph) *queryIndex {
 		blocksByID:         make(map[BlockID]int, len(g.Blocks)),
 		outgoing:           make(map[BlockID][]Edge),
 		incoming:           make(map[BlockID][]Edge),
+		nonReturningRaise:  make(map[BlockID]bool),
 		blocksLen:          len(g.Blocks),
 		edgesLen:           len(g.Edges),
 		entry:              g.Entry,
@@ -40,6 +41,7 @@ func buildQueryIndex(g Graph) *queryIndex {
 	for blockIndex, block := range g.Blocks {
 		if _, exists := index.blocksByID[block.ID]; !exists {
 			index.blocksByID[block.ID] = blockIndex
+			index.nonReturningRaise[block.ID] = isNonReturningRaiseBlock(block)
 		}
 		if block.Kind == BlockStatement && block.StatementID > 0 {
 			if _, exists := index.blocksByStatement[block.StatementID]; !exists {
@@ -51,8 +53,6 @@ func buildQueryIndex(g Graph) *queryIndex {
 		index.outgoing[edge.From] = append(index.outgoing[edge.From], edge)
 		index.incoming[edge.To] = append(index.incoming[edge.To], edge)
 	}
-	index.reachableAll = computeReachable(g, index, EdgeFilter{})
-	index.reachableNormal = computeReachable(g, index, EdgeFilter{NormalOnly: true})
 	return index
 }
 
@@ -65,20 +65,6 @@ func (g Graph) queryIndexes() *queryIndex {
 	// slice storage changes so the fallback remains correct without penalizing
 	// stable graph revisions.
 	return buildQueryIndex(g)
-}
-
-// cachedReachable returns the immutable reachability set for a canonical
-// filter view. Keep the filter cases explicit so a future filter variant does
-// not accidentally reuse the conservative default set.
-func (index *queryIndex) cachedReachable(filter EdgeFilter) (map[BlockID]bool, bool) {
-	switch filter {
-	case EdgeFilter{}:
-		return index.reachableAll, true
-	case EdgeFilter{NormalOnly: true}:
-		return index.reachableNormal, true
-	default:
-		return nil, false
-	}
 }
 
 func (index *queryIndex) matches(g Graph) bool {
@@ -105,60 +91,6 @@ func sameBlockIDs(a, b []BlockID) bool {
 		}
 	}
 	return true
-}
-
-func computeReachable(g Graph, index *queryIndex, filter EdgeFilter) map[BlockID]bool {
-	seen := physicalReachableWithIndex(g, index, filter, nil)
-	if unknownFlowReachedFor(g, seen) {
-		for _, block := range g.Blocks {
-			if block.Kind == BlockStatement {
-				seen[block.ID] = true
-			}
-		}
-		seen[g.UnknownExit] = true
-		seen = expandReachableWithIndex(index, filter, nil, seen)
-	}
-	return seen
-}
-
-func unknownFlowReachedFor(g Graph, reachable map[BlockID]bool) bool {
-	for _, source := range g.UnknownFlowSources {
-		if reachable[source] {
-			return true
-		}
-	}
-	return false
-}
-
-func physicalReachableWithIndex(g Graph, index *queryIndex, filter EdgeFilter, removed map[BlockID]bool) map[BlockID]bool {
-	seen := map[BlockID]bool{}
-	if removed != nil && removed[g.Entry] {
-		return seen
-	}
-	seen[g.Entry] = true
-	return expandReachableWithIndex(index, filter, removed, seen)
-}
-
-func expandReachableWithIndex(index *queryIndex, filter EdgeFilter, removed map[BlockID]bool, seen map[BlockID]bool) map[BlockID]bool {
-	queue := make([]BlockID, 0, len(seen))
-	for id := range seen {
-		queue = append(queue, id)
-	}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, edge := range index.outgoing[current] {
-			if !filter.accepts(edge) || removed != nil && removed[edge.To] {
-				continue
-			}
-			if seen[edge.To] {
-				continue
-			}
-			seen[edge.To] = true
-			queue = append(queue, edge.To)
-		}
-	}
-	return seen
 }
 
 func cloneBlockSet(in map[BlockID]bool) map[BlockID]bool {

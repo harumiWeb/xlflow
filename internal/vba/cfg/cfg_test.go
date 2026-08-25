@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -328,6 +329,159 @@ func TestIsReachableCanonicalQueriesDoNotAllocate(t *testing.T) {
 				t.Fatalf("IsReachable(%d, %+v) = %v, want %v", test.target, test.filter, got, test.want)
 			}
 		})
+	}
+}
+
+func TestCFGViewSharesRevisionStorageAndPreservesFilteredSemantics(t *testing.T) {
+	t.Parallel()
+	doc := buildIR(t, `Public Sub Work()
+    On Error GoTo Handler
+    Err.Raise 5
+    Debug.Print "unreachable"
+    Exit Sub
+Handler:
+    Resume Next
+End Sub
+`)
+	graph := BuildDocument(doc).Graphs[0]
+	view := graph.WithoutNormalErrRaiseContinuationView()
+	if len(view.graph.Blocks) == 0 || &view.graph.Blocks[0] != &graph.Blocks[0] {
+		t.Fatal("CFGView copied block storage")
+	}
+	if len(view.graph.Edges) == 0 || &view.graph.Edges[0] != &graph.Edges[0] {
+		t.Fatal("CFGView copied edge storage")
+	}
+	materialized := view.Materialize()
+	if len(materialized.Edges) >= len(graph.Edges) {
+		t.Fatalf("materialized view edges = %d, base edges = %d; raise continuation was not filtered", len(materialized.Edges), len(graph.Edges))
+	}
+	raiseStatement := 0
+	for _, statement := range doc.Procedures[0].Statements {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(statement.Text)), "err.raise") {
+			raiseStatement = statement.ID
+			break
+		}
+	}
+	raiseBlock, ok := graph.BlockForStatement(raiseStatement)
+	if !ok {
+		t.Fatal("Err.Raise block not found")
+	}
+	var filteredNormal bool
+	var exceptional bool
+	view.ForEachEdge(func(edge Edge) bool {
+		if edge.From != raiseBlock.ID {
+			return true
+		}
+		if edge.Class == EdgeNormal {
+			filteredNormal = true
+		}
+		if edge.Class == EdgeExceptional {
+			exceptional = true
+		}
+		return true
+	})
+	if filteredNormal || !exceptional {
+		t.Fatalf("filtered view flow: normal=%v exceptional=%v", filteredNormal, exceptional)
+	}
+}
+
+func TestCFGViewCachesCanonicalQueriesAndCustomMasks(t *testing.T) {
+	t.Parallel()
+	graph := benchmarkQueryGraph(100)
+	first := graph.WithoutNormalErrRaiseContinuationView()
+	second := graph.View(EdgeFilter{WithoutNormalErrRaiseContinuation: true})
+	if first.cache != second.cache {
+		t.Fatal("canonical views did not share the revision cache")
+	}
+	if first.IsReachable(graph.Entry) != second.IsReachable(graph.Entry) {
+		t.Fatal("canonical views returned different reachability")
+	}
+	if !reflect.DeepEqual(first.Dominators(), second.Dominators()) {
+		t.Fatal("canonical views returned different dominators")
+	}
+	dominators := first.DominatorsOf(graph.Blocks[len(graph.Blocks)-1].ID)
+	if len(dominators) > 0 {
+		dominators[0] = -1
+		if first.DominatorsOf(graph.Blocks[len(graph.Blocks)-1].ID)[0] == -1 {
+			t.Fatal("DominatorsOf exposed mutable cache storage")
+		}
+	}
+	custom := first.WithoutNormalContinuationsFrom(map[BlockID]bool{graph.Entry: true})
+	if custom.cache == first.cache {
+		t.Fatal("custom mask reused the canonical cache")
+	}
+	if custom.IsReachable(graph.Blocks[1].ID) {
+		t.Fatal("custom mask retained the entry normal continuation")
+	}
+	revision := graph
+	revision.Entry = graph.Blocks[len(graph.Blocks)-1].ID
+	if revised := revision.View(EdgeFilter{WithoutNormalErrRaiseContinuation: true}); revised.index == first.index {
+		t.Fatal("revised graph reused an incompatible query index")
+	}
+	chainGraph := Graph{
+		Blocks: []Block{{ID: 1, Kind: BlockEntry}, {ID: 2, Kind: BlockStatement}, {ID: 3, Kind: BlockStatement}, {ID: 4, Kind: BlockNormalExit}},
+		Edges: []Edge{
+			{ID: 1, From: 1, To: 2, Class: EdgeNormal},
+			{ID: 2, From: 1, To: 3, Class: EdgeNormal},
+			{ID: 3, From: 2, To: 4, Class: EdgeNormal},
+			{ID: 4, From: 3, To: 4, Class: EdgeNormal},
+		},
+		Entry: 1,
+	}
+	chained := chainGraph.View(EdgeFilter{}).
+		WithoutNormalContinuationsFrom(map[BlockID]bool{2: true}).
+		WithoutNormalContinuationsFrom(map[BlockID]bool{3: true})
+	if chained.IsReachable(4) {
+		t.Fatal("chained custom mask restored the first excluded continuation")
+	}
+}
+
+func TestCFGViewConcurrentReadsAreDeterministic(t *testing.T) {
+	graph := benchmarkQueryGraph(500)
+	view := graph.View(EdgeFilter{})
+	wantReachable := view.Reachable()
+	wantDominators := view.Dominators()
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				if got := view.Reachable(); !reflect.DeepEqual(got, wantReachable) {
+					t.Errorf("Reachable() = %v, want %v", got, wantReachable)
+					return
+				}
+				if got := view.Dominators(); !reflect.DeepEqual(got, wantDominators) {
+					t.Errorf("Dominators() changed under concurrent reads")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestCFGViewPreservesDenseOrdinalsForDefensiveZeroIDs(t *testing.T) {
+	t.Parallel()
+	graph := Graph{
+		Blocks: []Block{{ID: 0, Kind: BlockEntry}, {ID: 40, Kind: BlockNormalExit}},
+		Edges:  []Edge{{ID: 1, From: 0, To: 40, Class: EdgeNormal}},
+		Entry:  0,
+	}
+	view := graph.View(EdgeFilter{})
+	if !view.IsReachable(40) {
+		t.Fatal("view did not follow an ID-zero entry")
+	}
+	ordinal, ok := view.Ordinal(0)
+	if !ok || ordinal != 0 {
+		t.Fatalf("Ordinal(0) = (%d, %v), want (0, true)", ordinal, ok)
+	}
+	block, ok := view.BlockAtOrdinal(ordinal)
+	if !ok || block.ID != 0 {
+		t.Fatalf("BlockAtOrdinal(0) = (%+v, %v)", block, ok)
+	}
+	if block, ok := view.BlockByID(0); !ok || block.ID != 0 {
+		t.Fatalf("BlockByID(0) = (%+v, %v)", block, ok)
 	}
 }
 
