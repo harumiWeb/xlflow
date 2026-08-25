@@ -19,6 +19,41 @@ file or serialization format, or share entries across processes. Parser and
 tree-sitter reuse, cold parsing optimization, and distributed caching remain
 outside this specification.
 
+## Fingerprint ownership and compact invalidation (#724)
+
+During revision construction the analyzer prepares immutable fingerprints for
+configuration, TypeDB, module declarations/context, array/data-flow capability leaves,
+procedure-local source/signature/features, effect summaries, and call
+resolution. Procedure workers share these facts across the array, generic
+data-flow, and HTTP lanes. A procedure-local fingerprint does not embed broad
+module maps; each lane records only the module/capability leaf it actually
+reads. A changed producer therefore changes downstream dependencies only when
+the leaf or output consumed by that downstream query changes. Unknown,
+recovered, ambiguous, and incomplete inputs remain conservative and fail open.
+
+The private store uses the comparable `semanticquery.Key` directly for cache,
+pending, reverse-edge, epoch, and eviction metadata. Published dependency
+slices are duplicate-free and canonical; procedure/document entry indexes are
+maintained as keys are added and removed. LSP passes normalized document paths
+to exact invalidation rather than scanning all key strings. Finding defensive
+copies and deterministic projection boundaries are unchanged.
+
+The developer benchmark contract has four independent revision cases for both
+ROneCOne and the representative `std-vba` many-file corpus:
+
+- `analyze-only/cold` creates a fresh process-local store per operation;
+- `analyze-only/warm` primes one store outside the timer and measures unchanged
+  repeated revisions;
+- `analyze-only/local-edit` changes only a benchmark-owned procedure body; and
+- `analyze-only/dependency-edit` cycles benchmark-owned callee body, signature,
+  effect, and caller-redirect edits while retaining independent caller/callee
+  modules.
+
+Each case reports wall time and allocations together with hits, misses,
+invalidated procedures, recomputed kernels, and the existing physical-kernel
+counters. Benchmark output is observational developer telemetry, not a cache
+compatibility contract or a corpus snapshot input.
+
 ## Ownership and revision lifetime
 
 The store owns immutable Go values and dependency metadata. Query values may

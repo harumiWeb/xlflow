@@ -357,6 +357,7 @@ type analysisContext struct {
 	arrayStats                *arrayInterproceduralStats
 	arrayByRefEntryStates     map[string]map[int]bool
 	arrayByRefEntryConditions map[string]map[int]string
+	arrayCapabilityIndex      *semanticArrayCapabilityIndex
 	procedures                map[string]procedureSignature
 	procedureResolver         procedureir.Resolver
 	objectAnalysis            *objectAnalysisContext
@@ -411,6 +412,11 @@ type parsedFile struct {
 	ArrayOptionBaseSet          bool
 	ConstantValues              map[string]constexpr.Value
 	DataFlowModuleBindings      map[string]bool
+	// semanticQueryFacts is populated once the immutable revision capabilities
+	// (effects, resolution and array participant state) are ready.  Procedure
+	// query lanes share this pointer so they do not rebuild the same source,
+	// dependency, or capability fingerprints for every lane.
+	semanticQueryFacts *semanticFileQueryFacts
 }
 
 type parsedFileAnalysisResult struct {
@@ -745,6 +751,13 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		for i := range parsedFiles {
 			materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		}
+		// Keep the revision-owned procedure projection authoritative for the
+		// semantic query preparation pass. The worker path still derives a
+		// defensive copy, but the prepared effect leaf must come from the same
+		// resolved project summary that those workers consume.
+		for i := range parsedFiles {
+			parsedFiles[i].Procedures = sourceProceduresWithEffects(parsedFiles[i], projectEffects)
+		}
 		// Effects can add conservative feature seeds (for example, an
 		// application-state mutation discovered through a propagated call or a
 		// With Application member). Recompute the capability plan before any
@@ -807,6 +820,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	analysisCtx := analysis.buildContextWithObjectAnalysisPlan(parsedFiles, objectAnalysis, capabilityPlan, procedureir.ProcedureOnlyResolver(resolutionResolver))
 	analysisCtx.queryRevision = queryRevision
 	recordArrayInterproceduralTelemetry(ctx, analysisCtx)
+	prepareSemanticQueryFacts(analysis, parsedFiles, analysisCtx)
 	finishArrayCapability(nil)
 	finishStage(len(analysisCtx.procedures), nil)
 	finishStage = analysisstats.Measure(ctx, "project_context_indexes")
@@ -1768,8 +1782,17 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		file = contextFiles[0]
 		materializedProcedures := sourceProceduresWithEffects(file, projectEffects)
 		procedures = rebindRealtimeProcedureProjection(procedures, materializedProcedures)
+		// The prepared query facts are built from the context-file projection;
+		// attach the effect-bearing materialized procedures before preparation so
+		// callee effect leaves and procedure effect summaries stay coherent with
+		// the findings path below.
+		contextFiles[0].Procedures = procedures
 		recordArrayInterproceduralTelemetry(ctx, analysisCtx)
 		analysisCtx.projectEffects = projectEffects
+		prepareSemanticQueryFacts(analyzer, contextFiles, analysisCtx)
+		// prepareSemanticQueryFacts attaches the immutable projection to the
+		// context-file slice; refresh the value copy used by realtime workers.
+		file = contextFiles[0]
 		for i, proc := range procedures {
 			if i&0x1f == 0 {
 				if err := ctx.Err(); err != nil {

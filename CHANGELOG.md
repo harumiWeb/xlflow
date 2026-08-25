@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced revision-scoped semantic query overhead by sharing prepared,
+  kernel-specific fingerprints across procedure lanes, using comparable cache
+  keys and exact document/procedure invalidation indexes, and separating cold,
+  warm, local-edit, and dependency-edit corpus benchmarks. Diagnostic, JSON,
+  LSP, cancellation, and process-local cache contracts remain unchanged.
+
 - Added process-local, revision-scoped semantic query reuse for unchanged
   analyzer work. Dependency-aware invalidation, cancellation safety, and
   stderr-only query telemetry preserve existing batch/LSP diagnostics; disk

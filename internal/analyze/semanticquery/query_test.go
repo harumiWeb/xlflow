@@ -28,6 +28,38 @@ func TestHashAndKeyAreStable(t *testing.T) {
 	}
 }
 
+func TestComparableKeyIdentityDoesNotCollapseStringSeparatorCollision(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("separator-collision")
+	defer revision.Close()
+	first := Key{Procedure: "a\x00b", Fingerprint: "c", Kernel: "array"}
+	second := Key{Procedure: "a", Fingerprint: "b\x00c", Kernel: "array"}
+	if first.String() != second.String() {
+		t.Fatalf("test keys should collide under the old string identity: %q != %q", first.String(), second.String())
+	}
+	if value, _, err := Evaluate(context.Background(), revision, first, nil, func(context.Context) (int, error) { return 1, nil }); err != nil || value != 1 {
+		t.Fatalf("first evaluation = %d, err %v", value, err)
+	}
+	if value, hit, err := Evaluate(context.Background(), revision, second, nil, func(context.Context) (int, error) { return 2, nil }); err != nil || hit || value != 2 {
+		t.Fatalf("second evaluation = %d, hit %v, err %v", value, hit, err)
+	}
+}
+
+func TestEvaluateDependencySetIsOrderIndependent(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("dependency-order")
+	defer revision.Close()
+	parent := Key{Procedure: "M.P", Fingerprint: Hash("parent"), Kernel: "array"}
+	first := Key{Procedure: "M.First", Fingerprint: Hash("first"), Kernel: "effect"}
+	second := Key{Procedure: "M.Second", Fingerprint: Hash("second"), Kernel: "effect"}
+	if _, hit, err := Evaluate(context.Background(), revision, parent, []Key{first, second}, func(context.Context) (int, error) { return 1, nil }); err != nil || hit {
+		t.Fatalf("first evaluation hit=%v err=%v", hit, err)
+	}
+	if value, hit, err := Evaluate(context.Background(), revision, parent, []Key{second, first}, func(context.Context) (int, error) { return 2, nil }); err != nil || !hit || value != 1 {
+		t.Fatalf("reordered evaluation = %d, hit %v, err %v", value, hit, err)
+	}
+}
+
 func TestEvaluateSingleFlightAndReuse(t *testing.T) {
 	metrics := &testMetrics{}
 	store := New(Options{Metrics: metrics})
@@ -116,6 +148,12 @@ func TestPanickingBuildDoesNotPoisonKey(t *testing.T) {
 			panic("boom")
 		})
 	}()
+	store.mu.Lock()
+	if len(store.pending) != 0 || len(store.procedureEntries) != 0 || len(store.documentEntries) != 0 || len(store.epochs) != 0 {
+		store.mu.Unlock()
+		t.Fatalf("panic left query metadata: pending=%d procedures=%d documents=%d epochs=%d", len(store.pending), len(store.procedureEntries), len(store.documentEntries), len(store.epochs))
+	}
+	store.mu.Unlock()
 	value, hit, err := Evaluate(context.Background(), revision, key, nil, func(context.Context) (int, error) { return 9, nil })
 	if err != nil || hit || value != 9 {
 		t.Fatalf("retry after panic = %d, hit %v, err %v", value, hit, err)
@@ -155,6 +193,165 @@ func TestInvalidateTraversesReverseDependenciesDeterministically(t *testing.T) {
 	}
 }
 
+func TestInvalidateUsesOutputEqualityForGreenRecovery(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("green-recovery")
+	defer revision.Close()
+	callee := Key{Procedure: "M.Callee", Fingerprint: Hash("callee"), Kernel: "effect"}
+	caller := Key{Procedure: "M.Caller", Fingerprint: Hash("caller"), Kernel: "array"}
+	project := Key{Procedure: "project", Fingerprint: Hash("project"), Kernel: "summary"}
+	var callerBuilds, projectBuilds atomic.Int32
+	if _, _, err := Evaluate(context.Background(), revision, callee, nil, func(context.Context) (int, error) { return 1, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Evaluate(context.Background(), revision, caller, []Key{callee}, func(context.Context) (int, error) {
+		callerBuilds.Add(1)
+		return 7, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Evaluate(context.Background(), revision, project, []Key{caller}, func(context.Context) (int, error) {
+		projectBuilds.Add(1)
+		return 9, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	store.Invalidate(callee)
+	if value, hit, err := Evaluate(context.Background(), revision, caller, []Key{callee}, func(context.Context) (int, error) {
+		callerBuilds.Add(1)
+		return 7, nil
+	}); err != nil || hit || value != 7 {
+		t.Fatalf("unchanged caller = %d, hit %v, err %v", value, hit, err)
+	}
+	if value, hit, err := Evaluate(context.Background(), revision, project, []Key{caller}, func(context.Context) (int, error) {
+		projectBuilds.Add(1)
+		return 9, nil
+	}); err != nil || !hit || value != 9 {
+		t.Fatalf("green project = %d, hit %v, err %v", value, hit, err)
+	}
+	if callerBuilds.Load() != 2 || projectBuilds.Load() != 1 {
+		t.Fatalf("build counts after green recovery = caller %d project %d", callerBuilds.Load(), projectBuilds.Load())
+	}
+
+	store.Invalidate(callee)
+	if value, hit, err := Evaluate(context.Background(), revision, caller, []Key{callee}, func(context.Context) (int, error) {
+		callerBuilds.Add(1)
+		return 8, nil
+	}); err != nil || hit || value != 8 {
+		t.Fatalf("changed caller = %d, hit %v, err %v", value, hit, err)
+	}
+	if value, hit, err := Evaluate(context.Background(), revision, project, []Key{caller}, func(context.Context) (int, error) {
+		projectBuilds.Add(1)
+		return 10, nil
+	}); err != nil || hit || value != 10 {
+		t.Fatalf("changed project = %d, hit %v, err %v", value, hit, err)
+	}
+}
+
+func TestInvalidateMultipleRootsKeepsUnrecoveredRootRed(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("multi-root-red")
+	defer revision.Close()
+	first := Key{Procedure: "M.First", Fingerprint: Hash("first"), Kernel: "effect"}
+	second := Key{Procedure: "M.Second", Fingerprint: Hash("second"), Kernel: "effect"}
+	parent := Key{Procedure: "M.Parent", Fingerprint: Hash("parent"), Kernel: "array"}
+	if _, _, err := Evaluate(context.Background(), revision, first, nil, func(context.Context) (int, error) { return 1, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Evaluate(context.Background(), revision, second, nil, func(context.Context) (int, error) { return 2, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Evaluate(context.Background(), revision, parent, []Key{first, second}, func(context.Context) (int, error) { return 3, nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	store.Invalidate(first, second)
+	if value, hit, err := Evaluate(context.Background(), revision, first, nil, func(context.Context) (int, error) { return 1, nil }); err != nil || hit || value != 1 {
+		t.Fatalf("unchanged first = %d, hit %v, err %v", value, hit, err)
+	}
+	var parentBuilds atomic.Int32
+	if value, hit, err := Evaluate(context.Background(), revision, parent, []Key{first, second}, func(context.Context) (int, error) {
+		parentBuilds.Add(1)
+		return 3, nil
+	}); err != nil || hit || value != 3 {
+		t.Fatalf("parent with unrecovered second = %d, hit %v, err %v", value, hit, err)
+	}
+	if parentBuilds.Load() != 1 {
+		t.Fatal("parent incorrectly recovered while the second root remained stale")
+	}
+}
+
+func TestEvaluateRetriesAfterConcurrentInvalidation(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("epoch-retry")
+	defer revision.Close()
+	key := Key{Procedure: "M.P", Fingerprint: Hash("body"), Kernel: "array"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	result := make(chan struct {
+		value int
+		hit   bool
+		err   error
+	}, 1)
+	var builds atomic.Int32
+	go func() {
+		value, hit, err := Evaluate(context.Background(), revision, key, nil, func(context.Context) (int, error) {
+			if builds.Add(1) == 1 {
+				close(started)
+				<-release
+				return 1, nil
+			}
+			return 2, nil
+		})
+		result <- struct {
+			value int
+			hit   bool
+			err   error
+		}{value: value, hit: hit, err: err}
+	}()
+	<-started
+	store.Invalidate(key)
+	close(release)
+	got := <-result
+	if got.err != nil || got.hit || got.value != 2 {
+		t.Fatalf("concurrent invalidation result = %#v, want value 2 and miss", got)
+	}
+	if builds.Load() != 2 {
+		t.Fatalf("build count = %d, want 2", builds.Load())
+	}
+}
+
+func TestInvalidateMarksTransitiveClosureBeforeIntermediateRebuild(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("transitive-red")
+	defer revision.Close()
+	leaf := Key{Procedure: "M.Leaf", Fingerprint: Hash("leaf"), Kernel: "effect"}
+	middle := Key{Procedure: "M.Middle", Fingerprint: Hash("middle"), Kernel: "array"}
+	top := Key{Procedure: "project", Fingerprint: Hash("top"), Kernel: "summary"}
+	if _, _, err := Evaluate(context.Background(), revision, leaf, nil, func(context.Context) (int, error) { return 1, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Evaluate(context.Background(), revision, middle, []Key{leaf}, func(context.Context) (int, error) { return 2, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Evaluate(context.Background(), revision, top, []Key{middle}, func(context.Context) (int, error) { return 3, nil }); err != nil {
+		t.Fatal(err)
+	}
+	store.Invalidate(leaf)
+	var builds atomic.Int32
+	value, hit, err := Evaluate(context.Background(), revision, top, []Key{middle}, func(context.Context) (int, error) {
+		builds.Add(1)
+		return 3, nil
+	})
+	if err != nil || hit || value != 3 {
+		t.Fatalf("transitive top evaluation = %d, hit %v, err %v", value, hit, err)
+	}
+	if builds.Load() != 1 {
+		t.Fatalf("top was not marked stale before middle rebuild: builds=%d", builds.Load())
+	}
+}
+
 func TestInvalidateProceduresFindsPrefixAndDependents(t *testing.T) {
 	store := New(Options{})
 	revision := store.Begin("r1")
@@ -181,6 +378,33 @@ func TestInvalidateProceduresFindsPrefixAndDependents(t *testing.T) {
 	}
 }
 
+func TestInvalidateProceduresUsesDocumentIndex(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("document-index")
+	defer revision.Close()
+	mainA := Key{Procedure: `C:\src\Main.bas::Main::A::0`, Fingerprint: Hash("a"), Kernel: "array"}
+	mainB := Key{Procedure: `C:\src\Main.bas::Main::B::1`, Fingerprint: Hash("b"), Kernel: "array"}
+	other := Key{Procedure: `C:\src\Other.bas::Main::A::0`, Fingerprint: Hash("other"), Kernel: "array"}
+	for _, key := range []Key{mainA, mainB, other} {
+		if _, _, err := Evaluate(context.Background(), revision, key, nil, func(context.Context) (int, error) { return 1, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := store.InvalidateProcedures(`C:\src\Main.bas`)
+	want := []string{mainA.Procedure, mainB.Procedure}
+	if len(got) != len(want) {
+		t.Fatalf("invalidated = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("invalidated = %#v, want %#v", got, want)
+		}
+	}
+	if _, hit, err := Evaluate(context.Background(), revision, other, nil, func(context.Context) (int, error) { return 2, nil }); err != nil || !hit {
+		t.Fatalf("unrelated document entry hit=%v err=%v", hit, err)
+	}
+}
+
 func TestClosedRevisionRejectsQueries(t *testing.T) {
 	store := New(Options{})
 	revision := store.Begin("r1")
@@ -203,8 +427,8 @@ func TestEvictionBoundsDependencyMetadata(t *testing.T) {
 		}
 		store.Invalidate(key)
 	}
-	if len(store.entries) > 2 || len(store.keys) > 4 || len(store.reverse) > 4 || len(store.order) > 4 {
-		t.Fatalf("dependency metadata exceeded bounds: entries=%d keys=%d reverse=%d order=%d", len(store.entries), len(store.keys), len(store.reverse), len(store.order))
+	if len(store.entries) > 2 || len(store.procedureEntries) > 4 || len(store.documentEntries) > 4 || len(store.reverse) > 4 || len(store.order) > 4 {
+		t.Fatalf("dependency metadata exceeded bounds: entries=%d procedures=%d documents=%d reverse=%d order=%d", len(store.entries), len(store.procedureEntries), len(store.documentEntries), len(store.reverse), len(store.order))
 	}
 }
 
@@ -215,8 +439,8 @@ func TestRecordDependenciesBoundsMetadata(t *testing.T) {
 		dependency := Key{Procedure: "M.Dependency", Fingerprint: Hash(fmt.Sprintf("dependency-%d", index)), Kernel: "module"}
 		store.RecordDependencies(parent, dependency)
 	}
-	if len(store.entries) > 2 || len(store.keys) > 4 || len(store.reverse) > 2 || len(store.deps) > 2 || len(store.order) > 4 {
-		t.Fatalf("recorded dependency metadata exceeded bounds: entries=%d keys=%d reverse=%d deps=%d order=%d", len(store.entries), len(store.keys), len(store.reverse), len(store.deps), len(store.order))
+	if len(store.entries) > 2 || len(store.procedureEntries) > 4 || len(store.documentEntries) > 4 || len(store.reverse) > 2 || len(store.deps) > 2 || len(store.order) > 4 {
+		t.Fatalf("recorded dependency metadata exceeded bounds: entries=%d procedures=%d documents=%d reverse=%d deps=%d order=%d", len(store.entries), len(store.procedureEntries), len(store.documentEntries), len(store.reverse), len(store.deps), len(store.order))
 	}
 }
 
@@ -234,3 +458,4 @@ func TestRecordDependenciesPlaceholderDoesNotHit(t *testing.T) {
 		t.Fatalf("metadata placeholder evaluation = %d, hit %v, err %v", value, hit, err)
 	}
 }
+

@@ -181,17 +181,25 @@ tasks:
   bench:corpus:
     desc: Benchmark the analyzer stage for the slowest real-world corpus projects
     cmds:
-      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only$' -benchmem -benchtime=1x -count 2
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 2
         platforms: [windows]
-      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only$' -benchmem -benchtime=1x -count 2
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 2
+        platforms: [linux, darwin]
+
+  bench:corpus-semantic-query:
+    desc: Collect serial cold/warm/edit semantic-query benchmark samples for the corpus
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 10
+        platforms: [windows]
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(std-vba|ronecone)/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 10
         platforms: [linux, darwin]
 
   bench:corpus-ronecone:
     desc: Benchmark the single-project ROneCOne analyzer stress fixture
     cmds:
-      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 2
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 2
         platforms: [windows]
-      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count 2
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 2
         platforms: [linux, darwin]
 
   bench:analyze:

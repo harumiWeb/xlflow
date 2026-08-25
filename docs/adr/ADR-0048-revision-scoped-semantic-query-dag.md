@@ -54,6 +54,28 @@ fingerprints and revision-local IR/CFG IDs are not workspace-global identities;
 the canonical identity and current dependency fingerprints are required before
 an entry can be reused.
 
+### Amendment: fingerprint and invalidation overhead reduction (#724)
+
+The revision-owned analyzer projection prepares immutable configuration, TypeDB,
+module, capability, procedure, effect, and call-resolution leaves once before
+procedure workers run. The three reusable procedure lanes share those inputs;
+they do not serialize the same large maps or plans again for each lane. A
+procedure fingerprint contains procedure-local source and signature facts,
+while module, capability, data-flow, effect, and resolution leaves remain
+explicit dependencies at the kernel boundary. This separation may reduce a
+dependency set only when the kernel does not read the removed leaf; it must not
+weaken fail-open behavior for incomplete or ambiguous input.
+
+The store's internal identity is a comparable `Key` rather than a serialized
+string. Dependencies are canonicalized and deduplicated at publication, and
+reverse edges plus pending/epoch/eviction metadata use the same key. Exact
+document and procedure indexes service LSP invalidation, so a normalized path
+does not require scanning every cached key. These are private representations;
+the process-local lifetime, cancellation/single-flight behavior, late-result
+rejection, diagnostic projection, and public output contracts remain those
+decided by this ADR. No disk cache, cross-process format, or public API is
+introduced.
+
 ### Query graph and invalidation
 
 The graph contains immutable source/module and capability inputs, procedure
