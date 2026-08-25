@@ -243,6 +243,7 @@ func semanticProcedureBaseFingerprint(a Analyzer, file parsedFile, proc sourcePr
 		proc.Kind,
 		string(proc.ProcedureKind),
 		proc.ReturnType,
+		fmt.Sprintf("position:%d:%d", proc.StartLine, proc.EndLine),
 		string(body),
 		semanticProcedureNearbyFingerprint(file, proc),
 		semanticProcedureFeatureFingerprint(proc.Features),

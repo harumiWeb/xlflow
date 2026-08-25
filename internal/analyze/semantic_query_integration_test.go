@@ -262,6 +262,28 @@ func TestSemanticProcedureFingerprintIncludesNearbyEvidence(t *testing.T) {
 	}
 }
 
+func TestSemanticProcedureFingerprintIncludesSourcePosition(t *testing.T) {
+	file := parsedFile{
+		Path:   "Main.bas",
+		Source: []byte("Public Sub Run()\nEnd Sub\n"),
+	}
+	proc := sourceProcedure{
+		Name:          "Run",
+		Kind:          "Sub",
+		ProcedureKind: procedureir.ProcedureSub,
+		StartLine:     1,
+		EndLine:       2,
+		StartByte:     0,
+		EndByte:       len(file.Source) - 1,
+	}
+	moved := proc
+	moved.StartLine++
+	moved.EndLine++
+	if semanticProcedureBaseFingerprint(Analyzer{RootDir: "workspace"}, file, proc) == semanticProcedureBaseFingerprint(Analyzer{RootDir: "workspace"}, file, moved) {
+		t.Fatal("procedure fingerprint ignored a source position change")
+	}
+}
+
 func TestSemanticPreparedPlanFingerprintIncludesPrivateBits(t *testing.T) {
 	base := procedureAnalysisPlan{enabled: 1, planned: 1, enabledKernels: 1, plannedKernels: 1}
 	changed := base
