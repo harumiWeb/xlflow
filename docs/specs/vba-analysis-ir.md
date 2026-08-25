@@ -651,6 +651,34 @@ Data-flow lane telemetry additionally exposes
 `dataflow_cfg_walks` and `semantic_kernel_runs` counters remain compatibility
 measurements for the procedure execution and are not lane sums.
 
+### Indexed semantic-state solver boundary
+
+The HTTP transport kernel and the ordinary Array block-level walk use the
+internal `internal/analyze/semanticstate` solver. The ordinary Array adapter
+uses compact flow slots; HTTP currently uses one compatibility slot containing
+the legacy nested state while semantic-unit scalarization remains follow-up
+work. A procedure revision builds
+an immutable, case-insensitive environment with revision-local `SymbolID`
+values and a deterministic CFG `BlockOrdinal` index. Mutable flow states,
+scratch buffers, cancellation checks, and the `(BlockOrdinal, LaneOrdinal)`
+worklist remain owned by one solver invocation; no state or index is shared
+across revisions or nested worker pools.
+
+The solver stores present slots in dense bitset-backed storage for small or
+dense domains and sorted sparse storage for wide, sparse domains. Domain joins
+update the destination in place and report changed slots, so unchanged blocks
+are not requeued. Exceptional and uncertain edges retain predecessor input
+state. HTTP and Array adapters keep their existing conservative lattice and
+diagnostic projection contracts; source ranges, representative evidence, and
+finding multiplicity are not part of semantic state.
+
+This is an incremental migration boundary. Array source-line traversal,
+edge-refinement paths, and interprocedural evidence walkers continue to use
+their compatibility walker until their callback contracts can be represented
+without changing VBA227/VBA208/VBA249 behavior. The shared solver API and
+dense/sparse/hybrid benchmarks are internal implementation details and do not
+add CLI, JSON, or LSP fields.
+
 ### Batch procedure-worker boundary
 
 Batch `analyze` may evaluate procedures concurrently for a large file after

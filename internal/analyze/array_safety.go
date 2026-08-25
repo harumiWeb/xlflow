@@ -888,6 +888,20 @@ func walkArrayCFGWithSourceLines(graph *vbacfg.Graph, lines []string, initial ar
 }
 
 func walkArrayCFGWorklist(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
+	// The compact solver owns the ordinary block-level walk. Stop callbacks
+	// need an explicit edge-suppression protocol that semanticstate intentionally
+	// does not expose, while source-line and edge-refinement lanes still carry
+	// policy-specific metadata through the legacy callback boundary. Keep those
+	// paths on the proven walker until their evidence contract is migrated.
+	if stop == nil && !sourceLines && edgeState == nil {
+		if err := walkArrayCFGCompact(context.Background(), graph, lines, initial, visit, edgeState, sourceLines); err == nil {
+			return
+		}
+	}
+	walkArrayCFGWorklistLegacy(graph, lines, initial, visit, edgeState, stop, sourceLines)
+}
+
+func walkArrayCFGWorklistLegacy(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
 	if graph == nil {
 		return
 	}

@@ -6,12 +6,12 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/analyze/semanticstate"
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
@@ -196,54 +196,83 @@ func httpRecordConstant(state *httpAnalysisState, name, expression string) {
 }
 
 func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) (map[vbacfg.BlockID]httpAnalysisState, error) {
-	states := map[vbacfg.BlockID]httpAnalysisState{graph.Entry: cloneHTTPState(initial)}
-	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
-	type httpEdge struct {
-		to    vbacfg.BlockID
-		class vbacfg.EdgeClass
+	// Keep the existing HTTP state as the domain value at one indexed slot. The
+	// solver owns scheduling, edge classification, cancellation, and snapshot
+	// isolation; the adapter preserves the established transfer/join semantics
+	// while the HTTP domain is incrementally migrated to scalar slots.
+	index, err := semanticstate.NewIndex(graph)
+	if err != nil {
+		return nil, err
 	}
-	outgoing := make(map[vbacfg.BlockID][]httpEdge)
+	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
 	for _, block := range graph.Blocks {
 		blocks[block.ID] = block
 	}
-	for _, edge := range graph.Edges {
-		outgoing[edge.From] = append(outgoing[edge.From], httpEdge{to: edge.To, class: edge.Class})
+	environment := semanticstate.NewEnvironment([]string{"http-state"}, []string{"http-state"})
+	const lane semanticstate.LaneOrdinal = 0
+	var symbol semanticstate.SymbolID
+	lattice := httpStateLattice{}
+	solver, err := semanticstate.NewSolver(index, environment, lattice, []semanticstate.Lane[httpAnalysisState]{
+		{
+			Initialize: func(_ context.Context, _ semanticstate.LaneOrdinal, state *semanticstate.State[httpAnalysisState]) error {
+				state.Set(symbol, cloneHTTPState(initial))
+				return nil
+			},
+			Transfer: func(_ context.Context, _ semanticstate.LaneOrdinal, block semanticstate.BlockOrdinal, input semanticstate.StateView[httpAnalysisState], output *semanticstate.State[httpAnalysisState]) error {
+				value, ok := input.Value(symbol)
+				if !ok {
+					return nil
+				}
+				cfgBlock, ok := index.Block(block)
+				if !ok {
+					return nil
+				}
+				candidate, ok := blocks[cfgBlock.ID]
+				if !ok || candidate.Statement == nil || candidate.Statement.Recovered {
+					output.Set(symbol, value)
+					return nil
+				}
+				value, _ = a.transferHTTPStatement(file, proc, *candidate.Statement, value, false)
+				output.Set(symbol, value)
+				return nil
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
-	queue := []vbacfg.BlockID{graph.Entry}
-	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		id := queue[0]
-		queue = queue[1:]
-		queued[id] = false
-		block, ok := blocks[id]
-		if !ok {
-			continue
-		}
-		out := cloneHTTPState(states[id])
-		if block.Statement != nil && !block.Statement.Recovered {
-			out, _ = a.transferHTTPStatement(file, proc, *block.Statement, out, false)
-		}
-		for _, edge := range outgoing[id] {
-			edgeState := out
-			if edge.class == vbacfg.EdgeExceptional {
-				edgeState = states[id]
-			}
-			previous, initialized := states[edge.to]
-			merged, different := joinHTTPState(previous, edgeState, initialized)
-			if !different {
-				continue
-			}
-			states[edge.to] = merged
-			if !queued[edge.to] {
-				queue = append(queue, edge.to)
-				queued[edge.to] = true
-			}
+	result, err := solver.SolveContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	states := make(map[vbacfg.BlockID]httpAnalysisState, index.BlockCount())
+	for _, block := range index.Blocks() {
+		value, ok := result.State(block.Ordinal, lane).Value(symbol)
+		if ok {
+			states[block.ID] = value
 		}
 	}
 	return states, nil
+}
+
+// httpStateLattice adapts the legacy HTTP state join to the indexed solver.
+// Clone is the alias-safety boundary for the nested evidence sets still used
+// by the HTTP domain during this migration step.
+type httpStateLattice struct{}
+
+func (httpStateLattice) Clone(value httpAnalysisState) httpAnalysisState {
+	return cloneHTTPState(value)
+}
+
+func (httpStateLattice) Join(dst *httpAnalysisState, src httpAnalysisState) bool {
+	if dst == nil {
+		return false
+	}
+	merged, changed := joinHTTPState(*dst, src, true)
+	if changed {
+		*dst = merged
+	}
+	return changed
 }
 
 func (a Analyzer) transferHTTPStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state httpAnalysisState, collect bool) (httpAnalysisState, []httpFindingSpec) {
@@ -812,7 +841,66 @@ func httpPartialNewMatches(kind httpClientKind, rhs string) bool {
 }
 
 func sameHTTPState(a, b httpAnalysisState) bool {
-	return reflect.DeepEqual(a, b)
+	if len(a.objects) != len(b.objects) || len(a.launchers) != len(b.launchers) || len(a.strings) != len(b.strings) || len(a.known) != len(b.known) || len(a.sensitive) != len(b.sensitive) {
+		return false
+	}
+	for name, left := range a.objects {
+		right, ok := b.objects[name]
+		if !ok || left.kind != right.kind || left.identity != right.identity || left.url != right.url || left.urlKnown != right.urlKnown || left.hasCredentials != right.hasCredentials || left.timeoutConfigured != right.timeoutConfigured || left.timeoutInfinite != right.timeoutInfinite || left.downloaded != right.downloaded || !sameHTTPBoolSet(left.savedExecutable, right.savedExecutable) || !sameHTTPIntSet(left.credentialSinks, right.credentialSinks) {
+			return false
+		}
+	}
+	for name, value := range a.launchers {
+		other, ok := b.launchers[name]
+		if !ok || other != value {
+			return false
+		}
+	}
+	for name, value := range a.strings {
+		other, ok := b.strings[name]
+		if !ok || other != value {
+			return false
+		}
+	}
+	for name, value := range a.known {
+		other, ok := b.known[name]
+		if !ok || other != value {
+			return false
+		}
+	}
+	for name, value := range a.sensitive {
+		other, ok := b.sensitive[name]
+		if !ok || other != value {
+			return false
+		}
+	}
+	return true
+}
+
+func sameHTTPBoolSet(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		other, ok := b[key]
+		if !ok || other != value {
+			return false
+		}
+	}
+	return true
+}
+
+func sameHTTPIntSet(a, b map[int]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		other, ok := b[key]
+		if !ok || other != value {
+			return false
+		}
+	}
+	return true
 }
 
 func httpURLHasCredentials(raw string) bool {
