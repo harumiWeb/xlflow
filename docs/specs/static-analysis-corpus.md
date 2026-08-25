@@ -1737,6 +1737,28 @@ non-deterministic participant/worklist order is a stop-and-investigate
 condition. The three new counters are developer-only stderr telemetry and
 must never be copied into snapshots or the diagnostic review ledger.
 
+### Indexed semantic-state solver verification record (#713)
+
+Issue #713 introduced the first incremental shared-solver migration. The
+starting revision was `6c9f8ba60c5b162cb7115e8e68744412c7de9d5d` on Windows
+amd64 (12th Gen Intel(R) Core(TM) i7-12700). The measurement command was:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=1 -timeout=10m
+```
+
+The final post-migration sample completed in `8.93e9 ns/op`,
+`11,203,650,096 B/op`, and `81,659,543 allocs/op`. Its retained heap profile
+was `C:\Users\HARUMI\AppData\Local\Temp\xlflow-issue713-final.mem.pprof`.
+The focused alloc-space view attributed approximately 1.58 GB to
+`cloneArrayState`, 0.53 GB to `meetArrayState`, and 0.09 GB to
+`cloneHTTPState`; the starting focused sample was approximately 1.62 GB,
+0.53 GB, and 0.07 GB respectively. These measurements do not yet satisfy the
+Issue #713 50% reduction target, so source-line/edge-refinement Array paths
+remain explicitly on the compatibility walker and require a follow-up
+migration with differential evidence. No corpus snapshot or review-ledger
+change is justified by this partial migration.
+
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`

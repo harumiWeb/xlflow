@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Introduced the internal indexed semantic-state solver at the HTTP transport
+  scheduling boundary and for the ordinary Array CFG walk. Revision-local
+  `SymbolID` and `BlockOrdinal` indexes, dense/sparse slot storage, in-place
+  joins, and a deterministic changed-state worklist preserve diagnostic,
+  snapshot, CLI JSON, and LSP contracts. HTTP nested-map scalarization and
+  source-line/edge-refinement Array paths remain follow-up migrations.
+
 - Restricted array interprocedural fixed-point planning to semantic
   participants discovered from array operations, parameters/returns,
   ByRef/module-state dependencies, and resolved caller/callee closure.
