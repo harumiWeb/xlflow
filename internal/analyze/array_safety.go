@@ -1855,6 +1855,64 @@ func arrayProcedureKey(proc sourceProcedure) string {
 	return strings.ToLower(module + "." + name)
 }
 
+func arrayParticipantProcedureIdentity(proc sourceProcedure) string {
+	path := arrayProcedureSourcePath(proc)
+	if path == "" {
+		path = strings.ToLower(strings.TrimSpace(proc.Module))
+	}
+	return strings.Join([]string{
+		path,
+		strconv.Itoa(proc.Index),
+		strconv.Itoa(proc.StartByte),
+		strconv.Itoa(proc.StartLine),
+		strings.ToLower(strings.TrimSpace(proc.Name)),
+		strings.ToLower(string(proc.ProcedureKind)),
+	}, "\x00")
+}
+
+func arrayParticipantDisambiguatedKey(proc sourceProcedure) string {
+	return arrayProcedureKey(proc) + "|" + arrayParticipantProcedureIdentity(proc)
+}
+
+func arrayParticipantLookupKey(proc sourceProcedure, participantKeys map[string]string) string {
+	if len(participantKeys) > 0 {
+		if key := participantKeys[arrayParticipantProcedureIdentity(proc)]; key != "" {
+			return key
+		}
+	}
+	return arrayProcedureKey(proc)
+}
+
+func arrayProcedureSourcePath(proc sourceProcedure) string {
+	if proc.Document == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(proc.Document.Path))
+}
+
+func arrayProcedureLess(left, right sourceProcedure) bool {
+	leftPath, rightPath := arrayProcedureSourcePath(left), arrayProcedureSourcePath(right)
+	if leftPath != rightPath {
+		return leftPath < rightPath
+	}
+	if left.StartByte != right.StartByte {
+		return left.StartByte < right.StartByte
+	}
+	if left.StartLine != right.StartLine {
+		return left.StartLine < right.StartLine
+	}
+	if !strings.EqualFold(left.Module, right.Module) {
+		return strings.ToLower(left.Module) < strings.ToLower(right.Module)
+	}
+	if !strings.EqualFold(left.Name, right.Name) {
+		return strings.ToLower(left.Name) < strings.ToLower(right.Name)
+	}
+	if left.ProcedureKind != right.ProcedureKind {
+		return string(left.ProcedureKind) < string(right.ProcedureKind)
+	}
+	return arrayProcedureKey(left) < arrayProcedureKey(right)
+}
+
 type arrayByRefAllocationSummaries map[string]map[int]bool
 
 // arrayByRefConditionalAllocations records a ByRef array output that is
@@ -1914,6 +1972,741 @@ func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure
 	return targets
 }
 
+type arrayParticipantGraph struct {
+	all              map[string]sourceProcedure
+	fileByKey        map[string]parsedFile
+	byModule         map[string][]string
+	keyByIdentity    map[string]string
+	candidateIndex   arrayCandidateIndex
+	adjacency        map[string]map[string]bool
+	reverse          map[string]map[string]bool
+	resolvedReverse  map[string]map[string]bool
+	callAdjacency    map[string]map[string]bool
+	knownSeeds       map[string]bool
+	intrinsicSeeds   map[string]bool
+	uncertainFacts   map[bool]map[string]bool
+	uncertainCalls   map[string]bool
+	moduleArrayUsers map[string][]string
+}
+
+// buildArrayParticipantGraph classifies procedures and resolves all
+// project-local call edges once. The two participant boundaries (the local
+// fail-open plan and the narrower fixed-point plan) share this immutable graph
+// so a revision does not scan every procedure and call site twice.
+func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayParticipantGraph {
+	all := make(map[string]sourceProcedure)
+	fileByKey := make(map[string]parsedFile)
+	byModule := make(map[string][]string)
+	keyByIdentity := make(map[string]string)
+	type entry struct {
+		file parsedFile
+		proc sourceProcedure
+		base string
+	}
+	entries := make([]entry, 0)
+	baseCounts := make(map[string]int)
+	for _, file := range files {
+		procedures := file.procedureView()
+		for index := 0; index < procedures.Len(); index++ {
+			proc := procedures.valueAt(index)
+			base := arrayProcedureKey(proc)
+			if base == "" {
+				continue
+			}
+			entries = append(entries, entry{file: file, proc: proc, base: base})
+			baseCounts[base]++
+		}
+	}
+	for _, item := range entries {
+		key := item.base
+		if baseCounts[item.base] > 1 {
+			key = arrayParticipantDisambiguatedKey(item.proc)
+		}
+		if _, exists := all[key]; exists {
+			// Synthetic focused projections may omit Document/Index and still
+			// produce identical identity fields. Keep their source-order ordinal
+			// as a deterministic final discriminator.
+			key = key + "|" + strconv.Itoa(len(all))
+		}
+		all[key] = item.proc
+		fileByKey[key] = item.file
+		identity := arrayParticipantProcedureIdentity(item.proc)
+		if _, exists := keyByIdentity[identity]; exists {
+			identity = identity + "\x00" + strconv.Itoa(len(all))
+		}
+		keyByIdentity[identity] = key
+		module := strings.ToLower(strings.TrimSpace(item.proc.Module))
+		byModule[module] = append(byModule[module], key)
+	}
+	if len(all) == 0 {
+		return &arrayParticipantGraph{
+			all:              all,
+			fileByKey:        fileByKey,
+			byModule:         byModule,
+			keyByIdentity:    keyByIdentity,
+			candidateIndex:   buildArrayCandidateIndex(all),
+			adjacency:        map[string]map[string]bool{},
+			reverse:          map[string]map[string]bool{},
+			resolvedReverse:  map[string]map[string]bool{},
+			callAdjacency:    map[string]map[string]bool{},
+			knownSeeds:       map[string]bool{},
+			intrinsicSeeds:   map[string]bool{},
+			uncertainFacts:   map[bool]map[string]bool{false: {}, true: {}},
+			uncertainCalls:   map[string]bool{},
+			moduleArrayUsers: map[string][]string{},
+		}
+	}
+	candidateIndex := buildArrayCandidateIndex(all)
+
+	adjacency := make(map[string]map[string]bool, len(all))
+	knownSeeds := make(map[string]bool, len(all))
+	intrinsicSeeds := make(map[string]bool, len(all))
+	uncertainFacts := map[bool]map[string]bool{false: {}, true: {}}
+	uncertainCalls := make(map[string]bool)
+	moduleArrayUsers := make(map[string][]string)
+	callAdjacency := make(map[string]map[string]bool, len(all))
+	type resolvedEdge struct {
+		caller string
+		target string
+	}
+	resolvedEdges := make([]resolvedEdge, 0)
+	for key, proc := range all {
+		file := fileByKey[key]
+		moduleDecls := moduleDeclarationsForProcedure(files, proc)
+		arraySeed := procedureArraySeed(proc)
+		moduleArrayUse := procedureUsesModuleArray(file, proc, moduleDecls)
+		shapeSeed := procedureHasArrayParameter(proc) || procedureReturnsArray(proc) || moduleArrayUse
+		arraySeed = arraySeed || procedureHasArrayForEach(proc) || procedureHasObjectComparison(proc)
+		if arraySeed || shapeSeed {
+			knownSeeds[key] = true
+			intrinsicSeeds[key] = true
+		}
+		if moduleArrayUse {
+			module := strings.ToLower(strings.TrimSpace(proc.Module))
+			moduleArrayUsers[module] = append(moduleArrayUsers[module], key)
+		}
+		for _, ignoreFeatureUnknown := range []bool{false, true} {
+			if arrayParticipantFactsUncertain(proc, ignoreFeatureUnknown) {
+				// Recovered statements, missing CFGs, and conditional IR facts are
+				// bounded uncertainty. Keep the known module-array cluster fail-open
+				// until resolution can prove a smaller dependency boundary.
+				uncertainFacts[ignoreFeatureUnknown][key] = true
+			}
+		}
+		for call := range proc.Calls.All() {
+			resolution := call.Resolution
+			if ctx.procedureResolver != nil {
+				resolution = ctx.procedureResolver.ResolveCall(call)
+			}
+			addEdge := func(target string) {
+				if target == "" || target == key {
+					if target == key {
+						adjacency[key] = ensureArrayKeySet(adjacency[key])
+						adjacency[key][target] = true
+					}
+					return
+				}
+				adjacency[key] = ensureArrayKeySet(adjacency[key])
+				adjacency[key][target] = true
+			}
+			addCallEdge := func(target string) {
+				if target == "" {
+					return
+				}
+				callAdjacency[key] = ensureArrayKeySet(callAdjacency[key])
+				callAdjacency[key][target] = true
+			}
+			if resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1 {
+				candidate := resolution.Candidates[0]
+				target := arrayCandidateKey(candidate, all, candidateIndex)
+				addCallEdge(target)
+				// Defer resolved-edge filtering until every procedure's
+				// intrinsic seed has been classified. The source map is not
+				// ordered, so checking the target while this loop runs would
+				// make participant membership depend on map iteration order.
+				resolvedEdges = append(resolvedEdges, resolvedEdge{caller: key, target: target})
+				continue
+			}
+			if resolution.Status == procedureir.ResolutionAmbiguous || resolution.Status == procedureir.ResolutionUnresolved || resolution.Status == procedureir.ResolutionDynamic || resolution.Status == procedureir.ResolutionIncomplete {
+				for _, candidate := range resolution.Candidates {
+					target := arrayCandidateKey(candidate, all, candidateIndex)
+					addCallEdge(target)
+					addEdge(target)
+				}
+				if len(resolution.Candidates) == 0 {
+					// A candidate-bearing ambiguous/dynamic/unresolved call is
+					// bounded by those project-local candidates. Only a boundary
+					// with no target identity expands to its owning module.
+					uncertainCalls[key] = true
+				}
+			}
+		}
+	}
+	for _, edge := range resolvedEdges {
+		if intrinsicSeeds[edge.target] {
+			adjacency[edge.caller] = ensureArrayKeySet(adjacency[edge.caller])
+			adjacency[edge.caller][edge.target] = true
+		}
+	}
+	// Keep reverse links for every project-local resolved edge separately from
+	// the direct semantic graph. A bounded caller extension below lets a chain
+	// such as Top -> Wrapper -> ArrayWorker reach the seed transitively when
+	// facts are complete; recovered/incomplete targets use the module-array
+	// fallback below instead of opening an unbounded caller hub.
+	reverse := make(map[string]map[string]bool, len(adjacency))
+	resolvedReverse := make(map[string]map[string]bool, len(adjacency))
+	for _, edge := range resolvedEdges {
+		if edge.target == "" {
+			continue
+		}
+		resolvedReverse[edge.target] = ensureArrayKeySet(resolvedReverse[edge.target])
+		resolvedReverse[edge.target][edge.caller] = true
+	}
+	for caller, callees := range adjacency {
+		for callee := range callees {
+			reverse[callee] = ensureArrayKeySet(reverse[callee])
+			reverse[callee][caller] = true
+		}
+	}
+	return &arrayParticipantGraph{
+		all:              all,
+		fileByKey:        fileByKey,
+		byModule:         byModule,
+		keyByIdentity:    keyByIdentity,
+		candidateIndex:   candidateIndex,
+		adjacency:        adjacency,
+		reverse:          reverse,
+		resolvedReverse:  resolvedReverse,
+		callAdjacency:    callAdjacency,
+		knownSeeds:       knownSeeds,
+		intrinsicSeeds:   intrinsicSeeds,
+		uncertainFacts:   uncertainFacts,
+		uncertainCalls:   uncertainCalls,
+		moduleArrayUsers: moduleArrayUsers,
+	}
+}
+
+func (graph *arrayParticipantGraph) participantSet(ignoreFeatureUnknown bool) map[string]bool {
+	participants := make(map[string]bool, len(graph.all))
+	for key := range graph.knownSeeds {
+		participants[key] = true
+	}
+	for key := range graph.uncertainFacts[ignoreFeatureUnknown] {
+		participants[key] = true
+	}
+	closeArrayParticipantClosure(participants, graph.adjacency, graph.reverse)
+	addResolvedCallerBoundary(participants, graph.resolvedReverse, graph.all, graph.byModule, ignoreFeatureUnknown)
+	closeArrayParticipantClosure(participants, graph.adjacency, graph.reverse)
+	globalFallback := false
+	for key := range graph.uncertainFacts[ignoreFeatureUnknown] {
+		if !participants[key] {
+			continue
+		}
+		module := strings.ToLower(strings.TrimSpace(graph.all[key].Module))
+		if module == "" {
+			globalFallback = true
+			continue
+		}
+		// Recovered or incomplete facts are expanded to the smallest known
+		// module-array cluster. This preserves conservative state propagation
+		// without turning every procedure in a giant module into a candidate.
+		for _, user := range graph.moduleArrayUsers[module] {
+			participants[user] = true
+		}
+	}
+	for key := range graph.uncertainCalls {
+		if !participants[key] {
+			continue
+		}
+		// An unknown-only procedure remains a local participant for fail-open
+		// diagnostics, but it must not open an entire giant module before a
+		// semantic array seed reaches the uncertainty boundary.
+		if !graph.intrinsicSeeds[key] && !ignoreFeatureUnknown {
+			continue
+		}
+		module := strings.ToLower(strings.TrimSpace(graph.all[key].Module))
+		if module == "" {
+			globalFallback = true
+			continue
+		}
+		if users := graph.moduleArrayUsers[module]; len(users) > 0 {
+			for _, user := range users {
+				participants[user] = true
+			}
+			continue
+		}
+		for _, procedure := range graph.byModule[module] {
+			participants[procedure] = true
+		}
+	}
+	if globalFallback {
+		for key := range graph.all {
+			participants[key] = true
+		}
+	}
+	closeArrayParticipantClosure(participants, graph.adjacency, graph.reverse)
+	return participants
+}
+
+// buildArrayParticipantSet derives the bounded interprocedural closure used
+// by the array capability. Module declarations are deliberately not seeds:
+// only a procedure that observes an array locally, exposes an array-shaped
+// parameter/return, or reaches an array through a resolved call participates.
+func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[string]bool {
+	return buildArrayParticipantGraph(files, ctx).participantSet(ctx.arrayIgnoreFeatureUnknown)
+}
+
+func buildArrayParticipantSets(files []parsedFile, ctx analysisContext) (map[string]bool, map[string]bool, map[string]string) {
+	graph := buildArrayParticipantGraph(files, ctx)
+	participants := graph.participantSet(ctx.arrayIgnoreFeatureUnknown)
+	return participants, buildArrayInterproceduralParticipantSetFromGraph(graph, participants), graph.keyByIdentity
+}
+
+// buildArrayInterproceduralParticipantSet keeps the local fail-open plan
+// separate from the fixed-point scope. A complete procedure that has no
+// semantic array seed but carries an unknown array capability must retain its
+// local array kernel/projection; it must not, by itself, make every array
+// summary and module-entry solver walk the surrounding module.
+func buildArrayInterproceduralParticipantSet(files []parsedFile, ctx analysisContext, participants map[string]bool) map[string]bool {
+	graph := buildArrayParticipantGraph(files, ctx)
+	return buildArrayInterproceduralParticipantSetFromGraph(graph, participants)
+}
+
+func buildArrayInterproceduralParticipantSetFromGraph(graph *arrayParticipantGraph, participants map[string]bool) map[string]bool {
+	if len(participants) == 0 {
+		return map[string]bool{}
+	}
+	// Derive the fixed-point boundary with feature-unknown bits ignored from the
+	// shared graph. This preserves the proven semantic closure used before an
+	// unknown-only local participant was added, while the outer participant plan
+	// still retains that procedure for local fail-open diagnostics.
+	legacy := graph.participantSet(true)
+	legacyResult := make(map[string]bool, len(legacy))
+	for key := range legacy {
+		if participants[key] {
+			legacyResult[key] = true
+		}
+	}
+	all := graph.all
+	fileByKey := graph.fileByKey
+	moduleSizes := make(map[string]int)
+	for _, proc := range all {
+		moduleSizes[strings.ToLower(strings.TrimSpace(proc.Module))]++
+	}
+	connected := make(map[string]bool)
+	for key := range graph.callAdjacency {
+		if !participants[key] {
+			continue
+		}
+		for target := range graph.callAdjacency[key] {
+			if !participants[target] {
+				continue
+			}
+			if legacy[key] {
+				connected[target] = true
+			}
+			if legacy[target] {
+				connected[key] = true
+			}
+		}
+	}
+	for key := range connected {
+		if legacyResult[key] {
+			continue
+		}
+		proc := graph.all[key]
+		if !procedureArrayFactsUncertain(proc) || !procedureHasCompleteArrayFacts(proc) || proc.Features.unknown&arrayParticipantUnknownFeatures == 0 {
+			continue
+		}
+		module := strings.ToLower(strings.TrimSpace(proc.Module))
+		if moduleSizes[module] > arrayResolvedCallerModuleLimit {
+			if !procedureHasDirectModuleArrayOperation(fileByKey[key], proc, fileByKey[key].moduleDecls()) {
+				continue
+			}
+		}
+		legacyResult[key] = true
+	}
+	return legacyResult
+}
+
+const arrayResolvedCallerModuleLimit = 512
+
+func addResolvedCallerBoundary(participants map[string]bool, reverse map[string]map[string]bool, all map[string]sourceProcedure, byModule map[string][]string, ignoreFeatureUnknown bool) {
+	keys := make([]string, 0, len(participants))
+	for key := range participants {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, target := range keys {
+		procedure, ok := all[target]
+		if !ok || arrayParticipantFactsUncertain(procedure, ignoreFeatureUnknown) || len(byModule[strings.ToLower(strings.TrimSpace(procedure.Module))]) > arrayResolvedCallerModuleLimit {
+			continue
+		}
+		for caller := range reverse[target] {
+			participants[caller] = true
+		}
+	}
+}
+
+const arrayParticipantUnknownFeatures = featureArray | featureRangeArray | featureObject
+
+func procedureArraySeed(proc sourceProcedure) bool {
+	if proc.Features.present&(featureArray|featureRangeArray) != 0 {
+		return true
+	}
+	// Resolved scalar calls without array-shaped evidence remain excluded. Any
+	// unresolved/external call that leaves an array capability unknown is a seed
+	// and is bounded by the uncertainty policy below.
+	return false
+}
+
+func procedureArrayFactsUncertain(proc sourceProcedure) bool {
+	if proc.Features.unknown&arrayParticipantUnknownFeatures != 0 {
+		return true
+	}
+	if proc.IR == nil {
+		return proc.Features.unknown != 0
+	}
+	return !procedureHasCompleteArrayFacts(proc)
+}
+
+func arrayParticipantFactsUncertain(proc sourceProcedure, ignoreFeatureUnknown bool) bool {
+	if !ignoreFeatureUnknown {
+		return procedureArrayFactsUncertain(proc)
+	}
+	if proc.IR == nil {
+		return proc.Features.unknown != 0
+	}
+	return !procedureHasCompleteArrayFacts(proc)
+}
+
+// procedureHasCompleteArrayFacts reports whether the procedure's structural
+// IR facts are complete. Feature unknowns are intentionally checked by the
+// caller so complete IR with an unknown array capability can remain a local
+// fail-open participant without widening the interprocedural scope.
+func procedureHasCompleteArrayFacts(proc sourceProcedure) bool {
+	if proc.IR == nil {
+		return false
+	}
+	if proc.Document == nil || proc.Document.Parse.HasError || proc.Document.Parse.HasMissing || proc.IR.Symbol.Recovered || len(proc.IR.Symbol.ConditionalBranches) > 0 || proc.Graph == nil {
+		return false
+	}
+	if len(proc.Graph.UnknownFlowSources) > 0 {
+		return false
+	}
+	for declaration := range proc.Declarations.All() {
+		if declaration.Recovered || len(declaration.ConditionalBranches) > 0 {
+			return false
+		}
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Recovered || statement.Kind == procedureir.StatementUnknown || statement.Kind == procedureir.StatementRecovered || len(statement.ConditionalBranches) > 0 {
+			return false
+		}
+	}
+	for expression := range proc.Expressions.All() {
+		if expression.Recovered || expression.Kind == procedureir.ExpressionUnknown && !isKnownNonValueExpressionSyntax(expression.SyntaxKind) {
+			return false
+		}
+	}
+	return true
+}
+
+func closeArrayParticipantClosure(participants map[string]bool, adjacency, reverse map[string]map[string]bool) {
+	keys := make([]string, 0, len(participants))
+	for key := range participants {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	queue := append([]string(nil), keys...)
+	seen := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		seen[key] = true
+	}
+	for head := 0; head < len(queue); head++ {
+		current := queue[head]
+		neighbors := make([]string, 0, len(adjacency[current])+len(reverse[current]))
+		for caller := range reverse[current] {
+			if !seen[caller] {
+				neighbors = append(neighbors, caller)
+			}
+		}
+		for callee := range adjacency[current] {
+			if !seen[callee] {
+				neighbors = append(neighbors, callee)
+			}
+		}
+		sort.Strings(neighbors)
+		for _, neighbor := range neighbors {
+			if seen[neighbor] {
+				continue
+			}
+			seen[neighbor] = true
+			participants[neighbor] = true
+			queue = append(queue, neighbor)
+		}
+	}
+}
+
+func moduleDeclarationsForProcedure(files []parsedFile, proc sourceProcedure) map[string]sourceDeclaration {
+	for _, file := range files {
+		if strings.EqualFold(strings.TrimSpace(file.Module), strings.TrimSpace(proc.Module)) || strings.EqualFold(strings.TrimSpace(file.IR.ModuleName), strings.TrimSpace(proc.Module)) {
+			return file.moduleDecls()
+		}
+	}
+	return nil
+}
+
+func procedureHasArrayParameter(proc sourceProcedure) bool {
+	for parameter := range proc.Params.All() {
+		if parameterIsArray(parameter) {
+			return true
+		}
+	}
+	return false
+}
+
+func procedureReturnsArray(proc sourceProcedure) bool {
+	return proc.ReturnValueShape == procedureir.ValueShapeFixedArray ||
+		proc.ReturnValueShape == procedureir.ValueShapeDynamicArray ||
+		strings.Contains(proc.ReturnType, "()")
+}
+
+func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	if len(moduleDecls) == 0 {
+		return false
+	}
+	for access := range proc.Accesses.All() {
+		if access.Scope != procedureir.ScopeModule {
+			continue
+		}
+		for name, declaration := range moduleDecls {
+			if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(access.Name)) && declaration.Array && !declaration.Parameter {
+				return true
+			}
+		}
+	}
+	for statement := range proc.Statements.All() {
+		text := strings.TrimSpace(statement.Text)
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct {
+					if declaration, ok := moduleDecls[strings.ToLower(cleanIdentifier(redim.name))]; ok && declaration.Array && !declaration.Parameter {
+						return true
+					}
+				}
+			}
+		}
+		if lhs, _, indexed, ok := arrayAssignment(text); ok && !indexed {
+			if declaration, declared := moduleDecls[strings.ToLower(cleanIdentifier(lhs))]; declared && declaration.Array && !declaration.Parameter {
+				return true
+			}
+		}
+		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+			if declaration, declared := moduleDecls[strings.ToLower(cleanIdentifier(match[1]))]; declared && declaration.Array && !declaration.Parameter {
+				return true
+			}
+		}
+	}
+	if proc.StartLine < 1 || proc.EndLine < proc.StartLine || len(file.Lines) == 0 {
+		return false
+	}
+	if facts := file.moduleAnalysisFacts(); facts != nil {
+		for name, declaration := range moduleDecls {
+			if !declaration.Array || declaration.Parameter {
+				continue
+			}
+			used := false
+			facts.forEachArrayOperationFor(name, func(operation moduleArrayOperationFact) {
+				if operation.Line >= proc.StartLine && operation.Line <= proc.EndLine {
+					used = true
+				}
+			})
+			if used {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func procedureHasDirectModuleArrayOperation(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
+	for statement := range proc.Statements.All() {
+		text := strings.TrimSpace(statement.Text)
+		for name, declaration := range moduleDecls {
+			if declaration.Array && !declaration.Parameter && moduleArrayIndexedIdentifier(text, name) {
+				return true
+			}
+		}
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct {
+					if declaration, ok := moduleDecls[strings.ToLower(cleanIdentifier(redim.name))]; ok && declaration.Array && !declaration.Parameter {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func moduleArrayIndexedIdentifier(text, name string) bool {
+	text = strings.ToLower(text)
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	for start := 0; start <= len(text)-len(name); {
+		relative := strings.Index(text[start:], name)
+		if relative < 0 {
+			return false
+		}
+		index := start + relative
+		end := index + len(name)
+		if (index == 0 || !isIdentifierPart(text[index-1])) && (end == len(text) || !isIdentifierPart(text[end])) {
+			for end < len(text) && (text[end] == ' ' || text[end] == '\t') {
+				end++
+			}
+			if end < len(text) && text[end] == '(' {
+				return true
+			}
+		}
+		start = index + len(name)
+	}
+	return false
+}
+
+func procedureHasArrayForEach(proc sourceProcedure) bool {
+	for statement := range proc.Statements.All() {
+		if statement.Kind == procedureir.StatementForEach {
+			return true
+		}
+	}
+	return false
+}
+
+func procedureHasObjectComparison(proc sourceProcedure) bool {
+	if proc.Features.present&featureObject == 0 {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		text := strings.ToLower(strings.TrimSpace(statement.Text))
+		if strings.Contains(text, "nothing") && strings.Contains(text, "=") && !strings.Contains(text, " is ") {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureArrayKeySet(set map[string]bool) map[string]bool {
+	if set == nil {
+		return map[string]bool{}
+	}
+	return set
+}
+
+type arrayCandidateLineKey struct {
+	line int
+	kind string
+}
+
+type arrayCandidateQualifiedKindKey struct {
+	qualified string
+	kind      string
+}
+
+type arrayCandidateIndex struct {
+	byName          map[string]string
+	byQualified     map[string]string
+	byQualifiedKind map[arrayCandidateQualifiedKindKey]string
+	byLineAndKind   map[arrayCandidateLineKey]string
+}
+
+// buildArrayCandidateIndex preserves the old sorted-key tie breaking while
+// avoiding a project-wide key collection and sort for every uncertain call.
+func buildArrayCandidateIndex(all map[string]sourceProcedure) arrayCandidateIndex {
+	index := arrayCandidateIndex{
+		byName:          make(map[string]string, len(all)),
+		byQualified:     make(map[string]string, len(all)),
+		byQualifiedKind: make(map[arrayCandidateQualifiedKindKey]string, len(all)),
+		byLineAndKind:   make(map[arrayCandidateLineKey]string),
+	}
+	keys := make([]string, 0, len(all))
+	for key := range all {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		proc := all[key]
+		name := strings.ToLower(strings.TrimSpace(proc.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := index.byName[name]; !exists {
+			index.byName[name] = key
+		}
+		qualified := strings.ToLower(strings.TrimSpace(proc.Module + "." + proc.Name))
+		if qualified != "." {
+			if existing, exists := index.byQualified[qualified]; !exists {
+				index.byQualified[qualified] = key
+			} else if existing != key {
+				index.byQualified[qualified] = ""
+			}
+			qualifiedKind := arrayCandidateQualifiedKindKey{qualified: qualified, kind: strings.ToLower(string(proc.ProcedureKind))}
+			if existing, exists := index.byQualifiedKind[qualifiedKind]; !exists {
+				index.byQualifiedKind[qualifiedKind] = key
+			} else if existing != key {
+				index.byQualifiedKind[qualifiedKind] = ""
+			}
+		}
+		if proc.StartLine > 0 {
+			lineKey := arrayCandidateLineKey{line: proc.StartLine, kind: strings.ToLower(string(proc.ProcedureKind))}
+			if _, exists := index.byLineAndKind[lineKey]; !exists {
+				index.byLineAndKind[lineKey] = key
+			}
+		}
+	}
+	return index
+}
+
+func arrayCandidateKey(candidate procedureir.Candidate, all map[string]sourceProcedure, index arrayCandidateIndex) string {
+	qualified := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+	if proc, ok := all[qualified]; ok {
+		return arrayProcedureKey(proc)
+	}
+	qualifiedKind := arrayCandidateQualifiedKindKey{qualified: qualified, kind: strings.ToLower(strings.TrimSpace(candidate.Kind))}
+	if key := index.byQualifiedKind[qualifiedKind]; key != "" {
+		return key
+	}
+	if key := index.byQualified[qualified]; key != "" {
+		return key
+	}
+	if key, ok := index.byName[qualified]; ok {
+		return key
+	}
+	if candidate.Line > 0 {
+		lineKey := arrayCandidateLineKey{line: candidate.Line, kind: strings.ToLower(candidate.Kind)}
+		if key, ok := index.byLineAndKind[lineKey]; ok {
+			return key
+		}
+	}
+	return ""
+}
+
+func arrayProcedureIsParticipant(ctx analysisContext, proc sourceProcedure) bool {
+	participants := ctx.arrayInterproceduralParticipants
+	if participants == nil {
+		participants = ctx.arrayParticipants
+	}
+	if participants == nil {
+		return true
+	}
+	return participants[arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys)]
+}
+
 func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext, targets map[string]sourceProcedure) arrayByRefAllocationSummaries {
 	summaries := arrayByRefAllocationSummaries{}
 	procedures := make([]struct {
@@ -1926,7 +2719,7 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 		moduleDecls := file.moduleDecls()
 		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
 			proc := procs.valueAt(procedureIndex)
-			if !procedureHasByRefArrayParameter(proc) {
+			if !procedureHasByRefArrayParameter(proc) || !arrayProcedureIsParticipant(ctx, proc) {
 				continue
 			}
 			procedures = append(procedures, struct {
@@ -1936,23 +2729,64 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 			}{file: file, proc: proc, moduleDecls: moduleDecls})
 		}
 	}
+	sort.SliceStable(procedures, func(i, j int) bool {
+		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
+	})
 	dominators := arrayProcedureDominators{}
 	for _, procedure := range procedures {
 		dominators[arrayProcedureKey(procedure.proc)] = arrayProcedureNormalExitDominators(procedure.proc)
 	}
-	for iteration := 0; iteration <= len(procedures); iteration++ {
-		next := arrayByRefAllocationSummaries{}
-		for _, procedure := range procedures {
-			key := arrayProcedureKey(procedure.proc)
-			value := arrayByRefAllocationSummaryForProcedure(procedure.file, procedure.proc, targets, summaries, ctx, dominators[key])
-			if len(value) > 0 {
-				next[key] = value
+	dependents := make(map[string][]int)
+	for index, procedure := range procedures {
+		for call := range procedure.proc.Calls.All() {
+			if targetKey, _, ok := arrayPrivateTargetForCall(ctx, targets, call); ok {
+				dependents[targetKey] = append(dependents[targetKey], index)
 			}
 		}
-		if arrayByRefAllocationSummariesEqual(summaries, next) {
-			return next
+	}
+	for key := range dependents {
+		sort.Ints(dependents[key])
+	}
+	queue := make([]int, len(procedures))
+	queued := make([]bool, len(procedures))
+	for index := range procedures {
+		queue[index] = index
+		queued[index] = true
+	}
+	contributions := make(arrayByRefAllocationSummaries, len(procedures))
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		queued[index] = false
+		if head >= len(procedures) && ctx.arrayStats != nil {
+			ctx.arrayStats.revisits++
 		}
-		summaries = next
+		procedure := procedures[index]
+		key := arrayProcedureKey(procedure.proc)
+		if !arrayProcedureIsParticipant(ctx, procedure.proc) {
+			continue
+		}
+		if ctx.arrayStats != nil && procedure.proc.Graph != nil {
+			ctx.arrayStats.cfgWalks++
+		}
+		value := arrayByRefAllocationSummaryForProcedure(procedure.file, procedure.proc, targets, summaries, ctx, dominators[key])
+		old := arrayByRefAllocationSummaries{key: contributions[key]}
+		fresh := arrayByRefAllocationSummaries{key: value}
+		if arrayByRefAllocationSummariesEqual(old, fresh) {
+			continue
+		}
+		if len(value) == 0 {
+			delete(contributions, key)
+			delete(summaries, key)
+		} else {
+			contributions[key] = value
+			summaries[key] = value
+		}
+		for _, dependent := range dependents[key] {
+			if !queued[dependent] {
+				queued[dependent] = true
+				queue = append(queue, dependent)
+			}
+		}
 	}
 	return summaries
 }
@@ -2388,8 +3222,8 @@ func cloneArrayNameSet(values map[string]bool) map[string]bool {
 		return nil
 	}
 	clone := make(map[string]bool, len(values))
-	for name := range values {
-		clone[name] = true
+	for name, allocated := range values {
+		clone[name] = allocated
 	}
 	return clone
 }
@@ -2694,6 +3528,9 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 		moduleDecls := file.moduleDecls()
 		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
 			proc := procs.valueAt(procedureIndex)
+			if !arrayProcedureIsParticipant(ctx, proc) {
+				continue
+			}
 			procedures = append(procedures, struct {
 				file        parsedFile
 				proc        sourceProcedure
@@ -2704,24 +3541,62 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 	if len(procedures) == 0 {
 		return summaries
 	}
+	sort.SliceStable(procedures, func(i, j int) bool {
+		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
+	})
 	dominators := arrayProcedureDominators{}
 	for _, procedure := range procedures {
 		dominators[arrayProcedureKey(procedure.proc)] = arrayProcedureNormalExitDominators(procedure.proc)
 	}
 
-	for iteration := 0; iteration <= len(procedures); iteration++ {
-		next := arrayModuleAllocationSummaries{}
-		for _, procedure := range procedures {
-			key := arrayProcedureKey(procedure.proc)
-			value := arrayModuleAllocationSummaryForProcedure(procedure.file, procedure.proc, procedure.moduleDecls, targets, summaries, byRefSummaries, ctx, dominators[key])
-			if len(value) > 0 {
-				next[key] = value
+	dependents := make(map[string][]int)
+	for index, procedure := range procedures {
+		for call := range procedure.proc.Calls.All() {
+			if targetKey, _, ok := arrayPrivateTargetForCall(ctx, targets, call); ok {
+				dependents[targetKey] = append(dependents[targetKey], index)
 			}
 		}
-		if arrayModuleAllocationSummariesEqual(summaries, next) {
-			return next
+	}
+	for key := range dependents {
+		sort.Ints(dependents[key])
+	}
+	queue := make([]int, len(procedures))
+	queued := make([]bool, len(procedures))
+	for index := range procedures {
+		queue[index] = index
+		queued[index] = true
+	}
+	contributions := make(arrayModuleAllocationSummaries, len(procedures))
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		queued[index] = false
+		if head >= len(procedures) && ctx.arrayStats != nil {
+			ctx.arrayStats.revisits++
 		}
-		summaries = next
+		procedure := procedures[index]
+		if !arrayProcedureIsParticipant(ctx, procedure.proc) {
+			continue
+		}
+		key := arrayProcedureKey(procedure.proc)
+		value := arrayModuleAllocationSummaryForProcedure(procedure.file, procedure.proc, procedure.moduleDecls, targets, summaries, byRefSummaries, ctx, dominators[key])
+		old := arrayModuleAllocationSummaries{key: contributions[key]}
+		fresh := arrayModuleAllocationSummaries{key: value}
+		if arrayModuleAllocationSummariesEqual(old, fresh) {
+			continue
+		}
+		if len(value) == 0 {
+			delete(contributions, key)
+			delete(summaries, key)
+		} else {
+			contributions[key] = value
+			summaries[key] = value
+		}
+		for _, dependent := range dependents[key] {
+			if !queued[dependent] {
+				queued[dependent] = true
+				queue = append(queue, dependent)
+			}
+		}
 	}
 	return summaries
 }
@@ -3083,6 +3958,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	type procedureInfo struct {
 		file        parsedFile
 		proc        sourceProcedure
+		key         string
 		moduleDecls map[string]sourceDeclaration
 		variables   map[string]arrayVariable
 	}
@@ -3094,10 +3970,14 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		moduleDecls := file.moduleDecls()
 		for procedureIndex := 0; procedureIndex < procs.Len(); procedureIndex++ {
 			proc := procs.valueAt(procedureIndex)
-			key := arrayProcedureKey(proc)
+			if !arrayProcedureIsParticipant(ctx, proc) {
+				continue
+			}
+			key := arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys)
 			procedures = append(procedures, procedureInfo{
 				file: file, proc: proc, moduleDecls: moduleDecls,
 				variables: arrayVariables(file, proc, moduleDecls),
+				key:       key,
 			})
 			moduleArrays[key] = arrayModuleNamesForProcedure(file, proc, moduleDecls)
 			moduleFiles[key] = file.Path
@@ -3108,83 +3988,185 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	}
 
 	initializationStates := arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
-	entries := arrayModuleEntryStates{}
-	for iteration := 0; iteration <= len(procedures)+len(ctx.arrayPrivateTargets); iteration++ {
+	sort.SliceStable(procedures, func(i, j int) bool {
+		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
+	})
+	indexByKey := make(map[string]int, len(procedures))
+	dependents := make(map[string][]int)
+	for index, procedure := range procedures {
+		key := procedure.key
+		indexByKey[key] = index
+		for call := range procedure.proc.Calls.All() {
+			_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			participantTargetKey := arrayParticipantLookupKey(target, ctx.arrayParticipantKeys)
+			if ok && moduleFiles[participantTargetKey] == procedure.file.Path {
+				dependents[participantTargetKey] = append(dependents[participantTargetKey], index)
+			}
+		}
+	}
+	for key := range dependents {
+		sort.Ints(dependents[key])
+	}
+
+	evaluate := func(procedure procedureInfo, entries arrayModuleEntryStates) map[string]map[string]bool {
+		variables := procedure.variables
+		initial := arrayInitialState(variables)
+		initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
+		initial = applyArrayModuleEntryState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, entries, ctx.arrayParticipantKeys)
+		initial = applyArrayInternalStorageConfiguration(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, ctx.arrayModuleConfigurations[procedure.file.Path])
 		candidates := map[string]map[string]bool{}
-		for _, procedure := range procedures {
-			variables := procedure.variables
-			initial := arrayInitialState(variables)
-			initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
-			initial = applyArrayModuleEntryState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, entries)
-			initial = applyArrayInternalStorageConfiguration(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, ctx.arrayModuleConfigurations[procedure.file.Path])
-
-			recordCall := func(call procedureir.CallSite, state arrayFlowState) {
-				key, _, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
-				if !ok || moduleFiles[key] != procedure.file.Path {
-					// A module-level array is not shared across modules. Keep
-					// cross-module calls conservative even when the target is
-					// visible through Option Private Module.
-					return
-				}
-				names := moduleArrays[key]
-				if len(names) == 0 {
-					return
-				}
-				candidate, exists := candidates[key]
-				if !exists {
-					candidate = cloneArrayNameSet(names)
-					candidates[key] = candidate
-				}
-				for name := range names {
-					value, known := state[name]
-					if !known || value.kind != arrayAllocated || !value.knownArray {
-						candidate[name] = false
-					}
+		recordCall := func(call procedureir.CallSite, state arrayFlowState) {
+			_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			key := arrayParticipantLookupKey(target, ctx.arrayParticipantKeys)
+			if !ok || moduleFiles[key] != procedure.file.Path {
+				return
+			}
+			names := moduleArrays[key]
+			if len(names) == 0 {
+				return
+			}
+			candidate := candidates[key]
+			if candidate == nil {
+				candidate = cloneArrayNameSet(names)
+				candidates[key] = candidate
+			}
+			for name := range names {
+				value, known := state[name]
+				if !known || value.kind != arrayAllocated || !value.knownArray {
+					candidate[name] = false
 				}
 			}
-
-			visit := func(text string, line int, in arrayFlowState) arrayFlowState {
-				for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
-					recordCall(call, in)
-				}
-				out, _ := a.arrayTransfer(procedure.file, procedure.proc, ctx, variables, in, text, line, nil, nil)
-				for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
-					out = applyArrayModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
-				}
-				return out
-			}
-			if procedure.proc.Graph == nil {
-				state := initial
-				for line := procedure.proc.StartLine; line <= procedure.proc.EndLine && line <= len(procedure.file.Lines); line++ {
-					state = visit(normalizedCodeLine(procedure.file.Lines[line-1]), line, state)
-				}
-				continue
-			}
-			graph := arrayVBA227Graph(procedure.proc, ctx)
-			walkArrayCFGWithEdges(&graph, procedure.file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-				out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
-				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[procedure.file.Path], variables, procedure.file, procedure.proc, procedure.moduleDecls)
-			})
 		}
+		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+			for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
+				recordCall(call, in)
+			}
+			out, _ := a.arrayTransfer(procedure.file, procedure.proc, ctx, variables, in, text, line, nil, nil)
+			for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
+				out = applyArrayModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
+			}
+			return out
+		}
+		if procedure.proc.Graph == nil {
+			state := initial
+			for line := procedure.proc.StartLine; line <= procedure.proc.EndLine && line <= len(procedure.file.Lines); line++ {
+				state = visit(normalizedCodeLine(procedure.file.Lines[line-1]), line, state)
+			}
+			return candidates
+		}
+		graph := arrayVBA227Graph(procedure.proc, ctx)
+		if ctx.arrayStats != nil {
+			ctx.arrayStats.cfgWalks++
+		}
+		walkArrayCFGWithEdges(&graph, procedure.file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+			out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
+			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[procedure.file.Path], variables, procedure.file, procedure.proc, procedure.moduleDecls)
+		})
+		return candidates
+	}
 
+	contributions := make(map[string]map[string]map[string]bool, len(procedures))
+	entries := arrayModuleEntryStates{}
+	queue := make([]int, len(procedures))
+	queued := make([]bool, len(procedures))
+	for index := range procedures {
+		queue[index] = index
+		queued[index] = true
+	}
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		queued[index] = false
+		key := procedures[index].key
+		if head >= len(procedures) && ctx.arrayStats != nil {
+			ctx.arrayStats.revisits++
+		}
+		contribution := evaluate(procedures[index], entries)
+		if arrayModuleEntryContributionsEqual(contributions[key], contribution) {
+			continue
+		}
+		contributions[key] = contribution
 		next := arrayModuleEntryStates{}
-		for key, names := range candidates {
-			for name, allocated := range names {
-				if allocated {
-					if next[key] == nil {
-						next[key] = map[string]bool{}
+		for _, caller := range procedures {
+			for target, names := range contributions[caller.key] {
+				if next[target] == nil {
+					next[target] = cloneArrayNameSet(names)
+					continue
+				}
+				for name := range next[target] {
+					if !names[name] {
+						delete(next[target], name)
 					}
-					next[key][name] = true
 				}
 			}
 		}
-		if arrayModuleEntryStatesEqual(entries, next) {
-			return next
+		changedTargetSet := make(map[string]bool, len(entries)+len(next))
+		for target := range entries {
+			changedTargetSet[target] = true
+		}
+		for target := range next {
+			changedTargetSet[target] = true
+		}
+		changedTargets := make([]string, 0, len(changedTargetSet))
+		for target := range changedTargetSet {
+			if !arrayModuleEntryTargetEqual(entries, next, target) {
+				changedTargets = append(changedTargets, target)
+			}
+		}
+		if len(changedTargets) == 0 {
+			continue
 		}
 		entries = next
+		sortArrayProcedureKeys(changedTargets, indexByKey)
+		for _, target := range changedTargets {
+			for _, dependent := range dependents[target] {
+				if !queued[dependent] {
+					queued[dependent] = true
+					queue = append(queue, dependent)
+				}
+			}
+			if index, ok := indexByKey[target]; ok && !queued[index] {
+				queued[index] = true
+				queue = append(queue, index)
+			}
+		}
 	}
 	return entries
+}
+
+func arrayModuleEntryContributionsEqual(left, right map[string]map[string]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, names := range left {
+		other, ok := right[key]
+		if !ok || len(names) != len(other) {
+			return false
+		}
+		for name, allocated := range names {
+			if other[name] != allocated {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func arrayModuleEntryTargetEqual(left, right arrayModuleEntryStates, target string) bool {
+	leftNames, leftOK := left[target]
+	rightNames, rightOK := right[target]
+	if !leftOK || !rightOK {
+		return !leftOK && !rightOK
+	}
+	if len(leftNames) != len(rightNames) {
+		return false
+	}
+	for name, allocated := range leftNames {
+		if rightNames[name] != allocated {
+			return false
+		}
+	}
+	return true
 }
 
 func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]bool {
@@ -3204,15 +4186,26 @@ func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleD
 	return moduleArrays
 }
 
-func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates) arrayFlowState {
-	allocated := entries[arrayProcedureKey(proc)]
+func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates, participantKeys ...map[string]string) arrayFlowState {
+	var keyIndex map[string]string
+	if len(participantKeys) > 0 {
+		keyIndex = participantKeys[0]
+	}
+	allocated := entries[arrayParticipantLookupKey(proc, keyIndex)]
+	if len(allocated) == 0 && len(keyIndex) > 0 {
+		// Focused compatibility callers may still provide the legacy base key.
+		allocated = entries[arrayProcedureKey(proc)]
+	}
 	if len(allocated) == 0 {
 		return state
 	}
 	declarations := newDeclarationScope(file, proc)
 	declarations.module = moduleDecls
 	updated := cloneArrayState(state)
-	for name := range allocated {
+	for name, isAllocated := range allocated {
+		if !isAllocated {
+			continue
+		}
 		if declarations.shadowsModule(name) {
 			continue
 		}
@@ -3227,24 +4220,6 @@ func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sour
 		updated[name] = value
 	}
 	return updated
-}
-
-func arrayModuleEntryStatesEqual(left, right arrayModuleEntryStates) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for key, names := range left {
-		other, ok := right[key]
-		if !ok || len(names) != len(other) {
-			return false
-		}
-		for name := range names {
-			if !other[name] {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 type arrayByRefEntryEvidence struct {
@@ -3281,10 +4256,13 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		procedures := file.procedureView()
 		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
 			caller := procedures.valueAt(procedureIndex)
+			if !arrayProcedureIsParticipant(ctx, caller) {
+				continue
+			}
 			eligibleCaller := false
 			for call := range caller.Calls.All() {
 				_, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
-				if ok && procedureHasByRefArrayParameter(target) {
+				if ok && procedureHasByRefArrayParameter(target) && arrayProcedureIsParticipant(ctx, target) {
 					eligibleCaller = true
 					break
 				}
@@ -3299,85 +4277,127 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			})
 		}
 	}
+	sort.SliceStable(callers, func(i, j int) bool {
+		return arrayProcedureLess(callers[i].proc, callers[j].proc)
+	})
 
-	entries := map[string]map[int]bool{}
-	for {
+	evaluateCaller := func(caller callerInfo, entries map[string]map[int]bool, conditions map[string]map[int]string) map[string]map[int]arrayByRefEntryEvidence {
+		file := caller.file
+		proc := caller.proc
+		moduleDecls := caller.moduleDecls
+		variables := caller.variables
+		constants := caller.constants
+		localCtx := ctx
+		localCtx.arrayByRefEntryConditions = conditions
 		evidence := map[string]map[int]arrayByRefEntryEvidence{}
-		for _, caller := range callers {
-			file := caller.file
-			proc := caller.proc
-			moduleDecls := caller.moduleDecls
-			variables := caller.variables
-			constants := caller.constants
-			initial := arrayInitialState(variables)
-			initial = applyArrayModuleInitializationState(initial, file, proc, variables, moduleDecls, moduleInitializationStates)
-			initial = applyArrayByRefEntryStates(initial, proc, variables, entries, ctx.arrayByRefEntryConditions)
-			initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
-			initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
-			visit := func(text string, line int, in arrayFlowState) arrayFlowState {
-				var eligible []arrayByRefCallCandidate
-				for _, call := range arrayCallsAtLine(proc.Calls, line) {
-					key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
-					if !ok || !procedureHasByRefArrayParameter(target) {
-						continue
-					}
-					eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
+		initial := arrayInitialState(variables)
+		initial = applyArrayModuleInitializationState(initial, file, proc, variables, moduleDecls, moduleInitializationStates)
+		initial = applyArrayByRefEntryStates(initial, proc, variables, entries, conditions)
+		initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates, ctx.arrayParticipantKeys)
+		initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
+		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+			var eligible []arrayByRefCallCandidate
+			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				key, target, ok := arrayPrivateTargetForCall(localCtx, targets, call)
+				if !ok || !procedureHasByRefArrayParameter(target) || !arrayProcedureIsParticipant(localCtx, target) {
+					continue
 				}
-				if len(eligible) > 0 {
-					targetKey := eligible[0].key
-					sameTarget := true
-					for _, entry := range eligible[1:] {
-						if entry.key != targetKey {
-							sameTarget = false
-							break
-						}
-					}
-					if sameTarget {
-						for _, entry := range eligible {
-							arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, ctx)
-						}
-					} else {
-						// Nested calls on one source line are normally kept
-						// conservative because the pre-line state cannot describe
-						// mutations from an earlier, different helper. An outer
-						// ByRef call whose array argument is a proven allocated
-						// expression is independent of that ordering, however
-						// (for example, Consume MakeValues()). Record only that
-						// narrow case and require every ByRef array argument to be
-						// proven allocated.
-						for _, entry := range eligible {
-							allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, proc, entry.call, in, ctx)
-							if allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible)) {
-								arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, ctx)
-							}
-						}
-					}
-				}
-				out, _ := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
-				for _, call := range arrayCallsAtLine(proc.Calls, line) {
-					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
-				}
-				return out
+				eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
 			}
-			if proc.Graph == nil {
-				state := initial
-				for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
-					text := normalizedCodeLine(file.Lines[line-1])
-					state = visit(text, line, state)
+			if len(eligible) > 0 {
+				targetKey := eligible[0].key
+				sameTarget := true
+				for _, entry := range eligible[1:] {
+					if entry.key != targetKey {
+						sameTarget = false
+						break
+					}
 				}
-				continue
+				if sameTarget {
+					for _, entry := range eligible {
+						arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, localCtx)
+					}
+				} else {
+					// Nested calls on one source line are normally kept
+					// conservative because the pre-line state cannot describe
+					// mutations from an earlier, different helper. An outer
+					// ByRef call whose array argument is a proven allocated
+					// expression is independent of that ordering, however.
+					for _, entry := range eligible {
+						allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, proc, entry.call, in, localCtx)
+						if allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible)) {
+							arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, localCtx)
+						}
+					}
+				}
 			}
-			walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-				out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
-				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
-			})
+			out, _ := a.arrayTransfer(file, proc, localCtx, variables, in, text, line, constants, nil)
+			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				out = applyArrayModuleCallEffects(out, file, proc, call, localCtx, variables, moduleDecls)
+			}
+			return out
 		}
+		if proc.Graph == nil {
+			state := initial
+			for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+				state = visit(normalizedCodeLine(file.Lines[line-1]), line, state)
+			}
+			return evidence
+		}
+		if ctx.arrayStats != nil {
+			ctx.arrayStats.cfgWalks++
+		}
+		walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+			out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
+			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
+			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
+		})
+		return evidence
+	}
 
+	dependents := make(map[string][]int)
+	indexByKey := make(map[string]int, len(callers))
+	for index, caller := range callers {
+		indexByKey[arrayProcedureKey(caller.proc)] = index
+		for call := range caller.proc.Calls.All() {
+			if key, target, ok := arrayPrivateTargetForCall(ctx, targets, call); ok && procedureHasByRefArrayParameter(target) && arrayProcedureIsParticipant(ctx, target) {
+				dependents[key] = append(dependents[key], index)
+			}
+		}
+	}
+	for key := range dependents {
+		sort.Ints(dependents[key])
+	}
+	contributions := make(map[string]map[string]map[int]arrayByRefEntryEvidence, len(callers))
+	entries := map[string]map[int]bool{}
+	conditions := map[string]map[int]string{}
+	queue := make([]int, len(callers))
+	queued := make([]bool, len(callers))
+	for index := range callers {
+		queue[index] = index
+		queued[index] = true
+	}
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		queued[index] = false
+		if head >= len(callers) && ctx.arrayStats != nil {
+			ctx.arrayStats.revisits++
+		}
+		caller := callers[index]
+		key := arrayProcedureKey(caller.proc)
+		evidence := evaluateCaller(caller, entries, conditions)
+		if arrayByRefEvidenceMapsEqual(contributions[key], evidence) {
+			continue
+		}
+		contributions[key] = evidence
+		merged := map[string]map[int]arrayByRefEntryEvidence{}
+		for _, callerEvidence := range contributions {
+			mergeArrayByRefEntryEvidence(merged, callerEvidence)
+		}
 		result := map[string]map[int]bool{}
 		conditionalResult := map[string]map[int]string{}
-		for targetKey, parameters := range evidence {
-			for index, fact := range parameters {
+		for targetKey, parameters := range merged {
+			for parameterIndex, fact := range parameters {
 				if !fact.seen {
 					continue
 				}
@@ -3385,22 +4405,37 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 					if result[targetKey] == nil {
 						result[targetKey] = map[int]bool{}
 					}
-					result[targetKey][index] = true
+					result[targetKey][parameterIndex] = true
 				}
 				if !fact.allocated && fact.conditionCompatible && fact.condition != "" {
 					if conditionalResult[targetKey] == nil {
 						conditionalResult[targetKey] = map[int]string{}
 					}
-					conditionalResult[targetKey][index] = fact.condition
+					conditionalResult[targetKey][parameterIndex] = fact.condition
 				}
 			}
 		}
-		if arrayByRefEntryStatesEqual(entries, result) && arrayByRefEntryConditionsEqual(ctx.arrayByRefEntryConditions, conditionalResult) {
-			return result, conditionalResult
+		changedTargets := arrayByRefEntryChangedTargets(entries, conditions, result, conditionalResult)
+		if len(changedTargets) == 0 {
+			continue
 		}
+		sortArrayProcedureKeys(changedTargets, indexByKey)
 		entries = result
-		ctx.arrayByRefEntryConditions = conditionalResult
+		conditions = conditionalResult
+		for _, target := range changedTargets {
+			if dependent, ok := indexByKey[target]; ok && !queued[dependent] {
+				queued[dependent] = true
+				queue = append(queue, dependent)
+			}
+			for _, dependent := range dependents[target] {
+				if !queued[dependent] {
+					queued[dependent] = true
+					queue = append(queue, dependent)
+				}
+			}
+		}
 	}
+	return entries, conditions
 }
 
 func arrayByRefEntryStatesEqual(left, right map[string]map[int]bool) bool {
@@ -3437,6 +4472,106 @@ func arrayByRefEntryConditionsEqual(left, right map[string]map[int]string) bool 
 		}
 	}
 	return true
+}
+
+func arrayByRefEvidenceMapsEqual(left, right map[string]map[int]arrayByRefEntryEvidence) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for target, leftParameters := range left {
+		rightParameters, ok := right[target]
+		if !ok || len(leftParameters) != len(rightParameters) {
+			return false
+		}
+		for index, leftFact := range leftParameters {
+			if rightParameters[index] != leftFact {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func mergeArrayByRefEntryEvidence(dst, src map[string]map[int]arrayByRefEntryEvidence) {
+	for target, parameters := range src {
+		for index, incoming := range parameters {
+			if dst[target] == nil {
+				dst[target] = map[int]arrayByRefEntryEvidence{}
+			}
+			current, exists := dst[target][index]
+			if !exists {
+				dst[target][index] = incoming
+				continue
+			}
+			current.allocated = current.allocated && incoming.allocated
+			if !incoming.allocated && incoming.condition == "" {
+				current.conditionCompatible = false
+			}
+			if incoming.condition != "" {
+				if current.condition == "" {
+					current.condition = incoming.condition
+				} else if !strings.EqualFold(current.condition, incoming.condition) {
+					current.conditionCompatible = false
+				}
+			}
+			current.conditionCompatible = current.conditionCompatible && incoming.conditionCompatible
+			current.seen = current.seen || incoming.seen
+			dst[target][index] = current
+		}
+	}
+}
+
+func arrayByRefEntryChangedTargets(oldEntries map[string]map[int]bool, oldConditions map[string]map[int]string, newEntries map[string]map[int]bool, newConditions map[string]map[int]string) []string {
+	keys := map[string]bool{}
+	for target := range oldEntries {
+		keys[target] = true
+	}
+	for target := range oldConditions {
+		keys[target] = true
+	}
+	for target := range newEntries {
+		keys[target] = true
+	}
+	for target := range newConditions {
+		keys[target] = true
+	}
+	changed := make([]string, 0, len(keys))
+	for target := range keys {
+		oldEntry := map[string]map[int]bool{}
+		newEntry := map[string]map[int]bool{}
+		if names := oldEntries[target]; len(names) > 0 {
+			oldEntry[target] = names
+		}
+		if names := newEntries[target]; len(names) > 0 {
+			newEntry[target] = names
+		}
+		oldCondition := map[string]map[int]string{}
+		newCondition := map[string]map[int]string{}
+		if conditions := oldConditions[target]; len(conditions) > 0 {
+			oldCondition[target] = conditions
+		}
+		if conditions := newConditions[target]; len(conditions) > 0 {
+			newCondition[target] = conditions
+		}
+		if !arrayByRefEntryStatesEqual(oldEntry, newEntry) || !arrayByRefEntryConditionsEqual(oldCondition, newCondition) {
+			changed = append(changed, target)
+		}
+	}
+	return changed
+}
+
+func sortArrayProcedureKeys(keys []string, indexByKey map[string]int) {
+	sort.SliceStable(keys, func(i, j int) bool {
+		left, leftOK := indexByKey[keys[i]]
+		right, rightOK := indexByKey[keys[j]]
+		if leftOK && rightOK && left != right {
+			return left < right
+		}
+		if leftOK != rightOK {
+			return leftOK
+		}
+		return keys[i] < keys[j]
+	})
 }
 
 func arrayOptionPrivateModule(lines []string) bool {
@@ -4965,7 +6100,24 @@ func arrayLengthExpressionMatches(rhs, parameter string) bool {
 // Dependencies are solved to a fixed point so a private array-returning helper
 // may be declared after its caller without turning an unproved VBA function
 // contract into an allocation guarantee.
-func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[string]bool) map[string]arrayValue {
+func arrayReturnSummaryDuplicateNames(procedures []sourceProcedure) map[string]bool {
+	counts := make(map[string]int, len(procedures))
+	for _, procedure := range procedures {
+		name := strings.ToLower(strings.TrimSpace(procedure.Name))
+		if name != "" {
+			counts[name]++
+		}
+	}
+	duplicates := make(map[string]bool)
+	for name, count := range counts {
+		if count > 1 {
+			duplicates[name] = true
+		}
+	}
+	return duplicates
+}
+
+func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[string]bool, participantCtx analysisContext) map[string]arrayValue {
 	type candidate struct {
 		value arrayValue
 		ok    bool
@@ -4977,6 +6129,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		constants map[string]int
 	}
 	procedures := make([]returnProcedure, 0)
+	allReturnProcedures := make([]sourceProcedure, 0)
 	for _, file := range files {
 		fileProcedures := file.procedureView()
 		moduleDecls := file.moduleDecls()
@@ -4988,6 +6141,14 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			if proc.Name == "" {
 				continue
 			}
+			// Duplicate bare-name summaries are ambiguous even when one of the
+			// same-named procedures is outside the array participant closure.
+			// Collect names before filtering so narrowing the fixed-point scope
+			// cannot turn an otherwise ambiguous call into a definite summary.
+			allReturnProcedures = append(allReturnProcedures, proc)
+			if !arrayProcedureIsParticipant(participantCtx, proc) {
+				continue
+			}
 			procedures = append(procedures, returnProcedure{
 				file:      file,
 				proc:      proc,
@@ -4996,83 +6157,168 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			})
 		}
 	}
+	sort.SliceStable(procedures, func(i, j int) bool {
+		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
+	})
+	ambiguousReturnNames := arrayReturnSummaryDuplicateNames(allReturnProcedures)
 
-	summaries := map[string]arrayValue{}
-	for {
-		candidates := map[string][]candidate{}
-		for _, procedure := range procedures {
-			proc := procedure.proc
-			if proc.Graph == nil {
-				// Without a CFG the scan cannot distinguish conditional from
-				// unconditional return assignments, so leave the summary unknown.
-				continue
-			}
-			arrayReturns := summaries
-			// Never use a previous summary for the procedure currently being
-			// inspected. This keeps direct and mutual recursion fail-open while
-			// still allowing independent helpers to converge over later rounds.
-			if _, self := summaries[strings.ToLower(proc.Name)]; self {
-				arrayReturns = make(map[string]arrayValue, len(summaries)-1)
-				for name, value := range summaries {
-					if !strings.EqualFold(name, proc.Name) {
-						arrayReturns[name] = value
-					}
+	evaluate := func(procedure returnProcedure, summaries map[string]arrayValue) (candidate, bool) {
+		proc := procedure.proc
+		if proc.Graph == nil {
+			// Without a CFG the scan cannot distinguish conditional from
+			// unconditional return assignments, so leave the summary unknown.
+			return candidate{}, false
+		}
+		arrayReturns := summaries
+		// Never use a previous summary for the procedure currently being
+		// inspected. This keeps direct and mutual recursion fail-open while
+		// still allowing independent helpers to converge over later rounds.
+		if _, self := summaries[strings.ToLower(proc.Name)]; self {
+			arrayReturns = make(map[string]arrayValue, len(summaries)-1)
+			for name, value := range summaries {
+				if !strings.EqualFold(name, proc.Name) {
+					arrayReturns[name] = value
 				}
 			}
-			ctx := analysisContext{arrayReturns: arrayReturns}
-			returnCandidates := map[int]candidate{}
-			base := arrayOptionBase(procedure.file)
-			procedureHasErrorHandling := arrayProcedureHasErrorHandling(proc)
-			walkArrayCFGWithStop(proc.Graph, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
-				if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
-					value, known := arrayExpressionState(rhs, in, ctx)
-					returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
-				}
-				out, _ := (Analyzer{}).arrayTransfer(procedure.file, proc, ctx, procedure.variables, in, text, line, procedure.constants, nil)
-				return out
-			}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-				return applyArrayAllocationGuard(out, block.Statement, edge, arrayAllocationGuards, procedure.variables)
-			}, func(text string, _ int) bool {
-				return !procedureHasErrorHandling && arraySummaryStatementAlwaysFails(text, base, procedure.constants)
-			})
-			returnLines := make([]int, 0, len(returnCandidates))
-			for line := range returnCandidates {
-				returnLines = append(returnLines, line)
-			}
-			sort.Ints(returnLines)
-			returns := make([]candidate, 0, len(returnLines))
-			for _, line := range returnLines {
-				returns = append(returns, returnCandidates[line])
-			}
-			if len(returns) == 0 {
-				continue
-			}
-			if !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true}) {
-				continue
-			}
-			valid := returns[0].ok
-			value := returns[0].value
-			for _, returned := range returns[1:] {
-				if !returned.ok || !arrayValueCompatible(value, returned.value) {
-					valid = false
-					break
-				}
-				value = meetArrayValue(value, returned.value)
-			}
-			name := strings.ToLower(proc.Name)
-			candidates[name] = append(candidates[name], candidate{value: value, ok: valid})
 		}
-		next := map[string]arrayValue{}
-		for name, values := range candidates {
-			if len(values) == 1 && values[0].ok {
-				next[name] = values[0].value
+		ctx := analysisContext{arrayReturns: arrayReturns}
+		returnCandidates := map[int]candidate{}
+		base := arrayOptionBase(procedure.file)
+		procedureHasErrorHandling := arrayProcedureHasErrorHandling(proc)
+		if participantCtx.arrayStats != nil {
+			participantCtx.arrayStats.cfgWalks++
+		}
+		walkArrayCFGWithStop(proc.Graph, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
+			if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
+				value, known := arrayExpressionState(rhs, in, ctx)
+				returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
 			}
+			out, _ := (Analyzer{}).arrayTransfer(procedure.file, proc, ctx, procedure.variables, in, text, line, procedure.constants, nil)
+			return out
+		}, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+			return applyArrayAllocationGuard(out, block.Statement, edge, arrayAllocationGuards, procedure.variables)
+		}, func(text string, _ int) bool {
+			return !procedureHasErrorHandling && arraySummaryStatementAlwaysFails(text, base, procedure.constants)
+		})
+		returnLines := make([]int, 0, len(returnCandidates))
+		for line := range returnCandidates {
+			returnLines = append(returnLines, line)
 		}
-		if arrayReturnSummariesEqual(summaries, next) {
-			return next
+		sort.Ints(returnLines)
+		returns := make([]candidate, 0, len(returnLines))
+		for _, line := range returnLines {
+			returns = append(returns, returnCandidates[line])
 		}
-		summaries = next
+		if len(returns) == 0 || !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true}) {
+			return candidate{}, false
+		}
+		valid := returns[0].ok
+		value := returns[0].value
+		for _, returned := range returns[1:] {
+			if !returned.ok || !arrayValueCompatible(value, returned.value) {
+				valid = false
+				break
+			}
+			value = meetArrayValue(value, returned.value)
+		}
+		return candidate{value: value, ok: valid}, true
 	}
+
+	dependents := make(map[string][]int)
+	for index, procedure := range procedures {
+		for call := range procedure.proc.Calls.All() {
+			resolution := call.Resolution
+			if participantCtx.procedureResolver != nil {
+				resolution = participantCtx.procedureResolver.ResolveCall(call)
+			}
+			for _, candidate := range resolution.Candidates {
+				name := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
+				if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+					name = name[dot+1:]
+				}
+				if name != "" {
+					dependents[name] = append(dependents[name], index)
+				}
+			}
+		}
+	}
+	for name := range dependents {
+		sort.Ints(dependents[name])
+	}
+	contributions := make(map[string]candidate, len(procedures))
+	present := make(map[string]bool, len(procedures))
+	groups := make(map[string]map[string]candidate)
+	summaries := map[string]arrayValue{}
+	queue := make([]int, len(procedures))
+	queued := make([]bool, len(procedures))
+	for index := range procedures {
+		queue[index] = index
+		queued[index] = true
+	}
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		queued[index] = false
+		procedure := procedures[index]
+		name := strings.ToLower(strings.TrimSpace(procedure.proc.Name))
+		if ambiguousReturnNames[name] {
+			// Summary lookups use bare names for compatibility with the existing
+			// expression resolver. A duplicate bare name is therefore permanently
+			// ambiguous for this revision. Keep it at the unknown bottom of the
+			// lattice instead of allowing iteration order to delete and recreate a
+			// summary while duplicate candidates are evaluated.
+			continue
+		}
+		if head >= len(procedures) && participantCtx.arrayStats != nil {
+			participantCtx.arrayStats.revisits++
+		}
+		key := arrayProcedureKey(procedure.proc)
+		value, hasContribution := evaluate(procedure, summaries)
+		if present[key] == hasContribution && (!hasContribution || arrayValueEqual(contributions[key].value, value.value) && contributions[key].ok == value.ok) {
+			continue
+		}
+		if hasContribution {
+			contributions[key] = value
+			present[key] = true
+			if groups[name] == nil {
+				groups[name] = map[string]candidate{}
+			}
+			groups[name][key] = value
+		} else {
+			delete(contributions, key)
+			delete(present, key)
+			if group := groups[name]; group != nil {
+				delete(group, key)
+				if len(group) == 0 {
+					delete(groups, name)
+				}
+			}
+		}
+		old, hadOld := summaries[name]
+		group := groups[name]
+		if len(group) == 1 {
+			for _, value := range group {
+				if value.ok {
+					summaries[name] = value.value
+				} else {
+					delete(summaries, name)
+				}
+			}
+		} else {
+			delete(summaries, name)
+		}
+		fresh, hasFresh := summaries[name]
+		changed := hadOld != hasFresh || (hasFresh && !arrayValueEqual(old, fresh))
+		if !changed {
+			continue
+		}
+		for _, dependent := range dependents[name] {
+			if !queued[dependent] {
+				queued[dependent] = true
+				queue = append(queue, dependent)
+			}
+		}
+	}
+	return summaries
 }
 
 func arrayProcedureHasErrorHandling(proc sourceProcedure) bool {
@@ -5099,19 +6345,6 @@ func arraySummaryStatementAlwaysFails(text string, base int, constants map[strin
 		}
 	}
 	return false
-}
-
-func arrayReturnSummariesEqual(left, right map[string]arrayValue) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for name, value := range left {
-		other, ok := right[name]
-		if !ok || !arrayValueEqual(value, other) {
-			return false
-		}
-	}
-	return true
 }
 
 func arrayValueEqual(left, right arrayValue) bool {

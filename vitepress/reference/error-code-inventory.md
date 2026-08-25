@@ -27,10 +27,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `array_bounds`
 - `array_candidate_procedures`
 - `array_cfg_walks`
+- `array_interprocedural_cfg_walks`
 - `array_kernel_runs`
+- `array_participant_procedures`
 - `array_projection_runs`
 - `array_subscript_out_of_bounds`
 - `array_unallocated`
+- `array_worklist_revisits`
 - `as_type_clause`
 - `assignable_to`
 - `assignment_diagnostics`

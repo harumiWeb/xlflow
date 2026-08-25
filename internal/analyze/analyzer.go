@@ -341,13 +341,31 @@ type analysisContext struct {
 	arrayModuleConfigurations        map[string]arrayModuleConfigurationState
 	arrayModuleEntryStates           arrayModuleEntryStates
 	arrayPrivateTargets              map[string]sourceProcedure
-	arrayByRefEntryStates            map[string]map[int]bool
-	arrayByRefEntryConditions        map[string]map[int]string
-	procedures                       map[string]procedureSignature
-	procedureResolver                procedureir.Resolver
-	objectAnalysis                   *objectAnalysisContext
-	worksheetCodenames               map[string]string
-	projectEffects                   effects.ProjectSummary
+	arrayParticipants                map[string]bool
+	arrayParticipantKeys             map[string]string
+	// arrayInterproceduralParticipants excludes complete procedures whose only
+	// evidence is an unknown array capability. Those procedures remain in the
+	// local participant plan for fail-open diagnostics, but cannot by themselves
+	// widen every fixed-point lane in a large module.
+	arrayInterproceduralParticipants map[string]bool
+	// arrayIgnoreFeatureUnknown is retained for focused participant-set
+	// compatibility helpers. Production planning derives both feature-unknown
+	// boundaries from one shared graph; complete IR with an unknown array
+	// capability remains local unless a real seed reaches that procedure.
+	arrayIgnoreFeatureUnknown bool
+	arrayStats                *arrayInterproceduralStats
+	arrayByRefEntryStates     map[string]map[int]bool
+	arrayByRefEntryConditions map[string]map[int]string
+	procedures                map[string]procedureSignature
+	procedureResolver         procedureir.Resolver
+	objectAnalysis            *objectAnalysisContext
+	worksheetCodenames        map[string]string
+	projectEffects            effects.ProjectSummary
+}
+
+type arrayInterproceduralStats struct {
+	cfgWalks uint64
+	revisits uint64
 }
 
 type procedureSignature struct {
@@ -440,6 +458,12 @@ type sourceProcedure struct {
 	// Features is the immutable, analyzer-owned applicability summary built
 	// with the procedure facts. It contains no parser-owned values.
 	Features procedureFeatureSet
+	// ArrayParticipant is set after project resolution when this procedure is
+	// in the semantic array dependency closure.  A false value is meaningful
+	// only for production procedures with complete facts; compatibility
+	// projections continue to use their local feature evidence.
+	ArrayParticipant      bool
+	ArrayParticipantReady bool
 	// Plan is the immutable, configuration-specific semantic-domain plan for
 	// this procedure revision. PlanReady distinguishes a valid all-skipped plan
 	// from projections assembled by focused tests and compatibility helpers.
@@ -767,6 +791,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		finishArrayCapability = beginProjectCapabilityBuild(ctx, projectCapabilityArrayInterprocedural)
 	}
 	analysisCtx := analysis.buildContextWithObjectAnalysisPlan(parsedFiles, objectAnalysis, capabilityPlan, procedureir.ProcedureOnlyResolver(resolutionResolver))
+	recordArrayInterproceduralTelemetry(ctx, analysisCtx)
 	finishArrayCapability(nil)
 	finishStage(len(analysisCtx.procedures), nil)
 	finishStage = analysisstats.Measure(ctx, "project_context_indexes")
@@ -1703,7 +1728,16 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if len(procedures) == 0 {
 			procedures = []sourceProcedure{{StartLine: 1, EndLine: len(file.Lines), StartByte: 0, EndByte: len(file.Source)}}
 		}
-		analysisCtx := analyzer.buildContext([]parsedFile{file})
+		contextFiles := []parsedFile{file}
+		analysisCtx := analyzer.buildContext(contextFiles)
+		// buildContext materializes the participant-restricted plan after the
+		// initial procedure projection above was copied. Rebind the realtime
+		// projection to that materialized revision so batch and realtime execute
+		// the same array participant boundary.
+		file = contextFiles[0]
+		materializedProcedures := sourceProceduresWithEffects(file, projectEffects)
+		procedures = rebindRealtimeProcedureProjection(procedures, materializedProcedures)
+		recordArrayInterproceduralTelemetry(ctx, analysisCtx)
 		analysisCtx.projectEffects = projectEffects
 		for i, proc := range procedures {
 			if i&0x1f == 0 {
@@ -2087,6 +2121,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
+		arrayStats:                       &arrayInterproceduralStats{},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},
 		procedures:                       map[string]procedureSignature{},
@@ -2165,8 +2200,10 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	// open through buildProcedureAnalysisPlan.
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
-		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
+		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
+		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
+		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
 		ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)
 		ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)
@@ -2217,6 +2254,18 @@ func recordBatchWorkload(ctx context.Context, files []parsedFile) {
 			recorder.AddSum("cfg_block_count", uint64(len(graph.Blocks)))
 			recorder.AddSum("cfg_edge_count", uint64(len(graph.Edges)))
 		}
+	}
+}
+
+func recordArrayInterproceduralTelemetry(ctx context.Context, analysisCtx analysisContext) {
+	recorder := analysisstats.FromContext(ctx)
+	if recorder == nil || analysisCtx.arrayParticipants == nil {
+		return
+	}
+	recorder.AddSum(analysisstats.ArrayParticipantProceduresCounter, uint64(len(analysisCtx.arrayParticipants)))
+	if analysisCtx.arrayStats != nil {
+		recorder.AddSum(analysisstats.ArrayInterproceduralCFGWalksCounter, analysisCtx.arrayStats.cfgWalks)
+		recorder.AddSum(analysisstats.ArrayWorklistRevisitsCounter, analysisCtx.arrayStats.revisits)
 	}
 }
 
@@ -2897,6 +2946,16 @@ func sourceProceduresWithEffects(file parsedFile, project effects.ProjectSummary
 		}
 	}
 	return procedures
+}
+
+func rebindRealtimeProcedureProjection(current, materialized []sourceProcedure) []sourceProcedure {
+	if len(materialized) > 0 {
+		return materialized
+	}
+	// A source file can have no recovered procedure IR. The caller installs a
+	// whole-file synthetic procedure for source-line diagnostics; preserve that
+	// fallback when participant materialization has nothing to rebind.
+	return current
 }
 
 func (file *parsedFile) procedures() []sourceProcedure {

@@ -252,8 +252,11 @@ func TestDomainAndCounterNamesAreStable(t *testing.T) {
 		counter WorkCounter
 		want    string
 	}{
+		{CounterArrayParticipantProcedures, ArrayParticipantProceduresCounter},
+		{CounterArrayInterproceduralCFGWalks, ArrayInterproceduralCFGWalksCounter},
 		{CounterArrayKernelRuns, ArrayKernelRunsCounter},
 		{CounterArrayProjectionRuns, ArrayProjectionRunsCounter},
+		{CounterArrayWorklistRevisits, ArrayWorklistRevisitsCounter},
 	}
 	for _, test := range arrayCounterNames {
 		if got := test.counter.String(); got != test.want {
@@ -333,5 +336,24 @@ func TestAnalysisPlanCountersMergeAsFixedWorkCounters(t *testing.T) {
 	}
 	if !reflect.DeepEqual(counters, want) {
 		t.Fatalf("analysis plan counters = %+v, want %+v", counters, want)
+	}
+}
+
+func TestArrayParticipantCountersMergeAsFixedWorkCounters(t *testing.T) {
+	recorder := NewRecorder()
+	aggregate := NewAggregate(recorder)
+	aggregate.AddCounter(CounterArrayParticipantProcedures, 7)
+	aggregate.AddCounter(CounterArrayInterproceduralCFGWalks, 3)
+	aggregate.AddCounter(CounterArrayWorklistRevisits, 5)
+	aggregate.Merge()
+
+	_, counters := recorder.Totals()
+	want := []Counter{
+		{Name: ArrayInterproceduralCFGWalksCounter, Value: 3},
+		{Name: ArrayParticipantProceduresCounter, Value: 7},
+		{Name: ArrayWorklistRevisitsCounter, Value: 5},
+	}
+	if !reflect.DeepEqual(counters, want) {
+		t.Fatalf("array participant counters = %+v, want %+v", counters, want)
 	}
 }

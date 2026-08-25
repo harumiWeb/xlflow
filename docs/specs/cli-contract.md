@@ -340,6 +340,25 @@ start its explicitly separate secondary shape pass, which is reflected in
 These counters are emitted only in stderr performance records and never count
 findings.
 
+Array participant planning adds three developer-only counters:
+`array_participant_procedures` is the unique number of procedures in the
+resolved array dependency closure for an analysis revision,
+`array_interprocedural_cfg_walks` counts CFG walks actually started by array
+return/ByRef/module-entry fixed points, and `array_worklist_revisits` counts
+participant evaluations after their initial visit. The participant closure
+is seeded by direct array operations, array parameters/returns,
+object-array operations, and module-array accesses, then follows semantically
+array-shaped resolved calls, reverse callers, ByRef/return edges, module state,
+and initializer or helper edges. Resolved scalar helpers that cannot affect an
+array state are excluded. Ambiguous calls retain all resolved candidates and
+their related SCC/dependency boundary. Ambiguous, unresolved, dynamic,
+recovered, or incomplete inputs fail open at the smallest known
+module/SCC/dependency boundary; unknown ownership keeps the complete-project
+fallback. The counters are additive stderr telemetry,
+are deterministic for one revision, and never appear in normal JSON, LSP, or
+diagnostic payloads. Existing `array_candidate_procedures` and
+`array_cfg_walks` retain their procedure-local meanings.
+
 Applicability planning adds additive decision counters for each gated semantic
 domain: `planned_runtime_runs` / `skipped_runtime_runs`,
 `planned_array_runs` / `skipped_array_runs`,
@@ -379,9 +398,12 @@ key, diagnostic ID, or public schema field. Resolution-dependent capabilities
 reuse the shared resolved project inputs, and an individual rule must not
 construct a hidden project context when its capability was not planned.
 Participant filtering remains conservative: ambiguous, dynamic, unresolved,
-recovered, or incomplete project evidence keeps the affected domain on the
-complete participant set. Compile-equivalent diagnostics retain their existing
-unconditional availability regardless of optional runtime-analysis settings.
+recovered, or incomplete project evidence expands the affected array closure
+to its known candidates, SCC, module-array cluster, or containing module as
+available. Only inputs without reliable module/file ownership use the
+complete-project fallback. Compile-equivalent diagnostics retain their
+existing unconditional availability regardless of optional runtime-analysis
+settings.
 
 The main procedure path also reports plan-level counters when profiling is
 enabled: `analysis_plans` counts procedure plans executed,

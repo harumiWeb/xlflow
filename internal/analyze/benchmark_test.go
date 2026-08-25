@@ -409,6 +409,9 @@ func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
 			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
 		}
 	}
+	// Issue #712 workload: one small array dependency chain in a giant module
+	// with otherwise independent scalar procedures.
+	workloads = append(workloads, singleModuleBenchmarkWorkload{shape: "array-chain", size: 2000})
 	for _, size := range []int{100, 500, 1000, 2000} {
 		workloads = append(workloads, singleModuleBenchmarkWorkload{shape: "cfg-independent", size: size})
 	}
@@ -439,6 +442,8 @@ func (w singleModuleBenchmarkWorkload) expectedModuleDeclarations() int {
 	switch w.shape {
 	case "declarations":
 		return w.size
+	case "array-chain":
+		return 1
 	default:
 		return 0
 	}
@@ -448,6 +453,8 @@ func (w singleModuleBenchmarkWorkload) expectedCalls() int {
 	switch w.shape {
 	case "chain":
 		return w.size - 1
+	case "array-chain":
+		return 4
 	case "dense":
 		const fanout = 8
 		calls := 0
@@ -544,6 +551,14 @@ func singleModuleBenchmarkSource(workload singleModuleBenchmarkWorkload) string 
 			fmt.Fprintf(&source, "    If value = %d Then\n        value = value + 1\n    Else\n        value = value - 1\n    End If\n", index)
 		}
 		source.WriteString("End Sub\n")
+	case "array-chain":
+		source.WriteString("Private moduleValues() As Long\n\n")
+		source.WriteString("Private Sub ArrayAllocate()\n    ReDim moduleValues(0 To 2)\nEnd Sub\n\n")
+		source.WriteString("Private Sub ArrayConsume()\n    Debug.Print UBound(moduleValues)\nEnd Sub\n\n")
+		source.WriteString("Private Sub ArrayEntry()\n    Call ArrayAllocate\n    Call ArrayConsume\nEnd Sub\n\n")
+		for index := 3; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Independent%04d()\n    Dim value As Long\n    value = %d\nEnd Sub\n\n", index, index)
+		}
 	}
 	return source.String()
 }

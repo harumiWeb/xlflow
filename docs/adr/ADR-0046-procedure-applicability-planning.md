@@ -291,6 +291,58 @@ JSON and LSP payloads. `BenchmarkModuleAnalysisFacts` and the existing
 construction/reuse, source-normalization CPU and allocation cost, and the
 small-module regression guard.
 
+### Amendment: semantic array participants and bounded fixed points (#712)
+
+Array interprocedural analysis now builds an immutable participant plan after
+resolution and module facts are available. A procedure is seeded when its
+owned IR contains an array operation or access, an array parameter or return,
+an object-array operation, or a read/write of a module array. The plan then
+computes a deterministic closure over resolved calls and reverse callers,
+array ByRef relationships, array-return chains, shared module-array state,
+and class, document, or UserForm initializer/helper boundaries. A module-level
+array declaration alone is not a seed for every procedure in that module.
+
+The closure is a planning boundary, not a new lattice or diagnostic lane.
+`inferArrayReturnSummaries`, ByRef/module allocation, module-entry state, and
+ByRef-entry state all consume the same participant set. Resolved scalar helpers
+that cannot affect an array state are excluded; resolved call edges are retained
+when the target has intrinsic array evidence, while ambiguous or candidate-
+bearing uncertain edges retain their bounded candidates. The fixed-point worklist is
+ordered by source ordinal with sorted adjacency; a participant is evaluated
+once initially and is requeued only when an upstream summary or entry
+contribution changes. Recursive SCCs use the same unknown/definite state
+semantics and deterministic source order as the complete analysis.
+
+Reverse-caller extension is deliberately bounded at a large-module boundary:
+complete modules with at most 512 procedures receive one additional resolved
+caller hop so short wrapper chains remain in the closure, while larger modules
+retain their direct semantic edges and seed procedures. This prevents a
+generic call hub in a giant module from turning scalar callers into an array
+fixed-point workload; callers that carry an array operation, parameter, return,
+or module-array access remain seeds independently. Incomplete or recovered
+procedures use the uncertainty fallback below rather than this extension.
+
+Uncertainty fails open at the smallest known semantic boundary. Ambiguous
+calls retain all resolved candidates and their SCC/dependency boundary.
+Unresolved or dynamic calls with project-local candidates retain those
+candidates; when target identity is unavailable, the containing module is the
+fallback. External/member calls preserve unknown state without adding every
+project procedure. Recovered or incomplete IR expands through known
+procedures, SCCs, and module-array clusters in that order. Only compatibility
+or synthetic inputs with no module/file ownership may expand to the complete
+project. This keeps conservative diagnostics, including `VBA101` and
+`VBA102`, while preventing unrelated giant-module procedures from entering
+the fixed point.
+
+The performance recorder adds three stderr-only counters:
+`array_participant_procedures` (unique procedures in the closure),
+`array_interprocedural_cfg_walks` (CFG walks started by array summary/entry
+fixed points), and `array_worklist_revisits` (evaluations after a
+participant's initial visit). Existing `array_candidate_procedures`,
+`array_cfg_walks`, and `planned_array_runs` retain their previous procedure
+local meanings. None of these counters is part of normal CLI JSON, LSP
+payloads, diagnostic output, or the public rule registry.
+
 ## Rationale
 
 The IR and fact ownership boundaries already make procedure inputs immutable
@@ -405,6 +457,8 @@ produce a finding.
   `internal/vba/analysisstats/recorder.go`.
 - Issue #711's module-fact construction, immutable accessors, option-scan
   counter, and module-fact benchmark requirements.
+- Issue #712's semantic array participant closure, bounded fail-open policy,
+  deterministic fixed-point worklist, and participant telemetry requirements.
 
 ## Related
 
