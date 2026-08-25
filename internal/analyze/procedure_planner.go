@@ -960,7 +960,7 @@ func materializeProcedureAnalysisPlans(file *parsedFile, projectEffects effects.
 // capability discovery cannot miss a module-array dependency; this pass is
 // the execution boundary that removes array work from proven-unrelated
 // procedures.
-func materializeArrayParticipantPlans(files []parsedFile, cfg config.AnalyzeConfig, participants map[string]bool) {
+func materializeArrayParticipantPlans(files []parsedFile, cfg config.AnalyzeConfig, participants map[string]bool, participantKeys map[string]string) {
 	for fileIndex := range files {
 		file := &files[fileIndex]
 		procedures := file.Procedures
@@ -969,7 +969,7 @@ func materializeArrayParticipantPlans(files []parsedFile, cfg config.AnalyzeConf
 		}
 		for index := range procedures {
 			proc := procedures[index]
-			proc.ArrayParticipant = participants[arrayProcedureKey(proc)]
+			proc.ArrayParticipant = participants[arrayParticipantLookupKey(proc, participantKeys)]
 			proc.ArrayParticipantReady = true
 			if proc.PlanReady {
 				proc.Plan = restrictArrayProcedurePlan(proc.Plan, proc.ArrayParticipant)

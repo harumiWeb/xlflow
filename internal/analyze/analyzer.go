@@ -342,6 +342,7 @@ type analysisContext struct {
 	arrayModuleEntryStates           arrayModuleEntryStates
 	arrayPrivateTargets              map[string]sourceProcedure
 	arrayParticipants                map[string]bool
+	arrayParticipantKeys             map[string]string
 	// arrayInterproceduralParticipants excludes complete procedures whose only
 	// evidence is an unknown array capability. Those procedures remain in the
 	// local participant plan for fail-open diagnostics, but cannot by themselves
@@ -2200,8 +2201,8 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
-		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants = buildArrayParticipantSets(files, ctx)
-		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants)
+		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
+		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
 		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
 		ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)

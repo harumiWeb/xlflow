@@ -1855,6 +1855,34 @@ func arrayProcedureKey(proc sourceProcedure) string {
 	return strings.ToLower(module + "." + name)
 }
 
+func arrayParticipantProcedureIdentity(proc sourceProcedure) string {
+	path := arrayProcedureSourcePath(proc)
+	if path == "" {
+		path = strings.ToLower(strings.TrimSpace(proc.Module))
+	}
+	return strings.Join([]string{
+		path,
+		strconv.Itoa(proc.Index),
+		strconv.Itoa(proc.StartByte),
+		strconv.Itoa(proc.StartLine),
+		strings.ToLower(strings.TrimSpace(proc.Name)),
+		strings.ToLower(string(proc.ProcedureKind)),
+	}, "\x00")
+}
+
+func arrayParticipantDisambiguatedKey(proc sourceProcedure) string {
+	return arrayProcedureKey(proc) + "|" + arrayParticipantProcedureIdentity(proc)
+}
+
+func arrayParticipantLookupKey(proc sourceProcedure, participantKeys map[string]string) string {
+	if len(participantKeys) > 0 {
+		if key := participantKeys[arrayParticipantProcedureIdentity(proc)]; key != "" {
+			return key
+		}
+	}
+	return arrayProcedureKey(proc)
+}
+
 func arrayProcedureSourcePath(proc sourceProcedure) string {
 	if proc.Document == nil {
 		return ""
@@ -1878,6 +1906,9 @@ func arrayProcedureLess(left, right sourceProcedure) bool {
 	}
 	if !strings.EqualFold(left.Name, right.Name) {
 		return strings.ToLower(left.Name) < strings.ToLower(right.Name)
+	}
+	if left.ProcedureKind != right.ProcedureKind {
+		return string(left.ProcedureKind) < string(right.ProcedureKind)
 	}
 	return arrayProcedureKey(left) < arrayProcedureKey(right)
 }
@@ -1944,8 +1975,8 @@ func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure
 type arrayParticipantGraph struct {
 	all              map[string]sourceProcedure
 	fileByKey        map[string]parsedFile
-	byQualified      map[string]string
 	byModule         map[string][]string
+	keyByIdentity    map[string]string
 	candidateIndex   arrayCandidateIndex
 	adjacency        map[string]map[string]bool
 	reverse          map[string]map[string]bool
@@ -1965,32 +1996,54 @@ type arrayParticipantGraph struct {
 func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayParticipantGraph {
 	all := make(map[string]sourceProcedure)
 	fileByKey := make(map[string]parsedFile)
-	byQualified := make(map[string]string)
 	byModule := make(map[string][]string)
+	keyByIdentity := make(map[string]string)
+	type entry struct {
+		file parsedFile
+		proc sourceProcedure
+		base string
+	}
+	entries := make([]entry, 0)
+	baseCounts := make(map[string]int)
 	for _, file := range files {
 		procedures := file.procedureView()
 		for index := 0; index < procedures.Len(); index++ {
 			proc := procedures.valueAt(index)
-			key := arrayProcedureKey(proc)
-			if key == "" {
+			base := arrayProcedureKey(proc)
+			if base == "" {
 				continue
 			}
-			all[key] = proc
-			fileByKey[key] = file
-			qualified := strings.ToLower(strings.TrimSpace(proc.Module + "." + proc.Name))
-			if qualified != "." {
-				byQualified[qualified] = key
-			}
-			module := strings.ToLower(strings.TrimSpace(proc.Module))
-			byModule[module] = append(byModule[module], key)
+			entries = append(entries, entry{file: file, proc: proc, base: base})
+			baseCounts[base]++
 		}
+	}
+	for _, item := range entries {
+		key := item.base
+		if baseCounts[item.base] > 1 {
+			key = arrayParticipantDisambiguatedKey(item.proc)
+		}
+		if _, exists := all[key]; exists {
+			// Synthetic focused projections may omit Document/Index and still
+			// produce identical identity fields. Keep their source-order ordinal
+			// as a deterministic final discriminator.
+			key = key + "|" + strconv.Itoa(len(all))
+		}
+		all[key] = item.proc
+		fileByKey[key] = item.file
+		identity := arrayParticipantProcedureIdentity(item.proc)
+		if _, exists := keyByIdentity[identity]; exists {
+			identity = identity + "\x00" + strconv.Itoa(len(all))
+		}
+		keyByIdentity[identity] = key
+		module := strings.ToLower(strings.TrimSpace(item.proc.Module))
+		byModule[module] = append(byModule[module], key)
 	}
 	if len(all) == 0 {
 		return &arrayParticipantGraph{
 			all:              all,
 			fileByKey:        fileByKey,
-			byQualified:      byQualified,
 			byModule:         byModule,
+			keyByIdentity:    keyByIdentity,
 			candidateIndex:   buildArrayCandidateIndex(all),
 			adjacency:        map[string]map[string]bool{},
 			reverse:          map[string]map[string]bool{},
@@ -2065,10 +2118,7 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 			}
 			if resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1 {
 				candidate := resolution.Candidates[0]
-				target := byQualified[strings.ToLower(candidate.QualifiedName)]
-				if target == "" {
-					target = arrayCandidateKey(candidate, all, candidateIndex)
-				}
+				target := arrayCandidateKey(candidate, all, candidateIndex)
 				addCallEdge(target)
 				// Defer resolved-edge filtering until every procedure's
 				// intrinsic seed has been classified. The source map is not
@@ -2121,8 +2171,8 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 	return &arrayParticipantGraph{
 		all:              all,
 		fileByKey:        fileByKey,
-		byQualified:      byQualified,
 		byModule:         byModule,
+		keyByIdentity:    keyByIdentity,
 		candidateIndex:   candidateIndex,
 		adjacency:        adjacency,
 		reverse:          reverse,
@@ -2206,10 +2256,10 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 	return buildArrayParticipantGraph(files, ctx).participantSet(ctx.arrayIgnoreFeatureUnknown)
 }
 
-func buildArrayParticipantSets(files []parsedFile, ctx analysisContext) (map[string]bool, map[string]bool) {
+func buildArrayParticipantSets(files []parsedFile, ctx analysisContext) (map[string]bool, map[string]bool, map[string]string) {
 	graph := buildArrayParticipantGraph(files, ctx)
 	participants := graph.participantSet(ctx.arrayIgnoreFeatureUnknown)
-	return participants, buildArrayInterproceduralParticipantSetFromGraph(graph, participants)
+	return participants, buildArrayInterproceduralParticipantSetFromGraph(graph, participants), graph.keyByIdentity
 }
 
 // buildArrayInterproceduralParticipantSet keeps the local fail-open plan
@@ -2563,17 +2613,26 @@ type arrayCandidateLineKey struct {
 	kind string
 }
 
+type arrayCandidateQualifiedKindKey struct {
+	qualified string
+	kind      string
+}
+
 type arrayCandidateIndex struct {
-	byName        map[string]string
-	byLineAndKind map[arrayCandidateLineKey]string
+	byName          map[string]string
+	byQualified     map[string]string
+	byQualifiedKind map[arrayCandidateQualifiedKindKey]string
+	byLineAndKind   map[arrayCandidateLineKey]string
 }
 
 // buildArrayCandidateIndex preserves the old sorted-key tie breaking while
 // avoiding a project-wide key collection and sort for every uncertain call.
 func buildArrayCandidateIndex(all map[string]sourceProcedure) arrayCandidateIndex {
 	index := arrayCandidateIndex{
-		byName:        make(map[string]string, len(all)),
-		byLineAndKind: make(map[arrayCandidateLineKey]string),
+		byName:          make(map[string]string, len(all)),
+		byQualified:     make(map[string]string, len(all)),
+		byQualifiedKind: make(map[arrayCandidateQualifiedKindKey]string, len(all)),
+		byLineAndKind:   make(map[arrayCandidateLineKey]string),
 	}
 	keys := make([]string, 0, len(all))
 	for key := range all {
@@ -2589,6 +2648,20 @@ func buildArrayCandidateIndex(all map[string]sourceProcedure) arrayCandidateInde
 		if _, exists := index.byName[name]; !exists {
 			index.byName[name] = key
 		}
+		qualified := strings.ToLower(strings.TrimSpace(proc.Module + "." + proc.Name))
+		if qualified != "." {
+			if existing, exists := index.byQualified[qualified]; !exists {
+				index.byQualified[qualified] = key
+			} else if existing != key {
+				index.byQualified[qualified] = ""
+			}
+			qualifiedKind := arrayCandidateQualifiedKindKey{qualified: qualified, kind: strings.ToLower(string(proc.ProcedureKind))}
+			if existing, exists := index.byQualifiedKind[qualifiedKind]; !exists {
+				index.byQualifiedKind[qualifiedKind] = key
+			} else if existing != key {
+				index.byQualifiedKind[qualifiedKind] = ""
+			}
+		}
 		if proc.StartLine > 0 {
 			lineKey := arrayCandidateLineKey{line: proc.StartLine, kind: strings.ToLower(string(proc.ProcedureKind))}
 			if _, exists := index.byLineAndKind[lineKey]; !exists {
@@ -2603,6 +2676,13 @@ func arrayCandidateKey(candidate procedureir.Candidate, all map[string]sourcePro
 	qualified := strings.ToLower(strings.TrimSpace(candidate.QualifiedName))
 	if proc, ok := all[qualified]; ok {
 		return arrayProcedureKey(proc)
+	}
+	qualifiedKind := arrayCandidateQualifiedKindKey{qualified: qualified, kind: strings.ToLower(strings.TrimSpace(candidate.Kind))}
+	if key := index.byQualifiedKind[qualifiedKind]; key != "" {
+		return key
+	}
+	if key := index.byQualified[qualified]; key != "" {
+		return key
 	}
 	if key, ok := index.byName[qualified]; ok {
 		return key
@@ -2624,7 +2704,7 @@ func arrayProcedureIsParticipant(ctx analysisContext, proc sourceProcedure) bool
 	if participants == nil {
 		return true
 	}
-	return participants[arrayProcedureKey(proc)]
+	return participants[arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys)]
 }
 
 func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext, targets map[string]sourceProcedure) arrayByRefAllocationSummaries {
@@ -3878,6 +3958,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	type procedureInfo struct {
 		file        parsedFile
 		proc        sourceProcedure
+		key         string
 		moduleDecls map[string]sourceDeclaration
 		variables   map[string]arrayVariable
 	}
@@ -3892,10 +3973,11 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 			if !arrayProcedureIsParticipant(ctx, proc) {
 				continue
 			}
-			key := arrayProcedureKey(proc)
+			key := arrayParticipantLookupKey(proc, ctx.arrayParticipantKeys)
 			procedures = append(procedures, procedureInfo{
 				file: file, proc: proc, moduleDecls: moduleDecls,
 				variables: arrayVariables(file, proc, moduleDecls),
+				key:       key,
 			})
 			moduleArrays[key] = arrayModuleNamesForProcedure(file, proc, moduleDecls)
 			moduleFiles[key] = file.Path
@@ -3912,12 +3994,13 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	indexByKey := make(map[string]int, len(procedures))
 	dependents := make(map[string][]int)
 	for index, procedure := range procedures {
-		key := arrayProcedureKey(procedure.proc)
+		key := procedure.key
 		indexByKey[key] = index
 		for call := range procedure.proc.Calls.All() {
-			targetKey, _, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
-			if ok && moduleFiles[targetKey] == procedure.file.Path {
-				dependents[targetKey] = append(dependents[targetKey], index)
+			_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			participantTargetKey := arrayParticipantLookupKey(target, ctx.arrayParticipantKeys)
+			if ok && moduleFiles[participantTargetKey] == procedure.file.Path {
+				dependents[participantTargetKey] = append(dependents[participantTargetKey], index)
 			}
 		}
 	}
@@ -3929,11 +4012,12 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		variables := procedure.variables
 		initial := arrayInitialState(variables)
 		initial = applyArrayModuleInitializationState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, initializationStates)
-		initial = applyArrayModuleEntryState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, entries)
+		initial = applyArrayModuleEntryState(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, entries, ctx.arrayParticipantKeys)
 		initial = applyArrayInternalStorageConfiguration(initial, procedure.file, procedure.proc, variables, procedure.moduleDecls, ctx.arrayModuleConfigurations[procedure.file.Path])
 		candidates := map[string]map[string]bool{}
 		recordCall := func(call procedureir.CallSite, state arrayFlowState) {
-			key, _, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			key := arrayParticipantLookupKey(target, ctx.arrayParticipantKeys)
 			if !ok || moduleFiles[key] != procedure.file.Path {
 				return
 			}
@@ -3993,7 +4077,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 	for head := 0; head < len(queue); head++ {
 		index := queue[head]
 		queued[index] = false
-		key := arrayProcedureKey(procedures[index].proc)
+		key := procedures[index].key
 		if head >= len(procedures) && ctx.arrayStats != nil {
 			ctx.arrayStats.revisits++
 		}
@@ -4004,7 +4088,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		contributions[key] = contribution
 		next := arrayModuleEntryStates{}
 		for _, caller := range procedures {
-			for target, names := range contributions[arrayProcedureKey(caller.proc)] {
+			for target, names := range contributions[caller.key] {
 				if next[target] == nil {
 					next[target] = cloneArrayNameSet(names)
 					continue
@@ -4102,8 +4186,16 @@ func arrayModuleNamesForProcedure(file parsedFile, proc sourceProcedure, moduleD
 	return moduleArrays
 }
 
-func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates) arrayFlowState {
-	allocated := entries[arrayProcedureKey(proc)]
+func applyArrayModuleEntryState(state arrayFlowState, file parsedFile, proc sourceProcedure, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, entries arrayModuleEntryStates, participantKeys ...map[string]string) arrayFlowState {
+	var keyIndex map[string]string
+	if len(participantKeys) > 0 {
+		keyIndex = participantKeys[0]
+	}
+	allocated := entries[arrayParticipantLookupKey(proc, keyIndex)]
+	if len(allocated) == 0 && len(keyIndex) > 0 {
+		// Focused compatibility callers may still provide the legacy base key.
+		allocated = entries[arrayProcedureKey(proc)]
+	}
 	if len(allocated) == 0 {
 		return state
 	}
@@ -4201,7 +4293,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		initial := arrayInitialState(variables)
 		initial = applyArrayModuleInitializationState(initial, file, proc, variables, moduleDecls, moduleInitializationStates)
 		initial = applyArrayByRefEntryStates(initial, proc, variables, entries, conditions)
-		initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates)
+		initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates, ctx.arrayParticipantKeys)
 		initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
 		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 			var eligible []arrayByRefCallCandidate

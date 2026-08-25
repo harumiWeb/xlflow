@@ -202,6 +202,36 @@ func TestInferArrayReturnSummariesKeepsUnselectedDuplicateUnknown(t *testing.T) 
 	}
 }
 
+func TestArrayParticipantGraphRetainsSameNamedPropertyAccessors(t *testing.T) {
+	getter := sourceProcedure{
+		Module:        "M",
+		Name:          "Value",
+		ProcedureKind: procedureir.ProcedurePropertyGet,
+		Features:      procedureFeatureSet{present: featureArray},
+	}
+	setter := sourceProcedure{
+		Module:        "M",
+		Name:          "Value",
+		ProcedureKind: procedureir.ProcedurePropertyLet,
+	}
+	file := parsedFile{
+		Path: "M.cls", Module: "M", ModuleDeclarations: map[string]sourceDeclaration{},
+		Procedures: []sourceProcedure{getter, setter},
+	}
+	participants, _, keys := buildArrayParticipantSets([]parsedFile{file}, analysisContext{})
+	getterKey := keys[arrayParticipantProcedureIdentity(getter)]
+	setterKey := keys[arrayParticipantProcedureIdentity(setter)]
+	if getterKey == "" || setterKey == "" || getterKey == setterKey {
+		t.Fatalf("same-named accessors did not receive stable distinct keys: getter=%q setter=%q keys=%v", getterKey, setterKey, keys)
+	}
+	if !participants[getterKey] {
+		t.Fatalf("array property getter was excluded: participants=%v", participants)
+	}
+	if participants[setterKey] {
+		t.Fatalf("unrelated property setter entered participant closure: participants=%v", participants)
+	}
+}
+
 func TestArrayParticipantPlanExcludesModuleOnlyScalarProcedure(t *testing.T) {
 	moduleDecls := map[string]sourceDeclaration{"values": {Name: "values", Array: true}}
 	proc := sourceProcedure{Module: "M", Name: "Unrelated", Facts: &procedureAnalysisFacts{}}
