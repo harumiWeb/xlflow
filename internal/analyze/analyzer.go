@@ -3621,50 +3621,47 @@ func (w applicationStateExitWitness) description() string {
 // restoration is the cleanup boundary itself, so it clears state on its own
 // exceptional transition as well.
 func applicationStateExitWitnesses(proc sourceProcedure, property string, facts *procedureAnalysisFacts) map[int]applicationStateExitWitness {
-	flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
-	graph := &flowGraph
-	in := map[vbacfg.BlockID]applicationStateFlow{graph.Entry: newApplicationStateFlow()}
-	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
-	queue := []vbacfg.BlockID{graph.Entry}
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	in := map[vbacfg.BlockID]applicationStateFlow{graph.Entry(): newApplicationStateFlow()}
+	queued := map[vbacfg.BlockID]bool{graph.Entry(): true}
+	queue := []vbacfg.BlockID{graph.Entry()}
 
 	for len(queue) > 0 {
 		blockID := queue[0]
 		queue = queue[1:]
 		queued[blockID] = false
 		state := in[blockID]
-		block, ok := applicationStateBlock(*graph, blockID)
+		block, ok := applicationStateBlock(graph, blockID)
 		if !ok {
 			continue
 		}
-		for _, edge := range graph.Edges {
-			if edge.From != blockID {
-				continue
-			}
+		graph.ForEachOutgoing(blockID, func(edge vbacfg.Edge) bool {
 			out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, facts)
 			merged, changed := mergeApplicationStateFlow(in[edge.To], out)
 			if !changed {
-				continue
+				return true
 			}
 			in[edge.To] = merged
 			if !queued[edge.To] {
 				queue = append(queue, edge.To)
 				queued[edge.To] = true
 			}
-		}
+			return true
+		})
 	}
 	witnesses := map[int]applicationStateExitWitness{}
-	for _, edge := range graph.Edges {
-		kind := applicationStateExitKind(*graph, edge.To)
+	graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		kind := applicationStateViewExitKind(graph, edge.To)
 		if kind == "" {
-			continue
+			return true
 		}
 		state, reachable := in[edge.From]
 		if !reachable || state.Dirty == nil {
-			continue
+			return true
 		}
-		block, ok := applicationStateBlock(*graph, edge.From)
+		block, ok := applicationStateBlock(graph, edge.From)
 		if !ok {
-			continue
+			return true
 		}
 		out := applicationStateFlowAcrossEdge(proc, state, block, edge, property, facts)
 		if out.ViaExceptional && kind == "normal exit" {
@@ -3675,7 +3672,8 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, facts 
 				witnesses[origin] = applicationStateExitWitness{Kind: kind, Line: edge.Range.StartLine}
 			}
 		}
-	}
+		return true
+	})
 	return witnesses
 }
 
@@ -3710,11 +3708,23 @@ func applicationStateWitnessRank(kind string) int {
 	}
 }
 
-func applicationStateBlock(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
-	if id <= 0 || int(id) > len(graph.Blocks) {
-		return vbacfg.Block{}, false
+func applicationStateBlock(graph vbacfg.CFGView, id vbacfg.BlockID) (vbacfg.Block, bool) {
+	return graph.BlockByID(id)
+}
+
+func applicationStateViewExitKind(graph vbacfg.CFGView, id vbacfg.BlockID) string {
+	switch id {
+	case graph.NormalExit():
+		return "normal exit"
+	case graph.ExceptionalExit():
+		return "error exit"
+	case graph.TerminationExit():
+		return "termination exit"
+	case graph.UnknownExit():
+		return "unknown exit"
+	default:
+		return ""
 	}
-	return graph.Blocks[int(id)-1], true
 }
 
 func applicationStateExitKind(graph vbacfg.Graph, id vbacfg.BlockID) string {
@@ -4287,7 +4297,7 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 	}
 	var findings []Finding
 	if proc.Graph != nil {
-		flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
+		flowGraph := proc.Graph.WithoutNormalErrRaiseContinuationView()
 		reachable := map[vbacfg.BlockID]bool{}
 		for _, blockID := range proc.Graph.Reachable(vbacfg.EdgeFilter{NormalOnly: true}) {
 			reachable[blockID] = true
@@ -4306,8 +4316,8 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 			}
 			implicitEntry := false
 			loopExitVariables := map[string]bool{}
-			for _, edge := range flowGraph.Edges {
-				if edge.To == block.ID && edge.Class == vbacfg.EdgeNormal && reachable[edge.From] &&
+			flowGraph.ForEachIncoming(block.ID, func(edge vbacfg.Edge) bool {
+				if edge.Class == vbacfg.EdgeNormal && reachable[edge.From] &&
 					edge.Kind != vbacfg.EdgeGoto && edge.Kind != vbacfg.EdgeUnknown {
 					implicitEntry = true
 					if edge.Kind == vbacfg.EdgeLoopExit {
@@ -4318,7 +4328,8 @@ func (a Analyzer) errorHandlerFallthroughFindings(file parsedFile, proc sourcePr
 						}
 					}
 				}
-			}
+				return true
+			})
 			if !implicitEntry {
 				continue
 			}
@@ -4970,11 +4981,7 @@ func isCleanupFallthroughLabel(label string) bool {
 // qualified or project-specific labels whose body is demonstrably limited to
 // resource cleanup or loop finalization. Arbitrary handler code is rejected so
 // a normal fallthrough into logging or error reporting remains VBA204.
-func isSemanticCleanupFallthrough(proc sourceProcedure, labelBlock vbacfg.Block, graph vbacfg.Graph, loopExitVariables map[string]bool) bool {
-	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
-	for _, block := range graph.Blocks {
-		blocks[block.ID] = block
-	}
+func isSemanticCleanupFallthrough(proc sourceProcedure, labelBlock vbacfg.Block, graph vbacfg.CFGView, loopExitVariables map[string]bool) bool {
 
 	queue := []vbacfg.BlockID{labelBlock.ID}
 	seen := map[vbacfg.BlockID]bool{}
@@ -4987,14 +4994,14 @@ func isSemanticCleanupFallthrough(proc sourceProcedure, labelBlock vbacfg.Block,
 			continue
 		}
 		seen[blockID] = true
-		if blockID == graph.NormalExit {
+		if blockID == graph.NormalExit() {
 			reachedNormalExit = true
 			continue
 		}
-		if blockID == graph.ExceptionalExit || blockID == graph.TerminationExit || blockID == graph.UnknownExit {
+		if blockID == graph.ExceptionalExit() || blockID == graph.TerminationExit() || blockID == graph.UnknownExit() {
 			return false
 		}
-		block, ok := blocks[blockID]
+		block, ok := graph.BlockByID(blockID)
 		if !ok {
 			return false
 		}
@@ -5006,14 +5013,20 @@ func isSemanticCleanupFallthrough(proc sourceProcedure, labelBlock vbacfg.Block,
 				foundCleanup = true
 			}
 		}
-		for _, edge := range graph.Edges {
-			if edge.From != blockID || edge.Class != vbacfg.EdgeNormal {
-				continue
+		invalidEdge := false
+		graph.ForEachOutgoing(blockID, func(edge vbacfg.Edge) bool {
+			if edge.Class != vbacfg.EdgeNormal {
+				return true
 			}
 			if edge.Kind == vbacfg.EdgeUnknown || edge.Uncertain {
+				invalidEdge = true
 				return false
 			}
 			queue = append(queue, edge.To)
+			return true
+		})
+		if invalidEdge {
+			return false
 		}
 	}
 	return reachedNormalExit && foundCleanup

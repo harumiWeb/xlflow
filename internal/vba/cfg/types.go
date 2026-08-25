@@ -10,6 +10,12 @@ import (
 )
 
 type BlockID int
+
+// BlockOrdinal is the dense, revision-local position of a block in the
+// immutable base storage. It is an implementation identity for indexed
+// consumers and must not be persisted or compared across graph revisions.
+type BlockOrdinal int
+
 type EdgeID int
 
 type BlockKind string
@@ -130,6 +136,11 @@ type Document struct {
 // view: every normal and exceptional edge, including uncertain edges.
 type EdgeFilter struct {
 	NormalOnly bool
+	// WithoutNormalErrRaiseContinuation excludes normal-flow edges leaving
+	// Err.Raise and Error statements. Exceptional edges remain part of the
+	// selected view. The flag is interpreted by CFGView, which has access to
+	// the immutable graph's statement index.
+	WithoutNormalErrRaiseContinuation bool
 }
 
 func (f EdgeFilter) accepts(edge Edge) bool {

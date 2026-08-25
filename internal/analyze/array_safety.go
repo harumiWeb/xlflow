@@ -268,10 +268,11 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 	for _, finding := range findings {
 		seen[arrayFindingKey(finding)] = true
 	}
+	baseView := proc.Graph.View(vbacfg.EdgeFilter{})
 	lanes := make([]arrayCFGWorklistLane, 0, 3)
 	if baseLaneRequested {
 		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: proc.Graph, Initial: initial,
+			Graph: &baseView, Initial: initial,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
 				out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
 				for _, call := range arrayCallsAtLine(proc.Calls, line) {
@@ -290,7 +291,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				return out
 			},
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-				out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
+				out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 			},
@@ -334,7 +335,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		runtimeSeen := map[string]bool{}
 		runtimeState := arrayInitialState(variables)
 		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: proc.Graph, Initial: runtimeState,
+			Graph: &baseView, Initial: runtimeState,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
 				for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants) {
 					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
@@ -866,15 +867,15 @@ func arrayResumeNextCapacityProofApplies(guards []arrayResumeNextCapacityGuard, 
 // procedure findings pass and the array-return summary pass. Exceptional and
 // uncertain edges retain the predecessor's input state because the statement
 // may not have completed before control leaves the block.
-func walkArrayCFG(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState) {
+func walkArrayCFG(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState) {
 	walkArrayCFGWithEdges(graph, lines, initial, visit, nil)
 }
 
-func walkArrayCFGWithEdges(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
+func walkArrayCFGWithEdges(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
 	walkArrayCFGWithStop(graph, lines, initial, visit, edgeState, nil)
 }
 
-func walkArrayCFGWithStop(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool) {
+func walkArrayCFGWithStop(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool) {
 	walkArrayCFGWorklist(graph, lines, initial, visit, edgeState, stop, false)
 }
 
@@ -883,11 +884,11 @@ func walkArrayCFGWithStop(graph *vbacfg.Graph, lines []string, initial arrayFlow
 // VBA208 and VBA249; this variant additionally exposes source-line order
 // inside a CFG block so an allocation and a later access on the same loop body
 // can be analyzed in sequence.
-func walkArrayCFGWithSourceLines(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
+func walkArrayCFGWithSourceLines(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
 	walkArrayCFGWorklist(graph, lines, initial, visit, edgeState, nil, true)
 }
 
-func walkArrayCFGWorklist(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
+func walkArrayCFGWorklist(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
 	// The compact solver owns the ordinary block-level walk. Stop callbacks
 	// need an explicit edge-suppression protocol that semanticstate intentionally
 	// does not expose, while source-line and edge-refinement lanes still carry
@@ -901,20 +902,12 @@ func walkArrayCFGWorklist(graph *vbacfg.Graph, lines []string, initial arrayFlow
 	walkArrayCFGWorklistLegacy(graph, lines, initial, visit, edgeState, stop, sourceLines)
 }
 
-func walkArrayCFGWorklistLegacy(graph *vbacfg.Graph, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
+func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
 	if graph == nil {
 		return
 	}
-	blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(graph.Blocks))
-	outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
-	for _, block := range graph.Blocks {
-		blocks[block.ID] = block
-	}
-	for _, edge := range graph.Edges {
-		outgoing[edge.From] = append(outgoing[edge.From], edge)
-	}
-	inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry: initial}
-	queued := map[vbacfg.BlockID]bool{graph.Entry: true}
+	inStates := map[vbacfg.BlockID]arrayFlowState{graph.Entry(): initial}
+	queued := map[vbacfg.BlockID]bool{graph.Entry(): true}
 	for len(queued) > 0 {
 		// Block IDs are ordered so the worklist cannot inherit Go map iteration
 		// order and change the fixed-point path through the array state lattice.
@@ -928,7 +921,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.Graph, lines []string, initial arr
 		}
 		delete(queued, id)
 		in := cloneArrayState(inStates[id])
-		block, ok := blocks[id]
+		block, ok := graph.BlockByID(id)
 		if !ok {
 			continue
 		}
@@ -1010,7 +1003,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.Graph, lines []string, initial arr
 				}
 			}
 		}
-		for _, edge := range outgoing[id] {
+		graph.ForEachOutgoing(id, func(edge vbacfg.Edge) bool {
 			next := out
 			if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
 				next = in
@@ -1030,7 +1023,8 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.Graph, lines []string, initial arr
 			if mergeArrayState(inStates, edge.To, next) {
 				queued[edge.To] = true
 			}
-		}
+			return true
+		})
 	}
 }
 
@@ -1044,7 +1038,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.Graph, lines []string, initial arr
 // impossible normal continuations).  Block IDs are stable across those copies
 // and the worklist remains shared even when an edge is absent from one lane.
 type arrayCFGWorklistLane struct {
-	Graph   *vbacfg.Graph
+	Graph   *vbacfg.CFGView
 	Initial arrayFlowState
 
 	// Visit receives a private copy of the lane's block input state and returns
@@ -1087,15 +1081,14 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 	}
 
 	type graphIndex struct {
-		blocks   map[vbacfg.BlockID]vbacfg.Block
-		outgoing map[vbacfg.BlockID][]vbacfg.Edge
+		graph *vbacfg.CFGView
 	}
 	type laneIndex struct {
 		graphIndex
 		inStates map[vbacfg.BlockID]arrayFlowState
 	}
 	indexes := make([]laneIndex, len(lanes))
-	graphIndexes := make(map[*vbacfg.Graph]graphIndex, len(lanes))
+	graphIndexes := make(map[*vbacfg.CFGView]graphIndex, len(lanes))
 	queued := map[vbacfg.BlockID]bool{}
 	for index, lane := range lanes {
 		if lane.Graph == nil {
@@ -1103,22 +1096,14 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 		}
 		shared, ok := graphIndexes[lane.Graph]
 		if !ok {
-			blocks := make(map[vbacfg.BlockID]vbacfg.Block, len(lane.Graph.Blocks))
-			for _, block := range lane.Graph.Blocks {
-				blocks[block.ID] = block
-			}
-			outgoing := make(map[vbacfg.BlockID][]vbacfg.Edge)
-			for _, edge := range lane.Graph.Edges {
-				outgoing[edge.From] = append(outgoing[edge.From], edge)
-			}
-			shared = graphIndex{blocks: blocks, outgoing: outgoing}
+			shared = graphIndex{graph: lane.Graph}
 			graphIndexes[lane.Graph] = shared
 		}
 		inStates := map[vbacfg.BlockID]arrayFlowState{
-			lane.Graph.Entry: cloneArrayState(lane.Initial),
+			lane.Graph.Entry(): cloneArrayState(lane.Initial),
 		}
 		indexes[index] = laneIndex{graphIndex: shared, inStates: inStates}
-		queued[lane.Graph.Entry] = true
+		queued[lane.Graph.Entry()] = true
 	}
 
 	for len(queued) > 0 {
@@ -1147,7 +1132,7 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 			if !ok {
 				continue
 			}
-			block, ok := stateIndex.blocks[id]
+			block, ok := stateIndex.graph.BlockByID(id)
 			if !ok {
 				continue
 			}
@@ -1220,7 +1205,7 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 				continue
 			}
 
-			for _, edge := range stateIndex.outgoing[id] {
+			stateIndex.graph.ForEachOutgoing(id, func(edge vbacfg.Edge) bool {
 				next := out
 				if edge.Class == vbacfg.EdgeExceptional || edge.Uncertain {
 					next = in
@@ -1233,7 +1218,8 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 				if mergeArrayState(stateIndex.inStates, edge.To, next) {
 					queued[edge.To] = true
 				}
-			}
+				return true
+			})
 		}
 	}
 	return nil
@@ -1279,13 +1265,13 @@ func arrayCountExpressionMatches(expression, source string) bool {
 	return expression == source || expression == source+".count"
 }
 
-func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.Graph, block vbacfg.Block, edge vbacfg.Edge) arrayFlowState {
+func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.CFGView, block vbacfg.Block, edge vbacfg.Edge) arrayFlowState {
 	if block.Statement == nil {
 		return state
 	}
 	if block.Statement.Kind == procedureir.StatementSelect && edge.Kind == vbacfg.EdgeCase && graph != nil {
 		selectExpression := selectCaseExpression(block.Statement.Text)
-		caseBlock, ok := graphBlockByID(*graph, edge.To)
+		caseBlock, ok := graph.BlockByID(edge.To)
 		if !ok {
 			return state
 		}
@@ -1335,15 +1321,6 @@ func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.G
 		}
 	}
 	return state
-}
-
-func graphBlockByID(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
-	for _, block := range graph.Blocks {
-		if block.ID == id {
-			return block, true
-		}
-	}
-	return vbacfg.Block{}, false
 }
 
 func selectCaseExpression(text string) string {
@@ -1506,11 +1483,11 @@ func arrayIsArrayGuardCondition(text string) (string, vbacfg.EdgeKind, bool) {
 // latter covers project-local error wrappers such as RaiseContractError:
 // their call sites must not poison the normal allocation state with an
 // impossible fall-through branch.
-func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.Graph {
+func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.CFGView {
 	if proc.Graph == nil {
-		return vbacfg.Graph{}
+		return vbacfg.CFGView{}
 	}
-	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
 	removed := map[vbacfg.BlockID]bool{}
 	for call := range proc.Calls.All() {
 		_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
@@ -1525,23 +1502,15 @@ func arrayVBA227Graph(proc sourceProcedure, ctx analysisContext) vbacfg.Graph {
 	if len(removed) == 0 {
 		return graph
 	}
-	edges := make([]vbacfg.Edge, 0, len(graph.Edges))
-	for _, edge := range graph.Edges {
-		if edge.Class == vbacfg.EdgeNormal && removed[edge.From] {
-			continue
-		}
-		edges = append(edges, edge)
-	}
-	graph.Edges = edges
-	return graph
+	return graph.WithoutNormalContinuationsFrom(removed)
 }
 
 func arrayProcedureAlwaysRaises(proc sourceProcedure) bool {
 	if proc.Graph == nil {
 		return false
 	}
-	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
-	return !graph.IsReachable(graph.NormalExit, vbacfg.EdgeFilter{NormalOnly: true})
+	graph := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true, WithoutNormalErrRaiseContinuation: true})
+	return !graph.IsReachable(graph.NormalExit())
 }
 
 func arrayAllocationGuardCondition(text string, guards map[string]bool, state arrayFlowState) (string, vbacfg.EdgeKind, bool) {
@@ -2901,7 +2870,7 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 	edgeState := func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 		out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
 		out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
-		if edge.To == graph.NormalExit {
+		if edge.To == graph.NormalExit() {
 			if !hasNormalExit {
 				normalExit = cloneArrayState(out)
 				hasNormalExit = true
@@ -4361,8 +4330,9 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		if ctx.arrayStats != nil {
 			ctx.arrayStats.cfgWalks++
 		}
-		walkArrayCFGWithEdges(proc.Graph, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
-			out = applyArrayConditionalAllocationBranch(out, proc.Graph, block, edge)
+		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
+		walkArrayCFGWithEdges(&baseView, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+			out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
 		})
@@ -6202,7 +6172,8 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		if participantCtx.arrayStats != nil {
 			participantCtx.arrayStats.cfgWalks++
 		}
-		walkArrayCFGWithStop(proc.Graph, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
+		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
+		walkArrayCFGWithStop(&baseView, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 			if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 				value, known := arrayExpressionState(rhs, in, ctx)
 				returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}

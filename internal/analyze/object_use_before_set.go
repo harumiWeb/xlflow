@@ -59,7 +59,7 @@ type objectProcedurePlan struct {
 	procedureDecls map[string]sourceDeclaration
 
 	flowProc    sourceProcedure
-	flowGraph   vbacfg.Graph
+	flowGraph   vbacfg.CFGView
 	flowContext objectFlowContext
 	reachable   map[vbacfg.BlockID]bool
 	vars        map[string]objectVariable
@@ -184,13 +184,12 @@ func newObjectProcedurePlan(file parsedFile, proc sourceProcedure, moduleDecls m
 		vars:           map[string]objectVariable{},
 	}
 	plan.flowProc = proc
-	if proc.Graph != nil {
-		plan.flowGraph = proc.Graph.WithoutNormalErrRaiseContinuation()
-		plan.flowProc.Graph = &plan.flowGraph
-		for _, id := range plan.flowGraph.Reachable(vbacfg.EdgeFilter{}) {
+	if plan.proc.Graph != nil {
+		plan.flowGraph = proc.Graph.WithoutNormalErrRaiseContinuationView()
+		for _, id := range plan.flowGraph.Reachable() {
 			plan.reachable[id] = true
 		}
-		plan.flowContext = newObjectFlowContext(plan.flowProc)
+		plan.flowContext = newObjectFlowContext(plan.flowProc, plan.flowGraph)
 	}
 	addObjectVariables := func(scope procedureir.SymbolScope, declarations map[string]sourceDeclaration) {
 		for _, declaration := range declarations {
@@ -934,7 +933,8 @@ func objectErrorResumeNextAt(proc sourceProcedure, statementID int) bool {
 }
 
 type objectFlowGuardCache struct {
-	graph      *vbacfg.Graph
+	graph      vbacfg.CFGView
+	graphReady bool
 	dominators map[vbacfg.BlockID][]vbacfg.BlockID
 	successors map[vbacfg.BlockID][]vbacfg.BlockID
 }
@@ -943,14 +943,13 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 	if proc.Graph == nil {
 		return false
 	}
-	if cache.graph == nil {
-		flowGraph := proc.Graph.WithoutNormalErrRaiseContinuation()
-		cache.graph = &flowGraph
-		cache.dominators = flowGraph.Dominators(vbacfg.EdgeFilter{})
+	if !cache.graphReady {
+		cache.graph = proc.Graph.WithoutNormalErrRaiseContinuationView()
+		cache.graphReady = true
+		cache.dominators = cache.graph.Dominators()
 	}
 	flowProc := proc
-	flowProc.Graph = cache.graph
-	accessBlock, ok := flowProc.Graph.BlockForStatement(statementID)
+	accessBlock, ok := cache.graph.BlockForStatement(statementID)
 	if !ok {
 		return false
 	}
@@ -960,7 +959,7 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 		if !ok || !objectOpenFlagForObject(flag, objectName) {
 			continue
 		}
-		conditionBlock, ok := flowProc.Graph.BlockForStatement(statement.ID)
+		conditionBlock, ok := cache.graph.BlockForStatement(statement.ID)
 		if !ok || !objectBlockSetContains(dominators[accessBlock.ID], conditionBlock.ID) {
 			continue
 		}
@@ -974,9 +973,9 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 		safeReachable := false
 		unsafeReachable := false
 		cache.buildSuccessors()
-		for _, edge := range flowProc.Graph.Edges {
-			if edge.From != conditionBlock.ID || (edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse) {
-				continue
+		cache.graph.ForEachOutgoing(conditionBlock.ID, func(edge vbacfg.Edge) bool {
+			if edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+				return true
 			}
 			reachesAccess := objectFlowCanReach(cache.successors, edge.To, accessBlock.ID)
 			if edge.Kind == safeBranch {
@@ -984,7 +983,8 @@ func objectFlowGuardedByOpenFlag(proc sourceProcedure, statementID int, objectNa
 			} else {
 				unsafeReachable = unsafeReachable || reachesAccess
 			}
-		}
+			return true
+		})
 		if safeReachable && !unsafeReachable {
 			return true
 		}
@@ -996,13 +996,13 @@ func (cache *objectFlowGuardCache) buildSuccessors() {
 	if cache.successors != nil {
 		return
 	}
-	cache.successors = make(map[vbacfg.BlockID][]vbacfg.BlockID, len(cache.graph.Blocks))
-	for _, edge := range cache.graph.Edges {
-		if edge.Class == vbacfg.EdgeExceptional {
-			continue
+	cache.successors = make(map[vbacfg.BlockID][]vbacfg.BlockID)
+	cache.graph.ForEachEdge(func(edge vbacfg.Edge) bool {
+		if edge.Class != vbacfg.EdgeExceptional {
+			cache.successors[edge.From] = append(cache.successors[edge.From], edge.To)
 		}
-		cache.successors[edge.From] = append(cache.successors[edge.From], edge.To)
-	}
+		return true
+	})
 }
 
 func objectBooleanGuard(statement procedureir.Statement) (string, bool, bool) {
@@ -1110,16 +1110,17 @@ type objectFlowContext struct {
 	receiverSummaryKeys map[string][]string
 }
 
-func newObjectFlowContext(proc sourceProcedure) objectFlowContext {
+func newObjectFlowContext(proc sourceProcedure, graph vbacfg.CFGView) objectFlowContext {
 	context := objectFlowContext{
 		facts:        proc.analysisFacts(),
 		predecessors: make(map[vbacfg.BlockID][]vbacfg.Edge),
 		vars:         map[string]objectVariable{},
 	}
 	if proc.Graph != nil {
-		for _, edge := range proc.Graph.Edges {
+		graph.ForEachEdge(func(edge vbacfg.Edge) bool {
 			context.predecessors[edge.To] = append(context.predecessors[edge.To], edge)
-		}
+			return true
+		})
 	}
 	return context
 }
@@ -1171,6 +1172,7 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 	}
 	result.vars = plan.vars
 	flowProc := plan.flowProc
+	flowGraph := plan.flowGraph
 	flowContext := plan.flowContext
 	flowContext.receiverSummaryKeys = plan.receiverSummaryKeys
 	initial := map[string]bool{}
@@ -1185,23 +1187,24 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 		// initializer establishes a safe value.
 	}
 	reachable := plan.reachable
-	for _, block := range flowProc.Graph.Blocks {
+	flowGraph.ForEachBlock(func(block vbacfg.Block) bool {
 		if !reachable[block.ID] {
-			continue
+			return true
 		}
-		if block.ID == flowProc.Graph.Entry {
+		if block.ID == flowGraph.Entry() {
 			result.in[block.ID] = cloneObjectState(initial)
 		} else {
 			result.in[block.ID] = objectStateAllTrue(plan.vars)
 		}
 		result.out[block.ID] = objectFlowTransfer(plan.file, flowProc, block, result.in[block.ID], plan.vars, plan.declarations, summaries, flowContext)
-	}
+		return true
+	})
 	changed := true
 	for changed {
 		changed = false
-		for _, block := range flowProc.Graph.Blocks {
-			if !reachable[block.ID] || block.ID == flowProc.Graph.Entry {
-				continue
+		flowGraph.ForEachBlock(func(block vbacfg.Block) bool {
+			if !reachable[block.ID] || block.ID == flowGraph.Entry() {
+				return true
 			}
 			incoming := make([]map[string]bool, 0)
 			for _, edge := range flowContext.predecessors[block.ID] {
@@ -1216,7 +1219,7 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 				incoming = append(incoming, state)
 			}
 			if len(incoming) == 0 {
-				continue
+				return true
 			}
 			next := objectFlowIntersection(incoming, plan.vars)
 			if !objectStateEqual(result.in[block.ID], next) {
@@ -1228,10 +1231,11 @@ func objectStateFlowPlan(plan *objectProcedurePlan, summaries map[string]objectP
 				result.out[block.ID] = updated
 				changed = true
 			}
-		}
+			return true
+		})
 	}
-	if flowProc.Graph != nil {
-		result.normalExit = cloneObjectState(result.in[flowProc.Graph.NormalExit])
+	if plan.proc.Graph != nil {
+		result.normalExit = cloneObjectState(result.in[flowGraph.NormalExit()])
 	}
 	return result
 }

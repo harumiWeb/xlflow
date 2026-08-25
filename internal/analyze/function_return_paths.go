@@ -40,16 +40,28 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 		return nil
 	}
 
-	filter := vbacfg.EdgeFilter{}
-	graph := proc.Graph.WithoutNormalErrRaiseContinuation()
-	if !graph.IsReachable(graph.NormalExit, filter) {
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	if !graph.IsReachable(graph.NormalExit()) {
 		return nil
 	}
 
 	variable := returnSlotVariable(proc.Name)
-	filtered := graphWithValidReturnAssignments(graph, proc, variable)
-	definite := filtered.DefiniteAssignments(filter)
-	if hasReturnVariable(definite[filtered.NormalExit], variable) {
+	returnKinds := map[int]returnAssignmentKind{}
+	definite := graph.DefiniteAssignmentsWith(func(block vbacfg.Block, assigned vbacfg.Variable) bool {
+		if block.Statement == nil {
+			return true
+		}
+		kind, cached := returnKinds[block.Statement.ID]
+		if !cached {
+			kind = returnAssignmentKindForStatement(proc, *block.Statement)
+			returnKinds[block.Statement.ID] = kind
+		}
+		if kind != returnAssignmentInvalid {
+			return true
+		}
+		return assigned.Scope != variable.Scope || !strings.EqualFold(assigned.Name, variable.Name)
+	})
+	if hasReturnVariable(definite[graph.NormalExit()], variable) {
 		return nil
 	}
 
@@ -92,30 +104,6 @@ func (a Analyzer) functionReturnPathFindings(file parsedFile, proc sourceProcedu
 
 func returnSlotVariable(name string) vbacfg.Variable {
 	return vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: strings.ToLower(name)}
-}
-
-func graphWithValidReturnAssignments(graph vbacfg.Graph, proc sourceProcedure, variable vbacfg.Variable) vbacfg.Graph {
-	graph.Blocks = append([]vbacfg.Block(nil), graph.Blocks...)
-	for i, block := range graph.Blocks {
-		if block.Statement == nil || returnAssignmentKindForStatement(proc, *block.Statement) != returnAssignmentInvalid {
-			continue
-		}
-		copyBlock := block
-		copyBlock.Assignments = removeReturnVariable(copyBlock.Assignments, variable)
-		graph.Blocks[i] = copyBlock
-	}
-	return graph
-}
-
-func removeReturnVariable(assignments []vbacfg.Variable, variable vbacfg.Variable) []vbacfg.Variable {
-	filtered := make([]vbacfg.Variable, 0, len(assignments))
-	for _, assigned := range assignments {
-		if assigned.Scope == variable.Scope && strings.EqualFold(assigned.Name, variable.Name) {
-			continue
-		}
-		filtered = append(filtered, assigned)
-	}
-	return filtered
 }
 
 func returnAssignmentKindForStatement(proc sourceProcedure, statement procedureir.Statement) returnAssignmentKind {
@@ -175,13 +163,13 @@ func hasReturnVariable(assignments []vbacfg.Variable, variable vbacfg.Variable) 
 	return false
 }
 
-func returnPathWitnesses(graph vbacfg.Graph, proc sourceProcedure) []returnPathWitness {
+func returnPathWitnesses(graph vbacfg.CFGView, proc sourceProcedure) []returnPathWitness {
 	type pathKey struct {
 		block    vbacfg.BlockID
 		state    returnPathState
 		viaError bool
 	}
-	queue := []pathKey{{block: graph.Entry, state: returnPathUnassigned}}
+	queue := []pathKey{{block: graph.Entry(), state: returnPathUnassigned}}
 	seen := map[pathKey]bool{queue[0]: true}
 	var witnesses []returnPathWitness
 
@@ -192,10 +180,7 @@ func returnPathWitnesses(graph vbacfg.Graph, proc sourceProcedure) []returnPathW
 		if !ok {
 			continue
 		}
-		for _, edge := range graph.Edges {
-			if edge.From != current.block {
-				continue
-			}
+		graph.ForEachOutgoing(current.block, func(edge vbacfg.Edge) bool {
 			nextState := current.state
 			if edge.Class == vbacfg.EdgeNormal && block.Statement != nil {
 				switch returnAssignmentKindForStatement(proc, *block.Statement) {
@@ -206,7 +191,7 @@ func returnPathWitnesses(graph vbacfg.Graph, proc sourceProcedure) []returnPathW
 				}
 			}
 			viaError := current.viaError || edge.Class == vbacfg.EdgeExceptional
-			if edge.To == graph.NormalExit && nextState != returnPathAssigned {
+			if edge.To == graph.NormalExit() && nextState != returnPathAssigned {
 				witnesses = append(witnesses, returnPathWitness{
 					Kind:     returnExitKind(graph, edge, viaError),
 					Line:     returnExitLine(graph, edge, proc),
@@ -216,23 +201,21 @@ func returnPathWitnesses(graph vbacfg.Graph, proc sourceProcedure) []returnPathW
 			}
 			next := pathKey{block: edge.To, state: nextState, viaError: viaError}
 			if seen[next] {
-				continue
+				return true
 			}
 			seen[next] = true
 			queue = append(queue, next)
-		}
+			return true
+		})
 	}
 	return witnesses
 }
 
-func returnPathBlock(graph vbacfg.Graph, id vbacfg.BlockID) (vbacfg.Block, bool) {
-	if id <= 0 || int(id) > len(graph.Blocks) {
-		return vbacfg.Block{}, false
-	}
-	return graph.Blocks[int(id)-1], true
+func returnPathBlock(graph vbacfg.CFGView, id vbacfg.BlockID) (vbacfg.Block, bool) {
+	return graph.BlockByID(id)
 }
 
-func returnExitKind(graph vbacfg.Graph, edge vbacfg.Edge, viaError bool) string {
+func returnExitKind(graph vbacfg.CFGView, edge vbacfg.Edge, viaError bool) string {
 	if viaError {
 		return "error-handler path to normal exit"
 	}
@@ -253,7 +236,7 @@ func returnExitKind(graph vbacfg.Graph, edge vbacfg.Edge, viaError bool) string 
 	return "normal exit"
 }
 
-func returnExitLine(graph vbacfg.Graph, edge vbacfg.Edge, proc sourceProcedure) int {
+func returnExitLine(graph vbacfg.CFGView, edge vbacfg.Edge, proc sourceProcedure) int {
 	if edge.Range.StartLine > 0 {
 		return edge.Range.StartLine
 	}

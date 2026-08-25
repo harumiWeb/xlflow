@@ -17,6 +17,38 @@ support defensive cloning: callers may mutate returned slices without changing
 the builder result or a snapshot's cached copy. Graph construction is
 deterministic for the same IR.
 
+### Immutable base revisions and `CFGView`
+
+The built graph is an immutable base revision for its procedure. The base
+revision owns the block and edge storage, stable dense `BlockOrdinal` values,
+the `BlockID` lookup, and canonical base-order incoming/outgoing adjacency.
+Ordinals are internal positions and are stable only within that graph revision;
+they do not change the existing `BlockID` contract. Sparse or non-contiguous
+block IDs, ID `0`, duplicate defensive values, and directly constructed Graph
+values retain their existing lookup, validation, and deterministic-order
+behavior. Callers must use `Clone` or an explicit graph transformation before
+changing graph contents; indexed storage is not mutated in place.
+
+`CFGView` is a read-only view that borrows one immutable base revision. A view
+contains a canonical filter identity and, when needed, a compact edge mask.
+For example, the view equivalent to
+`WithoutNormalErrRaiseContinuation` excludes only the normal continuation
+after `Err.Raise`; it preserves exceptional edges and all existing `On Error`,
+`Resume Next`, and `Error` semantics. Creating or passing a view does not copy
+blocks, edges, procedure IR, or complete adjacency. Iteration uses shared
+base-order adjacency or an allocation-free filtered traversal, and view APIs
+must not expose mutable slices or outlive their procedure/revision owner.
+
+The existing Graph APIs remain compatibility boundaries. Graph construction,
+ordinary queries, `Clone`, and callers that explicitly need independent owned
+storage retain their defensive-value behavior. The legacy
+`WithoutNormalErrRaiseContinuation` entry point remains available with its
+existing owned-Graph return and defensive-value behavior; internal consumers
+should pass the equivalent read-only view directly. An independent Graph must
+be requested through explicit materialization or cloning. Internal Array,
+Object, Error, and return-path consumers should pass views so equivalent
+filters share the same base revision and derived query state.
+
 ### Validation facts
 
 ProcedureIR retains the source ranges and normalized operands needed by CFG
@@ -171,22 +203,26 @@ cleanup use the same conservative reachability. A path through unknown flow or
 established before that path diverges.
 
 Built graphs retain immutable per-revision query indexes. Statement-to-block
-lookups and incoming/outgoing edge traversal use these indexes, and the default
-and `NormalOnly` reachability sets are computed once when the graph is built.
-`IsReachable` reads membership directly from the matching cached set for these
-canonical views without materializing a defensive copy. APIs that materialize
-reachability data continue to receive independently owned copies, and a future
-filter view without a cached set must use the general reachability path.
-Graph value copies may share the index because it is read-only. `Clone`, graph
-rebasing, and edge-changing transformations rebuild the index with their
-independent graph storage. A Graph literal without an index builds a temporary
-fallback index, preserving the same query semantics for internal callers. The
-`Blocks`, `Edges`, `Entry`, `UnknownExit`, and `UnknownFlowSources` values are
-immutable for an indexed graph revision. If a caller replaces either slice or
-changes any reachability input on a copied graph, the index validity check
-discards the old index and rebuilds it before querying. In-place mutation of
-indexed slice elements is not a supported graph revision; callers should use
-`Clone` or a graph transformation before changing graph contents.
+lookups and incoming/outgoing edge traversal use stable ordinals and shared
+base adjacency. Derived query state is keyed by `(graph revision, canonical
+filter identity)`. Reachability, filtered adjacency, dominators, and other
+derived indexes are initialized lazily and reused by equivalent `CFGView`
+values; `IsReachable` and equivalent hot queries do not materialize a copied
+filtered graph. APIs that intentionally materialize reachability data continue
+to receive independently owned copies.
+
+The derived-query cache is scoped to one procedure/revision lifetime and is
+bounded to the supported filter identities. A result from one graph revision
+or filter identity must never be reused for another. Cache initialization and
+publication are safe for concurrent readers, and every reader observes the
+same deterministic traversal and result ordering. Canceled or failed query
+construction is not published as reusable state. A Graph value copy may share
+read-only base and derived state; `Clone`, graph rebasing, and edge-changing
+transformations create independent storage and a new revision. A Graph literal
+without indexes uses a correctness-preserving fallback index. Replacing graph
+slices or changing reachability inputs invalidates the old revision-local state
+and rebuilds it before querying; in-place mutation of indexed slice elements is
+not a supported revision.
 
 The default guarantee view includes normal and exceptional flow. A consumer may
 explicitly request a narrower view when its rule defines one. Narrowing by flow
@@ -268,6 +304,12 @@ may seed it with a CFG built from the same revision's IR. The cache:
 - returns defensive copies; and
 - retires with the snapshot without retaining parser state.
 
+The snapshot owns the immutable base revision and its revision-local
+`CFGView`/derived-query cache. Views are read-only borrows and do not create a
+second document CFG or escape the snapshot lifetime. Equivalent filters share
+the base ordinals, adjacency, reachability, and dominator state; a new snapshot
+or changed procedure receives a new revision and cannot reuse those results.
+
 `NewAnalysisSnapshotWithArtifacts` deep-copies a supplied CFG at the snapshot
 boundary and keeps the existing cancellation and defensive-copy behavior.
 
@@ -293,4 +335,7 @@ flow or infer legality from diagnostic text.
 
 The CFG does not define interprocedural call propagation, public visualization,
 new CLI output, configuration, or LSP capabilities. Adapters remain responsible
-for converting `ast.Range` byte columns to LSP UTF-16 positions.
+for converting `ast.Range` byte columns to LSP UTF-16 positions. Introducing
+`CFGView` changes only internal storage ownership and derived-query reuse; it
+does not change diagnostic IDs, finding meaning or order, CLI behavior/JSON, or
+LSP ranges and capabilities.
