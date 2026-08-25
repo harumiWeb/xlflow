@@ -132,6 +132,60 @@ func TestSolverDeterministicAndExceptionalEdgesUseInput(t *testing.T) {
 	}
 }
 
+func TestSolverSnapshotsInputBeforeSelfEdgePropagation(t *testing.T) {
+	env := NewEnvironment([]string{"value"})
+	index, err := NewIndex(cfg.Graph{
+		Blocks: []cfg.Block{
+			{ID: 0, Kind: cfg.BlockEntry},
+			{ID: 1, Kind: cfg.BlockStatement},
+			{ID: 2, Kind: cfg.BlockNormalExit},
+		},
+		Edges: []cfg.Edge{
+			{ID: 0, From: 0, To: 1, Kind: cfg.EdgeFallthrough, Class: cfg.EdgeNormal},
+			{ID: 1, From: 1, To: 1, Kind: cfg.EdgeBranchTrue, Class: cfg.EdgeNormal},
+			{ID: 2, From: 1, To: 2, Kind: cfg.EdgeError, Class: cfg.EdgeExceptional},
+		},
+		Entry: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, _ := env.Symbol("value")
+	var exceptionalInputs []int
+	solver, err := NewSolver[int](index, env, maxLattice{}, []Lane[int]{{
+		Initialize: func(_ context.Context, _ LaneOrdinal, state *State[int]) error {
+			state.Set(value, 1)
+			return nil
+		},
+		Transfer: func(_ context.Context, _ LaneOrdinal, block BlockOrdinal, in StateView[int], out *State[int]) error {
+			out.CloneFrom(in, nil)
+			if block == 1 {
+				out.Set(value, 2)
+			}
+			return nil
+		},
+		Edge: func(_ context.Context, _ LaneOrdinal, edge Edge, input, _ StateView[int], _ *State[int]) error {
+			if edge.From == 1 && edge.Class == cfg.EdgeExceptional {
+				got, ok := input.Value(value)
+				if !ok {
+					t.Fatalf("exceptional edge input lost value")
+				}
+				exceptionalInputs = append(exceptionalInputs, got)
+			}
+			return nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := solver.Solve(); err != nil {
+		t.Fatal(err)
+	}
+	if len(exceptionalInputs) < 2 || exceptionalInputs[0] != 1 {
+		t.Fatalf("exceptional edge inputs = %#v, want first input 1 before self-edge update", exceptionalInputs)
+	}
+}
+
 func TestSolverCancellationDoesNotPublishPartialResult(t *testing.T) {
 	env := NewEnvironment([]string{"value"})
 	index, err := NewIndex(testGraph())
@@ -169,8 +223,10 @@ func BenchmarkStateJoinRepresentations(b *testing.B) {
 			env := NewEnvironment(envNames, touched)
 			left := NewState[int](env.Layout())
 			right := NewState[int](env.Layout())
+			ids := make([]SymbolID, tc.touched)
 			for i := 0; i < tc.touched; i++ {
-				id, _ := env.Symbol(envNames[i])
+				ids[i], _ = env.Symbol(envNames[i])
+				id := ids[i]
 				left.Set(id, i)
 				right.Set(id, i+1)
 			}
@@ -181,11 +237,12 @@ func BenchmarkStateJoinRepresentations(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				changed = changed[:0]
 				left.JoinFrom(right.View(), lattice, &changed)
+				b.StopTimer()
 				left.Reset()
-				for symbol := 0; symbol < tc.touched; symbol++ {
-					id, _ := env.Symbol(envNames[symbol])
+				for symbol, id := range ids {
 					left.Set(id, symbol)
 				}
+				b.StartTimer()
 			}
 		})
 	}

@@ -851,22 +851,26 @@ func sameHTTPState(a, b httpAnalysisState) bool {
 		}
 	}
 	for name, value := range a.launchers {
-		if b.launchers[name] != value {
+		other, ok := b.launchers[name]
+		if !ok || other != value {
 			return false
 		}
 	}
 	for name, value := range a.strings {
-		if b.strings[name] != value {
+		other, ok := b.strings[name]
+		if !ok || other != value {
 			return false
 		}
 	}
 	for name, value := range a.known {
-		if b.known[name] != value {
+		other, ok := b.known[name]
+		if !ok || other != value {
 			return false
 		}
 	}
 	for name, value := range a.sensitive {
-		if b.sensitive[name] != value {
+		other, ok := b.sensitive[name]
+		if !ok || other != value {
 			return false
 		}
 	}
@@ -878,7 +882,8 @@ func sameHTTPBoolSet(a, b map[string]bool) bool {
 		return false
 	}
 	for key, value := range a {
-		if b[key] != value {
+		other, ok := b[key]
+		if !ok || other != value {
 			return false
 		}
 	}
@@ -890,7 +895,8 @@ func sameHTTPIntSet(a, b map[int]bool) bool {
 		return false
 	}
 	for key, value := range a {
-		if b[key] != value {
+		other, ok := b[key]
+		if !ok || other != value {
 			return false
 		}
 	}

@@ -57,6 +57,61 @@ End Sub
 	}
 }
 
+func TestSameHTTPStateDistinguishesMissingZeroValueKeys(t *testing.T) {
+	base := httpAnalysisState{
+		objects: map[string]httpObjectState{
+			"request": {
+				kind:            httpXML,
+				identity:        "request",
+				savedExecutable: map[string]bool{"saved.exe": false},
+				credentialSinks: map[int]bool{10: false},
+			},
+		},
+		launchers: map[string]string{"launcher": ""},
+		strings:   map[string]string{"value": ""},
+		known:     map[string]bool{"value": false},
+		sensitive: map[string]bool{"secret": false},
+	}
+	cases := map[string]func(httpAnalysisState) httpAnalysisState{
+		"launchers": func(other httpAnalysisState) httpAnalysisState {
+			other.launchers = map[string]string{"other": ""}
+			return other
+		},
+		"strings": func(other httpAnalysisState) httpAnalysisState {
+			other.strings = map[string]string{"other": ""}
+			return other
+		},
+		"known": func(other httpAnalysisState) httpAnalysisState {
+			other.known = map[string]bool{"other": false}
+			return other
+		},
+		"sensitive": func(other httpAnalysisState) httpAnalysisState {
+			other.sensitive = map[string]bool{"other": false}
+			return other
+		},
+		"saved executable": func(other httpAnalysisState) httpAnalysisState {
+			object := other.objects["request"]
+			object.savedExecutable = map[string]bool{"other.exe": false}
+			other.objects["request"] = object
+			return other
+		},
+		"credential sinks": func(other httpAnalysisState) httpAnalysisState {
+			object := other.objects["request"]
+			object.credentialSinks = map[int]bool{20: false}
+			other.objects["request"] = object
+			return other
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			other := mutate(cloneHTTPState(base))
+			if sameHTTPState(base, other) {
+				t.Fatalf("states with distinct zero-value keys compared equal: %#v vs %#v", base, other)
+			}
+		})
+	}
+}
+
 func TestVBA246DetectsURLCredentialsTLSAndCertificateBypass(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

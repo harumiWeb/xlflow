@@ -16,10 +16,7 @@ slices, and HTTP state equality depends on a deep comparison of nested maps.
 On the ROneCOne `analyze-only` workload at the Issue #713 starting revision
 (`6c9f8ba60c5b162cb7115e8e68744412c7de9d5d`), a Windows amd64 profile run on
 the repository's i7-12700 development host used
-`scripts/dev/go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench
-'^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchtime=1x -count=1`
-with the test binary and heap profile retained under
-`C:\Users\HARUMI\AppData\Local\Temp\xlflow-issue713-baseline.*`. The focused
+`rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=1 -timeout=10m` with the test binary and heap profile retained locally under `%TEMP%\xlflow-issue713-baseline.*`. The focused
 alloc-space view attributed approximately 1.62 GB to `cloneArrayState`,
 0.53 GB to `meetArrayState`, and 0.07 GB to `cloneHTTPState` in that sample.
 These copies are semantic state, not diagnostic evidence, and their cost grows
@@ -155,7 +152,8 @@ domains remain outside this decision.
    bounded procedure budget and deterministic merge contract already define the
    concurrency boundary.
 6. **Migrate generic source-to-sink dataflow or all semantic domains now** —
-   Rejected because Issue #713 requires measured HTTP and Array coverage and a
+   Rejected because Issue #713 requires measurements for HTTP and Array
+   coverage and a
    broader migration would expand compatibility risk without profile evidence.
 7. **Persist solver results across runs** — Rejected because invalidation and
    compatibility are a separate cache decision.

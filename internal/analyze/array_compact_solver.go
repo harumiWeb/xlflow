@@ -15,6 +15,8 @@ import (
 // are shared.
 type arrayCompactLattice struct{}
 
+func unknownArrayValue() arrayValue { return arrayValue{kind: arrayUnknown} }
+
 func (arrayCompactLattice) Clone(value arrayValue) arrayValue {
 	value.dimensions = append([]arrayDimension(nil), value.dimensions...)
 	value.preserveShape = append([]arrayDimension(nil), value.preserveShape...)
@@ -46,7 +48,11 @@ func newArrayCompactAdapter(initial arrayFlowState) arrayCompactAdapter {
 }
 
 func (a arrayCompactAdapter) toFlow(view semanticstate.StateView[arrayValue]) arrayFlowState {
-	flow := make(arrayFlowState, view.Len())
+	names := a.environment.Names()
+	flow := make(arrayFlowState, len(names))
+	for _, name := range names {
+		flow[name] = unknownArrayValue()
+	}
 	view.ForEach(func(id semanticstate.SymbolID, value arrayValue) bool {
 		name, ok := a.environment.Name(id)
 		if !ok {
@@ -60,7 +66,11 @@ func (a arrayCompactAdapter) toFlow(view semanticstate.StateView[arrayValue]) ar
 
 func (a arrayCompactAdapter) fromFlow(state *semanticstate.State[arrayValue], flow arrayFlowState) {
 	state.Reset()
-	for name, value := range flow {
+	for _, name := range a.environment.Names() {
+		value, ok := flow[name]
+		if !ok {
+			value = unknownArrayValue()
+		}
 		id, ok := a.environment.Symbol(name)
 		if !ok {
 			continue

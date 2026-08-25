@@ -1749,7 +1749,7 @@ rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 tes
 
 The final post-migration sample completed in `8.93e9 ns/op`,
 `11,203,650,096 B/op`, and `81,659,543 allocs/op`. Its retained heap profile
-was `C:\Users\HARUMI\AppData\Local\Temp\xlflow-issue713-final.mem.pprof`.
+was `%TEMP%\xlflow-issue713-final.mem.pprof` (retained locally).
 The focused alloc-space view attributed approximately 1.58 GB to
 `cloneArrayState`, 0.53 GB to `meetArrayState`, and 0.09 GB to
 `cloneHTTPState`; the starting focused sample was approximately 1.62 GB,

@@ -10,6 +10,7 @@ package semanticstate
 import (
 	"context"
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 
@@ -514,8 +515,8 @@ func (s *State[T]) value(id SymbolID) (T, bool) {
 func (s *State[T]) len() int {
 	if s.layout.representation == RepresentationDense {
 		n := 0
-		for _, bits := range s.present {
-			n += bitsOnes(bits)
+		for _, word := range s.present {
+			n += bits.OnesCount64(word)
 		}
 		return n
 	}
@@ -562,15 +563,6 @@ func (s *State[T]) setBit(index int) {
 
 func (s *State[T]) clearBit(index int) {
 	s.present[index/64] &^= uint64(1) << uint(index%64)
-}
-
-func bitsOnes(value uint64) int {
-	count := 0
-	for value != 0 {
-		value &= value - 1
-		count++
-	}
-	return count
 }
 
 // TransferFunc advances one lane's block transfer. out is a reusable scratch

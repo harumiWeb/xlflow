@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+
+	"github.com/harumiWeb/xlflow/internal/vba/cfg"
 )
 
 // WorkItem is the deterministic scheduling key used by the solver.
@@ -59,6 +61,7 @@ type Solver[T any] struct {
 	states          []State[T]
 	transferScratch []State[T]
 	edgeScratch     []State[T]
+	inputScratch    []State[T]
 	changed         []SymbolID
 	queue           workQueue
 	queued          []bool
@@ -103,6 +106,7 @@ func (s *Solver[T]) allocateStates() {
 	if len(s.transferScratch) != len(s.lanes) {
 		s.transferScratch = make([]State[T], len(s.lanes))
 		s.edgeScratch = make([]State[T], len(s.lanes))
+		s.inputScratch = make([]State[T], len(s.lanes))
 	}
 	for i := range s.states {
 		if s.states[i].Layout() != s.layout {
@@ -115,9 +119,11 @@ func (s *Solver[T]) allocateStates() {
 		if s.transferScratch[i].Layout() != s.layout {
 			s.transferScratch[i] = newState[T](s.layout)
 			s.edgeScratch[i] = newState[T](s.layout)
+			s.inputScratch[i] = newState[T](s.layout)
 		} else {
 			s.transferScratch[i].Reset()
 			s.edgeScratch[i].Reset()
+			s.inputScratch[i].Reset()
 		}
 	}
 	clear(s.queued)
@@ -185,6 +191,16 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 		if err := ctx.Err(); err != nil {
 			return Result[T]{}, err
 		}
+		inputView := input.View()
+		for _, edge := range s.index.outgoing[item.Block] {
+			if edge.To != item.Block {
+				continue
+			}
+			snapshot := &s.inputScratch[item.Lane]
+			snapshot.CloneFrom(inputView, s.lattice.Clone)
+			inputView = snapshot.View()
+			break
+		}
 		for edgeIndex, edge := range s.index.outgoing[item.Block] {
 			if edgeIndex&0xff == 0 {
 				if err := ctx.Err(); err != nil {
@@ -193,12 +209,12 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 			}
 			candidate := &s.edgeScratch[item.Lane]
 			base := output.View()
-			if edge.Class == cfgExceptional || edge.Uncertain {
-				base = input.View()
+			if edge.Class == cfg.EdgeExceptional || edge.Uncertain {
+				base = inputView
 			}
 			candidate.CloneFrom(base, s.lattice.Clone)
 			if lane.Edge != nil {
-				if err := lane.Edge(ctx, item.Lane, edge, input.View(), output.View(), candidate); err != nil {
+				if err := lane.Edge(ctx, item.Lane, edge, inputView, output.View(), candidate); err != nil {
 					return Result[T]{}, err
 				}
 			}
@@ -220,8 +236,6 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 	}
 	return result, nil
 }
-
-const cfgExceptional = "exceptional"
 
 func (s *Solver[T]) stateIndex(block BlockOrdinal, lane LaneOrdinal) int {
 	return int(block)*len(s.lanes) + int(lane)
