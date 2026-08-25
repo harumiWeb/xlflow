@@ -219,7 +219,7 @@ func New(opts Options) (*Server, func(), error) {
 		codeLensConfig:            intel.DefaultCodeLensConfig(),
 		diagStates:                make(map[string]*diagnosticState),
 		docLifecycles:             make(map[string]*sync.Mutex),
-		semanticQueries:           semanticquery.DefaultStore(),
+		semanticQueries:           semanticquery.New(semanticquery.Options{}),
 		semanticInvalidationPaths: make(map[string]struct{}),
 		analysisPermits:           make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
 	}

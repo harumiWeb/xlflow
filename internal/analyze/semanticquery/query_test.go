@@ -60,6 +60,20 @@ func TestEvaluateDependencySetIsOrderIndependent(t *testing.T) {
 	}
 }
 
+func TestEvaluateDependencySetDeduplicatesOnHit(t *testing.T) {
+	store := New(Options{})
+	revision := store.Begin("dependency-duplicates")
+	defer revision.Close()
+	parent := Key{Procedure: "M.P", Fingerprint: Hash("parent"), Kernel: "array"}
+	dependency := Key{Procedure: "M.Callee", Fingerprint: Hash("callee"), Kernel: "effect"}
+	if _, hit, err := Evaluate(context.Background(), revision, parent, []Key{dependency}, func(context.Context) (int, error) { return 1, nil }); err != nil || hit {
+		t.Fatalf("first evaluation hit=%v err=%v", hit, err)
+	}
+	if value, hit, err := Evaluate(context.Background(), revision, parent, []Key{dependency, dependency}, func(context.Context) (int, error) { return 2, nil }); err != nil || !hit || value != 1 {
+		t.Fatalf("duplicate dependency evaluation = %d, hit %v, err %v", value, hit, err)
+	}
+}
+
 func TestEvaluateSingleFlightAndReuse(t *testing.T) {
 	metrics := &testMetrics{}
 	store := New(Options{Metrics: metrics})
@@ -458,4 +472,3 @@ func TestRecordDependenciesPlaceholderDoesNotHit(t *testing.T) {
 		t.Fatalf("metadata placeholder evaluation = %d, hit %v, err %v", value, hit, err)
 	}
 }
-

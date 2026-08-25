@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/harumiWeb/xlflow/internal/analyze/semanticquery"
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/sourcegraph/jsonrpc2"
@@ -279,6 +280,28 @@ func TestNewCreatesLogFileWithoutStartingServer(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(root, logPath)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNewOwnsSemanticQueryStorePerServer(t *testing.T) {
+	first, firstCleanup, err := New(Options{RootDir: t.TempDir(), Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstCleanup()
+	second, secondCleanup, err := New(Options{RootDir: t.TempDir(), Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondCleanup()
+	if first.semanticQueries == nil || second.semanticQueries == nil {
+		t.Fatal("server semantic query store is nil")
+	}
+	if first.semanticQueries == second.semanticQueries {
+		t.Fatal("servers share a semantic query store")
+	}
+	if first.semanticQueries == semanticquery.DefaultStore() || second.semanticQueries == semanticquery.DefaultStore() {
+		t.Fatal("LSP server uses the process-global semantic query store")
 	}
 }
 

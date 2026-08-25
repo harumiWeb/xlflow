@@ -230,6 +230,14 @@ func TestSemanticArrayModuleFingerprintIncludesDeclarations(t *testing.T) {
 	}
 }
 
+func TestPrepareSemanticQueryFactsPublishesPreparedArrayIndex(t *testing.T) {
+	ctx := analysisContext{}
+	prepareSemanticQueryFacts(Analyzer{}, nil, &ctx)
+	if ctx.arrayCapabilityIndex == nil {
+		t.Fatal("prepared array capability index was not published to the caller context")
+	}
+}
+
 func TestSemanticProcedureIdentityUsesCanonicalPath(t *testing.T) {
 	file := parsedFile{Path: filepath.Join("workspace", "nested", "..", "Main.bas"), Module: "Main"}
 	proc := sourceProcedure{Name: "Run", ProcedureKind: procedureir.ProcedureSub}

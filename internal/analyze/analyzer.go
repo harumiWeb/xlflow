@@ -820,7 +820,7 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	analysisCtx := analysis.buildContextWithObjectAnalysisPlan(parsedFiles, objectAnalysis, capabilityPlan, procedureir.ProcedureOnlyResolver(resolutionResolver))
 	analysisCtx.queryRevision = queryRevision
 	recordArrayInterproceduralTelemetry(ctx, analysisCtx)
-	prepareSemanticQueryFacts(analysis, parsedFiles, analysisCtx)
+	prepareSemanticQueryFacts(analysis, parsedFiles, &analysisCtx)
 	finishArrayCapability(nil)
 	finishStage(len(analysisCtx.procedures), nil)
 	finishStage = analysisstats.Measure(ctx, "project_context_indexes")
@@ -1789,7 +1789,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		contextFiles[0].Procedures = procedures
 		recordArrayInterproceduralTelemetry(ctx, analysisCtx)
 		analysisCtx.projectEffects = projectEffects
-		prepareSemanticQueryFacts(analyzer, contextFiles, analysisCtx)
+		prepareSemanticQueryFacts(analyzer, contextFiles, &analysisCtx)
 		// prepareSemanticQueryFacts attaches the immutable projection to the
 		// context-file slice; refresh the value copy used by realtime workers.
 		file = contextFiles[0]

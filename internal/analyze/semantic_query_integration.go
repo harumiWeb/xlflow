@@ -84,7 +84,7 @@ type semanticProcedureQueryFacts struct {
 // prepareSemanticQueryFacts builds the revision/file/procedure projections
 // once, after all project capabilities have been materialized.  It is called
 // before procedure workers start and the resulting pointers are immutable.
-func prepareSemanticQueryFacts(a Analyzer, files []parsedFile, ctx analysisContext) {
+func prepareSemanticQueryFacts(a Analyzer, files []parsedFile, ctx *analysisContext) {
 	configFingerprint := semanticConfigFingerprint(a.Config)
 	revision := &semanticQueryRevisionFacts{
 		config:       configFingerprint,
@@ -92,7 +92,7 @@ func prepareSemanticQueryFacts(a Analyzer, files []parsedFile, ctx analysisConte
 		analyzer:     semanticAnalyzerCapability(a),
 		typeDB:       semanticTypeDBFingerprint(a),
 	}
-	revision.arrayIndex = buildSemanticArrayCapabilityIndex(ctx)
+	revision.arrayIndex = buildSemanticArrayCapabilityIndex(*ctx)
 	ctx.arrayCapabilityIndex = revision.arrayIndex
 	targetFacts := make(map[string]*semanticProcedureQueryFacts)
 	for index := range files {
@@ -112,7 +112,7 @@ func prepareSemanticQueryFacts(a Analyzer, files []parsedFile, ctx analysisConte
 			// capability. This keeps the revision setup from scanning the array
 			// indexes for procedures that are known not to enter that kernel.
 			if !proc.PlanReady || proc.Plan.runsKernel(procedureKernelArray) {
-				capabilities["array"] = semanticAnalysisCapabilityUncached(ctx, *file, proc, "array")
+				capabilities["array"] = semanticAnalysisCapabilityUncached(*ctx, *file, proc, "array")
 			}
 			if !proc.PlanReady || proc.Plan.runsDataflowLane(procedureDataflowLaneGeneric) {
 				capabilities["dataflow"] = semanticAnalysisCapabilityUncached(analysisContext{}, *file, proc, "dataflow")

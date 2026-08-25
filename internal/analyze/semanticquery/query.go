@@ -331,6 +331,7 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 		if err == nil {
 			err = ctx.Err()
 		}
+		unchanged := err == nil && len(staleReasons) > 0 && hadPrevious && reflect.DeepEqual(previous.value, value)
 		s.mu.Lock()
 		delete(s.pending, stable)
 		if err == nil && s.epochs[stable] == epoch {
@@ -347,7 +348,6 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 				s.order = append(s.order, stable)
 			}
 			s.recordDependenciesLocked(stable, key, dependencies)
-			unchanged := len(staleReasons) > 0 && hadPrevious && reflect.DeepEqual(previous.value, value)
 			if len(staleReasons) > 0 {
 				for _, parent := range parents {
 					// Dependents are red because this immediate producer was
@@ -385,6 +385,7 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 
 func (s *Store) dependenciesMatchLocked(parent Key, dependencies []Key) bool {
 	stored := s.deps[parent]
+	dependencies = deduplicateDependencies(dependencies)
 	if len(stored.ids) != len(dependencies) || stored.digest != dependencySetDigest(dependencies) {
 		return false
 	}
@@ -514,20 +515,9 @@ func (s *Store) recordDependenciesLocked(parent Key, parentKey Key, dependencies
 		}
 	}
 	s.indexKeyLocked(parentKey)
-	ids := make([]Key, 0, len(dependencies))
-	for _, dependency := range dependencies {
+	ids := append([]Key(nil), deduplicateDependencies(dependencies)...)
+	for _, dependency := range ids {
 		dependencyID := dependency
-		duplicate := false
-		for _, existing := range ids {
-			if existing == dependencyID {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
-			continue
-		}
-		ids = append(ids, dependencyID)
 		s.indexKeyLocked(dependency)
 		parents := s.reverse[dependencyID]
 		if parents == nil {
@@ -538,6 +528,35 @@ func (s *Store) recordDependenciesLocked(parent Key, parentKey Key, dependencies
 	}
 	sort.Slice(ids, func(i, j int) bool { return keyLess(ids[i], ids[j]) })
 	s.deps[parent] = dependencySet{ids: ids, digest: dependencySetDigest(ids)}
+}
+
+// deduplicateDependencies preserves the caller's order when all dependencies
+// are already unique. The hit path therefore stays allocation-free for the
+// normal case; a copy is created only when a caller supplied a duplicate.
+func deduplicateDependencies(dependencies []Key) []Key {
+	for index := 0; index < len(dependencies); index++ {
+		for previous := 0; previous < index; previous++ {
+			if dependencies[previous] != dependencies[index] {
+				continue
+			}
+			unique := make([]Key, 0, len(dependencies)-1)
+			unique = append(unique, dependencies[:index]...)
+			for _, dependency := range dependencies[index+1:] {
+				duplicate := false
+				for _, existing := range unique {
+					if existing == dependency {
+						duplicate = true
+						break
+					}
+				}
+				if !duplicate {
+					unique = append(unique, dependency)
+				}
+			}
+			return unique
+		}
+	}
+	return dependencies
 }
 
 func keyLess(left, right Key) bool {
@@ -695,11 +714,7 @@ func (s *Store) invalidateIDsLocked(queue []Key, metrics Metrics) []string {
 	for procedure := range procedures {
 		result = append(result, procedure)
 	}
-	for i := 1; i < len(result); i++ {
-		for j := i; j > 0 && result[j] < result[j-1]; j-- {
-			result[j], result[j-1] = result[j-1], result[j]
-		}
-	}
+	sort.Strings(result)
 	if metrics != nil {
 		metrics.RecordSemanticQueryInvalidatedProcedures(uint64(len(result)))
 	}
@@ -845,4 +860,3 @@ func (s *Store) pruneRevisionsLocked() {
 		}
 	}
 }
-
