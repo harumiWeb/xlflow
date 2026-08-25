@@ -1941,13 +1941,28 @@ func arrayPrivateProcedureTargets(files []parsedFile) map[string]sourceProcedure
 	return targets
 }
 
-// buildArrayParticipantSet derives the bounded interprocedural closure used by
-// the array capability.  Module declarations are deliberately not seeds: only
-// a procedure that observes an array locally, exposes an array-shaped
-// parameter/return, or reaches an array through a resolved call participates.
-// The closure is symmetric for resolved calls because both callee summaries
-// and caller entry states can affect an array result.
-func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[string]bool {
+type arrayParticipantGraph struct {
+	all              map[string]sourceProcedure
+	fileByKey        map[string]parsedFile
+	byQualified      map[string]string
+	byModule         map[string][]string
+	candidateIndex   arrayCandidateIndex
+	adjacency        map[string]map[string]bool
+	reverse          map[string]map[string]bool
+	resolvedReverse  map[string]map[string]bool
+	callAdjacency    map[string]map[string]bool
+	knownSeeds       map[string]bool
+	intrinsicSeeds   map[string]bool
+	uncertainFacts   map[bool]map[string]bool
+	uncertainCalls   map[string]bool
+	moduleArrayUsers map[string][]string
+}
+
+// buildArrayParticipantGraph classifies procedures and resolves all
+// project-local call edges once. The two participant boundaries (the local
+// fail-open plan and the narrower fixed-point plan) share this immutable graph
+// so a revision does not scan every procedure and call site twice.
+func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayParticipantGraph {
 	all := make(map[string]sourceProcedure)
 	fileByKey := make(map[string]parsedFile)
 	byQualified := make(map[string]string)
@@ -1971,16 +1986,32 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 		}
 	}
 	if len(all) == 0 {
-		return map[string]bool{}
+		return &arrayParticipantGraph{
+			all:              all,
+			fileByKey:        fileByKey,
+			byQualified:      byQualified,
+			byModule:         byModule,
+			candidateIndex:   buildArrayCandidateIndex(all),
+			adjacency:        map[string]map[string]bool{},
+			reverse:          map[string]map[string]bool{},
+			resolvedReverse:  map[string]map[string]bool{},
+			callAdjacency:    map[string]map[string]bool{},
+			knownSeeds:       map[string]bool{},
+			intrinsicSeeds:   map[string]bool{},
+			uncertainFacts:   map[bool]map[string]bool{false: {}, true: {}},
+			uncertainCalls:   map[string]bool{},
+			moduleArrayUsers: map[string][]string{},
+		}
 	}
 	candidateIndex := buildArrayCandidateIndex(all)
 
 	adjacency := make(map[string]map[string]bool, len(all))
-	participants := make(map[string]bool, len(all))
+	knownSeeds := make(map[string]bool, len(all))
 	intrinsicSeeds := make(map[string]bool, len(all))
-	uncertainFacts := make(map[string]bool)
+	uncertainFacts := map[bool]map[string]bool{false: {}, true: {}}
 	uncertainCalls := make(map[string]bool)
 	moduleArrayUsers := make(map[string][]string)
+	callAdjacency := make(map[string]map[string]bool, len(all))
 	type resolvedEdge struct {
 		caller string
 		target string
@@ -1994,23 +2025,20 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 		shapeSeed := procedureHasArrayParameter(proc) || procedureReturnsArray(proc) || moduleArrayUse
 		arraySeed = arraySeed || procedureHasArrayForEach(proc) || procedureHasObjectComparison(proc)
 		if arraySeed || shapeSeed {
-			participants[key] = true
+			knownSeeds[key] = true
 			intrinsicSeeds[key] = true
 		}
 		if moduleArrayUse {
 			module := strings.ToLower(strings.TrimSpace(proc.Module))
 			moduleArrayUsers[module] = append(moduleArrayUsers[module], key)
 		}
-		if arrayParticipantFactsUncertain(proc, ctx.arrayIgnoreFeatureUnknown) {
-			// Recovered statements, missing CFGs, and conditional IR facts are
-			// bounded uncertainty. Keep the known module-array cluster fail-open
-			// until resolution can prove a smaller dependency boundary.
-			uncertainFacts[key] = true
-			// Preserve local array diagnostics for an unknown-only procedure,
-			// but do not make it an intrinsic call-graph seed. Its resolved
-			// scalar helpers remain excluded unless an array-shaped boundary
-			// reaches them.
-			participants[key] = true
+		for _, ignoreFeatureUnknown := range []bool{false, true} {
+			if arrayParticipantFactsUncertain(proc, ignoreFeatureUnknown) {
+				// Recovered statements, missing CFGs, and conditional IR facts are
+				// bounded uncertainty. Keep the known module-array cluster fail-open
+				// until resolution can prove a smaller dependency boundary.
+				uncertainFacts[ignoreFeatureUnknown][key] = true
+			}
 		}
 		for call := range proc.Calls.All() {
 			resolution := call.Resolution
@@ -2028,12 +2056,20 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 				adjacency[key] = ensureArrayKeySet(adjacency[key])
 				adjacency[key][target] = true
 			}
+			addCallEdge := func(target string) {
+				if target == "" {
+					return
+				}
+				callAdjacency[key] = ensureArrayKeySet(callAdjacency[key])
+				callAdjacency[key][target] = true
+			}
 			if resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1 {
 				candidate := resolution.Candidates[0]
 				target := byQualified[strings.ToLower(candidate.QualifiedName)]
 				if target == "" {
 					target = arrayCandidateKey(candidate, all, candidateIndex)
 				}
+				addCallEdge(target)
 				// Defer resolved-edge filtering until every procedure's
 				// intrinsic seed has been classified. The source map is not
 				// ordered, so checking the target while this loop runs would
@@ -2043,7 +2079,9 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 			}
 			if resolution.Status == procedureir.ResolutionAmbiguous || resolution.Status == procedureir.ResolutionUnresolved || resolution.Status == procedureir.ResolutionDynamic || resolution.Status == procedureir.ResolutionIncomplete {
 				for _, candidate := range resolution.Candidates {
-					addEdge(arrayCandidateKey(candidate, all, candidateIndex))
+					target := arrayCandidateKey(candidate, all, candidateIndex)
+					addCallEdge(target)
+					addEdge(target)
 				}
 				if len(resolution.Candidates) == 0 {
 					// A candidate-bearing ambiguous/dynamic/unresolved call is
@@ -2055,11 +2093,10 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 		}
 	}
 	for _, edge := range resolvedEdges {
-		if !intrinsicSeeds[edge.target] {
-			continue
+		if intrinsicSeeds[edge.target] {
+			adjacency[edge.caller] = ensureArrayKeySet(adjacency[edge.caller])
+			adjacency[edge.caller][edge.target] = true
 		}
-		adjacency[edge.caller] = ensureArrayKeySet(adjacency[edge.caller])
-		adjacency[edge.caller][edge.target] = true
 	}
 	// Keep reverse links for every project-local resolved edge separately from
 	// the direct semantic graph. A bounded caller extension below lets a chain
@@ -2081,15 +2118,41 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 			reverse[callee][caller] = true
 		}
 	}
-	closeArrayParticipantClosure(participants, adjacency, reverse)
-	addResolvedCallerBoundary(participants, resolvedReverse, all, byModule, ctx.arrayIgnoreFeatureUnknown)
-	closeArrayParticipantClosure(participants, adjacency, reverse)
+	return &arrayParticipantGraph{
+		all:              all,
+		fileByKey:        fileByKey,
+		byQualified:      byQualified,
+		byModule:         byModule,
+		candidateIndex:   candidateIndex,
+		adjacency:        adjacency,
+		reverse:          reverse,
+		resolvedReverse:  resolvedReverse,
+		callAdjacency:    callAdjacency,
+		knownSeeds:       knownSeeds,
+		intrinsicSeeds:   intrinsicSeeds,
+		uncertainFacts:   uncertainFacts,
+		uncertainCalls:   uncertainCalls,
+		moduleArrayUsers: moduleArrayUsers,
+	}
+}
+
+func (graph *arrayParticipantGraph) participantSet(ignoreFeatureUnknown bool) map[string]bool {
+	participants := make(map[string]bool, len(graph.all))
+	for key := range graph.knownSeeds {
+		participants[key] = true
+	}
+	for key := range graph.uncertainFacts[ignoreFeatureUnknown] {
+		participants[key] = true
+	}
+	closeArrayParticipantClosure(participants, graph.adjacency, graph.reverse)
+	addResolvedCallerBoundary(participants, graph.resolvedReverse, graph.all, graph.byModule, ignoreFeatureUnknown)
+	closeArrayParticipantClosure(participants, graph.adjacency, graph.reverse)
 	globalFallback := false
-	for key := range uncertainFacts {
+	for key := range graph.uncertainFacts[ignoreFeatureUnknown] {
 		if !participants[key] {
 			continue
 		}
-		module := strings.ToLower(strings.TrimSpace(all[key].Module))
+		module := strings.ToLower(strings.TrimSpace(graph.all[key].Module))
 		if module == "" {
 			globalFallback = true
 			continue
@@ -2097,42 +2160,56 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 		// Recovered or incomplete facts are expanded to the smallest known
 		// module-array cluster. This preserves conservative state propagation
 		// without turning every procedure in a giant module into a candidate.
-		for _, user := range moduleArrayUsers[module] {
+		for _, user := range graph.moduleArrayUsers[module] {
 			participants[user] = true
 		}
 	}
-	for key := range uncertainCalls {
+	for key := range graph.uncertainCalls {
 		if !participants[key] {
 			continue
 		}
 		// An unknown-only procedure remains a local participant for fail-open
 		// diagnostics, but it must not open an entire giant module before a
 		// semantic array seed reaches the uncertainty boundary.
-		if !intrinsicSeeds[key] && !ctx.arrayIgnoreFeatureUnknown {
+		if !graph.intrinsicSeeds[key] && !ignoreFeatureUnknown {
 			continue
 		}
-		module := strings.ToLower(strings.TrimSpace(all[key].Module))
+		module := strings.ToLower(strings.TrimSpace(graph.all[key].Module))
 		if module == "" {
 			globalFallback = true
 			continue
 		}
-		if users := moduleArrayUsers[module]; len(users) > 0 {
+		if users := graph.moduleArrayUsers[module]; len(users) > 0 {
 			for _, user := range users {
 				participants[user] = true
 			}
 			continue
 		}
-		for _, procedure := range byModule[module] {
+		for _, procedure := range graph.byModule[module] {
 			participants[procedure] = true
 		}
 	}
 	if globalFallback {
-		for key := range all {
+		for key := range graph.all {
 			participants[key] = true
 		}
 	}
-	closeArrayParticipantClosure(participants, adjacency, reverse)
+	closeArrayParticipantClosure(participants, graph.adjacency, graph.reverse)
 	return participants
+}
+
+// buildArrayParticipantSet derives the bounded interprocedural closure used
+// by the array capability. Module declarations are deliberately not seeds:
+// only a procedure that observes an array locally, exposes an array-shaped
+// parameter/return, or reaches an array through a resolved call participates.
+func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[string]bool {
+	return buildArrayParticipantGraph(files, ctx).participantSet(ctx.arrayIgnoreFeatureUnknown)
+}
+
+func buildArrayParticipantSets(files []parsedFile, ctx analysisContext) (map[string]bool, map[string]bool) {
+	graph := buildArrayParticipantGraph(files, ctx)
+	participants := graph.participantSet(ctx.arrayIgnoreFeatureUnknown)
+	return participants, buildArrayInterproceduralParticipantSetFromGraph(graph, participants)
 }
 
 // buildArrayInterproceduralParticipantSet keeps the local fail-open plan
@@ -2141,74 +2218,45 @@ func buildArrayParticipantSet(files []parsedFile, ctx analysisContext) map[strin
 // local array kernel/projection; it must not, by itself, make every array
 // summary and module-entry solver walk the surrounding module.
 func buildArrayInterproceduralParticipantSet(files []parsedFile, ctx analysisContext, participants map[string]bool) map[string]bool {
+	graph := buildArrayParticipantGraph(files, ctx)
+	return buildArrayInterproceduralParticipantSetFromGraph(graph, participants)
+}
+
+func buildArrayInterproceduralParticipantSetFromGraph(graph *arrayParticipantGraph, participants map[string]bool) map[string]bool {
 	if len(participants) == 0 {
 		return map[string]bool{}
 	}
-	// Rebuild the fixed-point boundary with feature-unknown bits ignored. This
-	// preserves the proven semantic closure used before an unknown-only local
-	// participant was added, while the outer participant plan still retains that
-	// procedure for local fail-open diagnostics.
-	legacyCtx := ctx
-	legacyCtx.arrayIgnoreFeatureUnknown = true
-	legacy := buildArrayParticipantSet(files, legacyCtx)
+	// Derive the fixed-point boundary with feature-unknown bits ignored from the
+	// shared graph. This preserves the proven semantic closure used before an
+	// unknown-only local participant was added, while the outer participant plan
+	// still retains that procedure for local fail-open diagnostics.
+	legacy := graph.participantSet(true)
 	legacyResult := make(map[string]bool, len(legacy))
 	for key := range legacy {
 		if participants[key] {
 			legacyResult[key] = true
 		}
 	}
-	all := make(map[string]sourceProcedure, len(participants))
-	fileByKey := make(map[string]parsedFile, len(participants))
-	byQualified := make(map[string]string, len(participants))
+	all := graph.all
+	fileByKey := graph.fileByKey
 	moduleSizes := make(map[string]int)
-	for _, file := range files {
-		procedures := file.procedureView()
-		for index := 0; index < procedures.Len(); index++ {
-			proc := procedures.valueAt(index)
-			key := arrayProcedureKey(proc)
-			if key == "" {
-				continue
-			}
-			all[key] = proc
-			fileByKey[key] = file
-			moduleSizes[strings.ToLower(strings.TrimSpace(proc.Module))]++
-			qualified := strings.ToLower(strings.TrimSpace(proc.Module + "." + proc.Name))
-			if qualified != "." {
-				byQualified[qualified] = key
-			}
-		}
+	for _, proc := range all {
+		moduleSizes[strings.ToLower(strings.TrimSpace(proc.Module))]++
 	}
-	index := buildArrayCandidateIndex(all)
 	connected := make(map[string]bool)
-	for key, proc := range all {
+	for key := range graph.callAdjacency {
 		if !participants[key] {
 			continue
 		}
-		for call := range proc.Calls.All() {
-			resolution := call.Resolution
-			if ctx.procedureResolver != nil {
-				resolution = ctx.procedureResolver.ResolveCall(call)
+		for target := range graph.callAdjacency[key] {
+			if !participants[target] {
+				continue
 			}
-			addCandidate := func(candidate procedureir.Candidate) {
-				target := byQualified[strings.ToLower(strings.TrimSpace(candidate.QualifiedName))]
-				if target == "" {
-					target = arrayCandidateKey(candidate, all, index)
-				}
-				if target == "" || !participants[target] {
-					return
-				}
-				if legacy[key] {
-					connected[target] = true
-				}
-				if legacy[target] {
-					connected[key] = true
-				}
+			if legacy[key] {
+				connected[target] = true
 			}
-			switch resolution.Status {
-			case procedureir.ResolutionMatched, procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved, procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete:
-				for _, candidate := range resolution.Candidates {
-					addCandidate(candidate)
-				}
+			if legacy[target] {
+				connected[key] = true
 			}
 		}
 	}
@@ -2216,7 +2264,7 @@ func buildArrayInterproceduralParticipantSet(files []parsedFile, ctx analysisCon
 		if legacyResult[key] {
 			continue
 		}
-		proc := all[key]
+		proc := graph.all[key]
 		if !procedureArrayFactsUncertain(proc) || !procedureHasCompleteArrayFacts(proc) || proc.Features.unknown&arrayParticipantUnknownFeatures == 0 {
 			continue
 		}
@@ -2542,7 +2590,7 @@ func buildArrayCandidateIndex(all map[string]sourceProcedure) arrayCandidateInde
 			index.byName[name] = key
 		}
 		if proc.StartLine > 0 {
-			lineKey := arrayCandidateLineKey{line: proc.StartLine, kind: name}
+			lineKey := arrayCandidateLineKey{line: proc.StartLine, kind: strings.ToLower(string(proc.ProcedureKind))}
 			if _, exists := index.byLineAndKind[lineKey]; !exists {
 				index.byLineAndKind[lineKey] = key
 			}
@@ -5989,18 +6037,24 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		constants map[string]int
 	}
 	procedures := make([]returnProcedure, 0)
+	allReturnProcedures := make([]sourceProcedure, 0)
 	for _, file := range files {
 		fileProcedures := file.procedureView()
 		moduleDecls := file.moduleDecls()
 		for procedureIndex := 0; procedureIndex < fileProcedures.Len(); procedureIndex++ {
 			proc := fileProcedures.valueAt(procedureIndex)
-			if !arrayProcedureIsParticipant(participantCtx, proc) {
-				continue
-			}
 			if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 				continue
 			}
 			if proc.Name == "" {
+				continue
+			}
+			// Duplicate bare-name summaries are ambiguous even when one of the
+			// same-named procedures is outside the array participant closure.
+			// Collect names before filtering so narrowing the fixed-point scope
+			// cannot turn an otherwise ambiguous call into a definite summary.
+			allReturnProcedures = append(allReturnProcedures, proc)
+			if !arrayProcedureIsParticipant(participantCtx, proc) {
 				continue
 			}
 			procedures = append(procedures, returnProcedure{
@@ -6014,11 +6068,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	sort.SliceStable(procedures, func(i, j int) bool {
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})
-	returnProcedures := make([]sourceProcedure, 0, len(procedures))
-	for _, procedure := range procedures {
-		returnProcedures = append(returnProcedures, procedure.proc)
-	}
-	ambiguousReturnNames := arrayReturnSummaryDuplicateNames(returnProcedures)
+	ambiguousReturnNames := arrayReturnSummaryDuplicateNames(allReturnProcedures)
 
 	evaluate := func(procedure returnProcedure, summaries map[string]arrayValue) (candidate, bool) {
 		proc := procedure.proc

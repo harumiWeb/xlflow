@@ -145,6 +145,63 @@ func TestArrayReturnSummaryDuplicateNamesRemainUnknown(t *testing.T) {
 	}
 }
 
+func TestArrayCandidateKeyUsesProcedureKindForLineFallback(t *testing.T) {
+	procedure := sourceProcedure{
+		Module:        "M",
+		Name:          "Value",
+		ProcedureKind: procedureir.ProcedurePropertyGet,
+		StartLine:     12,
+	}
+	key := arrayProcedureKey(procedure)
+	all := map[string]sourceProcedure{key: procedure}
+	index := buildArrayCandidateIndex(all)
+
+	got := arrayCandidateKey(procedureir.Candidate{
+		QualifiedName: "Missing.Value",
+		Kind:          string(procedureir.ProcedurePropertyGet),
+		Line:          12,
+	}, all, index)
+	if got != key {
+		t.Fatalf("line/kind candidate = %q, want %q", got, key)
+	}
+	if got := arrayCandidateKey(procedureir.Candidate{
+		QualifiedName: "Missing.Value",
+		Kind:          string(procedureir.ProcedureFunction),
+		Line:          12,
+	}, all, index); got != "" {
+		t.Fatalf("different candidate kind matched property getter: %q", got)
+	}
+}
+
+func TestInferArrayReturnSummariesKeepsUnselectedDuplicateUnknown(t *testing.T) {
+	makeFile := func(module, path string) parsedFile {
+		source := []byte("Public Function BuildValues() As Variant()\n" +
+			"    ReDim BuildValues(0 To 1)\n" +
+			"End Function\n")
+		ir, err := procedureir.BuildSource(procedureir.BuildOptions{
+			Path: path, ModuleName: module, ModuleKind: "standard",
+		}, source)
+		if err != nil {
+			t.Fatalf("build %s: %v", module, err)
+		}
+		flow := cfg.BuildDocument(ir)
+		file := parsedFile{
+			Path: path, Module: module, Source: source,
+			Lines: normalizedSourceLines(string(source)), IR: ir, CFG: flow,
+		}
+		file.Procedures = sourceProceduresFromIRRef(&file.IR, flow)
+		return file
+	}
+	files := []parsedFile{
+		makeFile("First", "First.bas"),
+		makeFile("Second", "Second.bas"),
+	}
+	ctx := analysisContext{arrayInterproceduralParticipants: map[string]bool{"first.buildvalues": true}}
+	if summaries := inferArrayReturnSummaries(files, nil, ctx); summaries["buildvalues"].knownArray {
+		t.Fatalf("duplicate bare-name summary became definite after participant filtering: %#v", summaries)
+	}
+}
+
 func TestArrayParticipantPlanExcludesModuleOnlyScalarProcedure(t *testing.T) {
 	moduleDecls := map[string]sourceDeclaration{"values": {Name: "values", Array: true}}
 	proc := sourceProcedure{Module: "M", Name: "Unrelated", Facts: &procedureAnalysisFacts{}}

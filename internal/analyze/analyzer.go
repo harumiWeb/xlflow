@@ -347,11 +347,10 @@ type analysisContext struct {
 	// local participant plan for fail-open diagnostics, but cannot by themselves
 	// widen every fixed-point lane in a large module.
 	arrayInterproceduralParticipants map[string]bool
-	// arrayIgnoreFeatureUnknown is used only while deriving the legacy
-	// interprocedural boundary. Complete IR with an unknown array capability is
-	// retained in the local participant plan, but the fixed-point boundary is
-	// kept compatible with the proven semantic closure unless a real seed
-	// reaches that procedure.
+	// arrayIgnoreFeatureUnknown is retained for focused participant-set
+	// compatibility helpers. Production planning derives both feature-unknown
+	// boundaries from one shared graph; complete IR with an unknown array
+	// capability remains local unless a real seed reaches that procedure.
 	arrayIgnoreFeatureUnknown bool
 	arrayStats                *arrayInterproceduralStats
 	arrayByRefEntryStates     map[string]map[int]bool
@@ -2201,8 +2200,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
-		ctx.arrayParticipants = buildArrayParticipantSet(files, ctx)
-		ctx.arrayInterproceduralParticipants = buildArrayInterproceduralParticipantSet(files, ctx, ctx.arrayParticipants)
+		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants = buildArrayParticipantSets(files, ctx)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants)
 		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
