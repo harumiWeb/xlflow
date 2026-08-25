@@ -96,7 +96,6 @@ func FromContext(ctx context.Context) Context {
 }
 
 type cacheValue struct {
-	key   Key
 	value any
 }
 
@@ -300,7 +299,7 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 		s.mu.Lock()
 		delete(s.pending, stable)
 		if err == nil && s.epochs[stable] == epoch {
-			s.entries[stable] = cacheValue{key: key, value: value}
+			s.entries[stable] = cacheValue{value: value}
 			s.keys[stable] = key
 			s.order = append(s.order, stable)
 			s.recordDependenciesLocked(stable, key, dependencies)
@@ -402,7 +401,7 @@ func (s *Store) RecordDependencies(parent Key, dependencies ...Key) {
 	s.mu.Lock()
 	stable := parent.String()
 	if _, ok := s.entries[stable]; !ok {
-		s.entries[stable] = cacheValue{key: parent, value: dependencyRecord{}}
+		s.entries[stable] = cacheValue{value: dependencyRecord{}}
 		s.order = append(s.order, stable)
 	}
 	s.recordDependenciesLocked(stable, parent, dependencies)
