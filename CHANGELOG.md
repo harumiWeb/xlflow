@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.31.0
+
 - Updated the tree-sitter-vba parser dependency to v0.12.2. Exported VBA
   procedure attributes with multi-segment names now parse without recovery,
   preserving downstream lint and analysis behavior.
