@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced static-analysis allocation pressure for giant VBA modules by sharing
+  immutable module array-variable catalogs, lazily copying branch-local
+  Dictionary/Collection, Application-state, and generic data-flow maps, and
+  resolving VBA205 project procedure shadowing on demand. Added recovered and
+  unknown synthetic benchmark workloads and a ten-sample ROneCOne benchmark
+  task; diagnostic identity, ordering, JSON/LSP, batch/realtime, cancellation,
+  and process-local cache boundaries remain unchanged.
+
 ## v0.31.0
 
 - Updated the tree-sitter-vba parser dependency to v0.12.2. Exported VBA

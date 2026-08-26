@@ -79,3 +79,53 @@ func TestArrayLifecycleProjectionApplicableIncludesRecoveredSource(t *testing.T)
 		t.Fatal("recovered source indexed access should make the VBA227 projection applicable")
 	}
 }
+
+func TestArrayVariablesFiltersCatalogScalarsByProcedureAccess(t *testing.T) {
+	moduleDecls := map[string]sourceDeclaration{
+		"usedscalar":   {Name: "UsedScalar", Type: "Long"},
+		"unusedscalar": {Name: "UnusedScalar", Type: "Long"},
+		"values":       {Name: "values", Type: "Long", Array: true},
+	}
+	file := parsedFile{
+		Module:             "Main",
+		Lines:              []string{"Sub Run()", "", "End Sub"},
+		ModuleDeclarations: moduleDecls,
+		ArrayVariableCatalog: map[string]arrayVariable{
+			"usedscalar":   {name: "UsedScalar", typ: "Long", knownScalar: true},
+			"unusedscalar": {name: "UnusedScalar", typ: "Long", knownScalar: true},
+			"values":       {name: "values", typ: "Long", isArray: true},
+		},
+	}
+	proc := sourceProcedure{StartLine: 1, EndLine: 3, Accesses: newReadOnlySpan([]procedureir.VariableAccess{
+		{Name: "UsedScalar", Scope: procedureir.ScopeModule, Mode: procedureir.AccessRead},
+		{Name: "values", Scope: procedureir.ScopeModule, Mode: procedureir.AccessRead},
+	})}
+
+	variables := arrayVariables(file, proc, moduleDecls)
+	if _, ok := variables["usedscalar"]; !ok {
+		t.Fatal("accessed module scalar was filtered out")
+	}
+	if _, ok := variables["values"]; !ok {
+		t.Fatal("module array was filtered out")
+	}
+	if _, ok := variables["unusedscalar"]; ok {
+		t.Fatal("unaccessed module scalar retained in procedure projection")
+	}
+}
+
+func TestArrayVariablesFailsOpenWithoutAccessProjection(t *testing.T) {
+	moduleDecls := map[string]sourceDeclaration{
+		"modulevalue": {Name: "ModuleValue", Type: "Long"},
+	}
+	file := parsedFile{
+		Lines:              []string{"Sub Run()", "", "End Sub"},
+		ModuleDeclarations: moduleDecls,
+		ArrayVariableCatalog: map[string]arrayVariable{
+			"modulevalue": {name: "ModuleValue", typ: "Long", knownScalar: true},
+		},
+	}
+	variables := arrayVariables(file, sourceProcedure{StartLine: 1, EndLine: 3}, moduleDecls)
+	if _, ok := variables["modulevalue"]; !ok {
+		t.Fatal("module declaration must be retained when access projection is unavailable")
+	}
+}

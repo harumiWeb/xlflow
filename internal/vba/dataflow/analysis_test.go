@@ -312,6 +312,37 @@ func TestJoinStateDoesNotReportChangeForEquivalentMissingValue(t *testing.T) {
 	}
 }
 
+func TestAbstractStateCloneCopiesMapsOnWrite(t *testing.T) {
+	original := abstractState{
+		vars:       map[string]value{"raw": unknownStandaloneValue()},
+		sqlObjects: map[string]sqlObjectState{"command": {kind: sqlObjectCommand, identity: "command"}},
+	}
+	branch := cloneState(&original)
+	branch.ensureVars()
+	branch.vars["branch"] = unknownStandaloneValue()
+	branch.ensureSQLObjects()
+	branch.sqlObjects["branch"] = sqlObjectState{kind: sqlObjectCommand, identity: "branch"}
+
+	if _, ok := original.vars["branch"]; ok {
+		t.Fatal("variable write leaked from cloned abstract state")
+	}
+	if _, ok := original.sqlObjects["branch"]; ok {
+		t.Fatal("SQL object write leaked from cloned abstract state")
+	}
+
+	original.ensureVars()
+	original.vars["original"] = unknownStandaloneValue()
+	if _, ok := branch.vars["original"]; ok {
+		t.Fatal("write to original abstract state leaked into cloned state")
+	}
+
+	original.ensureSQLObjects()
+	original.sqlObjects["original"] = sqlObjectState{kind: sqlObjectCommand, identity: "original"}
+	if _, ok := branch.sqlObjects["original"]; ok {
+		t.Fatal("SQL object write to original abstract state leaked into cloned state")
+	}
+}
+
 func TestLooksDatabaseReceiverUsesIdentifierBoundaries(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -2445,6 +2445,53 @@ End Sub
 	}
 }
 
+func TestApplicationStateFlowCloneCopiesMapsOnWrite(t *testing.T) {
+	original := applicationStateFlow{
+		Dirty: map[int]bool{1: true},
+		Saved: map[string]applicationStateSnapshot{
+			"saved": {
+				Dirty:     map[int]bool{1: true},
+				Restores:  map[int]bool{},
+				GuardedBy: map[int]bool{},
+			},
+		},
+	}
+	branch := cloneApplicationStateFlow(&original)
+	branch.ensureDirty()
+	branch.Dirty[2] = true
+	branch.ensureSaved()
+	snapshot, ok := branch.mutableSavedSnapshot("saved")
+	if !ok {
+		t.Fatal("cloned saved snapshot was not available")
+	}
+	snapshot.Restores[3] = true
+	branch.Saved["saved"] = snapshot
+
+	if original.Dirty[2] {
+		t.Fatal("dirty-state write leaked from cloned application state")
+	}
+	if original.Saved["saved"].Restores[3] {
+		t.Fatal("nested saved-state write leaked from cloned application state")
+	}
+
+	original.ensureDirty()
+	original.Dirty[4] = true
+	if branch.Dirty[4] {
+		t.Fatal("write to original application state leaked into cloned state")
+	}
+
+	original.ensureSaved()
+	snapshot, ok = original.mutableSavedSnapshot("saved")
+	if !ok {
+		t.Fatal("original saved snapshot was not available")
+	}
+	snapshot.Restores[4] = true
+	original.Saved["saved"] = snapshot
+	if branch.Saved["saved"].Restores[4] {
+		t.Fatal("nested write to original application state leaked into cloned state")
+	}
+}
+
 func TestAnalyzerApplicationStateAllowsEitherSameModuleRestoreAlias(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

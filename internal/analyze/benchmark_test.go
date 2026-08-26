@@ -372,6 +372,30 @@ func TestCanonicalLargeModuleBenchmarkFixtures(t *testing.T) {
 	}
 }
 
+func TestSingleModuleBenchmarkRecoveryMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		shape               string
+		recoveredStatements int
+		unknownStatements   int
+	}{
+		{shape: "recovered", recoveredStatements: 1},
+		{shape: "unknown", unknownStatements: 1},
+	} {
+		t.Run(tc.shape, func(t *testing.T) {
+			fixture := writeSingleModuleBenchmarkProject(t, t.TempDir(), singleModuleBenchmarkWorkload{shape: tc.shape, size: 1})
+			if fixture.procedures != 1 {
+				t.Fatalf("%s procedures = %d, want 1", tc.shape, fixture.procedures)
+			}
+			if fixture.recoveredStatements < tc.recoveredStatements {
+				t.Fatalf("%s recovered statements = %d, want at least %d", tc.shape, fixture.recoveredStatements, tc.recoveredStatements)
+			}
+			if fixture.unknownStatements < tc.unknownStatements {
+				t.Fatalf("%s unknown statements = %d, want at least %d", tc.shape, fixture.unknownStatements, tc.unknownStatements)
+			}
+		})
+	}
+}
+
 func TestSingleModuleBenchmarkFactBuildCounters(t *testing.T) {
 	root := t.TempDir()
 	fixture := writeSingleModuleBenchmarkProject(t, root, singleModuleBenchmarkWorkload{shape: "declarations", size: 2000})
@@ -398,8 +422,8 @@ type singleModuleBenchmarkWorkload struct {
 }
 
 func singleModuleBenchmarkWorkloads() []singleModuleBenchmarkWorkload {
-	workloads := make([]singleModuleBenchmarkWorkload, 0, 20)
-	for _, shape := range []string{"independent", "chain", "declarations"} {
+	workloads := make([]singleModuleBenchmarkWorkload, 0, 29)
+	for _, shape := range []string{"independent", "chain", "declarations", "recovered", "unknown"} {
 		for _, size := range []int{100, 500, 1000, 2000} {
 			workloads = append(workloads, singleModuleBenchmarkWorkload{shape: shape, size: size})
 		}
@@ -425,6 +449,8 @@ func (w singleModuleBenchmarkWorkload) benchmarkName() string {
 		unit = "declarations"
 	case "cfg-independent":
 		unit = "branches"
+	case "recovered", "unknown":
+		unit = "statements"
 	}
 	return fmt.Sprintf("%s/%d-%s", w.shape, w.size, unit)
 }
@@ -474,15 +500,17 @@ func (w singleModuleBenchmarkWorkload) expectedCalls() int {
 }
 
 type singleModuleBenchmarkFixture struct {
-	sourcePath         string
-	moduleCount        int
-	lines              int
-	procedures         int
-	moduleDeclarations int
-	calls              int
-	maxStatements      int
-	maxCFGBlocks       int
-	maxCFGEdges        int
+	sourcePath          string
+	moduleCount         int
+	lines               int
+	procedures          int
+	moduleDeclarations  int
+	calls               int
+	recoveredStatements int
+	unknownStatements   int
+	maxStatements       int
+	maxCFGBlocks        int
+	maxCFGEdges         int
 }
 
 func writeSingleModuleBenchmarkProject(tb testing.TB, root string, workload singleModuleBenchmarkWorkload) singleModuleBenchmarkFixture {
@@ -559,6 +587,14 @@ func singleModuleBenchmarkSource(workload singleModuleBenchmarkWorkload) string 
 		for index := 3; index < workload.size; index++ {
 			fmt.Fprintf(&source, "Private Sub Independent%04d()\n    Dim value As Long\n    value = %d\nEnd Sub\n\n", index, index)
 		}
+	case "recovered":
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Recovered%04d()\n    recoveredValue =\nEnd Sub\n\n", index)
+		}
+	case "unknown":
+		for index := 0; index < workload.size; index++ {
+			fmt.Fprintf(&source, "Private Sub Unknown%04d()\n    Open unknownPath For Input As #1\nEnd Sub\n\n", index)
+		}
 	}
 	return source.String()
 }
@@ -586,6 +622,14 @@ func inspectSingleModuleBenchmarkFixture(tb testing.TB, root, path, source strin
 			fixture.maxStatements = len(procedure.Statements)
 		}
 		fixture.calls += len(procedure.Calls)
+		for _, statement := range procedure.Statements {
+			if statement.Recovered || statement.Kind == procedureir.StatementRecovered {
+				fixture.recoveredStatements++
+			}
+			if statement.Kind == procedureir.StatementUnknown {
+				fixture.unknownStatements++
+			}
+		}
 	}
 	controlFlow := vbacfg.BuildDocument(ir)
 	for _, graph := range controlFlow.Graphs {
