@@ -2030,6 +2030,58 @@ spot was 13.503 s/op with 3,713 hits. The formal comparison against
 95% confidence testing, remains unverified until the serial `-count=10`
 collection is retained on the fixed benchmark host.
 
+### Analyzer state-allocation verification (#729)
+
+Issue #729 reduces procedure-local analyzer allocation pressure at the
+profile-backed branch and projection boundaries. Batch and realtime setup now
+materialize one immutable module array-variable catalog; procedure projections
+overlay only local declarations and accessed module scalars, while empty access
+projections retain the historical fail-open behavior. Dictionary/Collection,
+Application-state, and generic data-flow CFG states use copy-on-write map
+headers and clone nested facts only when a branch mutates them. VBA205 keeps
+project procedure visibility lazy instead of copying the complete project
+procedure map into every procedure's shadow set.
+
+The optimization is process-local and revision-local. It does not add disk or
+cross-process state, a user-facing performance option, or an additional worker
+pool. Existing deterministic append order and diagnostic identity, range,
+severity, evidence, multiplicity, suppression, JSON, LSP, cancellation, and
+batch/realtime paths remain the compatibility boundary. COW isolation is covered
+by focused tests for all three state families; recovered and unknown synthetic
+workloads are included in `BenchmarkSingleModuleSynthetic` alongside
+independent, declaration-heavy, call-chain, dense/cyclic, and CFG-heavy shapes.
+
+The retained Windows measurement command is:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count=10 -timeout=25m
+```
+
+`task bench:corpus-ronecone` runs the same ten-sample command. On 2026-08-26,
+Windows/amd64, 12th Gen Intel(R) Core(TM) i7-12700, Go 1.26.6, the command
+completed successfully in 550.449 s. Every cold sample reported 1,565
+procedures and 510 findings; edit scenarios also recorded the expected query
+miss/recompute and array fallback counters. A spot comparison against the
+pre-change baseline was approximately 9.1 s/op, 9.08 GB/op, 81.5 M allocs/op
+(cold) and 8.54 s/op, 7.06 GB/op, 66.7 M allocs/op (warm), versus approximately
+8.0 s/op, 6.9 GB/op, 66.6 M allocs/op (cold) and 7.5 s/op, 5.5 GB/op, 55.5 M
+allocs/op (warm) after #729. These are host observations, not CI thresholds;
+the retained ten-sample output and alloc-space/alloc-object/in-use heap and CPU
+profiles are required for a formal baseline comparison.
+
+Run the following read-only checks after changing the analyzer:
+
+```powershell
+rtk proxy task corpus:test
+rtk proxy task corpus:test
+rtk proxy task corpus:metrics
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze ./internal/vba/dataflow ./internal/lspserver -count=1 -timeout=30m
+```
+
+The benchmark and verification paths must not update corpus snapshots or
+`reviews/diagnostics.jsonl`; unexplained deltas remain a stop-and-investigate
+condition.
+
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`

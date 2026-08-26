@@ -90,8 +90,10 @@ type sqlObjectState struct {
 }
 
 type abstractState struct {
-	vars       map[string]value
-	sqlObjects map[string]sqlObjectState
+	vars             map[string]value
+	sqlObjects       map[string]sqlObjectState
+	varsShared       bool
+	sqlObjectsShared bool
 }
 
 type procedureAnalyzer struct {
@@ -323,7 +325,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 				continue
 			}
 			next := cloneState(out)
-			a.applyGuard(id, edge, next)
+			a.applyGuard(id, edge, &next)
 			merged, changed := joinState(inStates[edge.To], next, inStates[edge.To].vars != nil)
 			if !changed {
 				continue
@@ -430,6 +432,7 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 	recovered := statement.Recovered || statement.Kind == procedureir.StatementRecovered
 	if recovered {
 		if target := assignmentTarget(statement); target != "" {
+			state.ensureVars()
 			state.vars[target] = a.unknownValue(statement.Range, statement.ID, "recovered statement")
 		}
 	}
@@ -439,17 +442,18 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 			return abstractState{}, err
 		}
 		assigned = appendPath(assigned, PathStep{Kind: "assignment", Label: statement.Text, Range: statement.Range, StatementID: statement.ID})
+		state.ensureVars()
 		state.vars[target] = assigned
 	}
 	if !recovered {
-		a.applySQLAssignment(statement, state)
+		a.applySQLAssignment(statement, &state)
 	}
 	for _, call := range a.callsByStatement[statement.ID] {
 		if err := a.contextErr(); err != nil {
 			return abstractState{}, err
 		}
-		a.applySourceWrite(call, state)
-		a.applySQLCallState(call, state)
+		a.applySourceWrite(call, &state)
+		a.applySQLCallState(call, &state)
 		if collectFindings {
 			a.inspectSink(call, state)
 			a.inspectSQL(call, state)
@@ -466,7 +470,10 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 // to connect a CommandText assignment with a later Command.Execute call. It
 // deliberately does not attempt whole-project aliasing or interprocedural
 // propagation; those remain outside the procedure-local data-flow contract.
-func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, state abstractState) {
+func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, state *abstractState) {
+	if state == nil {
+		return
+	}
 	if state.sqlObjects == nil {
 		state.sqlObjects = map[string]sqlObjectState{}
 	}
@@ -481,8 +488,9 @@ func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, 
 				object.identity = receiver
 			}
 			if statement.Value != nil {
-				object.commandText = a.evalExpression(*statement.Value, state)
+				object.commandText = a.evalExpression(*statement.Value, *state)
 			}
+			state.ensureSQLObjects()
 			state.sqlObjects[receiver] = object
 			propagateSQLAlias(state, receiver, object)
 		}
@@ -502,6 +510,7 @@ func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, 
 		}
 	}
 	if kind := sqlObjectKindFromText(rhs); kind != sqlObjectUnknown {
+		state.ensureSQLObjects()
 		state.sqlObjects[target] = sqlObjectState{kind: kind, identity: target, parameters: map[string]value{}}
 		return
 	}
@@ -510,6 +519,7 @@ func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, 
 			if object.identity == "" {
 				object.identity = source
 			}
+			state.ensureSQLObjects()
 			state.sqlObjects[target] = cloneSQLObjectState(object)
 			return
 		}
@@ -523,11 +533,15 @@ func (a *procedureAnalyzer) applySQLAssignment(statement procedureir.Statement, 
 		if object.parameters == nil {
 			object.parameters = map[string]value{}
 		}
+		state.ensureSQLObjects()
 		state.sqlObjects[target] = object
 	}
 }
 
-func (a *procedureAnalyzer) applySQLCallState(call procedureir.CallSite, state abstractState) {
+func (a *procedureAnalyzer) applySQLCallState(call procedureir.CallSite, state *abstractState) {
+	if state == nil {
+		return
+	}
 	if state.sqlObjects == nil {
 		state.sqlObjects = map[string]sqlObjectState{}
 	}
@@ -551,8 +565,9 @@ func (a *procedureAnalyzer) applySQLCallState(call procedureir.CallSite, state a
 						object.identity = target
 					}
 					if expression, exists := a.expressions[valueID]; exists {
-						object.commandText = a.evalExpression(expression, state)
+						object.commandText = a.evalExpression(expression, *state)
 					}
+					state.ensureSQLObjects()
 					state.sqlObjects[target] = object
 					propagateSQLAlias(state, target, object)
 				}
@@ -570,7 +585,11 @@ func (a *procedureAnalyzer) applySQLCallState(call procedureir.CallSite, state a
 	}
 }
 
-func propagateSQLAlias(state abstractState, name string, object sqlObjectState) {
+func propagateSQLAlias(state *abstractState, name string, object sqlObjectState) {
+	if state == nil {
+		return
+	}
+	state.ensureSQLObjects()
 	for aliasName, alias := range state.sqlObjects {
 		if aliasName == name || alias.identity != object.identity {
 			continue
@@ -581,7 +600,10 @@ func propagateSQLAlias(state abstractState, name string, object sqlObjectState) 
 	}
 }
 
-func markSQLParameterized(state abstractState, command string) {
+func markSQLParameterized(state *abstractState, command string) {
+	if state == nil {
+		return
+	}
 	object, ok := state.sqlObjects[command]
 	if !ok {
 		return
@@ -590,6 +612,7 @@ func markSQLParameterized(state abstractState, command string) {
 	if object.identity == "" {
 		object.identity = command
 	}
+	state.ensureSQLObjects()
 	state.sqlObjects[command] = object
 	for aliasName, alias := range state.sqlObjects {
 		if aliasName == command || alias.identity != object.identity {
@@ -963,7 +986,10 @@ func localeSensitiveTypeName(typ string) bool {
 	return false
 }
 
-func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state abstractState) {
+func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state *abstractState) {
+	if state == nil {
+		return
+	}
 	kind, label, ok := sourceCall(call)
 	if !ok || kind != SourceFileInput || len(call.Arguments.ExpressionIDs) == 0 {
 		return
@@ -978,6 +1004,7 @@ func (a *procedureAnalyzer) applySourceWrite(call procedureir.CallSite, state ab
 		if !exists || expression.Kind != procedureir.ExpressionIdentifier {
 			continue
 		}
+		state.ensureVars()
 		state.vars[canonicalName(expression.Text)] = valueFromSource(Source{
 			Kind: kind, Label: label, Range: call.Range, StatementID: call.StatementID,
 		}, PathStep{Kind: "source", Label: call.Callee.Text, Range: call.Range, StatementID: call.StatementID})
@@ -1767,7 +1794,10 @@ func (a *procedureAnalyzer) unknownTransform(input value, expression procedureir
 	return result
 }
 
-func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state abstractState) {
+func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state *abstractState) {
+	if state == nil {
+		return
+	}
 	if edge.Kind != cfg.EdgeBranchTrue && edge.Kind != cfg.EdgeCase {
 		return
 	}
@@ -1779,7 +1809,9 @@ func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state ab
 	if edge.Kind == cfg.EdgeBranchTrue {
 		if variable, ok := exactEqualityVariable(statement.Text); ok {
 			validated := state.vars[variable]
+			validated = cloneValue(validated)
 			markSafe(&validated)
+			state.ensureVars()
 			state.vars[variable] = validated
 		}
 	}
@@ -1794,7 +1826,9 @@ func (a *procedureAnalyzer) applyGuard(from cfg.BlockID, edge cfg.Edge, state ab
 		}
 		if variable != "" && caseLiteral(caseBlock.Statement.Text) {
 			validated := state.vars[variable]
+			validated = cloneValue(validated)
 			markSafe(&validated)
+			state.ensureVars()
 			state.vars[variable] = validated
 		}
 	}
@@ -2098,6 +2132,7 @@ func joinState(a, b abstractState, initialized bool) (abstractState, bool) {
 		merged, _ := joinValue(left, right, true)
 		previous, hadPrevious := a.vars[key]
 		if !hadPrevious || !isSameValue(previous, merged) {
+			result.ensureVars()
 			result.vars[key] = merged
 			changed = true
 		}
@@ -2113,6 +2148,7 @@ func joinState(a, b abstractState, initialized bool) (abstractState, bool) {
 		left, leftOK := a.sqlObjects[key]
 		right, rightOK := b.sqlObjects[key]
 		if !leftOK {
+			result.ensureSQLObjects()
 			result.sqlObjects[key] = cloneSQLObjectState(right)
 			changed = true
 			continue
@@ -2122,6 +2158,7 @@ func joinState(a, b abstractState, initialized bool) (abstractState, bool) {
 		}
 		merged := joinSQLObjectState(left, right)
 		if !sameSQLObjectState(left, merged) {
+			result.ensureSQLObjects()
 			result.sqlObjects[key] = merged
 			changed = true
 		}
@@ -2134,22 +2171,54 @@ func unknownStandaloneValue() value {
 }
 
 func cloneState(state abstractState) abstractState {
-	result := abstractState{vars: map[string]value{}, sqlObjects: map[string]sqlObjectState{}}
-	for key, variable := range state.vars {
-		result.vars[key] = cloneValue(variable)
+	result := abstractState{
+		vars:             state.vars,
+		sqlObjects:       state.sqlObjects,
+		varsShared:       true,
+		sqlObjectsShared: true,
 	}
-	for key, object := range state.sqlObjects {
-		result.sqlObjects[key] = cloneSQLObjectState(object)
+	if result.vars == nil {
+		result.vars = map[string]value{}
+		result.varsShared = false
+	}
+	if result.sqlObjects == nil {
+		result.sqlObjects = map[string]sqlObjectState{}
+		result.sqlObjectsShared = false
 	}
 	return result
 }
 
+func (s *abstractState) ensureVars() {
+	if s == nil || !s.varsShared {
+		return
+	}
+	out := make(map[string]value, len(s.vars))
+	for key, variable := range s.vars {
+		out[key] = variable
+	}
+	s.vars = out
+	s.varsShared = false
+}
+
+func (s *abstractState) ensureSQLObjects() {
+	if s == nil || !s.sqlObjectsShared {
+		return
+	}
+	out := make(map[string]sqlObjectState, len(s.sqlObjects))
+	for key, object := range s.sqlObjects {
+		out[key] = object
+	}
+	s.sqlObjects = out
+	s.sqlObjectsShared = false
+}
+
 func cloneSQLObjectState(input sqlObjectState) sqlObjectState {
 	result := input
-	result.commandText = cloneValue(input.commandText)
-	result.parameters = map[string]value{}
-	for key, parameter := range input.parameters {
-		result.parameters[key] = cloneValue(parameter)
+	if input.parameters != nil {
+		result.parameters = make(map[string]value, len(input.parameters))
+		for key, parameter := range input.parameters {
+			result.parameters[key] = parameter
+		}
 	}
 	return result
 }

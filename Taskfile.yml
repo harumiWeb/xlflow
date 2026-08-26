@@ -195,11 +195,11 @@ tasks:
         platforms: [linux, darwin]
 
   bench:corpus-ronecone:
-    desc: Benchmark the single-project ROneCOne analyzer stress fixture
+    desc: Collect ten-sample ROneCOne analyzer stress-fixture measurements
     cmds:
-      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 2
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 10 -timeout=25m
         platforms: [windows]
-      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 2
+      - cmd: rtk go test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count 10 -timeout=25m
         platforms: [linux, darwin]
 
   bench:analyze:

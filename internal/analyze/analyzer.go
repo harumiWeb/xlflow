@@ -477,6 +477,11 @@ type parsedFile struct {
 	// Procedures. It is materialized once during batch/realtime file setup and
 	// reused by rule stages that solve array and object state.
 	ModuleDeclarations map[string]sourceDeclaration
+	// ArrayVariableCatalog is the immutable array-variable projection for
+	// module declarations. Procedure-local arrayVariables calls overlay their
+	// own declarations on this catalog instead of rescanning every module
+	// declaration for every procedure.
+	ArrayVariableCatalog map[string]arrayVariable
 	// ModuleFacts owns the immutable module declaration and procedure ownership
 	// indexes shared by all rule stages for this file revision.
 	ModuleFacts                 *moduleAnalysisFacts
@@ -799,6 +804,9 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 		procedures := sourceProceduresFromIRRef(&parsedFiles[i].IR, parsedFiles[i].CFG)
 		parsedFiles[i].Procedures = procedures
 		parsedFiles[i].ensureModuleAnalysisFacts()
+		if arrayAnalysisEnabled(analysis.Config.Analyze) {
+			parsedFiles[i].ArrayVariableCatalog = buildArrayVariableCatalog(parsedFiles[i], parsedFiles[i].moduleDecls())
+		}
 		parsedFiles[i].moduleFactsFingerprint = semanticModuleFactsFingerprint(parsedFiles[i])
 		materializeProcedureAnalysisPlans(&parsedFiles[i], projectEffects, analysis.Config.Analyze)
 		recordFactBuilds(ctx, len(procedures))
@@ -1816,10 +1824,11 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		file.moduleFactsFingerprint = semanticModuleFactsFingerprint(file)
 		materializeProcedureAnalysisPlans(&file, projectEffects, cfg.Analyze)
 		recordFactBuilds(ctx, len(procedures))
-		if cfg.Analyze.DetectArrayLifecycleSafety || cfg.Analyze.DetectRedimPreserveDimension || cfg.Analyze.DetectObjectArrayComparison || cfg.Analyze.DetectDeterministicRuntimeErrors {
+		if arrayAnalysisEnabled(cfg.Analyze) {
 			file.ArrayOptionBase = optionBase(lines)
 			file.ArrayOptionBaseSet = true
 			file.ArrayIntegerModuleConstants = arrayIntegerModuleConstants(file)
+			file.ArrayVariableCatalog = buildArrayVariableCatalog(file, file.moduleDecls())
 		}
 		if cfg.Analyze.DetectNonShortCircuitObjectGuard && len(projectEffects.AllDirect()) == 0 && vba212SourceMayHaveGetter(file) {
 			projectEffects = buildSingleFileProjectEffects(file)
@@ -3362,7 +3371,7 @@ func (a Analyzer) rangeFindFindings(file parsedFile, proc sourceProcedure, lineN
 	return findings
 }
 
-func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, shadowed map[string]bool) []Finding {
+func (a Analyzer) unqualifiedExcelFindings(file parsedFile, proc sourceProcedure, lineNo int, stmt string, shadowed vba205ShadowedIdentifiers) []Finding {
 	if vba205NonExecutableStatement(stmt) {
 		return nil
 	}
@@ -3424,41 +3433,61 @@ func vba205NonExecutableStatement(stmt string) bool {
 		strings.HasPrefix(lower, "declare ")
 }
 
-func vba205ShadowedIdentifiersWithFacts(proc sourceProcedure, decls declarationScope, ctx analysisContext, facts *moduleAnalysisFacts) map[string]bool {
-	shadowed := make(map[string]bool, decls.len()+proc.Accesses.Len()+proc.Declarations.Len()+len(ctx.procedures))
-	decls.forEach(func(name string, _ sourceDeclaration) {
-		shadowed[strings.ToLower(name)] = true
-	})
+type vba205ShadowedIdentifiers struct {
+	decls      declarationScope
+	local      map[string]struct{}
+	procedures map[string]procedureSignature
+	resolver   procedureir.Resolver
+	proc       sourceProcedure
+	facts      *moduleAnalysisFacts
+}
+
+func vba205ShadowedIdentifiersWithFacts(proc sourceProcedure, decls declarationScope, ctx analysisContext, facts *moduleAnalysisFacts) vba205ShadowedIdentifiers {
+	shadowed := vba205ShadowedIdentifiers{
+		decls:      decls,
+		local:      make(map[string]struct{}, proc.Accesses.Len()+proc.Declarations.Len()),
+		procedures: ctx.procedures,
+		resolver:   ctx.procedureResolver,
+		proc:       proc,
+		facts:      facts,
+	}
 	for declaration := range proc.Declarations.All() {
 		switch declaration.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
-			shadowed[strings.ToLower(declaration.Name)] = true
+			shadowed.local[strings.ToLower(declaration.Name)] = struct{}{}
 		}
 	}
 	for access := range proc.Accesses.All() {
 		switch access.Scope {
 		case procedureir.ScopeParameter, procedureir.ScopeLocal, procedureir.ScopeModule, procedureir.ScopeProject:
-			shadowed[strings.ToLower(access.Name)] = true
-		}
-	}
-	for name := range ctx.procedures {
-		if strings.Contains(name, ".") {
-			continue
-		}
-		// A procedure declared in the caller's own module is always visible to
-		// unqualified VBA calls (including Private procedures). The immutable
-		// module index avoids resolving the same local name through the full
-		// project resolver for every procedure and preserves the resolver path
-		// for cross-module visibility and ambiguity decisions.
-		if facts != nil && facts.hasProcedure(name) {
-			shadowed[name] = true
-			continue
-		}
-		if vba205ProcedureVisibleFrom(ctx.procedureResolver, proc, name) {
-			shadowed[name] = true
+			shadowed.local[strings.ToLower(access.Name)] = struct{}{}
 		}
 	}
 	return shadowed
+}
+
+func (shadowed vba205ShadowedIdentifiers) contains(name string) bool {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if key == "" {
+		return false
+	}
+	if _, ok := shadowed.local[key]; ok {
+		return true
+	}
+	if _, ok := shadowed.decls.lookup(key); ok {
+		return true
+	}
+	// A procedure declared in the caller's own module is always visible to
+	// unqualified VBA calls (including Private procedures). Resolve only the
+	// candidate root seen by the source scanner instead of copying every
+	// project procedure into every procedure's shadow set.
+	if shadowed.facts != nil && shadowed.facts.hasProcedure(key) {
+		return true
+	}
+	if _, ok := shadowed.procedures[key]; ok {
+		return vba205ProcedureVisibleFrom(shadowed.resolver, shadowed.proc, key)
+	}
+	return false
 }
 
 func vba205ProcedureVisibleFrom(resolver procedureir.Resolver, proc sourceProcedure, name string) bool {
@@ -3472,7 +3501,7 @@ func vba205ProcedureVisibleFrom(resolver procedureir.Resolver, proc sourceProced
 	return resolution.Status == procedureir.ResolutionMatched || resolution.Status == procedureir.ResolutionAmbiguous
 }
 
-func vba205QualifiedOrShadowedRoot(match, name string, shadowed map[string]bool) bool {
+func vba205QualifiedOrShadowedRoot(match, name string, shadowed vba205ShadowedIdentifiers) bool {
 	lowerMatch := strings.ToLower(match)
 	if strings.Contains(lowerMatch, "application.") {
 		return false
@@ -3481,7 +3510,7 @@ func vba205QualifiedOrShadowedRoot(match, name string, shadowed map[string]bool)
 	if dot := strings.IndexByte(rootName, '.'); dot >= 0 {
 		rootName = rootName[:dot]
 	}
-	return shadowed[rootName]
+	return shadowed.contains(rootName)
 }
 
 func addInStandardModule(cfg config.Config, file parsedFile) bool {
@@ -3736,9 +3765,12 @@ type applicationStateSnapshot struct {
 }
 
 type applicationStateFlow struct {
-	Dirty          map[int]bool
-	Saved          map[string]applicationStateSnapshot
-	ViaExceptional bool
+	Dirty              map[int]bool
+	Saved              map[string]applicationStateSnapshot
+	ViaExceptional     bool
+	dirtyShared        bool
+	savedShared        bool
+	snapshotMapsShared bool
 }
 
 type applicationStateExitWitness struct {
@@ -3887,14 +3919,74 @@ func newApplicationStateFlow() applicationStateFlow {
 }
 
 func cloneApplicationStateFlow(in applicationStateFlow) applicationStateFlow {
-	out := newApplicationStateFlow()
-	for origin := range in.Dirty {
-		out.Dirty[origin] = true
+	// CFG edges fork this state frequently. Share the map headers and defer
+	// copying until a branch actually changes one of the maps. Snapshot maps
+	// are treated as shared as well because Saved values can alias one another.
+	out := applicationStateFlow{
+		Dirty:              in.Dirty,
+		Saved:              in.Saved,
+		ViaExceptional:     in.ViaExceptional,
+		dirtyShared:        true,
+		savedShared:        true,
+		snapshotMapsShared: true,
 	}
-	for key, snapshot := range in.Saved {
-		out.Saved[key] = cloneApplicationStateSnapshot(snapshot)
+	if out.Dirty == nil {
+		out.Dirty = map[int]bool{}
+		out.dirtyShared = false
 	}
-	out.ViaExceptional = in.ViaExceptional
+	if out.Saved == nil {
+		out.Saved = map[string]applicationStateSnapshot{}
+		out.savedShared = false
+	}
+	return out
+}
+
+func (s *applicationStateFlow) ensureDirty() {
+	if s == nil || !s.dirtyShared {
+		return
+	}
+	out := make(map[int]bool, len(s.Dirty))
+	for origin := range s.Dirty {
+		out[origin] = true
+	}
+	s.Dirty = out
+	s.dirtyShared = false
+}
+
+func (s *applicationStateFlow) ensureSaved() {
+	if s == nil || !s.savedShared {
+		return
+	}
+	out := make(map[string]applicationStateSnapshot, len(s.Saved))
+	for key, snapshot := range s.Saved {
+		out[key] = snapshot
+	}
+	s.Saved = out
+	s.savedShared = false
+}
+
+func (s *applicationStateFlow) mutableSavedSnapshot(key string) (applicationStateSnapshot, bool) {
+	if s == nil {
+		return applicationStateSnapshot{}, false
+	}
+	s.ensureSaved()
+	snapshot, exists := s.Saved[key]
+	if !exists {
+		return applicationStateSnapshot{}, false
+	}
+	if s.snapshotMapsShared {
+		snapshot.Dirty = cloneIntBoolSet(snapshot.Dirty)
+		snapshot.Restores = cloneIntBoolSet(snapshot.Restores)
+		snapshot.GuardedBy = cloneIntBoolSet(snapshot.GuardedBy)
+	}
+	return snapshot, true
+}
+
+func cloneIntBoolSet(in map[int]bool) map[int]bool {
+	out := make(map[int]bool, len(in))
+	for key := range in {
+		out[key] = true
+	}
 	return out
 }
 
@@ -3925,6 +4017,7 @@ func mergeApplicationStateFlow(current, incoming applicationStateFlow) (applicat
 	changed := false
 	for origin := range incoming.Dirty {
 		if !next.Dirty[origin] {
+			next.ensureDirty()
 			next.Dirty[origin] = true
 			changed = true
 		}
@@ -3973,6 +4066,7 @@ func mergeApplicationStateFlow(current, incoming applicationStateFlow) (applicat
 			}
 		}
 		if !applicationStateSnapshotEqual(current.Saved[key], merged) {
+			next.ensureSaved()
 			next.Saved[key] = merged
 			changed = true
 		}
@@ -4009,15 +4103,20 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 	if assignedProperty, value, isPropertyWrite := applicationPropertyAssignment(statement, facts); isPropertyWrite && assignedProperty == property {
 		if applicationStateSavedRestore(proc, state, statement, property, facts) {
 			variable, _ := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead)
-			state.Dirty = cloneApplicationStateSnapshot(state.Saved[variable]).Dirty
+			state.Dirty = cloneIntBoolSet(state.Saved[variable].Dirty)
+			state.dirtyShared = false
 			return state
 		}
 		if variable, ok := applicationStateVariable(proc, statement.ID, value, procedureir.AccessRead); ok {
 			if saved, exists := state.Saved[variable]; exists {
+				if len(saved.Restores) > 0 {
+					state.ensureDirty()
+				}
 				for origin := range saved.Restores {
 					delete(state.Dirty, origin)
 				}
 				if applicationStateMatchingGuard(proc, saved, statement, facts) {
+					state.ensureDirty()
 					for origin := range saved.Dirty {
 						state.Dirty[origin] = true
 					}
@@ -4031,13 +4130,16 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 			// Loop backedges can revisit this assignment after its origin was saved;
 			// an origin must never be recorded as restoring itself.
 			if !saved.Unknown && !saved.Dirty[statement.ID] {
+				saved, _ = state.mutableSavedSnapshot(key)
 				if saved.Restores == nil {
 					saved.Restores = map[int]bool{}
 				}
 				saved.Restores[statement.ID] = true
+				state.ensureSaved()
 				state.Saved[key] = saved
 			}
 		}
+		state.ensureDirty()
 		state.Dirty[statement.ID] = true
 		return state
 	}
@@ -4046,8 +4148,9 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 		return state
 	}
 	if isApplicationPropertyReference(statement.Value, statement, facts, property) {
+		state.ensureSaved()
 		state.Saved[variable] = applicationStateSnapshot{
-			Dirty:     cloneApplicationStateFlow(state).Dirty,
+			Dirty:     cloneIntBoolSet(state.Dirty),
 			Restores:  map[int]bool{},
 			GuardedBy: applicationStateDirectGuard(statement, facts),
 		}
@@ -4055,10 +4158,13 @@ func applyApplicationStateStatement(proc sourceProcedure, state applicationState
 	}
 	if source, ok := applicationStateVariable(proc, statement.ID, expressionText(statement.Value), procedureir.AccessRead); ok {
 		if saved, exists := state.Saved[source]; exists {
-			state.Saved[variable] = cloneApplicationStateSnapshot(saved)
+			state.ensureSaved()
+			state.Saved[variable] = saved
+			state.snapshotMapsShared = true
 			return state
 		}
 	}
+	state.ensureSaved()
 	state.Saved[variable] = applicationStateSnapshot{Dirty: map[int]bool{}, Restores: map[int]bool{}, GuardedBy: map[int]bool{}, Unknown: true}
 	return state
 }
@@ -4101,8 +4207,12 @@ func applyApplicationStateExceptionalRestore(proc sourceProcedure, state applica
 		return state
 	}
 	if applicationStateMatchingGuard(proc, saved, statement, facts) {
-		state.Dirty = cloneApplicationStateSnapshot(saved).Dirty
+		state.Dirty = cloneIntBoolSet(saved.Dirty)
+		state.dirtyShared = false
 		return state
+	}
+	if len(saved.Restores) > 0 {
+		state.ensureDirty()
 	}
 	for origin := range saved.Restores {
 		delete(state.Dirty, origin)

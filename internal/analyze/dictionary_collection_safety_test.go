@@ -218,6 +218,41 @@ func TestDictionaryCollectionOverlayPreservesFlowContentFacts(t *testing.T) {
 	}
 }
 
+func TestDCFlowStateCloneCopiesMapsOnWrite(t *testing.T) {
+	original := &dcFlowState{
+		Bindings: map[string]string{"dict": "object"},
+		Objects: map[string]dcObjectState{
+			"object": {Kind: dcDictionary, Keys: map[string]int{"existing|": 1}, Normalizations: map[string]string{}},
+		},
+		Scalars: map[string]dcKeyExpr{"key": {Base: "key"}},
+	}
+	branch := original.clone()
+	branch.setBinding("alias", "object")
+	object, ok := branch.mutableObject("object", true)
+	if !ok {
+		t.Fatal("cloned object was not available")
+	}
+	object.Keys["branch|new"] = 1
+	branch.setObject("object", object)
+	branch.ensureScalars()
+	branch.Scalars["branch"] = dcKeyExpr{Base: "branch"}
+
+	if _, ok := original.Bindings["alias"]; ok {
+		t.Fatal("binding write leaked from cloned flow state")
+	}
+	if _, ok := original.Objects["object"].Keys["branch|new"]; ok {
+		t.Fatal("nested object write leaked from cloned flow state")
+	}
+	if _, ok := original.Scalars["branch"]; ok {
+		t.Fatal("scalar write leaked from cloned flow state")
+	}
+
+	original.setBinding("original", "object")
+	if _, ok := branch.Bindings["original"]; ok {
+		t.Fatal("write to original flow state leaked into cloned state")
+	}
+}
+
 func TestVBA207DoesNotInferFactsFromCompoundExistsCondition(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

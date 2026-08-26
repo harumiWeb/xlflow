@@ -39,9 +39,13 @@ type dcKeyExpr struct {
 }
 
 type dcFlowState struct {
-	Bindings map[string]string
-	Objects  map[string]dcObjectState
-	Scalars  map[string]dcKeyExpr
+	Bindings         map[string]string
+	Objects          map[string]dcObjectState
+	Scalars          map[string]dcKeyExpr
+	bindingsShared   bool
+	objectsShared    bool
+	objectMapsShared bool
+	scalarsShared    bool
 }
 
 type dcHelperEffect struct {
@@ -393,19 +397,22 @@ func dcOverlayState(flow, linear *dcFlowState) *dcFlowState {
 	out := flow.clone()
 	for key, id := range linear.Bindings {
 		if _, exists := out.Bindings[key]; !exists {
+			out.ensureBindings()
 			out.Bindings[key] = id
 		}
 		if object, ok := linear.Objects[id]; ok {
 			if flowObject, exists := out.Objects[id]; exists {
 				object.Empty = flowObject.Empty
-				object.Keys = dcCloneIntMap(flowObject.Keys)
-				object.Normalizations = dcCloneStringMap(flowObject.Normalizations)
+				object.Keys = flowObject.Keys
+				object.Normalizations = flowObject.Normalizations
 			}
+			out.ensureObjects()
 			out.Objects[id] = object
 		}
 	}
 	for key, value := range linear.Scalars {
 		if _, exists := out.Scalars[key]; !exists {
+			out.ensureScalars()
 			out.Scalars[key] = value
 		}
 	}
@@ -487,32 +494,33 @@ func (a Analyzer) dcTransfer(file parsedFile, proc sourceProcedure, statement pr
 		target := strings.ToLower(assignment.target)
 		if kind, late, ok := dcConstruction(assignment.rhs); ok {
 			id := "construct:" + strings.ToLower(file.Path) + ":" + strconv.Itoa(statement.ID) + ":" + target
-			state.Bindings[target] = id
-			state.Objects[id] = dcObjectState{Kind: kind, LateBound: late, Empty: 1, CompareMode: dcDefaultCompareMode(kind, true), Keys: map[string]int{}, Normalizations: map[string]string{}}
+			state.setBinding(target, id)
+			state.setObject(id, dcObjectState{Kind: kind, LateBound: late, Empty: 1, CompareMode: dcDefaultCompareMode(kind, true), Keys: map[string]int{}, Normalizations: map[string]string{}})
 			return
 		}
 		if source := strings.ToLower(cleanIdentifier(assignment.rhs)); state.Bindings[source] != "" && dcBareIdentifier(assignment.rhs) {
-			state.Bindings[target] = state.Bindings[source]
+			state.setBinding(target, state.Bindings[source])
 			return
 		}
 		if name, args, ok := dcSimpleFunctionCall(assignment.rhs); ok {
 			if summary, found := a.dcHelper(name); found && summary.Factory != dcUnknown {
 				id := "factory:" + strings.ToLower(file.Path) + ":" + strconv.Itoa(statement.ID) + ":" + target
-				state.Bindings[target] = id
-				state.Objects[id] = dcObjectState{Kind: summary.Factory, LateBound: summary.FactoryLate, Empty: 1, CompareMode: dcDefaultCompareMode(summary.Factory, true), Keys: map[string]int{}, Normalizations: map[string]string{}}
+				state.setBinding(target, id)
+				state.setObject(id, dcObjectState{Kind: summary.Factory, LateBound: summary.FactoryLate, Empty: 1, CompareMode: dcDefaultCompareMode(summary.Factory, true), Keys: map[string]int{}, Normalizations: map[string]string{}})
 				a.dcApplyHelperEffects(summary, args, state)
 				return
 			}
 		}
-		delete(state.Bindings, target)
+		state.deleteBinding(target)
 		return
 	}
 	if assignment := dcValueAssignment(text); assignment != nil {
 		key := strings.ToLower(assignment.target)
 		if expr, ok := dcParseKeyExpr(assignment.rhs, state.Scalars); ok {
+			state.ensureScalars()
 			state.Scalars[key] = expr
 		} else {
-			delete(state.Scalars, key)
+			state.deleteScalar(key)
 		}
 	}
 	if receiver, member, args, ok := dcMemberCall(text); ok {
@@ -520,15 +528,14 @@ func (a Analyzer) dcTransfer(file parsedFile, proc sourceProcedure, statement pr
 	}
 	if receiver, keyText, ok := dcDefaultAssignment(text); ok {
 		if id := state.Bindings[strings.ToLower(receiver)]; id != "" {
-			object := state.Objects[id]
-			if object.Kind == dcDictionary {
+			if object, exists := state.mutableObject(id, true); exists && object.Kind == dcDictionary {
 				expr, parsed := dcParseKeyExpr(keyText, state.Scalars)
 				if parsed {
 					object.Keys[dcKeyIdentity(expr)] = 1
 					dcObserveNormalization(&object, expr)
 				}
 				object.Empty = -1
-				state.Objects[id] = object
+				state.setObject(id, object)
 			}
 		}
 	}
@@ -541,11 +548,14 @@ func (a Analyzer) dcTransfer(file parsedFile, proc sourceProcedure, statement pr
 		}
 		for _, arg := range args {
 			if id := state.Bindings[strings.ToLower(cleanIdentifier(arg))]; id != "" && dcBareIdentifier(arg) {
-				object := state.Objects[id]
+				object, exists := state.mutableObject(id, true)
+				if !exists {
+					continue
+				}
 				object.Empty, object.CompareMode = 0, ""
 				object.Keys = map[string]int{}
 				object.Normalizations = map[string]string{}
-				state.Objects[id] = object
+				state.setObject(id, object)
 			}
 		}
 	}
@@ -556,7 +566,11 @@ func (a Analyzer) dcApplyMember(receiver, member string, args []string, state *d
 	if id == "" {
 		return
 	}
-	object := state.Objects[id]
+	cloneMaps := member == "add" || member == "remove"
+	object, exists := state.mutableObject(id, cloneMaps)
+	if !exists {
+		return
+	}
 	switch member {
 	case "add":
 		keyArg := 0
@@ -586,7 +600,7 @@ func (a Analyzer) dcApplyMember(receiver, member string, args []string, state *d
 			object.CompareMode = dcCompareMode(args[0])
 		}
 	}
-	state.Objects[id] = object
+	state.setObject(id, object)
 }
 
 func (a Analyzer) dcApplyHelperEffects(summary dcHelperSummary, args []string, state *dcFlowState) {
@@ -599,7 +613,11 @@ func (a Analyzer) dcApplyHelperEffects(summary dcHelperSummary, args []string, s
 		if id == "" || !dcBareIdentifier(args[effect.Param]) {
 			continue
 		}
-		object := state.Objects[id]
+		cloneMaps := effect.Member == "add" || effect.Member == "remove"
+		object, exists := state.mutableObject(id, cloneMaps)
+		if !exists {
+			continue
+		}
 		switch effect.Member {
 		case "add":
 			object.Empty = -1
@@ -623,7 +641,7 @@ func (a Analyzer) dcApplyHelperEffects(summary dcHelperSummary, args []string, s
 		case "comparemode":
 			object.CompareMode = ""
 		}
-		state.Objects[id] = object
+		state.setObject(id, object)
 	}
 }
 
@@ -659,7 +677,10 @@ func (a Analyzer) dcApplyGuard(statement procedureir.Statement, edge vbacfg.Edge
 	if id == "" {
 		return
 	}
-	object := state.Objects[id]
+	object, exists := state.mutableObject(id, true)
+	if !exists {
+		return
+	}
 	expr, parsed := dcParseKeyExpr(keyText, state.Scalars)
 	if !parsed {
 		return
@@ -670,7 +691,7 @@ func (a Analyzer) dcApplyGuard(statement procedureir.Statement, edge vbacfg.Edge
 	} else {
 		object.Keys[dcKeyIdentity(expr)] = -1
 	}
-	state.Objects[id] = object
+	state.setObject(id, object)
 }
 
 func (a Analyzer) dcStatementFindings(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state *dcFlowState, loops []excelLoopRegion, narrow map[int]bool, constFacts *moduleAnalysisFacts, constNames map[string]bool, seen map[string]bool) []Finding {
@@ -890,19 +911,105 @@ func (s *dcFlowState) clone() *dcFlowState {
 	if s == nil {
 		return nil
 	}
-	out := &dcFlowState{Bindings: map[string]string{}, Objects: map[string]dcObjectState{}, Scalars: map[string]dcKeyExpr{}}
+	// Flow states are forked for every CFG edge. Keep the immutable map
+	// headers shared and copy only the map touched by the forked state.
+	s.bindingsShared = true
+	s.objectsShared = true
+	s.objectMapsShared = true
+	s.scalarsShared = true
+	return &dcFlowState{
+		Bindings:         s.Bindings,
+		Objects:          s.Objects,
+		Scalars:          s.Scalars,
+		bindingsShared:   true,
+		objectsShared:    true,
+		objectMapsShared: true,
+		scalarsShared:    true,
+	}
+}
+
+func (s *dcFlowState) ensureBindings() {
+	if s == nil || !s.bindingsShared {
+		return
+	}
+	out := make(map[string]string, len(s.Bindings))
 	for key, value := range s.Bindings {
-		out.Bindings[key] = value
+		out[key] = value
 	}
+	s.Bindings = out
+	s.bindingsShared = false
+}
+
+func (s *dcFlowState) ensureObjects() {
+	if s == nil || !s.objectsShared {
+		return
+	}
+	out := make(map[string]dcObjectState, len(s.Objects))
 	for key, value := range s.Objects {
-		value.Keys = dcCloneIntMap(value.Keys)
-		value.Normalizations = dcCloneStringMap(value.Normalizations)
-		out.Objects[key] = value
+		out[key] = value
 	}
+	s.Objects = out
+	s.objectsShared = false
+}
+
+func (s *dcFlowState) ensureScalars() {
+	if s == nil || !s.scalarsShared {
+		return
+	}
+	out := make(map[string]dcKeyExpr, len(s.Scalars))
 	for key, value := range s.Scalars {
-		out.Scalars[key] = value
+		out[key] = value
 	}
-	return out
+	s.Scalars = out
+	s.scalarsShared = false
+}
+
+func (s *dcFlowState) setBinding(key, value string) {
+	s.ensureBindings()
+	s.Bindings[key] = value
+}
+
+func (s *dcFlowState) deleteBinding(key string) {
+	if s == nil {
+		return
+	}
+	if _, exists := s.Bindings[key]; !exists {
+		return
+	}
+	s.ensureBindings()
+	delete(s.Bindings, key)
+}
+
+func (s *dcFlowState) deleteScalar(key string) {
+	if s == nil {
+		return
+	}
+	if _, exists := s.Scalars[key]; !exists {
+		return
+	}
+	s.ensureScalars()
+	delete(s.Scalars, key)
+}
+
+func (s *dcFlowState) setObject(id string, object dcObjectState) {
+	s.ensureObjects()
+	s.Objects[id] = object
+}
+
+func (s *dcFlowState) mutableObject(id string, cloneMaps bool) (dcObjectState, bool) {
+	if s == nil {
+		return dcObjectState{}, false
+	}
+	s.ensureObjects()
+	object, exists := s.Objects[id]
+	if !exists {
+		return dcObjectState{}, false
+	}
+	if cloneMaps && s.objectMapsShared {
+		object.Keys = dcCloneIntMap(object.Keys)
+		object.Normalizations = dcCloneStringMap(object.Normalizations)
+	}
+	return object, true
 }
 
 func dcMergeState(current, incoming *dcFlowState) (*dcFlowState, bool) {

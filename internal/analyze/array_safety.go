@@ -5320,29 +5320,81 @@ func arrayVariables(file parsedFile, proc sourceProcedure, moduleDecls map[strin
 			Object:     isObjectType(param.Type), Parameter: true, ParamArray: param.ParamArray,
 		}
 	}
-	variables := map[string]arrayVariable{}
-	decls.forEach(func(key string, decl sourceDeclaration) {
-		typeName := strings.TrimSpace(decl.Type)
-		// VBA declarations without an As clause are implicit Variant values.
-		// Treat them exactly like an explicit Variant so array-sensitive rules
-		// do not turn an unresolved value into a false scalar proof.
-		isVariant := typeName == "" || strings.EqualFold(typeName, "Variant")
-		variable := arrayVariable{name: decl.Name, typ: decl.Type, isArray: decl.Array, isVariant: isVariant, isObject: decl.Object, knownScalar: !isVariant && arrayKnownScalarType(typeName), parameter: decl.Parameter, static: decl.Static, paramArray: decl.ParamArray}
-		if decl.Array {
-			variable.dimensions, variable.fixed = declarationDimensions(file.Lines, decl.Line, decl.Name, base)
-			if len(decl.Dimensions) > 0 {
-				variable.dimensions = append([]arrayDimension(nil), decl.Dimensions...)
-			}
-			if decl.Fixed {
-				variable.fixed = true
-			}
-			if len(variable.dimensions) > 0 {
-				variable.fixed = true
+	catalog := file.ArrayVariableCatalog
+	if catalog == nil {
+		catalog = buildArrayVariableCatalog(file, moduleDecls)
+	}
+	usedModuleNames := make(map[string]struct{}, proc.Accesses.Len())
+	for access := range proc.Accesses.All() {
+		if name := strings.ToLower(strings.TrimSpace(access.Name)); name != "" {
+			usedModuleNames[name] = struct{}{}
+		}
+	}
+	// An empty access projection can mean a genuinely independent procedure,
+	// but it can also be the only reliable view left after parser recovery or
+	// an incomplete IR build. Preserve the historical fail-open behavior for
+	// that boundary instead of silently dropping module scalars from array
+	// classification.
+	includeAllModule := proc.Accesses.Len() == 0
+	moduleCapacity := len(usedModuleNames)
+	for _, variable := range catalog {
+		if includeAllModule || variable.isArray {
+			moduleCapacity++
+		}
+	}
+	variables := make(map[string]arrayVariable, moduleCapacity+len(decls.extra)+len(decls.local)+len(decls.parameters))
+	for key, variable := range catalog {
+		if !includeAllModule && !variable.isArray {
+			if _, used := usedModuleNames[key]; !used {
+				continue
 			}
 		}
 		variables[key] = variable
-	})
+	}
+	// Module declarations are immutable and already normalized in catalog.
+	// Only the procedure overlays need to be materialized here. Overlay order
+	// matches declarationScope.forEach: IR extras, source locals, parameters.
+	for key, decl := range decls.extra {
+		variables[key] = newArrayVariable(file, decl, base)
+	}
+	for key, decl := range decls.local {
+		variables[key] = newArrayVariable(file, decl, base)
+	}
+	for key, decl := range decls.parameters {
+		variables[key] = newArrayVariable(file, decl, base)
+	}
 	return variables
+}
+
+func buildArrayVariableCatalog(file parsedFile, moduleDecls map[string]sourceDeclaration) map[string]arrayVariable {
+	variables := make(map[string]arrayVariable, len(moduleDecls))
+	base := arrayOptionBase(file)
+	for key, decl := range moduleDecls {
+		variables[key] = newArrayVariable(file, decl, base)
+	}
+	return variables
+}
+
+func newArrayVariable(file parsedFile, decl sourceDeclaration, base int) arrayVariable {
+	typeName := strings.TrimSpace(decl.Type)
+	// VBA declarations without an As clause are implicit Variant values.
+	// Treat them exactly like an explicit Variant so array-sensitive rules
+	// do not turn an unresolved value into a false scalar proof.
+	isVariant := typeName == "" || strings.EqualFold(typeName, "Variant")
+	variable := arrayVariable{name: decl.Name, typ: decl.Type, isArray: decl.Array, isVariant: isVariant, isObject: decl.Object, knownScalar: !isVariant && arrayKnownScalarType(typeName), parameter: decl.Parameter, static: decl.Static, paramArray: decl.ParamArray}
+	if decl.Array {
+		variable.dimensions, variable.fixed = declarationDimensions(file.Lines, decl.Line, decl.Name, base)
+		if len(decl.Dimensions) > 0 {
+			variable.dimensions = append([]arrayDimension(nil), decl.Dimensions...)
+		}
+		if decl.Fixed {
+			variable.fixed = true
+		}
+		if len(variable.dimensions) > 0 {
+			variable.fixed = true
+		}
+	}
+	return variable
 }
 
 // arrayVBA227Variables overlays the narrow declaration facts needed by the
