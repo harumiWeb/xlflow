@@ -26,11 +26,25 @@ type projectDependencyView struct {
 // between two coherent snapshots. Both old and new reverse edges participate,
 // so removing or redirecting a call still refreshes the former callers.
 func projectImpactPaths(before, after intel.ProjectAnalysisSnapshot) []string {
+	return projectImpactPathsWithPerformance(before, after, nil)
+}
+
+func projectImpactPathsWithPerformance(before, after intel.ProjectAnalysisSnapshot, performance *performanceRecorder) []string {
+	return projectImpactPathsWithPerformanceClass(before, after, performance, "background")
+}
+
+func projectImpactPathsWithPerformanceClass(before, after intel.ProjectAnalysisSnapshot, performance *performanceRecorder, class string) []string {
 	if !before.Complete || !after.Complete {
 		return nil
 	}
-	oldView := buildProjectDependencyView(before)
-	newView := buildProjectDependencyView(after)
+	var oldView, newView projectDependencyView
+	if performance == nil {
+		oldView = buildProjectDependencyView(before)
+		newView = buildProjectDependencyView(after)
+	} else {
+		oldView = buildProjectDependencyViewWithPerformanceClass(before, performance, class)
+		newView = buildProjectDependencyViewWithPerformanceClass(after, performance, class)
+	}
 	changed := make(map[string]bool)
 	for key, old := range oldView.procedures {
 		if current, ok := newView.procedures[key]; !ok || current.fingerprint != old.fingerprint {
@@ -83,9 +97,14 @@ func projectImpactPaths(before, after intel.ProjectAnalysisSnapshot) []string {
 }
 
 func buildProjectDependencyView(snapshot intel.ProjectAnalysisSnapshot) projectDependencyView {
+	return buildProjectDependencyViewWithPerformanceClass(snapshot, nil, "background")
+}
+
+func buildProjectDependencyViewWithPerformanceClass(snapshot intel.ProjectAnalysisSnapshot, performance *performanceRecorder, class string) projectDependencyView {
 	view := projectDependencyView{procedures: make(map[string]projectProcedureState), reverse: make(map[string][]string)}
 	for _, document := range snapshot.Documents {
 		for _, procedure := range document.IR.Procedures {
+			performance.addCounter(performanceCounterProcedureFingerprintBuilds, 1, "workspace/project", performanceStageDependencyUpdate, class, document.IR.Path)
 			key := projectProcedureKey(document.IR.Path, procedure.Symbol.QualifiedName, string(procedure.Symbol.Kind), procedure.Symbol.DeclarationRange.StartLine)
 			encoded, _ := json.Marshal(procedure)
 			sum := sha256.Sum256(encoded)

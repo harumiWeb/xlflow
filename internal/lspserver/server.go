@@ -76,6 +76,7 @@ type Server struct {
 	handler                   protocol.Handler
 	docs                      *documents
 	logger                    *log.Logger
+	performance               *performanceRecorder
 	analysis                  *workspaceAnalysisIndex
 	semanticTokens            *semanticTokenCache
 	semanticTokenGenerator    func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
@@ -89,6 +90,9 @@ type Server struct {
 	diagnosticsFullIdleDelay  time.Duration
 	diagnosticsAfterFunc      func(time.Duration, func()) diagnosticTimer
 	beforeDiagnosticsPublish  func()
+	// performanceHook is an internal deterministic benchmark hook. It is never
+	// set by production construction and therefore has no runtime cost there.
+	performanceHook func(stage, path string)
 
 	diagMu              sync.Mutex
 	diagStates          map[string]*diagnosticState
@@ -215,6 +219,7 @@ func New(opts Options) (*Server, func(), error) {
 		},
 		docs:                      docs,
 		logger:                    logger,
+		performance:               newPerformanceRecorder(opts.PerformanceLog, logger),
 		semanticTokens:            newSemanticTokenCache(),
 		codeLensConfig:            intel.DefaultCodeLensConfig(),
 		diagStates:                make(map[string]*diagnosticState),
@@ -432,6 +437,7 @@ func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) eff
 
 func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, resolved map[string]procedureir.DocumentIR, complete bool) effects.ProjectSummary {
 	return s.projectSummaryCache.getOrBuild(project.Revision, complete, func() effects.ProjectSummary {
+		measurement := s.performance.start("project/preparation", performanceStageProjectEffects, "interactive", "")
 		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityEffectsBuildsCounter)
 		documents := make([]effects.Document, len(project.Documents))
 		for i, document := range project.Documents {
@@ -443,6 +449,7 @@ func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project
 		}
 		summary := effects.Build(documents)
 		finishCapability(nil)
+		measurement.finish(summary.ProcedureCount(), 0, nil)
 		return summary
 	})
 }
@@ -463,10 +470,13 @@ func initializeCapabilityTelemetry(ctx context.Context) {
 
 func (s *Server) projectConstants(project intel.ProjectAnalysisSnapshot, complete bool, typeDB *vbadb.DB) projectConstantsResult {
 	return s.projectConstantsCache.getOrBuild(project.Revision, complete, func() projectConstantsResult {
-		return projectConstantsResult{
+		measurement := s.performance.start("project/preparation", performanceStageProjectConstants, "interactive", "")
+		result := projectConstantsResult{
 			visible: projectVisibleConstants(project, typeDB),
 			values:  projectConstantValues(project, typeDB),
 		}
+		measurement.finish(len(result.visible)+len(result.values), 0, nil)
+		return result
 	})
 }
 
@@ -1735,13 +1745,12 @@ func (s *Server) runDocumentAnalysis(
 	mode intel.DiagnosticMode,
 ) {
 	defer s.diagWorkers.Done()
-	select {
-	case s.analysisPermits <- struct{}{}:
-		defer func() { <-s.analysisPermits }()
-	case <-runCtx.Done():
+	release, _, err := s.acquireAnalysisPermit(runCtx, "interactive")
+	if err != nil {
 		s.finishDocumentAnalysis(uri, state)
 		return
 	}
+	defer release()
 
 	if mode == intel.DiagnosticModeFast {
 		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode)
@@ -1785,7 +1794,7 @@ func (s *Server) runDocumentAnalysis(
 			}
 			state.mu.Unlock()
 			s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
-			project, impacted := s.analysis.projectChange()
+			project, impacted := s.analysis.projectChangeClass("interactive")
 			s.scheduleProjectDependentDiagnostics(notify, doc.URI, impacted)
 			s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 		}
@@ -1843,6 +1852,18 @@ func (s *Server) runDiagnosticsBody(
 	mode intel.DiagnosticMode,
 ) {
 	measurement := s.startPerformance("diagnostics", doc)
+	phase := "full"
+	if mode == intel.DiagnosticModeFast {
+		phase = "fast"
+	}
+	measurement.setPhase(phase)
+	s.notifyPerformanceHook("diagnostics-"+phase+"-start", doc.Path)
+	defer s.notifyPerformanceHook("diagnostics-"+phase+"-end", doc.Path)
+	counter := performanceCounterFullDiagnosticRuns
+	if mode == intel.DiagnosticModeFast {
+		counter = performanceCounterFastDiagnosticRuns
+	}
+	s.performance.addCounter(counter, 1, "diagnostics", "diagnostics", "interactive", doc.Path)
 	recorder := analysisstats.NewRecorder()
 	runCtx = analysisstats.WithRecorder(runCtx, recorder)
 	runCtx = semanticquery.WithContext(runCtx, semanticquery.Context{Store: s.semanticQueries, Metrics: recorder})
@@ -1860,7 +1881,7 @@ func (s *Server) runDiagnosticsBody(
 		request := intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder}
 		project := intel.ProjectAnalysisSnapshot{}
 		if mode == intel.DiagnosticModeFull {
-			project = s.analysis.projectSnapshot()
+			project = s.analysis.projectSnapshotClass("interactive")
 			if !project.Complete && s.projectDiagnosticsEnabled() {
 				s.scheduleProjectReadyDiagnostics(state)
 			}
@@ -1922,7 +1943,7 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 	}
 	state.projectReadyPending = true
 	state.mu.Unlock()
-	if project := s.analysis.projectSnapshot(); project.Complete {
+	if project := s.analysis.projectSnapshotClass("interactive"); project.Complete {
 		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 		return
 	}
@@ -1940,7 +1961,7 @@ func (s *Server) scheduleProjectReadyDiagnostics(state *diagnosticState) {
 			s.logger.Printf("workspace project diagnostics readiness failed: %v", err)
 			return
 		}
-		project, _ := s.analysis.projectChange()
+		project, _ := s.analysis.projectChangeClass("background")
 		s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 	}()
 }
@@ -2122,6 +2143,7 @@ func (s *Server) lockDocumentLifecycle(uri string) func() {
 func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	index := newWorkspaceAnalysisIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFileContext, s.logInitialWorkspaceIndexPerformance)
 	index.nonBlockingQueries = true
+	index.performance = s.performance
 	return index
 }
 
@@ -2132,16 +2154,28 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.DocumentIR, map[string]procedureir.DocumentIR) {
 	result := s.resolutionCache.getOrBuild(project.Revision, complete, func() projectResolutionResult {
 		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityResolutionBuildsCounter)
+		resolverMeasurement := s.performance.start("project/preparation", performanceStageProjectResolver, "interactive", "")
+		s.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
 		resolver := workspaceResolutionResolverWithTypeLib(project, complete, s.resolutionTypeLibSymbols)
+		resolverMeasurement.finish(len(project.Documents), 0, nil)
 		procedureResolver := procedureir.ProcedureOnlyResolver(resolver)
+		viewMeasurement := s.performance.start("project/preparation", performanceStageProjectResolutionView, "interactive", "")
+		s.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
 		resolved := make(map[string]procedureir.DocumentIR, len(project.Documents))
 		diagnosticResolved := make(map[string]procedureir.DocumentIR, len(project.Documents))
+		viewMeasurement.finish(len(project.Documents), 0, nil)
+		materializationMeasurement := s.performance.start("project/preparation", performanceStageResolutionMaterialize, "interactive", "")
+		materializations := 0
 		for _, document := range project.Documents {
 			// The workspace index resolver intentionally has no TypeDB dependency;
 			// apply the cached TypeDB-aware resolver here once per project revision.
 			resolved[symbolFileKey(document.IR.Path)] = procedureir.Resolve(document.IR, procedureResolver)
+			materializations++
 			diagnosticResolved[symbolFileKey(document.IR.Path)] = procedureir.Resolve(document.IR, resolver)
+			materializations++
 		}
+		materializationMeasurement.finish(materializations, 0, nil)
+		s.performance.addCounter(performanceCounterResolutionMaterializations, uint64(materializations), "project/preparation", performanceStageResolutionMaterialize, "interactive", "")
 		finishCapability(nil)
 		return projectResolutionResult{resolver: resolver, resolved: resolved, diagnosticResolved: diagnosticResolved}
 	})
@@ -2198,12 +2232,11 @@ func workspaceTypeLibResolverSymbols(typeDB *vbadb.DB) []procedureir.ResolverSym
 }
 
 func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {
-	select {
-	case s.analysisPermits <- struct{}{}:
-		defer func() { <-s.analysisPermits }()
-	case <-ctx.Done():
-		return indexedFileAnalysis{}, ctx.Err()
+	release, _, err := s.acquireAnalysisPermit(ctx, "background")
+	if err != nil {
+		return indexedFileAnalysis{}, err
 	}
+	defer release()
 	snapshot := intel.NewAnalysisSnapshot(intel.Document{
 		Path:       file.Path,
 		Source:     string(body),
@@ -2211,23 +2244,35 @@ func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.Sourc
 	})
 	doc := snapshot.Document()
 	defer snapshot.Retire()
-	return s.analyzeIndexedDocumentContext(ctx, doc)
+	return s.analyzeIndexedDocumentContextClass(ctx, doc, "background")
 }
 
-func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Document) (indexedFileAnalysis, error) {
+func (s *Server) analyzeIndexedDocumentContextClass(ctx context.Context, doc intel.Document, class string) (indexedFileAnalysis, error) {
 	snapshot := doc.Snapshot
 	if snapshot == nil || !snapshot.Matches(doc) {
 		snapshot = intel.NewAnalysisSnapshot(doc)
 		doc = snapshot.Document()
 		defer snapshot.Retire()
 	}
+	s.notifyPerformanceHook("declaration-start", doc.Path)
+	declarationMeasurement := s.performance.start("workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
 	syms, err := s.analyzer.DocumentSymbolsContext(ctx, doc)
 	if err != nil {
+		declarationMeasurement.finish(len(syms), 0, err)
 		return indexedFileAnalysis{}, err
 	}
 	if err := ctx.Err(); err != nil {
+		declarationMeasurement.finish(len(syms), 0, err)
 		return indexedFileAnalysis{}, err
 	}
+	declarationMeasurement.finish(len(syms), 0, nil)
+	s.performance.addCounter(performanceCounterWorkspaceDeclarationBuilds, 1, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
+	s.notifyPerformanceHook("declaration-ready", doc.Path)
+	if err := ctx.Err(); err != nil {
+		return indexedFileAnalysis{}, err
+	}
+	s.notifyPerformanceHook("semantic-start", doc.Path)
+	semanticMeasurement := s.performance.start("workspace/file", performanceStageSemanticIndexing, class, doc.Path)
 	procedureIR, _, err := snapshot.ProcedureIRContext(ctx, func(loadCtx context.Context) (procedureir.DocumentIR, error) {
 		parsed, err := snapshot.ParsedDocument()
 		if err != nil {
@@ -2240,24 +2285,28 @@ func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Do
 		}, parsed)
 	})
 	if err != nil {
+		semanticMeasurement.finish(0, 0, err)
 		return indexedFileAnalysis{}, err
 	}
 	if err := ctx.Err(); err != nil {
+		semanticMeasurement.finish(0, 0, err)
 		return indexedFileAnalysis{}, err
 	}
 	rawCalls, _, err := snapshot.RawCallSites(func() (calls.FileResult, error) {
 		return calls.ExtractIR(procedureIR), nil
 	})
 	if err != nil {
+		semanticMeasurement.finish(0, 0, err)
 		return indexedFileAnalysis{}, err
 	}
 	controlFlow, _, err := snapshot.ControlFlowGraphsContext(ctx, func(loadCtx context.Context) (vbacfg.Document, error) {
 		return vbacfg.BuildDocumentContext(loadCtx, procedureIR)
 	})
 	if err != nil {
+		semanticMeasurement.finish(0, 0, err)
 		return indexedFileAnalysis{}, err
 	}
-	return indexedFileAnalysis{
+	result := indexedFileAnalysis{
 		path:           doc.Path,
 		version:        documentVersion(doc),
 		moduleKind:     doc.ModuleKind,
@@ -2267,7 +2316,17 @@ func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Do
 		typeReferences: rawCalls.TypeReferences,
 		procedureIR:    procedureir.Clone(procedureIR),
 		controlFlow:    vbacfg.CloneDocument(controlFlow),
-	}, nil
+	}
+	semanticMeasurement.finish(len(procedureIR.Procedures), 0, nil)
+	s.performance.addCounter(performanceCounterWorkspaceSemanticBuilds, 1, "workspace/file", performanceStageSemanticIndexing, class, doc.Path)
+	s.notifyPerformanceHook("semantic-ready", doc.Path)
+	return result, nil
+}
+
+func (s *Server) notifyPerformanceHook(stage, path string) {
+	if s.performanceHook != nil {
+		s.performanceHook(stage, path)
+	}
 }
 
 func (s *Server) analyzeWorkspaceOverlay(ctx context.Context, doc intel.Document) (indexedFileAnalysis, bool, error) {
@@ -2290,6 +2349,10 @@ func (s *Server) analyzeWorkspaceOverlay(ctx context.Context, doc intel.Document
 		return indexedFileAnalysis{}, true, err
 	}
 	return analysis, true, nil
+}
+
+func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Document) (indexedFileAnalysis, error) {
+	return s.analyzeIndexedDocumentContextClass(ctx, doc, "interactive")
 }
 
 // diskProcedureSignatures captures the saved declaration baseline in the

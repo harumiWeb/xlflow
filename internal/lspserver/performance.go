@@ -1,17 +1,222 @@
 package lspserver
 
 import (
+	"context"
+	"errors"
+	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 )
 
+// Performance stage names are intentionally stable: they are consumed by
+// developer benchmark and profile scripts, but never enter an LSP payload.
+const (
+	performanceStageWorkspaceDiscovery    = "workspaceDiscovery"
+	performanceStageDeclarationIndexing   = "declarationIndexing"
+	performanceStageSemanticIndexing      = "semanticIndexing"
+	performanceStageProjectSnapshot       = "projectSnapshot"
+	performanceStageProjectResolver       = "projectResolver"
+	performanceStageProjectResolutionView = "projectResolutionView"
+	performanceStageResolutionMaterialize = "projectResolutionMaterialization"
+	performanceStageProjectEffects        = "projectEffectSummary"
+	performanceStageProjectConstants      = "projectConstants"
+	performanceStageProjectChange         = "projectChange"
+	performanceStageDependencyUpdate      = "dependencyFingerprintUpdate"
+	performanceStagePermitWait            = "permitWait"
+)
+
+const (
+	performanceCounterWorkspaceFilesDiscovered   = "workspace_files_discovered"
+	performanceCounterWorkspaceDeclarationBuilds = "workspace_declaration_builds"
+	performanceCounterWorkspaceSemanticBuilds    = "workspace_semantic_builds"
+	performanceCounterProjectSnapshotBuilds      = "project_snapshot_builds"
+	performanceCounterResolutionResolverBuilds   = "resolution_resolver_builds"
+	performanceCounterResolutionViewBuilds       = "resolution_view_builds"
+	performanceCounterResolutionMaterializations = "resolution_materializations"
+	performanceCounterProcedureFingerprintBuilds = "procedure_fingerprint_builds"
+	performanceCounterProcedureFingerprintReuses = "procedure_fingerprint_reuses"
+	performanceCounterFastDiagnosticRuns         = "fast_diagnostic_runs"
+	performanceCounterFullDiagnosticRuns         = "full_diagnostic_runs"
+	performanceCounterBackgroundPermitWaits      = "background_permit_waits"
+	performanceCounterInteractivePermitWaits     = "interactive_permit_waits"
+)
+
+var performanceCounterNames = [...]string{
+	performanceCounterWorkspaceFilesDiscovered,
+	performanceCounterWorkspaceDeclarationBuilds,
+	performanceCounterWorkspaceSemanticBuilds,
+	performanceCounterProjectSnapshotBuilds,
+	performanceCounterResolutionResolverBuilds,
+	performanceCounterResolutionViewBuilds,
+	performanceCounterResolutionMaterializations,
+	performanceCounterProcedureFingerprintBuilds,
+	performanceCounterProcedureFingerprintReuses,
+	performanceCounterFastDiagnosticRuns,
+	performanceCounterFullDiagnosticRuns,
+	performanceCounterBackgroundPermitWaits,
+	performanceCounterInteractivePermitWaits,
+}
+
+// performanceRecorder is deliberately separate from analysisstats. The
+// latter is request-scoped and owned by the analyzer; this recorder covers
+// server-lifetime workspace work that has no diagnostic context.
+//
+// A nil recorder is used when --performance-log is disabled. Callers retain a
+// nil-safe pointer and therefore do not pay a clock, lock, or map cost on the
+// normal path.
+type performanceRecorder struct {
+	logger   *log.Logger
+	enabled  bool
+	mu       sync.Mutex
+	counters map[string]uint64
+}
+
+func newPerformanceRecorder(enabled bool, logger *log.Logger) *performanceRecorder {
+	if !enabled || logger == nil {
+		return nil
+	}
+	counters := make(map[string]uint64, len(performanceCounterNames))
+	for _, name := range performanceCounterNames {
+		counters[name] = 0
+	}
+	return &performanceRecorder{logger: logger, enabled: true, counters: counters}
+}
+
+type performanceStageMeasurement struct {
+	recorder  *performanceRecorder
+	operation string
+	stage     string
+	class     string
+	path      string
+	started   time.Time
+}
+
+func (p *performanceRecorder) start(operation, stage, class, path string) performanceStageMeasurement {
+	if p == nil || !p.enabled {
+		return performanceStageMeasurement{}
+	}
+	return performanceStageMeasurement{recorder: p, operation: operation, stage: stage, class: class, path: path, started: time.Now()}
+}
+
+func (m performanceStageMeasurement) finish(resultCount int, wait time.Duration, err error) {
+	if m.recorder == nil || m.recorder.logger == nil {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			outcome = "canceled"
+		} else {
+			outcome = "error"
+		}
+	}
+	m.recorder.logger.Printf(
+		"performance operation=%q stage=%q class=%q path=%q elapsed_ms=%.3f wait_ms=%.3f result_count=%d outcome=%q",
+		m.operation, m.stage, m.class, m.path,
+		float64(time.Since(m.started))/float64(time.Millisecond),
+		float64(wait)/float64(time.Millisecond), resultCount, outcome,
+	)
+}
+
+func (p *performanceRecorder) addCounter(name string, value uint64, operation, stage, class, path string) {
+	if p == nil || !p.enabled || p.logger == nil {
+		return
+	}
+	p.mu.Lock()
+	p.counters[name] += value
+	total := p.counters[name]
+	p.mu.Unlock()
+	if value == 0 {
+		return
+	}
+	p.logger.Printf(
+		"performance operation=%q stage=%q class=%q path=%q counter=%q value=%d total=%d outcome=%q",
+		operation, stage, class, path, name, value, total, "counter",
+	)
+}
+
+func (p *performanceRecorder) logCounterSnapshot(operation, stage, class, path string) {
+	if p == nil || !p.enabled || p.logger == nil {
+		return
+	}
+	p.mu.Lock()
+	values := make(map[string]uint64, len(performanceCounterNames))
+	for _, name := range performanceCounterNames {
+		values[name] = p.counters[name]
+	}
+	p.mu.Unlock()
+	for _, name := range performanceCounterNames {
+		p.logger.Printf(
+			"performance operation=%q stage=%q class=%q path=%q counter=%q value=%d total=%d outcome=%q",
+			operation, stage, class, path, name, values[name], values[name], "counter",
+		)
+	}
+}
+
+func (p *performanceRecorder) counterTotal(name string) uint64 {
+	if p == nil || !p.enabled {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.counters[name]
+}
+
+// acquireAnalysisPermit keeps the existing bounded worker budget while making
+// contention visible. The fast path deliberately performs no timing work.
+func (s *Server) acquireAnalysisPermit(ctx context.Context, class string) (func(), time.Duration, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	if s.analysisPermits == nil {
+		return func() {}, 0, nil
+	}
+	select {
+	case s.analysisPermits <- struct{}{}:
+		return func() { <-s.analysisPermits }, 0, nil
+	default:
+	}
+	measurement := s.performance.start("scheduler/permit", performanceStagePermitWait, class, "")
+	select {
+	case s.analysisPermits <- struct{}{}:
+		wait := time.Duration(0)
+		if measurement.recorder != nil {
+			wait = time.Since(measurement.started)
+		}
+		counter := performanceCounterInteractivePermitWaits
+		if class == "background" {
+			counter = performanceCounterBackgroundPermitWaits
+		}
+		s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
+		measurement.finish(0, wait, nil)
+		return func() { <-s.analysisPermits }, wait, nil
+	case <-ctx.Done():
+		wait := time.Duration(0)
+		if measurement.recorder != nil {
+			wait = time.Since(measurement.started)
+		}
+		counter := performanceCounterInteractivePermitWaits
+		if class == "background" {
+			counter = performanceCounterBackgroundPermitWaits
+		}
+		s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
+		measurement.finish(0, wait, ctx.Err())
+		return nil, wait, ctx.Err()
+	}
+}
+
 type performanceMeasurement struct {
 	server    *Server
 	operation string
+	phase     string
 	document  intel.Document
 	started   time.Time
 }
@@ -70,6 +275,12 @@ func (m *performanceMeasurement) setDocument(doc intel.Document) {
 	}
 }
 
+func (m *performanceMeasurement) setPhase(phase string) {
+	if m != nil {
+		m.phase = phase
+	}
+}
+
 func (m *performanceMeasurement) finish(resultCount int, err error) {
 	if m == nil {
 		return
@@ -80,7 +291,8 @@ func (m *performanceMeasurement) finish(resultCount int, err error) {
 	}
 	doc := m.document
 	m.server.logger.Printf(
-		"performance operation=%q uri=%q path=%q version=%d bytes=%d lines=%d elapsed_ms=%.3f result_count=%d outcome=%q",
+		"performance operation=%q stage=%q uri=%q path=%q version=%d bytes=%d lines=%d elapsed_ms=%.3f wait_ms=0 result_count=%d outcome=%q",
+		m.operation,
 		m.operation,
 		doc.URI,
 		doc.Path,
@@ -103,8 +315,10 @@ func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation u
 		outcome = "discarded"
 	}
 	m.server.logger.Printf(
-		"performance operation=%q uri=%q path=%q version=%d generation=%d bytes=%d lines=%d elapsed_ms=%.3f result_count=%d outcome=%q discarded=%t",
+		"performance operation=%q stage=%q phase=%q uri=%q path=%q version=%d generation=%d bytes=%d lines=%d elapsed_ms=%.3f wait_ms=0 result_count=%d outcome=%q discarded=%t",
 		m.operation,
+		m.operation,
+		m.phase,
 		doc.URI,
 		doc.Path,
 		doc.Version,
@@ -151,6 +365,7 @@ func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time
 		fileCount,
 		outcome,
 	)
+	s.performance.logCounterSnapshot("workspaceSymbols/index/initial", performanceStageWorkspaceDiscovery, "background", s.opts.RootDir)
 }
 
 func (s *Server) logDocumentCachePerformance(operation, cache string, doc intel.Document, resultCount int, started time.Time, err error) {

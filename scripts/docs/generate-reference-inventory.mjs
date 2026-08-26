@@ -96,8 +96,9 @@ function walk(dir) {
 walk(path.join(repo, "internal"));
 
 const source = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
-// Some structured metadata keys use the same snake_case shape as error-code
-// literals but are not user-facing errors and do not belong in this inventory.
+// Some structured metadata keys and developer-only telemetry counters use the
+// same snake_case shape as error-code literals but are not user-facing errors
+// and do not belong in this inventory.
 const excludedErrorInventoryLiterals = new Set([
   "binding_status",
   "rule_codes",
@@ -109,6 +110,19 @@ const excludedErrorInventoryLiterals = new Set([
   "role_immutable",
   "role_list",
   "third_party",
+  "background_permit_waits",
+  "fast_diagnostic_runs",
+  "full_diagnostic_runs",
+  "interactive_permit_waits",
+  "procedure_fingerprint_builds",
+  "procedure_fingerprint_reuses",
+  "project_snapshot_builds",
+  "resolution_materializations",
+  "resolution_resolver_builds",
+  "resolution_view_builds",
+  "workspace_declaration_builds",
+  "workspace_files_discovered",
+  "workspace_semantic_builds",
 ]);
 const includedTelemetryInventoryLiterals = new Set([
   "http_dataflow_cfg_walks",
