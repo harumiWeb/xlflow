@@ -119,8 +119,9 @@ and unrelated semantic domains remain outside this decision.
 The shared solver boundary now accepts source-line transfers and an explicit
 edge-policy result. A policy may refine a normal edge, retain the predecessor
 input for an exceptional or uncertain edge, or suppress propagation for an
-edge that is not a continuation after a completed `Stop`/termination. A nil
-policy retains the historical default of propagating the predecessor input;
+edge that is not a continuation after a completed `Stop`/termination. With a
+nil policy, the solver propagates transfer output on normal edges and retains
+predecessor input on exceptional or uncertain edges;
 adapters that do not need refinement therefore remain source-compatible. Edge
 refinement is evaluated only for normal continuation edges. This keeps
 conditional allocation, allocation guards, and module-configuration branches
