@@ -237,6 +237,39 @@ End Property
 	}
 }
 
+func TestParserParsesVBEMultiSegmentProcedureAttributes(t *testing.T) {
+	parser, err := NewParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	result := parser.Parse("Exported.bas", []byte(`Public Sub Foo()
+Attribute Foo.VB_ProcData.VB_Invoke_Func = " \n14"
+End Sub
+`))
+	defer result.Close()
+
+	if result.HasError || result.HasMissing {
+		t.Fatalf("unexpected recovery state: error=%t missing=%t tree=%s", result.HasError, result.HasMissing, result.Root.ToSexp())
+	}
+	found := false
+	Walk(result.Root, func(node *tree_sitter.Node) bool {
+		if node.Kind() != "attribute_statement" {
+			return true
+		}
+		name := node.ChildByFieldName("name")
+		if name == nil || name.Utf8Text(result.Source) != "Foo.VB_ProcData.VB_Invoke_Func" {
+			return true
+		}
+		found = name.Kind() == "qualified_member_expression" && name.NamedChildCount() == 3
+		return true
+	})
+	if !found {
+		t.Fatalf("multi-segment procedure Attribute was not parsed as a qualified member expression: %s", result.Root.ToSexp())
+	}
+}
+
 func TestParsedDocumentOwnsRecoveryStateAndClosesAfterReaders(t *testing.T) {
 	doc, err := ParseDocument("Broken.bas", []byte("Public Function Foo(ByVal x As String\nEnd Function\n"))
 	if err != nil {
