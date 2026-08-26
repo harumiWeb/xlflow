@@ -104,15 +104,75 @@ must not cause state copies or affect equality.
 
 The first migration covers the HTTP scheduler boundary (`solveHTTPStates`)
 and the ordinary block-level `arrayFlowState` walk. HTTP's nested state is
-not yet compacted into semantic-unit slots. Array source-line traversal,
-edge-refinement callbacks, and interprocedural evidence walkers remain on
-their compatibility path until their callback contracts can be migrated
-without changing the VBA227/VBA208/VBA249 boundary. Existing diagnostic IDs,
-severity, ranges, messages, suppression, JSON, LSP projections,
-batch/realtime parity, and performance-counter meanings remain unchanged.
-Generic
-`internal/vba/dataflow`, CFG storage, cross-run caching, and unrelated semantic
-domains remain outside this decision.
+not yet compacted into semantic-unit slots. Issue #721 amends this boundary
+for the remaining Array paths without changing the semantic lattice. The
+source-line lifecycle lane, normal-edge refinement, exceptional/uncertain
+edges, and combined runtime/evidence lanes use the same indexed solver when
+their participant index and transfer contract can be built before execution.
+Existing diagnostic IDs, severity, ranges, messages, suppression, JSON, LSP
+projections, batch/realtime parity, and performance-counter meanings remain
+unchanged. Generic `internal/vba/dataflow`, CFG storage, cross-run caching,
+and unrelated semantic domains remain outside this decision.
+
+### Amendment: advanced Array paths on the indexed solver (Issue #721)
+
+The shared solver boundary now accepts source-line transfers and an explicit
+edge-policy result. A policy may refine a normal edge, retain the predecessor
+input for an exceptional or uncertain edge, or suppress propagation for an
+edge that is not a continuation after a completed `Stop`/termination. A nil
+policy retains the historical default of propagating the predecessor input;
+adapters that do not need refinement therefore remain source-compatible. Edge
+refinement is evaluated only for normal continuation edges. This keeps
+conditional allocation, allocation guards, and module-configuration branches
+out of exceptional and uncertain propagation.
+
+The Array adapter indexes one fixed semantic participant catalog and transfers
+through an internal cursor over compact slots. The legacy map adapter keeps
+the same transfer, join, module-call effect, ByRef/return summary, and
+evidence-read callback contract for differential tests, while retaining map
+storage as the compatibility oracle. Joins update reusable output and edge
+scratch in place. The compact solver boundary does not materialize a new
+whole-state map for block scheduling; domain callbacks may retain their
+documented copy-on-write behavior for legacy-compatible branch refinements.
+Dimension and preserve shapes are immutable values; an update creates a new
+shape value only when the shape itself changes.
+
+The base and runtime lanes for one `CFGView` are solved as one indexed lane
+group. The `VBA227` source-line lane that excludes the normal continuation is a
+separate solver group so physical source-line order remains observable. A
+completed stop suppresses all successor edges. Finding buffers, runtime
+findings, ByRef-call evidence, module-entry contributions, and return
+candidates remain lane-local sidecars rather than fixed-point state; the
+existing deduplication and `sortFindings` stages remain authoritative for
+evidence and result ordering.
+
+Exceptional and uncertain edges retain the legacy conservative rule: they
+receive predecessor input state. Under `On Error Resume Next`, the adapter may
+retain predecessor output only when `ReliableExceptional` proves a plain
+`ReDim`, `Array`, `Split`, or `Filter` allocation. `ReDim Preserve` does not
+receive that exceptional allocation proof when its prior allocation or shape
+is unknown. This rule applies equally to the source-line and combined lanes.
+
+Compatibility selection is a preflight decision. `auto` selects the indexed
+solver when the participant catalog is fixed, the cursor can represent every
+semantic write, and the requested lane contracts are supported. Index-build
+failure, an empty semantic state that still needs declaration-side diagnostics,
+or an explicitly unsupported transfer contract selects the legacy walker.
+Recovered or incomplete CFG input is not by itself a fallback reason when it
+can be indexed and retains the same unknown/uncertain semantics. Cancellation,
+transfer failure, or another execution-time error does not trigger a partial
+legacy retry. The legacy walker remains available for compatibility and
+differential testing; forced `compact` and `legacy` strategies are test and
+benchmark controls only.
+
+Compact/legacy walk counts and fallback reasons (empty-state, index-build, or
+unsupported-contract) are developer-only telemetry.
+They are not part of semantic state, normal CLI JSON, LSP payloads, corpus
+snapshots, or the diagnostic review ledger. The specified ROneCOne benchmark
+and alloc-space profile were collected against the #713 baseline. The focused
+three-leaf profile shows a material reduction; end-to-end wall time remains
+observational because host-load variance is high, and the profile paths and
+values are retained in the corpus specification.
 
 ## Consequences
 

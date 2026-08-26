@@ -588,13 +588,35 @@ type TransferFunc[T any] func(context.Context, LaneOrdinal, BlockOrdinal, StateV
 // a domain has a narrow exception that remains valid across that edge.
 type EdgePolicy[T any] func(context.Context, LaneOrdinal, Edge, StateView[T], StateView[T], *State[T]) error
 
+// EdgeDisposition controls whether the candidate produced for an edge is
+// joined into the destination state. EdgePropagate preserves the normal
+// behavior; EdgeSuppress discards the candidate. The solver still invokes the
+// policy with a candidate initialized from predecessor output on normal edges
+// and predecessor input on exceptional or uncertain edges.
+type EdgeDisposition uint8
+
+const (
+	EdgePropagate EdgeDisposition = iota
+	EdgeSuppress
+)
+
+// EdgeDecisionFunc is the result-bearing form of EdgePolicy. It is available
+// alongside EdgePolicy so existing adapters can retain their nil-means-
+// propagate behavior while advanced adapters explicitly suppress an edge.
+type EdgeDecisionFunc[T any] func(context.Context, LaneOrdinal, Edge, StateView[T], StateView[T], *State[T]) (EdgeDisposition, error)
+
 // InitializeFunc seeds the entry state for one lane.
 type InitializeFunc[T any] func(context.Context, LaneOrdinal, *State[T]) error
 
 // Lane defines an independent transfer and edge policy. Lanes share indexed
 // scheduling but never share mutable state.
 type Lane[T any] struct {
-	Transfer   TransferFunc[T]
-	Edge       EdgePolicy[T]
-	Initialize InitializeFunc[T]
+	Transfer TransferFunc[T]
+	// Edge is the compatibility policy. A nil Edge policy propagates every
+	// edge, as it did before EdgeDecision was introduced.
+	Edge EdgePolicy[T]
+	// EdgeDecision is the explicit result-bearing policy. When present it takes
+	// precedence over Edge; EdgeSuppress skips the destination join.
+	EdgeDecision EdgeDecisionFunc[T]
+	Initialize   InitializeFunc[T]
 }

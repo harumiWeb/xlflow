@@ -30,6 +30,18 @@ All notable changes to xlflow will be documented in this file.
   snapshot, CLI JSON, and LSP contracts. HTTP nested-map scalarization and
   source-line/edge-refinement Array paths remain follow-up migrations.
 
+- Extended the indexed semantic-state solver to advanced Array CFG paths,
+  including source-line lifecycle ordering, normal-edge refinement,
+  exceptional/uncertain edge handling, and combined runtime/evidence lanes.
+  Indexed cursors keep semantic slots separate from diagnostic sidecars while
+  preserving `VBA208`, `VBA227`, and `VBA249` findings, evidence, ordering, and
+  conservative `ReliableExceptional` behavior. A preflight compatibility
+  boundary retains the legacy walker for unsupported participant or transfer
+  contracts; compact/legacy counts and fallback reasons remain
+  developer-only telemetry. The five-sample ROneCOne measurement and focused
+  CPU/heap alloc-space profile are recorded in the corpus specification; the
+  retained leaf profile shows a material reduction versus the #713 baseline.
+
 - Restricted array interprocedural fixed-point planning to semantic
   participants discovered from array operations, parameters/returns,
   ByRef/module-state dependencies, and resolved caller/callee closure.

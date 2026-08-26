@@ -713,17 +713,61 @@ across revisions or nested worker pools.
 The solver stores present slots in dense bitset-backed storage for small or
 dense domains and sorted sparse storage for wide, sparse domains. Domain joins
 update the destination in place and report changed slots, so unchanged blocks
-are not requeued. Exceptional and uncertain edges retain predecessor input
-state. HTTP and Array adapters keep their existing conservative lattice and
-diagnostic projection contracts; source ranges, representative evidence, and
-finding multiplicity are not part of semantic state.
+are not requeued. HTTP and Array adapters keep their existing conservative
+lattice and diagnostic projection contracts; source ranges, representative
+evidence, and finding multiplicity are not part of semantic state.
 
-This is an incremental migration boundary. Array source-line traversal,
-edge-refinement paths, and interprocedural evidence walkers continue to use
-their compatibility walker until their callback contracts can be represented
-without changing VBA227/VBA208/VBA249 behavior. The shared solver API and
-dense/sparse/hybrid benchmarks are internal implementation details and do not
-add CLI, JSON, or LSP fields.
+#### Advanced Array transfer contract (#721)
+
+The Array adapter extends the shared solver with source-line transfers and an
+explicit edge-policy result. Normal edges may apply conditional allocation,
+allocation-guard, or module-configuration refinement. Exceptional and
+uncertain edges retain predecessor input state, except that
+`ReliableExceptional` may retain predecessor output for a proven plain
+`ReDim`, `Array`, `Split`, or `Filter` allocation. `ReDim Preserve` remains
+conservative when its prior allocation or shape is unknown. A completed
+`Stop` suppresses every successor edge. A nil edge policy means ordinary
+propagation, preserving the compatibility behavior of adapters without edge
+refinement.
+
+The source-line lifecycle lane evaluates physical source lines in order and
+uses a separate solver group for the graph with normal continuation removed;
+the base and runtime lanes for one `CFGView` share one indexed lane group.
+Module-call effects, ByRef entries, return summaries, and array aliases read
+and write an indexed cursor over one fixed semantic participant catalog. The
+legacy map adapter keeps the same transfer/evidence callback contract for
+differential tests and remains the compatibility oracle. Compact joins update
+reusable output/edge scratch in place and must not materialize a whole
+`arrayFlowState`, union-key map, or full-state copy for block scheduling.
+Dimension and preserve shapes remain immutable values and are copied only when
+the shape itself changes.
+
+Finding buffers, runtime findings, ByRef-call evidence, module-entry
+contributions, and return candidates are lane-local sidecars. They do not
+participate in fixed-point equality or requeue decisions. Existing
+deduplication, source/range/evidence canonicalization, and final
+`sortFindings` ordering remain the authority for observable output. This
+preserves `VBA208`, `VBA227`, and `VBA249` diagnostics, locations, evidence,
+multiplicity, suppression, and batch/realtime parity.
+
+`auto` selects the indexed path only after a preflight compatibility check
+proves that the participant catalog is fixed, every semantic write is
+representable by the cursor, and the requested transfer callbacks are
+supported. Index construction failure, an empty semantic state that still
+needs declaration-side diagnostics, or an unsupported transfer contract
+selects the legacy walker. Recovered or incomplete CFG input is not itself a
+fallback reason when it is indexable and retains the same unknown/uncertain
+semantics.
+Cancellation and execution-time transfer errors do not trigger a partial
+legacy retry. Forced `compact` and `legacy` modes are internal test and
+benchmark controls; the legacy walker remains the documented compatibility
+and differential oracle.
+
+Solver strategy counts and fallback reasons (empty-state, index-build, or
+unsupported-contract) are developer-only telemetry.
+They are not public IR fields and never appear in CLI JSON, LSP payloads,
+corpus snapshots, or the diagnostic review ledger. The shared solver API and
+dense/sparse/hybrid benchmarks remain internal implementation details.
 
 ### Batch procedure-worker boundary
 

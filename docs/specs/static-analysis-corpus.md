@@ -1759,6 +1759,105 @@ remain explicitly on the compatibility walker and require a follow-up
 migration with differential evidence. No corpus snapshot or review-ledger
 change is justified by this partial migration.
 
+### Advanced Array indexed-solver verification requirements (#721)
+
+Issue #721 extends the indexed semantic-state solver to the Array paths that
+were intentionally left on the #713 compatibility walker: physical
+source-line lifecycle analysis, normal-edge refinement, exceptional and
+uncertain edges, and combined runtime/evidence lanes. The migration must
+preserve `VBA208`, `VBA227`, and `VBA249` finding identity, source locations,
+severity, evidence, multiplicity, suppression, and deterministic ordering.
+The legacy walker remains both the compatibility fallback and the
+differential oracle.
+
+The compact path uses one fixed semantic participant index and an indexed
+cursor for allocation, shape, alias, module-call, ByRef, and return-summary
+state. It must not materialize a whole `arrayFlowState`, build a union-key map,
+or copy a complete state for each block or edge. Diagnostic findings, runtime
+findings, ByRef-call evidence, module-entry contributions, and return
+candidates remain lane-local sidecars and must not affect fixed-point equality.
+The source-line lane is a separate solver group that retains physical line
+order; base and runtime lanes for one `CFGView` share one indexed lane group.
+
+Normal edges alone may apply conditional-allocation, allocation-guard, and
+module-configuration refinement. Exceptional and uncertain edges retain
+predecessor input state. `ReliableExceptional` may retain predecessor output
+only for a proven plain `ReDim`, `Array`, `Split`, or `Filter` allocation under
+`On Error Resume Next`; `ReDim Preserve` remains conservative when its prior
+allocation or shape is unknown. A completed `Stop` suppresses every successor
+edge. Recovered or incomplete CFG input is compact-eligible when it can be
+indexed with the existing unknown/uncertain semantics.
+
+`auto` chooses compact only after preflight confirms that the participant
+catalog is fixed, all semantic writes are representable, and the requested
+transfer contract is supported. Index-construction failure, a
+participant-out-of-catalog write known before execution, or an unsupported
+transfer contract uses the legacy walker. Cancellation and execution-time
+errors do not trigger a partial legacy retry. Compact/legacy strategy counts
+and fallback reasons are developer-only telemetry and never enter corpus
+snapshots or `reviews/diagnostics.jsonl`.
+
+The required differential matrix covers source-line ordering and multiline
+statements, loops and recursive CFGs, normal/exceptional/uncertain edges,
+plain `ReDim` versus `ReDim Preserve`, `Array`/`Split`/`Filter`, object arrays,
+module-configuration branches, conditional allocation guards, aliases,
+module calls, recursive ByRef/helper chains, array-return summaries, and the
+combined `VBA208`/`VBA227`/`VBA249` lanes. Forced legacy and compact runs must
+compare the complete ordered finding records, source ranges, evidence and
+runtime context, multiplicity, suppression, exit status, and normal JSON.
+Any unexplained difference is a stop-and-investigate condition; it is not a
+reason to refresh a snapshot.
+
+Use the following commands on the same Windows machine and Go toolchain as
+the #713 record. The race and corpus commands are required verification; the
+benchmark command is the one-sample profile source and must also be run as
+five serial samples for the reported median:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze
+rtk task corpus:test
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=1 -timeout=10m
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5 -timeout=10m
+```
+
+The #713 post-migration sample is the comparison baseline for the advanced
+Array paths (`8.93e9 ns/op`, `11,203,650,096 B/op`, `81,659,543 allocs/op`,
+approximately 1.58 GB `cloneArrayState`, 0.53 GB `meetArrayState`, and
+0.09 GB `cloneHTTPState`). The original #713 starting sample remains the
+combined-target reference (approximately 1.62 GB, 0.53 GB, and 0.07 GB).
+Issue #721's final five serial ROneCOne samples were collected on the current
+Windows/Go environment. Their median was 9.700 s/op, 10,386,967,992 B/op,
+and 92,124,549 allocs/op. The five timings were 30.424, 16.039, 9.111,
+9.700, and 9.159 s/op; the first two samples show the host-load variance
+that is why wall time is not a CI threshold. The final one-sample profile run
+emitted 1,307 compact Array walks, zero legacy walks, and zero fallbacks. The
+final leaf profile is the evidence used for the allocation comparison:
+
+The profiled one-sample result was 9,085,157,800 ns/op,
+10,419,480,376 B/op, and 92,125,359 allocs/op.
+
+| measure                         |            #713 post-migration baseline |                      #721 result | status                                           |
+| ------------------------------- | --------------------------------------: | -------------------------------: | ------------------------------------------------ |
+| ROneCOne `ns/op`                |                                  8.93e9 |  9,700,135,400 (five-run median) | measured; high host-load variance                |
+| ROneCOne `B/op`                 |                          11,203,650,096 | 10,386,967,992 (five-run median) | measured; not a cross-issue target claim         |
+| ROneCOne `allocs/op`            |                              81,659,543 |     92,124,549 (five-run median) | measured; not a cross-issue target claim         |
+| `cloneArrayState` alloc-space   |                                ~1.58 GB |                       ~0.0065 GB | measured; material reduction                     |
+| `meetArrayState` alloc-space    |                                ~0.53 GB |              0 GB in focused top | measured; material reduction                     |
+| `cloneHTTPState` alloc-space    |                                ~0.09 GB |                       ~0.1005 GB | measured; retained for the HTTP follow-up        |
+| combined three-leaf alloc-space | ~2.20 GB post-#713; ~2.22 GB #713 start |                        ~0.107 GB | measured; ~95% reduction versus #713 post sample |
+
+Retain one CPU and heap profile for the one-sample run and inspect
+`-sample_index=alloc_space` for `cloneArrayState`, `meetArrayState`, and
+`cloneHTTPState`. The retained profiles are
+`C:\temp\xlflow-issue721-final2.cpu.pprof` and
+`C:\temp\xlflow-issue721-final2.mem.pprof`; their focused leaves were
+approximately 0.0065 GB, 0 GB, and 0.1005 GB respectively (about 0.107 GB
+combined). Report the final five-sample median, `B/op`, `allocs/op`, compact
+and legacy walk counts, fallback reasons, and profile paths. The focused
+alloc-space profile demonstrates the three-leaf reduction; the large
+end-to-end benchmark values remain recorded for follow-up rather than
+treated as a CI time threshold.
+
 ### Revision-scoped semantic query DAG verification requirements (#715)
 
 Issue #715 adds process-local, revision-scoped reuse for immutable semantic

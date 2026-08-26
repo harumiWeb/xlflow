@@ -7,10 +7,27 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/analyze/semanticstate"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+)
+
+type arrayCFGStrategy uint8
+
+const (
+	arrayCFGStrategyAuto arrayCFGStrategy = iota
+	arrayCFGStrategyCompact
+	arrayCFGStrategyLegacy
+)
+
+type arrayFallbackReason uint8
+
+const (
+	arrayFallbackUnsupported arrayFallbackReason = iota
+	arrayFallbackEmptyState
+	arrayFallbackIndex
 )
 
 // arrayAllocation is deliberately a three-point lattice.  In particular,
@@ -272,7 +289,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 	lanes := make([]arrayCFGWorklistLane, 0, 3)
 	if baseLaneRequested {
 		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: &baseView, Initial: initial,
+			Graph: &baseView, Initial: initial, Stats: ctx.arrayStats,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
 				out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
 				for _, call := range arrayCallsAtLine(proc.Calls, line) {
@@ -301,7 +318,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		vba227Graph := arrayVBA227Graph(proc, ctx)
 		vba227Initial := arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, vba227Variables)
 		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: &vba227Graph, Initial: vba227Initial, SourceLines: true,
+			Graph: &vba227Graph, Initial: vba227Initial, Stats: ctx.arrayStats, SourceLines: true,
 			ReliableExceptional: func(statement *procedureir.Statement, in, out arrayFlowState) bool {
 				return arrayAllocationTransferIsReliable(statement, in, out)
 			},
@@ -335,7 +352,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		runtimeSeen := map[string]bool{}
 		runtimeState := arrayInitialState(variables)
 		lanes = append(lanes, arrayCFGWorklistLane{
-			Graph: &baseView, Initial: runtimeState,
+			Graph: &baseView, Initial: runtimeState, Stats: ctx.arrayStats,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
 				for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants) {
 					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
@@ -868,35 +885,74 @@ func arrayResumeNextCapacityProofApplies(guards []arrayResumeNextCapacityGuard, 
 // uncertain edges retain the predecessor's input state because the statement
 // may not have completed before control leaves the block.
 func walkArrayCFG(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState) {
-	walkArrayCFGWithEdges(graph, lines, initial, visit, nil)
+	walkArrayCFGWorklist(graph, lines, initial, visit, nil, nil, false)
 }
 
-func walkArrayCFGWithEdges(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
-	walkArrayCFGWithStop(graph, lines, initial, visit, edgeState, nil)
+func walkArrayCFGWithEdgesStats(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stats *arrayInterproceduralStats) {
+	walkArrayCFGWithStopStats(graph, lines, initial, visit, edgeState, nil, stats)
 }
 
-func walkArrayCFGWithStop(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool) {
-	walkArrayCFGWorklist(graph, lines, initial, visit, edgeState, stop, false)
+func walkArrayCFGWithStopStats(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, stats *arrayInterproceduralStats) {
+	walkArrayCFGWorklistStats(graph, lines, initial, visit, edgeState, stop, false, stats)
 }
 
-// walkArrayCFGWithSourceLines is used only by VBA227's lifecycle pass. The
-// regular walker keeps the historical block-level semantics required by
-// VBA208 and VBA249; this variant additionally exposes source-line order
-// inside a CFG block so an allocation and a later access on the same loop body
-// can be analyzed in sequence.
-func walkArrayCFGWithSourceLines(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState) {
-	walkArrayCFGWorklist(graph, lines, initial, visit, edgeState, nil, true)
+func walkArrayCFGWithSourceLinesReliableStats(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool, stats *arrayInterproceduralStats) {
+	walkArrayCFGWorklistStatsWithReliable(graph, lines, initial, visit, edgeState, nil, true, stats, reliableExceptional)
 }
 
 func walkArrayCFGWorklist(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
-	// The compact solver owns the ordinary block-level walk. Stop callbacks
-	// need an explicit edge-suppression protocol that semanticstate intentionally
-	// does not expose, while source-line and edge-refinement lanes still carry
-	// policy-specific metadata through the legacy callback boundary. Keep those
-	// paths on the proven walker until their evidence contract is migrated.
-	if stop == nil && !sourceLines && edgeState == nil {
-		if err := walkArrayCFGCompact(context.Background(), graph, lines, initial, visit, edgeState, sourceLines); err == nil {
+	walkArrayCFGWorklistStats(graph, lines, initial, visit, edgeState, stop, sourceLines, nil)
+}
+
+func walkArrayCFGWorklistStats(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool, stats *arrayInterproceduralStats) {
+	walkArrayCFGWorklistStatsWithReliable(graph, lines, initial, visit, edgeState, stop, sourceLines, stats, nil)
+}
+
+func walkArrayCFGWorklistStatsWithReliable(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool, stats *arrayInterproceduralStats, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool) {
+	strategy := arrayCFGStrategyAuto
+	if stats != nil {
+		strategy = stats.strategy
+	}
+	if strategy == arrayCFGStrategyLegacy {
+		if stats != nil {
+			stats.addLegacyWalk()
+		}
+		walkArrayCFGWorklistLegacy(graph, lines, initial, visit, edgeState, stop, sourceLines)
+		return
+	}
+	// The Array adapter owns the policy-specific source-line, edge, and stop
+	// semantics at the indexed solver boundary. Only index/solver construction
+	// incompatibility falls back to the legacy map worklist; a solve-time error
+	// is not retried after analysis has begun.
+	// A zero-slot state cannot carry the declaration-only scalar/object checks
+	// that still consult the variables side table from the transfer callback.
+	// Keep those paths on the legacy adapter; this is an intentional
+	// compatibility boundary rather than an attempt to enlarge the compact
+	// lattice with non-array declarations.
+	if graph != nil && len(initial) > 0 {
+		if _, err := semanticstate.NewIndexView(*graph); err == nil {
+			if stats != nil {
+				stats.addCompactWalk()
+			}
+			if stop == nil && !sourceLines && edgeState == nil && reliableExceptional == nil {
+				_ = walkArrayCFGCompact(context.Background(), graph, lines, initial, visit, nil, false)
+			} else {
+				_ = walkArrayCFGCompactAdvanced(context.Background(), graph, lines, initial, visit, edgeState, stop, reliableExceptional, sourceLines)
+			}
 			return
+		}
+	}
+	if stats != nil {
+		stats.addLegacyWalk()
+		if graph != nil {
+			// A forced compact run is a test/benchmark oracle. Unsupported graph
+			// or participant layouts use this same compatibility fallback; do not
+			// retry the compact solver after callbacks have started.
+			reason := arrayFallbackIndex
+			if len(initial) == 0 {
+				reason = arrayFallbackEmptyState
+			}
+			stats.addFallbackReason(reason)
 		}
 	}
 	walkArrayCFGWorklistLegacy(graph, lines, initial, visit, edgeState, stop, sourceLines)
@@ -939,7 +995,10 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 				if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
 					text = normalizedCodeLine(lines[line-1])
 				}
-				out = visit(text, line, in)
+				// The transfer callback owns the block-local copy.  Keeping the
+				// predecessor input untouched is required for exceptional and
+				// uncertain edges, which deliberately propagate `in` below.
+				out = visit(text, line, out)
 				if stop != nil && stop(text, line) {
 					continue
 				}
@@ -1040,6 +1099,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 type arrayCFGWorklistLane struct {
 	Graph   *vbacfg.CFGView
 	Initial arrayFlowState
+	Stats   *arrayInterproceduralStats
 
 	// Visit receives a private copy of the lane's block input state and returns
 	// the state to propagate to outgoing edges.  In source-line mode it is
@@ -1078,6 +1138,46 @@ type arrayCFGWorklistLane struct {
 func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGWorklistLane) error {
 	if len(lanes) == 0 {
 		return ctx.Err()
+	}
+	strategy := arrayCFGStrategyAuto
+	for _, lane := range lanes {
+		if lane.Stats == nil || lane.Stats.strategy == arrayCFGStrategyAuto {
+			continue
+		}
+		strategy = lane.Stats.strategy
+		break
+	}
+	if strategy != arrayCFGStrategyLegacy {
+		if handled, err := walkArrayCFGCombinedCompact(ctx, lines, lanes); handled {
+			return err
+		}
+	}
+	// A forced compact run remains observable through the same compatibility
+	// fallback when a lane cannot be indexed; no second compact attempt is
+	// made after callbacks have started.
+	fallbackReason := arrayFallbackUnsupported
+	for _, lane := range lanes {
+		if len(lane.Initial) == 0 {
+			fallbackReason = arrayFallbackEmptyState
+			break
+		}
+		if lane.Graph != nil {
+			if _, err := semanticstate.NewIndexView(*lane.Graph); err != nil {
+				fallbackReason = arrayFallbackIndex
+				break
+			}
+		}
+	}
+	seenStats := map[*arrayInterproceduralStats]bool{}
+	for _, lane := range lanes {
+		if lane.Stats == nil || seenStats[lane.Stats] {
+			continue
+		}
+		seenStats[lane.Stats] = true
+		lane.Stats.addLegacyWalk()
+		if strategy != arrayCFGStrategyLegacy {
+			lane.Stats.addFallbackReason(fallbackReason)
+		}
 	}
 
 	type graphIndex struct {
@@ -1150,7 +1250,9 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 					if strings.TrimSpace(text) == "" && line >= 1 && line <= len(lines) {
 						text = normalizedCodeLine(lines[line-1])
 					}
-					out = lane.Visit(text, line, in)
+					// Keep the predecessor input immutable to the block transfer;
+					// exceptional and uncertain edges must receive that input state.
+					out = lane.Visit(text, line, out)
 					stopped = lane.Stop != nil && lane.Stop(text, line)
 				} else {
 					start := block.Statement.Range.StartLine
@@ -2741,7 +2843,7 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 		index := queue[head]
 		queued[index] = false
 		if head >= len(procedures) && ctx.arrayStats != nil {
-			ctx.arrayStats.revisits++
+			ctx.arrayStats.addRevisit()
 		}
 		procedure := procedures[index]
 		key := arrayProcedureKey(procedure.proc)
@@ -2749,7 +2851,7 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 			continue
 		}
 		if ctx.arrayStats != nil && procedure.proc.Graph != nil {
-			ctx.arrayStats.cfgWalks++
+			ctx.arrayStats.addCFGWalk()
 		}
 		value := arrayByRefAllocationSummaryForProcedure(procedure.file, procedure.proc, targets, summaries, ctx, dominators[key])
 		old := arrayByRefAllocationSummaries{key: contributions[key]}
@@ -2858,7 +2960,13 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 	variables := arrayVariables(file, proc, moduleDecls)
 	initial := arrayInitialState(variables)
 	graph := arrayVBA227Graph(proc, ctx)
-	var normalExit arrayFlowState
+	parameterNames := make([]string, 0, proc.Params.Len())
+	for _, parameter := range proc.Params.AllIndexed() {
+		if parameterIsByRefArray(parameter) {
+			parameterNames = append(parameterNames, strings.ToLower(parameter.Name))
+		}
+	}
+	var normalExit map[string]arrayValue
 	hasNormalExit := false
 	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 		out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, nil, nil)
@@ -2872,15 +2980,20 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 		out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 		if edge.To == graph.NormalExit() {
 			if !hasNormalExit {
-				normalExit = cloneArrayState(out)
+				normalExit = make(map[string]arrayValue, len(parameterNames))
+				for _, name := range parameterNames {
+					normalExit[name] = out[name]
+				}
 				hasNormalExit = true
 			} else {
-				normalExit = meetArrayState(normalExit, out)
+				for _, name := range parameterNames {
+					normalExit[name] = meetArrayValue(normalExit[name], out[name])
+				}
 			}
 		}
 		return out
 	}
-	walkArrayCFGWithSourceLines(&graph, file.Lines, initial, visit, edgeState)
+	walkArrayCFGWithSourceLinesReliableStats(&graph, file.Lines, initial, visit, edgeState, arrayAllocationTransferIsReliable, ctx.arrayStats)
 	if !hasNormalExit {
 		return nil
 	}
@@ -3234,7 +3347,14 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 	}
 	declarations := newDeclarationScope(file, proc)
 	declarations.module = moduleDecls
-	updated := cloneArrayState(state)
+	// Callers pass a block-local state to this transfer callback. The legacy
+	// walkers keep predecessor input separate before invoking it, while the
+	// compact cursor owns the map outright; update that private state in place
+	// so module/ByRef effects do not reintroduce whole-state copies.
+	updated := state
+	if updated == nil {
+		updated = arrayFlowState{}
+	}
 	markArgument := func(name string) {
 		name = strings.ToLower(cleanIdentifier(name))
 		variable, known := variables[name]
@@ -3554,7 +3674,7 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 		index := queue[head]
 		queued[index] = false
 		if head >= len(procedures) && ctx.arrayStats != nil {
-			ctx.arrayStats.revisits++
+			ctx.arrayStats.addRevisit()
 		}
 		procedure := procedures[index]
 		if !arrayProcedureIsParticipant(ctx, procedure.proc) {
@@ -4039,13 +4159,13 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		}
 		graph := arrayVBA227Graph(procedure.proc, ctx)
 		if ctx.arrayStats != nil {
-			ctx.arrayStats.cfgWalks++
+			ctx.arrayStats.addCFGWalk()
 		}
-		walkArrayCFGWithEdges(&graph, procedure.file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		walkArrayCFGWithEdgesStats(&graph, procedure.file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 			out = applyArrayConditionalAllocationBranch(out, &graph, block, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[procedure.file.Path], variables, procedure.file, procedure.proc, procedure.moduleDecls)
-		})
+		}, ctx.arrayStats)
 		return candidates
 	}
 
@@ -4062,7 +4182,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		queued[index] = false
 		key := procedures[index].key
 		if head >= len(procedures) && ctx.arrayStats != nil {
-			ctx.arrayStats.revisits++
+			ctx.arrayStats.addRevisit()
 		}
 		contribution := evaluate(procedures[index], entries)
 		if arrayModuleEntryContributionsEqual(contributions[key], contribution) {
@@ -4328,14 +4448,14 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			return evidence
 		}
 		if ctx.arrayStats != nil {
-			ctx.arrayStats.cfgWalks++
+			ctx.arrayStats.addCFGWalk()
 		}
 		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
-		walkArrayCFGWithEdges(&baseView, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		walkArrayCFGWithEdgesStats(&baseView, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 			out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
-		})
+		}, ctx.arrayStats)
 		return evidence
 	}
 
@@ -4365,7 +4485,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		index := queue[head]
 		queued[index] = false
 		if head >= len(callers) && ctx.arrayStats != nil {
-			ctx.arrayStats.revisits++
+			ctx.arrayStats.addRevisit()
 		}
 		caller := callers[index]
 		key := arrayProcedureKey(caller.proc)
@@ -6170,10 +6290,10 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		base := arrayOptionBase(procedure.file)
 		procedureHasErrorHandling := arrayProcedureHasErrorHandling(proc)
 		if participantCtx.arrayStats != nil {
-			participantCtx.arrayStats.cfgWalks++
+			participantCtx.arrayStats.addCFGWalk()
 		}
 		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
-		walkArrayCFGWithStop(&baseView, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
+		walkArrayCFGWithStopStats(&baseView, procedure.file.Lines, arrayInitialState(procedure.variables), func(text string, line int, in arrayFlowState) arrayFlowState {
 			if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(lhs, proc.Name) {
 				value, known := arrayExpressionState(rhs, in, ctx)
 				returnCandidates[line] = candidate{value: value, ok: known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue}
@@ -6184,7 +6304,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			return applyArrayAllocationGuard(out, block.Statement, edge, arrayAllocationGuards, procedure.variables)
 		}, func(text string, _ int) bool {
 			return !procedureHasErrorHandling && arraySummaryStatementAlwaysFails(text, base, procedure.constants)
-		})
+		}, participantCtx.arrayStats)
 		returnLines := make([]int, 0, len(returnCandidates))
 		for line := range returnCandidates {
 			returnLines = append(returnLines, line)
@@ -6254,7 +6374,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			continue
 		}
 		if head >= len(procedures) && participantCtx.arrayStats != nil {
-			participantCtx.arrayStats.revisits++
+			participantCtx.arrayStats.addRevisit()
 		}
 		key := arrayProcedureKey(procedure.proc)
 		value, hasContribution := evaluate(procedure, summaries)
