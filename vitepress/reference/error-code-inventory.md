@@ -26,9 +26,15 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `array_bound`
 - `array_bounds`
 - `array_candidate_procedures`
+- `array_cfg_fallback_empty_state`
+- `array_cfg_fallback_index`
+- `array_cfg_fallback_unsupported`
+- `array_cfg_fallbacks`
 - `array_cfg_walks`
+- `array_compact_cfg_walks`
 - `array_interprocedural_cfg_walks`
 - `array_kernel_runs`
+- `array_legacy_cfg_walks`
 - `array_participant_procedures`
 - `array_projection_runs`
 - `array_subscript_out_of_bounds`

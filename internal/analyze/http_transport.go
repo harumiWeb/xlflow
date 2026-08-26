@@ -215,6 +215,11 @@ func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sour
 				state.Set(symbol, cloneHTTPState(initial))
 				return nil
 			},
+			// HTTP has no edge-specific refinement. Keep the adapter on the
+			// explicit policy path while documenting that every edge propagates.
+			EdgeDecision: func(_ context.Context, _ semanticstate.LaneOrdinal, _ semanticstate.Edge, _, _ semanticstate.StateView[httpAnalysisState], _ *semanticstate.State[httpAnalysisState]) (semanticstate.EdgeDisposition, error) {
+				return semanticstate.EdgePropagate, nil
+			},
 			Transfer: func(_ context.Context, _ semanticstate.LaneOrdinal, block semanticstate.BlockOrdinal, input semanticstate.StateView[httpAnalysisState], output *semanticstate.State[httpAnalysisState]) error {
 				value, ok := input.Value(symbol)
 				if !ok {

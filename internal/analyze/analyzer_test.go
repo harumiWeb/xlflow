@@ -6025,11 +6025,22 @@ Public Sub Run()
 End Sub
 `)
 
-	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
-	if err != nil {
-		t.Fatal(err)
+	var legacy, compact []Finding
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strategy == arrayCFGStrategyLegacy {
+			legacy = findings
+		} else {
+			compact = findings
+		}
 	}
-	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+	if !reflect.DeepEqual(legacy, compact) {
+		t.Fatalf("legacy and compact Array findings differ: legacy=%+v compact=%+v", legacy, compact)
+	}
+	if got := findingsByCode(compact, "VBA227"); len(got) != 0 {
 		t.Fatalf("a positive-count dispatch should not report its case-local array access: %+v", got)
 	}
 }

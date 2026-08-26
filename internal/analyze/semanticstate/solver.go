@@ -213,7 +213,15 @@ func (s *Solver[T]) SolveContext(ctx context.Context) (Result[T], error) {
 				base = inputView
 			}
 			candidate.CloneFrom(base, s.lattice.Clone)
-			if lane.Edge != nil {
+			if lane.EdgeDecision != nil {
+				disposition, err := lane.EdgeDecision(ctx, item.Lane, edge, inputView, output.View(), candidate)
+				if err != nil {
+					return Result[T]{}, err
+				}
+				if disposition == EdgeSuppress {
+					continue
+				}
+			} else if lane.Edge != nil {
 				if err := lane.Edge(ctx, item.Lane, edge, inputView, output.View(), candidate); err != nil {
 					return Result[T]{}, err
 				}

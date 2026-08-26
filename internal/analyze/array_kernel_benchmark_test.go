@@ -82,6 +82,57 @@ func BenchmarkArrayAnalysisKernel(b *testing.B) {
 	}
 }
 
+// BenchmarkArrayAdvancedCFGStrategies compares the migrated source-line,
+// edge-refined, combined, and ByRef workloads against the retained legacy
+// oracle. The strategy selector is private and benchmark-only; production
+// analysis uses auto.
+func BenchmarkArrayAdvancedCFGStrategies(b *testing.B) {
+	workloads := []arrayKernelBenchmarkWorkload{
+		arrayKernelBenchmarkWorkloads()[2], // wide ReDim/P preserve CFG
+		arrayKernelBenchmarkWorkloads()[3], // edge-heavy branches
+		arrayKernelBenchmarkWorkloads()[5], // ByRef/module summary path
+	}
+	strategies := []struct {
+		name     string
+		strategy arrayCFGStrategy
+	}{
+		{name: "auto", strategy: arrayCFGStrategyAuto},
+		{name: "compact", strategy: arrayCFGStrategyCompact},
+		{name: "legacy", strategy: arrayCFGStrategyLegacy},
+	}
+	for _, workload := range workloads {
+		workload := workload
+		for _, strategy := range strategies {
+			strategy := strategy
+			b.Run(workload.name+"/"+strategy.name, func(b *testing.B) {
+				root := b.TempDir()
+				writeArrayKernelBenchmarkProject(b, root, workload)
+				b.Setenv(typedb.EnvDir, filepath.Join(b.TempDir(), "typelib"))
+				cfg := config.Default()
+				configureArrayBenchmarkRulesAll(&cfg)
+				recorder := analysisstats.NewRecorder()
+				ctx := analysisstats.WithRecorder(context.Background(), recorder)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := (Analyzer{RootDir: root, Config: cfg, arrayStrategy: strategy.strategy}).RunResultContext(ctx); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StopTimer()
+				_, counters := recorder.Totals()
+				for _, name := range []string{"array_compact_cfg_walks", "array_legacy_cfg_walks", "array_cfg_fallbacks"} {
+					for _, counter := range counters {
+						if counter.Name == name {
+							b.ReportMetric(float64(counter.Value)/float64(b.N), name+"/op")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestArrayKernelBenchmarkFixtureScale keeps the benchmark matrix visible to
 // ordinary test runs without executing the analyzer for every workload.
 func TestArrayKernelBenchmarkFixtureScale(t *testing.T) {
@@ -127,6 +178,41 @@ func TestArrayKernelProjectionWorkCounters(t *testing.T) {
 	// rebuilding the main array fixed point.
 	if all["array_cfg_walks"] > single["array_cfg_walks"]+1 {
 		t.Fatalf("array CFG walks = single %d/all %d, want at most one secondary pass", single["array_cfg_walks"], all["array_cfg_walks"])
+	}
+}
+
+func TestArrayCFGStrategyTelemetry(t *testing.T) {
+	workload := arrayKernelBenchmarkWorkloads()[5]
+	for _, strategy := range []struct {
+		name     string
+		strategy arrayCFGStrategy
+		wantKey  string
+	}{
+		{name: "compact", strategy: arrayCFGStrategyCompact, wantKey: "array_compact_cfg_walks"},
+		{name: "legacy", strategy: arrayCFGStrategyLegacy, wantKey: "array_legacy_cfg_walks"},
+	} {
+		strategy := strategy
+		t.Run(strategy.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeArrayKernelBenchmarkProject(t, root, workload)
+			t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+			cfg := config.Default()
+			configureArrayBenchmarkRulesAll(&cfg)
+			recorder := analysisstats.NewRecorder()
+			if _, err := (Analyzer{RootDir: root, Config: cfg, arrayStrategy: strategy.strategy}).RunResultContext(analysisstats.WithRecorder(context.Background(), recorder)); err != nil {
+				t.Fatal(err)
+			}
+			_, counters := recorder.Totals()
+			found := false
+			for _, counter := range counters {
+				if counter.Name == strategy.wantKey && counter.Value > 0 {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("strategy %s did not report %s: %+v", strategy.name, strategy.wantKey, counters)
+			}
+		})
 	}
 }
 

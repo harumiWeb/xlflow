@@ -106,8 +106,12 @@ type Result struct {
 }
 
 type Analyzer struct {
-	RootDir                    string
-	Config                     config.Config
+	RootDir string
+	Config  config.Config
+	// arrayStrategy is intentionally private and test/benchmark-only.  The
+	// zero value selects the production auto compatibility decision; tests may
+	// force the indexed or legacy oracle without changing public configuration.
+	arrayStrategy              arrayCFGStrategy
 	PathFilter                 func(string) bool
 	typeDB                     *vbadb.DB
 	typeDBResolutionIncomplete bool
@@ -367,8 +371,81 @@ type analysisContext struct {
 }
 
 type arrayInterproceduralStats struct {
-	cfgWalks uint64
-	revisits uint64
+	mu                  sync.Mutex
+	cfgWalks            uint64
+	revisits            uint64
+	compactWalks        uint64
+	legacyWalks         uint64
+	fallbackWalks       uint64
+	fallbackEmptyState  uint64
+	fallbackIndex       uint64
+	fallbackUnsupported uint64
+	strategy            arrayCFGStrategy
+}
+
+// Array CFG walks can be materialized concurrently while a procedure plan is
+// evaluated. Keep the developer-only counters race-free without imposing any
+// synchronization on the semantic state itself.
+func (s *arrayInterproceduralStats) addCFGWalk() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.cfgWalks++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addRevisit() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.revisits++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addCompactWalk() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.compactWalks++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addLegacyWalk() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.legacyWalks++
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) addFallbackReason(reason arrayFallbackReason) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.fallbackWalks++
+	switch reason {
+	case arrayFallbackEmptyState:
+		s.fallbackEmptyState++
+	case arrayFallbackIndex:
+		s.fallbackIndex++
+	default:
+		s.fallbackUnsupported++
+	}
+	s.mu.Unlock()
+}
+
+func (s *arrayInterproceduralStats) snapshot() (cfgWalks, revisits, compactWalks, legacyWalks, fallbackWalks, fallbackEmptyState, fallbackIndex, fallbackUnsupported uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfgWalks, s.revisits, s.compactWalks, s.legacyWalks, s.fallbackWalks, s.fallbackEmptyState, s.fallbackIndex, s.fallbackUnsupported
 }
 
 type procedureSignature struct {
@@ -2176,7 +2253,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
-		arrayStats:                       &arrayInterproceduralStats{},
+		arrayStats:                       &arrayInterproceduralStats{strategy: a.arrayStrategy},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
 		arrayByRefEntryConditions:        map[string]map[int]string{},
 		procedures:                       map[string]procedureSignature{},
@@ -2319,8 +2396,15 @@ func recordArrayInterproceduralTelemetry(ctx context.Context, analysisCtx analys
 	}
 	recorder.AddSum(analysisstats.ArrayParticipantProceduresCounter, uint64(len(analysisCtx.arrayParticipants)))
 	if analysisCtx.arrayStats != nil {
-		recorder.AddSum(analysisstats.ArrayInterproceduralCFGWalksCounter, analysisCtx.arrayStats.cfgWalks)
-		recorder.AddSum(analysisstats.ArrayWorklistRevisitsCounter, analysisCtx.arrayStats.revisits)
+		cfgWalks, revisits, compactWalks, legacyWalks, fallbackWalks, fallbackEmptyState, fallbackIndex, fallbackUnsupported := analysisCtx.arrayStats.snapshot()
+		recorder.AddSum(analysisstats.ArrayInterproceduralCFGWalksCounter, cfgWalks)
+		recorder.AddSum(analysisstats.ArrayWorklistRevisitsCounter, revisits)
+		recorder.AddSum("array_compact_cfg_walks", compactWalks)
+		recorder.AddSum("array_legacy_cfg_walks", legacyWalks)
+		recorder.AddSum("array_cfg_fallbacks", fallbackWalks)
+		recorder.AddSum("array_cfg_fallback_empty_state", fallbackEmptyState)
+		recorder.AddSum("array_cfg_fallback_index", fallbackIndex)
+		recorder.AddSum("array_cfg_fallback_unsupported", fallbackUnsupported)
 	}
 }
 

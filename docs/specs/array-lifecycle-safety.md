@@ -52,6 +52,47 @@ as another fixed-point walk. These policy choices are deliberate and do not
 change diagnostic code, severity, message, range, ordering, suppression, or
 Batch/realtime parity.
 
+## Indexed solver migration boundary (#721)
+
+The block-level, source-line lifecycle, edge-refined, and combined
+runtime/evidence Array walks share one indexed semantic-state boundary when
+the fixed participant catalog and transfer callbacks are available. The
+source-line lane retains physical source-line order in its own solver group;
+the base and runtime lanes for one CFG view share an indexed lane group. The
+solver cursor is used for allocation, shape, alias, module-call, ByRef, and
+return-summary state. The legacy map adapter preserves the same
+transfer/evidence callback contract and remains the differential oracle and
+compatibility fallback.
+
+Only normal continuation edges receive conditional-allocation,
+allocation-guard, and module-configuration refinement. Exceptional and
+uncertain edges receive predecessor input state. With `On Error Resume Next`,
+`ReliableExceptional` permits predecessor output only for a proven plain
+`ReDim`, `Array`, `Split`, or `Filter` allocation; `ReDim Preserve` remains
+unknown when its prior allocation or shape is not proven. A completed `Stop`
+suppresses all successor propagation. These edge rules apply to `VBA227`,
+`VBA208`, `VBA249`, and their combined evidence lanes without changing the
+existing allocation or shape lattice.
+
+Semantic slots contain only bounded allocation, shape, alias, and summary
+facts needed by the fixed point. Diagnostic findings, runtime findings,
+ByRef-call evidence, module-entry contributions, and return candidates are
+lane-local sidecars. They do not enlarge state equality or force a requeue;
+the existing deduplication, evidence canonicalization, and deterministic
+`sortFindings` stages remain authoritative for output order and multiplicity.
+
+`auto` chooses compact only after a preflight check confirms a fixed
+participant index and representable semantic writes. Index construction
+failure, an empty semantic state that still needs declaration-side diagnostics,
+or an unsupported transfer contract use the legacy walker. Recovered or
+incomplete CFG input remains on compact when it can be indexed with the
+existing unknown/uncertain semantics; recovery alone is not a fallback reason.
+Cancellation and execution-time failures do not cause a partial legacy retry.
+Forced compact/legacy selection is reserved for tests and benchmarks, and
+strategy/fallback telemetry, including fallback reason counters, is
+developer-only rather than a CLI, JSON, LSP,
+snapshot, or review-ledger field.
+
 ## State model
 
 The analyzer carries a case-insensitive variable state through the procedure

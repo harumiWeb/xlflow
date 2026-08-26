@@ -186,6 +186,119 @@ func TestSolverSnapshotsInputBeforeSelfEdgePropagation(t *testing.T) {
 	}
 }
 
+func TestSolverEdgeDecisionCanSuppressPropagation(t *testing.T) {
+	env := NewEnvironment([]string{"value"})
+	index, err := NewIndex(cfg.Graph{
+		Blocks: []cfg.Block{
+			{ID: 0, Kind: cfg.BlockEntry},
+			{ID: 1, Kind: cfg.BlockStatement},
+			{ID: 2, Kind: cfg.BlockNormalExit},
+		},
+		Edges: []cfg.Edge{
+			{ID: 0, From: 0, To: 1, Kind: cfg.EdgeFallthrough, Class: cfg.EdgeNormal},
+			{ID: 1, From: 1, To: 2, Kind: cfg.EdgeProcedureExit, Class: cfg.EdgeNormal},
+		},
+		Entry: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, _ := env.Symbol("value")
+	solver, err := NewSolver[int](index, env, maxLattice{}, []Lane[int]{{
+		Initialize: func(_ context.Context, _ LaneOrdinal, state *State[int]) error {
+			state.Set(value, 1)
+			return nil
+		},
+		Transfer: func(_ context.Context, _ LaneOrdinal, _ BlockOrdinal, in StateView[int], out *State[int]) error {
+			out.CloneFrom(in, nil)
+			return nil
+		},
+		EdgeDecision: func(_ context.Context, _ LaneOrdinal, edge Edge, _ StateView[int], _ StateView[int], _ *State[int]) (EdgeDisposition, error) {
+			if edge.ID == 0 {
+				return EdgeSuppress, nil
+			}
+			return EdgePropagate, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := solver.Solve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result.State(1, 0).Value(value); ok {
+		t.Fatal("suppressed edge unexpectedly reached destination")
+	}
+	if _, ok := result.State(2, 0).Value(value); ok {
+		t.Fatal("suppressed predecessor unexpectedly reached successor")
+	}
+}
+
+func TestSolverEdgeDecisionUsesInputForExceptionalAndUncertainEdges(t *testing.T) {
+	env := NewEnvironment([]string{"value"})
+	index, err := NewIndex(cfg.Graph{
+		Blocks: []cfg.Block{
+			{ID: 0, Kind: cfg.BlockEntry},
+			{ID: 1, Kind: cfg.BlockStatement},
+			{ID: 2, Kind: cfg.BlockStatement},
+			{ID: 3, Kind: cfg.BlockNormalExit},
+			{ID: 4, Kind: cfg.BlockNormalExit},
+		},
+		Edges: []cfg.Edge{
+			{ID: 0, From: 0, To: 1, Kind: cfg.EdgeFallthrough, Class: cfg.EdgeNormal},
+			{ID: 1, From: 1, To: 2, Kind: cfg.EdgeError, Class: cfg.EdgeExceptional},
+			{ID: 2, From: 1, To: 3, Kind: cfg.EdgeBranchTrue, Class: cfg.EdgeNormal, Uncertain: true},
+			{ID: 3, From: 1, To: 4, Kind: cfg.EdgeProcedureExit, Class: cfg.EdgeNormal},
+		},
+		Entry: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, _ := env.Symbol("value")
+	solver, err := NewSolver[int](index, env, maxLattice{}, []Lane[int]{{
+		Initialize: func(_ context.Context, _ LaneOrdinal, state *State[int]) error {
+			state.Set(value, 1)
+			return nil
+		},
+		Transfer: func(_ context.Context, _ LaneOrdinal, block BlockOrdinal, in StateView[int], out *State[int]) error {
+			out.CloneFrom(in, nil)
+			if block == 1 {
+				out.Set(value, 4)
+			}
+			return nil
+		},
+		EdgeDecision: func(_ context.Context, _ LaneOrdinal, edge Edge, input, output StateView[int], candidate *State[int]) (EdgeDisposition, error) {
+			if edge.Class != cfg.EdgeExceptional && !edge.Uncertain {
+				return EdgePropagate, nil
+			}
+			inputValue, inputOK := input.Value(value)
+			outputValue, outputOK := output.Value(value)
+			candidateValue, candidateOK := candidate.View().Value(value)
+			if !inputOK || !outputOK || !candidateOK || inputValue != 1 || outputValue != 4 || candidateValue != 1 {
+				t.Fatalf("edge %d states: input=(%d,%v) output=(%d,%v) candidate=(%d,%v)", edge.ID, inputValue, inputOK, outputValue, outputOK, candidateValue, candidateOK)
+			}
+			return EdgePropagate, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := solver.Solve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, block := range []BlockOrdinal{2, 3} {
+		if got, ok := result.State(block, 0).Value(value); !ok || got != 1 {
+			t.Fatalf("edge to block %d joined output instead of input: %d, %v", block, got, ok)
+		}
+	}
+	if got, ok := result.State(4, 0).Value(value); !ok || got != 4 {
+		t.Fatalf("normal edge did not join output: %d, %v", got, ok)
+	}
+}
+
 func TestSolverCancellationDoesNotPublishPartialResult(t *testing.T) {
 	env := NewEnvironment([]string{"value"})
 	index, err := NewIndex(testGraph())
