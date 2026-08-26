@@ -336,11 +336,13 @@ func buildHTTPCompactEnvironment(file parsedFile, proc sourceProcedure, initial 
 	}, semanticstate.NewEnvironment(names, names)
 }
 
-// httpCompactProcedureStringCandidates is an allocation-bounded, conservative
-// pre-scan used only to allocate saved-path symbols.  It gathers literal and
-// module-constant values assigned to procedure-local names, retaining all
-// values seen across branches so that a later SaveToFile site has a stable
-// path slot even when its path is not available in the entry state.
+// httpCompactProcedureStringCandidates is a pre-scan used only to allocate
+// saved-path symbols. It gathers literal and module-constant values assigned
+// to procedure-local names, retaining all values seen across branches so that
+// a later SaveToFile site has a stable path slot even when its path is not
+// available in the entry state. Candidate truncation is intentionally not
+// allowed here: every retained path is a semantic symbol, and dropping one
+// would make a later download-and-execute finding depend on enumeration order.
 func httpCompactProcedureStringCandidates(proc sourceProcedure, initial httpAnalysisState) map[string]map[string]bool {
 	values := map[string]map[string]bool{}
 	for name, value := range initial.strings {
@@ -394,7 +396,6 @@ func httpCompactStringCandidates(expr string, values map[string]map[string]bool)
 		return nil
 	}
 	candidates := []string{""}
-	const maxCandidates = 64
 	for _, rawPart := range parts {
 		part := strings.TrimSpace(rawPart)
 		var pieces []string
@@ -410,16 +411,15 @@ func httpCompactStringCandidates(expr string, values map[string]map[string]bool)
 		if len(pieces) == 0 {
 			return nil
 		}
+		// Do not cap the Cartesian product. The result is used to allocate the
+		// immutable saved-path symbols, so a cap would silently discard a
+		// statically possible executable path. The fixed-point state itself
+		// remains scalar; this pre-scan only materializes the finite candidates
+		// that the source actually provides.
 		next := make([]string, 0, len(candidates)*len(pieces))
 		for _, prefix := range candidates {
 			for _, piece := range pieces {
-				if len(next) == maxCandidates {
-					break
-				}
 				next = append(next, prefix+piece)
-			}
-			if len(next) == maxCandidates {
-				break
 			}
 		}
 		candidates = next
@@ -1101,6 +1101,17 @@ func httpCompactIsProcessLaunch(text string, view semanticstate.StateView[httpSc
 		start--
 	}
 	if start == end {
+		return false
+	}
+	// A launcher receiver is a simple identifier. If another member-access
+	// dot precedes it, the expression is a qualified chain such as
+	// `wrapper.shell.Run`; the suffix `shell` must not be looked up as if it
+	// were an independently tracked launcher variable.
+	prefix := start - 1
+	for prefix >= 0 && (text[prefix] == ' ' || text[prefix] == '\t') {
+		prefix--
+	}
+	if prefix >= 0 && (text[prefix] == '.' || text[prefix] == ')' || text[prefix] == ']') {
 		return false
 	}
 	receiver := strings.ToLower(text[start:end])

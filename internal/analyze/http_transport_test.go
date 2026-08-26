@@ -876,6 +876,7 @@ func TestHTTPCompactProcessLaunchRequiresKnownReceiver(t *testing.T) {
 	env := &httpCompactEnvironment{
 		launchers: map[string]httpCompactSlot{
 			"known": {id: launcherID, class: httpCompactLauncherSlot},
+			"shell": {id: launcherID, class: httpCompactLauncherSlot},
 		},
 	}
 	if !httpCompactIsProcessLaunch(`known.Run "payload.exe"`, state.View(), env) {
@@ -886,6 +887,32 @@ func TestHTTPCompactProcessLaunchRequiresKnownReceiver(t *testing.T) {
 	}
 	if httpCompactIsProcessLaunch(`Set result = other.Run "payload.exe"`, state.View(), env) {
 		t.Fatal("unknown launcher receiver reused an unrelated slot")
+	}
+	if httpCompactIsProcessLaunch(`wrapper.shell.Run "payload.exe"`, state.View(), env) {
+		t.Fatal("qualified member receiver was treated as the tracked launcher")
+	}
+}
+
+func TestHTTPCompactStringCandidatesRetainsAllCombinations(t *testing.T) {
+	values := map[string]map[string]bool{"prefix": {}, "suffix": {}}
+	for index := 0; index < 9; index++ {
+		values["prefix"]["C:\\Temp\\payload"+strconv.Itoa(index)+"-"] = true
+		values["suffix"][strconv.Itoa(index)+".exe"] = true
+	}
+	candidates := httpCompactStringCandidates("prefix & suffix", values)
+	if len(candidates) != 81 {
+		t.Fatalf("candidate count = %d, want 81", len(candidates))
+	}
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		seen[candidate] = true
+	}
+	for prefix := range values["prefix"] {
+		for suffix := range values["suffix"] {
+			if !seen[prefix+suffix] {
+				t.Fatalf("candidate %q was dropped", prefix+suffix)
+			}
+		}
 	}
 }
 
