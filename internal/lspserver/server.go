@@ -219,7 +219,7 @@ func New(opts Options) (*Server, func(), error) {
 		codeLensConfig:            intel.DefaultCodeLensConfig(),
 		diagStates:                make(map[string]*diagnosticState),
 		docLifecycles:             make(map[string]*sync.Mutex),
-		semanticQueries:           semanticquery.DefaultStore(),
+		semanticQueries:           semanticquery.New(semanticquery.Options{}),
 		semanticInvalidationPaths: make(map[string]struct{}),
 		analysisPermits:           make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
 	}
@@ -763,7 +763,22 @@ func (s *Server) flushSemanticInvalidations(ctx context.Context) {
 	s.semanticInvalidationPaths = make(map[string]struct{})
 	s.semanticInvalidationMu.Unlock()
 	if len(paths) > 0 {
-		s.semanticQueries.InvalidateProceduresContext(ctx, paths...)
+		normalized := make([]string, 0, len(paths))
+		seen := make(map[string]struct{}, len(paths))
+		for _, path := range paths {
+			path = symbolFileKey(path)
+			if path == "" {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			normalized = append(normalized, path)
+		}
+		if len(normalized) > 0 {
+			s.semanticQueries.InvalidateProceduresContext(ctx, normalized...)
+		}
 	}
 }
 

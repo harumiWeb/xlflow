@@ -999,6 +999,10 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `selected_by`
 - `selected_index`
 - `semantic_kernel_runs`
+- `semantic_query_hits`
+- `semantic_query_invalidated_procedures`
+- `semantic_query_misses`
+- `semantic_query_recomputed_kernels`
 - `semantic_results_reused`
 - `sensitive_module_constant`
 - `session_args_invalid`

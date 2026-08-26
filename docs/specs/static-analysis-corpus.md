@@ -1797,6 +1797,47 @@ ownership and invalidation contract is in
 `docs/specs/vba-semantic-query-dag.md` and
 `docs/adr/ADR-0048-revision-scoped-semantic-query-dag.md`.
 
+### Fingerprint and invalidation overhead verification (#724)
+
+The #724 benchmark harness keeps cache cost and cache benefit separate for
+both the single-module ROneCOne workload and the representative many-file
+`std-vba` workload. Run the following leaves serially on the fixed Windows
+host and Go toolchain, using at least ten `-benchtime=1x -benchmem` samples for
+the retained performance record:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/(ronecone|std-vba)/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchtime=1x -count=10 -benchmem
+```
+
+`cold` uses a fresh process-local semantic query store for every operation;
+`warm` primes one store outside the timed region; `local-edit` changes only a
+benchmark-owned procedure body; and `dependency-edit` cycles benchmark-owned
+callee body, signature, effect, and caller redirect edits while keeping the
+caller/callee modules independent of the checked-in corpus sources. Retain
+`ns/op`, `B/op`, `allocs/op`, findings and
+warnings, semantic-query hits/misses/invalidations/recomputations, and the
+array, generic-dataflow, and HTTP physical-kernel counters. Record median and
+spread with the host, Go version, power state, and baseline SHAs
+`149ab7bb` (pre-#715) and `f47e3b56` (#715 implementation) when a comparison
+is performed. Query counters are developer telemetry only; never copy them to
+corpus snapshots or `reviews/diagnostics.jsonl`.
+
+The benchmark harness is measurement-only: it must not update snapshots or
+review classifications. Run corpus metrics and the verify-only corpus test
+twice after implementation. Any unexplained snapshot, finding, range,
+severity, evidence, ordering, suppression, or review-ledger change is a
+stop-and-investigate condition.
+
+The 2026-08-26 implementation smoke samples were collected on Windows/amd64,
+12th Gen Intel(R) Core(TM) i7-12700, Go 1.26.6. They are spot observations,
+not the required ten-sample baseline comparison: ROneCOne warm was 7.975--8.003
+s/op with 2,221 semantic-query hits, and the dependency-edit case was 8.019
+s/op with 2,223 hits, 4 misses, and 4 recomputed kernels. The `std-vba` warm
+spot was 13.503 s/op with 3,713 hits. The formal comparison against
+`149ab7bb` and `f47e3b56`, including median/spread, cold allocation limits, and
+95% confidence testing, remains unverified until the serial `-count=10`
+collection is retained on the fixed benchmark host.
+
 ## Related
 
 - `docs/adr/ADR-0029-vendored-static-analysis-corpus.md`

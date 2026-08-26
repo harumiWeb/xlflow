@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -96,7 +98,6 @@ func FromContext(ctx context.Context) Context {
 }
 
 type cacheValue struct {
-	key   Key
 	value any
 }
 
@@ -107,6 +108,15 @@ type dependencyRecord struct{}
 
 type pendingValue struct {
 	done chan struct{}
+}
+
+// dependencySet keeps one parent's dependencies in canonical order and
+// retains an order-independent digest for the common hit-path rejection. The
+// exact membership check remains as a collision guard, but it does not build a
+// temporary map or stringify keys.
+type dependencySet struct {
+	ids    []Key
+	digest [32]byte
 }
 
 type revisionState struct {
@@ -120,13 +130,24 @@ type revisionState struct {
 type Store struct {
 	mu sync.Mutex
 
-	entries map[string]cacheValue
-	order   []string
-	pending map[string]*pendingValue
-	reverse map[string]map[string]Key
-	keys    map[string]Key
-	epochs  map[string]uint64
-	deps    map[string][]string
+	// Key is comparable, so keep it as the cache identity directly.  The
+	// previous string identity required building a NUL-delimited string for
+	// every lookup and retained a second copy of every key in keys.
+	entries map[Key]cacheValue
+	order   []Key
+	pending map[Key]*pendingValue
+	reverse map[Key]map[Key]struct{}
+	epochs  map[Key]uint64
+	deps    map[Key]dependencySet
+	stale   map[Key]map[Key]struct{}
+
+	// procedureEntries contains exact procedure identities and their
+	// structural prefixes (document, document::module, and so on).  Keeping
+	// these indexes means document/procedure invalidation does not scan every
+	// query key. documentEntries is kept separately so a normalized document
+	// path has an explicit, exact lookup path.
+	procedureEntries map[string]map[Key]struct{}
+	documentEntries  map[string]map[Key]struct{}
 
 	revisions    map[string]*revisionState
 	sequence     uint64
@@ -146,16 +167,18 @@ func New(opts Options) *Store {
 		maxRevisions = 4
 	}
 	return &Store{
-		entries:      make(map[string]cacheValue),
-		pending:      make(map[string]*pendingValue),
-		reverse:      make(map[string]map[string]Key),
-		keys:         make(map[string]Key),
-		epochs:       make(map[string]uint64),
-		deps:         make(map[string][]string),
-		revisions:    make(map[string]*revisionState),
-		maxEntries:   maxEntries,
-		maxRevisions: maxRevisions,
-		metrics:      opts.Metrics,
+		entries:          make(map[Key]cacheValue),
+		pending:          make(map[Key]*pendingValue),
+		reverse:          make(map[Key]map[Key]struct{}),
+		epochs:           make(map[Key]uint64),
+		deps:             make(map[Key]dependencySet),
+		stale:            make(map[Key]map[Key]struct{}),
+		procedureEntries: make(map[string]map[Key]struct{}),
+		documentEntries:  make(map[string]map[Key]struct{}),
+		revisions:        make(map[string]*revisionState),
+		maxEntries:       maxEntries,
+		maxRevisions:     maxRevisions,
+		metrics:          opts.Metrics,
 	}
 }
 
@@ -239,7 +262,7 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 	}
 	s := r.store
 	metrics := s.metricsFor(ctx)
-	stable := key.String()
+	stable := key
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
@@ -251,16 +274,18 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 				s.mu.Unlock()
 				continue
 			}
-			if !s.dependenciesMatchLocked(stable, dependencies) {
-				s.invalidateIDsLocked([]string{stable}, metrics)
+			if _, stale := s.stale[stable]; !stale {
+				if !s.dependenciesMatchLocked(stable, dependencies) {
+					s.invalidateIDsLocked([]Key{stable}, metrics)
+					s.mu.Unlock()
+					continue
+				}
 				s.mu.Unlock()
-				continue
+				if metrics != nil {
+					metrics.RecordSemanticQueryHit()
+				}
+				return cached.value, true, nil
 			}
-			s.mu.Unlock()
-			if metrics != nil {
-				metrics.RecordSemanticQueryHit()
-			}
-			return cached.value, true, nil
 		}
 		if pending := s.pending[stable]; pending != nil {
 			done := pending.done
@@ -274,7 +299,15 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 		}
 		pending := &pendingValue{done: make(chan struct{})}
 		epoch := s.epochs[stable]
+		previous, hadPrevious := s.entries[stable]
+		if hadPrevious {
+			if _, metadataOnly := previous.value.(dependencyRecord); metadataOnly {
+				hadPrevious = false
+			}
+		}
+		staleReasons := append([]Key(nil), s.staleReasonsLocked(stable)...)
 		s.pending[stable] = pending
+		s.indexKeyLocked(stable)
 		if metrics != nil {
 			metrics.RecordSemanticQueryMiss()
 		}
@@ -287,6 +320,7 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 				if recovered := recover(); recovered != nil {
 					s.mu.Lock()
 					delete(s.pending, stable)
+					s.maybeRemoveKeyMetadataLocked(stable)
 					close(pending.done)
 					s.mu.Unlock()
 					panic(recovered)
@@ -297,42 +331,152 @@ func (r *Revision) Evaluate(ctx context.Context, key Key, dependencies []Key, bu
 		if err == nil {
 			err = ctx.Err()
 		}
+		unchanged := err == nil && len(staleReasons) > 0 && hadPrevious && reflect.DeepEqual(previous.value, value)
 		s.mu.Lock()
 		delete(s.pending, stable)
 		if err == nil && s.epochs[stable] == epoch {
-			s.entries[stable] = cacheValue{key: key, value: value}
-			s.keys[stable] = key
-			s.order = append(s.order, stable)
+			parents := make([]Key, 0, len(s.reverse[stable]))
+			for parent := range s.reverse[stable] {
+				parents = append(parents, parent)
+			}
+			hadEntry := false
+			if _, ok := s.entries[stable]; ok {
+				hadEntry = true
+			}
+			s.entries[stable] = cacheValue{value: value}
+			if !hadEntry {
+				s.order = append(s.order, stable)
+			}
 			s.recordDependenciesLocked(stable, key, dependencies)
+			if len(staleReasons) > 0 {
+				for _, parent := range parents {
+					// Dependents are red because this immediate producer was
+					// invalidated, not because of the producer's own upstream
+					// reason. Clear or retain that edge-local reason only.
+					s.clearStaleReasonLocked(parent, stable)
+					if !unchanged {
+						s.markStaleReasonLocked(parent, stable)
+					}
+				}
+			}
+			s.clearStaleLocked(stable)
 			s.pruneEntriesLocked()
 			if metrics != nil {
 				metrics.RecordSemanticQueryRecomputedKernel()
 			}
+		}
+		epochChanged := s.epochs[stable] != epoch
+		if err != nil || epochChanged {
+			s.maybeRemoveKeyMetadataLocked(stable)
 		}
 		close(pending.done)
 		s.mu.Unlock()
 		if err != nil {
 			return nil, false, err
 		}
+		if epochChanged {
+			// A newer revision invalidated this build while it was running. Do
+			// not expose the uncommitted value; retry against the current epoch.
+			continue
+		}
 		return value, false, nil
 	}
 }
 
-func (s *Store) dependenciesMatchLocked(parent string, dependencies []Key) bool {
+func (s *Store) dependenciesMatchLocked(parent Key, dependencies []Key) bool {
 	stored := s.deps[parent]
-	if len(stored) != len(dependencies) {
+	dependencies = deduplicateDependencies(dependencies)
+	if len(stored.ids) != len(dependencies) || stored.digest != dependencySetDigest(dependencies) {
 		return false
 	}
-	seen := make(map[string]struct{}, len(dependencies))
-	for _, dependency := range dependencies {
-		seen[dependency.String()] = struct{}{}
-	}
-	for _, dependencyID := range stored {
-		if _, ok := seen[dependencyID]; !ok {
+	// Stored dependencies are deduplicated by recordDependenciesLocked. A
+	// membership comparison is deliberately allocation-free on the hit path;
+	// dependency slices are normally tiny, and order is not semantically
+	// significant. The digest above rejects almost all changed sets before this
+	// collision-safe comparison runs.
+	for _, dependencyID := range stored.ids {
+		found := false
+		for _, dependency := range dependencies {
+			if dependency == dependencyID {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return false
 		}
 	}
 	return true
+}
+
+func dependencyKeyDigest(key Key) [32]byte {
+	h := sha256.New()
+	for _, part := range []string{key.Procedure, key.Fingerprint, key.Kernel, key.Config, key.Capability} {
+		_, _ = fmt.Fprintf(h, "%d:", len(part))
+		_, _ = h.Write([]byte(part))
+	}
+	var digest [32]byte
+	copy(digest[:], h.Sum(nil))
+	return digest
+}
+
+func dependencySetDigest(dependencies []Key) [32]byte {
+	var digest [32]byte
+	for _, dependency := range dependencies {
+		item := dependencyKeyDigest(dependency)
+		for index := range digest {
+			digest[index] ^= item[index]
+		}
+	}
+	return digest
+}
+
+func (s *Store) staleReasonsLocked(id Key) []Key {
+	reasons := s.stale[id]
+	if len(reasons) == 0 {
+		return nil
+	}
+	out := make([]Key, 0, len(reasons))
+	for reason := range reasons {
+		out = append(out, reason)
+	}
+	return out
+}
+
+// markStaleReasonLocked marks a cached value red because the producer named
+// by reason changed. Reasons are retained so an unchanged producer output can
+// clear only the invalidation it caused while preserving unrelated red state.
+func (s *Store) markStaleReasonLocked(id, reason Key) {
+	reasons := s.stale[id]
+	if reasons == nil {
+		if _, hasEntry := s.entries[id]; !hasEntry {
+			// A pending or not-yet-created node still needs an epoch bump to
+			// reject a late publication, but it has no value to mark stale.
+			s.epochs[id]++
+			return
+		}
+		reasons = make(map[Key]struct{})
+		s.stale[id] = reasons
+	}
+	reasons[reason] = struct{}{}
+	// Repeated invalidations of the same producer still advance the epoch so
+	// an in-flight build cannot publish across the newer source snapshot.
+	s.epochs[id]++
+}
+
+func (s *Store) clearStaleReasonLocked(id, reason Key) {
+	reasons := s.stale[id]
+	if len(reasons) == 0 {
+		return
+	}
+	delete(reasons, reason)
+	if len(reasons) == 0 {
+		delete(s.stale, id)
+	}
+}
+
+func (s *Store) clearStaleLocked(id Key) {
+	delete(s.stale, id)
 }
 
 func (s *Store) metricsFor(ctx context.Context) Metrics {
@@ -360,34 +504,75 @@ func Evaluate[T any](ctx context.Context, r *Revision, key Key, dependencies []K
 	return result, hit, nil
 }
 
-func (s *Store) recordDependenciesLocked(parent string, parentKey Key, dependencies []Key) {
-	for _, dependencyID := range s.deps[parent] {
+func (s *Store) recordDependenciesLocked(parent Key, parentKey Key, dependencies []Key) {
+	for _, dependencyID := range s.deps[parent].ids {
 		if parents := s.reverse[dependencyID]; parents != nil {
 			delete(parents, parent)
 			if len(parents) == 0 {
 				delete(s.reverse, dependencyID)
+				s.maybeRemoveKeyMetadataLocked(dependencyID)
 			}
 		}
 	}
-	s.keys[parent] = parentKey
-	ids := make([]string, 0, len(dependencies))
-	seen := make(map[string]struct{}, len(dependencies))
-	for _, dependency := range dependencies {
-		dependencyID := dependency.String()
-		if _, ok := seen[dependencyID]; ok {
-			continue
-		}
-		seen[dependencyID] = struct{}{}
-		ids = append(ids, dependencyID)
-		s.keys[dependencyID] = dependency
+	s.indexKeyLocked(parentKey)
+	ids := append([]Key(nil), deduplicateDependencies(dependencies)...)
+	for _, dependency := range ids {
+		dependencyID := dependency
+		s.indexKeyLocked(dependency)
 		parents := s.reverse[dependencyID]
 		if parents == nil {
-			parents = make(map[string]Key)
+			parents = make(map[Key]struct{})
 			s.reverse[dependencyID] = parents
 		}
-		parents[parent] = parentKey
+		parents[parent] = struct{}{}
 	}
-	s.deps[parent] = ids
+	sort.Slice(ids, func(i, j int) bool { return keyLess(ids[i], ids[j]) })
+	s.deps[parent] = dependencySet{ids: ids, digest: dependencySetDigest(ids)}
+}
+
+// deduplicateDependencies preserves the caller's order when all dependencies
+// are already unique. The hit path therefore stays allocation-free for the
+// normal case; a copy is created only when a caller supplied a duplicate.
+func deduplicateDependencies(dependencies []Key) []Key {
+	for index := 0; index < len(dependencies); index++ {
+		for previous := 0; previous < index; previous++ {
+			if dependencies[previous] != dependencies[index] {
+				continue
+			}
+			unique := make([]Key, 0, len(dependencies)-1)
+			unique = append(unique, dependencies[:index]...)
+			for _, dependency := range dependencies[index+1:] {
+				duplicate := false
+				for _, existing := range unique {
+					if existing == dependency {
+						duplicate = true
+						break
+					}
+				}
+				if !duplicate {
+					unique = append(unique, dependency)
+				}
+			}
+			return unique
+		}
+	}
+	return dependencies
+}
+
+func keyLess(left, right Key) bool {
+	if left.Procedure != right.Procedure {
+		return left.Procedure < right.Procedure
+	}
+	if left.Fingerprint != right.Fingerprint {
+		return left.Fingerprint < right.Fingerprint
+	}
+	if left.Kernel != right.Kernel {
+		return left.Kernel < right.Kernel
+	}
+	if left.Config != right.Config {
+		return left.Config < right.Config
+	}
+	return left.Capability < right.Capability
 }
 
 // RecordDependencies records a dependency for an already-computed query. It
@@ -400,21 +585,22 @@ func (s *Store) RecordDependencies(parent Key, dependencies ...Key) {
 		return
 	}
 	s.mu.Lock()
-	stable := parent.String()
+	stable := parent
 	if _, ok := s.entries[stable]; !ok {
-		s.entries[stable] = cacheValue{key: parent, value: dependencyRecord{}}
+		s.entries[stable] = cacheValue{value: dependencyRecord{}}
 		s.order = append(s.order, stable)
 	}
+	s.indexKeyLocked(parent)
 	s.recordDependenciesLocked(stable, parent, dependencies)
 	s.pruneEntriesLocked()
 	s.mu.Unlock()
 }
 
-// Invalidate removes changed queries and their transitive dependents. The
+// Invalidate marks changed queries and their transitive dependents red. The
 // returned procedure identities are sorted and unique for deterministic
-// telemetry. Reverse traversal is completed before affected metadata is
-// released, so callers can invalidate an old/new dependency union when a call
-// is removed or redirected without retaining unbounded historical edges.
+// telemetry. Reverse traversal reports the full affected closure, while
+// values are reevaluated lazily: an unchanged producer output clears its
+// dependents back to green instead of forcing the whole closure to rebuild.
 func (s *Store) Invalidate(changed ...Key) []string {
 	return s.InvalidateContext(context.Background(), changed...)
 }
@@ -428,17 +614,15 @@ func (s *Store) InvalidateContext(ctx context.Context, changed ...Key) []string 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	queue := make([]string, 0, len(changed))
-	for _, key := range changed {
-		queue = append(queue, key.String())
-	}
+	queue := append([]Key(nil), changed...)
 	return s.invalidateIDsLocked(queue, s.metricsFor(ctx))
 }
 
-// InvalidateProcedures removes all cached queries belonging to the supplied
-// procedure identities (or identity prefixes) and their reverse dependents.
-// LSP callers use path prefixes because a source edit can replace a procedure
-// declaration and therefore cannot always reconstruct the old full key.
+// InvalidateProcedures marks all cached queries belonging to the supplied
+// procedure identities (or identity prefixes), plus their reverse dependents,
+// red. LSP callers use path prefixes because a source edit can replace a
+// procedure declaration and therefore cannot always reconstruct the old full
+// key.
 func (s *Store) InvalidateProcedures(procedures ...string) []string {
 	return s.InvalidateProceduresContext(context.Background(), procedures...)
 }
@@ -451,101 +635,190 @@ func (s *Store) InvalidateProceduresContext(ctx context.Context, procedures ...s
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	queue := make([]string, 0)
-	for id, key := range s.keys {
-		for _, procedure := range procedures {
-			if procedure != "" && (key.Procedure == procedure || strings.HasPrefix(key.Procedure, procedure)) {
-				queue = append(queue, id)
-				break
-			}
+	queue := make([]Key, 0)
+	for _, procedure := range procedures {
+		if procedure == "" {
+			continue
+		}
+		for id := range s.procedureEntries[procedure] {
+			queue = append(queue, id)
+		}
+		for id := range s.documentEntries[procedure] {
+			queue = append(queue, id)
 		}
 	}
 	return s.invalidateIDsLocked(queue, s.metricsFor(ctx))
 }
 
-func (s *Store) invalidateIDsLocked(queue []string, metrics Metrics) []string {
-	seen := make(map[string]bool)
-	procedures := make(map[string]bool)
-	affected := make([]string, 0, len(queue))
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		if seen[id] {
+func (s *Store) invalidateIDsLocked(queue []Key, metrics Metrics) []string {
+	// Stale reasons are the immediate producer keys on each reverse edge. A
+	// shared sentinel for a multi-root invalidation would let an unchanged
+	// rebuild of root A clear the same reason from a dependent that is still
+	// stale because of root B; edge-local reasons preserve recovery while this
+	// remains one reverse traversal.
+	roots := make([]Key, 0, len(queue))
+	rootSeen := make(map[Key]struct{}, len(queue))
+	for _, root := range queue {
+		if _, ok := rootSeen[root]; ok {
 			continue
 		}
-		seen[id] = true
-		affected = append(affected, id)
-		s.epochs[id]++
-		if key, ok := s.keys[id]; ok {
-			if key.Procedure != "" {
-				procedures[key.Procedure] = true
-			}
+		rootSeen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	seen := make(map[Key]bool)
+	procedures := make(map[string]bool)
+	affected := make([]Key, 0, len(roots))
+	rootQueue := append([]Key(nil), roots...)
+	for _, root := range roots {
+		if seen[root] {
+			continue
 		}
+		seen[root] = true
+		affected = append(affected, root)
+		if root.Procedure != "" {
+			procedures[root.Procedure] = true
+		}
+		// A root has no invalidating edge in the supplied set, so use its own
+		// identity as the reason that its cached value is red.
+		s.markStaleReasonLocked(root, root)
+	}
+	for len(rootQueue) > 0 {
+		id := rootQueue[0]
+		rootQueue = rootQueue[1:]
 		for parent := range s.reverse[id] {
-			queue = append(queue, parent)
+			// The parent is red because this immediate producer is red. If
+			// another changed root reaches the same parent, it contributes a
+			// separate reason rather than sharing a batch sentinel.
+			s.markStaleReasonLocked(parent, id)
+			if seen[parent] {
+				continue
+			}
+			seen[parent] = true
+			affected = append(affected, parent)
+			if parent.Procedure != "" {
+				procedures[parent.Procedure] = true
+			}
+			rootQueue = append(rootQueue, parent)
 		}
+	}
+	if len(affected) == 0 {
+		if metrics != nil {
+			metrics.RecordSemanticQueryInvalidatedProcedures(0)
+		}
+		return nil
 	}
 	for _, id := range affected {
-		s.removeNodeLocked(id)
-	}
-	if len(s.order) > s.maxEntries*2 {
-		compact := make([]string, 0, len(s.entries))
-		seenOrder := make(map[string]struct{}, len(s.entries))
-		for _, id := range s.order {
-			if _, ok := s.entries[id]; !ok {
-				continue
-			}
-			if _, ok := seenOrder[id]; ok {
-				continue
-			}
-			seenOrder[id] = struct{}{}
-			compact = append(compact, id)
-		}
-		s.order = compact
+		s.maybeRemoveKeyMetadataLocked(id)
 	}
 	result := make([]string, 0, len(procedures))
 	for procedure := range procedures {
 		result = append(result, procedure)
 	}
-	for i := 1; i < len(result); i++ {
-		for j := i; j > 0 && result[j] < result[j-1]; j-- {
-			result[j], result[j-1] = result[j-1], result[j]
-		}
-	}
+	sort.Strings(result)
 	if metrics != nil {
 		metrics.RecordSemanticQueryInvalidatedProcedures(uint64(len(result)))
 	}
 	return result
 }
 
-func (s *Store) removeNodeLocked(id string) {
-	for _, dependencyID := range s.deps[id] {
+func (s *Store) removeNodeLocked(id Key) {
+	for _, dependencyID := range s.deps[id].ids {
 		if parents := s.reverse[dependencyID]; parents != nil {
 			delete(parents, id)
 			if len(parents) == 0 {
 				delete(s.reverse, dependencyID)
-				s.maybeRemoveDependencyMetadataLocked(dependencyID)
+				s.maybeRemoveKeyMetadataLocked(dependencyID)
 			}
 		}
 	}
 	delete(s.deps, id)
 	delete(s.entries, id)
-	if len(s.reverse[id]) == 0 && s.pending[id] == nil && len(s.deps[id]) == 0 {
+	delete(s.stale, id)
+	if len(s.reverse[id]) == 0 && s.pending[id] == nil && len(s.deps[id].ids) == 0 {
 		delete(s.reverse, id)
-		delete(s.keys, id)
+		s.removeKeyIndexLocked(id)
 		delete(s.epochs, id)
 	}
 }
 
-func (s *Store) maybeRemoveDependencyMetadataLocked(id string) {
+func (s *Store) maybeRemoveKeyMetadataLocked(id Key) {
 	if _, ok := s.entries[id]; ok {
 		return
 	}
-	if s.pending[id] != nil || len(s.reverse[id]) != 0 || len(s.deps[id]) != 0 {
+	if s.pending[id] != nil || len(s.reverse[id]) != 0 || len(s.deps[id].ids) != 0 {
 		return
 	}
-	delete(s.keys, id)
+	s.removeKeyIndexLocked(id)
 	delete(s.epochs, id)
+	delete(s.stale, id)
+}
+
+func addKeyIndex(index map[string]map[Key]struct{}, name string, key Key) {
+	if name == "" {
+		return
+	}
+	keys := index[name]
+	if keys == nil {
+		keys = make(map[Key]struct{})
+		index[name] = keys
+	}
+	keys[key] = struct{}{}
+}
+
+func removeKeyIndex(index map[string]map[Key]struct{}, name string, key Key) {
+	if keys := index[name]; keys != nil {
+		delete(keys, key)
+		if len(keys) == 0 {
+			delete(index, name)
+		}
+	}
+}
+
+// indexKeyLocked records all stable structural identities understood by
+// InvalidateProcedures. Prefix strings are slices of the procedure identity,
+// so indexing does not need another serialization of the Key itself.
+func (s *Store) indexKeyLocked(key Key) {
+	procedure := key.Procedure
+	if procedure == "" {
+		return
+	}
+	addKeyIndex(s.procedureEntries, procedure, key)
+	first := strings.Index(procedure, "::")
+	if first < 0 {
+		addKeyIndex(s.documentEntries, procedure, key)
+		return
+	}
+	addKeyIndex(s.documentEntries, procedure[:first], key)
+	for end := first; end >= 0; {
+		addKeyIndex(s.procedureEntries, procedure[:end], key)
+		next := strings.Index(procedure[end+2:], "::")
+		if next < 0 {
+			break
+		}
+		end += 2 + next
+	}
+}
+
+func (s *Store) removeKeyIndexLocked(key Key) {
+	procedure := key.Procedure
+	if procedure == "" {
+		return
+	}
+	removeKeyIndex(s.procedureEntries, procedure, key)
+	first := strings.Index(procedure, "::")
+	if first < 0 {
+		removeKeyIndex(s.documentEntries, procedure, key)
+		return
+	}
+	removeKeyIndex(s.documentEntries, procedure[:first], key)
+	for end := first; end >= 0; {
+		removeKeyIndex(s.procedureEntries, procedure[:end], key)
+		next := strings.Index(procedure[end+2:], "::")
+		if next < 0 {
+			break
+		}
+		end += 2 + next
+	}
 }
 
 func (s *Store) pruneEntriesLocked() {
@@ -558,8 +831,8 @@ func (s *Store) pruneEntriesLocked() {
 		s.removeNodeLocked(oldest)
 	}
 	if len(s.order) > s.maxEntries*2 {
-		compact := make([]string, 0, len(s.entries))
-		seen := make(map[string]struct{}, len(s.entries))
+		compact := make([]Key, 0, len(s.entries))
+		seen := make(map[Key]struct{}, len(s.entries))
 		for _, id := range s.order {
 			if _, ok := s.entries[id]; !ok {
 				continue
