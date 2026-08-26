@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/harumiWeb/xlflow/internal/analyze/semanticstate"
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
@@ -93,7 +92,7 @@ func (a Analyzer) httpTransportFindingsContext(ctx context.Context, file parsedF
 		return nil, nil
 	}
 	initial := newHTTPAnalysisState(file, ir)
-	entryStates, err := solveHTTPStates(ctx, a, file, proc, *proc.Graph, initial)
+	compact, err := solveHTTPStates(ctx, a, file, proc, *proc.Graph, initial)
 	if err != nil {
 		return nil, err
 	}
@@ -107,11 +106,11 @@ func (a Analyzer) httpTransportFindingsContext(ctx context.Context, file parsedF
 		if block.Statement == nil || block.Statement.Recovered {
 			continue
 		}
-		state, ok := entryStates[block.ID]
-		if !ok {
+		input := compact.entryState(block.ID)
+		if !input.valid {
 			continue
 		}
-		_, found := a.transferHTTPStatement(file, proc, *block.Statement, state, true)
+		found := compact.collect(file, proc, *block.Statement, input.view)
 		specs = append(specs, found...)
 	}
 	// Module constants are storage findings under VBA223. VBA246 reports the
@@ -195,86 +194,8 @@ func httpRecordConstant(state *httpAnalysisState, name, expression string) {
 	}
 }
 
-func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) (map[vbacfg.BlockID]httpAnalysisState, error) {
-	// Keep the existing HTTP state as the domain value at one indexed slot. The
-	// solver owns scheduling, edge classification, cancellation, and snapshot
-	// isolation; the adapter preserves the established transfer/join semantics
-	// while the HTTP domain is incrementally migrated to scalar slots.
-	view := graph.View(vbacfg.EdgeFilter{})
-	index, err := semanticstate.NewIndexView(view)
-	if err != nil {
-		return nil, err
-	}
-	environment := semanticstate.NewEnvironment([]string{"http-state"}, []string{"http-state"})
-	const lane semanticstate.LaneOrdinal = 0
-	var symbol semanticstate.SymbolID
-	lattice := httpStateLattice{}
-	solver, err := semanticstate.NewSolver(index, environment, lattice, []semanticstate.Lane[httpAnalysisState]{
-		{
-			Initialize: func(_ context.Context, _ semanticstate.LaneOrdinal, state *semanticstate.State[httpAnalysisState]) error {
-				state.Set(symbol, cloneHTTPState(initial))
-				return nil
-			},
-			// HTTP has no edge-specific refinement. Keep the adapter on the
-			// explicit policy path while documenting that every edge propagates.
-			EdgeDecision: func(_ context.Context, _ semanticstate.LaneOrdinal, _ semanticstate.Edge, _, _ semanticstate.StateView[httpAnalysisState], _ *semanticstate.State[httpAnalysisState]) (semanticstate.EdgeDisposition, error) {
-				return semanticstate.EdgePropagate, nil
-			},
-			Transfer: func(_ context.Context, _ semanticstate.LaneOrdinal, block semanticstate.BlockOrdinal, input semanticstate.StateView[httpAnalysisState], output *semanticstate.State[httpAnalysisState]) error {
-				value, ok := input.Value(symbol)
-				if !ok {
-					return nil
-				}
-				_, ok = index.Block(block)
-				if !ok {
-					return nil
-				}
-				candidate, ok := view.BlockAtOrdinal(vbacfg.BlockOrdinal(block))
-				if !ok || candidate.Statement == nil || candidate.Statement.Recovered {
-					output.Set(symbol, value)
-					return nil
-				}
-				value, _ = a.transferHTTPStatement(file, proc, *candidate.Statement, value, false)
-				output.Set(symbol, value)
-				return nil
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	result, err := solver.SolveContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	states := make(map[vbacfg.BlockID]httpAnalysisState, index.BlockCount())
-	for _, block := range index.Blocks() {
-		value, ok := result.State(block.Ordinal, lane).Value(symbol)
-		if ok {
-			states[block.ID] = value
-		}
-	}
-	return states, nil
-}
-
-// httpStateLattice adapts the legacy HTTP state join to the indexed solver.
-// Clone is the alias-safety boundary for the nested evidence sets still used
-// by the HTTP domain during this migration step.
-type httpStateLattice struct{}
-
-func (httpStateLattice) Clone(value httpAnalysisState) httpAnalysisState {
-	return cloneHTTPState(value)
-}
-
-func (httpStateLattice) Join(dst *httpAnalysisState, src httpAnalysisState) bool {
-	if dst == nil {
-		return false
-	}
-	merged, changed := joinHTTPState(*dst, src, true)
-	if changed {
-		*dst = merged
-	}
-	return changed
+func solveHTTPStates(ctx context.Context, a Analyzer, file parsedFile, proc sourceProcedure, graph vbacfg.Graph, initial httpAnalysisState) (*httpCompactSolve, error) {
+	return solveHTTPCompactStates(ctx, a, file, proc, graph, initial)
 }
 
 func (a Analyzer) transferHTTPStatement(file parsedFile, proc sourceProcedure, statement procedureir.Statement, state httpAnalysisState, collect bool) (httpAnalysisState, []httpFindingSpec) {

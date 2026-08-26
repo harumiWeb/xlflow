@@ -1858,6 +1858,99 @@ alloc-space profile demonstrates the three-leaf reduction; the large
 end-to-end benchmark values remain recorded for follow-up rather than
 treated as a CI time threshold.
 
+### HTTP compact-state scalarization verification record (#720)
+
+Issue #720 completes the HTTP portion of the compact semantic-state solver
+migration left open by #713. The HTTP fixed-point path must not clone or join a
+complete nested `httpAnalysisState`; revision-local scalar slots, in-place
+joins, and changed-slot worklist updates are the only semantic propagation
+state. Immutable HTTP names/declarations belong to the procedure revision
+environment. Diagnostic evidence remains a post-convergence projection and
+separate credential-sink replay.
+
+The differential comparison uses the #713 baseline revision
+`6c9f8ba60c5b162cb7115e8e68744412c7de9d5d` and implementation revision
+`f47e3b56` plus the working tree changes, on the same Windows host and Go
+toolchain. Batch and realtime
+surfaces must produce identical ordered finding digests for both revisions.
+The digest includes code, range, severity, API, risk, header/origin/timeout,
+multiplicity, redaction, and VBA224 duplicate suppression. The focused matrix
+covers recognized early- and late-bound clients, TLS options,
+URL/header/`SetCredentials` flows, finite/missing/unbounded timeouts, module
+constants, sensitive logging, and download/save/execute flows. CFG regressions
+cover loops, branch joins, exceptional and uncertain edges, same- and
+different-identity aliases, unknown values, conflicting assignments, and
+recovered statements.
+
+The required focused and race checks are:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test -race ./internal/analyze/semanticstate
+```
+
+Corpus verification is read-only and must be repeated without refreshing
+snapshots:
+
+```powershell
+rtk task corpus:test
+rtk task corpus:test
+rtk task corpus:metrics
+```
+
+The ROneCOne leaf uses five serial samples on the same environment:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only$' -benchmem -benchtime=1x -count=5 -timeout=10m
+```
+
+The implementation also records the HTTP-focused benchmark for linear, wide,
+branch/loop/alias, and download/execute workloads, keeping fixture construction
+outside the timed region. Five serial samples on this host had these medians:
+
+| workload          | median ns/op | median B/op | median allocs/op |
+| ----------------- | -----------: | ----------: | ---------------: |
+| linear            |      287,500 |     182,296 |              788 |
+| branch/loop/alias |      604,900 |     416,056 |            1,916 |
+| wide constants    |      376,400 |     262,376 |            1,131 |
+| download/execute  |      670,500 |     471,712 |            2,084 |
+
+The before/after ROneCOne allocation record uses the same command and retained
+local heap profiles:
+
+| revision                                                   |   median ns/op |    median B/op | median allocs/op | `cloneHTTPState` / related alloc-space | profile paths                                   |
+| ---------------------------------------------------------- | -------------: | -------------: | ---------------: | -------------------------------------- | ----------------------------------------------- |
+| #713 baseline (`6c9f8ba60c5b162cb7115e8e68744412c7de9d5d`) | 21,621,334,100 | 11,231,956,152 |       81,828,012 | 67.13 MB / 35,101 objects              | `%TEMP%\xlflow-720-baseline-ronecone.mem.pprof` |
+| #720 (`f47e3b56` + working tree)                           | 10,352,922,100 | 11,653,406,520 |       90,718,921 | 0 / 0 (focus matched no samples)       | `%TEMP%\xlflow-720-ronecone-final2.mem.pprof`   |
+
+Raw five-sample wall times were 9.381, 9.256, 21.621, 31.806, and 36.889 s
+for the baseline and 9.693, 10.340, 10.353, 25.029, and 11.263 s for #720.
+The baseline timing spread is a host-level observation; allocation medians are
+the stable comparison. Whole-workload bytes and objects are higher in this
+single migration sample because the compact indexed lane and the unchanged
+Array paths have different fixed costs. The targeted HTTP clone/join symbols,
+however, disappear from both production allocation profiles, which is the
+boundary contribution tracked by #720; the combined #713 50% target remains an
+Array follow-up measurement.
+
+For one-sample profile capture, use the issue benchmark with `-count=1`,
+`-cpuprofile`, `-memprofile`, and `-o`, then inspect allocation space and
+objects with:
+
+```powershell
+rtk go tool pprof -sample_index=alloc_space -focus 'cloneHTTPState|joinHTTPState|cloneHTTPObject' -top <benchmark-binary> <heap-profile>
+rtk go tool pprof -sample_index=alloc_objects -focus 'cloneHTTPState|joinHTTPState|cloneHTTPObject' -top <benchmark-binary> <heap-profile>
+```
+
+The completed record must show a material reduction in HTTP state allocations
+and no production fixed-point samples attributable to the removed nested-map
+clone/join boundary. It must also record deterministic changed-slot behavior,
+explicit absence/unknown joins, alias propagation, cancellation, and the
+existing no-worker-pool execution boundary. These are developer measurements,
+not CI thresholds. Any unexplained diagnostic identity, range, severity,
+evidence, multiplicity, ordering, snapshot, or review-ledger delta is a
+stop-and-investigate condition; ordinary tests must never rewrite snapshots.
+
 ### Revision-scoped semantic query DAG verification requirements (#715)
 
 Issue #715 adds process-local, revision-scoped reuse for immutable semantic

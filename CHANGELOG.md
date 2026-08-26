@@ -4,6 +4,8 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.31.0
+
 - Updated the tree-sitter-vba parser dependency to v0.12.2. Exported VBA
   procedure attributes with multi-segment names now parse without recovery,
   preserving downstream lint and analysis behavior.
@@ -27,12 +29,14 @@ All notable changes to xlflow will be documented in this file.
   boundaries remain available; Array, Object, Error, and return-path
   diagnostics, CLI JSON, and LSP contracts are unchanged.
 
-- Introduced the internal indexed semantic-state solver at the HTTP transport
-  scheduling boundary and for the ordinary Array CFG walk. Revision-local
-  `SymbolID` and `BlockOrdinal` indexes, dense/sparse slot storage, in-place
-  joins, and a deterministic changed-state worklist preserve diagnostic,
-  snapshot, CLI JSON, and LSP contracts. HTTP nested-map scalarization and
-  source-line/edge-refinement Array paths remain follow-up migrations.
+- Completed the HTTP portion of the indexed semantic-state solver migration.
+  HTTP transport facts now use revision-local scalar slots with in-place joins
+  and changed-state worklist updates; the fixed-point path no longer clones or
+  joins a nested `httpAnalysisState`. Deterministic post-convergence evidence
+  replay preserves recognized-client, TLS, credential, timeout,
+  module-constant, and download/execute diagnostics, including VBA224
+  duplicate suppression, batch/realtime ordering, CLI JSON, and LSP contracts.
+  Array source-line/edge-refinement paths remain follow-up migrations.
 
 - Extended the indexed semantic-state solver to advanced Array CFG paths,
   including source-line lifecycle ordering, normal-edge refinement,
