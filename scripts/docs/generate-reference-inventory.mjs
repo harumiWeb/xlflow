@@ -101,6 +101,7 @@ const source = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n
 // and do not belong in this inventory.
 const excludedErrorInventoryLiterals = new Set([
   "binding_status",
+  "counter_snapshot",
   "rule_codes",
   "binding_note",
   "license_file",

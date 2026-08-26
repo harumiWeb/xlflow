@@ -672,12 +672,12 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	for _, entry := range entries {
 		resolvedIR := procedureir.Resolve(entry.procedureIR, resolver)
 		materializations++
-		x.performance.addCounter(performanceCounterResolutionMaterializations, 1, "workspace/project", performanceStageResolutionMaterialize, class, entry.path)
 		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: entry.controlFlow, Source: entry.source})
 		sites = append(sites, entry.callSites...)
 		typeReferences = append(typeReferences, entry.typeReferences...)
 	}
 	materializationMeasurement.finish(materializations, 0, nil)
+	x.performance.addCounter(performanceCounterResolutionMaterializations, uint64(materializations), "workspace/project", performanceStageResolutionMaterialize, class, x.root)
 	resolvedCalls := make([]calls.Call, len(sites))
 	for i, site := range sites {
 		resolvedCalls[i] = callResolver.Resolve(site)

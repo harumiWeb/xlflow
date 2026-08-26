@@ -653,21 +653,25 @@ func benchmarkIssue491Lifecycle(b *testing.B, fixture lspBenchmarkFixture) {
 			b.StopTimer()
 			s, cleanup := newLSPBenchmarkServerWithCleanup(b, fixture)
 			active := make(chan struct{}, 1)
+			release := make(chan struct{})
 			s.performanceHook = func(stage, path string) {
 				if path == fixture.largePath && stage == "declaration-start" {
 					select {
 					case active <- struct{}{}:
 					default:
 					}
+					<-release
 				}
 			}
 			s.analysis.start()
 			waitLSPStartupEvent(b, active)
 			b.StartTimer()
 			if _, err := s.definition(nil, params); err != nil {
+				close(release)
 				b.Fatal(err)
 			}
 			b.StopTimer()
+			close(release)
 			if err := s.analysis.waitReady(); err != nil {
 				b.Fatal(err)
 			}

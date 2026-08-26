@@ -153,7 +153,7 @@ func (p *performanceRecorder) logCounterSnapshot(operation, stage, class, path s
 	for _, name := range performanceCounterNames {
 		p.logger.Printf(
 			"performance operation=%q stage=%q class=%q path=%q counter=%q value=%d total=%d outcome=%q",
-			operation, stage, class, path, name, values[name], values[name], "counter",
+			operation, stage, class, path, name, 0, values[name], "counter_snapshot",
 		)
 	}
 }

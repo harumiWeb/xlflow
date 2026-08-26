@@ -174,7 +174,8 @@ func TestWorkspaceSymbolIndexPerformanceReportsInitialBuild(t *testing.T) {
 	if !strings.Contains(logOutput, `operation="workspaceSymbols/index/initial"`) ||
 		!strings.Contains(logOutput, `file_count=0`) ||
 		!strings.Contains(logOutput, `elapsed_ms=`) ||
-		!strings.Contains(logOutput, `stage="workspaceDiscovery"`) {
+		!strings.Contains(logOutput, `stage="workspaceDiscovery"`) ||
+		!strings.Contains(logOutput, `outcome="counter_snapshot"`) {
 		t.Fatalf("workspace index performance log missing initial build fields:\n%s", logOutput)
 	}
 	for _, name := range performanceCounterNames {

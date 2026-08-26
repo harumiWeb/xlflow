@@ -74,6 +74,11 @@ as zero until a reusable fingerprint cache is used. A counter increment is
 reported with the stage and path that caused it; the initial snapshot reports
 the accumulated totals.
 
+Delta counter records use `outcome="counter"` with the increment in `value`.
+The initial aggregate snapshot uses `outcome="counter_snapshot"`,
+`value=0`, and the accumulated count in `total`; profile scripts should not
+sum snapshot records as additional work.
+
 ## Deterministic benchmarks
 
 Run commands from the repository root. On Windows, use the repository Go
@@ -131,8 +136,9 @@ New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 $bin = Join-Path $profileDir 'lsp-benchmark.test.exe'
 $cpu = Join-Path $profileDir 'startup.cpu.pprof'
 $mem = Join-Path $profileDir 'startup.mem.pprof'
-rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^TestLSPStartupBenchmarkFixture$' -bench '^BenchmarkLSPStartup/WhileIndexing$' -benchtime=1x -count=1 -timeout 25m -o $bin -cpuprofile $cpu -memprofile $mem
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^TestLSPStartupBenchmarkFixture$' -bench '^BenchmarkLSPStartup/WhileIndexing$' -benchtime=1x -count=1 -timeout 25m -o $bin -cpuprofile $cpu
 rtk go tool pprof -top $bin $cpu
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^TestLSPStartupBenchmarkFixture$' -bench '^BenchmarkLSPStartup/WhileIndexing$' -benchtime=1x -count=1 -timeout 25m -o $bin -memprofile $mem
 rtk go tool pprof -sample_index=alloc_space -top $bin $mem
 rtk go tool pprof -sample_index=alloc_objects -top $bin $mem
 rtk go tool pprof -sample_index=inuse_space -top $bin $mem

@@ -670,12 +670,19 @@ func startupInteractiveQueries(b *testing.B, s *Server, fixture lspStartupBenchm
 	}
 	definitions := 0
 	if locations, ok := definition.([]protocol.Location); ok {
-		definitions = len(locations)
+		for _, location := range locations {
+			if location.URI == protocol.DocumentUri(fixture.moduleBURI) {
+				definitions++
+			}
+		}
 	}
-	if hover == nil {
-		return 0, definitions
+	hovers := 0
+	if hover != nil {
+		if contents, ok := hover.Contents.(protocol.MarkupContent); ok && strings.Contains(contents.Value, "CrossFileTarget") {
+			hovers = 1
+		}
 	}
-	return 1, definitions
+	return hovers, definitions
 }
 
 func waitLSPStartupEvent(b *testing.B, events <-chan struct{}) {
@@ -776,12 +783,14 @@ func BenchmarkLSPStartup(b *testing.B) {
 			b.StopTimer()
 			s, cleanup := newLSPStartupServer(b, fixture)
 			active := make(chan struct{}, 1)
+			release := make(chan struct{})
 			s.performanceHook = func(stage, path string) {
 				if path == fixture.moduleB && stage == "declaration-start" {
 					select {
 					case active <- struct{}{}:
 					default:
 					}
+					<-release
 				}
 			}
 			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
@@ -801,6 +810,7 @@ func BenchmarkLSPStartup(b *testing.B) {
 			hovers += hover
 			definitions += definition
 			b.StopTimer()
+			close(release)
 			if err := s.analysis.waitReady(); err != nil {
 				b.Fatal(err)
 			}

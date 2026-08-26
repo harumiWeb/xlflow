@@ -37,14 +37,8 @@ func projectImpactPathsWithPerformanceClass(before, after intel.ProjectAnalysisS
 	if !before.Complete || !after.Complete {
 		return nil
 	}
-	var oldView, newView projectDependencyView
-	if performance == nil {
-		oldView = buildProjectDependencyView(before)
-		newView = buildProjectDependencyView(after)
-	} else {
-		oldView = buildProjectDependencyViewWithPerformanceClass(before, performance, class)
-		newView = buildProjectDependencyViewWithPerformanceClass(after, performance, class)
-	}
+	oldView := buildProjectDependencyViewWithPerformanceClass(before, performance, class)
+	newView := buildProjectDependencyViewWithPerformanceClass(after, performance, class)
 	changed := make(map[string]bool)
 	for key, old := range oldView.procedures {
 		if current, ok := newView.procedures[key]; !ok || current.fingerprint != old.fingerprint {
@@ -96,15 +90,11 @@ func projectImpactPathsWithPerformanceClass(before, after intel.ProjectAnalysisS
 	return out
 }
 
-func buildProjectDependencyView(snapshot intel.ProjectAnalysisSnapshot) projectDependencyView {
-	return buildProjectDependencyViewWithPerformanceClass(snapshot, nil, "background")
-}
-
 func buildProjectDependencyViewWithPerformanceClass(snapshot intel.ProjectAnalysisSnapshot, performance *performanceRecorder, class string) projectDependencyView {
 	view := projectDependencyView{procedures: make(map[string]projectProcedureState), reverse: make(map[string][]string)}
 	for _, document := range snapshot.Documents {
+		performance.addCounter(performanceCounterProcedureFingerprintBuilds, uint64(len(document.IR.Procedures)), "workspace/project", performanceStageDependencyUpdate, class, document.IR.Path)
 		for _, procedure := range document.IR.Procedures {
-			performance.addCounter(performanceCounterProcedureFingerprintBuilds, 1, "workspace/project", performanceStageDependencyUpdate, class, document.IR.Path)
 			key := projectProcedureKey(document.IR.Path, procedure.Symbol.QualifiedName, string(procedure.Symbol.Kind), procedure.Symbol.DeclarationRange.StartLine)
 			encoded, _ := json.Marshal(procedure)
 			sum := sha256.Sum256(encoded)
