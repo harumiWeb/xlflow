@@ -324,7 +324,7 @@ func (a *procedureAnalyzer) runWithStatsAndRankContext(worklistRank map[cfg.Bloc
 			if !reachable[edge.To] {
 				continue
 			}
-			next := cloneState(out)
+			next := cloneState(&out)
 			a.applyGuard(id, edge, &next)
 			merged, changed := joinState(inStates[edge.To], next, inStates[edge.To].vars != nil)
 			if !changed {
@@ -423,7 +423,7 @@ func (a *procedureAnalyzer) transfer(id cfg.BlockID, input abstractState, collec
 	if err := a.contextErr(); err != nil {
 		return abstractState{}, err
 	}
-	state := cloneState(input)
+	state := cloneState(&input)
 	block, ok := a.blocksByID[id]
 	if !ok || block.Statement == nil {
 		return state, nil
@@ -2109,9 +2109,9 @@ func joinValue(a, b value, initialized bool) (value, bool) {
 
 func joinState(a, b abstractState, initialized bool) (abstractState, bool) {
 	if !initialized {
-		return cloneState(b), true
+		return cloneState(&b), true
 	}
-	result := cloneState(a)
+	result := cloneState(&a)
 	changed := false
 	keys := map[string]bool{}
 	for key := range a.vars {
@@ -2170,7 +2170,12 @@ func unknownStandaloneValue() value {
 	return valueFromSourceState(Source{Kind: SourceUnknown, Label: "unknown input"}, StateUnknown, PathStep{Kind: "unknown_transformation", Label: "possibly unassigned value"})
 }
 
-func cloneState(state abstractState) abstractState {
+func cloneState(state *abstractState) abstractState {
+	if state == nil {
+		return abstractState{vars: map[string]value{}, sqlObjects: map[string]sqlObjectState{}}
+	}
+	state.varsShared = true
+	state.sqlObjectsShared = true
 	result := abstractState{
 		vars:             state.vars,
 		sqlObjects:       state.sqlObjects,

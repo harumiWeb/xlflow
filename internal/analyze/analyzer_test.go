@@ -2456,7 +2456,7 @@ func TestApplicationStateFlowCloneCopiesMapsOnWrite(t *testing.T) {
 			},
 		},
 	}
-	branch := cloneApplicationStateFlow(original)
+	branch := cloneApplicationStateFlow(&original)
 	branch.ensureDirty()
 	branch.Dirty[2] = true
 	branch.ensureSaved()
@@ -2478,6 +2478,17 @@ func TestApplicationStateFlowCloneCopiesMapsOnWrite(t *testing.T) {
 	original.Dirty[4] = true
 	if branch.Dirty[4] {
 		t.Fatal("write to original application state leaked into cloned state")
+	}
+
+	original.ensureSaved()
+	snapshot, ok = original.mutableSavedSnapshot("saved")
+	if !ok {
+		t.Fatal("original saved snapshot was not available")
+	}
+	snapshot.Restores[4] = true
+	original.Saved["saved"] = snapshot
+	if branch.Saved["saved"].Restores[4] {
+		t.Fatal("nested write to original application state leaked into cloned state")
 	}
 }
 

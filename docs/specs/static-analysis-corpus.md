@@ -2057,7 +2057,7 @@ The retained Windows measurement command is:
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/staticanalysis/corpus -run '^$' -bench '^BenchmarkRealWorldCorpus/ronecone/analyze-only/(cold|warm|local-edit|dependency-edit)$' -benchmem -benchtime=1x -count=10 -timeout=25m
 ```
 
-`task bench:corpus-ronecone` runs the same ten-sample command. On 2026-08-26,
+`rtk task bench:corpus-ronecone` runs the same ten-sample command. On 2026-08-26,
 Windows/amd64, 12th Gen Intel(R) Core(TM) i7-12700, Go 1.26.6, the command
 completed successfully in 550.449 s. Every cold sample reported 1,565
 procedures and 510 findings; edit scenarios also recorded the expected query

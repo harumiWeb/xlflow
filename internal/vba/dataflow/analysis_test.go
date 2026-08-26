@@ -317,7 +317,7 @@ func TestAbstractStateCloneCopiesMapsOnWrite(t *testing.T) {
 		vars:       map[string]value{"raw": unknownStandaloneValue()},
 		sqlObjects: map[string]sqlObjectState{"command": {kind: sqlObjectCommand, identity: "command"}},
 	}
-	branch := cloneState(original)
+	branch := cloneState(&original)
 	branch.ensureVars()
 	branch.vars["branch"] = unknownStandaloneValue()
 	branch.ensureSQLObjects()
@@ -334,6 +334,12 @@ func TestAbstractStateCloneCopiesMapsOnWrite(t *testing.T) {
 	original.vars["original"] = unknownStandaloneValue()
 	if _, ok := branch.vars["original"]; ok {
 		t.Fatal("write to original abstract state leaked into cloned state")
+	}
+
+	original.ensureSQLObjects()
+	original.sqlObjects["original"] = sqlObjectState{kind: sqlObjectCommand, identity: "original"}
+	if _, ok := branch.sqlObjects["original"]; ok {
+		t.Fatal("SQL object write to original abstract state leaked into cloned state")
 	}
 }
 

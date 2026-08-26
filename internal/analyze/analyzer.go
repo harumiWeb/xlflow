@@ -3850,7 +3850,7 @@ func applicationStateExitWitnesses(proc sourceProcedure, property string, facts 
 }
 
 func applicationStateFlowAcrossEdge(proc sourceProcedure, state applicationStateFlow, block vbacfg.Block, edge vbacfg.Edge, property string, facts *procedureAnalysisFacts) applicationStateFlow {
-	out := cloneApplicationStateFlow(state)
+	out := cloneApplicationStateFlow(&state)
 	out.ViaExceptional = out.ViaExceptional || edge.Class == vbacfg.EdgeExceptional
 	if block.Statement == nil {
 		return out
@@ -3918,7 +3918,13 @@ func newApplicationStateFlow() applicationStateFlow {
 	return applicationStateFlow{Dirty: map[int]bool{}, Saved: map[string]applicationStateSnapshot{}}
 }
 
-func cloneApplicationStateFlow(in applicationStateFlow) applicationStateFlow {
+func cloneApplicationStateFlow(in *applicationStateFlow) applicationStateFlow {
+	if in == nil {
+		return newApplicationStateFlow()
+	}
+	in.dirtyShared = true
+	in.savedShared = true
+	in.snapshotMapsShared = true
 	// CFG edges fork this state frequently. Share the map headers and defer
 	// copying until a branch actually changes one of the maps. Snapshot maps
 	// are treated as shared as well because Saved values can alias one another.
@@ -4011,9 +4017,9 @@ func cloneApplicationStateSnapshot(in applicationStateSnapshot) applicationState
 
 func mergeApplicationStateFlow(current, incoming applicationStateFlow) (applicationStateFlow, bool) {
 	if current.Dirty == nil {
-		return cloneApplicationStateFlow(incoming), true
+		return cloneApplicationStateFlow(&incoming), true
 	}
-	next := cloneApplicationStateFlow(current)
+	next := cloneApplicationStateFlow(&current)
 	changed := false
 	for origin := range incoming.Dirty {
 		if !next.Dirty[origin] {
