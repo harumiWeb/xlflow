@@ -893,26 +893,34 @@ func TestHTTPCompactProcessLaunchRequiresKnownReceiver(t *testing.T) {
 	}
 }
 
-func TestHTTPCompactStringCandidatesRetainsAllCombinations(t *testing.T) {
+func TestHTTPCompactStringCandidatesBoundsCartesianProduct(t *testing.T) {
 	values := map[string]map[string]bool{"prefix": {}, "suffix": {}}
 	for index := 0; index < 9; index++ {
 		values["prefix"]["C:\\Temp\\payload"+strconv.Itoa(index)+"-"] = true
 		values["suffix"][strconv.Itoa(index)+".exe"] = true
 	}
 	candidates := httpCompactStringCandidates("prefix & suffix", values)
-	if len(candidates) != 81 {
-		t.Fatalf("candidate count = %d, want 81", len(candidates))
+	if len(candidates) != 64 {
+		t.Fatalf("candidate count = %d, want bounded 64", len(candidates))
 	}
-	seen := make(map[string]bool, len(candidates))
 	for _, candidate := range candidates {
-		seen[candidate] = true
+		if candidate == "" {
+			t.Fatal("bounded candidate set contains an empty path")
+		}
 	}
+
+	encoded := ""
 	for prefix := range values["prefix"] {
 		for suffix := range values["suffix"] {
-			if !seen[prefix+suffix] {
-				t.Fatalf("candidate %q was dropped", prefix+suffix)
-			}
+			encoded = httpCompactSavedPathSetAdd(encoded, prefix+suffix)
 		}
+	}
+	paths := strings.Split(encoded, httpSavedPathSetSeparator)
+	if len(paths) != 81 {
+		t.Fatalf("saved-path fallback count = %d, want 81", len(paths))
+	}
+	if !httpCompactSavedPathSetMatches(encoded, httpPathKey("C:\\Temp\\payload8-8.exe")) {
+		t.Fatal("saved-path fallback dropped an overflow candidate")
 	}
 }
 
@@ -1102,15 +1110,18 @@ func TestHTTPCompactUncertainIdentityPreservesVBA224Ownership(t *testing.T) {
 Option Explicit
 Public Sub Run(ByVal chooseClient As Boolean)
     Dim request As Object
+    Dim aliasRequest As Object
     If chooseClient Then
         Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
     Else
         Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
     End If
+    Set aliasRequest = request
     request.SetTimeouts 1000, 1000, 1000, 1000
     request.Open "GET", "http://example.test", False
     request.SetRequestHeader "Authorization", InputBox("Token")
     request.Send
+    aliasRequest.Send
 End Sub
 `)
 	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()

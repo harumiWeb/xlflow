@@ -24,7 +24,10 @@ const (
 	httpCompactValueSlot
 	httpCompactSensitiveSlot
 	httpCompactSavedSlot
+	httpCompactSavedSetSlot
 )
+
+const httpSavedPathSetSeparator = "\x00"
 
 // httpScalar is deliberately map-free.  Its strings are immutable values
 // shared by the revision; Clone is therefore a plain value copy.
@@ -68,6 +71,7 @@ type httpCompactEnvironment struct {
 	sensitive map[string]httpCompactSlot
 	saved     map[string][]httpCompactSlot
 	savedPath map[string][]httpCompactSlot
+	savedSet  map[string]httpCompactSlot
 	saveVars  map[string]bool
 	savePaths []string
 
@@ -124,6 +128,17 @@ func (httpScalarLattice) Join(dst *httpScalar, src httpScalar) bool {
 		merged.flag = (dst.present && dst.flag) || (src.present && src.flag)
 	case httpCompactSavedSlot:
 		merged.present = dst.present && src.present && dst.text == src.text
+		if !merged.present {
+			merged.text = ""
+		}
+	case httpCompactSavedSetSlot:
+		if !dst.present || !src.present {
+			merged.present = false
+			merged.text = ""
+			break
+		}
+		merged.text = httpCompactSavedPathSetIntersect(dst.text, src.text)
+		merged.present = merged.text != ""
 		if !merged.present {
 			merged.text = ""
 		}
@@ -315,10 +330,11 @@ func buildHTTPCompactEnvironment(file parsedFile, proc sourceProcedure, initial 
 	}
 	sort.Strings(savePaths)
 
-	names := make([]string, 0, len(vars)*4+len(saveVars)*(len(saveSites)+len(savePaths)))
+	names := make([]string, 0, len(vars)*4+len(saveVars)*(1+len(saveSites)+len(savePaths)))
 	for _, variable := range vars {
 		names = append(names, "object:"+variable, "launcher:"+variable, "value:"+variable, "sensitive:"+variable)
 		if saveVars[variable] {
+			names = append(names, "saved-set:"+variable)
 			for _, site := range saveSites {
 				names = append(names, fmt.Sprintf("saved:%s:%d", variable, site))
 			}
@@ -332,17 +348,18 @@ func buildHTTPCompactEnvironment(file parsedFile, proc sourceProcedure, initial 
 		variables: vars, saveSites: saveSites, names: names, initial: initial,
 		objects: map[string]httpCompactSlot{}, launchers: map[string]httpCompactSlot{},
 		values: map[string]httpCompactSlot{}, sensitive: map[string]httpCompactSlot{},
-		saved: map[string][]httpCompactSlot{}, savedPath: map[string][]httpCompactSlot{}, saveVars: saveVars, savePaths: savePaths, identityByKey: identityByKey,
+		saved: map[string][]httpCompactSlot{}, savedPath: map[string][]httpCompactSlot{}, savedSet: map[string]httpCompactSlot{}, saveVars: saveVars, savePaths: savePaths, identityByKey: identityByKey,
 	}, semanticstate.NewEnvironment(names, names)
 }
 
 // httpCompactProcedureStringCandidates is a pre-scan used only to allocate
 // saved-path symbols. It gathers literal and module-constant values assigned
-// to procedure-local names, retaining all values seen across branches so that
-// a later SaveToFile site has a stable path slot even when its path is not
-// available in the entry state. Candidate truncation is intentionally not
-// allowed here: every retained path is a semantic symbol, and dropping one
-// would make a later download-and-execute finding depend on enumeration order.
+// to procedure-local names, retaining values seen across branches so that a
+// later SaveToFile site has a stable path slot even when its path is not
+// available in the entry state. The bounded exact-path slots are supplemented
+// by one scalar saved-path set per stream; that fallback preserves paths that
+// do not fit in the bounded Cartesian product without putting an unbounded
+// allocation on the environment-building path.
 func httpCompactProcedureStringCandidates(proc sourceProcedure, initial httpAnalysisState) map[string]map[string]bool {
 	values := map[string]map[string]bool{}
 	for name, value := range initial.strings {
@@ -396,6 +413,7 @@ func httpCompactStringCandidates(expr string, values map[string]map[string]bool)
 		return nil
 	}
 	candidates := []string{""}
+	const maxCandidates = 64
 	for _, rawPart := range parts {
 		part := strings.TrimSpace(rawPart)
 		var pieces []string
@@ -411,20 +429,87 @@ func httpCompactStringCandidates(expr string, values map[string]map[string]bool)
 		if len(pieces) == 0 {
 			return nil
 		}
-		// Do not cap the Cartesian product. The result is used to allocate the
-		// immutable saved-path symbols, so a cap would silently discard a
-		// statically possible executable path. The fixed-point state itself
-		// remains scalar; this pre-scan only materializes the finite candidates
-		// that the source actually provides.
-		next := make([]string, 0, len(candidates)*len(pieces))
+		// Keep the eagerly indexed exact-path symbols bounded. Any path that is
+		// not represented here is retained by the scalar saved-path set updated
+		// by the transfer, so this cap cannot make a finding unsound.
+		capacity := maxCandidates
+		if len(candidates) <= maxCandidates && len(pieces) <= maxCandidates {
+			capacity = len(candidates) * len(pieces)
+			if capacity > maxCandidates {
+				capacity = maxCandidates
+			}
+		}
+		next := make([]string, 0, capacity)
 		for _, prefix := range candidates {
 			for _, piece := range pieces {
+				if len(next) == maxCandidates {
+					break
+				}
 				next = append(next, prefix+piece)
+			}
+			if len(next) == maxCandidates {
+				break
 			}
 		}
 		candidates = next
 	}
 	return candidates
+}
+
+// Saved-path overflow is represented as a sorted, NUL-separated scalar. NUL
+// cannot occur in a Windows path, so the representation remains unambiguous
+// while keeping the semantic slot map-free. The set is unioned by transfer
+// (multiple SaveToFile operations) and intersected by the lattice (branch
+// joins), matching the legacy savedExecutable semantics.
+func httpCompactSavedPathSetAdd(encoded, path string) string {
+	path = httpPathKey(path)
+	if path == "" {
+		return encoded
+	}
+	if encoded == "" {
+		return path
+	}
+	paths := strings.Split(encoded, httpSavedPathSetSeparator)
+	index := sort.SearchStrings(paths, path)
+	if index < len(paths) && paths[index] == path {
+		return encoded
+	}
+	paths = append(paths, "")
+	copy(paths[index+1:], paths[index:])
+	paths[index] = path
+	return strings.Join(paths, httpSavedPathSetSeparator)
+}
+
+func httpCompactSavedPathSetIntersect(left, right string) string {
+	if left == "" || right == "" {
+		return ""
+	}
+	leftPaths := strings.Split(left, httpSavedPathSetSeparator)
+	rightPaths := strings.Split(right, httpSavedPathSetSeparator)
+	common := make([]string, 0, len(leftPaths))
+	leftIndex, rightIndex := 0, 0
+	for leftIndex < len(leftPaths) && rightIndex < len(rightPaths) {
+		switch {
+		case leftPaths[leftIndex] < rightPaths[rightIndex]:
+			leftIndex++
+		case leftPaths[leftIndex] > rightPaths[rightIndex]:
+			rightIndex++
+		default:
+			common = append(common, leftPaths[leftIndex])
+			leftIndex++
+			rightIndex++
+		}
+	}
+	return strings.Join(common, httpSavedPathSetSeparator)
+}
+
+func httpCompactSavedPathSetMatches(encoded, command string) bool {
+	for _, path := range strings.Split(encoded, httpSavedPathSetSeparator) {
+		if command == path || httpCommandContainsPath(command, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *httpCompactEnvironment) bind(environment semanticstate.Environment) {
@@ -444,6 +529,9 @@ func (e *httpCompactEnvironment) bind(environment semanticstate.Environment) {
 		if !e.saveVars[variable] {
 			continue
 		}
+		setName := "saved-set:" + variable
+		setID, _ := environment.Symbol(setName)
+		e.savedSet[variable] = httpCompactSlot{id: setID, name: setName, variable: variable, class: httpCompactSavedSetSlot}
 		for _, site := range e.saveSites {
 			name := fmt.Sprintf("saved:%s:%d", variable, site)
 			id, _ := environment.Symbol(name)
@@ -463,6 +551,9 @@ func (e *httpCompactEnvironment) seed(state *semanticstate.State[httpScalar]) {
 		state.Set(e.launchers[variable].id, httpScalarZero(httpCompactLauncherSlot))
 		state.Set(e.values[variable].id, httpScalarZero(httpCompactValueSlot))
 		state.Set(e.sensitive[variable].id, httpScalarZero(httpCompactSensitiveSlot))
+		if slot, ok := e.savedSet[variable]; ok {
+			state.Set(slot.id, httpScalarZero(httpCompactSavedSetSlot))
+		}
 		for _, slot := range e.saved[variable] {
 			state.Set(slot.id, httpScalarZero(httpCompactSavedSlot))
 		}
@@ -514,6 +605,11 @@ func (e *httpCompactEnvironment) object(view semanticstate.StateView[httpScalar]
 }
 
 func (e *httpCompactEnvironment) copySaved(view semanticstate.StateView[httpScalar], out *semanticstate.State[httpScalar], from, to string) {
+	if fromSlot, ok := e.savedSet[from]; ok {
+		if toSlot, ok := e.savedSet[to]; ok {
+			httpCompactSet(out, toSlot, httpCompactValue(view, fromSlot))
+		}
+	}
 	for index, slot := range e.saved[from] {
 		if index < len(e.saved[to]) {
 			httpCompactSet(out, e.saved[to][index], httpCompactValue(view, slot))
@@ -527,6 +623,9 @@ func (e *httpCompactEnvironment) copySaved(view semanticstate.StateView[httpScal
 }
 
 func (e *httpCompactEnvironment) clearSaved(out *semanticstate.State[httpScalar], variable string) {
+	if slot, ok := e.savedSet[variable]; ok {
+		httpCompactSet(out, slot, httpScalarZero(httpCompactSavedSetSlot))
+	}
 	for _, slot := range e.saved[variable] {
 		httpCompactSet(out, slot, httpScalarZero(httpCompactSavedSlot))
 	}
@@ -559,6 +658,11 @@ func (e *httpCompactEnvironment) setObjectAliases(view semanticstate.StateView[h
 			for index, saved := range e.savedPath[receiver] {
 				if index < len(e.savedPath[name]) {
 					httpCompactSet(out, e.savedPath[name][index], httpCompactValue(view, saved))
+				}
+			}
+			if saved, ok := e.savedSet[receiver]; ok {
+				if target, ok := e.savedSet[name]; ok {
+					httpCompactSet(out, target, httpCompactValue(view, saved))
 				}
 			}
 		}
@@ -912,6 +1016,12 @@ func httpCompactTransfer(file parsedFile, proc sourceProcedure, statement proced
 						}
 					}
 				}
+				if !matched {
+					if savedSlot, ok := e.savedSet[name]; ok {
+						saved := httpCompactValue(output.View(), savedSlot)
+						matched = saved.present && httpCompactSavedPathSetMatches(saved.text, launchKey)
+					}
+				}
 				if matched {
 					findings = append(findings, httpFindingSpec{line: line, code: "VBA246", api: "ADODB.Stream", risk: "download_and_execute", redact: true})
 				}
@@ -1029,6 +1139,11 @@ func httpCompactTransfer(file parsedFile, proc sourceProcedure, statement proced
 					}
 				}
 				canonicalPath := httpPathKey(path)
+				if slot, ok := e.savedSet[receiver]; ok {
+					saved := httpCompactValue(output.View(), slot)
+					encoded := httpCompactSavedPathSetAdd(saved.text, canonicalPath)
+					httpCompactSet(output, slot, httpScalar{class: httpCompactSavedSetSlot, present: encoded != "", text: encoded})
+				}
 				for _, slot := range e.savedPath[receiver] {
 					if slot.path == canonicalPath {
 						httpCompactSet(output, slot, httpScalar{class: httpCompactSavedSlot, present: true, text: canonicalPath})
@@ -1247,6 +1362,9 @@ func transferHTTPEvidence(statement procedureir.Statement, state *httpEvidenceSt
 	}
 	if match := httpObjectAssignmentRe.FindStringSubmatch(text); len(match) == 3 {
 		target, rhs := strings.ToLower(match[1]), strings.TrimSpace(match[2])
+		sourceName := strings.ToLower(rhs)
+		sourceObject := e.object(view, sourceName)
+		sourceKnown := sourceObject.present && sourceObject.kind != httpUnknown
 		switch {
 		case httpKindFromConstruction(rhs) != httpUnknown:
 			identity := e.constructorIdentity(target, statement.ID)
@@ -1256,10 +1374,24 @@ func transferHTTPEvidence(statement procedureir.Statement, state *httpEvidenceSt
 			state.objects[target] = identity
 			delete(state.unknown, target)
 			delete(state.sinks, target)
-		case state.objects[strings.ToLower(rhs)] != "" || state.unknown[strings.ToLower(rhs)]:
-			source := strings.ToLower(rhs)
-			state.objects[target] = state.objects[source]
-			state.unknown[target] = state.unknown[source]
+		case state.objects[sourceName] != "" || state.unknown[sourceName] || sourceKnown:
+			source := sourceName
+			identity := state.objects[source]
+			unknown := state.unknown[source]
+			// The compact semantic state treats a known-kind object with an
+			// uncertain identity as an alias of its source name. Mirror that
+			// refinement in the evidence replay so credential-sink ownership
+			// follows the same alias chain after a branch join.
+			if sourceKnown && identity == "" {
+				identity = source
+				unknown = false
+			}
+			state.objects[target] = identity
+			if unknown {
+				state.unknown[target] = true
+			} else {
+				delete(state.unknown, target)
+			}
 			state.sinks[target] = cloneHTTPIntSet(state.sinks[source])
 		case httpPartialNewMatches(e.object(view, target).kind, rhs):
 			// The IR may expose a typed `New ADODB`/`New MSXML2` prefix
