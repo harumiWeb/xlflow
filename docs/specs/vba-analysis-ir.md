@@ -700,15 +700,25 @@ verification matrix is in `docs/specs/vba-semantic-query-dag.md`.
 ### Indexed semantic-state solver boundary
 
 The HTTP transport kernel and the ordinary Array block-level walk use the
-internal `internal/analyze/semanticstate` solver. The ordinary Array adapter
-uses compact flow slots; HTTP currently uses one compatibility slot containing
-the legacy nested state while semantic-unit scalarization remains follow-up
-work. A procedure revision builds
-an immutable, case-insensitive environment with revision-local `SymbolID`
-values and a deterministic CFG `BlockOrdinal` index. Mutable flow states,
-scratch buffers, cancellation checks, and the `(BlockOrdinal, LaneOrdinal)`
-worklist remain owned by one solver invocation; no state or index is shared
-across revisions or nested worker pools.
+internal `internal/analyze/semanticstate` solver. Both adapters use compact
+flow slots. The HTTP transport no longer stores a full nested
+`httpAnalysisState` in a compatibility slot: each procedure revision builds an
+immutable, case-insensitive HTTP environment with revision-local `SymbolID`
+values and a deterministic CFG `BlockOrdinal` index. Declarations, module
+constants, constructor/launcher sites, interned strings/URLs, and save sites
+belong to that immutable environment. Mutable flow states, scratch buffers,
+cancellation checks, and the `(BlockOrdinal, LaneOrdinal)` worklist remain
+owned by one solver invocation; no state or index is shared across revisions
+or nested worker pools.
+
+HTTP facts are represented by independent indexed scalar slots. Object slots
+carry explicit presence/unknown state and the object kind, identity, known URL,
+credentials, timeout, and downloaded facts. Launcher, string/value, sensitive,
+and saved executable-path facts use separate slots. Assignment copies the
+source slots, identity-based member updates propagate through aliases, and
+uncertain reassignments invalidate only the affected target. Unknown/absence
+and the existing conservative intersection/union behavior are part of the
+lattice, not implicit missing map entries.
 
 The solver stores present slots in dense bitset-backed storage for small or
 dense domains and sorted sparse storage for wide, sparse domains. Domain joins
@@ -768,6 +778,24 @@ unsupported-contract) are developer-only telemetry.
 They are not public IR fields and never appear in CLI JSON, LSP payloads,
 corpus snapshots, or the diagnostic review ledger. The shared solver API and
 dense/sparse/hybrid benchmarks remain internal implementation details.
+Exceptional and uncertain edges retain predecessor input
+state. HTTP joins preserve the previous contracts: identity/kind/URL/value
+facts require agreement, credential/timeout-infinite/sensitive facts use union,
+timeout-configured/downloaded facts use intersection, and saved paths retain
+only an agreed value. Source ranges, representative evidence, credential sink
+witnesses, and finding multiplicity are not part of semantic state.
+
+After fixed-point convergence, HTTP diagnostics are produced by a deterministic
+CFG-order projection. Credential sink evidence is reconstructed by a separate
+indexed replay so aliasing, kills, exceptional/uncertain edges, and VBA224
+duplicate suppression remain compatible without adding witness allocations to
+the solver state.
+
+The HTTP block-level fixed-point state is fully scalarized. Remaining
+compatibility walkers are limited to explicitly out-of-scope generic dataflow
+and unrelated semantic domains. The shared solver API and dense/sparse/hybrid
+benchmarks are internal implementation details and do not add CLI, JSON, or
+LSP fields.
 
 ### Batch procedure-worker boundary
 

@@ -63,10 +63,10 @@ and sparse storage otherwise. Representation benchmarks cover dense, sparse,
 and hybrid choices; changing these constants requires new benchmark evidence.
 Slot values are scalar IDs, flags, or bounded handles to immutable interned
 values. The ordinary Array adapter follows this rule and keeps dimension
-shapes in the value lattice. The initial HTTP adapter intentionally retains
-the legacy `httpAnalysisState` nested maps in one compatibility slot while
-its semantic-unit scalarization is developed separately; this exception is
-why the Issue #713 allocation target remains open.
+shapes in the value lattice. The initial HTTP adapter retained the legacy
+`httpAnalysisState` nested maps in one compatibility slot. Issue #720 removes
+that temporary boundary for the HTTP transport kernel; the historical adapter
+is retained only as the #713 baseline used by differential measurements.
 
 ### Joins and convergence
 
@@ -100,19 +100,43 @@ rules. Semantic state may retain only bounded membership required to decide a
 later transfer (for example an interned executable-path set); evidence itself
 must not cause state copies or affect equality.
 
-### Migration boundary
+### HTTP scalarization follow-up (#720)
 
-The first migration covers the HTTP scheduler boundary (`solveHTTPStates`)
-and the ordinary block-level `arrayFlowState` walk. HTTP's nested state is
-not yet compacted into semantic-unit slots. Issue #721 amends this boundary
-for the remaining Array paths without changing the semantic lattice. The
-source-line lifecycle lane, normal-edge refinement, exceptional/uncertain
-edges, and combined runtime/evidence lanes use the same indexed solver when
-their participant index and transfer contract can be built before execution.
-Existing diagnostic IDs, severity, ranges, messages, suppression, JSON, LSP
-projections, batch/realtime parity, and performance-counter meanings remain
-unchanged. Generic `internal/vba/dataflow`, CFG storage, cross-run caching,
-and unrelated semantic domains remain outside this decision.
+Issue #720 completes the HTTP portion of this migration. Each procedure
+revision builds one immutable, case-insensitive `httpCompactEnvironment`.
+Declarations, module constants, constructor sites, launcher names, interned
+strings/URLs, and save sites receive deterministic revision-local IDs; those
+IDs and immutable declarations are never copied into block states.
+
+The HTTP fixed-point state contains only indexed scalar slots. Object slots
+carry explicit presence/unknown state plus kind, identity, known URL,
+credential, timeout, and downloaded facts. Launcher, string/value, sensitive,
+and saved-path facts use independent slots. Absence and unknown are represented
+in the lattice rather than by missing nested-map keys. Object assignment copies
+the source slots, identity-preserving member updates reach aliases, and
+constructor or uncertain reassignments invalidate only the target slots.
+
+Joins update the destination slots in place and report only changed
+`SymbolID`s. Equality and join retain the previous conservative contracts:
+identity/kind/URL/value facts meet on agreement, credential/timeout-infinite/
+sensitive facts union, timeout-configured/downloaded facts intersect, and
+saved executable paths retain only an agreed value. No transfer clones or
+joins a complete `httpAnalysisState`.
+
+Diagnostic evidence remains outside the fixed-point state. After convergence,
+HTTP findings are projected in deterministic CFG/source order. Credential sink
+evidence is reconstructed by a separate indexed replay so aliasing, kills,
+exceptional/uncertain edges, and VBA224 duplicate suppression retain their
+previous behavior without making witness data part of state equality.
+
+The shared solver still owns deterministic scheduling, cancellation, and the
+single-thread execution boundary. Existing diagnostic IDs, severity, ranges,
+messages, suppression, JSON, LSP projections, batch/realtime parity, and
+performance-counter meanings remain unchanged. Array source-line traversal,
+edge-refinement callbacks, and interprocedural evidence walkers continue on
+the indexed boundary documented by Issue #721; generic `internal/vba/dataflow`,
+CFG storage, cross-run caching, and unrelated semantic domains remain outside
+this decision.
 
 ### Amendment: advanced Array paths on the indexed solver (Issue #721)
 
@@ -178,9 +202,8 @@ values are retained in the corpus specification.
 ## Consequences
 
 - Ordinary Array state copies become proportional to compact slot values or
-  active sparse entries. HTTP gains deterministic indexed scheduling and
-  cancellation through the shared boundary, but its compatibility slot still
-  copies nested maps until the follow-up scalarization.
+  active sparse entries. HTTP now uses the same indexed, changed-slot state
+  boundary, so its fixed-point path no longer copies nested maps.
 - The solver and domain adapters have a narrow ownership boundary that can be
   reused by later semantic kernels without exposing analyzer or protocol APIs.
 - Deterministic indexed scheduling and changed-slot reporting make convergence
@@ -219,10 +242,33 @@ values are retained in the corpus specification.
 7. **Persist solver results across runs** — Rejected because invalidation and
    compatibility are a separate cache decision.
 
+## Completion record (#720)
+
+The HTTP scalarization boundary and evidence replay are complete in the
+implementation described above. The baseline is
+`6c9f8ba60c5b162cb7115e8e68744412c7de9d5d`; the implementation was verified at
+`f47e3b56` plus the working tree changes. The ordered pre-migration digest
+matrix and batch/realtime parity tests pass without a diagnostic or snapshot
+delta. The required command matrix and measured allocation record are
+maintained in `docs/specs/static-analysis-corpus.md` under the #720
+verification record; profile files remain local developer artifacts.
+
+The `-race` analyzer and semanticstate runs, two verify-only corpus runs, and
+corpus metrics all passed. The five-sample ROneCOne record and focused profiles
+show that
+`cloneHTTPState`, `joinHTTPState`, and nested HTTP map growth are absent from
+the production fixed-point path. Any diagnostic, snapshot, ordering, or
+review-ledger delta requires investigation before the record is completed.
+
 ## Evidence
 
 - `internal/analyze/http_transport.go` (`httpAnalysisState`,
-  `solveHTTPStates`, `cloneHTTPState`, `joinHTTPState`).
+  `solveHTTPStates`, and the compatibility constant/planner helpers).
+- `internal/analyze/http_compact_state.go` (the indexed HTTP environment,
+  scalar lattice, solver transfer, projection, and credential-evidence replay).
+- `internal/analyze/http_transport_differential_test.go` and
+  `internal/analyze/http_transport_benchmark_test.go` (pre-migration digest
+  oracle and HTTP allocation-shape benchmarks).
 - `internal/analyze/array_safety.go` (`arrayFlowState`,
   `walkArrayCFGWorklist`, `walkArrayCFGCombined`, `cloneArrayState`,
   `meetArrayState`).
@@ -240,6 +286,7 @@ values are retained in the corpus specification.
 ## Related
 
 - Issue #713: `perf(dataflow): introduce a compact semantic state solver`
+- Issue #720: `Follow-up: scalarize HTTP analysis state in the compact solver`
 - Issue #693: shared semantic analysis kernel performance wave
 - ADR-0021, ADR-0022,
   `docs/adr/ADR-0044-bounded-procedure-effect-summaries.md`, ADR-0046, and
