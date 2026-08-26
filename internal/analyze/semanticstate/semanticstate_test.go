@@ -541,8 +541,12 @@ func TestSolverCancellationDuringTransferDoesNotPublishPartialResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := solver.SolveContext(ctx); err != context.Canceled {
+	result, err := solver.SolveContext(ctx)
+	if err != context.Canceled {
 		t.Fatalf("transfer cancellation error = %v", err)
+	}
+	if got, ok := result.State(0, 0).Value(value); ok {
+		t.Fatalf("canceled solve published state: %d", got)
 	}
 }
 

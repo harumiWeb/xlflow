@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -175,8 +176,8 @@ End Sub
 			if err != nil {
 				t.Fatal(err)
 			}
-			legacy := legacyHTTPFindings(analyzer, file, proc)
-			if got, want := httpFindingDigest(compact), httpFindingDigest(legacy); !sameStringSlice(got, want) {
+			legacy := legacyHTTPFindings(t, analyzer, file, proc)
+			if got, want := httpFindingDigest(compact), httpFindingDigest(legacy); !reflect.DeepEqual(got, want) {
 				t.Fatalf("compact/pre-migration digest differs:\n compact=%#v\n legacy=%#v", got, want)
 			}
 		})
@@ -217,8 +218,9 @@ func loadHTTPDifferentialProcedure(t *testing.T, dir, source string) (parsedFile
 	return parsedFile{}, sourceProcedure{}
 }
 
-func legacyHTTPFindings(analyzer Analyzer, file parsedFile, proc sourceProcedure) []Finding {
-	initial := newHTTPAnalysisState(file, mustProcedureIR(file.IR, proc))
+func legacyHTTPFindings(t *testing.T, analyzer Analyzer, file parsedFile, proc sourceProcedure) []Finding {
+	t.Helper()
+	initial := newHTTPAnalysisState(file, mustProcedureIR(t, file.IR, proc))
 	states := map[vbacfg.BlockID]httpAnalysisState{proc.Graph.Entry: cloneHTTPState(initial)}
 	queue := []vbacfg.BlockID{proc.Graph.Entry}
 	queued := map[vbacfg.BlockID]bool{proc.Graph.Entry: true}
@@ -287,23 +289,13 @@ func legacyHTTPFindings(analyzer Analyzer, file parsedFile, proc sourceProcedure
 	return findings
 }
 
-func mustProcedureIR(document procedureir.DocumentIR, proc sourceProcedure) procedureir.ProcedureIR {
+func mustProcedureIR(t *testing.T, document procedureir.DocumentIR, proc sourceProcedure) procedureir.ProcedureIR {
+	t.Helper()
 	for _, candidate := range document.Procedures {
 		if candidate.Symbol.Name == proc.Name {
 			return candidate
 		}
 	}
+	t.Fatalf("procedure IR not found: %s", proc.Name)
 	return procedureir.ProcedureIR{}
-}
-
-func sameStringSlice(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
-		}
-	}
-	return true
 }

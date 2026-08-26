@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/harumiWeb/xlflow/internal/analyze/semanticstate"
 	"github.com/harumiWeb/xlflow/internal/config"
 )
 
@@ -862,6 +863,27 @@ End Sub
 	got := findingsByCode(findings, "VBA247")
 	if len(got) != 1 || got[0].HTTPReliability == nil || got[0].HTTPReliability.TimeoutState != "missing" {
 		t.Fatalf("reassigned alias timeout findings = %+v", got)
+	}
+}
+
+func TestHTTPCompactProcessLaunchRequiresKnownReceiver(t *testing.T) {
+	environment := semanticstate.NewEnvironment([]string{"launcher:known"})
+	launcherID, ok := environment.Symbol("launcher:known")
+	if !ok {
+		t.Fatal("launcher slot was not indexed")
+	}
+	state := semanticstate.NewState[httpScalar](environment.Layout())
+	state.Set(launcherID, httpScalar{class: httpCompactLauncherSlot, present: true, text: "wscript.shell"})
+	env := &httpCompactEnvironment{
+		launchers: map[string]httpCompactSlot{
+			"known": {id: launcherID, class: httpCompactLauncherSlot},
+		},
+	}
+	if !httpCompactIsProcessLaunch(`known.Run "payload.exe"`, state.View(), env) {
+		t.Fatal("known launcher receiver was not recognized")
+	}
+	if httpCompactIsProcessLaunch(`Set result = other.Run "payload.exe"`, state.View(), env) {
+		t.Fatal("unknown launcher receiver reused an unrelated slot")
 	}
 }
 

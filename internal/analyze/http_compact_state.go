@@ -760,12 +760,14 @@ func solveHTTPCompactStates(ctx context.Context, a Analyzer, file parsedFile, pr
 			statements[block.Statement.ID] = block.ID
 		}
 	}
-	base := &httpCompactSolve{env: env, environment: environment, result: result, blocks: blocks, reachable: reachable, statements: statements}
+	base := &httpCompactSolve{index: index, env: env, environment: environment, result: result, blocks: blocks, reachable: reachable, statements: statements}
 	evidence, err := solveHTTPEvidence(ctx, file, proc, graph, initial, base)
 	if err != nil {
 		return nil, err
 	}
-	return &httpCompactSolve{index: index, env: env, environment: environment, result: result, blocks: blocks, reachable: reachable, statements: statements, evidence: evidence, projection: semanticstate.NewState[httpScalar](environment.Layout())}, nil
+	base.evidence = evidence
+	base.projection = semanticstate.NewState[httpScalar](environment.Layout())
+	return base, nil
 }
 
 func httpCompactTransfer(file parsedFile, proc sourceProcedure, statement procedureir.Statement, e *httpCompactEnvironment, input semanticstate.StateView[httpScalar], output *semanticstate.State[httpScalar], collect bool, evidence *httpEvidenceState) []httpFindingSpec {
@@ -1100,7 +1102,11 @@ func httpCompactIsProcessLaunch(text string, view semanticstate.StateView[httpSc
 			break
 		}
 	}
-	launcher := httpCompactValue(view, e.launchers[receiver])
+	launcherSlot, ok := e.launchers[receiver]
+	if !ok {
+		return false
+	}
+	launcher := httpCompactValue(view, launcherSlot)
 	return launcher.present && ((launcher.text == "wscript.shell" && (method == "run" || method == "exec")) || (launcher.text == "shell.application" && method == "shellexecute"))
 }
 
