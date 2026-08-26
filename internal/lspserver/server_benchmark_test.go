@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,15 +117,22 @@ func largeModuleSource() string {
 
 func newLSPBenchmarkServer(tb testing.TB, fixture lspBenchmarkFixture) *Server {
 	tb.Helper()
-	s, cleanup, err := New(Options{RootDir: fixture.root, Config: config.Default()})
+	s, cleanup := newLSPBenchmarkServerWithCleanup(tb, fixture)
+	tb.Cleanup(cleanup)
+	return s
+}
+
+func newLSPBenchmarkServerWithCleanup(tb testing.TB, fixture lspBenchmarkFixture) (*Server, func()) {
+	tb.Helper()
+	s, cleanup, err := New(Options{RootDir: fixture.root, Config: config.Default(), Stderr: io.Discard})
 	if err != nil {
 		tb.Fatal(err)
 	}
-	tb.Cleanup(cleanup)
 	if _, err := s.docs.open(fixture.largeURI, fixture.largeSource); err != nil {
+		cleanup()
 		tb.Fatal(err)
 	}
-	return s
+	return s, cleanup
 }
 
 func TestLSPBenchmarkFixture(t *testing.T) {
@@ -586,4 +594,319 @@ func benchmarkSourceLine(source, exact string) int {
 		}
 	}
 	panic("benchmark source line not found: " + exact)
+}
+
+type lspStartupBenchmarkFixture struct {
+	root       string
+	moduleA    string
+	moduleB    string
+	moduleAURI string
+	moduleBURI string
+	sourceA    string
+}
+
+func makeLSPStartupBenchmarkFixture(tb testing.TB) lspStartupBenchmarkFixture {
+	tb.Helper()
+	root := tb.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		tb.Fatal(err)
+	}
+	moduleB := filepath.Join(moduleDir, "00_ModuleB.bas")
+	moduleA := filepath.Join(moduleDir, "01_ModuleA.bas")
+	sourceB := "Attribute VB_Name = \"ModuleB\"\nOption Explicit\n\nPublic Function CrossFileTarget(ByVal value As Long) As Long\n    CrossFileTarget = value + 1\nEnd Function\n"
+	sourceA := "Attribute VB_Name = \"ModuleA\"\nOption Explicit\n\nPublic Sub CallB()\n    Call CrossFileTarget(1)\nEnd Sub\n"
+	if err := os.WriteFile(moduleB, []byte(sourceB), 0o644); err != nil {
+		tb.Fatal(err)
+	}
+	if err := os.WriteFile(moduleA, []byte(sourceA), 0o644); err != nil {
+		tb.Fatal(err)
+	}
+	for i := 0; i < 32; i++ {
+		path := filepath.Join(moduleDir, fmt.Sprintf("%02d_Filler.bas", i+2))
+		source := fmt.Sprintf("Attribute VB_Name = \"Filler%02d\"\nOption Explicit\n\nPublic Sub FillerProcedure%02d()\nEnd Sub\n", i, i)
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			tb.Fatal(err)
+		}
+	}
+	return lspStartupBenchmarkFixture{
+		root: root, moduleA: moduleA, moduleB: moduleB,
+		moduleAURI: pathToFileURI(moduleA), moduleBURI: pathToFileURI(moduleB), sourceA: sourceA,
+	}
+}
+
+func TestLSPStartupBenchmarkFixture(t *testing.T) {
+	first := makeLSPStartupBenchmarkFixture(t)
+	second := makeLSPStartupBenchmarkFixture(t)
+	if first.sourceA != second.sourceA {
+		t.Fatal("startup fixture is not deterministic")
+	}
+	files, err := filepath.Glob(filepath.Join(first.root, "src", "modules", "*.bas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 34 {
+		t.Fatalf("startup fixture files = %d, want 34", len(files))
+	}
+}
+
+func startupInteractiveQueries(b *testing.B, s *Server, fixture lspStartupBenchmarkFixture) (int, int) {
+	b.Helper()
+	line := benchmarkSourceLine(fixture.sourceA, "    Call CrossFileTarget(1)")
+	character := len("    Call ")
+	hover, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.moduleAURI)},
+		Position:     protocol.Position{Line: protocol.UInteger(line), Character: protocol.UInteger(character)},
+	}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	definition, err := s.definition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.moduleAURI)},
+		Position:     protocol.Position{Line: protocol.UInteger(line), Character: protocol.UInteger(character)},
+	}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	definitions := 0
+	if locations, ok := definition.([]protocol.Location); ok {
+		for _, location := range locations {
+			if location.URI == protocol.DocumentUri(fixture.moduleBURI) {
+				definitions++
+			}
+		}
+	}
+	hovers := 0
+	if hover != nil {
+		if contents, ok := hover.Contents.(protocol.MarkupContent); ok && strings.Contains(contents.Value, "CrossFileTarget") {
+			hovers = 1
+		}
+	}
+	return hovers, definitions
+}
+
+func waitLSPStartupEvent(b *testing.B, events <-chan struct{}) {
+	b.Helper()
+	select {
+	case <-events:
+	case <-time.After(30 * time.Second):
+		b.Fatal("timed out waiting for startup benchmark checkpoint")
+	}
+}
+
+func startLSPStartupServer(b *testing.B, fixture lspStartupBenchmarkFixture) (*Server, func()) {
+	b.Helper()
+	s, cleanup, err := New(Options{RootDir: fixture.root, Config: config.Default(), Stderr: io.Discard})
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+		cleanup()
+		b.Fatal(err)
+	}
+	if err := s.initialized(nil, nil); err != nil {
+		cleanup()
+		b.Fatal(err)
+	}
+	if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
+	}}); err != nil {
+		cleanup()
+		b.Fatal(err)
+	}
+	return s, cleanup
+}
+
+func newLSPStartupServer(b *testing.B, fixture lspStartupBenchmarkFixture) (*Server, func()) {
+	b.Helper()
+	s, cleanup, err := New(Options{RootDir: fixture.root, Config: config.Default(), Stderr: io.Discard})
+	if err != nil {
+		b.Fatal(err)
+	}
+	return s, cleanup
+}
+
+// BenchmarkLSPStartup reproduces the initialize/initialized/background scan/
+// didOpen/interactive overlap. Checkpoints are synchronized by internal
+// parser hooks rather than wall-clock sleeps, so the benchmark remains useful
+// on contended machines and makes pre-readiness behavior explicit.
+func BenchmarkLSPStartup(b *testing.B) {
+	fixture := makeLSPStartupBenchmarkFixture(b)
+
+	b.Run("Initialization", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup, err := New(Options{RootDir: fixture.root, Config: config.Default(), Stderr: io.Discard})
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.StartTimer()
+			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.initialized(nil, nil); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.analysis.waitReady(); err != nil {
+				b.Fatal(err)
+			}
+			b.StopTimer()
+			cleanup()
+		}
+	})
+
+	b.Run("ImmediateInteractive", func(b *testing.B) {
+		b.ReportAllocs()
+		var hovers, definitions int
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := startLSPStartupServer(b, fixture)
+			b.StartTimer()
+			hover, definition := startupInteractiveQueries(b, s, fixture)
+			hovers += hover
+			definitions += definition
+			b.StopTimer()
+			if err := s.analysis.waitReady(); err != nil {
+				b.Fatal(err)
+			}
+			cleanup()
+		}
+		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
+		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+	})
+
+	b.Run("WhileIndexing", func(b *testing.B) {
+		b.ReportAllocs()
+		var hovers, definitions int
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := newLSPStartupServer(b, fixture)
+			active := make(chan struct{}, 1)
+			release := make(chan struct{})
+			s.performanceHook = func(stage, path string) {
+				if path == fixture.moduleB && stage == "declaration-start" {
+					select {
+					case active <- struct{}{}:
+					default:
+					}
+					<-release
+				}
+			}
+			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.initialized(nil, nil); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+				URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
+			}}); err != nil {
+				b.Fatal(err)
+			}
+			waitLSPStartupEvent(b, active)
+			b.StartTimer()
+			hover, definition := startupInteractiveQueries(b, s, fixture)
+			hovers += hover
+			definitions += definition
+			b.StopTimer()
+			close(release)
+			if err := s.analysis.waitReady(); err != nil {
+				b.Fatal(err)
+			}
+			cleanup()
+		}
+		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
+		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+	})
+
+	b.Run("AfterDeclarationBeforeSemantic", func(b *testing.B) {
+		b.ReportAllocs()
+		var hovers, definitions int
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := newLSPStartupServer(b, fixture)
+			declared := make(chan struct{}, 1)
+			release := make(chan struct{})
+			s.performanceHook = func(stage, path string) {
+				if path != fixture.moduleB {
+					return
+				}
+				switch stage {
+				case "declaration-ready":
+					select {
+					case declared <- struct{}{}:
+					default:
+					}
+				case "semantic-start":
+					<-release
+				}
+			}
+			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.initialized(nil, nil); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+				URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
+			}}); err != nil {
+				b.Fatal(err)
+			}
+			waitLSPStartupEvent(b, declared)
+			b.StartTimer()
+			hover, definition := startupInteractiveQueries(b, s, fixture)
+			hovers += hover
+			definitions += definition
+			b.StopTimer()
+			close(release)
+			if err := s.analysis.waitReady(); err != nil {
+				b.Fatal(err)
+			}
+			cleanup()
+		}
+		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
+		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+	})
+
+	b.Run("AfterSemanticReady", func(b *testing.B) {
+		b.ReportAllocs()
+		var hovers, definitions int
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := newLSPStartupServer(b, fixture)
+			semantic := make(chan struct{}, 1)
+			s.performanceHook = func(stage, path string) {
+				if path == fixture.moduleB && stage == "semantic-ready" {
+					select {
+					case semantic <- struct{}{}:
+					default:
+					}
+				}
+			}
+			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.initialized(nil, nil); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+				URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
+			}}); err != nil {
+				b.Fatal(err)
+			}
+			waitLSPStartupEvent(b, semantic)
+			if err := s.analysis.waitReady(); err != nil {
+				b.Fatal(err)
+			}
+			b.StartTimer()
+			hover, definition := startupInteractiveQueries(b, s, fixture)
+			hovers += hover
+			definitions += definition
+			b.StopTimer()
+			cleanup()
+		}
+		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
+		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+	})
 }

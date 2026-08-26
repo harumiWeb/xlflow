@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Added opt-in LSP startup/project-preparation telemetry for workspace
+  discovery, declaration and semantic indexing, snapshots, resolution,
+  dependency updates, diagnostics, interactive requests, and scheduler waits.
+  Deterministic multi-module and ROneCOne-scale lifecycle benchmarks plus a
+  reproducible CPU/allocation/live-heap profiling procedure are documented in
+  `docs/specs/lsp-performance-profiling.md`; LSP responses and default logging
+  remain unchanged.
+
 - Reduced static-analysis allocation pressure for giant VBA modules by sharing
   immutable module array-variable catalogs, lazily copying branch-local
   Dictionary/Collection, Application-state, and generic data-flow maps, and

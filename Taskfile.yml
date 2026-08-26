@@ -173,9 +173,17 @@ tasks:
   bench:lsp:
     desc: Run deterministic LSP performance benchmarks
     cmds:
-      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/lspserver -run '^TestLSPBenchmarkFixture$' -bench '^BenchmarkLSP' -benchmem -benchtime=1x -count 5
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/lspserver -run '^TestLSPBenchmarkFixture$' -bench '^BenchmarkLSP' -benchmem -benchtime=1x -count 5 -timeout 25m
         platforms: [windows]
-      - cmd: go test ./internal/lspserver -run '^TestLSPBenchmarkFixture$' -bench '^BenchmarkLSP' -benchmem -benchtime=1x -count 5
+      - cmd: rtk proxy go test ./internal/lspserver -run '^TestLSPBenchmarkFixture$' -bench '^BenchmarkLSP' -benchmem -benchtime=1x -count 5 -timeout 25m
+        platforms: [linux, darwin]
+
+  bench:lsp-startup:
+    desc: Run the deterministic LSP startup/readiness benchmark
+    cmds:
+      - cmd: rtk powershell -NoProfile -ExecutionPolicy Bypass -File '.\scripts\dev\go.ps1' test ./internal/lspserver -run '^TestLSPStartupBenchmarkFixture$' -bench '^BenchmarkLSPStartup$' -benchmem -benchtime=1x -count 5
+        platforms: [windows]
+      - cmd: rtk proxy go test ./internal/lspserver -run '^TestLSPStartupBenchmarkFixture$' -bench '^BenchmarkLSPStartup$' -benchmem -benchtime=1x -count 5
         platforms: [linux, darwin]
 
   bench:corpus:

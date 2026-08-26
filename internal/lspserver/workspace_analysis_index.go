@@ -27,10 +27,11 @@ import (
 // All mutation is path-scoped: replacing a file removes and re-adds only that
 // file's references. The index never reparses unaffected source files.
 type workspaceAnalysisIndex struct {
-	root   string
-	config config.Config
-	parse  func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
-	log    func(fileCount int, started time.Time, err error)
+	root        string
+	config      config.Config
+	parse       func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
+	log         func(fileCount int, started time.Time, err error)
+	performance *performanceRecorder
 	// nonBlockingQueries allows LSP requests to observe the coherently indexed
 	// subset while the initial background scan is still running. Direct index
 	// users retain the historical wait-for-ready behavior by default.
@@ -216,7 +217,10 @@ func (x *workspaceAnalysisIndex) completeLocked() bool {
 
 func (x *workspaceAnalysisIndex) buildInitial() {
 	started := time.Now()
+	discovery := x.performance.start("workspace/index", performanceStageWorkspaceDiscovery, "background", x.root)
 	files, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: x.root, Config: x.config})
+	discovery.finish(len(files), 0, err)
+	x.performance.addCounter(performanceCounterWorkspaceFilesDiscovered, uint64(len(files)), "workspace/index", performanceStageWorkspaceDiscovery, "background", x.root)
 	if err == nil {
 		for _, file := range files {
 			// A single unreadable or unrecoverable source file makes the
@@ -603,7 +607,13 @@ func (x *workspaceAnalysisIndex) completeClearWithoutEntry(refresh *diskRefresh)
 // overlay is pending, a disk parse failed, or recovered IR was published.
 // Callers must not publish project diagnostics from an incomplete view.
 func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot {
+	return x.projectSnapshotClass("background")
+}
+
+func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.ProjectAnalysisSnapshot {
 	x.start()
+	snapshotMeasurement := x.performance.start("workspace/project", performanceStageProjectSnapshot, class, x.root)
+	x.performance.addCounter(performanceCounterProjectSnapshotBuilds, 1, "workspace/project", performanceStageProjectSnapshot, class, x.root)
 	x.mu.RLock()
 	complete := x.completeLocked()
 	revision := x.revision
@@ -646,17 +656,28 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 		}
 	}
 
+	resolverMeasurement := x.performance.start("workspace/project", performanceStageProjectResolver, class, x.root)
+	x.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
 	resolver := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+	resolverMeasurement.finish(len(resolverSymbols), 0, nil)
+	viewMeasurement := x.performance.start("workspace/project", performanceStageProjectResolutionView, class, x.root)
+	x.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "workspace/project", performanceStageProjectResolutionView, class, x.root)
 	callResolver := calls.NewResolverFromProcedureIRResolver(resolver)
+	viewMeasurement.finish(len(resolverSymbols), 0, nil)
 	result := intel.ProjectAnalysisSnapshot{Revision: revision, Complete: complete}
 	var sites []calls.CallSite
 	var typeReferences []calls.TypeReference
+	materializationMeasurement := x.performance.start("workspace/project", performanceStageResolutionMaterialize, class, x.root)
+	materializations := 0
 	for _, entry := range entries {
 		resolvedIR := procedureir.Resolve(entry.procedureIR, resolver)
+		materializations++
 		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: resolvedIR, CFG: entry.controlFlow, Source: entry.source})
 		sites = append(sites, entry.callSites...)
 		typeReferences = append(typeReferences, entry.typeReferences...)
 	}
+	materializationMeasurement.finish(materializations, 0, nil)
+	x.performance.addCounter(performanceCounterResolutionMaterializations, uint64(materializations), "workspace/project", performanceStageResolutionMaterialize, class, x.root)
 	resolvedCalls := make([]calls.Call, len(sites))
 	for i, site := range sites {
 		resolvedCalls[i] = callResolver.Resolve(site)
@@ -672,6 +693,7 @@ func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot
 		return typeReferences[i].Range.StartColumn < typeReferences[j].Range.StartColumn
 	})
 	result.CallGraph = callgraph.Snapshot{Symbols: graphSymbols, Calls: resolvedCalls, TypeReferences: typeReferences}
+	snapshotMeasurement.finish(len(result.Documents), 0, nil)
 	return result
 }
 
@@ -690,22 +712,34 @@ func (x *workspaceAnalysisIndex) initialReady() bool {
 // so overlapping pending overlays are compared once the workspace becomes
 // coherent again.
 func (x *workspaceAnalysisIndex) projectChange() (intel.ProjectAnalysisSnapshot, []string) {
-	current := x.projectSnapshot()
+	return x.projectChangeClass("background")
+}
+
+func (x *workspaceAnalysisIndex) projectChangeClass(class string) (intel.ProjectAnalysisSnapshot, []string) {
+	changeMeasurement := x.performance.start("workspace/project", performanceStageProjectChange, class, x.root)
+	current := x.projectSnapshotClass(class)
 	if !current.Complete {
+		changeMeasurement.finish(0, 0, nil)
 		return current, nil
 	}
 	x.projectMu.Lock()
 	previous := x.lastProjectSnapshot
 	if previous.Complete && current.Revision <= previous.Revision {
 		x.projectMu.Unlock()
+		changeMeasurement.finish(0, 0, nil)
 		return current, nil
 	}
 	x.lastProjectSnapshot = current
 	x.projectMu.Unlock()
 	if !previous.Complete {
+		changeMeasurement.finish(0, 0, nil)
 		return current, nil
 	}
-	return current, projectImpactPaths(previous, current)
+	dependencyMeasurement := x.performance.start("workspace/project", performanceStageDependencyUpdate, class, x.root)
+	impacted := projectImpactPathsWithPerformanceClass(previous, current, x.performance, class)
+	dependencyMeasurement.finish(len(impacted), 0, nil)
+	changeMeasurement.finish(len(impacted), 0, nil)
+	return current, impacted
 }
 
 func cloneCallSites(in []calls.CallSite) []calls.CallSite {

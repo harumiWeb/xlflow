@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"path/filepath"
@@ -172,8 +173,15 @@ func TestWorkspaceSymbolIndexPerformanceReportsInitialBuild(t *testing.T) {
 	logOutput := output.String()
 	if !strings.Contains(logOutput, `operation="workspaceSymbols/index/initial"`) ||
 		!strings.Contains(logOutput, `file_count=0`) ||
-		!strings.Contains(logOutput, `elapsed_ms=`) {
+		!strings.Contains(logOutput, `elapsed_ms=`) ||
+		!strings.Contains(logOutput, `stage="workspaceDiscovery"`) ||
+		!strings.Contains(logOutput, `outcome="counter_snapshot"`) {
 		t.Fatalf("workspace index performance log missing initial build fields:\n%s", logOutput)
+	}
+	for _, name := range performanceCounterNames {
+		if !strings.Contains(logOutput, `counter="`+name+`"`) {
+			t.Fatalf("workspace index performance log missing counter %q:\n%s", name, logOutput)
+		}
 	}
 }
 
@@ -323,4 +331,58 @@ func TestSourceLineCount(t *testing.T) {
 			t.Errorf("sourceLineCount(%q) = %d, want %d", test.source, got, test.want)
 		}
 	}
+}
+
+func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
+	var output bytes.Buffer
+	s := &Server{performance: newPerformanceRecorder(true, log.New(&output, "", 0))}
+	project := projectTestSnapshot(projectTestProcedure(filepath.Join(t.TempDir(), "Main.bas"), "Main.Run", "", "", 1, "Run"))
+	project.Revision = 19
+
+	ctx := context.Background()
+	s.projectResolution(ctx, project, true)
+	s.projectResolution(ctx, project, true)
+	s.projectEffectSummaryWithResolution(ctx, project, nil, true)
+	s.projectEffectSummaryWithResolution(ctx, project, nil, true)
+	s.projectConstants(project, true, nil)
+	s.projectConstants(project, true, nil)
+
+	for _, expected := range []string{
+		`stage="projectResolver"`,
+		`stage="projectResolutionView"`,
+		`stage="projectResolutionMaterialization"`,
+		`stage="projectEffectSummary"`,
+		`stage="projectConstants"`,
+		`counter="resolution_resolver_builds" value=1`,
+		`counter="resolution_view_builds" value=1`,
+		`counter="resolution_materializations" value=2`,
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("preparation telemetry missing %q:\n%s", expected, output.String())
+		}
+	}
+	if got := s.performance.counterTotal(performanceCounterResolutionResolverBuilds); got != 1 {
+		t.Fatalf("resolver build counter = %d, want 1", got)
+	}
+}
+
+func TestAnalysisPermitPreCanceledContextDoesNotWait(t *testing.T) {
+	var output bytes.Buffer
+	s := &Server{
+		performance:     newPerformanceRecorder(true, log.New(&output, "", 0)),
+		analysisPermits: make(chan struct{}, 1),
+	}
+	s.analysisPermits <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if release, _, err := s.acquireAnalysisPermit(ctx, "background"); release != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire canceled = (release=%v, err=%v)", release != nil, err)
+	}
+	if got := s.performance.counterTotal(performanceCounterBackgroundPermitWaits); got != 0 {
+		t.Fatalf("background permit waits = %d, want 0 for a pre-canceled context", got)
+	}
+	if strings.Contains(output.String(), `stage="permitWait"`) {
+		t.Fatalf("pre-canceled permit emitted a wait record: %s", output.String())
+	}
+	<-s.analysisPermits
 }
