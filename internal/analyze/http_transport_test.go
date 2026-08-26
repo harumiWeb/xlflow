@@ -2,7 +2,6 @@ package analyze
 
 import (
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -882,6 +881,9 @@ func TestHTTPCompactProcessLaunchRequiresKnownReceiver(t *testing.T) {
 	if !httpCompactIsProcessLaunch(`known.Run "payload.exe"`, state.View(), env) {
 		t.Fatal("known launcher receiver was not recognized")
 	}
+	if !httpCompactIsProcessLaunch(`Set result = known.Run "payload.exe"`, state.View(), env) {
+		t.Fatal("assignment-form launcher receiver was not recognized")
+	}
 	if httpCompactIsProcessLaunch(`Set result = other.Run "payload.exe"`, state.View(), env) {
 		t.Fatal("unknown launcher receiver reused an unrelated slot")
 	}
@@ -1123,16 +1125,41 @@ End Sub
 	}
 }
 
-func httpFindingDigest(findings []Finding) []string {
-	digest := make([]string, 0, len(findings))
+type httpFindingDigestEntry struct {
+	Code         string
+	Severity     string
+	File         string
+	Module       string
+	Procedure    string
+	Line         int
+	Column       int
+	EndLine      int
+	EndColumn    int
+	ScopeEndLine int
+	Message      string
+	Reason       string
+	Suggestion   string
+	NearbyCode   []string
+	CallCycle    *CallCycleContext
+	DataFlow     *DataFlowContext
+
+	CommandExecution *CommandExecutionContext
+	SQLExecution     *SQLExecutionContext
+	FileOperation    *FileOperationContext
+	HTTPSecurity     *HTTPSecurityContext
+	HTTPReliability  *HTTPReliabilityContext
+	OpaqueBoolean    *OpaqueBooleanContext
+	RuntimeError     *RuntimeErrorContext
+
+	// httpOwnedSinks is private metadata used by HTTP's VBA224 suppression;
+	// include its canonicalized projection so ownership differences remain
+	// visible without comparing map iteration order.
+	OwnedSinks []int
+}
+
+func httpFindingDigest(findings []Finding) []httpFindingDigestEntry {
+	digest := make([]httpFindingDigestEntry, 0, len(findings))
 	for _, finding := range findings {
-		api, risk, header, origin, timeout := "", "", "", "", ""
-		if finding.HTTPSecurity != nil {
-			api, risk, header, origin = finding.HTTPSecurity.API, finding.HTTPSecurity.RiskKind, finding.HTTPSecurity.Header, finding.HTTPSecurity.Origin
-		}
-		if finding.HTTPReliability != nil {
-			api, risk, timeout = finding.HTTPReliability.API, finding.HTTPReliability.RiskKind, finding.HTTPReliability.TimeoutState
-		}
 		owned := make([]int, 0, len(finding.httpOwnedSinks))
 		for sink, present := range finding.httpOwnedSinks {
 			if present {
@@ -1140,14 +1167,32 @@ func httpFindingDigest(findings []Finding) []string {
 			}
 		}
 		sort.Ints(owned)
-		ownedDigest := make([]string, 0, len(owned))
-		for _, sink := range owned {
-			ownedDigest = append(ownedDigest, strconv.Itoa(sink))
-		}
-		// Keep the differential oracle sensitive to the public diagnostic
-		// contract: order/multiplicity, range, severity, redacted witness
-		// projection, and HTTP context fields all participate in the digest.
-		digest = append(digest, fmt.Sprintf("%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s", finding.Code, finding.Severity, finding.File, finding.Procedure, finding.Line, finding.Column, finding.EndLine, finding.EndColumn, api, risk, header, origin, timeout, strings.Join(finding.NearbyCode, "\x1f"), strings.Join(ownedDigest, ",")))
+		digest = append(digest, httpFindingDigestEntry{
+			Code:             finding.Code,
+			Severity:         finding.Severity,
+			File:             finding.File,
+			Module:           finding.Module,
+			Procedure:        finding.Procedure,
+			Line:             finding.Line,
+			Column:           finding.Column,
+			EndLine:          finding.EndLine,
+			EndColumn:        finding.EndColumn,
+			ScopeEndLine:     finding.ScopeEndLine,
+			Message:          finding.Message,
+			Reason:           finding.Reason,
+			Suggestion:       finding.Suggestion,
+			NearbyCode:       finding.NearbyCode,
+			CallCycle:        finding.CallCycle,
+			DataFlow:         finding.DataFlow,
+			CommandExecution: finding.CommandExecution,
+			SQLExecution:     finding.SQLExecution,
+			FileOperation:    finding.FileOperation,
+			HTTPSecurity:     finding.HTTPSecurity,
+			HTTPReliability:  finding.HTTPReliability,
+			OpaqueBoolean:    finding.OpaqueBoolean,
+			RuntimeError:     finding.RuntimeError,
+			OwnedSinks:       owned,
+		})
 	}
 	return digest
 }

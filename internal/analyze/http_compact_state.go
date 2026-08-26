@@ -1089,11 +1089,21 @@ func httpCompactIsProcessLaunch(text string, view semanticstate.StateView[httpSc
 	if match == nil {
 		return false
 	}
-	dot := strings.Index(text, ".")
-	if dot < 0 {
+	// The match starts at the member-call dot. Scan backwards from that
+	// position so assignment-form calls such as `Set result = shell.Run ...`
+	// resolve the launcher receiver rather than the statement prefix.
+	end := match[0]
+	for end > 0 && (text[end-1] == ' ' || text[end-1] == '\t') {
+		end--
+	}
+	start := end
+	for start > 0 && isVBAIdentifierPart(text[start-1]) {
+		start--
+	}
+	if start == end {
 		return false
 	}
-	receiver := strings.ToLower(strings.TrimSpace(text[:dot]))
+	receiver := strings.ToLower(text[start:end])
 	matchedCall := strings.ToLower(text[match[0]:match[1]])
 	method := ""
 	for _, candidate := range []string{"shellexecute", "exec", "run"} {
