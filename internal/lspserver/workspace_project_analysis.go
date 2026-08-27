@@ -567,37 +567,27 @@ func updateProjectDependencyView(view *projectDependencyView, snapshot intel.Pro
 	}
 	changedFiles := make(map[string]bool)
 	resolutionRefresh := false
-	for fileKey, oldFile := range view.files {
-		index, exists := currentDocuments[fileKey]
-		if !exists {
+	fileKeys := make(map[string]struct{}, len(view.files)+len(currentDocuments))
+	for fileKey := range view.files {
+		fileKeys[fileKey] = struct{}{}
+	}
+	for fileKey := range currentDocuments {
+		fileKeys[fileKey] = struct{}{}
+	}
+	for fileKey := range fileKeys {
+		oldFile, hasOld := view.files[fileKey]
+		index, hasCurrent := currentDocuments[fileKey]
+		if !hasOld || !hasCurrent {
 			changedFiles[fileKey] = true
 			resolutionRefresh = true
 			continue
 		}
 		document := snapshot.Documents[index]
-		if projectFileChanged(view, document, fileKey, oldFile, currentCatalogSafe[fileKey]) {
+		changed, refresh := projectFileNeedsWork(view, document, fileKey, oldFile, currentCatalogSafe[fileKey])
+		if changed {
 			changedFiles[fileKey] = true
 		}
-		if !oldFile.catalogSafe || !currentCatalogSafe[fileKey] {
-			resolutionRefresh = true
-		}
-		if oldFile.module != document.ProcedureCatalog.ModuleContextHash || oldFile.conditional != document.ProcedureCatalog.ConditionalHash || (oldFile.version != document.Version && len(document.IR.Procedures) == 0) {
-			resolutionRefresh = true
-		}
-	}
-	for fileKey, index := range currentDocuments {
-		if _, exists := view.files[fileKey]; !exists {
-			changedFiles[fileKey] = true
-			resolutionRefresh = true
-			continue
-		}
-		if projectFileChanged(view, snapshot.Documents[index], fileKey, view.files[fileKey], currentCatalogSafe[fileKey]) {
-			changedFiles[fileKey] = true
-		}
-		if !view.files[fileKey].catalogSafe || !currentCatalogSafe[fileKey] {
-			resolutionRefresh = true
-		}
-		if view.files[fileKey].module != snapshot.Documents[index].ProcedureCatalog.ModuleContextHash || view.files[fileKey].conditional != snapshot.Documents[index].ProcedureCatalog.ConditionalHash || (view.files[fileKey].version != snapshot.Documents[index].Version && len(snapshot.Documents[index].IR.Procedures) == 0) {
+		if refresh {
 			resolutionRefresh = true
 		}
 	}
@@ -758,6 +748,15 @@ func updateProjectDependencyView(view *projectDependencyView, snapshot intel.Pro
 	}
 
 	return projectImpactPathsFromIncrementalView(view, changed, oldReverse, impactFiles)
+}
+
+func projectFileNeedsWork(view *projectDependencyView, document intel.ProjectAnalysisDocument, fileKey string, oldFile projectFileState, catalogSafe bool) (changed, refresh bool) {
+	changed = projectFileChanged(view, document, fileKey, oldFile, catalogSafe)
+	refresh = !oldFile.catalogSafe || !catalogSafe ||
+		oldFile.module != document.ProcedureCatalog.ModuleContextHash ||
+		oldFile.conditional != document.ProcedureCatalog.ConditionalHash ||
+		(oldFile.version != document.Version && len(document.IR.Procedures) == 0)
+	return changed, refresh
 }
 
 func projectFileChanged(view *projectDependencyView, document intel.ProjectAnalysisDocument, fileKey string, oldFile projectFileState, catalogSafe bool) bool {

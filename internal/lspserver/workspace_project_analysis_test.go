@@ -431,6 +431,7 @@ func qualifiedBenchmarkProcedureName(index int) string {
 func cloneProjectDependencyView(view projectDependencyView) projectDependencyView {
 	clone := newProjectDependencyView()
 	clone.revision = view.revision
+	clone.lookup = cloneProjectProcedureLookup(view.lookup)
 	for file, state := range view.files {
 		state.procedureKeys = append([]string(nil), state.procedureKeys...)
 		clone.files[file] = state
@@ -443,6 +444,28 @@ func cloneProjectDependencyView(view projectDependencyView) projectDependencyVie
 		clone.reverse[callee] = cloneProjectCallers(callers)
 	}
 	return clone
+}
+
+func cloneProjectProcedureLookup(lookup projectProcedureLookup) projectProcedureLookup {
+	clone := projectProcedureLookup{byQualified: make(map[string][]projectProcedureLookupEntry, len(lookup.byQualified))}
+	for qualified, entries := range lookup.byQualified {
+		clone.byQualified[qualified] = append([]projectProcedureLookupEntry(nil), entries...)
+	}
+	return clone
+}
+
+func TestCloneProjectDependencyViewPreservesLookup(t *testing.T) {
+	base := buildProjectDependencyViewWithPerformanceClass(callChangeProjectDependencyBenchmarkSnapshot("Callee.First", false), nil, "background")
+	clone := cloneProjectDependencyView(base)
+	qualified := projectQualifiedKey("Callee.First", "sub")
+	entries := clone.lookup.byQualified[qualified]
+	if len(entries) != 1 {
+		t.Fatalf("cloned lookup[%q] = %#v, want one entry", qualified, entries)
+	}
+	entries[0].key = "mutated"
+	if base.lookup.byQualified[qualified][0].key == "mutated" {
+		t.Fatal("cloned lookup shares entry storage with base view")
+	}
 }
 
 func TestWorkspaceProjectSnapshotHoldsResolvedIRAndDefensiveCFG(t *testing.T) {
