@@ -1821,7 +1821,7 @@ func (s *Server) runDocumentAnalysis(
 			}
 			s.logWorkspaceOverlayPerformance(doc, generation, started, semanticErr, !publishedSemantic)
 			if !publishedSemantic && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
-				s.analysis.abandonOverlay(doc, generation)
+				s.analysis.abandonOverlaySemantic(doc, generation)
 			}
 			if publishedSemantic {
 				s.overlayPublications.Add(1)

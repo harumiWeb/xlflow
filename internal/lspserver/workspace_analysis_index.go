@@ -768,6 +768,31 @@ func (x *workspaceAnalysisIndex) abandonOverlay(doc intel.Document, generation u
 	return true
 }
 
+// abandonOverlaySemantic ends only the semantic part of an overlay build.
+// Declaration publication is an independent readiness boundary and remains
+// available for workspace symbol and navigation queries after semantic failure.
+func (x *workspaceAnalysisIndex) abandonOverlaySemantic(doc intel.Document, generation uint64) bool {
+	key := documentSymbolKey(doc)
+	if key == "" {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.pending[key] != generation {
+		return false
+	}
+	delete(x.pending, key)
+	x.incomplete[key] = true
+	x.overlays[key] = indexedFileAnalysis{
+		path:       doc.Path,
+		version:    documentVersion(doc),
+		moduleKind: doc.ModuleKind,
+	}
+	x.removeEffectiveLocked(key)
+	x.revision++
+	return true
+}
+
 // clearOverlay restores a freshly parsed disk entry. The path stays absent
 // from the effective index for the entire refresh, so neither a stale cached
 // disk entry nor the closing overlay can leak into concurrent queries. On a

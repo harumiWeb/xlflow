@@ -753,6 +753,38 @@ func TestWorkspaceAnalysisIndexAbandonOverlayClearsReservationAndKeepsDiskMasked
 	}
 }
 
+func TestWorkspaceAnalysisIndexAbandonOverlaySemanticKeepsDeclarations(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub DiskName()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: "DiskName", File: file.Path}}}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parse, nil)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, ModuleKind: "standard", Version: 1, Source: "Sub OpenName()\nEnd Sub\n"}
+	index.beginOverlay(doc, 1)
+	if !index.publishOverlayDeclarations(doc, 1, indexedFileAnalysis{symbols: []intel.Symbol{{Name: "OpenName", File: path}}}) {
+		t.Fatal("declaration overlay was not published")
+	}
+	if !index.abandonOverlaySemantic(doc, 1) {
+		t.Fatal("semantic overlay was not abandoned")
+	}
+	if got, err := index.searchExact("OpenName"); err != nil || len(got) != 1 {
+		t.Fatalf("declaration overlay lost after semantic failure: %+v, %v", got, err)
+	}
+	if got, err := index.searchExact("DiskName"); err != nil || len(got) != 0 {
+		t.Fatalf("saved symbols leaked after semantic failure: %+v, %v", got, err)
+	}
+}
+
 func TestWorkspaceAnalysisIndexPendingOverlayCancelsCloseRefresh(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "src", "modules", "Main.bas")
