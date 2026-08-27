@@ -141,6 +141,7 @@ type diagnosticState struct {
 	runningMode          intel.DiagnosticMode
 	publishedMode        intel.DiagnosticMode
 	hasPublished         bool
+	initialFast          bool
 	open                 bool
 	cancel               context.CancelFunc
 	buildOverlay         bool
@@ -1516,18 +1517,26 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 	}
 	state.generation++
 	generation := state.generation
+	documentKind := s.documentKind(doc)
+	largeFile := sourceLineCount(doc.Source) >= diagnosticsLargeFileLines
+	fastFirst := largeFile && documentKind == DocumentKindVBA
 	openDelay := time.Duration(0)
-	if sourceLineCount(doc.Source) >= diagnosticsLargeFileLines {
+	if largeFile && !fastFirst {
 		openDelay = s.diagnosticsOpenDelay
 	}
 	state.latest = doc
 	state.notify = ctx
 	state.ready = openDelay <= 0
 	state.readyMode = intel.DiagnosticModeFull
+	if fastFirst {
+		state.ready = true
+		state.readyMode = intel.DiagnosticModeFast
+	}
 	state.hasPublished = false
+	state.initialFast = fastFirst
 	state.changes = intel.ProcedureChangeSet{}
 	state.open = true
-	state.buildOverlay = s.documentKind(doc) == DocumentKindVBA
+	state.buildOverlay = documentKind == DocumentKindVBA
 	if state.buildOverlay {
 		_, _ = s.analysis.projectChange()
 		previous, exists := s.analysis.beginOverlay(doc, generation)
@@ -1549,6 +1558,11 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 	}
 	if state.cancel != nil {
 		state.cancel()
+	}
+	if fastFirst {
+		state.fullTimer = s.diagnosticsAfterFunc(s.diagnosticsOpenDelay, func() {
+			s.diagnosticsReady(doc.URI, state, generation, intel.DiagnosticModeFull)
+		})
 	}
 	state.mu.Unlock()
 	s.diagMu.Unlock()
@@ -1633,6 +1647,7 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 	}
 	state.publishedMode = intel.DiagnosticModeFull
 	state.hasPublished = false
+	state.initialFast = false
 	state.changes = changes
 	state.open = true
 	state.buildOverlay = buildOverlay && s.documentKind(doc) == DocumentKindVBA
@@ -1874,11 +1889,12 @@ func (s *Server) runDiagnosticsBody(
 	state.mu.Lock()
 	previousCache := state.diagnosticCache
 	changes := state.changes
+	initialFast := state.initialFast
 	dependencyGeneration := state.dependencyGeneration
 	state.mu.Unlock()
 	var result intel.DiagnosticResult
 	if s.documentKind(doc) == DocumentKindVBA && s.diagnosticsRequest != nil {
-		request := intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder}
+		request := intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder, InitialFast: initialFast && mode == intel.DiagnosticModeFast}
 		project := intel.ProjectAnalysisSnapshot{}
 		if mode == intel.DiagnosticModeFull {
 			project = s.analysis.projectSnapshotClass("interactive")
@@ -2092,6 +2108,7 @@ func (state *diagnosticState) close() {
 	state.baselineKnown = false
 	state.diagnosticCache = nil
 	state.hasPublished = false
+	state.initialFast = false
 	state.overlayGeneration = 0
 	state.dependencyGeneration++
 	state.projectReadyPending = false

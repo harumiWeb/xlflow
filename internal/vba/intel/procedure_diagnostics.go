@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/harumiWeb/xlflow/internal/lint"
 	staticrules "github.com/harumiWeb/xlflow/internal/staticanalysis/rules"
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/ast"
@@ -32,6 +33,11 @@ type DiagnosticRequest struct {
 	Changes       ProcedureChangeSet
 	PreviousCache *DiagnosticCache
 	Recorder      *analysisstats.Recorder
+	// InitialFast requests the bounded, document-local preview used by a large
+	// document's first didOpen publication.  Edit-time Fast diagnostics retain
+	// their existing changed-procedure behavior; the preview deliberately does
+	// not attempt to walk every procedure before publishing the first result.
+	InitialFast bool
 }
 
 type DiagnosticResult struct {
@@ -114,7 +120,12 @@ func (a Analyzer) DiagnosticsRequestContext(ctx context.Context, request Diagnos
 		recorder.Add("cfg_builds", after.CFGBuild-before.CFGBuild)
 		recorder.Add("cfg_reuses", after.CFGReuse-before.CFGReuse)
 	}()
-	a = a.withRequestWorkspaceResolution(ctx, []Document{doc})
+	// The cold-open Fast preview is document/procedure-local and must not spend
+	// its first-publication budget preparing a workspace resolution view.  Keep
+	// the established request-wide view for edit-time Fast and Full diagnostics.
+	if request.Mode != DiagnosticModeFast || !request.InitialFast {
+		a = a.withRequestWorkspaceResolution(ctx, []Document{doc})
+	}
 	if ctx.Err() != nil {
 		return DiagnosticResult{}
 	}
@@ -129,13 +140,15 @@ func (a Analyzer) DiagnosticsRequestContext(ctx context.Context, request Diagnos
 	// Property accessor contracts span sibling procedures. A procedure-sized
 	// fast fragment cannot validate the group, so signature edits in any
 	// Property accessor force a document-wide recomputation and a fresh cache.
-	for _, entry := range changedProcedureEntries(catalog, request.PreviousCache, request.Changes) {
-		if strings.HasPrefix(entry.Identity.Kind, "property_") {
-			diagnostics := a.diagnosticsFullContext(ctx, doc)
-			if ctx.Err() != nil {
-				return DiagnosticResult{}
+	if !request.InitialFast {
+		for _, entry := range changedProcedureEntries(catalog, request.PreviousCache, request.Changes) {
+			if strings.HasPrefix(entry.Identity.Kind, "property_") {
+				diagnostics := a.diagnosticsFullContext(ctx, doc)
+				if ctx.Err() != nil {
+					return DiagnosticResult{}
+				}
+				return DiagnosticResult{Diagnostics: diagnostics, Cache: buildDiagnosticCache(catalog, diagnostics)}
 			}
-			return DiagnosticResult{Diagnostics: diagnostics, Cache: buildDiagnosticCache(catalog, diagnostics)}
 		}
 	}
 	return DiagnosticResult{Diagnostics: a.fastDiagnosticsContext(ctx, doc, catalog, request), Cache: request.PreviousCache}
@@ -143,6 +156,12 @@ func (a Analyzer) DiagnosticsRequestContext(ctx context.Context, request Diagnos
 
 func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, catalog ProcedureCatalog, request DiagnosticRequest) []Diagnostic {
 	changed := changedProcedureEntries(catalog, request.PreviousCache, request.Changes)
+	if request.InitialFast && len(changed) > 0 {
+		// A cold Fast publication is a latency preview, not a second Full pass.
+		// One procedure keeps the work bounded on modules with thousands of
+		// procedures; the subsequent Full generation replaces this subset.
+		changed = changed[:1]
+	}
 	changedKeys := make(map[ProcedureIdentity]bool, len(changed))
 	out := make([]Diagnostic, 0)
 	modulePreamble := ""
@@ -156,6 +175,10 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 			return nil
 		}
 		changedKeys[entry.Identity] = true
+		if request.InitialFast {
+			out = append(out, a.fastLintProcedureContext(ctx, doc, modulePreamble, modulePreambleEnd, entry)...)
+			continue
+		}
 		fragment := doc
 		fragment.Snapshot = nil
 		fragment.Source = fastDiagnosticFragmentSource(doc.Source, modulePreamble, modulePreambleEnd, entry)
@@ -169,6 +192,9 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 				out = append(out, rebaseDiagnostic(diagnostic, fragmentEntry.Range.Start, entry.Range.Start))
 			}
 		}
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 	if previous := request.PreviousCache; previous != nil && catalog.ReuseSafe && previous.Catalog.ReuseSafe && previous.Catalog.ModuleContextHash == catalog.ModuleContextHash && previous.Catalog.ConditionalHash == catalog.ConditionalHash {
 		current := make(map[ProcedureIdentity]ProcedureCatalogEntry, len(catalog.Entries))
@@ -197,6 +223,59 @@ func (a Analyzer) fastDiagnosticsContext(ctx context.Context, doc Document, cata
 		}
 		return out[i].Code < out[j].Code
 	})
+	return out
+}
+
+// fastLintProcedureContext is the bounded cold-open preview.  The regular
+// Fast path intentionally runs the complete document-local diagnostic plan for
+// every changed procedure, which is appropriate after an edit but would make
+// a first open of a thousands-of-procedures module repeat whole-document setup.
+// The preview runs only file-local lint rules for one procedure fragment; Full
+// diagnostics remains responsible for the complete module and project result.
+func (a Analyzer) fastLintProcedureContext(ctx context.Context, doc Document, modulePreamble string, modulePreambleEnd int, entry ProcedureCatalogEntry) []Diagnostic {
+	fragment := doc
+	fragment.Snapshot = nil
+	fragment.Source = fastDiagnosticFragmentSource(doc.Source, modulePreamble, modulePreambleEnd, entry)
+	parsed, closeParsed, err := parsedDocumentForDocument(fragment)
+	if err != nil {
+		return nil
+	}
+	defer closeParsed()
+	issues, err := (lint.Linter{
+		RootDir:                a.RootDir,
+		Config:                 a.Config,
+		ModuleKind:             doc.ModuleKind,
+		VisibleDeclarations:    a.visibleDeclarations,
+		VisibleConstants:       a.VisibleConstants,
+		ConstantValues:         a.ConstantValues,
+		TypeDeclarations:       a.typeDeclarations,
+		ObjectTypeDeclarations: a.objectTypeDeclarations,
+	}).LintParsedContext(ctx, parsed)
+	if err != nil || ctx.Err() != nil {
+		return nil
+	}
+	fragmentCatalog := procedureCatalogForDocumentMode(fragment, false)
+	if len(fragmentCatalog.Entries) != 1 {
+		return nil
+	}
+	fragmentEntry := fragmentCatalog.Entries[0]
+	out := make([]Diagnostic, 0, len(issues))
+	for _, issue := range issues {
+		diagnosticRange := issueRange(fragment.Source, issue.Line, issue.Column)
+		if issue.EndLine > 0 && issue.EndColumn > 0 {
+			diagnosticRange = issueRangeWithEnd(fragment.Source, issue.Line, issue.Column, issue.EndLine, issue.EndColumn)
+		}
+		diagnostic := Diagnostic{
+			Code:     issue.Code,
+			Severity: issue.Severity,
+			Source:   "xlflow",
+			Message:  lintDiagnosticMessage(issue),
+			Range:    diagnosticRange,
+		}
+		if fastDiagnosticForProcedure(diagnostic, fragmentEntry) {
+			out = append(out, rebaseDiagnostic(diagnostic, fragmentEntry.Range.Start, entry.Range.Start))
+		}
+	}
 	return out
 }
 

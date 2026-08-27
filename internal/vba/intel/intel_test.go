@@ -2350,6 +2350,41 @@ End Sub
 	}
 }
 
+func TestInitialFastDiagnosticsUseBoundedProcedureLocalPreview(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	snapshotCalls := 0
+	analyzer.WorkspaceSymbolsSnapshotFunc = func([]Document) ([]Symbol, error) {
+		snapshotCalls++
+		return nil, nil
+	}
+	doc := Document{
+		Path:       filepath.Join(t.TempDir(), "Main.bas"),
+		ModuleKind: "standard",
+		Source: `Attribute VB_Name = "Main"
+Option Explicit
+Public Sub First()
+    Dim staleFirst As Long
+End Sub
+
+Public Sub Second()
+    Dim staleSecond As Long
+End Sub
+`,
+	}
+	result := analyzer.DiagnosticsRequestContext(context.Background(), DiagnosticRequest{
+		Document:    doc,
+		Mode:        DiagnosticModeFast,
+		InitialFast: true,
+	})
+	got := diagnosticsByCode(result.Diagnostics, "VB020")
+	if len(got) != 1 || got[0].Range.Start.Line != 3 {
+		t.Fatalf("initial Fast diagnostics = %+v, want only First procedure's VB020", result.Diagnostics)
+	}
+	if snapshotCalls != 0 {
+		t.Fatalf("initial Fast workspace snapshots = %d, want 0", snapshotCalls)
+	}
+}
+
 func TestDiagnosticsIgnoreUsedIdentifierTypeCharacters(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

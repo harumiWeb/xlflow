@@ -71,8 +71,11 @@ xlflow-owned source formats.
   edit debounce, then build the matching workspace overlay and replace the Fast
   result with Full diagnostics after two seconds of editor idle. A Full result
   outranks Fast for the same generation, and neither phase may publish across a
-  generation or lifecycle boundary. Opening a document schedules only the cold
-  overlay and Full pass.
+  generation or lifecycle boundary. Opening a small or non-VBA document keeps
+  its existing Full-diagnostics path. Opening a VBA document with at least
+  10,000 source lines publishes a bounded procedure-local Fast preview
+  immediately. After that publication the cold overlay starts, while the Full
+  pass is released by the existing open-delay timer.
 - Anchor reusable procedure diagnostics to a procedure identity and source
   fragment. Fast publication may rebase unchanged procedure-local diagnostics
   to the current procedure start, but must omit interprocedural results until

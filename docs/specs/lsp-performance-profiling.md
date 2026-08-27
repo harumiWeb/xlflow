@@ -101,9 +101,12 @@ ROneCOne-scale shape:
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPIssue491LargeClass/Lifecycle/' -benchmem -benchtime=1x -count 1 -timeout 25m
 ```
 
-It reports first Fast diagnostics, first Full diagnostics, hover during Full
-diagnostics, and definition during workspace indexing. The generated fixture
-is deterministic and does not add third-party source to the repository.
+It reports the actual first diagnostics publication after `didOpen`, first Fast
+and Full diagnostic costs, hover during Full diagnostics, and definition during
+workspace indexing. The generated fixture is deterministic and does not add
+third-party source to the repository. `Lifecycle/DidOpenFirstPublication`
+measures time-to-first-publication, while `Lifecycle/InitialFastDiagnostics`
+isolates the bounded first-open Fast preview cost.
 
 The opt-in local ROneCOne path remains available when a developer has a local
 specimen:

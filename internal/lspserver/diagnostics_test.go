@@ -68,6 +68,170 @@ func TestDidChangeSchedulesFastThenIdleFullDiagnostics(t *testing.T) {
 	wantVersion(t, runs, 2)
 }
 
+func TestLargeDidOpenPublishesFastBeforeDelayedFull(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	s.diagnosticsOpenDelay = diagnosticsOpenDelay
+
+	notifications := &diagnosticNotificationRecorder{}
+	ctx := diagnosticTestContext(notifications)
+	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		message := "full"
+		if request.Mode == intel.DiagnosticModeFast {
+			if !request.InitialFast {
+				return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{Code: "TEST", Severity: "error", Message: "missing initial Fast marker"}}}
+			}
+			message = "fast"
+		}
+		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{
+			Code: "TEST", Severity: "warning", Message: message,
+		}}}
+	}
+
+	uri := pathToFileURI(filepath.Join(s.opts.RootDir, "Large.bas"))
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: largeOpenDiagnosticSource(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	created := timers.snapshot()
+	if len(created) != 1 || created[0].delay != diagnosticsOpenDelay {
+		t.Fatalf("large-open timers = %+v, want one Full timer at %s", created, diagnosticsOpenDelay)
+	}
+	first := notifications.waitForCount(t, 1)
+	if len(first[0].Diagnostics) != 1 || first[0].Diagnostics[0].Message != "fast" {
+		t.Fatalf("first large-open publication = %+v, want Fast diagnostics", first)
+	}
+
+	created[0].Fire()
+	publications := notifications.waitForCount(t, 2)
+	if len(publications[1].Diagnostics) != 1 || publications[1].Diagnostics[0].Message != "full" {
+		t.Fatalf("large-open Full publication = %+v, want Full replacement", publications)
+	}
+}
+
+func TestLargeDidOpenFastPublishesBeforeWorkspaceIndexReady(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modulePath := filepath.Join(moduleDir, "Large.bas")
+	source := largeOpenDiagnosticSource()
+	if err := os.WriteFile(modulePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	// Keep the background index and interactive Fast analysis independently
+	// schedulable while the test holds the index at its semantic checkpoint.
+	s.analysisPermits = make(chan struct{}, 2)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWorkspace := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseWorkspace()
+	s.performanceHook = func(stage, path string) {
+		if stage != "semantic-start" || path != modulePath {
+			return
+		}
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+	}
+	s.analysis.start()
+	waitClosed(t, started, "initial workspace semantic indexing")
+	if s.analysis.initialReady() {
+		t.Fatal("workspace index became ready before the semantic checkpoint was released")
+	}
+
+	s.diagnosticsOpenDelay = diagnosticsOpenDelay
+	notifications := &diagnosticNotificationRecorder{}
+	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		if request.Mode != intel.DiagnosticModeFast {
+			return intel.DiagnosticResult{}
+		}
+		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{
+			Code: "TEST", Severity: "warning", Message: "fast-before-ready",
+		}}}
+	}
+	uri := pathToFileURI(modulePath)
+	ctx := diagnosticTestContext(notifications)
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: source,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	publication := notifications.waitForCount(t, 1)
+	if len(publication[0].Diagnostics) != 1 || publication[0].Diagnostics[0].Message != "fast-before-ready" {
+		t.Fatalf("publication while workspace index pending = %+v, want Fast diagnostics", publication)
+	}
+	releaseWorkspace()
+}
+
+func TestLargeDidOpenEditInvalidatesPendingFull(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	s.diagnosticsOpenDelay = diagnosticsOpenDelay
+	notifications := &diagnosticNotificationRecorder{}
+	ctx := diagnosticTestContext(notifications)
+	s.diagnosticsRequest = func(_ context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		phase := "full"
+		if request.Mode == intel.DiagnosticModeFast {
+			if request.InitialFast {
+				return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{Code: "TEST", Severity: "error", Message: "edit incorrectly marked as initial Fast"}}}
+			}
+			phase = "fast"
+		}
+		return intel.DiagnosticResult{Diagnostics: []intel.Diagnostic{{
+			Code: "TEST", Severity: "warning", Message: fmt.Sprintf("%s %d", phase, request.Document.Version),
+		}}}
+	}
+
+	uri := pathToFileURI(filepath.Join(s.opts.RootDir, "Large.bas"))
+	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(uri), Version: 1, Text: largeOpenDiagnosticSource(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	notifications.waitForCount(t, 1)
+	created := timers.snapshot()
+	if len(created) != 1 {
+		t.Fatalf("large-open timers = %d, want one pending Full timer", len(created))
+	}
+
+	changeDiagnosticsTestDocument(t, s, ctx, uri, 2)
+	created = timers.snapshot()
+	if len(created) != 3 {
+		t.Fatalf("timers after edit = %d, want old Full plus new Fast/Full timers", len(created))
+	}
+	// Firing a stopped timer is a useful deterministic stand-in for a callback
+	// already queued by the timer implementation; generation checks must reject
+	// the old Full result regardless.
+	created[0].Fire()
+	if got := len(notifications.snapshot()); got != 1 {
+		t.Fatalf("stale Full publication count = %d, want 1", got)
+	}
+	created[1].Fire()
+	publications := notifications.waitForCount(t, 2)
+	if publications[1].Diagnostics[0].Message != "fast 2" {
+		t.Fatalf("latest Fast publication = %+v, want version 2", publications)
+	}
+}
+
+func largeOpenDiagnosticSource() string {
+	return "Attribute VB_Name = \"Large\"\nOption Explicit\nPublic Sub Run()\nEnd Sub\n" +
+		strings.Repeat("' filler\n", diagnosticsLargeFileLines)
+}
+
 func TestFastDiagnosticsAreCompletelyReplacedByFullDiagnostics(t *testing.T) {
 	s, timers, cleanup := newDiagnosticsTestServer(t)
 	defer cleanup()
