@@ -1420,10 +1420,10 @@ func TestRunCommandIncludesVerboseFlag(t *testing.T) {
 	}
 }
 
-func TestHeadlessGUIBoundaryLogsExplainProjectWideScanAndLintOverride(t *testing.T) {
+func TestHeadlessGUIBoundaryLogsExplainReachabilityAndLintOverride(t *testing.T) {
 	logs := headlessGUIBoundaryLogs(config.Default())
 	for _, want := range []string{
-		"Headless preflight scans the configured source tree, not the target macro call graph.",
+		"Headless preflight follows the target macro call graph",
 		"Use xlflow run --interactive if a human can operate Excel dialogs.",
 		"replace raw MsgBox/InputBox/file dialog calls with XlflowUI wrappers",
 		"--msgbox/--inputbox/--filedialog",
@@ -6912,6 +6912,34 @@ func TestRunHeadlessPreflightRejectsGUIBoundariesBeforeExcel(t *testing.T) {
 	err := root.Execute()
 	if err == nil || output.ExitCode(err) != output.ExitValidation {
 		t.Fatalf("expected validation failure before Excel, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+}
+
+func TestRunPushInputConflictPrecedesHeadlessGUIPreflight(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(dir, config.FileName), cfg); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "Option Explicit\nPublic Sub Run()\n  MsgBox \"stop\"\nEnd Sub\n"
+	if err := os.WriteFile(filepath.Join(src, "Main.bas"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := &bytes.Buffer{}
+	a := &app{cwd: dir, stdout: stdout, stderr: &bytes.Buffer{}}
+	root := a.rootCommand()
+	root.SetArgs([]string{"--json", "run", "Main.Run", "--headless", "--push", "--input", "other.xlsm"})
+	err := root.Execute()
+	if err == nil || output.ExitCode(err) != output.ExitConfig {
+		t.Fatalf("expected argument validation before GUI preflight, got err=%v exit=%d", err, output.ExitCode(err))
+	}
+	if !strings.Contains(stdout.String(), "run_args_invalid") {
+		t.Fatalf("expected run_args_invalid output, got %s", stdout.String())
 	}
 }
 

@@ -74,6 +74,13 @@ When a macro fails and your source files are newer than the workbook, `run` repo
 Use `--interactive` only when the macro intentionally shows dialogs or UserForms. Headless automation should avoid GUI prompts.
 :::
 
+::: tip
+`run --headless` evaluates GUI boundaries from the requested macro's
+conservative call graph. An unreachable legacy GUI procedure no longer blocks a
+safe entrypoint. Ambiguous or unknown project dispatch, incomplete parsing, and
+boundaries without a known owning procedure remain blocking for safety.
+:::
+
 ::: warning
 If `run` times out after Excel work begins, VBA may still be running. xlflow
 publishes workbook recovery state before releasing the normal lock. Follow-up

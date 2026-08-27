@@ -4078,7 +4078,7 @@ func (a *app) runnerCommand() *cobra.Command {
 
 func headlessGUIBoundaryLogs(cfg config.Config) []string {
 	logs := []string{
-		"Headless preflight scans the configured source tree, not the target macro call graph.",
+		"Headless preflight follows the target macro call graph when source ownership and dispatch are resolvable; uncertain cases retain the project-wide scan.",
 		"Use xlflow run --interactive if a human can operate Excel dialogs.",
 		"For simple dialogs, replace raw MsgBox/InputBox/file dialog calls with XlflowUI wrappers and drive them with --msgbox/--inputbox/--filedialog.",
 		"For repeatable automation, refactor GUI entrypoints into parameterized headless procedures.",
@@ -4137,10 +4137,27 @@ func (a *app) runCommand() *cobra.Command {
 			if err != nil {
 				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
 			}
-			if push {
-				if strings.TrimSpace(input) != "" {
-					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", fmt.Errorf("--push cannot be combined with --input"))
+			if push && strings.TrimSpace(input) != "" {
+				return a.writeFailure("run", output.ExitConfig, "run_args_invalid", fmt.Errorf("--push cannot be combined with --input"))
+			}
+			if opts.Mode == "headless" {
+				boundaries, err := gui.Analyzer{RootDir: a.cwd, Config: cfg}.RunHeadless(opts.Macro)
+				if err != nil {
+					return a.writeFailure("run", output.ExitEnvironment, "gui_preflight_failed", err)
 				}
+				if len(boundaries) > 0 {
+					env := output.Failure("run", output.Error{
+						Code:    "gui_boundary_detected",
+						Message: "Cannot run in headless mode because this project contains GUI interaction boundaries.",
+						Source:  "xlflow",
+						Phase:   "preflight",
+					})
+					env.GUIBoundaries = boundaries
+					env.Logs = headlessGUIBoundaryLogs(cfg)
+					return a.write(env, output.ExitValidation)
+				}
+			}
+			if push {
 				pushOpts, err := buildRunPushOptions(session, fast, buildCommandOptions(a.stderrWriter()))
 				if err != nil {
 					return a.writeFailure("run", output.ExitConfig, "run_args_invalid", err)
@@ -4156,23 +4173,6 @@ func (a *app) runCommand() *cobra.Command {
 			if a.shouldRunSourcePreflight(cfg, opts) {
 				if err := a.runSourcePreflight(cmd.Context(), "run", cfg, "running macros", nil, nil); err != nil {
 					return err
-				}
-			}
-			if opts.Mode == "headless" {
-				boundaries, err := gui.Analyzer{RootDir: a.cwd, Config: cfg}.Run()
-				if err != nil {
-					return a.writeFailure("run", output.ExitEnvironment, "gui_preflight_failed", err)
-				}
-				if len(boundaries) > 0 {
-					env := output.Failure("run", output.Error{
-						Code:    "gui_boundary_detected",
-						Message: "Cannot run in headless mode because this project contains GUI interaction boundaries.",
-						Source:  "xlflow",
-						Phase:   "preflight",
-					})
-					env.GUIBoundaries = boundaries
-					env.Logs = headlessGUIBoundaryLogs(cfg)
-					return a.write(env, output.ExitValidation)
 				}
 			}
 			var env output.Envelope
