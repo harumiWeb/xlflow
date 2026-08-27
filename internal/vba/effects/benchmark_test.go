@@ -34,6 +34,8 @@ func BenchmarkBuildLargeCallgraphs(b *testing.B) {
 			b.ReportMetric(float64(stats.WorklistEvaluations), "worklist_evaluations/op")
 			b.ReportMetric(float64(stats.MaxPropagatedFactsPerProcedure), "max_propagated_facts/procedure")
 			b.ReportMetric(float64(stats.TotalPropagatedFacts), "propagated_facts/op")
+			b.ReportMetric(float64(stats.ReusedDirectProcedures), "reused_direct_procedures/op")
+			b.ReportMetric(float64(stats.RecomputedDirectProcedures), "recomputed_direct_procedures/op")
 		})
 	}
 }

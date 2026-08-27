@@ -4,6 +4,15 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced LSP project preparation invalidation for ordinary editor revisions.
+  Resolution indexes and per-document overlays now use semantic dependency
+  fingerprints, constants are reused across procedure-body edits, and effects
+  reuse unchanged procedure summaries while recalculating the changed
+  procedure's reverse caller closure. Canceled or incomplete products remain
+  unpublished. Added project cache hit/miss/rebuild, dependency-invalidation,
+  and reused-entry performance counters; diagnostic and LSP payload contracts
+  remain unchanged.
+
 - Reduced LSP project dependency-update work by reusing canonical procedure
   catalog fingerprints and maintaining file/procedure-level call and reverse
   caller state incrementally. Body-only edits now revisit only changed

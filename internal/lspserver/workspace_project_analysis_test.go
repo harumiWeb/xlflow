@@ -642,7 +642,7 @@ func TestProjectResolutionCancellationLeavesCacheRetryable(t *testing.T) {
 	if _, _, _, err := s.projectResolution(ctx, project, true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled project resolution error = %v, want context.Canceled", err)
 	}
-	if s.resolutionCache.valid {
+	if len(s.resolutionResolverCache.values) != 0 {
 		t.Fatal("canceled project resolution was published to the cache")
 	}
 	if _, _, _, err := s.projectResolution(context.Background(), project, true); err != nil {

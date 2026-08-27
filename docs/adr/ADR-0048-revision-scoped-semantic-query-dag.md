@@ -98,6 +98,31 @@ rejection, diagnostic projection, and public output contracts remain those
 decided by this ADR. No disk cache, cross-process format, or public API is
 introduced.
 
+### Amendment: dependency-aware LSP project products (#739)
+
+The LSP project-preparation boundary now uses bounded keyed caches for the
+resolver index, per-document resolution overlays, project capability plans,
+project constants, and effects. Keys describe the semantic inputs consumed by each product rather
+than the workspace revision alone. Resolver entries depend on declarations,
+signatures, module/conditional context, TypeDB, and completeness; document
+overlays additionally depend on the current document content. Constant values
+depend on module-level declarations and preamble expressions, so a procedure
+body edit preserves the environment while declaration or TypeDB changes
+rebuild it conservatively.
+
+Effects expose an incremental builder over immutable direct procedure summaries.
+Changed procedures and the reverse caller closure are reset and propagated
+using both old and new call edges; callers of deleted or redirected procedures
+are therefore included. If resolution, recovery, or completeness changes
+without a precise source boundary, the builder invalidates the current project
+boundary. Unchanged summaries remain immutable and are reused.
+
+The keyed caches use per-key single-flight and a bounded FIFO retention limit.
+Builds that fail or observe cancellation publish neither values nor dependency
+metadata. Existing diagnostic generation and dependency-generation checks are
+still authoritative for publication, and the additional cache counters remain
+developer-only performance telemetry.
+
 ### Query graph and invalidation
 
 The graph contains immutable source/module and capability inputs, procedure

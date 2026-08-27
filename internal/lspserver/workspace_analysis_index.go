@@ -74,13 +74,17 @@ type workspaceAnalysisIndex struct {
 	// projectDependencies retains only compact procedure/dependency metadata;
 	// the previous full IR/CFG snapshot is intentionally not retained here.
 	projectDependencies projectDependencyView
-	declarations        *workspaceDeclarationIndex
-	initialWorkers      int
-	semanticWorkers     int
-	initialCtx          context.Context
-	initialCancel       context.CancelFunc
-	initialWG           sync.WaitGroup
-	stopOnce            sync.Once
+	// Snapshot preparation reuses the resolver index and each document's
+	// overlay independently of the monotonically increasing workspace revision.
+	snapshotResolverCache dependencyCache[procedureir.Resolver]
+	snapshotViewCache     dependencyCache[procedureir.ResolvedDocumentView]
+	declarations          *workspaceDeclarationIndex
+	initialWorkers        int
+	semanticWorkers       int
+	initialCtx            context.Context
+	initialCancel         context.CancelFunc
+	initialWG             sync.WaitGroup
+	stopOnce              sync.Once
 }
 
 type diskParse struct {
@@ -963,20 +967,57 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 		}
 	}
 
-	resolverMeasurement := x.performance.start("workspace/project", performanceStageProjectResolver, class, x.root)
-	x.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
-	resolver := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
-	resolverMeasurement.finish(len(resolverSymbols), 0, nil)
+	resolverKey := resolverSymbolsFingerprint(resolverSymbols, complete)
+	resolver, resolverErr, resolverHit := x.snapshotResolverCache.getOrBuildContext(context.Background(), resolverKey, func() (procedureir.Resolver, error) {
+		resolverMeasurement := x.performance.start("workspace/project", performanceStageProjectResolver, class, x.root)
+		x.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
+		value := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
+		resolverMeasurement.finish(len(resolverSymbols), 0, nil)
+		return value, nil
+	})
+	if resolverErr != nil {
+		snapshotMeasurement.finish(0, 0, resolverErr)
+		return intel.ProjectAnalysisSnapshot{Revision: revision, Complete: false}
+	}
+	if resolverHit {
+		x.performance.addCounter(performanceCounterProjectCacheHits, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
+	} else {
+		x.performance.addCounter(performanceCounterProjectCacheMisses, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
+		x.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
+	}
 	viewMeasurement := x.performance.start("workspace/project", performanceStageProjectResolutionView, class, x.root)
-	x.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "workspace/project", performanceStageProjectResolutionView, class, x.root)
-	callResolver := calls.NewResolverFromProcedureIRResolver(resolver)
+	if !resolverHit {
+		x.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "workspace/project", performanceStageProjectResolutionView, class, x.root)
+	}
+	canonicalResolver, ok := resolver.(procedureir.SymbolResolver)
+	if !ok {
+		snapshotMeasurement.finish(0, 0, errors.New("cached workspace resolver has unexpected type"))
+		return intel.ProjectAnalysisSnapshot{Revision: revision, Complete: false}
+	}
+	callResolver := calls.NewResolverFromProcedureIRResolver(canonicalResolver)
 	viewMeasurement.finish(len(resolverSymbols), 0, nil)
 	result := intel.ProjectAnalysisSnapshot{Revision: revision, Complete: complete}
 	var sites []calls.CallSite
 	var typeReferences []calls.TypeReference
 	materializationMeasurement := x.performance.start("workspace/project", performanceStageResolutionMaterialize, class, x.root)
 	for _, entry := range entries {
-		resolution := procedureir.ResolveView(entry.procedureIR, resolver)
+		viewKey := workspaceResolutionDocumentFingerprint(entry.path, entry.version, resolverKey, complete)
+		resolution, viewErr, viewHit := x.snapshotViewCache.getOrBuildContext(context.Background(), viewKey, func() (procedureir.ResolvedDocumentView, error) {
+			return procedureir.ResolveView(entry.procedureIR, resolver), nil
+		})
+		if viewErr != nil {
+			materializationMeasurement.finish(0, 0, viewErr)
+			snapshotMeasurement.finish(0, 0, viewErr)
+			return intel.ProjectAnalysisSnapshot{Revision: revision, Complete: false}
+		}
+		if viewHit {
+			x.performance.addCounter(performanceCounterProjectCacheHits, 1, "workspace/project", performanceStageProjectResolutionView, class, entry.path)
+			x.performance.addCounter(performanceCounterProjectCacheReusedEntries, 1, "workspace/project", performanceStageProjectResolutionView, class, entry.path)
+		} else {
+			x.performance.addCounter(performanceCounterProjectCacheMisses, 1, "workspace/project", performanceStageProjectResolutionView, class, entry.path)
+			x.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "workspace/project", performanceStageProjectResolutionView, class, entry.path)
+			x.performance.addCounter(performanceCounterResolutionOverlayBuilds, 1, "workspace/project", performanceStageProjectResolutionView, class, entry.path)
+		}
 		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{
 			IR: entry.procedureIR, Resolution: resolution, CFG: entry.controlFlow, Source: entry.source,
 			Version: entry.version, ProcedureCatalog: entry.procedureCatalog,

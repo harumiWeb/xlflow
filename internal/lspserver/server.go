@@ -105,26 +105,47 @@ type Server struct {
 	overlayBuilds            atomic.Uint64
 	overlayPublications      atomic.Uint64
 
-	docLifecycleMu            sync.Mutex
-	docLifecycles             map[string]*sync.Mutex
-	projectSummaryCache       revisionCache[effects.ProjectSummary]
-	resolutionCache           revisionCache[projectResolutionResult]
-	projectConstantsCache     revisionCache[projectConstantsResult]
-	semanticQueries           *semanticquery.Store
-	semanticInvalidationMu    sync.Mutex
-	semanticInvalidationPaths map[string]struct{}
-	resolutionTypeLibSymbols  []procedureir.ResolverSymbol
-}
-
-type projectResolutionResult struct {
-	resolver           procedureir.Resolver
-	resolved           map[string]procedureir.ResolvedDocumentView
-	diagnosticResolved map[string]procedureir.ResolvedDocumentView
+	docLifecycleMu      sync.Mutex
+	docLifecycles       map[string]*sync.Mutex
+	projectSummaryCache revisionCache[effects.ProjectSummary]
+	// Dependency caches are keyed by the semantic inputs consumed by each
+	// product. The revision caches above remain for compatibility callers and
+	// tests that explicitly exercise revision-scoped behavior.
+	resolutionResolverCache    dependencyCache[procedureir.Resolver]
+	resolutionDocumentCache    dependencyCache[projectResolutionDocument]
+	projectEffectsCache        dependencyCache[effects.ProjectSummary]
+	projectEffectsState        dependencyEffectsState
+	projectCapabilityPlanCache dependencyCache[analyze.ProjectCapabilityRequirements]
+	projectConstantsDepCache   dependencyCache[projectConstantsResult]
+	semanticQueries            *semanticquery.Store
+	semanticInvalidationMu     sync.Mutex
+	semanticInvalidationPaths  map[string]struct{}
+	resolutionTypeLibSymbols   []procedureir.ResolverSymbol
 }
 
 type projectConstantsResult struct {
 	visible map[string]bool
 	values  map[string]constexpr.Value
+}
+
+type projectResolutionDocument struct {
+	procedure  procedureir.ResolvedDocumentView
+	diagnostic procedureir.ResolvedDocumentView
+}
+
+// dependencyEffectsState keeps the last completed effects graph and its
+// compact per-file inputs. It is intentionally separate from revisionCache:
+// the next revision can reuse direct summaries outside the changed caller
+// closure.
+type dependencyEffectsState struct {
+	mu            sync.Mutex
+	valid         bool
+	key           string
+	resolutionKey string
+	versions      map[string]string
+	summary       effects.ProjectSummary
+	building      bool
+	done          chan struct{}
 }
 
 type diagnosticTimer interface {
@@ -270,7 +291,32 @@ func New(opts Options) (*Server, func(), error) {
 				CFG: projectDocument.CFG, Source: projectDocument.Source,
 			})
 		}
-		capabilityRequirements := analyze.PlanProjectCapabilities(s.opts.Config.Analyze, capabilityDocuments)
+		capabilityKey := projectCapabilityDependencyFingerprint(project, resolutionComplete, projectResolutionFingerprint(project, resolutionComplete, s.resolutionTypeLibSymbols), s.opts.Config.Analyze)
+		capabilityRequirements, capabilityErr, capabilityHit := s.projectCapabilityPlanCache.getOrBuildContext(ctx, capabilityKey, func() (analyze.ProjectCapabilityRequirements, error) {
+			measurement := s.performance.start("project/preparation", performanceStageProjectCapabilities, "interactive", "")
+			if err := ctx.Err(); err != nil {
+				measurement.finish(0, 0, err)
+				return analyze.ProjectCapabilityRequirements{}, err
+			}
+			result := analyze.PlanProjectCapabilities(s.opts.Config.Analyze, capabilityDocuments)
+			if err := ctx.Err(); err != nil {
+				measurement.finish(0, 0, err)
+				return analyze.ProjectCapabilityRequirements{}, err
+			}
+			measurement.finish(countProjectCapabilities(result), 0, nil)
+			return result, nil
+		})
+		if capabilityErr != nil {
+			return intel.DiagnosticResult{}
+		}
+		if capabilityHit {
+			s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectCapabilities, "interactive", "")
+			s.performance.addCounter(performanceCounterProjectCacheReusedEntries, uint64(countProjectCapabilities(capabilityRequirements)), "project/preparation", performanceStageProjectCapabilities, "interactive", "")
+		} else {
+			s.performance.addCounter(performanceCounterProjectCacheMisses, 1, "project/preparation", performanceStageProjectCapabilities, "interactive", "")
+			s.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "project/preparation", performanceStageProjectCapabilities, "interactive", "")
+			s.performance.addCounter(performanceCounterProjectDependencyInvalidations, 1, "project/preparation", performanceStageProjectCapabilities, "interactive", "")
+		}
 		var projectEffects effects.ProjectSummary
 		if capabilityRequirements.Effects {
 			projectEffects = s.projectEffectSummaryWithResolution(ctx, project, resolvedProjectViews, resolutionComplete)
@@ -281,7 +327,7 @@ func New(opts Options) (*Server, func(), error) {
 		// explicit so optional plans can skip it if that contract changes.
 		var projectConstants projectConstantsResult
 		if capabilityRequirements.ProjectConstants {
-			projectConstants = s.projectConstants(project, resolutionComplete, typeDB.DB)
+			projectConstants = s.projectConstantsContext(ctx, project, resolutionComplete, typeDB.DB)
 		}
 		analyzer := s.analyzer
 		analyzer.VisibleConstants = projectConstants.visible
@@ -439,26 +485,132 @@ func projectConstantIdentifier(text string) string {
 }
 
 func (s *Server) projectEffectSummary(project intel.ProjectAnalysisSnapshot) effects.ProjectSummary {
-	return s.projectEffectSummaryWithResolution(context.Background(), project, nil, false)
+	return s.projectSummaryCache.getOrBuild(project.Revision, project.Complete, func() effects.ProjectSummary {
+		documents := make([]effects.Document, len(project.Documents))
+		for i, document := range project.Documents {
+			documents[i] = effects.Document{IR: document.IR, Resolution: document.Resolution, CFG: document.CFG}
+		}
+		return effects.Build(documents)
+	})
+}
+
+func projectEffectDisplayPaths(project intel.ProjectAnalysisSnapshot) map[string]string {
+	paths := make(map[string]string, len(project.Documents))
+	for _, document := range project.Documents {
+		paths[document.IR.Path] = document.IR.Path
+	}
+	return paths
 }
 
 func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, resolved map[string]procedureir.ResolvedDocumentView, complete bool) effects.ProjectSummary {
-	return s.projectSummaryCache.getOrBuild(project.Revision, complete, func() effects.ProjectSummary {
-		measurement := s.performance.start("project/preparation", performanceStageProjectEffects, "interactive", "")
-		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityEffectsBuildsCounter)
-		documents := make([]effects.Document, len(project.Documents))
-		for i, document := range project.Documents {
-			if view, ok := resolved[symbolFileKey(document.IR.Path)]; ok {
-				documents[i] = effects.Document{IR: document.IR, Resolution: view, CFG: document.CFG}
-			} else {
-				documents[i] = effects.Document{IR: document.IR, CFG: document.CFG}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return effects.ProjectSummary{}
+	}
+	documents := make([]effects.Document, len(project.Documents))
+	versions := make(map[string]string, len(project.Documents))
+	for i, document := range project.Documents {
+		key := symbolFileKey(document.IR.Path)
+		versions[key] = projectDocumentContentFingerprint(document)
+		if view, ok := resolved[key]; ok {
+			documents[i] = effects.Document{IR: document.IR, Resolution: view, CFG: document.CFG}
+		} else {
+			documents[i] = effects.Document{IR: document.IR, CFG: document.CFG}
+		}
+	}
+	resolutionKey := projectResolutionFingerprint(project, complete, s.resolutionTypeLibSymbols)
+	key := projectEffectsDependencyFingerprint(versions, complete, resolutionKey)
+	displayPaths := projectEffectDisplayPaths(project)
+	if value, ok := s.projectEffectsCache.get(key); ok {
+		value = value.RebindPaths(displayPaths)
+		s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectEffects, "interactive", "")
+		s.performance.addCounter(performanceCounterProjectCacheReusedEntries, uint64(value.ProcedureCount()), "project/preparation", performanceStageProjectEffects, "interactive", "")
+		return value
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return effects.ProjectSummary{}
+		}
+		s.projectEffectsState.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			s.projectEffectsState.mu.Unlock()
+			return effects.ProjectSummary{}
+		}
+		if s.projectEffectsState.valid && s.projectEffectsState.key == key {
+			value := s.projectEffectsState.summary.RebindPaths(displayPaths)
+			s.projectEffectsState.mu.Unlock()
+			s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectEffects, "interactive", "")
+			s.performance.addCounter(performanceCounterProjectCacheReusedEntries, uint64(value.ProcedureCount()), "project/preparation", performanceStageProjectEffects, "interactive", "")
+			return value
+		}
+		if s.projectEffectsState.building {
+			done := s.projectEffectsState.done
+			s.projectEffectsState.mu.Unlock()
+			select {
+			case <-done:
+				if err := ctx.Err(); err != nil {
+					return effects.ProjectSummary{}
+				}
+				continue
+			case <-ctx.Done():
+				return effects.ProjectSummary{}
 			}
 		}
-		summary := effects.Build(documents)
-		finishCapability(nil)
-		measurement.finish(summary.ProcedureCount(), 0, nil)
-		return summary
-	})
+		previous := s.projectEffectsState.summary
+		previousValid := s.projectEffectsState.valid
+		previousKey := s.projectEffectsState.key
+		previousResolutionKey := s.projectEffectsState.resolutionKey
+		previousVersions := cloneProjectEffectVersions(s.projectEffectsState.versions)
+		done := make(chan struct{})
+		s.projectEffectsState.building = true
+		s.projectEffectsState.done = done
+		s.projectEffectsState.mu.Unlock()
+
+		changedFiles := changedProjectEffectFiles(previousVersions, versions, previousValid)
+		// A resolver/TypeDB/completeness change can alter effect edges even when
+		// source versions are unchanged. In that case the safe seed is the full
+		// current project; BuildIncremental will still preserve its output and
+		// provenance contracts.
+		if previousValid && previousKey != key && (previousResolutionKey != resolutionKey || len(changedFiles) == 0) {
+			for path := range versions {
+				changedFiles[path] = struct{}{}
+			}
+		}
+		s.performance.addCounter(performanceCounterProjectDependencyInvalidations, uint64(len(changedFiles)), "project/preparation", performanceStageProjectEffects, "interactive", "")
+		s.performance.addCounter(performanceCounterProjectCacheMisses, 1, "project/preparation", performanceStageProjectEffects, "interactive", "")
+		s.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "project/preparation", performanceStageProjectEffects, "interactive", "")
+		measurement := s.performance.start("project/preparation", performanceStageProjectEffects, "interactive", "")
+		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityEffectsBuildsCounter)
+		result, effectStats := effects.BuildIncrementalWithStats(documents, previous, changedFiles)
+		s.performance.addCounter(performanceCounterProjectCacheReusedEntries, effectStats.ReusedDirectProcedures, "project/preparation", performanceStageProjectEffects, "interactive", "")
+		buildErr := ctx.Err()
+		if buildErr == nil {
+			finishCapability(nil)
+			measurement.finish(result.ProcedureCount(), 0, nil)
+		} else {
+			finishCapability(buildErr)
+			measurement.finish(0, 0, buildErr)
+		}
+		s.projectEffectsState.mu.Lock()
+		s.projectEffectsState.building = false
+		s.projectEffectsState.done = nil
+		close(done)
+		if buildErr == nil {
+			s.projectEffectsState.valid = true
+			s.projectEffectsState.key = key
+			s.projectEffectsState.resolutionKey = resolutionKey
+			s.projectEffectsState.versions = versions
+			s.projectEffectsState.summary = result
+		}
+		s.projectEffectsState.mu.Unlock()
+		if buildErr != nil {
+			return effects.ProjectSummary{}
+		}
+		s.projectEffectsCache.publish(key, result)
+		return result
+	}
 }
 
 func initializeCapabilityTelemetry(ctx context.Context) {
@@ -476,15 +628,42 @@ func initializeCapabilityTelemetry(ctx context.Context) {
 }
 
 func (s *Server) projectConstants(project intel.ProjectAnalysisSnapshot, complete bool, typeDB *vbadb.DB) projectConstantsResult {
-	return s.projectConstantsCache.getOrBuild(project.Revision, complete, func() projectConstantsResult {
+	return s.projectConstantsContext(context.Background(), project, complete, typeDB)
+}
+
+func (s *Server) projectConstantsContext(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool, typeDB *vbadb.DB) projectConstantsResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	key := projectConstantsDependencyFingerprint(project, complete, typeDB)
+	result, err, hit := s.projectConstantsDepCache.getOrBuildContext(ctx, key, func() (projectConstantsResult, error) {
 		measurement := s.performance.start("project/preparation", performanceStageProjectConstants, "interactive", "")
+		if err := ctx.Err(); err != nil {
+			measurement.finish(0, 0, err)
+			return projectConstantsResult{}, err
+		}
 		result := projectConstantsResult{
 			visible: projectVisibleConstants(project, typeDB),
 			values:  projectConstantValues(project, typeDB),
 		}
+		if err := ctx.Err(); err != nil {
+			measurement.finish(0, 0, err)
+			return projectConstantsResult{}, err
+		}
 		measurement.finish(len(result.visible)+len(result.values), 0, nil)
-		return result
+		return result, nil
 	})
+	if err != nil {
+		return projectConstantsResult{}
+	}
+	if hit {
+		s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectConstants, "interactive", "")
+		s.performance.addCounter(performanceCounterProjectCacheReusedEntries, uint64(len(result.values)), "project/preparation", performanceStageProjectConstants, "interactive", "")
+	} else {
+		s.performance.addCounter(performanceCounterProjectCacheMisses, 1, "project/preparation", performanceStageProjectConstants, "interactive", "")
+		s.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "project/preparation", performanceStageProjectConstants, "interactive", "")
+	}
+	return result
 }
 
 func newLogger(opts Options) (*log.Logger, func(), error) {
@@ -2195,58 +2374,76 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	return index
 }
 
-// projectResolution caches the canonical resolver and immutable resolution
-// views for one workspace revision. Full diagnostics can be requested several
-// times for the same coherent snapshot without cloning every DocumentIR.
+// projectResolution caches the canonical resolver and each document's
+// resolution overlay by the inputs that product consumes. Full diagnostics
+// can therefore reuse unrelated document views after a local edit while the
+// edited document is rebuilt against the current IR.
 func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.ResolvedDocumentView, map[string]procedureir.ResolvedDocumentView, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err := s.resolutionCache.getOrBuildContext(ctx, project.Revision, complete, func() (projectResolutionResult, error) {
+	resolverKey := projectResolutionFingerprint(project, complete, s.resolutionTypeLibSymbols)
+	resolver, err, resolverHit := s.resolutionResolverCache.getOrBuildContext(ctx, resolverKey, func() (procedureir.Resolver, error) {
 		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityResolutionBuildsCounter)
 		resolverMeasurement := s.performance.start("project/preparation", performanceStageProjectResolver, "interactive", "")
 		if err := ctx.Err(); err != nil {
 			resolverMeasurement.finish(0, 0, err)
 			finishCapability(err)
-			return projectResolutionResult{}, err
+			return nil, err
 		}
 		s.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
 		s.performance.addCounter(performanceCounterCanonicalResolverBuilds, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
 		resolver := workspaceResolutionResolverWithTypeLib(project, complete, s.resolutionTypeLibSymbols)
 		resolverMeasurement.finish(len(project.Documents), 0, nil)
-		procedureResolver := procedureir.ProcedureOnlyResolver(resolver)
-		s.performance.addCounter(performanceCounterProcedureResolverViews, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
-		s.performance.addCounter(performanceCounterFullResolverViews, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
-		viewMeasurement := s.performance.start("project/preparation", performanceStageProjectResolutionView, "interactive", "")
-		s.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
-		resolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
-		diagnosticResolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
-		materializationMeasurement := s.performance.start("project/preparation", performanceStageResolutionMaterialize, "interactive", "")
-		for _, document := range project.Documents {
-			if err := ctx.Err(); err != nil {
-				viewMeasurement.finish(0, 0, err)
-				materializationMeasurement.finish(0, 0, err)
-				finishCapability(err)
-				return projectResolutionResult{}, err
-			}
-			// The workspace index resolver intentionally has no TypeDB dependency;
-			// apply the cached TypeDB-aware resolver here once per project revision
-			// while retaining the syntax-local IR as the canonical owner.
-			procedureView, diagnosticView := procedureir.ResolveViews(document.IR, procedureResolver, resolver)
-			s.performance.addCounter(performanceCounterResolutionOverlayBuilds, 2, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
-			resolved[symbolFileKey(document.IR.Path)] = procedureView
-			diagnosticResolved[symbolFileKey(document.IR.Path)] = diagnosticView
-		}
-		viewMeasurement.finish(len(project.Documents), 0, nil)
-		materializationMeasurement.finish(0, 0, nil)
-		s.performance.addCounter(performanceCounterResolutionMaterializations, 0, "project/preparation", performanceStageResolutionMaterialize, "interactive", "")
 		finishCapability(nil)
-		return projectResolutionResult{resolver: resolver, resolved: resolved, diagnosticResolved: diagnosticResolved}, nil
+		return resolver, nil
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return result.resolver, result.resolved, result.diagnosticResolved, nil
+	if resolverHit {
+		s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
+	} else {
+		s.performance.addCounter(performanceCounterProjectCacheMisses, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
+		s.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
+	}
+	procedureResolver := procedureir.ProcedureOnlyResolver(resolver)
+	if !resolverHit {
+		s.performance.addCounter(performanceCounterProcedureResolverViews, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
+		s.performance.addCounter(performanceCounterFullResolverViews, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
+		s.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
+	}
+	resolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
+	diagnosticResolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
+	for _, document := range project.Documents {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, err
+		}
+		key := projectResolutionDocumentFingerprint(document, resolverKey, complete)
+		views, buildErr, hit := s.resolutionDocumentCache.getOrBuildContext(ctx, key, func() (projectResolutionDocument, error) {
+			viewMeasurement := s.performance.start("project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+			materializationMeasurement := s.performance.start("project/preparation", performanceStageResolutionMaterialize, "interactive", document.IR.Path)
+			procedureView, diagnosticView := procedureir.ResolveViews(document.IR, procedureResolver, resolver)
+			viewMeasurement.finish(2, 0, nil)
+			materializationMeasurement.finish(0, 0, nil)
+			s.performance.addCounter(performanceCounterResolutionOverlayBuilds, 2, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+			return projectResolutionDocument{procedure: procedureView, diagnostic: diagnosticView}, nil
+		})
+		if buildErr != nil {
+			return nil, nil, nil, buildErr
+		}
+		if hit {
+			s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+			s.performance.addCounter(performanceCounterProjectCacheReusedEntries, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+		} else {
+			s.performance.addCounter(performanceCounterProjectCacheMisses, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+			s.performance.addCounter(performanceCounterProjectCacheRebuilds, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+		}
+		resolved[symbolFileKey(document.IR.Path)] = views.procedure
+		diagnosticResolved[symbolFileKey(document.IR.Path)] = views.diagnostic
+	}
+	s.performance.addCounter(performanceCounterResolutionMaterializations, 0, "project/preparation", performanceStageResolutionMaterialize, "interactive", "")
+	return resolver, resolved, diagnosticResolved, nil
 }
 
 func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapshot, complete bool, typeLibSymbols []procedureir.ResolverSymbol) procedureir.Resolver {

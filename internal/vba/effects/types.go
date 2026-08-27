@@ -4,6 +4,7 @@ package effects
 
 import (
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -55,7 +56,7 @@ type ProcedureIdentity struct {
 
 func (id ProcedureIdentity) Key() string {
 	return strings.Join([]string{
-		canonicalPath(id.File), strings.ToLower(id.Module),
+		canonicalComparisonPath(id.File), strings.ToLower(id.Module),
 		strings.ToLower(id.QualifiedName), string(id.Kind),
 		decimal(id.DeclarationLine),
 	}, "\x00")
@@ -154,7 +155,8 @@ type ProcedureSummary struct {
 	// semantic is the bounded fixed-point state used while building a
 	// project. Propagated evidence is materialized from the project call graph
 	// only when a caller asks for a full ProcedureSummary.
-	semantic *semanticState
+	semantic              *semanticState
+	resolutionFingerprint string
 }
 
 func (s ProcedureSummary) Has(kind EffectKind) bool {
@@ -180,7 +182,12 @@ type ProjectSummary struct {
 	byCandidateLine map[int][]int
 	provenance      *provenanceGraph
 	materialization *materializationCache
-	stats           BuildStats
+	// errorContractsFingerprint records the project-wide wrapper indexes used
+	// while extracting direct error summaries. An incremental build must
+	// invalidate direct summaries when these indexes change, even if the
+	// affected procedure is not in the source-file change set.
+	errorContractsFingerprint string
+	stats                     BuildStats
 }
 
 // BuildStats describes the bounded fixed-point computation. Propagated fact
@@ -190,6 +197,11 @@ type BuildStats struct {
 	WorklistEvaluations            uint64
 	MaxPropagatedFactsPerProcedure uint64
 	TotalPropagatedFacts           uint64
+	// ReusedDirectProcedures and RecomputedDirectProcedures describe the
+	// incremental direct-summary frontier. They remain useful for a full build
+	// as well: a full build recomputes every procedure and reuses none.
+	ReusedDirectProcedures     uint64
+	RecomputedDirectProcedures uint64
 }
 
 type semanticState struct {
@@ -209,6 +221,30 @@ func newSemanticState() *semanticState {
 		errors:              map[ErrorBehaviorKind]struct{}{},
 		uncertainty:         map[UncertaintyKind]struct{}{},
 	}
+}
+
+func cloneSemanticState(in *semanticState) *semanticState {
+	if in == nil {
+		return nil
+	}
+	out := newSemanticState()
+	for key := range in.effects {
+		out.effects[key] = struct{}{}
+	}
+	for key := range in.applicationChanges {
+		out.applicationChanges[key] = struct{}{}
+	}
+	for key := range in.applicationRestores {
+		out.applicationRestores[key] = struct{}{}
+	}
+	for key := range in.errors {
+		out.errors[key] = struct{}{}
+	}
+	for key := range in.uncertainty {
+		out.uncertainty[key] = struct{}{}
+	}
+	out.mayRaiseWitness = in.mayRaiseWitness
+	return out
 }
 
 func (s *semanticState) hasEffect(kind EffectKind) bool {
@@ -385,6 +421,63 @@ func (p ProjectSummary) ProcedureCount() int { return len(p.procedures) }
 // Stats returns fixed-point counters captured during BuildWithStats.
 func (p ProjectSummary) Stats() BuildStats { return p.stats }
 
+// RebindPaths returns a defensive summary copy whose display identities use
+// the current source paths. Internal identity keys deliberately fold Windows
+// casing, so a historical cache product can be reused across a case-only
+// reopen without leaking the previous revision's path into diagnostics.
+func (p ProjectSummary) RebindPaths(paths map[string]string) ProjectSummary {
+	if len(paths) == 0 || len(p.procedures) == 0 {
+		return p
+	}
+	displayByKey := make(map[string]string, len(paths))
+	for path, display := range paths {
+		if strings.TrimSpace(display) == "" {
+			display = path
+		}
+		displayByKey[canonicalComparisonPath(path)] = canonicalPath(display)
+	}
+	currentIdentities := make(map[string]ProcedureIdentity, len(p.procedures))
+	out := p
+	out.procedures = make([]ProcedureSummary, len(p.procedures))
+	for index, summary := range p.procedures {
+		cloned := cloneProcedureSummary(summary)
+		if display, ok := displayByKey[canonicalComparisonPath(cloned.Identity.File)]; ok {
+			current := cloned.Identity
+			current.File = display
+			rebindProcedureSummaryIdentity(&cloned, current)
+		}
+		out.procedures[index] = cloned
+		currentIdentities[cloned.Identity.Key()] = cloned.Identity
+	}
+	if p.provenance == nil {
+		out.materialization = nil
+		return out
+	}
+	out.provenance = &provenanceGraph{
+		callers:   p.provenance.callers,
+		callees:   p.provenance.callees,
+		summaries: make(map[string]ProcedureSummary, len(p.provenance.summaries)),
+		witness:   make(map[string]ProcedureSummary, len(p.provenance.witness)),
+		keys:      append([]string(nil), p.provenance.keys...),
+	}
+	for key, summary := range p.provenance.summaries {
+		cloned := cloneProcedureSummary(summary)
+		if current, ok := currentIdentities[key]; ok {
+			rebindProcedureSummaryIdentity(&cloned, current)
+		}
+		out.provenance.summaries[key] = cloned
+	}
+	for key, summary := range p.provenance.witness {
+		cloned := cloneProcedureSummary(summary)
+		if current, ok := currentIdentities[key]; ok {
+			rebindProcedureSummaryIdentity(&cloned, current)
+		}
+		out.provenance.witness[key] = cloned
+	}
+	out.materialization = newMaterializationCache(out)
+	return out
+}
+
 func (p ProjectSummary) materialize(index int) ProcedureSummary {
 	return newProvenanceMaterialization(p).materialize(index)
 }
@@ -452,6 +545,17 @@ func cloneErrorEvidence(items []ErrorEvidence) []ErrorEvidence {
 
 func canonicalPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
+}
+
+// canonicalComparisonPath is used only for stable internal keys. Keep the
+// display path in ProcedureIdentity.File so diagnostics and JSON preserve the
+// source spelling while Windows comparisons remain case-insensitive.
+func canonicalComparisonPath(path string) string {
+	path = canonicalPath(path)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
 }
 
 func decimal(value int) string {
