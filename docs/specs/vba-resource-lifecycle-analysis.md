@@ -39,7 +39,10 @@ The analyzer traverses normal, exceptional, termination, and unknown CFG exits.
 Cleanup labels and error handlers require no name-based exception: a release is
 safe whenever the CFG proves it is reached. A reached release statement is the
 cleanup boundary even if the release call itself could fail; modeling failures
-inside Close is outside this rule.
+inside Close is outside this rule. When a matching Close is recognized on some
+path but not proven on every exit, the diagnostic explains both facts. It must
+not imply that no cleanup source exists, and it must not attribute the remaining
+uncertainty specifically to `On Error Resume Next`.
 
 Unreachable acquisitions and recovered statements are never used as ownership,
 release, transfer, or alias evidence. Alias assignments take effect only on
@@ -47,7 +50,8 @@ their normal CFG edges, so exception handlers retain the pre-assignment alias
 state.
 
 Each finding is located at the acquisition and its reason identifies the
-uncovered exit witness. The rule is default-enabled, warning-only,
+uncovered exit witness and, when available, the recognized cleanup statement.
+The rule is default-enabled, warning-only,
 non-blocking, realtime, and inline suppressible. Disable it project-wide with
 `[analyze].disabled_rules = ["VBA219"]`; the legacy
 `detect_resource_leaks` boolean remains accepted with a deprecation warning.

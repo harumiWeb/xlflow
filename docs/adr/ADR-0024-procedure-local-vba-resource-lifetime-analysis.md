@@ -30,6 +30,9 @@ Function exit.
 Release means a recognized `Workbook.Close`, `Close #handle`, or bare `Close`
 statement is reached. The rule intentionally does not model a Close call's own
 failure, arbitrary helper calls, ByRef ownership transfer, or dynamic dispatch.
+When a release is recognized on only some paths, the diagnostic may mention the
+release as explanation-only evidence while retaining the leak finding and its
+uncovered exit witness.
 
 ## Consequences
 

@@ -1472,7 +1472,7 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA106`: removed `XlflowSetTraceFile` trace helper call
 - `VBA201`: a result assigned from `Excel.Range.Find` is dereferenced before a `Nothing` check when the `.Find` receiver resolves as `Excel.Range`; project-defined or unresolved `.Find` receivers are excluded
 - `VBA202`: object variable may be dereferenced before a definitely non-`Nothing` value is proven on every reachable path
-- `VBA203`: a change to `Application.ScreenUpdating`, `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.Calculation`, `Application.StatusBar`, `Application.Cursor`, `Application.Interactive`, `Application.AskToUpdateLinks`, `Application.AutomationSecurity`, or `Application.CutCopyMode` can reach an exit without restoring its previous value
+- `VBA203`: a change to `Application.ScreenUpdating`, `Application.EnableEvents`, `Application.DisplayAlerts`, `Application.Calculation`, `Application.StatusBar`, `Application.Cursor`, `Application.Interactive`, `Application.AskToUpdateLinks`, `Application.AutomationSecurity`, or `Application.CutCopyMode` cannot be proven restored to its previous value on every exit; the reason may identify a restore-like assignment without treating it as an all-exit proof
 - `VBA204`: normal execution can fall through into an error-handler label
 - `VBA205`: ambiguous Excel workbook or worksheet scope: active UI objects, unqualified worksheet members (`Range`, `Cells`, `Rows`, and `Columns`), unqualified sheet collections, positional workbook/window access, uncaptured `Workbooks.Open`, or `ThisWorkbook` in an add-in standard module
 - `VBA206`: runtime-safety warning for temporary, parenthesized, property/member, or indirect ByRef argument forms; it remains configurable and inline-suppressible
@@ -1489,9 +1489,9 @@ Higher-signal lint rules `VB019`, `VB020`, `VB022`, `VB023`, and `VB026` are ena
 - `VBA216`: a range expression provably mixes explicit worksheet roots
 - `VBA217`: a last-row calculation depends on an implicit worksheet root or unstable boundary pattern
 - `VBA218`: a resolved Excel API call can raise a runtime error or return `Variant/Error` when no result exists, but its documented failure contract is not handled
-- `VBA219`: an explicitly acquired local Workbook or VBA file handle can reach a CFG exit without a matching Close
+- `VBA219`: an explicitly acquired local Workbook or VBA file handle cannot be proven closed on every exit; the reason may identify a matching Close recognized on only some paths
 - `VBA220`: a supported event handler can re-enter itself or trigger a related event chain; unresolved calls are reported as uncertainty
-- `VBA221`: a direct project-local call can leave an `Application` property changed because its callee does not restore it on every exit
+- `VBA221`: a direct project-local call can leave an `Application` property changed because cleanup is not proven on every exit; the reason may identify a restore-like callee assignment without treating it as an all-exit proof
 - `VBA222`: a public API exposes an inaccessible, ambiguous, or unresolved type
 - `VBA223`: a credential-like value appears directly in VBA source; structural matches are reported without exposing the value
 - `VBA224`: conservative procedure-local analysis finds potentially untrusted data flowing into a sensitive API

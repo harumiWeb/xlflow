@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"sort"
 	"strings"
 
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -148,18 +149,39 @@ func (a Analyzer) applicationStateCallEffectFindings(file parsedFile, proc sourc
 			if originName == "" {
 				originName = origin.Identity.Name
 			}
-			reason := "This call propagates the un-restored " + property + " change introduced by " + originName + " at line " + strconvItoa(origin.Line) + "."
+			message := "Call to " + call.Callee.Text + " can leave " + property + " changed; cleanup is not proven on every exit."
+			reason := "This call propagates an " + property + " change introduced by " + originName + " at line " + strconvItoa(origin.Line) + ". The callee's cleanup is not proven to restore the previous value on every exit."
+			if lines := applicationStateRestoreEvidenceFromSummary(callee, origin.Property); len(lines) > 0 {
+				reason += " A restore-like assignment is also recognized at line " + strconvItoa(lines[0]) + ", but it is not an all-exit proof."
+			}
 			if uncertainty := applicationStateCallUncertainty(callee); uncertainty != "" {
 				reason += " The callee's final state is also uncertain because it reaches " + uncertainty + " call dispatch."
 			}
 			out = append(out, a.simpleFinding(
 				file, proc, call.Range.StartLine, "VBA221", "warning",
-				"Call to "+call.Callee.Text+" can leave "+property+" changed.",
+				message,
 				reason,
-				"Restore the previous "+property+" value in the owning cleanup path, or make the helper's state ownership explicit.",
+				"Ensure that the callee restores the previous "+property+" value on every normal, error, termination, and unknown exit, or make the helper's state ownership explicit.",
 			))
 		}
 	}
+	return out
+}
+
+func applicationStateRestoreEvidenceFromSummary(summary effects.ProcedureSummary, property string) []int {
+	target := "application." + strings.ToLower(property)
+	lines := map[int]bool{}
+	for _, evidence := range summary.Direct {
+		if evidence.Effect != effects.RestoresApplicationState || !strings.EqualFold(evidence.Target, target) || evidence.Range.StartLine <= 0 {
+			continue
+		}
+		lines[evidence.Range.StartLine] = true
+	}
+	out := make([]int, 0, len(lines))
+	for line := range lines {
+		out = append(out, line)
+	}
+	sort.Ints(out)
 	return out
 }
 

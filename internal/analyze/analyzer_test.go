@@ -1122,7 +1122,7 @@ End Sub
 	want := map[string]int{"WorkbookLeak": 14, "FileLeak": 55, "NestedBranchLeak": 62, "ReassignedWorkbookLeak": 69, "FailedTransfer": 101, "OverwrittenTransfer": 109}
 	for _, finding := range got {
 		line, ok := want[finding.Procedure]
-		if !ok || finding.Line != line || !strings.Contains(finding.Reason, "without a matching Close") || !strings.Contains(finding.Suggestion, "cleanup path") {
+		if !ok || finding.Line != line || !strings.Contains(finding.Message, "cannot be proven closed on every exit") || !strings.Contains(finding.Reason, "without a proven matching Close") || !strings.Contains(finding.Suggestion, "every normal, error, termination, and unknown exit") {
 			t.Fatalf("unexpected VBA219 finding: %+v", finding)
 		}
 	}
@@ -1154,6 +1154,47 @@ End Sub
 	}
 	if got := findingsByCode(realtime, "VBA219"); len(got) != 0 {
 		t.Fatalf("disabled VBA219 should not report in realtime: %+v", got)
+	}
+}
+
+func TestVBA219ExplainsRecognizedCleanupWithoutChangingLeakDecision(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "FileReader.bas", `Option Explicit
+
+Public Function ReadInput(ByVal filePath As String) As String
+  Dim fileNo As Integer
+  Dim fileOpen As Boolean
+  On Error GoTo ErrorHandler
+  fileNo = FreeFile
+  Open filePath For Input As #fileNo
+  fileOpen = True
+  ReadInput = "ok"
+CleanExit:
+  On Error Resume Next
+  If fileOpen Then Close #fileNo
+  On Error GoTo 0
+  Exit Function
+ErrorHandler:
+  ReadInput = vbNullString
+  On Error Resume Next
+  If fileOpen Then Close #fileNo
+  On Error GoTo 0
+End Function
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA219")
+	if len(got) != 1 {
+		t.Fatalf("VBA219 findings = %+v, want one conservative leak finding", got)
+	}
+	if !strings.Contains(got[0].Message, "cannot be proven closed on every exit") ||
+		!strings.Contains(got[0].Reason, "A matching Close is recognized at line") ||
+		!strings.Contains(got[0].Reason, "cannot prove that it is reached on every exit") {
+		t.Fatalf("VBA219 should explain the recognized conditional cleanup: %+v", got[0])
 	}
 }
 
@@ -2443,6 +2484,67 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA221"); len(got) != 0 {
 		t.Fatalf("VBA221 should not report a paired Push/Pop helper: %+v", got)
+	}
+}
+
+func TestApplicationStateDiagnosticsExplainRestoreLikeCleanup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "ExcelStateGuard.bas", `Option Explicit
+
+Private savedScreenUpdating As Boolean
+Private savedStateAvailable As Boolean
+
+Public Sub BeginBatch()
+  savedScreenUpdating = Application.ScreenUpdating
+  savedStateAvailable = True
+  On Error GoTo BeginBatchError
+  Application.ScreenUpdating = False
+  Exit Sub
+BeginBatchError:
+  RestoreSavedState
+  savedStateAvailable = False
+  Err.Raise 5
+End Sub
+
+Private Sub RestoreSavedState()
+  If Not savedStateAvailable Then Exit Sub
+  On Error Resume Next
+  Application.ScreenUpdating = savedScreenUpdating
+  On Error GoTo 0
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: dir, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateFindings := findingsByCode(findings, "VBA203")
+	if len(stateFindings) != 2 {
+		t.Fatalf("VBA203 findings = %+v, want the BeginBatch and helper root findings", stateFindings)
+	}
+	var helperFinding *Finding
+	for index := range stateFindings {
+		finding := &stateFindings[index]
+		if finding.Procedure == "RestoreSavedState" {
+			helperFinding = finding
+		}
+		if !strings.Contains(finding.Message, "cannot be proven restored to its previous value on every exit") {
+			t.Fatalf("VBA203 should use the precise all-exit message: %+v", finding)
+		}
+	}
+	if helperFinding == nil || !strings.Contains(helperFinding.Reason, "A restore-like assignment is recognized at line") ||
+		!strings.Contains(helperFinding.Reason, "cannot prove that it restores this value on every exit") {
+		t.Fatalf("VBA203 should explain the restore-like assignment: %+v", stateFindings)
+	}
+	callFindings := findingsByCode(findings, "VBA221")
+	if len(callFindings) != 1 {
+		t.Fatalf("VBA221 findings = %+v, want one immediate caller finding", callFindings)
+	}
+	if !strings.Contains(callFindings[0].Message, "cleanup is not proven on every exit") ||
+		!strings.Contains(callFindings[0].Reason, "restore-like assignment is also recognized at line") ||
+		!strings.Contains(callFindings[0].Reason, "not an all-exit proof") {
+		t.Fatalf("VBA221 should explain the helper cleanup evidence: %+v", callFindings[0])
 	}
 }
 
