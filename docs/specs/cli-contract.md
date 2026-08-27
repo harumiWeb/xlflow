@@ -563,6 +563,11 @@ For session-aware workbooks, `test --session` is the preferred validation path w
 
 `.xlsb` support is first-class for Excel COM/VBIDE-backed VBA workflows: `new`, `init`, `pull`, `push`, sessions, `run`, `test`, `save`, backup/rollback, macros, and UserForm operations use the same source layout as `.xlsm` and `.xlam`. Direct file-level worksheet/package features remain limited to OOXML workbooks and must fail with `workbook_format_unsupported` instead of leaking ZIP, XML, or Excelize parser errors.
 
+Text VBA components imported through the VBIDE file API (`.bas`, `.cls`, and
+`.frm`) are normalized to CRLF in the temporary import copy. This keeps Excel
+from misclassifying LF-only exported class headers; tracked source files remain
+UTF-8 and are not rewritten by the import normalization.
+
 ## Configuration
 
 The MVP only auto-discovers `xlflow.toml` from the current working directory. `vba.toml` is intentionally not supported.
