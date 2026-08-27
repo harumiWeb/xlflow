@@ -2,9 +2,11 @@ package lspserver
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 )
@@ -131,5 +133,90 @@ func TestRevisionCacheDoesNotReplaceNewerRevisionWithStaleResult(t *testing.T) {
 	}
 	if builds != 2 {
 		t.Fatalf("build count = %d, want 2", builds)
+	}
+}
+
+func TestRevisionCacheContextDoesNotPublishCanceledBuild(t *testing.T) {
+	var cache revisionCache[int]
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cache.getOrBuildContext(ctx, 12, true, func() (int, error) {
+		t.Fatal("canceled cache build was invoked")
+		return 42, nil
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled cache build error = %v, want context.Canceled", err)
+	}
+
+	var builds int
+	got, err := cache.getOrBuildContext(context.Background(), 12, true, func() (int, error) {
+		builds++
+		return 7, nil
+	})
+	if err != nil || got != 7 || builds != 1 {
+		t.Fatalf("retry after canceled build = (value=%d, err=%v, builds=%d)", got, err, builds)
+	}
+}
+
+func TestRevisionCacheContextDoesNotPublishBuildCanceledAfterWork(t *testing.T) {
+	var cache revisionCache[int]
+	ctx, cancel := context.WithCancel(context.Background())
+	var builds int
+	if _, err := cache.getOrBuildContext(ctx, 13, true, func() (int, error) {
+		builds++
+		cancel()
+		return 9, nil
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("post-build cancellation error = %v, want context.Canceled", err)
+	}
+	if _, err := cache.getOrBuildContext(context.Background(), 13, true, func() (int, error) {
+		builds++
+		return 11, nil
+	}); err != nil || builds != 2 {
+		t.Fatalf("post-build cancellation retry = (err=%v, builds=%d)", err, builds)
+	}
+}
+
+func TestRevisionCacheContextWaiterCanCancelWhileBuildIsInFlight(t *testing.T) {
+	var cache revisionCache[int]
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := cache.getOrBuildContext(context.Background(), 14, true, func() (int, error) {
+			close(entered)
+			<-release
+			return 14, nil
+		})
+		firstDone <- err
+	}()
+	<-entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	duplicateBuild := make(chan struct{}, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := cache.getOrBuildContext(ctx, 14, true, func() (int, error) {
+			duplicateBuild <- struct{}{}
+			return 0, nil
+		})
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled waiter error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled waiter remained blocked behind an in-flight build")
+	}
+	select {
+	case <-duplicateBuild:
+		t.Fatal("canceled waiter started a duplicate build")
+	default:
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first build error = %v", err)
 	}
 }

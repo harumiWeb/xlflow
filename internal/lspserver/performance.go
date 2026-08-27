@@ -37,6 +37,10 @@ const (
 	performanceCounterProjectSnapshotBuilds      = "project_snapshot_builds"
 	performanceCounterResolutionResolverBuilds   = "resolution_resolver_builds"
 	performanceCounterResolutionViewBuilds       = "resolution_view_builds"
+	performanceCounterCanonicalResolverBuilds    = "canonical_resolver_builds"
+	performanceCounterProcedureResolverViews     = "procedure_resolver_views"
+	performanceCounterFullResolverViews          = "full_resolver_views"
+	performanceCounterResolutionOverlayBuilds    = "resolution_overlay_builds"
 	performanceCounterResolutionMaterializations = "resolution_materializations"
 	performanceCounterProcedureFingerprintBuilds = "procedure_fingerprint_builds"
 	performanceCounterProcedureFingerprintReuses = "procedure_fingerprint_reuses"
@@ -53,6 +57,10 @@ var performanceCounterNames = [...]string{
 	performanceCounterProjectSnapshotBuilds,
 	performanceCounterResolutionResolverBuilds,
 	performanceCounterResolutionViewBuilds,
+	performanceCounterCanonicalResolverBuilds,
+	performanceCounterProcedureResolverViews,
+	performanceCounterFullResolverViews,
+	performanceCounterResolutionOverlayBuilds,
 	performanceCounterResolutionMaterializations,
 	performanceCounterProcedureFingerprintBuilds,
 	performanceCounterProcedureFingerprintReuses,

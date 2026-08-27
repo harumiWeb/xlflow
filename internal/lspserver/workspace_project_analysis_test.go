@@ -2,6 +2,7 @@ package lspserver
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -183,8 +184,14 @@ func TestProjectCapabilityCachesRecordOneBuildPerRevision(t *testing.T) {
 	s := &Server{}
 	recorder := analysisstats.NewRecorder()
 	ctx := analysisstats.WithRecorder(context.Background(), recorder)
-	_, resolved, _ := s.projectResolution(ctx, project, true)
-	_, resolvedAgain, _ := s.projectResolution(ctx, project, true)
+	_, resolved, _, err := s.projectResolution(ctx, project, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resolvedAgain, _, err := s.projectResolution(ctx, project, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(resolved) != len(resolvedAgain) {
 		t.Fatalf("resolution cache sizes = %d and %d", len(resolved), len(resolvedAgain))
 	}
@@ -200,6 +207,23 @@ func TestProjectCapabilityCachesRecordOneBuildPerRevision(t *testing.T) {
 	}
 	if values[analysisstats.CapabilityEffectsBuildsCounter] != 1 {
 		t.Fatalf("effects builds = %d, want 1", values[analysisstats.CapabilityEffectsBuildsCounter])
+	}
+}
+
+func TestProjectResolutionCancellationLeavesCacheRetryable(t *testing.T) {
+	project := projectTestSnapshot(projectTestProcedure(filepath.Join(t.TempDir(), "Main.bas"), "Main.Run", "", "", 1, "Run"))
+	project.Revision = 21
+	s := &Server{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, _, err := s.projectResolution(ctx, project, true); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled project resolution error = %v, want context.Canceled", err)
+	}
+	if s.resolutionCache.valid {
+		t.Fatal("canceled project resolution was published to the cache")
+	}
+	if _, _, _, err := s.projectResolution(context.Background(), project, true); err != nil {
+		t.Fatalf("project resolution retry error = %v", err)
 	}
 }
 

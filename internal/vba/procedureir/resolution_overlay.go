@@ -114,12 +114,25 @@ func (v ResolvedDocumentView) ResolvedProcedure(procedureIndex int) (ProcedureIR
 // ResolveView builds a read-only project-resolution view over in. The input
 // document and all of its nested slices remain untouched.
 func ResolveView(in DocumentIR, resolver Resolver) ResolvedDocumentView {
-	view := ResolvedDocumentView{document: in}
+	return resolveViewWithFacts(in, resolver, documentFactIDs(in))
+}
+
+// ResolveViews builds two immutable resolution views over one document while
+// sharing the revision-local fact IDs. The resolvers remain separate so
+// procedure-only and full semantics cannot be conflated, while the document
+// does not need to be scanned to assign IDs twice. Passing a nil resolver
+// produces the same zero view as ResolveView.
+func ResolveViews(in DocumentIR, procedureResolver, fullResolver Resolver) (ResolvedDocumentView, ResolvedDocumentView) {
+	facts := documentFactIDs(in)
+	return resolveViewWithFacts(in, procedureResolver, facts), resolveViewWithFacts(in, fullResolver, facts)
+}
+
+func resolveViewWithFacts(in DocumentIR, resolver Resolver, facts resolutionFactIDs) ResolvedDocumentView {
+	view := ResolvedDocumentView{document: in, callIDs: facts.calls, accessIDs: facts.accesses, eventIDs: facts.events}
 	if resolver == nil {
 		return view
 	}
 	view.hasOverlay = true
-	view.callIDs, view.accessIDs, view.eventIDs = documentFactIDs(in)
 	view.overlay = buildResolutionOverlay(in, resolver, view.callIDs, view.accessIDs, view.eventIDs)
 	return view
 }
@@ -415,7 +428,13 @@ func (v ResolvedDocumentView) idsFor(procedureIndex int, kind resolutionFactKind
 	}
 }
 
-func documentFactIDs(document DocumentIR) ([][]int, [][]int, [][]int) {
+type resolutionFactIDs struct {
+	calls    [][]int
+	accesses [][]int
+	events   [][]int
+}
+
+func documentFactIDs(document DocumentIR) resolutionFactIDs {
 	calls := make([][]int, len(document.Procedures))
 	accesses := make([][]int, len(document.Procedures))
 	events := make([][]int, len(document.Procedures))
@@ -424,7 +443,7 @@ func documentFactIDs(document DocumentIR) ([][]int, [][]int, [][]int) {
 		accesses[procedureIndex] = factIDs(procedure, resolutionFactAccess)
 		events[procedureIndex] = factIDs(procedure, resolutionFactEvent)
 	}
-	return calls, accesses, events
+	return resolutionFactIDs{calls: calls, accesses: accesses, events: events}
 }
 
 func procedureIdentity(document DocumentIR, procedureIndex int) ProcedureIdentity {

@@ -252,7 +252,13 @@ func New(opts Options) (*Server, func(), error) {
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
 		capabilityDocuments := make([]analyze.ProjectCapabilityDocument, 0, len(project.Documents))
 		resolutionComplete := project.Complete && typeDB.Complete
-		resolutionResolver, resolvedProjectViews, resolvedDiagnosticViews := s.projectResolution(ctx, project, resolutionComplete)
+		resolutionResolver, resolvedProjectViews, resolvedDiagnosticViews, resolutionErr := s.projectResolution(ctx, project, resolutionComplete)
+		if resolutionErr != nil {
+			// A canceled or failed resolution build must not fall through to
+			// effects/capability preparation with nil views. In particular, doing
+			// so could cache an incomplete effects summary for this revision.
+			return intel.DiagnosticResult{}
+		}
 		for _, projectDocument := range project.Documents {
 			key := symbolFileKey(projectDocument.IR.Path)
 			if resolved, ok := resolvedProjectViews[key]; ok {
@@ -2192,33 +2198,55 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 // projectResolution caches the canonical resolver and immutable resolution
 // views for one workspace revision. Full diagnostics can be requested several
 // times for the same coherent snapshot without cloning every DocumentIR.
-func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.ResolvedDocumentView, map[string]procedureir.ResolvedDocumentView) {
-	result := s.resolutionCache.getOrBuild(project.Revision, complete, func() projectResolutionResult {
+func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.ResolvedDocumentView, map[string]procedureir.ResolvedDocumentView, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := s.resolutionCache.getOrBuildContext(ctx, project.Revision, complete, func() (projectResolutionResult, error) {
 		finishCapability := analysisstats.MeasureCapabilityBuild(ctx, analysisstats.CapabilityResolutionBuildsCounter)
 		resolverMeasurement := s.performance.start("project/preparation", performanceStageProjectResolver, "interactive", "")
+		if err := ctx.Err(); err != nil {
+			resolverMeasurement.finish(0, 0, err)
+			finishCapability(err)
+			return projectResolutionResult{}, err
+		}
 		s.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
+		s.performance.addCounter(performanceCounterCanonicalResolverBuilds, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
 		resolver := workspaceResolutionResolverWithTypeLib(project, complete, s.resolutionTypeLibSymbols)
 		resolverMeasurement.finish(len(project.Documents), 0, nil)
 		procedureResolver := procedureir.ProcedureOnlyResolver(resolver)
+		s.performance.addCounter(performanceCounterProcedureResolverViews, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
+		s.performance.addCounter(performanceCounterFullResolverViews, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
 		viewMeasurement := s.performance.start("project/preparation", performanceStageProjectResolutionView, "interactive", "")
 		s.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
 		resolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
 		diagnosticResolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
-		viewMeasurement.finish(len(project.Documents), 0, nil)
 		materializationMeasurement := s.performance.start("project/preparation", performanceStageResolutionMaterialize, "interactive", "")
 		for _, document := range project.Documents {
+			if err := ctx.Err(); err != nil {
+				viewMeasurement.finish(0, 0, err)
+				materializationMeasurement.finish(0, 0, err)
+				finishCapability(err)
+				return projectResolutionResult{}, err
+			}
 			// The workspace index resolver intentionally has no TypeDB dependency;
 			// apply the cached TypeDB-aware resolver here once per project revision
 			// while retaining the syntax-local IR as the canonical owner.
-			resolved[symbolFileKey(document.IR.Path)] = procedureir.ResolveView(document.IR, procedureResolver)
-			diagnosticResolved[symbolFileKey(document.IR.Path)] = procedureir.ResolveView(document.IR, resolver)
+			procedureView, diagnosticView := procedureir.ResolveViews(document.IR, procedureResolver, resolver)
+			s.performance.addCounter(performanceCounterResolutionOverlayBuilds, 2, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
+			resolved[symbolFileKey(document.IR.Path)] = procedureView
+			diagnosticResolved[symbolFileKey(document.IR.Path)] = diagnosticView
 		}
+		viewMeasurement.finish(len(project.Documents), 0, nil)
 		materializationMeasurement.finish(0, 0, nil)
 		s.performance.addCounter(performanceCounterResolutionMaterializations, 0, "project/preparation", performanceStageResolutionMaterialize, "interactive", "")
 		finishCapability(nil)
-		return projectResolutionResult{resolver: resolver, resolved: resolved, diagnosticResolved: diagnosticResolved}
+		return projectResolutionResult{resolver: resolver, resolved: resolved, diagnosticResolved: diagnosticResolved}, nil
 	})
-	return result.resolver, result.resolved, result.diagnosticResolved
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return result.resolver, result.resolved, result.diagnosticResolved, nil
 }
 
 func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapshot, complete bool, typeLibSymbols []procedureir.ResolverSymbol) procedureir.Resolver {

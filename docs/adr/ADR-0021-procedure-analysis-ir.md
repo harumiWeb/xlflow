@@ -75,6 +75,15 @@ preserve the existing input-unchanged and independent-ownership guarantees.
 `ResolveView` and materialization must also preserve behavior for a nil resolver,
 including the existing unresolved/incomplete representation.
 
+When one project revision needs both procedure-only and compile-equivalent
+resolution, construct one canonical symbol index and derive the two resolver
+semantics as immutable views. The procedure-only view filters the canonical
+procedure entries at lookup time instead of owning a second full candidate map.
+Document resolution views may share revision-local fact IDs; each mode retains
+its own overlay so the intentional semantic difference is never merged. A
+failed or canceled project-resolution build is not published to the revision
+cache and remains retryable.
+
 Carry module kind in resolver symbols. A receiver-less call may resolve to a
 non-standard procedure only within the same module; class, document, and
 UserForm procedures require an explicit receiver across module boundaries.
@@ -139,6 +148,9 @@ contracts.
 - Positive: read-only batch resolution can refresh project-dependent facts
   without deep-cloning statements, expressions, declarations, calls, accesses,
   and other procedure-level payloads.
+- Positive: project resolution modes share the canonical symbol storage and
+  revision-local fact identity, reducing duplicate index and preparation
+  allocations while preserving their separate semantics.
 - Positive: cached analysis values are safe after the parsed document closes
   because the IR contains no borrowed parser state.
 - Positive: a body-only edit rebuilds only changed procedure IR while safely
@@ -159,6 +171,9 @@ contracts.
 - Negative: overlay indexes and revision-local fact identity add bookkeeping,
   and consumers that need independent ownership still pay the materialization
   cost of `Resolve`.
+- Negative: procedure-only lookup performs a filtered view projection over the
+  canonical candidate slice; callers must keep resolver entries immutable so
+  the view cannot leak mutations back into the full resolver.
 - Limitation: issue #426 provides syntactic structure, not executable-path
   truth, type-complete member binding, COM type-library resolution, or
   interprocedural effects.

@@ -848,6 +848,14 @@ indexed file. A legacy consumer may request a bounded per-procedure fact
 projection, but the declarations, statements, and expressions remain owned by
 the canonical revision IR.
 
+For a project revision that requires both procedure-only and full resolution,
+`procedureir` builds one canonical symbol index and derives an immutable
+procedure-only resolver view from it. The full resolver keeps the complete
+candidate semantics. `ResolveViews` shares the document's revision-local fact
+IDs between the two overlays while keeping their resolved facts separate. This
+is an internal ownership optimization and introduces no CLI, JSON, or LSP
+surface.
+
 Issue #426 intentionally stops at procedure syntax and conservative name/call
 resolution. The separate CFG layer defined by
 `docs/specs/vba-control-flow-graph.md` consumes this IR to provide basic blocks,
