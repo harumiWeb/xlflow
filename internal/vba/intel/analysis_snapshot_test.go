@@ -59,6 +59,22 @@ func TestAnalysisSnapshotIdentityLinesAndProcedures(t *testing.T) {
 	}
 }
 
+func TestProcedureCatalogAccessorReturnsDefensiveEntries(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{
+		Path: "Main.bas", ModuleKind: "standard",
+		Source: "Public Sub Run()\nEnd Sub\n",
+	})
+	first := snapshot.ProcedureCatalog()
+	if len(first.Entries) != 1 {
+		t.Fatalf("catalog entries = %d, want 1", len(first.Entries))
+	}
+	first.Entries[0].Identity.CanonicalName = "mutated"
+	second := snapshot.ProcedureCatalog()
+	if second.Entries[0].Identity.CanonicalName == "mutated" {
+		t.Fatal("procedure catalog accessor shares its entries with the snapshot")
+	}
+}
+
 func TestAnalysisSnapshotMatchesSameBackingWithoutFullHash(t *testing.T) {
 	doc := Document{
 		URI: "file:///Main.bas", Path: "Main.bas", Version: 7,

@@ -2364,15 +2364,16 @@ func (s *Server) analyzeIndexedDocumentContextClass(ctx context.Context, doc int
 		return indexedFileAnalysis{}, err
 	}
 	result := indexedFileAnalysis{
-		path:           doc.Path,
-		version:        documentVersion(doc),
-		moduleKind:     doc.ModuleKind,
-		source:         doc.Source,
-		symbols:        syms,
-		callSites:      rawCalls.CallSites,
-		typeReferences: rawCalls.TypeReferences,
-		procedureIR:    procedureir.Clone(procedureIR),
-		controlFlow:    vbacfg.CloneDocument(controlFlow),
+		path:             doc.Path,
+		version:          documentVersion(doc),
+		moduleKind:       doc.ModuleKind,
+		source:           doc.Source,
+		symbols:          syms,
+		callSites:        rawCalls.CallSites,
+		typeReferences:   rawCalls.TypeReferences,
+		procedureIR:      procedureir.Clone(procedureIR),
+		controlFlow:      vbacfg.CloneDocument(controlFlow),
+		procedureCatalog: snapshot.ProcedureCatalog(),
 	}
 	semanticMeasurement.finish(len(procedureIR.Procedures), 0, nil)
 	s.performance.addCounter(performanceCounterWorkspaceSemanticBuilds, 1, "workspace/file", performanceStageSemanticIndexing, class, doc.Path)

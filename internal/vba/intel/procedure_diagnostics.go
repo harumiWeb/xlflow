@@ -60,6 +60,12 @@ type ProjectAnalysisDocument struct {
 	Resolution procedureir.ResolvedDocumentView
 	CFG        vbacfg.Document
 	Source     string
+	// Version identifies the published source revision.  Procedure dependency
+	// indexes use it to skip unchanged files without walking their procedures.
+	Version string
+	// ProcedureCatalog is the canonical catalog prepared by document analysis.
+	// It is immutable input for project dependency bookkeeping.
+	ProcedureCatalog ProcedureCatalog
 }
 
 // ProjectAnalysisSnapshot is a coherent view of saved files and published

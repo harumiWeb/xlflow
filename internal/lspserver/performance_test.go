@@ -185,6 +185,28 @@ func TestWorkspaceSymbolIndexPerformanceReportsInitialBuild(t *testing.T) {
 	}
 }
 
+func TestPerformanceRecorderRegistersDependencyCounters(t *testing.T) {
+	var output bytes.Buffer
+	recorder := newPerformanceRecorder(true, log.New(&output, "", 0))
+
+	for _, counter := range []string{
+		performanceCounterDependencyNodesUpdated,
+		performanceCounterDependencyEdgesUpdated,
+		performanceCounterProceduresRevisited,
+	} {
+		if got := recorder.counterTotal(counter); got != 0 {
+			t.Fatalf("counter %q initialized to %d, want 0", counter, got)
+		}
+		recorder.addCounter(counter, 1, "workspace/project", performanceStageDependencyUpdate, "background", "")
+		if got := recorder.counterTotal(counter); got != 1 {
+			t.Fatalf("counter %q total = %d, want 1", counter, got)
+		}
+		if !strings.Contains(output.String(), `counter="`+counter+`" value=1 total=1`) {
+			t.Fatalf("counter %q was not emitted:\n%s", counter, output.String())
+		}
+	}
+}
+
 func TestWorkspaceOverlayPerformanceReportsGenerationAndDiscard(t *testing.T) {
 	var output bytes.Buffer
 	s := &Server{opts: Options{PerformanceLog: true}, logger: log.New(&output, "", 0)}

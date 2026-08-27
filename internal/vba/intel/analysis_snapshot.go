@@ -280,6 +280,22 @@ func (s *AnalysisSnapshot) SourceHash() string {
 	return hex.EncodeToString(s.sourceHash[:])
 }
 
+// ProcedureCatalog returns the canonical procedure identities and revision
+// fingerprints prepared for this immutable document revision.  Callers must
+// treat the returned catalog as read-only; its hashes are also used by
+// procedure artifact and diagnostic reuse.
+func (s *AnalysisSnapshot) ProcedureCatalog() ProcedureCatalog {
+	if s == nil {
+		return ProcedureCatalog{}
+	}
+	s.procedureCatalogOnce.Do(func() {
+		s.procedureCatalog = procedureCatalogForDocumentMode(s.Document(), true)
+	})
+	catalog := s.procedureCatalog
+	catalog.Entries = append([]ProcedureCatalogEntry(nil), catalog.Entries...)
+	return catalog
+}
+
 func (s *AnalysisSnapshot) sameRevision(doc Document) bool {
 	if s == nil || s.retired.Load() || s.uri != doc.URI || s.path != doc.Path ||
 		s.version != doc.Version || s.moduleKind != doc.ModuleKind ||

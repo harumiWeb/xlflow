@@ -44,6 +44,9 @@ const (
 	performanceCounterResolutionMaterializations = "resolution_materializations"
 	performanceCounterProcedureFingerprintBuilds = "procedure_fingerprint_builds"
 	performanceCounterProcedureFingerprintReuses = "procedure_fingerprint_reuses"
+	performanceCounterDependencyNodesUpdated     = "dependency_nodes_updated"
+	performanceCounterDependencyEdgesUpdated     = "dependency_edges_updated"
+	performanceCounterProceduresRevisited        = "procedures_revisited"
 	performanceCounterFastDiagnosticRuns         = "fast_diagnostic_runs"
 	performanceCounterFullDiagnosticRuns         = "full_diagnostic_runs"
 	performanceCounterBackgroundPermitWaits      = "background_permit_waits"
@@ -64,6 +67,9 @@ var performanceCounterNames = [...]string{
 	performanceCounterResolutionMaterializations,
 	performanceCounterProcedureFingerprintBuilds,
 	performanceCounterProcedureFingerprintReuses,
+	performanceCounterDependencyNodesUpdated,
+	performanceCounterDependencyEdgesUpdated,
+	performanceCounterProceduresRevisited,
 	performanceCounterFastDiagnosticRuns,
 	performanceCounterFullDiagnosticRuns,
 	performanceCounterBackgroundPermitWaits,
