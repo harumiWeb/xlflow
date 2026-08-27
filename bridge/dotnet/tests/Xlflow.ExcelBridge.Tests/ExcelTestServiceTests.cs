@@ -727,6 +727,7 @@ public sealed class ExcelTestServiceTests
             {
                 Name = "TestAdd",
                 Module = "MathTests",
+                Index = 0,
                 CaseId = "positive",
                 Arguments =
                 [
@@ -739,6 +740,60 @@ public sealed class ExcelTestServiceTests
         var code = ExcelTestService.BuildTestRunnerCode(tests, []);
 
         Assert.Contains("MathTests.TestAdd 1, \"a \"\"quote\"\"\"", code);
+        Assert.Contains("Public Function RunTest_0() As Variant", code);
+        Assert.DoesNotContain("Public Function RunTest(ByVal testIndex As Long)", code);
+        Assert.DoesNotContain("Select Case testIndex", code);
+    }
+
+    [Fact]
+    public void BuildTestRunnerCodeKeepsLargeSuitesBelowSingleProcedureLimit()
+    {
+        var tests = Enumerable.Range(0, 100)
+            .Select(index => new ExcelTestService.TestCase
+            {
+                Name = "TestCase" + index,
+                Module = "LargeSuite",
+                Index = index,
+            })
+            .ToList();
+
+        var code = ExcelTestService.BuildTestRunnerCode(tests, []);
+
+        Assert.DoesNotContain("Public Function RunTest(ByVal testIndex As Long)", code);
+        Assert.DoesNotContain("Select Case testIndex", code);
+        foreach (var test in tests)
+        {
+            Assert.Contains($"Public Function RunTest_{test.Index}() As Variant", code);
+            Assert.Contains($"LargeSuite.{test.Name}", code);
+        }
+    }
+
+    [Fact]
+    public void BuildTestRunnerCodePreservesHooksAndResultShapePerTestFunction()
+    {
+        var tests = new List<ExcelTestService.TestCase>
+        {
+            new() { Name = "TestOne", Module = "HookSuite", Index = 3 },
+        };
+        var hooks = new Dictionary<string, ExcelTestService.ModuleHooks>
+        {
+            ["HookSuite"] = new ExcelTestService.ModuleHooks
+            {
+                BeforeEach = new ExcelTestService.HookInfo("BeforeEach", "HookSuite", 1),
+                AfterEach = new ExcelTestService.HookInfo("AfterEach", "HookSuite", 2),
+            },
+        };
+
+        var code = ExcelTestService.BuildTestRunnerCode(tests, hooks);
+
+        Assert.Contains("Public Function RunTest_3() As Variant", code);
+        Assert.Contains("HookSuite.BeforeEach", code);
+        Assert.Contains("HookSuite.TestOne", code);
+        Assert.Contains("HookSuite.AfterEach", code);
+        Assert.Contains("RunTest_3 = Array(False, afterEachErr(1), afterEachErr(2), afterEachErr(3), statusHint, phaseHint)", code);
+        Assert.Contains("RunTest_3 = Array(False, testErr(1), testErr(2), testErr(3), statusHint, phaseHint)", code);
+        Assert.Contains("RunTest_3 = Array(False, beforeEachErr(1), beforeEachErr(2), beforeEachErr(3), statusHint, phaseHint)", code);
+        Assert.Contains("RunTest_3 = Array(True, CLng(0), \"\", \"\", statusHint, phaseHint)", code);
     }
 
     [Fact]
