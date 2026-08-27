@@ -81,8 +81,8 @@ semantics as immutable views. The procedure-only view filters the canonical
 procedure entries at lookup time instead of owning a second full candidate map.
 Document resolution views may share revision-local fact IDs; each mode retains
 its own overlay so the intentional semantic difference is never merged. A
-canceled or incomplete project-resolution build is not published to the
-revision cache and remains retryable.
+failed or canceled project-resolution build is not published to the revision
+cache and remains retryable.
 
 Carry module kind in resolver symbols. A receiver-less call may resolve to a
 non-standard procedure only within the same module; class, document, and

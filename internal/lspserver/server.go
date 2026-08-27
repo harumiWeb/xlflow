@@ -2221,10 +2221,10 @@ func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAna
 		s.performance.addCounter(performanceCounterResolutionViewBuilds, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", "")
 		resolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
 		diagnosticResolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
-		viewMeasurement.finish(len(project.Documents), 0, nil)
 		materializationMeasurement := s.performance.start("project/preparation", performanceStageResolutionMaterialize, "interactive", "")
 		for _, document := range project.Documents {
 			if err := ctx.Err(); err != nil {
+				viewMeasurement.finish(0, 0, err)
 				materializationMeasurement.finish(0, 0, err)
 				finishCapability(err)
 				return projectResolutionResult{}, err
@@ -2237,6 +2237,7 @@ func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAna
 			resolved[symbolFileKey(document.IR.Path)] = procedureView
 			diagnosticResolved[symbolFileKey(document.IR.Path)] = diagnosticView
 		}
+		viewMeasurement.finish(len(project.Documents), 0, nil)
 		materializationMeasurement.finish(0, 0, nil)
 		s.performance.addCounter(performanceCounterResolutionMaterializations, 0, "project/preparation", performanceStageResolutionMaterialize, "interactive", "")
 		finishCapability(nil)
