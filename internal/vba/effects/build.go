@@ -13,10 +13,11 @@ import (
 )
 
 type procedureInput struct {
-	id        ProcedureIdentity
-	proc      procedureir.ProcedureIR
-	graph     cfg.Graph
-	reachable map[int]bool
+	id         ProcedureIdentity
+	proc       procedureir.ProcedureIR
+	graph      cfg.Graph
+	reachable  map[int]bool
+	statements map[int]procedureir.Statement
 }
 
 type edge struct{ from, to string }
@@ -131,7 +132,7 @@ func buildWithReuse(documents []Document, previous *ProjectSummary, changedFiles
 		directStats.RecomputedDirectProcedures++
 		summary := &ProcedureSummary{Identity: input.id, resolutionFingerprint: resolutionFingerprint}
 		reachable := input.reachable
-		statements := statementIndex(input.proc)
+		statements := input.statements
 		extractStatements(summary, input.proc, reachable)
 		extractErrorSummary(summary, input.proc, input.graph, reachable, candidateKeys, loggerTargets, rethrowTargets, terminalTargets)
 		for _, call := range input.proc.Calls {
@@ -166,7 +167,7 @@ func buildWithReuse(documents []Document, previous *ProjectSummary, changedFiles
 	// Edges are cheap to collect from the current resolved inputs and must be
 	// refreshed even when a procedure's direct kernel was reused.
 	for _, input := range inputs {
-		statements := statementIndex(input.proc)
+		statements := input.statements
 		for _, call := range input.proc.Calls {
 			statement := statements[call.StatementID]
 			if !input.reachable[call.StatementID] || statement.Recovered || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
@@ -371,7 +372,13 @@ func collectInputs(documents []Document) []procedureInput {
 				proc = resolved
 			}
 			graph := graphs[proc.Symbol.QualifiedName+"\x00"+string(proc.Symbol.Kind)]
-			out = append(out, procedureInput{id: identity(doc.IR, proc), proc: proc, graph: graph, reachable: reachableStatements(proc, graph)})
+			out = append(out, procedureInput{
+				id:         identity(doc.IR, proc),
+				proc:       proc,
+				graph:      graph,
+				reachable:  reachableStatements(proc, graph),
+				statements: statementIndex(proc),
+			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].id.Key() < out[j].id.Key() })

@@ -607,11 +607,11 @@ func TestProjectCapabilityCachesRecordOneBuildPerRevision(t *testing.T) {
 	s := &Server{}
 	recorder := analysisstats.NewRecorder()
 	ctx := analysisstats.WithRecorder(context.Background(), recorder)
-	_, resolved, _, err := s.projectResolution(ctx, project, true)
+	_, resolved, _, _, err := s.projectResolution(ctx, project, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, resolvedAgain, _, err := s.projectResolution(ctx, project, true)
+	_, resolvedAgain, _, _, err := s.projectResolution(ctx, project, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,13 +639,13 @@ func TestProjectResolutionCancellationLeavesCacheRetryable(t *testing.T) {
 	s := &Server{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, _, err := s.projectResolution(ctx, project, true); !errors.Is(err, context.Canceled) {
+	if _, _, _, _, err := s.projectResolution(ctx, project, true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled project resolution error = %v, want context.Canceled", err)
 	}
 	if len(s.resolutionResolverCache.values) != 0 {
 		t.Fatal("canceled project resolution was published to the cache")
 	}
-	if _, _, _, err := s.projectResolution(context.Background(), project, true); err != nil {
+	if _, _, _, _, err := s.projectResolution(context.Background(), project, true); err != nil {
 		t.Fatalf("project resolution retry error = %v", err)
 	}
 }

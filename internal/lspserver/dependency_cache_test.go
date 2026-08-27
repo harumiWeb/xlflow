@@ -39,6 +39,34 @@ func TestDependencyCacheReusesAcrossKeysThatRemainStable(t *testing.T) {
 	}
 }
 
+func TestDependencyCacheHonorsPerInstanceRetentionLimit(t *testing.T) {
+	cache := dependencyCache[int]{maxEntries: 2}
+	cache.publish("one", 1)
+	cache.publish("two", 2)
+	cache.publish("three", 3)
+	if _, ok := cache.get("one"); ok {
+		t.Fatal("oldest published entry was not evicted")
+	}
+	if got := len(cache.values); got != 2 {
+		t.Fatalf("published cache size = %d, want 2", got)
+	}
+
+	built := dependencyCache[int]{maxEntries: 2}
+	for _, key := range []string{"one", "two", "three"} {
+		if _, err, _ := built.getOrBuildContext(context.Background(), key, func() (int, error) {
+			return 1, nil
+		}); err != nil {
+			t.Fatalf("build %q: %v", key, err)
+		}
+	}
+	if _, ok := built.get("one"); ok {
+		t.Fatal("oldest built entry was not evicted")
+	}
+	if got := len(built.values); got != 2 {
+		t.Fatalf("built cache size = %d, want 2", got)
+	}
+}
+
 func TestDependencyCacheCanceledBuildIsRetryable(t *testing.T) {
 	var cache dependencyCache[int]
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,10 +162,10 @@ func TestProjectResolutionReusesResolverAndUnchangedDocumentViews(t *testing.T) 
 	second.Documents[0].Source = "Public Sub Run()\n    Debug.Print 1\nEnd Sub\n"
 
 	s := &Server{performance: newPerformanceRecorder(true, log.New(io.Discard, "", 0))}
-	if _, _, _, err := s.projectResolution(context.Background(), first, true); err != nil {
+	if _, _, _, _, err := s.projectResolution(context.Background(), first, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := s.projectResolution(context.Background(), second, true); err != nil {
+	if _, _, _, _, err := s.projectResolution(context.Background(), second, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.performance.counterTotal(performanceCounterResolutionResolverBuilds); got != 1 {
@@ -195,6 +223,34 @@ func TestSourceLessIRFingerprintIncludesCompleteSemanticPayload(t *testing.T) {
 	second.Documents[0].IR = ir
 	if projectDocumentContentFingerprint(first.Documents[0]) == projectDocumentContentFingerprint(second.Documents[0]) {
 		t.Fatal("source-less IR semantic changes did not change the content fingerprint")
+	}
+}
+
+func TestSourceLessIRFingerprintStableAcrossProcedureClones(t *testing.T) {
+	first := projectTestSnapshot(projectTestProcedure("main.bas", "Main.Run", "", "", 1, "Run"))
+	first.Documents[0].Source = ""
+	first.Documents[0].Version = ""
+	first.Documents[0].ProcedureCatalog = intel.ProcedureCatalog{}
+	ir := first.Documents[0].IR
+	ir.Procedures = append([]procedureir.ProcedureIR(nil), ir.Procedures...)
+	procedure := ir.Procedures[0]
+	procedure.Statements = append([]procedureir.Statement(nil), procedure.Statements...)
+	receiver := "Application"
+	procedure.Statements[0].Target = &procedureir.Expression{ID: 2, Kind: procedureir.ExpressionMember, Text: "Value"}
+	procedure.Calls = []procedureir.CallSite{{
+		ID:         3,
+		Callee:     procedureir.Callee{Text: "Application.Value", BaseName: "Value", Receiver: &receiver},
+		Resolution: procedureir.CallResolution{Status: procedureir.ResolutionExternal},
+	}}
+	procedure.Statements[0].Control = &procedureir.ControlFlowMetadata{Transfer: procedureir.TransferGoto, Target: "Done"}
+	ir.Procedures[0] = procedure
+	first.Documents[0].IR = ir
+
+	second := first
+	second.Documents = append([]intel.ProjectAnalysisDocument(nil), first.Documents...)
+	second.Documents[0].IR = procedureir.Clone(first.Documents[0].IR)
+	if got, want := projectDocumentContentFingerprint(second.Documents[0]), projectDocumentContentFingerprint(first.Documents[0]); got != want {
+		t.Fatalf("clone fingerprint = %q, want %q", got, want)
 	}
 }
 

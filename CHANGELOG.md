@@ -12,6 +12,18 @@ All notable changes to xlflow will be documented in this file.
   unpublished. Added project cache hit/miss/rebuild, dependency-invalidation,
   and reused-entry performance counters; diagnostic and LSP payload contracts
   remain unchanged.
+- Fixed Windows Excel VBA imports so LF-only source, including `.cls` class
+  modules, is normalized to CRLF before VBIDE import and is no longer
+  misidentified as a standard module during `build` or `push`.
+
+- Scaffolded projects now expose `[build].exclude` and exclude generated test
+  modules plus `XlflowAssert.bas` from release builds by default; `push` and
+  `pack` source selection is unchanged.
+
+- Fixed workbook-backed test execution for large suites by generating one small
+  runner function per executable test case instead of expanding every case into
+  a single `RunTest` dispatcher. Hook ordering, parameterized arguments, result
+  classification, filtering, isolation, and session behavior remain unchanged.
 
 - Reduced LSP project dependency-update work by reusing canonical procedure
   catalog fingerprints and maintaining file/procedure-level call and reverse

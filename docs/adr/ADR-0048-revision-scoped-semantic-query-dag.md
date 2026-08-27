@@ -103,9 +103,11 @@ introduced.
 The LSP project-preparation boundary now uses bounded keyed caches for the
 resolver index, per-document resolution overlays, project capability plans,
 project constants, and effects. Keys describe the semantic inputs consumed by each product rather
-than the workspace revision alone. Resolver entries depend on declarations,
-signatures, module/conditional context, TypeDB, and completeness; document
-overlays additionally depend on the current document content. Constant values
+than the workspace revision alone. Resolver entries depend on declarations, signatures, module/conditional context,
+TypeDB, and completeness; document overlays additionally depend on the current
+document content. Capability plans depend on analyzer configuration, the resolver
+boundary/completeness fingerprint, and every project document's IR and resolution
+inputs, so changes to any of those inputs invalidate the plan. Constant values
 depend on module-level declarations and preamble expressions, so a procedure
 body edit preserves the environment while declaration or TypeDB changes
 rebuild it conservatively.

@@ -51,6 +51,12 @@ func TestConfigRuleDefaultsComeFromRegistry(t *testing.T) {
 	}
 }
 
+func TestDefaultBuildExcludesAreScaffoldOnly(t *testing.T) {
+	if got := Default().Build.Exclude; len(got) != 0 {
+		t.Fatalf("config defaults must not impose scaffold build exclusions: %#v", got)
+	}
+}
+
 func TestDictionaryCollectionMisuseRulesDefaultEnabled(t *testing.T) {
 	cfg := Default()
 	for _, id := range []string{"VBA230", "VBA231", "VBA232", "VBA233", "VBA234", "VBA235"} {
@@ -1800,6 +1806,7 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	cfg.Project.Name = "write-test"
 	cfg.Excel.Bridge = "dotnet"
 	cfg.UserForm.CodeSource = "frm"
+	cfg.Build.Exclude = []string{"src/modules/Tests/**", "src/modules/Xlflow/XlflowAssert.bas"}
 	cfg.Lint.ForbidInteractiveInput = false
 	cfg.Analyze.ForbidUnqualifiedExcelObjects = false
 	cfg.Analyze.DetectDictionaryIterationValueUsage = true
@@ -1860,6 +1867,16 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 		t.Fatalf("generated config should include fmt spacing settings:\n%s", text)
 	}
 	for _, want := range []string{
+		"# Release build source filtering. This affects `build` only; `push` and `pack`",
+		"[build]",
+		"  \"src/modules/Tests/**\",",
+		"  \"src/modules/Xlflow/XlflowAssert.bas\",",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
+	for _, want := range []string{
 		"# [backup.retention]",
 		"# enabled = false",
 		"# max_count = 20",
@@ -1907,6 +1924,9 @@ func TestWriteProducesReadableConfig(t *testing.T) {
 	}
 	if loaded.UserForm.CodeSource != "frm" {
 		t.Fatalf("userform.code_source mismatch: got %q, want frm", loaded.UserForm.CodeSource)
+	}
+	if !reflect.DeepEqual(loaded.Build.Exclude, cfg.Build.Exclude) {
+		t.Fatalf("build.exclude mismatch: got %#v, want %#v", loaded.Build.Exclude, cfg.Build.Exclude)
 	}
 	if loaded.Excel.Bridge != "dotnet" {
 		t.Fatalf("excel.bridge mismatch: got %q, want dotnet", loaded.Excel.Bridge)

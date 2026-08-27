@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,16 +23,27 @@ import (
 // share entries when the inputs that product actually reads are unchanged.
 // One build is shared per key and failed or cancelled builds are retryable.
 type dependencyCache[T any] struct {
-	mu      sync.Mutex
-	values  map[string]T
-	order   []string
-	pending map[string]*dependencyCachePending
+	mu         sync.Mutex
+	values     map[string]T
+	order      []string
+	pending    map[string]*dependencyCachePending
+	maxEntries int
 }
 
-const dependencyCacheMaxEntries = 256
+const (
+	dependencyCacheMaxEntries     = 256
+	projectEffectsCacheMaxEntries = 32
+)
 
 type dependencyCachePending struct {
 	done chan struct{}
+}
+
+func (c *dependencyCache[T]) retentionLimit() int {
+	if c.maxEntries > 0 {
+		return c.maxEntries
+	}
+	return dependencyCacheMaxEntries
 }
 
 func (c *dependencyCache[T]) get(key string) (T, bool) {
@@ -57,7 +68,7 @@ func (c *dependencyCache[T]) publish(key string, value T) {
 	}
 	c.values[key] = value
 	c.order = append(c.order, key)
-	for len(c.order) > dependencyCacheMaxEntries {
+	for len(c.order) > c.retentionLimit() {
 		oldest := c.order[0]
 		c.order = c.order[1:]
 		if oldest != key {
@@ -165,17 +176,93 @@ func projectDocumentContentFingerprint(document intel.ProjectAnalysisDocument) s
 }
 
 func projectProcedureIRFingerprint(document intel.ProjectAnalysisDocument) string {
-	// Without source/version or a matching catalog entry, no compact catalog
-	// hash can prove that the rest of the IR is unchanged. Hash the complete
-	// value instead so resolution facts, accesses, expressions, and control
-	// metadata cannot silently reuse a stale overlay. ProcedureIR contains no
-	// maps or runtime pointers whose addresses would make this representation
-	// nondeterministic; %#v renders nested pointers by value.
+	// Compatibility snapshots may omit both Source and Version. Walk the full
+	// IR explicitly so cloned pointer fields contribute their values rather than
+	// allocation addresses. The document path is normalized before the walk so
+	// equivalent Windows spellings share one fingerprint.
 	h := sha256.New()
 	ir := document.IR
 	ir.Path = symbolFileKey(ir.Path)
-	_, _ = fmt.Fprintf(h, "%#v", ir)
+	writeDeterministicFingerprintValue(h, reflect.ValueOf(ir))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func writeDeterministicFingerprintValue(w interface{ Write([]byte) (int, error) }, value reflect.Value) {
+	if !value.IsValid() {
+		writeFingerprintText(w, "invalid")
+		return
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			writeFingerprintText(w, "interface", "nil")
+			return
+		}
+		writeFingerprintText(w, "interface", value.Type().String())
+		writeDeterministicFingerprintValue(w, value.Elem())
+	case reflect.Ptr:
+		if value.IsNil() {
+			writeFingerprintText(w, "pointer", value.Type().String(), "nil")
+			return
+		}
+		writeFingerprintText(w, "pointer", value.Type().String())
+		writeDeterministicFingerprintValue(w, value.Elem())
+	case reflect.Struct:
+		writeFingerprintText(w, "struct", value.Type().String())
+		for index := 0; index < value.NumField(); index++ {
+			field := value.Type().Field(index)
+			writeFingerprintText(w, "field", field.Name)
+			writeDeterministicFingerprintValue(w, value.Field(index))
+		}
+	case reflect.Slice, reflect.Array:
+		// nil and empty slices carry the same semantic information in the IR;
+		// procedureir.Clone may materialize one form from the other.
+		writeFingerprintText(w, "sequence", value.Type().String(), strconv.Itoa(value.Len()))
+		for index := 0; index < value.Len(); index++ {
+			writeDeterministicFingerprintValue(w, value.Index(index))
+		}
+	case reflect.Map:
+		if value.IsNil() {
+			writeFingerprintText(w, "map", value.Type().String(), "nil")
+			return
+		}
+		type mapEntry struct {
+			sortKey string
+			key     reflect.Value
+			value   reflect.Value
+		}
+		entries := make([]mapEntry, 0, value.Len())
+		for _, key := range value.MapKeys() {
+			var keyText strings.Builder
+			writeDeterministicFingerprintValue(&keyText, key)
+			entries = append(entries, mapEntry{sortKey: keyText.String(), key: key, value: value.MapIndex(key)})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].sortKey < entries[j].sortKey })
+		writeFingerprintText(w, "map", value.Type().String(), strconv.Itoa(len(entries)))
+		for _, entry := range entries {
+			writeDeterministicFingerprintValue(w, entry.key)
+			writeDeterministicFingerprintValue(w, entry.value)
+		}
+	case reflect.String:
+		writeFingerprintText(w, "string", value.String())
+	case reflect.Bool:
+		writeFingerprintText(w, "bool", strconv.FormatBool(value.Bool()))
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		writeFingerprintText(w, "integer", value.Type().String(), strconv.FormatInt(value.Int(), 10))
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		writeFingerprintText(w, "unsigned", value.Type().String(), strconv.FormatUint(value.Uint(), 10))
+	case reflect.Float32, reflect.Float64:
+		writeFingerprintText(w, "float", value.Type().String(), strconv.FormatFloat(value.Float(), 'g', -1, value.Type().Bits()))
+	case reflect.Complex64, reflect.Complex128:
+		complexValue := value.Complex()
+		writeFingerprintText(w, "complex", value.Type().String(),
+			strconv.FormatFloat(real(complexValue), 'g', -1, value.Type().Bits()/2),
+			strconv.FormatFloat(imag(complexValue), 'g', -1, value.Type().Bits()/2))
+	default:
+		// ProcedureIR currently contains no channels, functions, or unsafe
+		// pointers. Keep the kind marker deterministic if that changes later.
+		writeFingerprintText(w, "unsupported", value.Type().String(), value.Kind().String())
+	}
 }
 
 func resolverSymbolsFingerprint(symbols []procedureir.ResolverSymbol, complete bool) string {
@@ -393,7 +480,7 @@ func (c *dependencyCache[T]) getOrBuildContext(ctx context.Context, key string, 
 		if panicValue == nil && err == nil && ctx.Err() == nil {
 			c.values[key] = value
 			c.order = append(c.order, key)
-			for len(c.order) > dependencyCacheMaxEntries {
+			for len(c.order) > c.retentionLimit() {
 				oldest := c.order[0]
 				c.order = c.order[1:]
 				if oldest != key {

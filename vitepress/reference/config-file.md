@@ -83,9 +83,12 @@ code_source = "sidecar"
 
 # Release build source filtering. This affects `build` only; `push` and `pack`
 # always use the complete source tree.
-# [build]
-# Exclude project-root-relative doublestar glob patterns from `xlflow build`.
-# exclude = ["src/modules/Tests/**"]
+[build]
+# Project-root-relative doublestar globs excluded from `xlflow build`.
+exclude = [
+  "src/modules/Tests/**",
+  "src/modules/Xlflow/XlflowAssert.bas",
+]
 
 # Source-preflight diagnostic waivers.
 [preflight]
@@ -217,6 +220,11 @@ Negative numeric values are configuration errors. `min_keep > max_count` is also
 | `exclude` | string[] | no       | `[]`    | Project-root-relative `doublestar` glob patterns excluded from `xlflow build` source selection only. |
 
 Each pattern is normalized to `/`; Windows and WSL separators match identically. Absolute paths and patterns that traverse outside the project root are invalid. `xlflow build` reports unmatched patterns as `build_exclude_unmatched` warnings. A matching UserForm artifact excludes the whole form component, including its related `.frx`, sidecar code, and persisted spec files. This setting does not change source selection for `push` or `pack`.
+
+`xlflow new` and `xlflow init` pre-populate this setting to exclude the scaffold's
+`src/modules/Tests/**` and `src/modules/Xlflow/XlflowAssert.bas` files from
+release builds. Remove an entry or set `exclude = []` when those components are
+required by a release.
 
 ### `[preflight]`
 

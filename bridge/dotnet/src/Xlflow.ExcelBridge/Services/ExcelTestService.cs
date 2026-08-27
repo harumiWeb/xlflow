@@ -725,7 +725,10 @@ public sealed class ExcelTestService : ITestService
                         var sw = Stopwatch.StartNew();
                         try
                         {
-                            var runResult = ExcelBridgeSupport.InvokeMethod(excel, "Run", runnerName + ".RunTest", test.Index);
+                            var runResult = ExcelBridgeSupport.InvokeMethod(
+                                excel,
+                                "Run",
+                                runnerName + "." + BuildTestRunnerFunctionName(test.Index));
                             sw.Stop();
                             if (runResult is not object[] arr || arr.Length < 6)
                             {
@@ -1914,6 +1917,11 @@ public sealed class ExcelTestService : ITestService
         }
     }
 
+    internal static string BuildTestRunnerFunctionName(int testIndex)
+    {
+        return "RunTest_" + testIndex.ToString(CultureInfo.InvariantCulture);
+    }
+
     internal static string BuildTestRunnerCode(List<TestCase> tests, Dictionary<string, ModuleHooks> hooksByModule)
     {
         var builder = new StringBuilder();
@@ -1958,79 +1966,77 @@ public sealed class ExcelTestService : ITestService
             }
         }
 
-        // Generate RunTest dispatch
-        builder.AppendLine("Public Function RunTest(ByVal testIndex As Long) As Variant");
-        builder.AppendLine("  On Error Resume Next");
-        builder.AppendLine("  Err.Clear");
-        builder.AppendLine("  Dim beforeEachErr As Variant");
-        builder.AppendLine("  Dim testErr As Variant");
-        builder.AppendLine("  Dim afterEachErr As Variant");
-        builder.AppendLine("  Dim statusHint As String");
-        builder.AppendLine("  Dim phaseHint As String");
-        builder.AppendLine("  Select Case testIndex");
-
-        for (var i = 0; i < tests.Count; i++)
+        // Generate one small execution function per test. Keeping each case in
+        // its own VBA procedure avoids the per-procedure 64 KB compiler limit.
+        foreach (var test in tests)
         {
-            var test = tests[i];
             hooksByModule.TryGetValue(test.Module, out var hooks);
             var beforeEachName = hooks?.BeforeEach?.Name ?? "";
             var afterEachName = hooks?.AfterEach?.Name ?? "";
 
-            builder.AppendLine(CultureInfo.InvariantCulture, $"    Case {i}");
-            builder.AppendLine("      statusHint = \"\"");
-            builder.AppendLine("      phaseHint = \"\"");
+            var functionName = BuildTestRunnerFunctionName(test.Index);
+            builder.AppendLine(CultureInfo.InvariantCulture, $"Public Function {functionName}() As Variant");
+            builder.AppendLine("  On Error Resume Next");
+            builder.AppendLine("  Err.Clear");
+            builder.AppendLine("  Dim beforeEachErr As Variant");
+            builder.AppendLine("  Dim testErr As Variant");
+            builder.AppendLine("  Dim afterEachErr As Variant");
+            builder.AppendLine("  Dim statusHint As String");
+            builder.AppendLine("  Dim phaseHint As String");
+            builder.AppendLine("  statusHint = \"\"");
+            builder.AppendLine("  phaseHint = \"\"");
 
             if (!string.IsNullOrEmpty(beforeEachName))
             {
-                builder.AppendLine(CultureInfo.InvariantCulture, $"      {test.Module}.{beforeEachName}");
-                builder.AppendLine("      If Err.Number <> 0 Then");
-                builder.AppendLine("        beforeEachErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))");
-                builder.AppendLine("        phaseHint = \"before_each\"");
-                builder.AppendLine("        Err.Clear");
-                builder.AppendLine("      End If");
+                builder.AppendLine(CultureInfo.InvariantCulture, $"  {test.Module}.{beforeEachName}");
+                builder.AppendLine("  If Err.Number <> 0 Then");
+                builder.AppendLine("    beforeEachErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))");
+                builder.AppendLine("    phaseHint = \"before_each\"");
+                builder.AppendLine("    Err.Clear");
+                builder.AppendLine("  End If");
             }
 
-            builder.AppendLine("      If IsEmpty(beforeEachErr) Then");
+            builder.AppendLine("  If IsEmpty(beforeEachErr) Then");
             var argumentList = test.Arguments.Length == 0 ? "" : " " + string.Join(", ", test.Arguments.Select(a => a.VbaLiteral));
-            builder.AppendLine(CultureInfo.InvariantCulture, $"        {test.Module}.{test.Name}{argumentList}");
-            builder.AppendLine("        If Err.Number <> 0 Then");
-            builder.AppendLine("          If Err.Number = vbObjectError + 516 Then");
-            builder.AppendLine("            statusHint = \"inconclusive\"");
-            builder.AppendLine("          End If");
-            builder.AppendLine("          testErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))");
-            builder.AppendLine("          phaseHint = \"test\"");
-            builder.AppendLine("          Err.Clear");
-            builder.AppendLine("        End If");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"    {test.Module}.{test.Name}{argumentList}");
+            builder.AppendLine("    If Err.Number <> 0 Then");
+            builder.AppendLine("      If Err.Number = vbObjectError + 516 Then");
+            builder.AppendLine("        statusHint = \"inconclusive\"");
             builder.AppendLine("      End If");
+            builder.AppendLine("      testErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))");
+            builder.AppendLine("      phaseHint = \"test\"");
+            builder.AppendLine("      Err.Clear");
+            builder.AppendLine("    End If");
+            builder.AppendLine("  End If");
 
             if (!string.IsNullOrEmpty(afterEachName))
             {
-                builder.AppendLine(CultureInfo.InvariantCulture, $"      {test.Module}.{afterEachName}");
-                builder.AppendLine("      If Err.Number <> 0 Then");
-                builder.AppendLine("        afterEachErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))");
-                builder.AppendLine("        If phaseHint = \"\" Then");
-                builder.AppendLine("          phaseHint = \"after_each\"");
-                builder.AppendLine("        End If");
-                builder.AppendLine("        Err.Clear");
-                builder.AppendLine("      End If");
+                builder.AppendLine(CultureInfo.InvariantCulture, $"  {test.Module}.{afterEachName}");
+                builder.AppendLine("  If Err.Number <> 0 Then");
+                builder.AppendLine("    afterEachErr = Array(False, CLng(Err.Number), CStr(Err.Source), CStr(Err.Description))");
+                builder.AppendLine("    If phaseHint = \"\" Then");
+                builder.AppendLine("      phaseHint = \"after_each\"");
+                builder.AppendLine("    End If");
+                builder.AppendLine("    Err.Clear");
+                builder.AppendLine("  End If");
             }
 
-            builder.AppendLine("      If Not IsEmpty(afterEachErr) Then");
-            builder.AppendLine("        phaseHint = \"after_each\"");
-            builder.AppendLine("        statusHint = \"failed\"");
-            builder.AppendLine("        RunTest = Array(False, afterEachErr(1), afterEachErr(2), afterEachErr(3), statusHint, phaseHint)");
-            builder.AppendLine("      ElseIf Not IsEmpty(testErr) Then");
-            builder.AppendLine("        RunTest = Array(False, testErr(1), testErr(2), testErr(3), statusHint, phaseHint)");
-            builder.AppendLine("      ElseIf Not IsEmpty(beforeEachErr) Then");
-            builder.AppendLine("        RunTest = Array(False, beforeEachErr(1), beforeEachErr(2), beforeEachErr(3), statusHint, phaseHint)");
-            builder.AppendLine("      Else");
-            builder.AppendLine("        RunTest = Array(True, CLng(0), \"\", \"\", statusHint, phaseHint)");
-            builder.AppendLine("      End If");
+            builder.AppendLine("  If Not IsEmpty(afterEachErr) Then");
+            builder.AppendLine("    phaseHint = \"after_each\"");
+            builder.AppendLine("    statusHint = \"failed\"");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"    {functionName} = Array(False, afterEachErr(1), afterEachErr(2), afterEachErr(3), statusHint, phaseHint)");
+            builder.AppendLine("  ElseIf Not IsEmpty(testErr) Then");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"    {functionName} = Array(False, testErr(1), testErr(2), testErr(3), statusHint, phaseHint)");
+            builder.AppendLine("  ElseIf Not IsEmpty(beforeEachErr) Then");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"    {functionName} = Array(False, beforeEachErr(1), beforeEachErr(2), beforeEachErr(3), statusHint, phaseHint)");
+            builder.AppendLine("  Else");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"    {functionName} = Array(True, CLng(0), \"\", \"\", statusHint, phaseHint)");
+            builder.AppendLine("  End If");
+            builder.AppendLine("  Err.Clear");
+            builder.AppendLine("End Function");
+            builder.AppendLine();
         }
 
-        builder.AppendLine("  End Select");
-        builder.AppendLine("  Err.Clear");
-        builder.AppendLine("End Function");
         return builder.ToString();
     }
 

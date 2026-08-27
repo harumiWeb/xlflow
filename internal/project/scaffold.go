@@ -152,6 +152,7 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 	cfg := config.Default()
 	cfg.Project.Name = name
 	cfg.Excel.Path = result.Workbook
+	cfg.Build.Exclude = scaffoldBuildExcludes(cfg.Src)
 	if strings.TrimSpace(userFormCodeSource) != "" {
 		cfg.UserForm.CodeSource = userFormCodeSource
 	}
@@ -201,6 +202,13 @@ func createScaffold(cwd, destPath, name string, createWorkbook WorkbookCreator, 
 		result.Created = append(result.Created, ".gitignore")
 	}
 	return result, nil
+}
+
+func scaffoldBuildExcludes(src config.SourceConfig) []string {
+	return []string{
+		filepath.ToSlash(filepath.Join(src.Modules, "Tests", "**")),
+		filepath.ToSlash(filepath.Join(src.Modules, "Xlflow", "XlflowAssert.bas")),
+	}
 }
 
 func InstallHelperModules(cwd string, src config.SourceConfig) (InstallModulesResult, error) {

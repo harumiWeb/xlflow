@@ -362,10 +362,10 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 	project.Revision = 19
 
 	ctx := context.Background()
-	if _, _, _, err := s.projectResolution(ctx, project, true); err != nil {
+	if _, _, _, _, err := s.projectResolution(ctx, project, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := s.projectResolution(ctx, project, true); err != nil {
+	if _, _, _, _, err := s.projectResolution(ctx, project, true); err != nil {
 		t.Fatal(err)
 	}
 	s.projectEffectSummaryWithResolution(ctx, project, nil, true)

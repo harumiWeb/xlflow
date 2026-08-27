@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -52,6 +53,7 @@ func TestInitScaffold(t *testing.T) {
 	if cfg.UserForm.CodeSource != "frm" {
 		t.Fatalf("init userform code source = %q, want frm", cfg.UserForm.CodeSource)
 	}
+	assertScaffoldBuildExcludes(t, cfg)
 }
 
 func TestInitScaffoldAcceptsSidecarCodeSource(t *testing.T) {
@@ -1028,6 +1030,7 @@ func TestNewScaffoldDefaultWorkbook(t *testing.T) {
 	if cfg.UserForm.CodeSource != "sidecar" {
 		t.Fatalf("new userform code source = %q, want sidecar", cfg.UserForm.CodeSource)
 	}
+	assertScaffoldBuildExcludes(t, cfg)
 	for _, path := range []string{"src/workbook/ThisWorkbook.bas", "src/workbook/Sheet1.bas"} {
 		body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(path)))
 		if err != nil {
@@ -1036,6 +1039,14 @@ func TestNewScaffoldDefaultWorkbook(t *testing.T) {
 		if string(body) != defaultDocumentModule {
 			t.Fatalf("%s = %q, want %q", path, string(body), defaultDocumentModule)
 		}
+	}
+}
+
+func assertScaffoldBuildExcludes(t *testing.T, cfg config.Config) {
+	t.Helper()
+	want := []string{"src/modules/Tests/**", "src/modules/Xlflow/XlflowAssert.bas"}
+	if !reflect.DeepEqual(cfg.Build.Exclude, want) {
+		t.Fatalf("build.exclude = %#v, want %#v", cfg.Build.Exclude, want)
 	}
 }
 

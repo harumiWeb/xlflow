@@ -245,6 +245,7 @@ func New(opts Options) (*Server, func(), error) {
 		docs:                      docs,
 		logger:                    logger,
 		performance:               newPerformanceRecorder(opts.PerformanceLog, logger),
+		projectEffectsCache:       dependencyCache[effects.ProjectSummary]{maxEntries: projectEffectsCacheMaxEntries},
 		semanticTokens:            newSemanticTokenCache(),
 		codeLensConfig:            intel.DefaultCodeLensConfig(),
 		diagStates:                make(map[string]*diagnosticState),
@@ -273,7 +274,7 @@ func New(opts Options) (*Server, func(), error) {
 		projectByPath := make(map[string]intel.ProjectAnalysisDocument, len(project.Documents))
 		capabilityDocuments := make([]analyze.ProjectCapabilityDocument, 0, len(project.Documents))
 		resolutionComplete := project.Complete && typeDB.Complete
-		resolutionResolver, resolvedProjectViews, resolvedDiagnosticViews, resolutionErr := s.projectResolution(ctx, project, resolutionComplete)
+		resolutionResolver, resolvedProjectViews, resolvedDiagnosticViews, resolutionKey, resolutionErr := s.projectResolution(ctx, project, resolutionComplete)
 		if resolutionErr != nil {
 			// A canceled or failed resolution build must not fall through to
 			// effects/capability preparation with nil views. In particular, doing
@@ -291,7 +292,7 @@ func New(opts Options) (*Server, func(), error) {
 				CFG: projectDocument.CFG, Source: projectDocument.Source,
 			})
 		}
-		capabilityKey := projectCapabilityDependencyFingerprint(project, resolutionComplete, projectResolutionFingerprint(project, resolutionComplete, s.resolutionTypeLibSymbols), s.opts.Config.Analyze)
+		capabilityKey := projectCapabilityDependencyFingerprint(project, resolutionComplete, resolutionKey, s.opts.Config.Analyze)
 		capabilityRequirements, capabilityErr, capabilityHit := s.projectCapabilityPlanCache.getOrBuildContext(ctx, capabilityKey, func() (analyze.ProjectCapabilityRequirements, error) {
 			measurement := s.performance.start("project/preparation", performanceStageProjectCapabilities, "interactive", "")
 			if err := ctx.Err(); err != nil {
@@ -319,7 +320,7 @@ func New(opts Options) (*Server, func(), error) {
 		}
 		var projectEffects effects.ProjectSummary
 		if capabilityRequirements.Effects {
-			projectEffects = s.projectEffectSummaryWithResolution(ctx, project, resolvedProjectViews, resolutionComplete)
+			projectEffects = s.projectEffectSummaryWithResolutionKey(ctx, project, resolvedProjectViews, resolutionComplete, resolutionKey)
 		}
 		// Resolution is built before planning because the planner needs its
 		// completeness and its resolution views. ProjectConstants is currently part of
@@ -503,6 +504,10 @@ func projectEffectDisplayPaths(project intel.ProjectAnalysisSnapshot) map[string
 }
 
 func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, resolved map[string]procedureir.ResolvedDocumentView, complete bool) effects.ProjectSummary {
+	return s.projectEffectSummaryWithResolutionKey(ctx, project, resolved, complete, projectResolutionFingerprint(project, complete, s.resolutionTypeLibSymbols))
+}
+
+func (s *Server) projectEffectSummaryWithResolutionKey(ctx context.Context, project intel.ProjectAnalysisSnapshot, resolved map[string]procedureir.ResolvedDocumentView, complete bool, resolutionKey string) effects.ProjectSummary {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -520,7 +525,6 @@ func (s *Server) projectEffectSummaryWithResolution(ctx context.Context, project
 			documents[i] = effects.Document{IR: document.IR, CFG: document.CFG}
 		}
 	}
-	resolutionKey := projectResolutionFingerprint(project, complete, s.resolutionTypeLibSymbols)
 	key := projectEffectsDependencyFingerprint(versions, complete, resolutionKey)
 	displayPaths := projectEffectDisplayPaths(project)
 	if value, ok := s.projectEffectsCache.get(key); ok {
@@ -2378,7 +2382,7 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 // resolution overlay by the inputs that product consumes. Full diagnostics
 // can therefore reuse unrelated document views after a local edit while the
 // edited document is rebuilt against the current IR.
-func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.ResolvedDocumentView, map[string]procedureir.ResolvedDocumentView, error) {
+func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAnalysisSnapshot, complete bool) (procedureir.Resolver, map[string]procedureir.ResolvedDocumentView, map[string]procedureir.ResolvedDocumentView, string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -2399,7 +2403,7 @@ func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAna
 		return resolver, nil
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, "", err
 	}
 	if resolverHit {
 		s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectResolver, "interactive", "")
@@ -2417,7 +2421,7 @@ func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAna
 	diagnosticResolved := make(map[string]procedureir.ResolvedDocumentView, len(project.Documents))
 	for _, document := range project.Documents {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, "", err
 		}
 		key := projectResolutionDocumentFingerprint(document, resolverKey, complete)
 		views, buildErr, hit := s.resolutionDocumentCache.getOrBuildContext(ctx, key, func() (projectResolutionDocument, error) {
@@ -2430,7 +2434,7 @@ func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAna
 			return projectResolutionDocument{procedure: procedureView, diagnostic: diagnosticView}, nil
 		})
 		if buildErr != nil {
-			return nil, nil, nil, buildErr
+			return nil, nil, nil, "", buildErr
 		}
 		if hit {
 			s.performance.addCounter(performanceCounterProjectCacheHits, 1, "project/preparation", performanceStageProjectResolutionView, "interactive", document.IR.Path)
@@ -2443,7 +2447,7 @@ func (s *Server) projectResolution(ctx context.Context, project intel.ProjectAna
 		diagnosticResolved[symbolFileKey(document.IR.Path)] = views.diagnostic
 	}
 	s.performance.addCounter(performanceCounterResolutionMaterializations, 0, "project/preparation", performanceStageResolutionMaterialize, "interactive", "")
-	return resolver, resolved, diagnosticResolved, nil
+	return resolver, resolved, diagnosticResolved, resolverKey, nil
 }
 
 func workspaceResolutionResolverWithTypeLib(project intel.ProjectAnalysisSnapshot, complete bool, typeLibSymbols []procedureir.ResolverSymbol) procedureir.Resolver {
