@@ -232,6 +232,19 @@ func InspectContext(ctx context.Context, opts Options) (*Result, error) {
 // DiscoverSourceFiles returns the VBA files included by the configured source
 // roots. The result is absolute-path deduplicated and deterministically sorted.
 func DiscoverSourceFiles(opts Options) ([]SourceFile, error) {
+	return DiscoverSourceFilesContext(context.Background(), opts)
+}
+
+// DiscoverSourceFilesContext is the cancellable variant of DiscoverSourceFiles.
+// It checks ctx while traversing each configured source root so callers that
+// own a short-lived workspace scan can stop without waiting for a full walk.
+func DiscoverSourceFilesContext(ctx context.Context, opts Options) ([]SourceFile, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	rootDir := opts.RootDir
 	if rootDir == "" {
 		rootDir = "."
@@ -241,7 +254,7 @@ func DiscoverSourceFiles(opts Options) ([]SourceFile, error) {
 		return nil, err
 	}
 	opts.RootDir = absRoot
-	files, err := discoverFiles(opts)
+	files, err := discoverFilesContext(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -435,10 +448,6 @@ func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.P
 		return nil
 	})
 	return result, err
-}
-
-func discoverFiles(opts Options) ([]fileCandidate, error) {
-	return discoverFilesContext(context.Background(), opts)
 }
 
 func discoverFilesContext(ctx context.Context, opts Options) ([]fileCandidate, error) {

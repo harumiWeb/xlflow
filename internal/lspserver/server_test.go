@@ -99,6 +99,43 @@ End Sub
 	}
 }
 
+func TestWorkspaceOverlayReusesDeclarationSnapshotForSemanticAnalysis(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "Attribute VB_Name = \"Main\"\nOption Explicit\nPublic Sub Main()\nEnd Sub\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	doc := intel.Document{URI: pathToFileURI(path), Path: path, Source: source, Version: 1}
+	declarations, normalized, included, err := server.analyzeWorkspaceOverlayDeclarations(context.Background(), doc)
+	if err != nil || !included {
+		t.Fatalf("declaration overlay = included:%v err:%v", included, err)
+	}
+	if len(declarations.symbols) == 0 {
+		t.Fatal("declaration overlay returned no symbols")
+	}
+	if normalized.Snapshot == nil || normalized.Snapshot == doc.Snapshot {
+		t.Fatalf("declaration snapshot = %p, want a normalized owned snapshot", normalized.Snapshot)
+	}
+	defer normalized.Snapshot.Retire()
+	parses := normalized.Snapshot.ParseCount()
+	if _, semanticIncluded, err := server.analyzeWorkspaceOverlay(context.Background(), normalized); err != nil || !semanticIncluded {
+		t.Fatalf("semantic overlay = included:%v err:%v", semanticIncluded, err)
+	}
+	if got := normalized.Snapshot.ParseCount(); got != parses {
+		t.Fatalf("overlay snapshot parse count = %d, want unchanged %d", got, parses)
+	}
+}
+
 func TestFileURIPathRoundTripWithEscapedJapanesePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "日本 語#%dir", "Main.bas")
 	uri := pathToFileURI(path)

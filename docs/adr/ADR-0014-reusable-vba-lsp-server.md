@@ -58,6 +58,17 @@ xlflow-owned source formats.
   They synchronously register the current immutable snapshot, reserve
   its document generation, and schedule background workspace-overlay and
   diagnostics work; they do not wait for that work to finish.
+- Split workspace preparation into an interactive declaration index and a
+  background semantic index. The declaration layer owns project symbols and
+  exact/prefix/qualified/module/kind lookup and becomes ready independently;
+  ProcedureIR, CFG, call sites, and project-resolution artifacts remain behind
+  the semantic readiness boundary. Initial declaration work uses a fixed,
+  bounded worker pool, while semantic workers leave capacity for interactive
+  requests and are cancellable during shutdown.
+- Publish open-document declarations and semantic artifacts independently but
+  under the same generation. A pending or incomplete semantic entry cannot
+  make project-wide negative conclusions complete, while current open-document
+  declarations remain available from the immutable document snapshot.
 - While an open document's workspace overlay is pending, mask both its saved
   filesystem entry and its previously published overlay. Workspace-wide queries
   may therefore omit that document temporarily, but must not return stale
@@ -111,6 +122,13 @@ The VS Code extension should remain a thin language client that launches:
   temporary source files.
 - Positive: Opening or changing a very large VBA module does not make document
   lifecycle notifications wait for full workspace and diagnostic analysis.
+- Positive: Cross-file declaration queries can become useful before the
+  workspace has built every file's IR, CFG, and call-site artifacts.
+- Negative: The server coordinates two readiness and publication lifecycles;
+  semantic consumers must continue to fail open until both declaration and
+  semantic completeness are proven.
+- Negative: Initial indexing uses bounded parallel source work and therefore
+  needs explicit cancellation and immutable-result ownership at shutdown.
 - Negative: The main binary now carries LSP protocol and JSON-RPC dependencies.
 - Negative: URI, path normalization, and UTF-16 position conversion become part
   of xlflow's long-lived compatibility surface.

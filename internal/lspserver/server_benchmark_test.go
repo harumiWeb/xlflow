@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -780,41 +781,46 @@ func BenchmarkLSPStartup(b *testing.B) {
 		b.ReportAllocs()
 		var hovers, definitions int
 		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			s, cleanup := newLSPStartupServer(b, fixture)
-			active := make(chan struct{}, 1)
-			release := make(chan struct{})
-			s.performanceHook = func(stage, path string) {
-				if path == fixture.moduleB && stage == "declaration-start" {
-					select {
-					case active <- struct{}{}:
-					default:
+			func() {
+				b.StopTimer()
+				s, cleanup := newLSPStartupServer(b, fixture)
+				defer cleanup()
+				active := make(chan struct{}, 1)
+				releaseCh := make(chan struct{})
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(func() { close(releaseCh) }) }
+				defer release()
+				s.performanceHook = func(stage, path string) {
+					if path == fixture.moduleB && stage == "declaration-start" {
+						select {
+						case active <- struct{}{}:
+						default:
+						}
+						<-releaseCh
 					}
-					<-release
 				}
-			}
-			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
-				b.Fatal(err)
-			}
-			if err := s.initialized(nil, nil); err != nil {
-				b.Fatal(err)
-			}
-			if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
-				URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
-			}}); err != nil {
-				b.Fatal(err)
-			}
-			waitLSPStartupEvent(b, active)
-			b.StartTimer()
-			hover, definition := startupInteractiveQueries(b, s, fixture)
-			hovers += hover
-			definitions += definition
-			b.StopTimer()
-			close(release)
-			if err := s.analysis.waitReady(); err != nil {
-				b.Fatal(err)
-			}
-			cleanup()
+				if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+					b.Fatal(err)
+				}
+				if err := s.initialized(nil, nil); err != nil {
+					b.Fatal(err)
+				}
+				if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+					URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
+				}}); err != nil {
+					b.Fatal(err)
+				}
+				waitLSPStartupEvent(b, active)
+				b.StartTimer()
+				hover, definition := startupInteractiveQueries(b, s, fixture)
+				hovers += hover
+				definitions += definition
+				b.StopTimer()
+				release()
+				if err := s.analysis.waitReady(); err != nil {
+					b.Fatal(err)
+				}
+			}()
 		}
 		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
@@ -824,46 +830,57 @@ func BenchmarkLSPStartup(b *testing.B) {
 		b.ReportAllocs()
 		var hovers, definitions int
 		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			s, cleanup := newLSPStartupServer(b, fixture)
-			declared := make(chan struct{}, 1)
-			release := make(chan struct{})
-			s.performanceHook = func(stage, path string) {
-				if path != fixture.moduleB {
-					return
-				}
-				switch stage {
-				case "declaration-ready":
-					select {
-					case declared <- struct{}{}:
-					default:
+			func() {
+				b.StopTimer()
+				s, cleanup := newLSPStartupServer(b, fixture)
+				defer cleanup()
+				declared := make(chan struct{}, 1)
+				releaseCh := make(chan struct{})
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(func() { close(releaseCh) }) }
+				defer release()
+				s.performanceHook = func(stage, path string) {
+					if path != fixture.moduleB {
+						return
 					}
-				case "semantic-start":
-					<-release
+					switch stage {
+					case "declaration-ready":
+						select {
+						case declared <- struct{}{}:
+						default:
+						}
+					case "semantic-start":
+						<-releaseCh
+					}
 				}
-			}
-			if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
-				b.Fatal(err)
-			}
-			if err := s.initialized(nil, nil); err != nil {
-				b.Fatal(err)
-			}
-			if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
-				URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
-			}}); err != nil {
-				b.Fatal(err)
-			}
-			waitLSPStartupEvent(b, declared)
-			b.StartTimer()
-			hover, definition := startupInteractiveQueries(b, s, fixture)
-			hovers += hover
-			definitions += definition
-			b.StopTimer()
-			close(release)
-			if err := s.analysis.waitReady(); err != nil {
-				b.Fatal(err)
-			}
-			cleanup()
+				if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+					b.Fatal(err)
+				}
+				if err := s.initialized(nil, nil); err != nil {
+					b.Fatal(err)
+				}
+				if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+					URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: fixture.sourceA,
+				}}); err != nil {
+					b.Fatal(err)
+				}
+				waitLSPStartupEvent(b, declared)
+				// The parser hook marks the declaration parse boundary; wait for the
+				// corresponding posting publication before measuring the query itself.
+				waitForWorkspaceSymbol(b, s.analysis, "CrossFileTarget")
+				b.StartTimer()
+				hover, definition := startupInteractiveQueries(b, s, fixture)
+				if hover != 1 || definition != 1 {
+					b.Fatalf("declaration-ready interactive results = hover %d, definition %d; want 1/1", hover, definition)
+				}
+				hovers += hover
+				definitions += definition
+				b.StopTimer()
+				release()
+				if err := s.analysis.waitReady(); err != nil {
+					b.Fatal(err)
+				}
+			}()
 		}
 		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
