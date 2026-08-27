@@ -9,6 +9,15 @@ All notable changes to xlflow will be documented in this file.
   a single `RunTest` dispatcher. Hook ordering, parameterized arguments, result
   classification, filtering, isolation, and session behavior remain unchanged.
 
+- Reduced LSP project dependency-update work by reusing canonical procedure
+  catalog fingerprints and maintaining file/procedure-level call and reverse
+  caller state incrementally. Body-only edits now revisit only changed
+  procedures; old and new reverse edges preserve invalidation for removed or
+  redirected calls. Module declaration dependencies and uncertain resolutions
+  fail open through module/project boundary nodes. Added opt-in dependency node,
+  edge, revisit, and fingerprint reuse counters; diagnostic and LSP response
+  contracts remain unchanged.
+
 - Reduced duplicate LSP project-resolution preparation by sharing one canonical
   symbol index between procedure-only and full resolver views, reusing
   revision-local overlay fact IDs, and preventing canceled resolution builds

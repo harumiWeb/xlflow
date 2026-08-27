@@ -63,15 +63,17 @@ type workspaceAnalysisIndex struct {
 	// revision changes only when a complete effective entry is published or
 	// removed. Pending overlays make projectSnapshot incomplete and therefore
 	// cannot seed project-aware diagnostics.
-	revision            uint64
-	qualified           map[string][]symbolRef
-	all                 []symbolRef
-	allCalls            []callRef
-	byCaller            map[string][]callRef
-	byBaseName          map[string][]callRef
-	byText              map[string][]callRef
-	projectMu           sync.Mutex
-	lastProjectSnapshot intel.ProjectAnalysisSnapshot
+	revision   uint64
+	qualified  map[string][]symbolRef
+	all        []symbolRef
+	allCalls   []callRef
+	byCaller   map[string][]callRef
+	byBaseName map[string][]callRef
+	byText     map[string][]callRef
+	projectMu  sync.Mutex
+	// projectDependencies retains only compact procedure/dependency metadata;
+	// the previous full IR/CFG snapshot is intentionally not retained here.
+	projectDependencies projectDependencyView
 	declarations        *workspaceDeclarationIndex
 	initialWorkers      int
 	semanticWorkers     int
@@ -115,6 +117,7 @@ type indexedFileAnalysis struct {
 	typeReferences        []calls.TypeReference
 	procedureIR           procedureir.DocumentIR
 	controlFlow           vbacfg.Document
+	procedureCatalog      intel.ProcedureCatalog
 }
 
 // indexedAnalysisIncomplete reports whether an indexed entry was produced
@@ -937,10 +940,11 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	graphSymbols := make([]callgraph.Symbol, 0, symbolCapacity)
 	for _, raw := range rawEntries {
 		entry := indexedFileAnalysis{
-			path: raw.path, source: raw.source, procedureIR: procedureir.Clone(raw.procedureIR),
+			path: raw.path, version: raw.version, source: raw.source, procedureIR: procedureir.Clone(raw.procedureIR),
 			controlFlow: vbacfg.CloneDocument(raw.controlFlow),
 			callSites:   cloneCallSites(raw.callSites), typeReferences: cloneTypeReferences(raw.typeReferences),
-			symbols: append([]intel.Symbol(nil), raw.symbols...),
+			symbols:          append([]intel.Symbol(nil), raw.symbols...),
+			procedureCatalog: cloneProcedureCatalog(raw.procedureCatalog),
 		}
 		entries = append(entries, entry)
 		file := workspaceDisplayPath(x.root, entry.path)
@@ -973,7 +977,10 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	materializationMeasurement := x.performance.start("workspace/project", performanceStageResolutionMaterialize, class, x.root)
 	for _, entry := range entries {
 		resolution := procedureir.ResolveView(entry.procedureIR, resolver)
-		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{IR: entry.procedureIR, Resolution: resolution, CFG: entry.controlFlow, Source: entry.source})
+		result.Documents = append(result.Documents, intel.ProjectAnalysisDocument{
+			IR: entry.procedureIR, Resolution: resolution, CFG: entry.controlFlow, Source: entry.source,
+			Version: entry.version, ProcedureCatalog: entry.procedureCatalog,
+		})
 		sites = append(sites, entry.callSites...)
 		typeReferences = append(typeReferences, entry.typeReferences...)
 	}
@@ -1023,20 +1030,22 @@ func (x *workspaceAnalysisIndex) projectChangeClass(class string) (intel.Project
 		return current, nil
 	}
 	x.projectMu.Lock()
-	previous := x.lastProjectSnapshot
-	if previous.Complete && current.Revision <= previous.Revision {
+	if x.projectDependencies.revision != 0 && current.Revision <= x.projectDependencies.revision {
 		x.projectMu.Unlock()
 		changeMeasurement.finish(0, 0, nil)
 		return current, nil
 	}
-	x.lastProjectSnapshot = current
-	x.projectMu.Unlock()
-	if !previous.Complete {
+	if x.projectDependencies.revision == 0 {
+		x.projectDependencies = buildProjectDependencyViewWithPerformanceClass(current, x.performance, class)
+		x.projectDependencies.revision = current.Revision
+		x.projectMu.Unlock()
 		changeMeasurement.finish(0, 0, nil)
 		return current, nil
 	}
 	dependencyMeasurement := x.performance.start("workspace/project", performanceStageDependencyUpdate, class, x.root)
-	impacted := projectImpactPathsWithPerformanceClass(previous, current, x.performance, class)
+	impacted := updateProjectDependencyView(&x.projectDependencies, current, x.performance, class)
+	x.projectDependencies.revision = current.Revision
+	x.projectMu.Unlock()
 	dependencyMeasurement.finish(len(impacted), 0, nil)
 	changeMeasurement.finish(len(impacted), 0, nil)
 	return current, impacted
