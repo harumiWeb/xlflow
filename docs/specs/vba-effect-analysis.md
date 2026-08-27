@@ -245,8 +245,10 @@ model.
 
 The integration preserves the `VBA203` diagnostic ID, severity, ordering,
 inline suppression, configuration, and `analyze --json` field shape. Its
-message and reason now name the affected property and an available uncovered
-exit witness.
+message and reason name the affected property and an available uncovered exit
+witness. A restore-like direct effect may be included as explanation-only
+evidence when a procedure contains one, but it never clears the CFG leak origin
+or proves that the saved value is the value being restored on every exit.
 
 ## Boundaries
 
@@ -255,8 +257,10 @@ guarantee. Issue #431 provides procedure-local all-path restoration through the
 CFG. `VBA221` consumes the direct callee summary only when its direct
 Application-state evidence matches a `VBA203` leak origin. It reports that
 immediate call boundary once per property, names the originating procedure, and
-preserves any callee uncertainty; it never repeats the same leak at transitive
-ancestors or treats a later restore helper as an all-path proof.
+preserves any callee uncertainty. If the direct callee also has a restore-like
+effect for that property, the finding may identify it as a candidate while
+stating that it is not an all-exit proof. It never repeats the same leak at
+transitive ancestors or treats a later restore helper as an all-path proof.
 
 `VBA220` consumes these summaries for supported event handlers. It classifies
 cell writes, explicit recalculation, selection changes, workbook lifecycle and

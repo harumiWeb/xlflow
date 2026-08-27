@@ -1668,7 +1668,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA203
 
-**Application state not restored.** An Application state change can reach an exit without restoring its previous value.
+**Application state not restored.** An Application state change cannot be proven restored to its previous value on every exit; a restore-like assignment may still be present.
 
 | Property                    | Value                              |
 | --------------------------- | ---------------------------------- |
@@ -2020,7 +2020,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA219
 
-**Unreleased workbook or VBA file handle.** A procedure-local Workbook or VBA file handle acquired by an explicit Open call can reach an exit without a matching Close.
+**Unreleased workbook or VBA file handle.** A procedure-local Workbook or VBA file handle acquired by an explicit Open call cannot be proven closed on every exit; a matching Close may still be present on some paths.
 
 | Property                    | Value                   |
 | --------------------------- | ----------------------- |
@@ -2064,7 +2064,7 @@ Use [`xlflow rules`](../commands/rules) to inspect the same metadata from an ins
 
 ## VBA221
 
-**Application state changed by local helper.** A direct project-local call can leave an Application property changed because the callee does not restore it on every exit.
+**Application state changed by local helper.** A direct project-local call can leave an Application property changed because cleanup is not proven on every exit; a restore-like assignment may still be present.
 
 | Property                    | Value                                   |
 | --------------------------- | --------------------------------------- |

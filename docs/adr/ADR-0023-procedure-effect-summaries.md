@@ -64,9 +64,11 @@ Use the summary as a validation consumer for the existing
 `VBA203` Push/Pop helper exemption. Pair lookup prefers the same module, then
 requires exactly one project-visible Pop/Restore candidate. A direct or
 propagated matching restore effect permits the existing exemption; missing or
-ambiguous pairs remain unsafe. Diagnostic ID, severity, location, message,
-ordering, inline suppression, configuration, and CLI/LSP representation remain
-unchanged.
+ambiguous pairs remain unsafe. Diagnostic ID, severity, location, ordering,
+inline suppression, configuration, and CLI/LSP representation remain
+unchanged. Diagnostic explanations may identify a restore-like effect as a
+candidate, but that explanation is not an all-exit safety proof and does not
+suppress a root finding.
 
 `VBA221` reports a batch-only caller context at a uniquely resolved, reachable
 call only when the direct callee has direct Application-state evidence that

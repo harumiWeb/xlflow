@@ -3772,14 +3772,42 @@ func (a Analyzer) applicationStateFindings(file parsedFile, proc sourceProcedure
 	}
 	for _, origin := range origins {
 		property := applicationStatePropertyName(origin.Property)
+		message := "Application." + property + " cannot be proven restored to its previous value on every exit."
+		reason := "The changed Application." + property + " value can leave this procedure through " + origin.Witness.description() + "."
+		if lines := applicationStateRestoreEvidence(proc, origin.Property); len(lines) > 0 {
+			reason += " A restore-like assignment is recognized at line " + strconvItoa(lines[0]) + ", but this analysis cannot prove that it restores this value on every exit."
+		}
 		findings = append(findings, a.simpleFinding(
 			file, proc, origin.Line, "VBA203", "warning",
-			"Application."+property+" can reach "+origin.Witness.Kind+" without restoring its previous value.",
-			"The changed Application."+property+" value can leave this procedure through "+origin.Witness.description()+".",
-			"Save the previous Application."+property+" value and restore it in a cleanup path.",
+			message,
+			reason,
+			"Ensure that the previous Application."+property+" value is restored on every normal, error, termination, and unknown exit, or avoid forced termination and suppress this warning when the remaining path is intentional.",
 		))
 	}
 	return findings
+}
+
+// applicationStateRestoreEvidence is explanation-only evidence. A restore
+// effect is a useful clue for the diagnostic, but it is deliberately not used
+// to clear an origin from the CFG all-exit analysis.
+func applicationStateRestoreEvidence(proc sourceProcedure, property string) []int {
+	if proc.Effects == nil {
+		return nil
+	}
+	target := "application." + strings.ToLower(property)
+	lines := map[int]bool{}
+	for _, evidence := range proc.Effects.Direct {
+		if evidence.Effect != effects.RestoresApplicationState || !strings.EqualFold(evidence.Target, target) || evidence.Range.StartLine <= 0 {
+			continue
+		}
+		lines[evidence.Range.StartLine] = true
+	}
+	out := make([]int, 0, len(lines))
+	for line := range lines {
+		out = append(out, line)
+	}
+	sort.Ints(out)
+	return out
 }
 
 type applicationStateProperty struct {

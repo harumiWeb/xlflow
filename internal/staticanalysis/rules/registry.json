@@ -1060,7 +1060,7 @@
     {
       "id": "VBA203",
       "title": "Application state not restored",
-      "description": "An Application state change can reach an exit without restoring its previous value.",
+      "description": "An Application state change cannot be proven restored to its previous value on every exit; a restore-like assignment may still be present.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",
@@ -1412,7 +1412,7 @@
     {
       "id": "VBA219",
       "title": "Unreleased workbook or VBA file handle",
-      "description": "A procedure-local Workbook or VBA file handle acquired by an explicit Open call can reach an exit without a matching Close.",
+      "description": "A procedure-local Workbook or VBA file handle acquired by an explicit Open call cannot be proven closed on every exit; a matching Close may still be present on some paths.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",
@@ -1456,7 +1456,7 @@
     {
       "id": "VBA221",
       "title": "Application state changed by local helper",
-      "description": "A direct project-local call can leave an Application property changed because the callee does not restore it on every exit.",
+      "description": "A direct project-local call can leave an Application property changed because cleanup is not proven on every exit; a restore-like assignment may still be present.",
       "family": "analyze",
       "category": "reliability",
       "evidence_class": "inference",

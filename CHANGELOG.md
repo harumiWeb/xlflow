@@ -12,6 +12,13 @@ All notable changes to xlflow will be documented in this file.
   unpublished. Added project cache hit/miss/rebuild, dependency-invalidation,
   and reused-entry performance counters; diagnostic and LSP payload contracts
   remain unchanged.
+
+- Clarified `VBA203`, `VBA219`, and `VBA221` cleanup diagnostics. Findings now
+  distinguish recognized cleanup candidates from cleanup proven on every exit,
+  so existing `Close` and Application-state restore paths are described as
+  uncertain rather than reported as absent. Detection criteria, finding
+  locations, and suppression behavior are unchanged.
+
 - Fixed Windows Excel VBA imports so LF-only source, including `.cls` class
   modules, is normalized to CRLF before VBIDE import and is no longer
   misidentified as a standard module during `build` or `push`.

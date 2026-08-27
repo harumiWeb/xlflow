@@ -42,6 +42,12 @@ type resourceExitWitness struct {
 	Line int
 }
 
+type resourceLeakAnalysis struct {
+	Witness     resourceExitWitness
+	Leaked      bool
+	CleanupLine int
+}
+
 func (w resourceExitWitness) description() string {
 	if w.Line > 0 {
 		return w.Kind + " at line " + strconvItoa(w.Line)
@@ -55,19 +61,27 @@ func (a Analyzer) resourceLeakFindings(file parsedFile, proc sourceProcedure) []
 	}
 	var findings []Finding
 	for _, acquisition := range resourceAcquisitions(proc) {
-		witness, leaked := resourceLeakWitness(proc, acquisition)
-		if !leaked {
+		analysis := resourceLeakAnalysisFor(proc, acquisition)
+		if !analysis.Leaked {
 			continue
 		}
 		resource := "Workbook"
 		if acquisition.Kind == resourceFileHandle {
 			resource = "VBA file handle"
 		}
+		message := resource + " acquired here cannot be proven closed on every exit."
+		reason := "The " + string(acquisition.Kind) + " acquired at line " + strconvItoa(acquisition.Line) +
+			" can leave this procedure through " + analysis.Witness.description() +
+			" without a proven matching Close."
+		if analysis.CleanupLine > 0 {
+			reason += " A matching Close is recognized at line " + strconvItoa(analysis.CleanupLine) +
+				", but this analysis cannot prove that it is reached on every exit."
+		}
 		findings = append(findings, a.simpleFinding(
 			file, proc, acquisition.Line, "VBA219", "warning",
-			resource+" acquired here can reach "+witness.Kind+" without Close.",
-			"The "+string(acquisition.Kind)+" acquired at line "+strconvItoa(acquisition.Line)+" can leave this procedure through "+witness.description()+" without a matching Close.",
-			"Close the "+string(acquisition.Kind)+" in a cleanup path that every exit reaches.",
+			message,
+			reason,
+			"Ensure that the "+string(acquisition.Kind)+" is closed on every normal, error, termination, and unknown exit, or avoid forced termination and suppress this warning when the remaining path is intentional.",
 		))
 	}
 	return findings
@@ -95,13 +109,18 @@ func resourceAcquisitions(proc sourceProcedure) []resourceAcquisition {
 }
 
 func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) (resourceExitWitness, bool) {
+	analysis := resourceLeakAnalysisFor(proc, acquisition)
+	return analysis.Witness, analysis.Leaked
+}
+
+func resourceLeakAnalysisFor(proc sourceProcedure, acquisition resourceAcquisition) resourceLeakAnalysis {
 	graph := proc.Graph
 	block, ok := graph.BlockForStatement(acquisition.StatementID)
 	if !ok {
-		return resourceExitWitness{}, false
+		return resourceLeakAnalysis{}
 	}
 	if !graph.IsReachable(block.ID, vbacfg.EdgeFilter{}) {
-		return resourceExitWitness{}, false
+		return resourceLeakAnalysis{}
 	}
 	initialAliases := map[string]bool{acquisition.Owner: true}
 	if acquisition.Kind == resourceFileHandle {
@@ -112,6 +131,7 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 	queue := make([]int, 0)
 	var witness resourceExitWitness
 	found := false
+	cleanupLine := 0
 
 	for _, edge := range graph.Edges {
 		if edge.From != block.ID || edge.Class != vbacfg.EdgeNormal {
@@ -139,6 +159,9 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 		}
 		if current.Statement != nil && !current.Statement.Recovered {
 			if resourceStatementReleases(acquisition.Kind, current.Statement.Text, aliases) {
+				if line := current.Statement.Range.StartLine; cleanupLine == 0 || line < cleanupLine {
+					cleanupLine = line
+				}
 				continue
 			}
 		}
@@ -161,7 +184,7 @@ func resourceLeakWitness(proc sourceProcedure, acquisition resourceAcquisition) 
 			resourceMergeAliases(in, queued, &queue, int(edge.To), out)
 		}
 	}
-	return witness, found
+	return resourceLeakAnalysis{Witness: witness, Leaked: found, CleanupLine: cleanupLine}
 }
 
 // resourceFileAliasesBefore finds local numeric aliases that are definitely
