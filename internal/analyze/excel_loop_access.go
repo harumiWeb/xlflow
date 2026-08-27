@@ -438,24 +438,25 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 		rootBindings = buildExcelRootBindingIndex([]parsedFile{file})
 	}
 	procedures := file.procedureView()
-	for i, candidate := range file.IR.Procedures {
-		if i >= procedures.Len() {
-			continue
-		}
-		key := excelProcedureKey(file.IR, candidate.Symbol)
+	for i := 0; i < procedures.Len(); i++ {
 		procedure, ok := procedures.At(i)
-		if !ok {
+		if !ok || procedure.IR == nil {
 			continue
 		}
+		key := excelProcedureKey(file.IR, procedure.IR.Symbol)
 		summaries[key] = directExcelAccessSummary(file, procedure, db, rootBindings, rootDir, cfg)
 	}
 	changed := true
 	for changed {
 		changed = false
-		for _, procedure := range file.IR.Procedures {
-			key := excelProcedureKey(file.IR, procedure.Symbol)
+		for i := 0; i < procedures.Len(); i++ {
+			procedure, ok := procedures.At(i)
+			if !ok || procedure.IR == nil {
+				continue
+			}
+			key := excelProcedureKey(file.IR, procedure.IR.Symbol)
 			current := summaries[key]
-			for _, call := range procedure.Calls {
+			for call := range procedure.Calls.All() {
 				callee, ok := excelHelperProcedureKey(file, call)
 				if !ok {
 					continue

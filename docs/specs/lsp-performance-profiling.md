@@ -176,6 +176,14 @@ the counter snapshot makes that distinction visible. Permit wait time is
 separate from execution time so an interactive request blocked behind a
 background worker can be measured without attributing the delay to analysis.
 
+Project snapshots retain the canonical syntax-local `DocumentIR` and attach a
+read-only `ResolvedDocumentView`. The normal snapshot and Full-diagnostic paths
+must therefore report `projectResolutionMaterialization` with zero results and
+`resolution_materializations` must remain zero. `Resolve`/`Materialize` remains
+available for compatibility consumers that explicitly require an independently
+owned resolved document; such fallback calls are the only work counted by that
+counter.
+
 All instrumentation is developer telemetry. It must remain disabled by
 default, use no LSP response fields, and preserve cancellation and generation
 safety. A profile is evidence about the selected benchmark checkpoint, not a

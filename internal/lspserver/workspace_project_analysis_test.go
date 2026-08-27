@@ -77,8 +77,8 @@ func TestWorkspaceProjectSnapshotHoldsResolvedIRAndDefensiveCFG(t *testing.T) {
 	if snapshot.Revision == 0 {
 		t.Fatal("published project snapshot revision was not advanced")
 	}
-	resolution := snapshot.Documents[0].IR.Procedures[0].Calls[0].Resolution
-	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+	resolution, ok := snapshot.Documents[0].Resolution.ResolvedCall(0, snapshot.Documents[0].IR.Procedures[0].Calls[0].ID)
+	if !ok || resolution.Resolution.Status != procedureir.ResolutionMatched || len(resolution.Resolution.Candidates) != 1 {
 		t.Fatalf("resolution = %#v", resolution)
 	}
 	snapshot.Documents[0].IR.Procedures[0].Symbol.Name = "Mutated"
@@ -134,7 +134,11 @@ func TestWorkspaceProjectSnapshotResolverCandidatesUseDisplayPaths(t *testing.T)
 	if !snapshot.Complete || len(snapshot.Documents) != 1 {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
-	candidates := snapshot.Documents[0].IR.Procedures[0].Calls[0].Resolution.Candidates
+	resolved, ok := snapshot.Documents[0].Resolution.ResolvedCall(0, snapshot.Documents[0].IR.Procedures[0].Calls[0].ID)
+	if !ok {
+		t.Fatal("call resolution was not attached to snapshot view")
+	}
+	candidates := resolved.Resolution.Candidates
 	if len(candidates) != 1 || candidates[0].File != filepath.ToSlash(filepath.Join("src", "modules", "Main.bas")) {
 		t.Fatalf("resolver candidates = %#v, want workspace display path", candidates)
 	}

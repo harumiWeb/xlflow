@@ -214,14 +214,18 @@ func (a Analyzer) errorValueWrapperFindingsContext(ctx context.Context, file par
 		aliases = isErrorGuardAliases(file.Lines)
 	}
 	var findings []Finding
-	for i, irProcedure := range file.IR.Procedures {
+	for i := 0; i < procedures.Len(); i++ {
 		if i&0x1f == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 		}
-		proc := procedureForLineView(procedures, irProcedure.Symbol.DeclarationRange.StartLine+1, len(file.Lines))
-		for _, call := range irProcedure.Calls {
+		irProcedure, ok := procedures.At(i)
+		if !ok || irProcedure.IR == nil {
+			continue
+		}
+		proc := procedureForLineView(procedures, irProcedure.StartLine+1, len(file.Lines))
+		for call := range irProcedure.Calls.All() {
 			if !wrapperCallMatches(call, wrappers) {
 				continue
 			}

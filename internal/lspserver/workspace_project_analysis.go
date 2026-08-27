@@ -94,7 +94,11 @@ func buildProjectDependencyViewWithPerformanceClass(snapshot intel.ProjectAnalys
 	view := projectDependencyView{procedures: make(map[string]projectProcedureState), reverse: make(map[string][]string)}
 	for _, document := range snapshot.Documents {
 		performance.addCounter(performanceCounterProcedureFingerprintBuilds, uint64(len(document.IR.Procedures)), "workspace/project", performanceStageDependencyUpdate, class, document.IR.Path)
-		for _, procedure := range document.IR.Procedures {
+		for procedureIndex, sourceProcedure := range document.IR.Procedures {
+			procedure := sourceProcedure
+			if resolved, ok := document.Resolution.ResolvedProcedure(procedureIndex); ok {
+				procedure = resolved
+			}
 			key := projectProcedureKey(document.IR.Path, procedure.Symbol.QualifiedName, string(procedure.Symbol.Kind), procedure.Symbol.DeclarationRange.StartLine)
 			encoded, _ := json.Marshal(procedure)
 			sum := sha256.Sum256(encoded)

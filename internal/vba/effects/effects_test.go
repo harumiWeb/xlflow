@@ -50,6 +50,28 @@ End Sub
 	}
 }
 
+func TestBuildUsesResolutionViewWithoutReplacingCanonicalIR(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Main.bas")
+	ir, err := procedureir.BuildSource(procedureir.BuildOptions{Path: path, ModuleName: "Main", ModuleKind: "standard"}, []byte("Public Sub Caller()\n  Call Target\nEnd Sub\nPublic Sub Target()\nEnd Sub\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := procedureir.NewSymbolResolver([]procedureir.ResolverSymbol{
+		{Name: "Caller", Module: "Main", ModuleKind: "standard", Kind: string(procedureir.ProcedureSub), Visibility: "Public", File: path, Line: 0},
+		{Name: "Target", Module: "Main", ModuleKind: "standard", Kind: string(procedureir.ProcedureSub), Visibility: "Public", File: path, Line: 3},
+	})
+	view := procedureir.ResolveView(ir, resolver)
+	viewSummary := Build([]Document{{IR: ir, Resolution: view, CFG: cfg.BuildDocument(ir)}})
+	materialized := procedureir.Resolve(ir, resolver)
+	materializedSummary := Build([]Document{{IR: materialized, CFG: cfg.BuildDocument(materialized)}})
+	if !reflect.DeepEqual(viewSummary.All(), materializedSummary.All()) {
+		t.Fatalf("view effects differ from compatibility materialization:\nview=%+v\nmaterialized=%+v", viewSummary.All(), materializedSummary.All())
+	}
+	if ir.Procedures[0].Calls[0].Resolution.Status != procedureir.ResolutionNotAttempted {
+		t.Fatalf("resolution view modified canonical IR: %+v", ir.Procedures[0].Calls[0].Resolution)
+	}
+}
+
 func TestRestoresEventsAndCellMutations(t *testing.T) {
 	summary := buildSources(t, sourceFile{"Helpers.bas", "Helpers", `Private savedEvents As Boolean
 Public Sub Restore()

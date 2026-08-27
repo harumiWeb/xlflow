@@ -43,9 +43,10 @@ type projectCapabilityPlan struct {
 // LSP planning. LSP snapshots already own IR/CFG, so exposing this small value
 // avoids making the internal parsedFile representation part of the public API.
 type ProjectCapabilityDocument struct {
-	IR     procedureir.DocumentIR
-	CFG    vbacfg.Document
-	Source string
+	IR         procedureir.DocumentIR
+	Resolution procedureir.ResolvedDocumentView
+	CFG        vbacfg.Document
+	Source     string
 }
 
 // ProjectCapabilityRequirements is the public, read-only view needed by the
@@ -79,16 +80,17 @@ func PlanProjectCapabilities(cfg config.AnalyzeConfig, documents []ProjectCapabi
 		if module == "" {
 			module = strings.TrimSuffix(filepath.Base(document.IR.Path), filepath.Ext(document.IR.Path))
 		}
-		procedures := sourceProceduresFromIRRef(&document.IR, document.CFG)
+		procedures, resolvedProcedures := sourceProceduresFromIRRefWithResolution(&document.IR, &document.Resolution, document.CFG)
 		file := parsedFile{
-			Path:       document.IR.Path,
-			Lines:      normalizedSourceLines(document.Source),
-			Module:     module,
-			ModuleKind: document.IR.ModuleKind,
-			Source:     []byte(document.Source),
-			IR:         document.IR,
-			CFG:        document.CFG,
-			Procedures: procedures,
+			Path:               document.IR.Path,
+			Lines:              normalizedSourceLines(document.Source),
+			Module:             module,
+			ModuleKind:         document.IR.ModuleKind,
+			Source:             []byte(document.Source),
+			IR:                 document.IR,
+			CFG:                document.CFG,
+			Procedures:         procedures,
+			ResolvedProcedures: resolvedProcedures,
 		}
 		file.ensureModuleAnalysisFacts()
 		materializeProcedureAnalysisPlans(&file, effects.ProjectSummary{}, cfg)

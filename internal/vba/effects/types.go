@@ -409,10 +409,15 @@ func (m *provenanceMaterialization) materialize(index int) ProcedureSummary {
 	return out
 }
 
-// Document pairs already-resolved IR with the CFG built from that exact IR.
+// Document pairs canonical syntax-local IR and an optional resolution view
+// with the CFG built from that exact IR.
 type Document struct {
-	IR  procedureir.DocumentIR
-	CFG cfg.Document
+	// IR is the canonical syntax-local document. Resolution, when present,
+	// supplies project-dependent call/access/event facts without replacing IR
+	// with a deep-copied resolved document.
+	IR         procedureir.DocumentIR
+	Resolution procedureir.ResolvedDocumentView
+	CFG        cfg.Document
 }
 
 func identity(doc procedureir.DocumentIR, proc procedureir.ProcedureIR) ProcedureIdentity {

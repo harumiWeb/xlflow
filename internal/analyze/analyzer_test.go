@@ -19,6 +19,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/typedb"
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
+	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
@@ -4551,6 +4552,47 @@ End Sub
 	}
 	if got := findingsByCode(realtime, "VBA218"); len(got) != 0 {
 		t.Fatalf("realtime analysis must not resolve cross-module CVErr wrappers: %+v", got)
+	}
+}
+
+func TestVBA218RealtimeProjectViewUsesResolvedLocalWrapperCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.bas")
+	source := []byte(`Option Explicit
+Private Function TryVisible(ByVal rng As Range) As Variant
+    On Error GoTo Missing
+    TryVisible = rng.SpecialCells(xlCellTypeVisible)
+    Exit Function
+Missing:
+    TryVisible = CVErr(xlErrNA)
+End Function
+Public Sub Run()
+    Dim rng As Range
+    Debug.Print TryVisible(rng)
+End Sub
+`)
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	ir, err := procedureir.BuildParsed(procedureir.BuildOptions{Path: path, ModuleName: "Main", ModuleKind: "standard"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlFlow := vbacfg.BuildDocument(ir)
+	view := procedureir.ResolveView(ir, procedureir.NewResolver([]procedureir.ResolverSymbol{
+		{Name: "TryVisible", Module: "Main", ModuleKind: "standard", Kind: string(procedureir.ProcedureFunction), Visibility: "Private", File: path, Line: 1},
+	}))
+	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(
+		context.Background(), dir, config.Default(), doc, ir, controlFlow, nil, effects.ProjectSummary{}, nil, &view,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA218"); len(got) != 1 || got[0].Line != 11 {
+		t.Fatalf("project resolution view should retain local CVErr wrapper finding: %+v", got)
 	}
 }
 

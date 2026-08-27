@@ -62,6 +62,55 @@ type ResolvedDocumentView struct {
 	eventIDs   [][]int
 }
 
+// HasOverlay reports whether this view contains project-dependent facts. It
+// distinguishes a zero/compatibility view from a view built with a resolver.
+func (v ResolvedDocumentView) HasOverlay() bool { return v.hasOverlay }
+
+// ResolvedProcedure returns a procedure projection with project-dependent
+// call, access, and RaiseEvent facts applied. Syntax-local collections such as
+// declarations, statements, and expressions continue to alias the immutable
+// revision. Only the small fact slices are copied, so this is not the full IR
+// materialization performed by Materialize.
+//
+// The returned procedure and its fact slices are owned by the caller. The
+// nested syntax-local values remain immutable revision data.
+func (v ResolvedDocumentView) ResolvedProcedure(procedureIndex int) (ProcedureIR, bool) {
+	if !v.hasOverlay {
+		return ProcedureIR{}, false
+	}
+	if procedureIndex < 0 || procedureIndex >= len(v.document.Procedures) {
+		return ProcedureIR{}, false
+	}
+	procedure := v.document.Procedures[procedureIndex]
+	procedure.Calls = make([]CallSite, len(procedure.Calls))
+	for callIndex, call := range v.document.Procedures[procedureIndex].Calls {
+		call.Resolution = CallResolution{}
+		if resolved, ok := v.resolvedCallAt(procedureIndex, callIndex); ok {
+			call.Resolution = cloneCallResolution(resolved.Resolution)
+		}
+		if v.hasOverlay && !call.IsRaiseEvent && !isAssignmentTargetCall(call, procedure) {
+			call.NonCallableNames = append([]string(nil), declarationNames(v.document.Declarations, procedure.Declarations)...)
+		}
+		procedure.Calls[callIndex] = call
+	}
+	procedure.Accesses = make([]VariableAccess, len(procedure.Accesses))
+	for accessIndex, access := range v.document.Procedures[procedureIndex].Accesses {
+		if resolved, ok := v.resolvedAccessAt(procedureIndex, accessIndex); ok {
+			access.Scope = resolved.Scope
+			access.Resolution = cloneSymbolResolution(resolved.Resolution)
+		}
+		procedure.Accesses[accessIndex] = access
+	}
+	procedure.RaiseEvents = make([]RaiseEventReference, len(procedure.RaiseEvents))
+	for eventIndex, event := range v.document.Procedures[procedureIndex].RaiseEvents {
+		if resolved, ok := v.resolvedEventAt(procedureIndex, eventIndex); ok {
+			event.Resolution = cloneSymbolResolution(resolved.Resolution)
+		}
+		procedure.RaiseEvents[eventIndex] = event
+	}
+	return procedure, true
+}
+
 // ResolveView builds a read-only project-resolution view over in. The input
 // document and all of its nested slices remain untouched.
 func ResolveView(in DocumentIR, resolver Resolver) ResolvedDocumentView {

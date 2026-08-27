@@ -140,7 +140,11 @@ func collectInputs(documents []Document) []procedureInput {
 		for _, graph := range doc.CFG.Graphs {
 			graphs[graph.Procedure.QualifiedName+"\x00"+string(graph.Procedure.Kind)] = graph
 		}
-		for _, proc := range doc.IR.Procedures {
+		for procedureIndex, sourceProc := range doc.IR.Procedures {
+			proc := sourceProc
+			if resolved, ok := doc.Resolution.ResolvedProcedure(procedureIndex); ok {
+				proc = resolved
+			}
 			graph := graphs[proc.Symbol.QualifiedName+"\x00"+string(proc.Symbol.Kind)]
 			out = append(out, procedureInput{id: identity(doc.IR, proc), proc: proc, graph: graph, reachable: reachableStatements(proc, graph)})
 		}
