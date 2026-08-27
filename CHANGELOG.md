@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed workbook-backed test execution for large suites by generating one small
+  runner function per executable test case instead of expanding every case into
+  a single `RunTest` dispatcher. Hook ordering, parameterized arguments, result
+  classification, filtering, isolation, and session behavior remain unchanged.
+
 - Reduced LSP project dependency-update work by reusing canonical procedure
   catalog fingerprints and maintaining file/procedure-level call and reverse
   caller state incrementally. Body-only edits now revisit only changed
