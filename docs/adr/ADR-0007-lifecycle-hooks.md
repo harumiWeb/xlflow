@@ -33,15 +33,16 @@ Rules:
 5. `AfterEach` failure overrides the test result to `failed`.
 6. `BeforeAll` or `AfterAll` failure marks **all** tests in the module as `failed`.
 7. Hook failures use dedicated `error.code` values (`before_all_failed`, `after_all_failed`, `before_each_failed`, `after_each_failed`).
+8. The generated runner keeps each test case in its own `RunTest_<index>` function so a growing suite does not exceed VBA's per-procedure size limit. The bridge invokes the selected function by name.
 
-The runner generates a temporary VBA module with module-specific `RunBeforeAll_<ModuleName>`, `RunAfterAll_<ModuleName>`, and `RunTest` functions that use `Application.Run` to invoke module-qualified procedures. This avoids private-dispatch complexity entirely.
+The runner generates a temporary VBA module with module-specific `RunBeforeAll_<ModuleName>`, `RunAfterAll_<ModuleName>`, and one `RunTest_<index>` function per executable test case. The bridge invokes the selected wrapper through Excel's `Run` entry point; each wrapper directly invokes module-qualified VBA procedures. This avoids private-dispatch complexity entirely while keeping each generated test procedure small.
 
 ## Consequences
 
 - Positive: Simple, explicit, and CLI-friendly.
 - Positive: No annotation parser or IDE dependency required.
 - Negative: Hooks must be public, so they are visible to workbook VBA.
-- Negative: `Application.Run` is slightly slower than direct invocation, but the overhead is negligible for test suites.
+- Negative: The temporary module contains one wrapper per executable test, increasing the number of generated procedures, while avoiding the single-dispatcher size ceiling.
 
 ## Alternatives Considered
 

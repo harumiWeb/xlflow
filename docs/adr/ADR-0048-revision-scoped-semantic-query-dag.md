@@ -66,6 +66,28 @@ explicit dependencies at the kernel boundary. This separation may reduce a
 dependency set only when the kernel does not read the removed leaf; it must not
 weaken fail-open behavior for incomplete or ambiguous input.
 
+### Amendment: incremental LSP dependency index (#738)
+
+The LSP project-change path consumes the immutable `ProcedureCatalog` produced
+by document analysis. It keeps compact procedure fingerprints, file revision
+tokens, outgoing call sets, and a reverse caller index; it must not serialize a
+complete `ProcedureIR` or rebuild every reverse edge for each project revision.
+
+A body-only change revisits only procedures in the changed file whose catalog
+fingerprint differs. A signature, visibility, module-context, declaration, or
+resolution change may refresh procedure resolution across the project, but the
+graph still replaces only changed nodes and edges. Old and new reverse edges
+are both used during caller-closure propagation so removed and redirected calls
+invalidate former callers. If catalog/IR correspondence or resolution
+completeness is not proven, the index fails open to the affected project
+boundary rather than reusing an uncertain entry. Module declaration references
+(including constants and enum members) target a compact module dependency node,
+so declaration-only changes invalidate their consumers. Dynamic, ambiguous, or
+incomplete resolutions also attach to a synthetic project boundary node; a
+revision change invalidates that uncertain closure before any narrower reuse is
+attempted. The compact index owns no parser trees or retired snapshots and is
+discarded with the workspace lifecycle.
+
 The store's internal identity is a comparable `Key` rather than a serialized
 string. Dependencies are canonicalized and deduplicated at publication, and
 reverse edges plus pending/epoch/eviction metadata use the same key. Exact

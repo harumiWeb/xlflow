@@ -59,30 +59,45 @@ zero values, so a profile can distinguish “not observed” from an omitted
 instrumentation field. The counters are stderr-only and never enter an LSP
 payload.
 
-| Counter                        | Meaning                                                    |
-| ------------------------------ | ---------------------------------------------------------- |
-| `workspace_files_discovered`   | Source files returned by workspace discovery.              |
-| `workspace_declaration_builds` | Successful per-file declaration builds.                    |
-| `workspace_semantic_builds`    | Successful per-file semantic builds.                       |
-| `project_snapshot_builds`      | Project snapshots assembled.                               |
-| `resolution_resolver_builds`   | Resolver constructions (revision cache misses).            |
-| `resolution_view_builds`       | Resolution views constructed (revision cache misses).      |
-| `canonical_resolver_builds`    | Canonical project resolver/index constructions.            |
-| `procedure_resolver_views`     | Procedure-only resolver views derived from the index.      |
-| `full_resolver_views`          | Full resolver views derived from the index.                |
-| `resolution_overlay_builds`    | Per-document resolution overlays built for both modes.     |
-| `resolution_materializations`  | Document IR materializations into resolution views.        |
-| `procedure_fingerprint_builds` | Procedure fingerprints computed for dependency comparison. |
-| `procedure_fingerprint_reuses` | Fingerprints served from a reusable dependency cache.      |
-| `fast_diagnostic_runs`         | Fast diagnostic runs started.                              |
-| `full_diagnostic_runs`         | Full diagnostic runs started.                              |
-| `background_permit_waits`      | Background workers that waited for an analysis permit.     |
-| `interactive_permit_waits`     | Interactive workers that waited for an analysis permit.    |
+| Counter                        | Meaning                                                       |
+| ------------------------------ | ------------------------------------------------------------- |
+| `workspace_files_discovered`   | Source files returned by workspace discovery.                 |
+| `workspace_declaration_builds` | Successful per-file declaration builds.                       |
+| `workspace_semantic_builds`    | Successful per-file semantic builds.                          |
+| `project_snapshot_builds`      | Project snapshots assembled.                                  |
+| `resolution_resolver_builds`   | Resolver constructions (revision cache misses).               |
+| `resolution_view_builds`       | Resolution views constructed (revision cache misses).         |
+| `canonical_resolver_builds`    | Canonical project resolver/index constructions.               |
+| `procedure_resolver_views`     | Procedure-only resolver views derived from the index.         |
+| `full_resolver_views`          | Full resolver views derived from the index.                   |
+| `resolution_overlay_builds`    | Per-document resolution overlays built for both modes.        |
+| `resolution_materializations`  | Document IR materializations into resolution views.           |
+| `procedure_fingerprint_builds` | Procedure fingerprints computed for dependency comparison.    |
+| `procedure_fingerprint_reuses` | Fingerprints served from a reusable dependency cache.         |
+| `dependency_nodes_updated`     | Procedure dependency entries replaced or removed.             |
+| `dependency_edges_updated`     | Reverse or outgoing call edges added or removed.              |
+| `procedures_revisited`         | Procedures inspected during an incremental dependency update. |
+| `fast_diagnostic_runs`         | Fast diagnostic runs started.                                 |
+| `full_diagnostic_runs`         | Full diagnostic runs started.                                 |
+| `background_permit_waits`      | Background workers that waited for an analysis permit.        |
+| `interactive_permit_waits`     | Interactive workers that waited for an analysis permit.       |
 
 `procedure_fingerprint_reuses` is reserved for reuse reporting and is emitted
 as zero until a reusable fingerprint cache is used. A counter increment is
 reported with the stage and path that caused it; the initial snapshot reports
 the accumulated totals.
+
+The LSP dependency index stores catalog fingerprints and call edges from the
+document analysis revision. A body-only edit should increment
+`dependency_nodes_updated` only for changed procedures and should report
+unchanged procedures through `procedure_fingerprint_reuses`; it must not invoke
+JSON serialization of a complete `ProcedureIR`. Signature, module-context, or
+resolution changes may revisit all procedures, while edge publication remains
+incremental. Module declaration references use a module-level dependency node;
+uncertain (dynamic, ambiguous, incomplete, or project-local unresolved)
+resolution attaches to a project boundary so its reverse closure is invalidated
+on the next revision. These counters are structural observations and are never copied
+into LSP responses, normal CLI JSON, corpus snapshots, or review ledgers.
 
 Delta counter records use `outcome="counter"` with the increment in `value`.
 The initial aggregate snapshot uses `outcome="counter_snapshot"`,
