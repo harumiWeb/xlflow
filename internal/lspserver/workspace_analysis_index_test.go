@@ -3,10 +3,12 @@ package lspserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,6 +97,243 @@ func TestWorkspaceAnalysisIndexParsesOnceAndUpdatesOnlyChangedFile(t *testing.T)
 	}
 	if counts[a] != 2 || counts[b] != 1 {
 		t.Fatalf("duplicate watcher event reparsed: %#v", counts)
+	}
+}
+
+func TestWorkspaceDeclarationIndexServesCrossFileHoverBeforeSemanticReady(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moduleB := filepath.Join(moduleDir, "00_ModuleB.bas")
+	moduleA := filepath.Join(moduleDir, "01_ModuleA.bas")
+	sourceB := "Attribute VB_Name = \"ModuleB\"\nOption Explicit\n\nPublic Function CrossFileTarget(ByVal value As Long) As Long\n    CrossFileTarget = value + 1\nEnd Function\n"
+	sourceA := "Attribute VB_Name = \"ModuleA\"\nOption Explicit\n\nPublic Sub CallB()\n    Call CrossFileTarget(1)\nEnd Sub\n"
+	if err := os.WriteFile(moduleB, []byte(sourceB), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moduleA, []byte(sourceA), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	declarationReady := make(chan struct{})
+	semanticRelease := make(chan struct{})
+	var declarationOnce sync.Once
+	s.performanceHook = func(stage, path string) {
+		if path != moduleB {
+			return
+		}
+		if stage == "declaration-ready" {
+			declarationOnce.Do(func() { close(declarationReady) })
+		}
+		if stage == "semantic-start" {
+			<-semanticRelease
+		}
+	}
+	if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.initialized(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(pathToFileURI(moduleA)), Version: 1, Text: sourceA,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-declarationReady:
+	case <-time.After(30 * time.Second):
+		t.Fatal("timed out waiting for declaration readiness")
+	}
+	line := benchmarkSourceLine(sourceA, "    Call CrossFileTarget(1)")
+	position := intel.Position{Line: line, Character: len("    Call ")}
+	var symbols []intel.Symbol
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		symbols, err = s.analysis.searchExact("CrossFileTarget")
+		if err == nil && len(symbols) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(symbols) != 1 {
+		t.Fatalf("declaration query = %+v, %v", symbols, err)
+	}
+	hover, err := s.analyzer.Hover(s.docs.openDocuments()[0], position, s.docs.openDocuments())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "CrossFileTarget") {
+		t.Fatalf("cross-file hover before semantic readiness = %+v", hover)
+	}
+	close(semanticRelease)
+	if err := s.analysis.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkspaceAnalysisIndexBoundsDeclarationWorkersBeforeSemanticReady(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 6; i++ {
+		path := filepath.Join(moduleDir, fmt.Sprintf("M%d.bas", i))
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("Sub Proc%d()\nEnd Sub\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var active, maximum atomic.Int32
+	declarationsStarted := make(chan struct{})
+	var startedOnce sync.Once
+	declarationRelease := make(chan struct{})
+	declarationParse := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		current := active.Add(1)
+		for {
+			old := maximum.Load()
+			if current <= old || maximum.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		if current == 2 {
+			startedOnce.Do(func() { close(declarationsStarted) })
+		}
+		select {
+		case <-declarationRelease:
+		case <-ctx.Done():
+			active.Add(-1)
+			return indexedFileAnalysis{}, ctx.Err()
+		}
+		active.Add(-1)
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{
+			Name: name, Kind: "module", Module: name, ModuleKind: file.ModuleKind, File: file.Path,
+		}}}, nil
+	}
+	semanticRelease := make(chan struct{})
+	semanticParse := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		select {
+		case <-semanticRelease:
+		case <-ctx.Done():
+			return indexedFileAnalysis{}, ctx.Err()
+		}
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), semanticParse, nil)
+	index.parseDeclarations = declarationParse
+	index.initialWorkers = 2
+	index.semanticWorkers = 1
+	index.nonBlockingQueries = true
+	index.start()
+	select {
+	case <-declarationsStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for bounded declaration workers")
+	}
+	close(declarationRelease)
+	if err := index.waitDeclarationsReady(); err != nil {
+		t.Fatal(err)
+	}
+	if got := maximum.Load(); got > 2 {
+		t.Fatalf("maximum declaration workers = %d, want at most 2", got)
+	}
+	if got, err := index.searchExact("M0"); err != nil || len(got) != 1 {
+		t.Fatalf("declaration query before semantic readiness = %+v, %v", got, err)
+	}
+	select {
+	case <-index.ready:
+		t.Fatal("semantic readiness published before semantic release")
+	default:
+	}
+	close(semanticRelease)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	index.stop()
+}
+
+func TestWorkspaceAnalysisIndexSharesInitialSourceGeneration(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initialSource := "Sub Initial()\\nEnd Sub\\n"
+	if err := os.WriteFile(path, []byte(initialSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	declarationStarted := make(chan struct{})
+	declarationRelease := make(chan struct{})
+	semanticSource := make(chan string, 1)
+	declarationParse := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		close(declarationStarted)
+		select {
+		case <-declarationRelease:
+		case <-ctx.Done():
+			return indexedFileAnalysis{}, ctx.Err()
+		}
+		// Simulate a filesystem change before the semantic worker starts. The
+		// semantic phase must still consume the declaration phase's source
+		// generation; the watcher will reconcile this later.
+		if err := os.WriteFile(file.Path, []byte("Sub Changed()\\nEnd Sub\\n"), 0o644); err != nil {
+			return indexedFileAnalysis{}, err
+		}
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{
+			Name: "Initial", Kind: "sub", Module: "Main", ModuleKind: file.ModuleKind, File: file.Path,
+		}}}, nil
+	}
+	semanticParse := func(_ context.Context, file symbols.SourceFile, source []byte) (indexedFileAnalysis, error) {
+		semanticSource <- string(source)
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), semanticParse, nil)
+	index.parseDeclarations = declarationParse
+	index.initialWorkers = 1
+	index.semanticWorkers = 1
+	index.start()
+	select {
+	case <-declarationStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for declaration parser")
+	}
+	close(declarationRelease)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-semanticSource:
+		if got != initialSource {
+			t.Fatalf("semantic source = %q, want declaration generation %q", got, initialSource)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for semantic parser")
+	}
+	if got, err := index.searchExact("Initial"); err != nil || len(got) != 1 {
+		t.Fatalf("shared-generation declaration = %+v, %v", got, err)
+	}
+	index.stop()
+}
+
+func TestWorkspaceAnalysisIndexStopPreventsRestart(t *testing.T) {
+	var parses atomic.Int32
+	index := newWorkspaceAnalysisIndex(t.TempDir(), config.Default(), func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error) {
+		parses.Add(1)
+		return indexedFileAnalysis{}, nil
+	}, nil)
+	index.stop()
+	index.start()
+	if err := index.waitReady(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("stopped index readiness = %v, want context.Canceled", err)
+	}
+	if got := parses.Load(); got != 0 {
+		t.Fatalf("stopped index restarted %d parser jobs", got)
 	}
 }
 
@@ -818,7 +1057,7 @@ func TestCachedWorkspaceSymbolQueryUsesCurrentSnapshotWhileOverlayPending(t *tes
 	<-s.analysisPermits
 }
 
-func waitForWorkspaceSymbol(t *testing.T, index *workspaceAnalysisIndex, name string) {
+func waitForWorkspaceSymbol(t testing.TB, index *workspaceAnalysisIndex, name string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -831,7 +1070,7 @@ func waitForWorkspaceSymbol(t *testing.T, index *workspaceAnalysisIndex, name st
 	t.Fatalf("workspace symbol %q was not published: %+v, %v", name, got, err)
 }
 
-func waitForWorkspaceCall(t *testing.T, index *workspaceAnalysisIndex, name string) {
+func waitForWorkspaceCall(t testing.TB, index *workspaceAnalysisIndex, name string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

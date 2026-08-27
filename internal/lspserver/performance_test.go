@@ -386,3 +386,63 @@ func TestAnalysisPermitPreCanceledContextDoesNotWait(t *testing.T) {
 	}
 	<-s.analysisPermits
 }
+
+func TestAnalysisPermitInteractivePriority(t *testing.T) {
+	s := &Server{analysisPermits: make(chan struct{}, 1)}
+	holderRelease, _, err := s.acquireAnalysisPermit(context.Background(), "background")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backgroundDone := make(chan func(), 1)
+	go func() {
+		release, _, acquireErr := s.acquireAnalysisPermit(context.Background(), "background")
+		if acquireErr != nil {
+			return
+		}
+		backgroundDone <- release
+	}()
+	select {
+	case release := <-backgroundDone:
+		release()
+		t.Fatal("background waiter acquired the held permit")
+	default:
+	}
+
+	interactiveDone := make(chan func(), 1)
+	go func() {
+		release, _, acquireErr := s.acquireAnalysisPermit(context.Background(), "interactive")
+		if acquireErr != nil {
+			return
+		}
+		interactiveDone <- release
+	}()
+	deadline := time.Now().Add(time.Second)
+	for s.interactivePermitWaiters.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if s.interactivePermitWaiters.Load() == 0 {
+		t.Fatal("interactive waiter did not register")
+	}
+
+	holderRelease()
+	var interactiveRelease func()
+	select {
+	case interactiveRelease = <-interactiveDone:
+	case <-time.After(time.Second):
+		t.Fatal("interactive waiter did not acquire the released permit")
+	}
+	select {
+	case release := <-backgroundDone:
+		release()
+		t.Fatal("background waiter bypassed the interactive waiter")
+	default:
+	}
+	interactiveRelease()
+	select {
+	case release := <-backgroundDone:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("background waiter did not resume after interactive release")
+	}
+}

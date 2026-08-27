@@ -94,13 +94,16 @@ type Server struct {
 	// set by production construction and therefore has no runtime cost there.
 	performanceHook func(stage, path string)
 
-	diagMu              sync.Mutex
-	diagStates          map[string]*diagnosticState
-	diagWorkers         sync.WaitGroup
-	diagStopped         bool
-	analysisPermits     chan struct{}
-	overlayBuilds       atomic.Uint64
-	overlayPublications atomic.Uint64
+	diagMu                   sync.Mutex
+	diagStates               map[string]*diagnosticState
+	diagWorkers              sync.WaitGroup
+	diagStopped              bool
+	analysisPermits          chan struct{}
+	analysisPermitMu         sync.Mutex
+	analysisPermitChanged    chan struct{}
+	interactivePermitWaiters atomic.Int64
+	overlayBuilds            atomic.Uint64
+	overlayPublications      atomic.Uint64
 
 	docLifecycleMu            sync.Mutex
 	docLifecycles             map[string]*sync.Mutex
@@ -228,6 +231,7 @@ func New(opts Options) (*Server, func(), error) {
 		semanticQueries:           semanticquery.New(semanticquery.Options{}),
 		semanticInvalidationPaths: make(map[string]struct{}),
 		analysisPermits:           make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
+		analysisPermitChanged:     make(chan struct{}),
 	}
 	s.analysis = s.newWorkspaceAnalysisIndex()
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
@@ -347,6 +351,9 @@ func New(opts Options) (*Server, func(), error) {
 	}
 	return s, func() {
 		s.stopDiagnostics()
+		if s.analysis != nil {
+			s.analysis.stop()
+		}
 		s.docs.closeAll()
 		cleanup()
 	}, nil
@@ -583,6 +590,9 @@ func codeLensConfigFromInitialize(params *protocol.InitializeParams) intel.CodeL
 
 func (s *Server) shutdown(_ *glsp.Context) error {
 	s.stopDiagnostics()
+	if s.analysis != nil {
+		s.analysis.stop()
+	}
 	s.docs.closeAll()
 	s.logger.Printf("shutdown")
 	return nil
@@ -1789,29 +1799,42 @@ func (s *Server) runDocumentAnalysis(
 		}
 		started := time.Now()
 		s.overlayBuilds.Add(1)
-		analysis, included, err := s.analyzeWorkspaceOverlay(runCtx, doc)
-		published := false
+		declarations, included, err := s.analyzeWorkspaceOverlayDeclarations(runCtx, doc)
+		publishedDeclarations := false
 		if err == nil && included && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
-			published = s.analysis.publishOverlay(doc, generation, analysis)
+			publishedDeclarations = s.analysis.publishOverlayDeclarations(doc, generation, declarations)
 		}
-		s.logWorkspaceOverlayPerformance(doc, generation, started, err, !published)
-		if !published && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
+		if !publishedDeclarations && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
 			s.analysis.abandonOverlay(doc, generation)
 		}
-		if published {
-			s.overlayPublications.Add(1)
-			newSignatures := procedureSignaturesFromSymbols(analysis.symbols)
-			state.mu.Lock()
-			oldSignatures := state.publishedSignatures
-			if state.open && state.generation == generation {
-				state.publishedSignatures = newSignatures
-				state.overlayGeneration = generation
+		if !publishedDeclarations {
+			s.logWorkspaceOverlayPerformance(doc, generation, started, err, true)
+		}
+		if publishedDeclarations && runCtx.Err() == nil {
+			analysis, semanticIncluded, semanticErr := s.analyzeWorkspaceOverlay(runCtx, doc)
+			publishedSemantic := false
+			if semanticErr == nil && semanticIncluded && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
+				publishedSemantic = s.analysis.publishOverlaySemantic(doc, generation, analysis)
 			}
-			state.mu.Unlock()
-			s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
-			project, impacted := s.analysis.projectChangeClass("interactive")
-			s.scheduleProjectDependentDiagnostics(notify, doc.URI, impacted)
-			s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
+			s.logWorkspaceOverlayPerformance(doc, generation, started, semanticErr, !publishedSemantic)
+			if !publishedSemantic && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
+				s.analysis.abandonOverlay(doc, generation)
+			}
+			if publishedSemantic {
+				s.overlayPublications.Add(1)
+				newSignatures := procedureSignaturesFromSymbols(declarations.symbols)
+				state.mu.Lock()
+				oldSignatures := state.publishedSignatures
+				if state.open && state.generation == generation {
+					state.publishedSignatures = newSignatures
+					state.overlayGeneration = generation
+				}
+				state.mu.Unlock()
+				s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
+				project, impacted := s.analysis.projectChangeClass("interactive")
+				s.scheduleProjectDependentDiagnostics(notify, doc.URI, impacted)
+				s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
+			}
 		}
 	}
 	// Overlay failure deliberately does not suppress file-local diagnostics.
@@ -2161,6 +2184,12 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	index := newWorkspaceAnalysisIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFileContext, s.logInitialWorkspaceIndexPerformance)
 	index.nonBlockingQueries = true
 	index.performance = s.performance
+	index.logDeclarations = s.logInitialWorkspaceDeclarationPerformance
+	index.parseDeclarations = s.parseIndexedDeclarationsContext
+	if permits := cap(s.analysisPermits); permits > 0 {
+		index.initialWorkers = permits
+		index.semanticWorkers = max(1, permits-1)
+	}
 	return index
 }
 
@@ -2271,20 +2300,10 @@ func (s *Server) analyzeIndexedDocumentContextClass(ctx context.Context, doc int
 		doc = snapshot.Document()
 		defer snapshot.Retire()
 	}
-	s.notifyPerformanceHook("declaration-start", doc.Path)
-	declarationMeasurement := s.performance.start("workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
 	syms, err := s.analyzer.DocumentSymbolsContext(ctx, doc)
 	if err != nil {
-		declarationMeasurement.finish(len(syms), 0, err)
 		return indexedFileAnalysis{}, err
 	}
-	if err := ctx.Err(); err != nil {
-		declarationMeasurement.finish(len(syms), 0, err)
-		return indexedFileAnalysis{}, err
-	}
-	declarationMeasurement.finish(len(syms), 0, nil)
-	s.performance.addCounter(performanceCounterWorkspaceDeclarationBuilds, 1, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
-	s.notifyPerformanceHook("declaration-ready", doc.Path)
 	if err := ctx.Err(); err != nil {
 		return indexedFileAnalysis{}, err
 	}
@@ -2340,6 +2359,54 @@ func (s *Server) analyzeIndexedDocumentContextClass(ctx context.Context, doc int
 	return result, nil
 }
 
+// parseIndexedDeclarationsContext builds only the declaration view needed by
+// interactive workspace queries.  It intentionally stops before ProcedureIR,
+// call-site, and CFG construction; the semantic phase reparses through the
+// existing full callback after declaration readiness is published.
+func (s *Server) parseIndexedDeclarationsContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {
+	release, _, err := s.acquireAnalysisPermit(ctx, "background")
+	if err != nil {
+		return indexedFileAnalysis{}, err
+	}
+	defer release()
+	doc := intel.Document{Path: file.Path, Source: string(body), ModuleKind: file.ModuleKind}
+	return s.analyzeIndexedDeclarationsDocumentContext(ctx, doc, "background")
+}
+
+func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, doc intel.Document, class string) (indexedFileAnalysis, error) {
+	snapshot := doc.Snapshot
+	if snapshot == nil || !snapshot.Matches(doc) {
+		snapshot = intel.NewAnalysisSnapshot(doc)
+		defer snapshot.Retire()
+	}
+	doc = snapshot.Document()
+	s.notifyPerformanceHook("declaration-start", doc.Path)
+	declarationMeasurement := s.performance.start("workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
+	syms, err := s.analyzer.DocumentSymbolsContext(ctx, doc)
+	if err != nil {
+		declarationMeasurement.finish(len(syms), 0, err)
+		return indexedFileAnalysis{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		declarationMeasurement.finish(len(syms), 0, err)
+		return indexedFileAnalysis{}, err
+	}
+	declarationMeasurement.finish(len(syms), 0, nil)
+	s.performance.addCounter(performanceCounterWorkspaceDeclarationBuilds, 1, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
+	s.notifyPerformanceHook("declaration-ready", doc.Path)
+	incomplete := false
+	if parsed, parseErr := snapshot.ParsedDocument(); parseErr == nil {
+		_ = parsed.Read(func(view vbaast.ParsedView) error {
+			incomplete = view.HasError || view.HasMissing
+			return nil
+		})
+	}
+	return indexedFileAnalysis{
+		path: doc.Path, moduleKind: doc.ModuleKind, symbols: syms,
+		declarationIncomplete: incomplete,
+	}, nil
+}
+
 func (s *Server) notifyPerformanceHook(stage, path string) {
 	if s.performanceHook != nil {
 		s.performanceHook(stage, path)
@@ -2359,6 +2426,26 @@ func (s *Server) analyzeWorkspaceOverlay(ctx context.Context, doc intel.Document
 	// analyzeIndexedDocument intentionally constructs symbols before IR and
 	// calls, so interactive document-local handlers never wait on this permit.
 	analysis, err := s.analyzeIndexedDocumentContext(ctx, doc)
+	if err != nil {
+		return indexedFileAnalysis{}, true, err
+	}
+	if err := ctx.Err(); err != nil {
+		return indexedFileAnalysis{}, true, err
+	}
+	return analysis, true, nil
+}
+
+func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc intel.Document) (indexedFileAnalysis, bool, error) {
+	file, included, err := symbols.SourceFileForPath(s.opts.RootDir, s.opts.Config, doc.Path)
+	if err != nil || !included {
+		return indexedFileAnalysis{}, included, err
+	}
+	if err := ctx.Err(); err != nil {
+		return indexedFileAnalysis{}, true, err
+	}
+	doc.Path = file.Path
+	doc.ModuleKind = file.ModuleKind
+	analysis, err := s.analyzeIndexedDeclarationsDocumentContext(ctx, doc, "interactive")
 	if err != nil {
 		return indexedFileAnalysis{}, true, err
 	}

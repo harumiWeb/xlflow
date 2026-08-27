@@ -21,6 +21,12 @@ per-file stages. The existing request records remain compatible; their
 `stage` field is the request operation and diagnostics additionally include a
 `phase` of `fast` or `full`.
 
+Workspace readiness is recorded independently: declaration indexing publishes
+`operation="workspaceDeclarations/index/initial"` when interactive symbol
+postings are complete, while semantic preparation publishes the existing
+`operation="workspaceSymbols/index/initial"` after IR/CFG/call-site entries are
+complete. Neither record changes LSP response fields.
+
 ## Stage names
 
 The following names are stable and intended for benchmark/profile scripts:
@@ -92,7 +98,10 @@ rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 tes
 measures `Initialization`, `ImmediateInteractive`, `WhileIndexing`,
 `AfterDeclarationBeforeSemantic`, and `AfterSemanticReady`. The latter three
 use parser checkpoints rather than sleeps, so hover and definition are sampled
-while the background index is at a known readiness boundary.
+while the background index is at a known readiness boundary. The declaration
+checkpoint must already resolve the cross-file target even though semantic
+preparation is blocked; the semantic checkpoint must preserve the same result
+after IR/CFG/call-site publication.
 
 The giant single-module lifecycle benchmark uses the existing generated
 ROneCOne-scale shape:

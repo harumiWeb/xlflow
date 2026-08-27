@@ -168,7 +168,10 @@ func (p *performanceRecorder) counterTotal(name string) uint64 {
 }
 
 // acquireAnalysisPermit keeps the existing bounded worker budget while making
-// contention visible. The fast path deliberately performs no timing work.
+// contention visible. Interactive waiters are registered before they try the
+// channel, and background waiters sleep on a generation signal instead of
+// competing in the channel's FIFO-less send queue. This gives a released slot
+// to an interactive request before resuming background work.
 func (s *Server) acquireAnalysisPermit(ctx context.Context, class string) (func(), time.Duration, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -179,38 +182,79 @@ func (s *Server) acquireAnalysisPermit(ctx context.Context, class string) (func(
 	if s.analysisPermits == nil {
 		return func() {}, 0, nil
 	}
-	select {
-	case s.analysisPermits <- struct{}{}:
-		return func() { <-s.analysisPermits }, 0, nil
-	default:
+	if class == "interactive" {
+		s.analysisPermitMu.Lock()
+		s.interactivePermitWaiters.Add(1)
+		s.analysisPermitMu.Unlock()
+		defer s.interactivePermitWaiters.Add(-1)
 	}
-	measurement := s.performance.start("scheduler/permit", performanceStagePermitWait, class, "")
-	select {
-	case s.analysisPermits <- struct{}{}:
-		wait := time.Duration(0)
-		if measurement.recorder != nil {
-			wait = time.Since(measurement.started)
+
+	var measurement performanceStageMeasurement
+	waited := false
+	for {
+		s.analysisPermitMu.Lock()
+		if s.analysisPermitChanged == nil {
+			s.analysisPermitChanged = make(chan struct{})
 		}
-		counter := performanceCounterInteractivePermitWaits
-		if class == "background" {
-			counter = performanceCounterBackgroundPermitWaits
+		changed := s.analysisPermitChanged
+		backgroundBlocked := class == "background" && s.interactivePermitWaiters.Load() > 0
+		if !backgroundBlocked {
+			select {
+			case s.analysisPermits <- struct{}{}:
+				s.analysisPermitMu.Unlock()
+				if !waited {
+					return s.releaseAnalysisPermit, 0, nil
+				}
+				wait := time.Duration(0)
+				if measurement.recorder != nil {
+					wait = time.Since(measurement.started)
+				}
+				counter := performanceCounterInteractivePermitWaits
+				if class == "background" {
+					counter = performanceCounterBackgroundPermitWaits
+				}
+				s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
+				measurement.finish(0, wait, nil)
+				return s.releaseAnalysisPermit, wait, nil
+			default:
+			}
 		}
-		s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
-		measurement.finish(0, wait, nil)
-		return func() { <-s.analysisPermits }, wait, nil
-	case <-ctx.Done():
-		wait := time.Duration(0)
-		if measurement.recorder != nil {
-			wait = time.Since(measurement.started)
+		s.analysisPermitMu.Unlock()
+		if !waited {
+			measurement = s.performance.start("scheduler/permit", performanceStagePermitWait, class, "")
+			waited = true
 		}
-		counter := performanceCounterInteractivePermitWaits
-		if class == "background" {
-			counter = performanceCounterBackgroundPermitWaits
+		select {
+		case <-changed:
+		case <-time.After(10 * time.Millisecond):
+		case <-ctx.Done():
+			wait := time.Duration(0)
+			if measurement.recorder != nil {
+				wait = time.Since(measurement.started)
+			}
+			counter := performanceCounterInteractivePermitWaits
+			if class == "background" {
+				counter = performanceCounterBackgroundPermitWaits
+			}
+			s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
+			measurement.finish(0, wait, ctx.Err())
+			return nil, wait, ctx.Err()
 		}
-		s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
-		measurement.finish(0, wait, ctx.Err())
-		return nil, wait, ctx.Err()
 	}
+}
+
+func (s *Server) releaseAnalysisPermit() {
+	if s.analysisPermits == nil {
+		return
+	}
+	<-s.analysisPermits
+	s.analysisPermitMu.Lock()
+	if s.analysisPermitChanged == nil {
+		s.analysisPermitChanged = make(chan struct{})
+	}
+	close(s.analysisPermitChanged)
+	s.analysisPermitChanged = make(chan struct{})
+	s.analysisPermitMu.Unlock()
 }
 
 type performanceMeasurement struct {
@@ -366,6 +410,24 @@ func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time
 		outcome,
 	)
 	s.performance.logCounterSnapshot("workspaceSymbols/index/initial", performanceStageWorkspaceDiscovery, "background", s.opts.RootDir)
+}
+
+func (s *Server) logInitialWorkspaceDeclarationPerformance(fileCount int, started time.Time, err error) {
+	if !s.opts.PerformanceLog {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	s.logger.Printf(
+		"performance operation=%q elapsed_ms=%.3f file_count=%d outcome=%q",
+		"workspaceDeclarations/index/initial",
+		float64(time.Since(started))/float64(time.Millisecond),
+		fileCount,
+		outcome,
+	)
+	s.performance.logCounterSnapshot("workspaceDeclarations/index/initial", performanceStageWorkspaceDiscovery, "background", s.opts.RootDir)
 }
 
 func (s *Server) logDocumentCachePerformance(operation, cache string, doc intel.Document, resultCount int, started time.Time, err error) {

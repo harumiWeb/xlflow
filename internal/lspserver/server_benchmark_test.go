@@ -854,8 +854,14 @@ func BenchmarkLSPStartup(b *testing.B) {
 				b.Fatal(err)
 			}
 			waitLSPStartupEvent(b, declared)
+			// The parser hook marks the declaration parse boundary; wait for the
+			// corresponding posting publication before measuring the query itself.
+			waitForWorkspaceSymbol(b, s.analysis, "CrossFileTarget")
 			b.StartTimer()
 			hover, definition := startupInteractiveQueries(b, s, fixture)
+			if hover != 1 || definition != 1 {
+				b.Fatalf("declaration-ready interactive results = hover %d, definition %d; want 1/1", hover, definition)
+			}
 			hovers += hover
 			definitions += definition
 			b.StopTimer()

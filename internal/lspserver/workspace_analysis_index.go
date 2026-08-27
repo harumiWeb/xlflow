@@ -27,22 +27,31 @@ import (
 // All mutation is path-scoped: replacing a file removes and re-adds only that
 // file's references. The index never reparses unaffected source files.
 type workspaceAnalysisIndex struct {
-	root        string
-	config      config.Config
-	parse       func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
-	log         func(fileCount int, started time.Time, err error)
-	performance *performanceRecorder
+	root   string
+	config config.Config
+	parse  func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
+	// parseDeclarations is the lightweight phase used by the server startup
+	// pipeline.  It is optional so the direct index tests and compatibility
+	// callers can continue to provide one combined parser.
+	parseDeclarations func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
+	log               func(fileCount int, started time.Time, err error)
+	logDeclarations   func(fileCount int, started time.Time, err error)
+	performance       *performanceRecorder
 	// nonBlockingQueries allows LSP requests to observe the coherently indexed
 	// subset while the initial background scan is still running. Direct index
 	// users retain the historical wait-for-ready behavior by default.
 	nonBlockingQueries bool
 
-	mu        sync.RWMutex
-	startOnce sync.Once
-	ready     chan struct{}
-	readyErr  error
-	disk      map[string]indexedFileAnalysis
-	overlays  map[string]indexedFileAnalysis
+	mu          sync.RWMutex
+	startOnce   sync.Once
+	lifecycleMu sync.Mutex
+	started     bool
+	stopped     bool
+	ready       chan struct{}
+	readyOnce   sync.Once
+	readyErr    error
+	disk        map[string]indexedFileAnalysis
+	overlays    map[string]indexedFileAnalysis
 	// pending masks both the saved file and the last published overlay while a
 	// newer in-memory document generation is being analyzed.  Workspace
 	// queries therefore remain conservative instead of returning stale data.
@@ -68,6 +77,13 @@ type workspaceAnalysisIndex struct {
 	byText              map[string][]callRef
 	projectMu           sync.Mutex
 	lastProjectSnapshot intel.ProjectAnalysisSnapshot
+	declarations        *workspaceDeclarationIndex
+	initialWorkers      int
+	semanticWorkers     int
+	initialCtx          context.Context
+	initialCancel       context.CancelFunc
+	initialWG           sync.WaitGroup
+	stopOnce            sync.Once
 }
 
 type diskParse struct {
@@ -84,16 +100,26 @@ type diskRefresh struct {
 	active     *diskParse
 }
 
+// initialSource is the immutable source generation shared by the declaration
+// and semantic startup phases.  Keeping one source/version pair prevents the
+// two layers from accidentally publishing results parsed from different reads
+// when a watcher notification is still in flight.
+type initialSource struct {
+	source  []byte
+	version string
+}
+
 type indexedFileAnalysis struct {
-	path           string
-	version        string
-	moduleKind     string
-	source         string
-	symbols        []intel.Symbol
-	callSites      []calls.CallSite
-	typeReferences []calls.TypeReference
-	procedureIR    procedureir.DocumentIR
-	controlFlow    vbacfg.Document
+	path                  string
+	version               string
+	moduleKind            string
+	declarationIncomplete bool
+	source                string
+	symbols               []intel.Symbol
+	callSites             []calls.CallSite
+	typeReferences        []calls.TypeReference
+	procedureIR           procedureir.DocumentIR
+	controlFlow           vbacfg.Document
 }
 
 // indexedAnalysisIncomplete reports whether an indexed entry was produced
@@ -160,16 +186,31 @@ type workspaceCallQuery struct {
 }
 
 func newWorkspaceAnalysisIndex(root string, cfg config.Config, parse func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error), logInitial func(int, time.Time, error)) *workspaceAnalysisIndex {
+	initialCtx, initialCancel := context.WithCancel(context.Background())
 	return &workspaceAnalysisIndex{
 		root: root, config: cfg, parse: parse, log: logInitial, ready: make(chan struct{}),
 		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, pending: map[string]uint64{}, incomplete: map[string]bool{}, effective: map[string]indexedFileAnalysis{},
 		generation: map[string]uint64{}, diskParses: map[string]*diskParse{}, exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{}, moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
 		byCaller: map[string][]callRef{}, byBaseName: map[string][]callRef{}, byText: map[string][]callRef{},
+		declarations: newWorkspaceDeclarationIndex(root, cfg), initialWorkers: 1, semanticWorkers: 1,
+		initialCtx: initialCtx, initialCancel: initialCancel,
 	}
 }
 
 func (x *workspaceAnalysisIndex) start() {
-	x.startOnce.Do(func() { go x.buildInitial() })
+	x.lifecycleMu.Lock()
+	defer x.lifecycleMu.Unlock()
+	if x.stopped {
+		return
+	}
+	x.startOnce.Do(func() {
+		x.started = true
+		x.initialWG.Add(1)
+		go func() {
+			defer x.initialWG.Done()
+			x.buildInitial()
+		}()
+	})
 }
 
 func (x *workspaceAnalysisIndex) waitReady() error {
@@ -197,6 +238,43 @@ func (x *workspaceAnalysisIndex) queryReady() error {
 	}
 }
 
+// waitDeclarationsReady is the lightweight readiness boundary used by
+// workspace symbol queries.  waitReady remains the semantic compatibility
+// boundary for project/call-graph consumers.
+func (x *workspaceAnalysisIndex) waitDeclarationsReady() error {
+	x.start()
+	return x.declarations.waitReady()
+}
+
+func (x *workspaceAnalysisIndex) stop() {
+	x.stopOnce.Do(func() {
+		x.lifecycleMu.Lock()
+		x.stopped = true
+		started := x.started
+		x.lifecycleMu.Unlock()
+		if x.initialCancel != nil {
+			x.initialCancel()
+		}
+		x.mu.Lock()
+		for _, active := range x.diskParses {
+			active.cancel()
+		}
+		x.mu.Unlock()
+		x.initialWG.Wait()
+		if !started {
+			x.declarations.markReady(context.Canceled)
+			x.mu.Lock()
+			x.readyErr = context.Canceled
+			x.mu.Unlock()
+			x.readyOnce.Do(func() { close(x.ready) })
+		}
+	})
+}
+
+func (x *workspaceAnalysisIndex) closeReady() {
+	x.readyOnce.Do(func() { close(x.ready) })
+}
+
 // completeLocked reports whether the effective index is safe for
 // project-wide negative resolution. Callers must hold x.mu (for reading or
 // writing) while invoking this helper. In non-blocking query mode the initial
@@ -204,7 +282,7 @@ func (x *workspaceAnalysisIndex) queryReady() error {
 // insufficient; readiness and its discovery error are part of the same
 // coherence check.
 func (x *workspaceAnalysisIndex) completeLocked() bool {
-	if len(x.pending) != 0 || len(x.incomplete) != 0 {
+	if len(x.pending) != 0 || len(x.incomplete) != 0 || !x.declarations.complete() {
 		return false
 	}
 	select {
@@ -218,26 +296,173 @@ func (x *workspaceAnalysisIndex) completeLocked() bool {
 func (x *workspaceAnalysisIndex) buildInitial() {
 	started := time.Now()
 	discovery := x.performance.start("workspace/index", performanceStageWorkspaceDiscovery, "background", x.root)
-	files, err := symbols.DiscoverSourceFiles(symbols.Options{RootDir: x.root, Config: x.config})
+	files, err := symbols.DiscoverSourceFilesContext(x.initialCtx, symbols.Options{RootDir: x.root, Config: x.config})
 	discovery.finish(len(files), 0, err)
 	x.performance.addCounter(performanceCounterWorkspaceFilesDiscovered, uint64(len(files)), "workspace/index", performanceStageWorkspaceDiscovery, "background", x.root)
-	if err == nil {
+	if err == nil && x.parseDeclarations != nil {
+		// The declaration phase is intentionally complete before semantic
+		// preparation starts.  This makes the symbol index useful as soon as
+		// possible and keeps heavyweight IR/CFG work from delaying it.
+		declarationStarted := time.Now()
+		sources := x.buildInitialDeclarations(files)
+		x.declarations.markReady(nil)
+		if x.logDeclarations != nil {
+			x.logDeclarations(len(files), declarationStarted, nil)
+		}
+		x.buildInitialSemantics(files, sources)
+	} else if err == nil {
 		for _, file := range files {
-			// A single unreadable or unrecoverable source file makes the
-			// project snapshot incomplete, but must not prevent the remaining
-			// files from being indexed.  upsertDisk records that path in
-			// incomplete; readiness errors are reserved for workspace discovery
-			// failures so a later clean refresh can restore completeness.
+			// Compatibility path for direct index users that provide one
+			// combined parser.  The combined entry is projected into both
+			// layers after it completes.
 			_ = x.upsertDisk(file, true)
 		}
+		x.declarations.markReady(nil)
+	} else {
+		x.declarations.markReady(err)
 	}
 	x.mu.Lock()
 	x.readyErr = err
 	x.mu.Unlock()
+	if err != nil {
+		// A discovery failure is the only initial readiness error.  Per-file
+		// read/parse failures are represented by incomplete path state.
+		x.declarations.markReady(err)
+	}
 	if x.log != nil {
 		x.log(len(files), started, err)
 	}
-	close(x.ready)
+	x.closeReady()
+}
+
+func (x *workspaceAnalysisIndex) buildInitialDeclarations(files []symbols.SourceFile) map[string]initialSource {
+	workers := max(1, x.initialWorkers)
+	jobs := make(chan symbols.SourceFile)
+	sources := make(map[string]initialSource, len(files))
+	var sourcesMu sync.Mutex
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range jobs {
+				if x.initialCtx != nil {
+					if err := x.initialCtx.Err(); err != nil {
+						return
+					}
+				}
+				source, readErr := os.ReadFile(file.Path)
+				if readErr != nil {
+					x.declarations.recordInitialFailure(file.Path)
+					continue
+				}
+				key := symbolFileKey(file.Path)
+				version := sourceVersion(source)
+				if key != "" {
+					sourcesMu.Lock()
+					sources[key] = initialSource{source: append([]byte(nil), source...), version: version}
+					sourcesMu.Unlock()
+				}
+				entry, parseErr := x.parseDeclarations(x.initialCtx, file, source)
+				if parseErr != nil {
+					x.declarations.recordInitialFailure(file.Path)
+					continue
+				}
+				entry.path = file.Path
+				entry.version = version
+				entry.moduleKind = file.ModuleKind
+				x.declarations.setDisk(file.Path, entry, 0, true)
+			}
+		}()
+	}
+sendJobs:
+	for _, file := range files {
+		select {
+		case jobs <- file:
+		case <-x.initialCtx.Done():
+			break sendJobs
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return sources
+}
+
+func (x *workspaceAnalysisIndex) buildInitialSemantics(files []symbols.SourceFile, sources map[string]initialSource) {
+	workers := max(1, x.semanticWorkers)
+	jobs := make(chan symbols.SourceFile)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range jobs {
+				if err := x.initialCtx.Err(); err != nil {
+					return
+				}
+				initial, ok := sources[symbolFileKey(file.Path)]
+				if !ok {
+					x.markInitialSemanticFailure(file.Path)
+					continue
+				}
+				entry, parseErr := x.parse(x.initialCtx, file, initial.source)
+				if parseErr != nil {
+					x.markInitialSemanticFailure(file.Path)
+					continue
+				}
+				entry.path = file.Path
+				entry.version = initial.version
+				entry.moduleKind = file.ModuleKind
+				entry.source = string(initial.source)
+				x.publishInitialSemantic(file.Path, entry)
+			}
+		}()
+	}
+sendJobs:
+	for _, file := range files {
+		select {
+		case jobs <- file:
+		case <-x.initialCtx.Done():
+			break sendJobs
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+func (x *workspaceAnalysisIndex) publishInitialSemantic(path string, entry indexedFileAnalysis) {
+	key := symbolFileKey(path)
+	if key == "" {
+		return
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.generation[key] != 0 || x.pending[key] != 0 {
+		return
+	}
+	x.disk[key] = entry
+	if indexedAnalysisIncomplete(entry) {
+		x.incomplete[key] = true
+	} else {
+		delete(x.incomplete, key)
+	}
+	if _, open := x.overlays[key]; !open {
+		x.replaceEffectiveLocked(key, entry)
+		x.revision++
+	}
+}
+
+func (x *workspaceAnalysisIndex) markInitialSemanticFailure(path string) {
+	key := symbolFileKey(path)
+	if key == "" {
+		return
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.generation[key] != 0 || x.pending[key] != 0 {
+		return
+	}
+	x.incomplete[key] = true
 }
 
 // updatePath accepts either a watcher create/change/delete notification. The
@@ -304,6 +529,10 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 			return x.removePath(file.Path)
 		}
 		x.markDiskIncomplete(key, observed)
+		if x.parseDeclarations != nil {
+			declarationGeneration := x.declarations.beginDisk(file.Path)
+			x.declarations.markIncomplete(file.Path, declarationGeneration)
+		}
 		return err
 	}
 	version := sourceVersion(source)
@@ -311,7 +540,8 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 	current, exists := x.disk[key]
 	x.mu.RUnlock()
 	currentIncomplete := indexedAnalysisIncomplete(current)
-	if exists && current.version == version && current.moduleKind == file.ModuleKind {
+	if exists && current.version == version && current.moduleKind == file.ModuleKind &&
+		(x.parseDeclarations == nil || x.declarations.matchesVersion(file.Path, version, file.ModuleKind)) {
 		x.mu.Lock()
 		if x.generation[key] == observed {
 			if currentIncomplete {
@@ -322,6 +552,25 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 		}
 		x.mu.Unlock()
 		return nil
+	}
+	declarationGeneration := uint64(0)
+	if x.parseDeclarations != nil {
+		declarationGeneration = x.declarations.beginDisk(file.Path)
+		declarationEntry, declarationErr := x.parseDeclarations(ctx, file, source)
+		if declarationErr != nil {
+			if errors.Is(declarationErr, context.Canceled) && ctx.Err() != nil {
+				return nil
+			}
+			x.markDiskIncomplete(key, observed)
+			x.declarations.markIncomplete(file.Path, declarationGeneration)
+			return declarationErr
+		}
+		declarationEntry.path = file.Path
+		declarationEntry.version = version
+		declarationEntry.moduleKind = file.ModuleKind
+		if !x.declarations.setDisk(file.Path, declarationEntry, declarationGeneration, false) {
+			return nil
+		}
 	}
 	entry, err := x.parse(ctx, file, source)
 	if err != nil {
@@ -348,6 +597,12 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 	if _, open := x.overlays[key]; !open && x.pending[key] == 0 {
 		x.replaceEffectiveLocked(key, entry)
 		x.revision++
+	}
+	if x.parseDeclarations == nil {
+		// The compatibility parser returns declarations and semantic artifacts
+		// together, so project them into the independent declaration layer only
+		// after the combined parse has completed.
+		x.declarations.setEffectiveFromEntry(file.Path, entry)
 	}
 	return nil
 }
@@ -390,6 +645,7 @@ func (x *workspaceAnalysisIndex) removePath(path string) error {
 		}
 	}
 	x.mu.Unlock()
+	x.declarations.removePath(path)
 	return nil
 }
 
@@ -418,6 +674,7 @@ func (x *workspaceAnalysisIndex) setOverlay(doc intel.Document, analysis indexed
 	x.replaceEffectiveLocked(key, analysis)
 	x.revision++
 	x.mu.Unlock()
+	x.declarations.setOverlay(doc, analysis)
 }
 
 // beginOverlay reserves an open-document generation and removes any older
@@ -429,6 +686,7 @@ func (x *workspaceAnalysisIndex) beginOverlay(doc intel.Document, generation uin
 	if key == "" || generation == 0 {
 		return indexedFileAnalysis{}, false
 	}
+	declarationPrevious, declarationExists := x.declarations.beginOverlay(doc, generation)
 	x.mu.Lock()
 	previous, ok := x.effective[key]
 	x.generation[key]++
@@ -442,12 +700,25 @@ func (x *workspaceAnalysisIndex) beginOverlay(doc intel.Document, generation uin
 	x.removeEffectiveLocked(key)
 	x.revision++
 	x.mu.Unlock()
+	if !ok {
+		previous, ok = declarationPrevious, declarationExists
+	}
 	return previous, ok
 }
 
 // publishOverlay atomically publishes only the generation most recently
 // reserved by beginOverlay. Superseded and close/reopen workers are rejected.
 func (x *workspaceAnalysisIndex) publishOverlay(doc intel.Document, generation uint64, analysis indexedFileAnalysis) bool {
+	declarationsPublished := x.publishOverlayDeclarations(doc, generation, analysis)
+	semanticPublished := x.publishOverlaySemantic(doc, generation, analysis)
+	return declarationsPublished && semanticPublished
+}
+
+func (x *workspaceAnalysisIndex) publishOverlayDeclarations(doc intel.Document, generation uint64, analysis indexedFileAnalysis) bool {
+	return x.declarations.publishOverlay(doc, generation, analysis)
+}
+
+func (x *workspaceAnalysisIndex) publishOverlaySemantic(doc intel.Document, generation uint64, analysis indexedFileAnalysis) bool {
 	key := documentSymbolKey(doc)
 	if key == "" {
 		return false
@@ -477,6 +748,7 @@ func (x *workspaceAnalysisIndex) publishOverlay(doc intel.Document, generation u
 // for the still-open buffer. An empty overlay marker keeps watcher disk updates
 // masked until the next document generation or didClose.
 func (x *workspaceAnalysisIndex) abandonOverlay(doc intel.Document, generation uint64) bool {
+	x.declarations.abandonOverlay(doc, generation)
 	key := documentSymbolKey(doc)
 	if key == "" {
 		return false
@@ -532,6 +804,11 @@ func (x *workspaceAnalysisIndex) beginClearOverlay(path string) *diskRefresh {
 	active := &diskParse{generation: observed, cancel: cancel}
 	x.diskParses[key] = active
 	x.mu.Unlock()
+	// Closing an open document must mask its declaration layer immediately as
+	// well; otherwise a workspace symbol query can observe the stale overlay
+	// while the fresh disk parse is still in flight.
+	x.declarations.removePath(path)
+	x.declarations.recordInitialFailure(path)
 	return &diskRefresh{key: key, path: path, generation: observed, ctx: ctx, cancel: cancel, active: active}
 }
 
@@ -554,12 +831,14 @@ func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (index
 	}
 	if !included {
 		x.completeClearWithoutEntry(refresh)
+		x.declarations.removePath(refresh.path)
 		return indexedFileAnalysis{}, false, nil
 	}
 	source, err := os.ReadFile(file.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			x.completeClearWithoutEntry(refresh)
+			x.declarations.removePath(refresh.path)
 			return indexedFileAnalysis{}, false, nil
 		}
 		return indexedFileAnalysis{}, false, err
@@ -589,6 +868,7 @@ func (x *workspaceAnalysisIndex) finishClearOverlay(refresh *diskRefresh) (index
 	}
 	x.replaceEffectiveLocked(refresh.key, entry)
 	x.revision++
+	x.declarations.setEffectiveFromEntry(file.Path, entry)
 	return entry, true, nil
 }
 
@@ -762,87 +1042,38 @@ func cloneTypeReferences(in []calls.TypeReference) []calls.TypeReference {
 }
 
 func (x *workspaceAnalysisIndex) searchContains(query string) ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	query = normalizeSymbolQuery(query)
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	refs := x.all
-	if query == "" {
-		return x.symbolsForRefsLocked(refs), nil
-	}
-	out := make([]intel.Symbol, 0)
-	for _, ref := range refs {
-		sym, ok := x.symbolForRefLocked(ref)
-		if ok && (strings.Contains(strings.ToLower(sym.Name), query) || strings.Contains(strings.ToLower(qualifiedSymbolName(sym)), query)) {
-			out = append(out, sym)
-		}
-	}
-	return out, nil
+	x.start()
+	return x.declarations.searchContains(query, x.nonBlockingQueries)
 }
 
 func (x *workspaceAnalysisIndex) symbolSnapshot() ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	return x.symbolsForRefsLocked(x.all), nil
+	x.start()
+	return x.declarations.symbolSnapshot(x.nonBlockingQueries)
 }
 
 func (x *workspaceAnalysisIndex) searchExact(name string) ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	return x.symbolsForRefsLocked(x.exactName[normalizeSymbolQuery(name)]), nil
+	x.start()
+	return x.declarations.searchExact(name, x.nonBlockingQueries)
 }
 
 func (x *workspaceAnalysisIndex) searchPrefix(prefix string) ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	prefix = normalizeSymbolQuery(prefix)
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	if prefix == "" {
-		return x.symbolsForRefsLocked(x.all), nil
-	}
-	start := sort.SearchStrings(x.exactKeys, prefix)
-	buckets := make([][]symbolRef, 0)
-	for i := start; i < len(x.exactKeys) && strings.HasPrefix(x.exactKeys[i], prefix); i++ {
-		buckets = append(buckets, x.exactName[x.exactKeys[i]])
-	}
-	return x.mergePostingBucketsLocked(buckets), nil
+	x.start()
+	return x.declarations.searchPrefix(prefix, x.nonBlockingQueries)
 }
 
 func (x *workspaceAnalysisIndex) searchQualified(name string) ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	return x.symbolsForRefsLocked(x.qualified[normalizeSymbolQuery(name)]), nil
+	x.start()
+	return x.declarations.searchQualified(name, x.nonBlockingQueries)
 }
 
 func (x *workspaceAnalysisIndex) searchModule(name string) ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	return x.symbolsForRefsLocked(x.moduleName[normalizeSymbolQuery(name)]), nil
+	x.start()
+	return x.declarations.searchModule(name, x.nonBlockingQueries)
 }
 
 func (x *workspaceAnalysisIndex) searchKind(kind string) ([]intel.Symbol, error) {
-	if err := x.queryReady(); err != nil {
-		return nil, err
-	}
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	return x.symbolsForRefsLocked(x.symbolKind[normalizeSymbolQuery(kind)]), nil
+	x.start()
+	return x.declarations.searchKind(kind, x.nonBlockingQueries)
 }
 
 // queryResolvedCalls snapshots both raw sites and the effective symbol set
@@ -1090,40 +1321,6 @@ func (x *workspaceAnalysisIndex) removePostingLocked(postings map[string][]symbo
 		return
 	}
 	postings[key] = refs
-}
-
-func (x *workspaceAnalysisIndex) symbolsForRefsLocked(refs []symbolRef) []intel.Symbol {
-	out := make([]intel.Symbol, 0, len(refs))
-	for _, ref := range refs {
-		if sym, ok := x.symbolForRefLocked(ref); ok {
-			out = append(out, sym)
-		}
-	}
-	return out
-}
-
-func (x *workspaceAnalysisIndex) mergePostingBucketsLocked(buckets [][]symbolRef) []intel.Symbol {
-	positions := make([]int, len(buckets))
-	out := make([]intel.Symbol, 0)
-	for {
-		best := -1
-		for i, bucket := range buckets {
-			if positions[i] >= len(bucket) {
-				continue
-			}
-			if best < 0 || x.refLessLocked(bucket[positions[i]], buckets[best][positions[best]]) {
-				best = i
-			}
-		}
-		if best < 0 {
-			return out
-		}
-		ref := buckets[best][positions[best]]
-		positions[best]++
-		if symbol, ok := x.symbolForRefLocked(ref); ok {
-			out = append(out, symbol)
-		}
-	}
 }
 
 func (x *workspaceAnalysisIndex) symbolForRefLocked(ref symbolRef) (intel.Symbol, bool) {

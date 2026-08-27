@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Improved LSP workspace startup by publishing a bounded, lightweight
+  declaration index independently from background semantic indexing. Cross-file
+  symbol queries can now use declarations before IR/CFG preparation completes;
+  open-document generation, cancellation, and existing LSP response contracts
+  remain unchanged.
+
 - Improved LSP diagnostics for VBA modules with at least 10,000 source lines:
   `didOpen` now publishes document-local Fast diagnostics before the delayed
   workspace overlay and Full diagnostics pass, while generation-safe
