@@ -840,6 +840,14 @@ continue to use materialized `Resolve`. This overlay boundary is internal and
 does not add a public CLI flag, configuration key, JSON field, diagnostic ID, or
 LSP capability.
 
+The LSP project snapshot stores the syntax-local `DocumentIR` together with a
+`ResolvedDocumentView`. Project capability planning, effects, realtime
+diagnostics, dependency edges, and compile-equivalent resolution diagnostics
+must consume that view; they must not materialize a resolved document for every
+indexed file. A legacy consumer may request a bounded per-procedure fact
+projection, but the declarations, statements, and expressions remain owned by
+the canonical revision IR.
+
 Issue #426 intentionally stops at procedure syntax and conservative name/call
 resolution. The separate CFG layer defined by
 `docs/specs/vba-control-flow-graph.md` consumes this IR to provide basic blocks,

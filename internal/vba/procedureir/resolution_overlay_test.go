@@ -85,6 +85,29 @@ func TestResolveViewUsesFactIDsWithoutMutatingInput(t *testing.T) {
 	}
 }
 
+func TestResolvedProcedureProjectsFactsWithoutCloningSyntaxPayload(t *testing.T) {
+	doc := overlayTestDocument()
+	view := ResolveView(doc, overlayTestResolver{})
+	sourceStatus := doc.Procedures[0].Calls[0].Resolution.Status
+	projected, ok := view.ResolvedProcedure(0)
+	if !ok {
+		t.Fatal("ResolvedProcedure returned no procedure")
+	}
+	if projected.Symbol.Name != doc.Procedures[0].Symbol.Name {
+		t.Fatalf("projected symbol = %q, want %q", projected.Symbol.Name, doc.Procedures[0].Symbol.Name)
+	}
+	if projected.Calls[0].Resolution.Status != ResolutionMatched || doc.Procedures[0].Calls[0].Resolution.Status != sourceStatus {
+		t.Fatalf("projected/source resolutions = %+v / %+v", projected.Calls[0].Resolution, doc.Procedures[0].Calls[0].Resolution)
+	}
+	if len(projected.Statements) == 0 || &projected.Statements[0] != &doc.Procedures[0].Statements[0] {
+		t.Fatal("syntax-local statement payload was unexpectedly copied")
+	}
+	projected.Calls[0].Resolution.Candidates[0].QualifiedName = "mutated"
+	if got, _ := view.ResolvedCall(0, 1); got.Resolution.Candidates[0].QualifiedName == "mutated" {
+		t.Fatal("projected call exposed mutable overlay storage")
+	}
+}
+
 func TestResolveViewUsesOrdinalFallbackForDuplicateHandBuiltIDs(t *testing.T) {
 	doc := overlayTestDocument()
 	doc.Procedures[0].Calls = append(doc.Procedures[0].Calls,

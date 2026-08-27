@@ -355,7 +355,6 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 		`stage="projectConstants"`,
 		`counter="resolution_resolver_builds" value=1`,
 		`counter="resolution_view_builds" value=1`,
-		`counter="resolution_materializations" value=2`,
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("preparation telemetry missing %q:\n%s", expected, output.String())
@@ -363,6 +362,9 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 	}
 	if got := s.performance.counterTotal(performanceCounterResolutionResolverBuilds); got != 1 {
 		t.Fatalf("resolver build counter = %d, want 1", got)
+	}
+	if got := s.performance.counterTotal(performanceCounterResolutionMaterializations); got != 0 {
+		t.Fatalf("resolution materializations = %d, want 0", got)
 	}
 }
 

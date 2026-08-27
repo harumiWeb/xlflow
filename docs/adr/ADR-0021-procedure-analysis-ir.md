@@ -60,8 +60,14 @@ IDs remain internal metadata and are omitted from serialized IR/JSON.
 `Diagnostics` and reads syntax/recovery facts from the immutable IR while
 reading project-dependent call, access, and event facts from the overlay. Batch
 analyzer resolution diagnostics use this view. Effects, ordinary analyzer
-rules, lint, LSP, metrics, and developer-only oracle consumers retain the
-materialized path unless they independently require an overlay migration.
+rules, lint, metrics, and developer-only oracle consumers may retain the
+materialized path when they require an independently owned document. The LSP
+project snapshot instead keeps the canonical syntax-local `DocumentIR` and
+attaches a `ResolvedDocumentView`; its capability, effect, realtime,
+dependency, and resolution-diagnostic consumers read the view, with only
+bounded per-procedure fact projections where a legacy loop requires
+value-shaped calls or accesses. The normal LSP path does not call
+`Resolve`/`Materialize`.
 
 Keep `Resolve` as the compatibility API for consumers that require an
 independently owned resolved `DocumentIR`: it may materialize a view and must

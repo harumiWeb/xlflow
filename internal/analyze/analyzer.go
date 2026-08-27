@@ -499,6 +499,12 @@ type parsedFile struct {
 	// query lanes share this pointer so they do not rebuild the same source,
 	// dependency, or capability fingerprints for every lane.
 	semanticQueryFacts *semanticFileQueryFacts
+	// Resolution is the optional project-dependent overlay for this file. The
+	// projected procedure fact slices below are the only per-procedure copies
+	// made when a view is supplied; declarations, statements, and expressions
+	// remain owned by the canonical DocumentIR.
+	Resolution         *procedureir.ResolvedDocumentView
+	ResolvedProcedures []procedureir.ProcedureIR
 }
 
 type parsedFileAnalysisResult struct {
@@ -1763,6 +1769,18 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil)
+}
+
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
+// the LSP project-aware entry point. It keeps the canonical syntax-local IR
+// and reads project-dependent call/access/event facts through resolution
+// views, avoiding a full resolved DocumentIR clone per file.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution)
+}
+
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1805,7 +1823,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 		if dataFlowInputsEnabled(cfg.Analyze) {
 			dataFlowModuleBindings = dataFlowBindings(ir.Declarations)
 		}
-		procedures := sourceProceduresFromIRRef(&ir, controlFlow)
+		procedures, resolvedProcedures := sourceProceduresFromIRRefWithResolution(&ir, resolution, controlFlow)
 		file := parsedFile{
 			Path:                      view.Path,
 			Lines:                     lines,
@@ -1816,6 +1834,8 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 			IR:                        ir,
 			CFG:                       controlFlow,
 			Procedures:                procedures,
+			Resolution:                resolution,
+			ResolvedProcedures:        resolvedProcedures,
 			RangeValueModuleConstants: rangeValueConstants,
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
@@ -3125,6 +3145,9 @@ func (file *parsedFile) procedureProjection() []sourceProcedure {
 	if file.Procedures != nil {
 		return file.Procedures
 	}
+	if file.ResolvedProcedures != nil {
+		return sourceProceduresFromProcedureSlice(&file.IR, file.ResolvedProcedures, file.CFG)
+	}
 	return sourceProceduresFromIRRef(&file.IR, file.CFG)
 }
 
@@ -3151,16 +3174,38 @@ func procedureEffectIdentity(document procedureir.DocumentIR, symbol procedureir
 // procedure IR collections; facts and views alias the ProcedureIR storage for
 // the lifetime of the document revision.
 func sourceProceduresFromIRRef(document *procedureir.DocumentIR, controlFlow ...vbacfg.Document) []sourceProcedure {
+	return sourceProceduresFromProcedureSlice(document, document.Procedures, controlFlow...)
+}
+
+// sourceProceduresFromIRRefWithResolution builds analyzer projections over an
+// immutable resolution view. Only call/access/event fact slices are projected;
+// all syntax-local procedure payloads continue to alias the source IR.
+func sourceProceduresFromIRRefWithResolution(document *procedureir.DocumentIR, resolution *procedureir.ResolvedDocumentView, controlFlow ...vbacfg.Document) ([]sourceProcedure, []procedureir.ProcedureIR) {
+	if resolution == nil || !resolution.HasOverlay() {
+		return sourceProceduresFromIRRef(document, controlFlow...), nil
+	}
+	projected := make([]procedureir.ProcedureIR, len(document.Procedures))
+	for index := range projected {
+		if procedure, ok := resolution.ResolvedProcedure(index); ok {
+			projected[index] = procedure
+		} else {
+			projected[index] = document.Procedures[index]
+		}
+	}
+	return sourceProceduresFromProcedureSlice(document, projected, controlFlow...), projected
+}
+
+func sourceProceduresFromProcedureSlice(document *procedureir.DocumentIR, procedureValues []procedureir.ProcedureIR, controlFlow ...vbacfg.Document) []sourceProcedure {
 	if document == nil {
 		return nil
 	}
-	procedures := make([]sourceProcedure, 0, len(document.Procedures))
+	procedures := make([]sourceProcedure, 0, len(procedureValues))
 	module := strings.TrimSpace(document.ModuleName)
 	if module == "" {
 		module = strings.TrimSuffix(filepath.Base(document.Path), filepath.Ext(document.Path))
 	}
-	for procedureIndex := range document.Procedures {
-		procedure := &document.Procedures[procedureIndex]
+	for procedureIndex := range procedureValues {
+		procedure := &procedureValues[procedureIndex]
 		kind := "Sub"
 		switch procedure.Symbol.Kind {
 		case procedureir.ProcedureFunction:

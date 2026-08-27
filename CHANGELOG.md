@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced LSP project-resolution allocations by retaining canonical syntax-local
+  procedure IR and reading project-dependent call, access, event, and
+  resolution-diagnostic facts through immutable resolution views. Existing
+  diagnostic results and the materializing compatibility API remain unchanged.
+
 - Improved LSP workspace startup by publishing a bounded, lightweight
   declaration index independently from background semantic indexing. Cross-file
   symbol queries can now use declarations before IR/CFG preparation completes;
