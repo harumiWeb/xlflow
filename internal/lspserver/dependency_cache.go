@@ -200,7 +200,7 @@ func writeDeterministicFingerprintValue(w interface{ Write([]byte) (int, error) 
 		}
 		writeFingerprintText(w, "interface", value.Type().String())
 		writeDeterministicFingerprintValue(w, value.Elem())
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if value.IsNil() {
 			writeFingerprintText(w, "pointer", value.Type().String(), "nil")
 			return
