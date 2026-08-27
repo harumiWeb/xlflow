@@ -245,8 +245,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `defined_name_count`
 - `defined_names`
 - `deleted_entries`
-- `dependency_edges_updated`
-- `dependency_nodes_updated`
 - `depends_on_sheets`
 - `deprecated_analyze_rule_config`
 - `deprecated_lint_rule_config`
@@ -858,7 +856,6 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `procedure_name_constant`
 - `procedure_score_threshold`
 - `procedure_top_n`
-- `procedures_revisited`
 - `process_architecture`
 - `process_args_invalid`
 - `process_cancelled`

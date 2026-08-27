@@ -3,6 +3,7 @@ package effects
 import (
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -69,6 +70,161 @@ func TestBuildUsesResolutionViewWithoutReplacingCanonicalIR(t *testing.T) {
 	}
 	if ir.Procedures[0].Calls[0].Resolution.Status != procedureir.ResolutionNotAttempted {
 		t.Fatalf("resolution view modified canonical IR: %+v", ir.Procedures[0].Calls[0].Resolution)
+	}
+}
+
+func TestBuildIncrementalMatchesFreshRecomputation(t *testing.T) {
+	root := t.TempDir()
+	calleePath := filepath.Join(root, "Worker.bas")
+	callerPath := filepath.Join(root, "Caller.bas")
+	oldDocuments := buildEffectDocuments(t,
+		sourceFile{calleePath, "Worker", "Public Sub Work()\nEnd Sub\n"},
+		sourceFile{callerPath, "Caller", "Public Sub Run()\n    Call Work\nEnd Sub\n"},
+	)
+	previous := Build(oldDocuments)
+	newDocuments := buildEffectDocuments(t,
+		sourceFile{calleePath, "Worker", "Public Sub Work()\n    Application.EnableEvents = False\nEnd Sub\n"},
+		sourceFile{callerPath, "Caller", "Public Sub Run()\n    Call Work\nEnd Sub\n"},
+	)
+	incremental := BuildIncremental(newDocuments, previous, map[string]struct{}{calleePath: {}})
+	fresh := Build(newDocuments)
+	if !reflect.DeepEqual(incremental.All(), fresh.All()) {
+		t.Fatalf("incremental effects differ from fresh recomputation:\nincremental=%+v\nfresh=%+v", incremental.All(), fresh.All())
+	}
+	work := find(t, incremental, "Worker.Work")
+	if !work.Has(DisablesEvents) {
+		t.Fatal("changed direct effect was not recomputed")
+	}
+	run := find(t, incremental, "Caller.Run")
+	if !run.Has(DisablesEvents) {
+		t.Fatal("changed callee effect did not propagate to its caller")
+	}
+}
+
+func TestBuildIncrementalRecomputesCallersWhenResolutionFactsChange(t *testing.T) {
+	root := t.TempDir()
+	callerPath := filepath.Join(root, "Caller.bas")
+	workerPath := filepath.Join(root, "Worker.bas")
+	oldDocuments := buildEffectDocuments(t,
+		sourceFile{callerPath, "Caller", "Public Sub Run()\n    Work\nEnd Sub\n"},
+	)
+	previous := Build(oldDocuments)
+	newDocuments := buildEffectDocuments(t,
+		sourceFile{callerPath, "Caller", "Public Sub Run()\n    Work\nEnd Sub\n"},
+		sourceFile{workerPath, "Worker", "Public Sub Work()\n    Application.EnableEvents = False\nEnd Sub\n"},
+	)
+	incremental, stats := BuildIncrementalWithStats(newDocuments, previous, map[string]struct{}{workerPath: {}})
+	fresh := Build(newDocuments)
+	if !reflect.DeepEqual(incremental.All(), fresh.All()) {
+		t.Fatalf("resolution change differs from fresh recomputation:\nincremental=%+v\nfresh=%+v", incremental.All(), fresh.All())
+	}
+	run := find(t, incremental, "Caller.Run")
+	if len(run.DirectUncertainty) != 0 || !run.Has(DisablesEvents) {
+		t.Fatalf("caller retained stale resolution facts: %#v", run)
+	}
+	if stats.ReusedDirectProcedures != 0 || stats.RecomputedDirectProcedures != 2 {
+		t.Fatalf("resolution change stats = %+v, want both current procedures recomputed", stats)
+	}
+}
+
+func TestBuildIncrementalResetsRemovedAndRedirectedCallEdges(t *testing.T) {
+	root := t.TempDir()
+	calleeA := filepath.Join(root, "A.bas")
+	calleeB := filepath.Join(root, "B.bas")
+	caller := filepath.Join(root, "Caller.bas")
+	oldDocuments := buildEffectDocuments(t,
+		sourceFile{calleeA, "A", "Public Sub WorkA()\n    Application.EnableEvents = False\nEnd Sub\n"},
+		sourceFile{calleeB, "B", "Public Sub WorkB()\n    Application.DisplayAlerts = False\nEnd Sub\n"},
+		sourceFile{caller, "Caller", "Public Sub Run()\n    Call WorkA\nEnd Sub\n"},
+	)
+	previous := Build(oldDocuments)
+	newDocuments := buildEffectDocuments(t,
+		sourceFile{calleeA, "A", "Public Sub WorkA()\n    Application.EnableEvents = False\nEnd Sub\n"},
+		sourceFile{calleeB, "B", "Public Sub WorkB()\n    Application.DisplayAlerts = False\nEnd Sub\n"},
+		sourceFile{caller, "Caller", "Public Sub Run()\n    Call WorkB\nEnd Sub\n"},
+	)
+	incremental := BuildIncremental(newDocuments, previous, map[string]struct{}{caller: {}})
+	fresh := Build(newDocuments)
+	if !reflect.DeepEqual(incremental.All(), fresh.All()) {
+		t.Fatalf("redirected edges differ from fresh recomputation:\nincremental=%+v\nfresh=%+v", incremental.All(), fresh.All())
+	}
+	run := find(t, incremental, "Caller.Run")
+	if run.Has(DisablesEvents) || !run.Has(ChangesApplicationState) {
+		t.Fatalf("redirected caller retained stale effects: %#v", run)
+	}
+}
+
+func TestBuildIncrementalReportsDirectSummaryReuse(t *testing.T) {
+	root := t.TempDir()
+	calleePath := filepath.Join(root, "Worker.bas")
+	callerPath := filepath.Join(root, "Caller.bas")
+	oldDocuments := buildEffectDocuments(t,
+		sourceFile{calleePath, "Worker", "Public Sub Work()\nEnd Sub\n"},
+		sourceFile{callerPath, "Caller", "Public Sub Run()\n    Call Work\nEnd Sub\n"},
+	)
+	previous := Build(oldDocuments)
+	newDocuments := buildEffectDocuments(t,
+		sourceFile{calleePath, "Worker", "Public Sub Work()\n    Application.EnableEvents = False\nEnd Sub\n"},
+		sourceFile{callerPath, "Caller", "Public Sub Run()\n    Call Work\nEnd Sub\n"},
+	)
+	changedPath := calleePath
+	if filepath.Separator == '\\' {
+		changedPath = strings.ToLower(filepath.Clean(calleePath))
+	}
+	incremental, stats := BuildIncrementalWithStats(newDocuments, previous, map[string]struct{}{changedPath: {}})
+	if stats.ReusedDirectProcedures != 1 || stats.RecomputedDirectProcedures != 1 {
+		t.Fatalf("direct summary stats = %+v, want one reused and one recomputed", stats)
+	}
+	if !find(t, incremental, "Caller.Run").Has(DisablesEvents) {
+		t.Fatal("reused caller did not receive changed callee effect")
+	}
+}
+
+func TestBuildIncrementalInvalidatesDirectErrorSummariesWhenWrapperContractsChange(t *testing.T) {
+	root := t.TempDir()
+	loggerPath := filepath.Join(root, "Logger.bas")
+	callerPath := filepath.Join(root, "Caller.bas")
+	oldDocuments := buildEffectDocuments(t,
+		sourceFile{loggerPath, "Logger", "Private Sub WriteDiagnostic(ByVal message As String)\n    Debug.Print message\nEnd Sub\n"},
+		sourceFile{callerPath, "Caller", "Public Sub WrapperLog()\n    On Error GoTo Handler\n    Workbooks.Open \"book.xlsx\"\n    Exit Sub\nHandler:\n    WriteDiagnostic Err.Description\nEnd Sub\n"},
+	)
+	previous := Build(oldDocuments)
+	newDocuments := buildEffectDocuments(t,
+		sourceFile{loggerPath, "Logger", "Private Sub WriteDiagnostic(ByVal message As String)\n    Debug.Print \"unrelated\"\nEnd Sub\n"},
+		sourceFile{callerPath, "Caller", "Public Sub WrapperLog()\n    On Error GoTo Handler\n    Workbooks.Open \"book.xlsx\"\n    Exit Sub\nHandler:\n    WriteDiagnostic Err.Description\nEnd Sub\n"},
+	)
+	incremental, stats := BuildIncrementalWithStats(newDocuments, previous, map[string]struct{}{loggerPath: {}})
+	fresh := Build(newDocuments)
+	if !reflect.DeepEqual(incremental.All(), fresh.All()) {
+		t.Fatalf("wrapper contract change differs from fresh recomputation:\nincremental=%+v\nfresh=%+v", incremental.All(), fresh.All())
+	}
+	wrapper := find(t, incremental, "Caller.WrapperLog")
+	if !wrapper.Error.SuppressesErrors || wrapper.Error.LogsAndContinues {
+		t.Fatalf("stale logger contract remained on caller: %#v", wrapper.Error)
+	}
+	if stats.ReusedDirectProcedures != 0 || stats.RecomputedDirectProcedures != 2 {
+		t.Fatalf("global error contract invalidation stats = %+v, want all direct summaries recomputed", stats)
+	}
+}
+
+func TestIncrementalNormalizesWindowsCandidatePathCasing(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path casing is the behavior under test")
+	}
+	root := t.TempDir()
+	oldPath := strings.ToUpper(filepath.Join(root, "Module.bas"))
+	newPath := strings.ToLower(oldPath)
+	previous := Build(buildEffectDocuments(t, sourceFile{oldPath, "Module", "Public Sub Run()\n    Application.EnableEvents = False\nEnd Sub\n"}))
+	incremental, stats := BuildIncrementalWithStats(buildEffectDocuments(t, sourceFile{newPath, "Module", "Public Sub Run()\n    Application.EnableEvents = False\nEnd Sub\n"}), previous, nil)
+	fresh := Build(buildEffectDocuments(t, sourceFile{newPath, "Module", "Public Sub Run()\n    Application.EnableEvents = False\nEnd Sub\n"}))
+	if !reflect.DeepEqual(incremental.All(), fresh.All()) {
+		t.Fatalf("case-only path change differs from fresh recomputation:\nincremental=%+v\nfresh=%+v", incremental.All(), fresh.All())
+	}
+	if stats.ReusedDirectProcedures != 1 || stats.RecomputedDirectProcedures != 0 {
+		t.Fatalf("case-only path change stats = %+v, want one reused direct summary", stats)
+	}
+	if got := find(t, incremental, "Module.Run").Identity.File; got != filepath.ToSlash(newPath) {
+		t.Fatalf("display path = %q, want current source spelling %q", got, filepath.ToSlash(newPath))
 	}
 }
 
@@ -1136,6 +1292,29 @@ func buildSources(t *testing.T, sources ...sourceFile) ProjectSummary {
 		documents[i] = Document{IR: resolved, CFG: cfg.BuildDocument(resolved)}
 	}
 	return Build(documents)
+}
+
+func buildEffectDocuments(t *testing.T, sources ...sourceFile) []Document {
+	t.Helper()
+	irs := make([]procedureir.DocumentIR, len(sources))
+	var symbols []procedureir.ResolverSymbol
+	for i, source := range sources {
+		ir, err := procedureir.BuildSource(procedureir.BuildOptions{Path: source.path, ModuleName: source.module, ModuleKind: "standard"}, []byte(source.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		irs[i] = ir
+		for _, proc := range ir.Procedures {
+			symbols = append(symbols, procedureir.ResolverSymbol{Name: proc.Symbol.Name, Module: ir.ModuleName, ModuleKind: ir.ModuleKind, Kind: string(proc.Symbol.Kind), Visibility: proc.Symbol.Visibility, File: ir.Path, Line: proc.Symbol.DeclarationRange.StartLine})
+		}
+	}
+	resolver := procedureir.NewSymbolResolver(symbols)
+	documents := make([]Document, len(irs))
+	for i, ir := range irs {
+		resolved := procedureir.Resolve(ir, resolver)
+		documents[i] = Document{IR: ir, Resolution: procedureir.ResolveView(ir, resolver), CFG: cfg.BuildDocument(resolved)}
+	}
+	return documents
 }
 
 func manualProcedure(name string, line int, calls []procedureir.CallSite) procedureir.ProcedureIR {

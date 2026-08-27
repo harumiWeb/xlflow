@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced LSP project preparation invalidation for ordinary editor revisions.
+  Resolution indexes and per-document overlays now use semantic dependency
+  fingerprints, constants are reused across procedure-body edits, and effects
+  reuse unchanged procedure summaries while recalculating the changed
+  procedure's reverse caller closure. Canceled or incomplete products remain
+  unpublished. Added project cache hit/miss/rebuild, dependency-invalidation,
+  and reused-entry performance counters; diagnostic and LSP payload contracts
+  remain unchanged.
 - Fixed Windows Excel VBA imports so LF-only source, including `.cls` class
   modules, is normalized to CRLF before VBIDE import and is no longer
   misidentified as a standard module during `build` or `push`.

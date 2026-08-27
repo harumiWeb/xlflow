@@ -38,6 +38,38 @@ maintained as keys are added and removed. LSP passes normalized document paths
 to exact invalidation rather than scanning all key strings. Finding defensive
 copies and deterministic projection boundaries are unchanged.
 
+### Dependency-aware LSP project products (#739)
+
+LSP project preparation uses content dependency keys in addition to the
+revision-scoped semantic query store. The resolver index is keyed by module
+declarations, procedure signatures, conditional context, TypeDB symbols, and
+completeness; individual procedure-only and full resolution overlays add the
+current document content fingerprint. A procedure-body edit therefore rebuilds
+only that document's overlays while unchanged documents reuse their immutable
+views. Declaration, visibility, type, conditional, TypeDB, or recovery changes
+invalidate the resolver boundary conservatively.
+
+Project capability planning is also keyed by its configuration, resolver
+boundary, and project document inputs, so repeated Full-diagnostic requests
+share the pure requirement plan without changing analyzer output. Project
+constants are keyed by the module preamble, declaration/conditional
+fingerprints, TypeDB values, and completeness. Procedure-body edits do not
+invalidate this environment; declaration or constant edits rebuild the whole
+environment because forward references and ambiguity make a smaller boundary
+unproven. Effects retain immutable direct procedure summaries and recompute
+the changed procedure plus the reverse caller closure using the union of old
+and new call edges. Removed procedures and redirected calls seed the closure
+from the previous graph. When resolution or completeness changes without a
+source-version change, the effects builder fails open to the current project.
+
+These products use bounded keyed single-flight caches. Only completed values
+are retained, and canceled/failed builds remain retryable. The existing LSP
+generation and dependency-generation checks still control publication, so a
+late result cannot overwrite newer editor state. Additive performance counters
+(`project_cache_hits`, `project_cache_misses`, `project_cache_rebuilds`,
+`project_dependency_invalidations`, and `project_cache_reused_entries`) are
+stderr-only and never enter diagnostics, protocol payloads, or corpus data.
+
 The developer benchmark contract has four independent revision cases for both
 ROneCOne and the representative `std-vba` many-file corpus:
 

@@ -25,32 +25,38 @@ const (
 	performanceStageResolutionMaterialize = "projectResolutionMaterialization"
 	performanceStageProjectEffects        = "projectEffectSummary"
 	performanceStageProjectConstants      = "projectConstants"
+	performanceStageProjectCapabilities   = "projectCapabilityPlan"
 	performanceStageProjectChange         = "projectChange"
 	performanceStageDependencyUpdate      = "dependencyFingerprintUpdate"
 	performanceStagePermitWait            = "permitWait"
 )
 
 const (
-	performanceCounterWorkspaceFilesDiscovered   = "workspace_files_discovered"
-	performanceCounterWorkspaceDeclarationBuilds = "workspace_declaration_builds"
-	performanceCounterWorkspaceSemanticBuilds    = "workspace_semantic_builds"
-	performanceCounterProjectSnapshotBuilds      = "project_snapshot_builds"
-	performanceCounterResolutionResolverBuilds   = "resolution_resolver_builds"
-	performanceCounterResolutionViewBuilds       = "resolution_view_builds"
-	performanceCounterCanonicalResolverBuilds    = "canonical_resolver_builds"
-	performanceCounterProcedureResolverViews     = "procedure_resolver_views"
-	performanceCounterFullResolverViews          = "full_resolver_views"
-	performanceCounterResolutionOverlayBuilds    = "resolution_overlay_builds"
-	performanceCounterResolutionMaterializations = "resolution_materializations"
-	performanceCounterProcedureFingerprintBuilds = "procedure_fingerprint_builds"
-	performanceCounterProcedureFingerprintReuses = "procedure_fingerprint_reuses"
-	performanceCounterDependencyNodesUpdated     = "dependency_nodes_updated"
-	performanceCounterDependencyEdgesUpdated     = "dependency_edges_updated"
-	performanceCounterProceduresRevisited        = "procedures_revisited"
-	performanceCounterFastDiagnosticRuns         = "fast_diagnostic_runs"
-	performanceCounterFullDiagnosticRuns         = "full_diagnostic_runs"
-	performanceCounterBackgroundPermitWaits      = "background_permit_waits"
-	performanceCounterInteractivePermitWaits     = "interactive_permit_waits"
+	performanceCounterWorkspaceFilesDiscovered       = "workspace_files_discovered"
+	performanceCounterWorkspaceDeclarationBuilds     = "workspace_declaration_builds"
+	performanceCounterWorkspaceSemanticBuilds        = "workspace_semantic_builds"
+	performanceCounterProjectSnapshotBuilds          = "project_snapshot_builds"
+	performanceCounterResolutionResolverBuilds       = "resolution_resolver_builds"
+	performanceCounterResolutionViewBuilds           = "resolution_view_builds"
+	performanceCounterCanonicalResolverBuilds        = "canonical_resolver_builds"
+	performanceCounterProcedureResolverViews         = "procedure_resolver_views"
+	performanceCounterFullResolverViews              = "full_resolver_views"
+	performanceCounterResolutionOverlayBuilds        = "resolution_overlay_builds"
+	performanceCounterResolutionMaterializations     = "resolution_materializations"
+	performanceCounterProcedureFingerprintBuilds     = "procedure_fingerprint_builds"
+	performanceCounterProcedureFingerprintReuses     = "procedure_fingerprint_reuses"
+	performanceCounterDependencyNodesUpdated         = "dependency_nodes_updated"
+	performanceCounterDependencyEdgesUpdated         = "dependency_edges_updated"
+	performanceCounterProceduresRevisited            = "procedures_revisited"
+	performanceCounterFastDiagnosticRuns             = "fast_diagnostic_runs"
+	performanceCounterFullDiagnosticRuns             = "full_diagnostic_runs"
+	performanceCounterBackgroundPermitWaits          = "background_permit_waits"
+	performanceCounterInteractivePermitWaits         = "interactive_permit_waits"
+	performanceCounterProjectCacheHits               = "project_cache_hits"
+	performanceCounterProjectCacheMisses             = "project_cache_misses"
+	performanceCounterProjectCacheRebuilds           = "project_cache_rebuilds"
+	performanceCounterProjectDependencyInvalidations = "project_dependency_invalidations"
+	performanceCounterProjectCacheReusedEntries      = "project_cache_reused_entries"
 )
 
 var performanceCounterNames = [...]string{
@@ -74,6 +80,11 @@ var performanceCounterNames = [...]string{
 	performanceCounterFullDiagnosticRuns,
 	performanceCounterBackgroundPermitWaits,
 	performanceCounterInteractivePermitWaits,
+	performanceCounterProjectCacheHits,
+	performanceCounterProjectCacheMisses,
+	performanceCounterProjectCacheRebuilds,
+	performanceCounterProjectDependencyInvalidations,
+	performanceCounterProjectCacheReusedEntries,
 }
 
 // performanceRecorder is deliberately separate from analysisstats. The

@@ -1,7 +1,11 @@
 package effects
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -9,10 +13,11 @@ import (
 )
 
 type procedureInput struct {
-	id        ProcedureIdentity
-	proc      procedureir.ProcedureIR
-	graph     cfg.Graph
-	reachable map[int]bool
+	id         ProcedureIdentity
+	proc       procedureir.ProcedureIR
+	graph      cfg.Graph
+	reachable  map[int]bool
+	statements map[int]procedureir.Statement
 }
 
 type edge struct{ from, to string }
@@ -49,17 +54,85 @@ func Build(documents []Document) ProjectSummary {
 // source provenance remains at its origin and is reconstructed lazily from the
 // project call graph by ProjectSummary.Lookup/All.
 func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
+	return buildWithReuse(documents, nil, nil)
+}
+
+// BuildIncremental reuses immutable direct summaries from previous when the
+// supplied changed-file set does not contain their owner. The reverse caller
+// closure is recomputed from both the previous and current graphs so removed
+// or redirected calls cannot leave stale propagated state behind.
+//
+// changedFiles must contain canonical or equivalent source paths. An empty
+// set is a valid no-op revision and returns a structurally equivalent copy of
+// previous without rebuilding its semantic kernels.
+func BuildIncremental(documents []Document, previous ProjectSummary, changedFiles map[string]struct{}) ProjectSummary {
+	project, _ := BuildIncrementalWithStats(documents, previous, changedFiles)
+	return project
+}
+
+// BuildIncrementalWithStats is BuildIncremental with developer-facing
+// counters for direct-summary reuse and fixed-point propagation.
+func BuildIncrementalWithStats(documents []Document, previous ProjectSummary, changedFiles map[string]struct{}) (ProjectSummary, BuildStats) {
+	if len(previous.procedures) == 0 {
+		return BuildWithStats(documents)
+	}
+	return buildWithReuse(documents, &previous, changedFiles)
+}
+
+func buildWithReuse(documents []Document, previous *ProjectSummary, changedFiles map[string]struct{}) (ProjectSummary, BuildStats) {
+	changedFiles = normalizeChangedFiles(changedFiles)
 	inputs := collectInputs(documents)
 	summaries := make(map[string]*ProcedureSummary, len(inputs))
 	candidateKeys := candidateIndex(inputs)
 	loggerTargets := loggerProcedureIndex(inputs, candidateKeys)
 	rethrowTargets := rethrowProcedureIndex(inputs, candidateKeys)
 	terminalTargets := terminalProcedureIndex(inputs, candidateKeys)
+	errorContractsKey := errorContractsFingerprint(loggerTargets, rethrowTargets, terminalTargets)
+	globalErrorContractInvalidation := previous != nil && previous.errorContractsFingerprint != errorContractsKey
 	var edges []edge
+	changedKeys := make(map[string]struct{})
+	var directStats BuildStats
 	for _, input := range inputs {
-		summary := &ProcedureSummary{Identity: input.id}
+		key := input.id.Key()
+		resolutionFingerprint := procedureResolutionFingerprint(input.proc)
+		// The error wrapper indexes are project-wide dependencies of direct
+		// extraction. If one changes, recompute every current direct summary so
+		// an unchanged caller cannot retain stale suppression/rethrow evidence.
+		changed := globalErrorContractInvalidation
+		if changedPathMatches(changedFiles, input.id.File) {
+			changed = true
+		}
+		if _, ok := changedFiles[key]; ok {
+			changed = true
+		}
+		if previous != nil && !changed {
+			if index, ok := previous.byKey[key]; ok && index >= 0 && index < len(previous.procedures) && previous.procedures[index].resolutionFingerprint != resolutionFingerprint {
+				// A project declaration edit can change this procedure's resolved
+				// calls/accesses even when its own source file is unchanged.
+				changed = true
+			}
+		}
+		if changed {
+			changedKeys[key] = struct{}{}
+		}
+		if previous != nil && !changed {
+			if index, ok := previous.byKey[key]; ok && index >= 0 && index < len(previous.procedures) {
+				summary := cloneProcedureSummary(previous.procedures[index])
+				rebindProcedureSummaryIdentity(&summary, input.id)
+				summary.semantic = cloneSemanticState(summary.semantic)
+				summaries[key] = &summary
+			}
+		}
+		if _, reused := summaries[key]; reused {
+			directStats.ReusedDirectProcedures++
+			// The current graph is still collected below. Only the direct
+			// semantic extraction is skipped for a matching immutable input.
+			continue
+		}
+		directStats.RecomputedDirectProcedures++
+		summary := &ProcedureSummary{Identity: input.id, resolutionFingerprint: resolutionFingerprint}
 		reachable := input.reachable
-		statements := statementIndex(input.proc)
+		statements := input.statements
 		extractStatements(summary, input.proc, reachable)
 		extractErrorSummary(summary, input.proc, input.graph, reachable, candidateKeys, loggerTargets, rethrowTargets, terminalTargets)
 		for _, call := range input.proc.Calls {
@@ -69,12 +142,6 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 			}
 			extractCall(summary, call, statement)
 			switch call.Resolution.Status {
-			case procedureir.ResolutionMatched:
-				if len(call.Resolution.Candidates) == 1 {
-					if target, ok := candidateKeys[candidateKey(call.Resolution.Candidates[0])]; ok {
-						edges = append(edges, edge{from: input.id.Key(), to: target})
-					}
-				}
 			case procedureir.ResolutionAmbiguous, procedureir.ResolutionUnresolved,
 				procedureir.ResolutionExternal, procedureir.ResolutionMemberCall,
 				procedureir.ResolutionDynamic, procedureir.ResolutionIncomplete,
@@ -85,7 +152,31 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 		dedupeDirect(summary)
 		summary.semantic = semanticStateFromSummary(summary)
 		summary.Error = errorSummaryWithState(summary.Error, summary.semantic)
-		summaries[input.id.Key()] = summary
+		summaries[key] = summary
+	}
+	if previous != nil {
+		// A deleted procedure has no current input from which to seed the red
+		// set. Preserve its old identity long enough to walk old reverse edges
+		// and reset callers that depended on it.
+		for _, summary := range previous.procedures {
+			if changedPathMatches(changedFiles, summary.Identity.File) {
+				changedKeys[summary.Identity.Key()] = struct{}{}
+			}
+		}
+	}
+	// Edges are cheap to collect from the current resolved inputs and must be
+	// refreshed even when a procedure's direct kernel was reused.
+	for _, input := range inputs {
+		statements := input.statements
+		for _, call := range input.proc.Calls {
+			statement := statements[call.StatementID]
+			if !input.reachable[call.StatementID] || statement.Recovered || call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1 {
+				continue
+			}
+			if target, ok := candidateKeys[candidateKey(call.Resolution.Candidates[0])]; ok {
+				edges = append(edges, edge{from: input.id.Key(), to: target})
+			}
+		}
 	}
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].from != edges[j].from {
@@ -94,7 +185,141 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 		return edges[i].to < edges[j].to
 	})
 	callers, callees := buildAdjacency(edges)
-	stats := propagateBounded(summaries, callers)
+	if previous == nil {
+		stats := propagateBounded(summaries, callers)
+		stats.ReusedDirectProcedures = directStats.ReusedDirectProcedures
+		stats.RecomputedDirectProcedures = directStats.RecomputedDirectProcedures
+		return assembleProjectSummary(summaries, callers, callees, stats, errorContractsKey)
+	}
+
+	// Start the red set with directly changed procedures and traverse both
+	// reverse graphs. Any caller in that closure must be reset to its direct
+	// state before propagation, otherwise removed effects would remain sticky.
+	red := make(map[string]struct{}, len(changedKeys))
+	queue := make([]string, 0, len(changedKeys))
+	for key := range changedKeys {
+		red[key] = struct{}{}
+		queue = append(queue, key)
+	}
+	for len(queue) > 0 {
+		owner := queue[0]
+		queue = queue[1:]
+		neighborSet := make(map[string]struct{}, len(callers[owner]))
+		for _, caller := range callers[owner] {
+			neighborSet[caller] = struct{}{}
+		}
+		if previous.provenance != nil {
+			for _, caller := range previous.provenance.callers[owner] {
+				neighborSet[caller] = struct{}{}
+			}
+		}
+		neighbors := make([]string, 0, len(neighborSet))
+		for neighbor := range neighborSet {
+			neighbors = append(neighbors, neighbor)
+		}
+		sort.Strings(neighbors)
+		for _, neighbor := range neighbors {
+			if _, exists := red[neighbor]; exists {
+				continue
+			}
+			red[neighbor] = struct{}{}
+			queue = append(queue, neighbor)
+		}
+	}
+	// A reset caller must also be scheduled after its current and previous
+	// callees are processed. These dependency seeds feed the caller's direct
+	// state without widening the reset set to every downstream helper.
+	seeds := make(map[string]struct{}, len(red))
+	for key := range red {
+		seeds[key] = struct{}{}
+		for _, callee := range callees[key] {
+			seeds[callee] = struct{}{}
+		}
+		if previous.provenance != nil {
+			for _, callee := range previous.provenance.callees[key] {
+				seeds[callee] = struct{}{}
+			}
+		}
+	}
+	for key := range red {
+		if summary := summaries[key]; summary != nil {
+			summary.semantic = semanticStateFromSummary(summary)
+			summary.Error = errorSummaryWithState(summary.Error, summary.semantic)
+		}
+	}
+	stats := propagateBoundedSeeded(summaries, callers, seeds)
+	stats.ReusedDirectProcedures = directStats.ReusedDirectProcedures
+	stats.RecomputedDirectProcedures = directStats.RecomputedDirectProcedures
+	return assembleProjectSummary(summaries, callers, callees, stats, errorContractsKey)
+}
+
+// rebindProcedureSummaryIdentity updates display identities on a reused direct
+// summary when a Windows path is reopened with different casing. The internal
+// key intentionally folds that casing, but diagnostics must retain the current
+// source spelling rather than leaking the previous revision's path.
+func rebindProcedureSummaryIdentity(summary *ProcedureSummary, current ProcedureIdentity) {
+	if summary == nil || summary.Identity.Key() != current.Key() {
+		return
+	}
+	previous := summary.Identity
+	rebind := func(identity *ProcedureIdentity) {
+		if identity != nil && identity.Key() == previous.Key() {
+			*identity = current
+		}
+	}
+	rebind(&summary.Identity)
+	for index := range summary.Direct {
+		rebind(&summary.Direct[index].Origin)
+	}
+	for index := range summary.Propagated {
+		rebind(&summary.Propagated[index].Origin)
+	}
+	for index := range summary.DirectUncertainty {
+		rebind(&summary.DirectUncertainty[index].Origin)
+	}
+	for index := range summary.PropagatedUncertainty {
+		rebind(&summary.PropagatedUncertainty[index].Origin)
+	}
+	for index := range summary.Error.Direct {
+		rebind(&summary.Error.Direct[index].Origin)
+		for chainIndex := range summary.Error.Direct[index].CallChain {
+			rebind(&summary.Error.Direct[index].CallChain[chainIndex])
+		}
+	}
+	for index := range summary.Error.Propagated {
+		rebind(&summary.Error.Propagated[index].Origin)
+		for chainIndex := range summary.Error.Propagated[index].CallChain {
+			rebind(&summary.Error.Propagated[index].CallChain[chainIndex])
+		}
+	}
+}
+
+func normalizeChangedFiles(in map[string]struct{}) map[string]struct{} {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]struct{}, len(in)*2)
+	for key := range in {
+		out[key] = struct{}{}
+		canonical := canonicalComparisonPath(key)
+		out[canonical] = struct{}{}
+	}
+	return out
+}
+
+func changedPathMatches(changed map[string]struct{}, path string) bool {
+	canonical := canonicalComparisonPath(path)
+	if _, ok := changed[canonical]; ok {
+		return true
+	}
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	_, ok := changed[strings.ToLower(canonical)]
+	return ok
+}
+
+func assembleProjectSummary(summaries map[string]*ProcedureSummary, callers map[string][]string, callees map[string][]string, stats BuildStats, errorContractsKey string) (ProjectSummary, BuildStats) {
 	witnessSummaries := make(map[string]ProcedureSummary, len(summaries))
 	for key, summary := range summaries {
 		if summary != nil {
@@ -105,9 +330,10 @@ func BuildWithStats(documents []Document) (ProjectSummary, BuildStats) {
 		}
 	}
 	out := ProjectSummary{
-		byKey:           map[string]int{},
-		byCandidateLine: map[int][]int{},
-		stats:           stats,
+		byKey:                     map[string]int{},
+		byCandidateLine:           map[int][]int{},
+		errorContractsFingerprint: errorContractsKey,
+		stats:                     stats,
 		provenance: &provenanceGraph{
 			callers:   callers,
 			callees:   callees,
@@ -146,7 +372,13 @@ func collectInputs(documents []Document) []procedureInput {
 				proc = resolved
 			}
 			graph := graphs[proc.Symbol.QualifiedName+"\x00"+string(proc.Symbol.Kind)]
-			out = append(out, procedureInput{id: identity(doc.IR, proc), proc: proc, graph: graph, reachable: reachableStatements(proc, graph)})
+			out = append(out, procedureInput{
+				id:         identity(doc.IR, proc),
+				proc:       proc,
+				graph:      graph,
+				reachable:  reachableStatements(proc, graph),
+				statements: statementIndex(proc),
+			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].id.Key() < out[j].id.Key() })
@@ -156,14 +388,55 @@ func collectInputs(documents []Document) []procedureInput {
 func candidateIndex(inputs []procedureInput) map[string]string {
 	out := map[string]string{}
 	for _, input := range inputs {
-		key := strings.Join([]string{input.id.File, strings.ToLower(input.id.QualifiedName), string(input.id.Kind), decimal(input.id.DeclarationLine)}, "\x00")
+		key := strings.Join([]string{canonicalComparisonPath(input.id.File), strings.ToLower(input.id.QualifiedName), string(input.id.Kind), decimal(input.id.DeclarationLine)}, "\x00")
 		out[key] = input.id.Key()
 	}
 	return out
 }
 
 func candidateKey(c procedureir.Candidate) string {
-	return strings.Join([]string{canonicalPath(c.File), strings.ToLower(c.QualifiedName), strings.ToLower(c.Kind), decimal(c.Line)}, "\x00")
+	return strings.Join([]string{canonicalComparisonPath(c.File), strings.ToLower(c.QualifiedName), strings.ToLower(c.Kind), decimal(c.Line)}, "\x00")
+}
+
+// procedureResolutionFingerprint captures the project-dependent facts that
+// direct extraction consumes. The owning source file is still the primary
+// invalidation input, but a declaration edit in another file can change an
+// unchanged caller's call/access/event resolutions. Candidate paths go through
+// canonicalPath so Windows case-only path changes do not defeat reuse.
+func procedureResolutionFingerprint(proc procedureir.ProcedureIR) string {
+	var builder strings.Builder
+	write := func(values ...string) {
+		for _, value := range values {
+			builder.WriteString(value)
+			builder.WriteByte('\x00')
+		}
+	}
+	writeCandidate := func(candidate procedureir.Candidate) {
+		write("candidate", canonicalComparisonPath(candidate.File), strings.ToLower(candidate.QualifiedName), strings.ToLower(candidate.Kind), strconv.Itoa(candidate.Line))
+	}
+	writeSymbolResolution := func(resolution procedureir.SymbolResolution) {
+		write("symbol-resolution", string(resolution.Status), string(resolution.Scope), strconv.Itoa(len(resolution.Candidates)))
+		for _, candidate := range resolution.Candidates {
+			writeCandidate(candidate)
+		}
+	}
+	write("procedure-resolution-v1", strconv.Itoa(len(proc.Calls)), strconv.Itoa(len(proc.Accesses)), strconv.Itoa(len(proc.RaiseEvents)))
+	for _, call := range proc.Calls {
+		write("call", strconv.Itoa(call.ID), strconv.Itoa(call.StatementID), string(call.Resolution.Status), strconv.FormatBool(call.Resolution.ProjectLocal), strconv.Itoa(len(call.Resolution.Candidates)))
+		for _, candidate := range call.Resolution.Candidates {
+			writeCandidate(candidate)
+		}
+	}
+	for _, access := range proc.Accesses {
+		write("access", strconv.Itoa(access.ID), access.Name, string(access.Mode), string(access.Scope), strconv.Itoa(access.StatementID), strconv.Itoa(access.ExpressionID))
+		writeSymbolResolution(access.Resolution)
+	}
+	for _, event := range proc.RaiseEvents {
+		write("raise-event", strconv.Itoa(event.ID), event.Name, event.Module, strconv.FormatBool(event.Recovered))
+		writeSymbolResolution(event.Resolution)
+	}
+	hash := sha256.Sum256([]byte(builder.String()))
+	return hex.EncodeToString(hash[:])
 }
 
 func reachableStatements(proc procedureir.ProcedureIR, graph cfg.Graph) map[int]bool {
@@ -251,9 +524,23 @@ func buildAdjacency(edges []edge) (map[string][]string, map[string][]string) {
 
 // propagateBounded propagates only finite semantic state.
 func propagateBounded(summaries map[string]*ProcedureSummary, callers map[string][]string) BuildStats {
+	seeds := make(map[string]struct{}, len(summaries))
+	for key := range summaries {
+		seeds[key] = struct{}{}
+	}
+	return propagateBoundedSeeded(summaries, callers, seeds)
+}
+
+// propagateBoundedSeeded is the incremental counterpart of propagateBounded.
+// Only the red dependency closure is scheduled; callers outside that closure
+// retain their immutable fixed-point state.
+func propagateBoundedSeeded(summaries map[string]*ProcedureSummary, callers map[string][]string, seeds map[string]struct{}) BuildStats {
 	queue := make([]string, 0, len(summaries))
 	queued := map[string]bool{}
-	for key := range summaries {
+	for key := range seeds {
+		if _, exists := summaries[key]; !exists {
+			continue
+		}
 		queue = append(queue, key)
 		queued[key] = true
 	}

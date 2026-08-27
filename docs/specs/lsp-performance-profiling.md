@@ -41,6 +41,7 @@ The following names are stable and intended for benchmark/profile scripts:
 | `projectResolutionView`            | Resolution view/call-resolver setup for a project revision.                  |
 | `projectResolutionMaterialization` | Resolution of indexed document IR into the project view.                     |
 | `projectEffectSummary`             | Project effect-summary construction.                                         |
+| `projectCapabilityPlan`            | Project capability requirement planning.                                     |
 | `projectConstants`                 | Project-visible constant and constant-value construction.                    |
 | `projectChange`                    | Revision change bookkeeping and impacted-file calculation.                   |
 | `dependencyFingerprintUpdate`      | Procedure fingerprinting and dependency propagation.                         |
@@ -59,28 +60,33 @@ zero values, so a profile can distinguish “not observed” from an omitted
 instrumentation field. The counters are stderr-only and never enter an LSP
 payload.
 
-| Counter                        | Meaning                                                       |
-| ------------------------------ | ------------------------------------------------------------- |
-| `workspace_files_discovered`   | Source files returned by workspace discovery.                 |
-| `workspace_declaration_builds` | Successful per-file declaration builds.                       |
-| `workspace_semantic_builds`    | Successful per-file semantic builds.                          |
-| `project_snapshot_builds`      | Project snapshots assembled.                                  |
-| `resolution_resolver_builds`   | Resolver constructions (revision cache misses).               |
-| `resolution_view_builds`       | Resolution views constructed (revision cache misses).         |
-| `canonical_resolver_builds`    | Canonical project resolver/index constructions.               |
-| `procedure_resolver_views`     | Procedure-only resolver views derived from the index.         |
-| `full_resolver_views`          | Full resolver views derived from the index.                   |
-| `resolution_overlay_builds`    | Per-document resolution overlays built for both modes.        |
-| `resolution_materializations`  | Document IR materializations into resolution views.           |
-| `procedure_fingerprint_builds` | Procedure fingerprints computed for dependency comparison.    |
-| `procedure_fingerprint_reuses` | Fingerprints served from a reusable dependency cache.         |
-| `dependency_nodes_updated`     | Procedure dependency entries replaced or removed.             |
-| `dependency_edges_updated`     | Reverse or outgoing call edges added or removed.              |
-| `procedures_revisited`         | Procedures inspected during an incremental dependency update. |
-| `fast_diagnostic_runs`         | Fast diagnostic runs started.                                 |
-| `full_diagnostic_runs`         | Full diagnostic runs started.                                 |
-| `background_permit_waits`      | Background workers that waited for an analysis permit.        |
-| `interactive_permit_waits`     | Interactive workers that waited for an analysis permit.       |
+| Counter                            | Meaning                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `workspace_files_discovered`       | Source files returned by workspace discovery.                                         |
+| `workspace_declaration_builds`     | Successful per-file declaration builds.                                               |
+| `workspace_semantic_builds`        | Successful per-file semantic builds.                                                  |
+| `project_snapshot_builds`          | Project snapshots assembled.                                                          |
+| `resolution_resolver_builds`       | Resolver constructions (revision cache misses).                                       |
+| `resolution_view_builds`           | Resolution views constructed (revision cache misses).                                 |
+| `canonical_resolver_builds`        | Canonical project resolver/index constructions.                                       |
+| `procedure_resolver_views`         | Procedure-only resolver views derived from the index.                                 |
+| `full_resolver_views`              | Full resolver views derived from the index.                                           |
+| `resolution_overlay_builds`        | Per-document resolution overlays built for both modes.                                |
+| `resolution_materializations`      | Document IR materializations into resolution views.                                   |
+| `procedure_fingerprint_builds`     | Procedure fingerprints computed for dependency comparison.                            |
+| `procedure_fingerprint_reuses`     | Fingerprints served from a reusable dependency cache.                                 |
+| `dependency_nodes_updated`         | Procedure dependency entries replaced or removed.                                     |
+| `dependency_edges_updated`         | Reverse or outgoing call edges added or removed.                                      |
+| `procedures_revisited`             | Procedures inspected during an incremental dependency update.                         |
+| `fast_diagnostic_runs`             | Fast diagnostic runs started.                                                         |
+| `full_diagnostic_runs`             | Full diagnostic runs started.                                                         |
+| `background_permit_waits`          | Background workers that waited for an analysis permit.                                |
+| `interactive_permit_waits`         | Interactive workers that waited for an analysis permit.                               |
+| `project_cache_hits`               | Completed project products (including capability plans) served from a dependency key. |
+| `project_cache_misses`             | Project product (including capability-plan) lookups without a reusable entry.         |
+| `project_cache_rebuilds`           | Project product builds started after a dependency miss.                               |
+| `project_dependency_invalidations` | Files or dependency roots invalidated for a project product.                          |
+| `project_cache_reused_entries`     | Immutable resolver, constant, effect, overlay, or capability-plan entries reused.     |
 
 `procedure_fingerprint_reuses` is reserved for reuse reporting and is emitted
 as zero until a reusable fingerprint cache is used. A counter increment is
@@ -98,6 +104,16 @@ uncertain (dynamic, ambiguous, incomplete, or project-local unresolved)
 resolution attaches to a project boundary so its reverse closure is invalidated
 on the next revision. These counters are structural observations and are never copied
 into LSP responses, normal CLI JSON, corpus snapshots, or review ledgers.
+
+Project preparation has a second, product-level cache layer. Resolver indexes,
+document overlays, constants, and effects are keyed by their explicit semantic
+inputs and may be reused across adjacent workspace revisions. The effects
+product retains direct procedure summaries and recalculates the changed
+procedure plus its reverse caller closure; a declaration, TypeDB, recovery, or
+completeness change may invalidate the project boundary. These five project
+cache counters are emitted at the same stderr-only boundary.
+They are observations for comparing cold, warm, body-edit, and dependency-edit
+benchmarks and are not a performance threshold or a protocol contract.
 
 Delta counter records use `outcome="counter"` with the increment in `value`.
 The initial aggregate snapshot uses `outcome="counter_snapshot"`,
@@ -188,7 +204,7 @@ ROneCOne benchmark in CI unless the source path is supplied explicitly.
 
 ## Interpretation and correctness boundary
 
-`projectResolver`, `projectResolutionView`, and
+`projectResolver`, `projectResolutionView`, `projectCapabilityPlan`, and
 `projectResolutionMaterialization` are cache-miss/build boundaries. A repeated
 request on the same revision should show request latency without another build;
 the counter snapshot makes that distinction visible. For one project

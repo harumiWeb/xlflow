@@ -1,6 +1,8 @@
 package effects
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,34 @@ const (
 )
 
 type loggerContract map[int]bool
+
+// errorContractsFingerprint is the dependency key for the project-wide
+// wrappers consulted by extractErrorSummary. These indexes are derived from
+// procedure bodies and call edges, so a body edit can change a caller's
+// direct error classification without changing the caller itself. Keeping a
+// deterministic fingerprint on ProjectSummary lets incremental builds reuse
+// direct summaries when the contracts are stable and invalidate them when
+// they are not.
+func errorContractsFingerprint(loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) string {
+	parts := make([]string, 0, len(loggerTargets)+len(rethrowTargets)+len(terminalTargets))
+	for key, contract := range loggerTargets {
+		if len(contract) == 0 {
+			continue
+		}
+		for parameterIndex, enabled := range contract {
+			parts = append(parts, "logger\x00"+key+"\x00"+strconv.Itoa(parameterIndex)+"\x00"+strconv.FormatBool(enabled))
+		}
+	}
+	for key, enabled := range rethrowTargets {
+		parts = append(parts, "rethrow\x00"+key+"\x00"+strconv.FormatBool(enabled))
+	}
+	for key, enabled := range terminalTargets {
+		parts = append(parts, "terminal\x00"+key+"\x00"+strconv.FormatBool(enabled))
+	}
+	sort.Strings(parts)
+	hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(hash[:])
+}
 
 func extractErrorSummary(summary *ProcedureSummary, proc procedureir.ProcedureIR, graph cfg.Graph, reachable map[int]bool, candidateKeys map[string]string, loggerTargets map[string]loggerContract, rethrowTargets, terminalTargets map[string]bool) {
 	statements := append([]procedureir.Statement(nil), proc.Statements...)
