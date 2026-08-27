@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Improved LSP diagnostics for VBA modules with at least 10,000 source lines:
+  `didOpen` now publishes document-local Fast diagnostics before the delayed
+  workspace overlay and Full diagnostics pass, while generation-safe
+  cancellation and Full-result replacement remain unchanged.
+
 - Added opt-in LSP startup/project-preparation telemetry for workspace
   discovery, declaration and semantic indexing, snapshots, resolution,
   dependency updates, diagnostics, interactive requests, and scheduler waits.

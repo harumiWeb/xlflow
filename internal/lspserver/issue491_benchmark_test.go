@@ -22,6 +22,10 @@ import (
 const (
 	issue491ProcedureCount = 1200
 	issue491CallsPerProc   = 4
+	// The first-publication benchmark includes the initial Fast pass over the
+	// complete synthetic module. Keep a generous guard so a contended host
+	// cannot leave the benchmark process waiting forever.
+	issue491FirstPublicationWait = 5 * time.Minute
 	// Building the 1,200-procedure catalog can exceed five seconds on a
 	// contended Linux CI runner. The behavior under test is prompt cancellation
 	// after the checkpoint, not a fixed upper bound on catalog construction.
@@ -558,7 +562,7 @@ func benchmarkIssue491OpenImmediateInteractive(b *testing.B, fixture lspBenchmar
 }
 
 func benchmarkIssue491Lifecycle(b *testing.B, fixture lspBenchmarkFixture) {
-	b.Run("Lifecycle/FirstFastDiagnostics", func(b *testing.B) {
+	b.Run("Lifecycle/InitialFastDiagnostics", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
@@ -567,12 +571,46 @@ func benchmarkIssue491Lifecycle(b *testing.B, fixture lspBenchmarkFixture) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			state := &diagnosticState{open: true, generation: 1, latest: doc}
+			state := &diagnosticState{open: true, generation: 1, latest: doc, initialFast: true}
 			s.diagWorkers.Add(1)
 			b.StartTimer()
 			s.runDocumentAnalysis(context.Background(), fixture.largeURI, state, 1, doc, nil, false, intel.DiagnosticModeFast)
 			b.StopTimer()
 			cleanup()
+		}
+	})
+
+	b.Run("Lifecycle/DidOpenFirstPublication", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := newLSPBenchmarkServerWithCleanup(b, fixture)
+			published := make(chan struct{}, 1)
+			ctx := &glsp.Context{Notify: func(method string, _ any) {
+				if method != string(protocol.ServerTextDocumentPublishDiagnostics) {
+					return
+				}
+				select {
+				case published <- struct{}{}:
+				default:
+				}
+			}}
+			b.StartTimer()
+			err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+				URI: protocol.DocumentUri(fixture.largeURI), Version: int32(i + 1), Text: fixture.largeSource,
+			}})
+			if err == nil {
+				select {
+				case <-published:
+				case <-time.After(issue491FirstPublicationWait):
+					err = fmt.Errorf("first diagnostics publication timed out")
+				}
+			}
+			b.StopTimer()
+			cleanup()
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
