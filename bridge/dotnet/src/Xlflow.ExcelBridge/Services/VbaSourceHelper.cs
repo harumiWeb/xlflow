@@ -434,6 +434,10 @@ internal static partial class VbaSourceHelper
             throw new InvalidOperationException($"vba_line_number_safety_failed: {sourcePath}:{issue!.Line}: {issue.Message}");
         }
 
+        // VBIDE's file importer expects exported VBA text to use CRLF. In
+        // particular, an LF-only .cls file is imported as a standard module
+        // instead of a class module, leaving its VERSION header in the body.
+        content = NormalizeLineEndings(content);
         var encoding = GetVbaInteropEncoding();
         File.WriteAllText(destPath, content, encoding);
         return destPath;
@@ -484,9 +488,7 @@ internal static partial class VbaSourceHelper
             return content;
         }
 
-        content = content.Replace("\r\n", "\n");
-        content = content.Replace("\r", "\n");
-        content = content.Replace("\n", "\r\n");
+        content = NormalizeLineEndings(content);
 
         if (content.Length > 0 && content[0] == '\uFEFF')
         {
@@ -494,6 +496,18 @@ internal static partial class VbaSourceHelper
         }
 
         return content;
+    }
+
+    private static string NormalizeLineEndings(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return content;
+        }
+
+        return content.Replace("\r\n", "\n")
+            .Replace("\r", "\n")
+            .Replace("\n", "\r\n");
     }
 
     public static string GetFolderAnnotationForPath(string rootDir, string filePath)

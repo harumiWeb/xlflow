@@ -1181,6 +1181,26 @@ func legacyOptInAnalyzeRulesForWrite(cfg AnalyzeConfig) []analyzeRuleConfig {
 	return out
 }
 
+func renderBuildConfig(cfg BuildConfig) string {
+	var b strings.Builder
+	b.WriteString("# Release build source filtering. This affects `build` only; `push` and `pack`\n")
+	b.WriteString("# always use the complete source tree.\n")
+	b.WriteString("[build]\n")
+	b.WriteString("# Project-root-relative doublestar globs excluded from `xlflow build`.\n")
+	if len(cfg.Exclude) == 0 {
+		b.WriteString("exclude = []\n")
+		return b.String()
+	}
+	b.WriteString("exclude = [\n")
+	for _, pattern := range cfg.Exclude {
+		b.WriteString("  ")
+		b.WriteString(strconv.Quote(pattern))
+		b.WriteString(",\n")
+	}
+	b.WriteString("]\n")
+	return b.String()
+}
+
 func renderMetricsConfig(cfg MetricsConfig) string {
 	var b strings.Builder
 	b.WriteString("# Procedure complexity metrics.\n")
@@ -1255,6 +1275,7 @@ func Write(path string, cfg Config) (err error) {
 
 	lintConfigText := renderLintConfig(cfg.Lint)
 	analyzeConfigText := renderAnalyzeConfig(analyzeConfig)
+	buildConfigText := renderBuildConfig(cfg.Build)
 	metricsConfigText := renderMetricsConfig(metricsConfig)
 	preflightConfigText := renderPreflightConfig(preflightConfig)
 
@@ -1314,6 +1335,7 @@ default_component_folders = %t
 code_source = %q
 
 %s
+%s
 # Automatic backup retention is disabled by default. Uncomment to prune old
 # metadata-backed backups for the configured workbook after successful backup-
 # producing push and rollback operations.
@@ -1353,6 +1375,7 @@ builtin_casing = %t
 		cfg.Src.Modules, cfg.Src.Classes, cfg.Src.Forms, cfg.Src.Workbook,
 		cfg.VBA.Folders, cfg.VBA.FolderAnnotation, cfg.VBA.DefaultComponentFolders,
 		cfg.UserForm.CodeSource,
+		buildConfigText,
 		metricsConfigText,
 		cfg.Fmt.OperatorSpacing, cfg.Fmt.DeclarationSpacing, cfg.Fmt.KeywordCasing, cfg.Fmt.BuiltinCasing,
 		preflightConfigText,

@@ -204,8 +204,44 @@ public sealed class VbaSourceHelperTests
             Assert.True(ErlLineNumberTransformer.TryRemove(prepared, out var restored, out var issue));
             Assert.Null(issue);
             Assert.Equal(
-                VbaSourceHelper.UpdateFolderAnnotationText(source, "update", "Nested"),
+                VbaSourceHelper.ConvertToUtf8(VbaSourceHelper.UpdateFolderAnnotationText(source, "update", "Nested")),
                 restored);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void PrepareSourceForImport_NormalizesLfOnlyClassModuleForVbe()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlflow-class-import-line-ending-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var sourcePath = Path.Combine(root, "SampleClass.cls");
+            var destinationPath = Path.Combine(root, "import", "SampleClass.cls");
+            var source = string.Join("\n", new[]
+            {
+                "VERSION 1.0 CLASS",
+                "BEGIN",
+                "  MultiUse = -1  'True",
+                "END",
+                "Attribute VB_Name = \"SampleClass\"",
+                "Option Explicit",
+                "Public Value As String",
+                "",
+            });
+            Directory.CreateDirectory(root);
+            File.WriteAllText(sourcePath, source, new UTF8Encoding(false));
+
+            VbaSourceHelper.PrepareSourceForImport(sourcePath, destinationPath, null, "off");
+
+            var prepared = File.ReadAllText(destinationPath, VbaSourceHelper.GetVbaImportEncoding());
+            Assert.Equal(source.Replace("\n", "\r\n"), prepared);
         }
         finally
         {

@@ -563,6 +563,11 @@ For session-aware workbooks, `test --session` is the preferred validation path w
 
 `.xlsb` support is first-class for Excel COM/VBIDE-backed VBA workflows: `new`, `init`, `pull`, `push`, sessions, `run`, `test`, `save`, backup/rollback, macros, and UserForm operations use the same source layout as `.xlsm` and `.xlam`. Direct file-level worksheet/package features remain limited to OOXML workbooks and must fail with `workbook_format_unsupported` instead of leaking ZIP, XML, or Excelize parser errors.
 
+Text VBA components imported through the VBIDE file API (`.bas`, `.cls`, and
+`.frm`) are normalized to CRLF in the temporary import copy. This keeps Excel
+from misclassifying LF-only exported class headers; tracked source files remain
+UTF-8 and are not rewritten by the import normalization.
+
 ## Configuration
 
 The MVP only auto-discovers `xlflow.toml` from the current working directory. `vba.toml` is intentionally not supported.
@@ -597,7 +602,10 @@ code_source = "sidecar"
 
 [build]
 # Source paths are project-root-relative doublestar globs.
-exclude = ["src/modules/Tests/**"]
+exclude = [
+  "src/modules/Tests/**",
+  "src/modules/Xlflow/XlflowAssert.bas",
+]
 
 # [backup.retention]
 # enabled = false
@@ -656,7 +664,7 @@ development origins without configuration. A match suppresses only
 `plain_http_credentials`, never credentials in URLs, authorization logging,
 TLS/certificate policy, sensitive constants, or download-and-launch findings.
 
-`[build].exclude` defines the source filtering policy used only by the Excel-backed `build` command; it never changes `push` or `pack` source selection. Each entry is a project-root-relative `doublestar` glob. Paths and patterns are normalized to `/`, so Windows and WSL separators match identically; absolute paths and patterns that traverse outside the project root are invalid. Matching is component-level: standard, class, and document components match their source file, while a UserForm matches its `.frm` and any associated `.frx`, sidecar code, or persisted spec path. A matching UserForm artifact excludes the whole form component. The resolver reports unmatched patterns as stable `build_exclude_unmatched` warnings, but malformed patterns, unreadable configured source roots or files, incomplete UserForm artifacts, duplicate included VBA component names (case-insensitive across component types), and equal resolved base/output paths are errors before Excel is opened. Included and excluded lists are sorted by normalized source path.
+`[build].exclude` defines the source filtering policy used only by the Excel-backed `build` command; it never changes `push` or `pack` source selection. Each entry is a project-root-relative `doublestar` glob. Paths and patterns are normalized to `/`, so Windows and WSL separators match identically; absolute paths and patterns that traverse outside the project root are invalid. Matching is component-level: standard, class, and document components match their source file, while a UserForm matches its `.frm` and any associated `.frx`, sidecar code, or persisted spec path. A matching UserForm artifact excludes the whole form component. The resolver reports unmatched patterns as stable `build_exclude_unmatched` warnings, but malformed patterns, unreadable configured source roots or files, incomplete UserForm artifacts, duplicate included VBA component names (case-insensitive across component types), and equal resolved base/output paths are errors before Excel is opened. Included and excluded lists are sorted by normalized source path. `xlflow new` and `xlflow init` pre-populate this list with `src/modules/Tests/**` and `src/modules/Xlflow/XlflowAssert.bas`; these scaffold defaults can be removed when those components are part of a release.
 
 `build` defaults its base workbook to `[excel].path` and its output to `build/Release/<base filename>`. The base must exist and use `.xlsm`, `.xlam`, or `.xlsb`; the output uses the same format and is a complete project-local file path, not a directory. `build --dry-run` never opens Excel, creates directories, writes an artifact or manifest, acquires workbook coordination, or delegates from WSL. It returns a v1 `build` manifest with `schema_version=1`, `command="build"`, `backend="excel"`, resolved base/output, included/excluded components, and `validation.vbe_compile="not_run"`.
 
