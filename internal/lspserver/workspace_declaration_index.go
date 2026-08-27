@@ -32,8 +32,8 @@ type workspaceDeclarationIndex struct {
 	moduleName map[string][]symbolRef
 	symbolKind map[string][]symbolRef
 	exactKeys  []string
-	qualKeys   []string
 	all        []symbolRef
+	allSorted  bool
 
 	root   string
 	config config.Config
@@ -46,7 +46,7 @@ func newWorkspaceDeclarationIndex(root string, cfg config.Config) *workspaceDecl
 		pending: map[string]uint64{}, incomplete: map[string]bool{},
 		effective: map[string]indexedFileAnalysis{}, generation: map[string]uint64{},
 		exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{},
-		moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
+		moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{}, allSorted: true,
 	}
 }
 
@@ -124,7 +124,7 @@ func (d *workspaceDeclarationIndex) setDisk(filePath string, entry indexedFileAn
 		delete(d.incomplete, key)
 	}
 	if _, open := d.overlays[key]; !open && d.pending[key] == 0 {
-		d.replaceEffectiveLocked(key, entry)
+		d.replaceEffectiveLocked(key, entry, initial)
 		d.revision++
 	}
 	return true
@@ -173,7 +173,7 @@ func (d *workspaceDeclarationIndex) setEffectiveFromEntry(filePath string, entry
 		delete(d.incomplete, key)
 	}
 	if _, open := d.overlays[key]; !open && d.pending[key] == 0 {
-		d.replaceEffectiveLocked(key, entry)
+		d.replaceEffectiveLocked(key, entry, false)
 		d.revision++
 	}
 	d.mu.Unlock()
@@ -242,7 +242,7 @@ func (d *workspaceDeclarationIndex) setOverlay(doc intel.Document, entry indexed
 		delete(d.incomplete, key)
 	}
 	d.overlays[key] = entry
-	d.replaceEffectiveLocked(key, entry)
+	d.replaceEffectiveLocked(key, entry, false)
 	d.revision++
 	d.mu.Unlock()
 }
@@ -283,7 +283,7 @@ func (d *workspaceDeclarationIndex) publishOverlay(doc intel.Document, generatio
 		delete(d.incomplete, key)
 	}
 	d.overlays[key] = entry
-	d.replaceEffectiveLocked(key, entry)
+	d.replaceEffectiveLocked(key, entry, false)
 	d.revision++
 	return true
 }
@@ -311,8 +311,9 @@ func (d *workspaceDeclarationIndex) searchContains(query string, nonBlocking boo
 		return nil, err
 	}
 	query = normalizeSymbolQuery(query)
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ensureAllSortedLocked()
 	if query == "" {
 		return d.symbolsForRefsLocked(d.all), nil
 	}
@@ -330,8 +331,9 @@ func (d *workspaceDeclarationIndex) symbolSnapshot(nonBlocking bool) ([]intel.Sy
 	if err := d.queryReady(nonBlocking); err != nil {
 		return nil, err
 	}
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ensureAllSortedLocked()
 	return d.symbolsForRefsLocked(d.all), nil
 }
 
@@ -349,8 +351,9 @@ func (d *workspaceDeclarationIndex) searchPrefix(prefix string, nonBlocking bool
 		return nil, err
 	}
 	prefix = normalizeSymbolQuery(prefix)
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ensureAllSortedLocked()
 	if prefix == "" {
 		return d.symbolsForRefsLocked(d.all), nil
 	}
@@ -389,16 +392,24 @@ func (d *workspaceDeclarationIndex) searchKind(kind string, nonBlocking bool) ([
 	return d.symbolsForRefsLocked(d.symbolKind[normalizeSymbolQuery(kind)]), nil
 }
 
-func (d *workspaceDeclarationIndex) replaceEffectiveLocked(key string, entry indexedFileAnalysis) {
+func (d *workspaceDeclarationIndex) replaceEffectiveLocked(key string, entry indexedFileAnalysis, appendAll bool) {
 	d.removeEffectiveLocked(key)
 	d.effective[key] = entry
+	if !appendAll {
+		d.ensureAllSortedLocked()
+	}
 	for i, sym := range entry.symbols {
 		ref := symbolRef{path: key, index: i}
 		d.addPostingLocked(d.exactName, &d.exactKeys, normalizeSymbolQuery(sym.Name), ref)
-		d.addPostingLocked(d.qualified, &d.qualKeys, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
+		d.addPostingLocked(d.qualified, nil, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
 		d.addPostingLocked(d.moduleName, nil, normalizeSymbolQuery(sym.Module), ref)
 		d.addPostingLocked(d.symbolKind, nil, normalizeSymbolQuery(sym.Kind), ref)
-		d.all = insertSortedRef(d.all, ref, d.refLessLocked)
+		if appendAll {
+			d.all = append(d.all, ref)
+			d.allSorted = false
+		} else {
+			d.all = insertSortedRef(d.all, ref, d.refLessLocked)
+		}
 	}
 }
 
@@ -410,12 +421,28 @@ func (d *workspaceDeclarationIndex) removeEffectiveLocked(key string) {
 	for i, sym := range old.symbols {
 		ref := symbolRef{path: key, index: i}
 		d.removePostingLocked(d.exactName, &d.exactKeys, normalizeSymbolQuery(sym.Name), ref)
-		d.removePostingLocked(d.qualified, &d.qualKeys, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
+		d.removePostingLocked(d.qualified, nil, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
 		d.removePostingLocked(d.moduleName, nil, normalizeSymbolQuery(sym.Module), ref)
 		d.removePostingLocked(d.symbolKind, nil, normalizeSymbolQuery(sym.Kind), ref)
 		d.all = removeRef(d.all, ref)
 	}
 	delete(d.effective, key)
+}
+
+func (d *workspaceDeclarationIndex) sortAll() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ensureAllSortedLocked()
+}
+
+func (d *workspaceDeclarationIndex) ensureAllSortedLocked() {
+	if d.allSorted {
+		return
+	}
+	sort.SliceStable(d.all, func(i, j int) bool {
+		return d.refLessLocked(d.all[i], d.all[j])
+	})
+	d.allSorted = true
 }
 
 func (d *workspaceDeclarationIndex) addPostingLocked(postings map[string][]symbolRef, keys *[]string, key string, ref symbolRef) {

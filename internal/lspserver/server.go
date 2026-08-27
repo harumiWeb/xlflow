@@ -1799,7 +1799,10 @@ func (s *Server) runDocumentAnalysis(
 		}
 		started := time.Now()
 		s.overlayBuilds.Add(1)
-		declarations, included, err := s.analyzeWorkspaceOverlayDeclarations(runCtx, doc)
+		declarations, overlayDoc, included, err := s.analyzeWorkspaceOverlayDeclarations(runCtx, doc)
+		if overlayDoc.Snapshot != nil && overlayDoc.Snapshot != doc.Snapshot {
+			defer overlayDoc.Snapshot.Retire()
+		}
 		publishedDeclarations := false
 		if err == nil && included && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
 			publishedDeclarations = s.analysis.publishOverlayDeclarations(doc, generation, declarations)
@@ -1811,7 +1814,7 @@ func (s *Server) runDocumentAnalysis(
 			s.logWorkspaceOverlayPerformance(doc, generation, started, err, true)
 		}
 		if publishedDeclarations && runCtx.Err() == nil {
-			analysis, semanticIncluded, semanticErr := s.analyzeWorkspaceOverlay(runCtx, doc)
+			analysis, semanticIncluded, semanticErr := s.analyzeWorkspaceOverlay(runCtx, overlayDoc)
 			publishedSemantic := false
 			if semanticErr == nil && semanticIncluded && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
 				publishedSemantic = s.analysis.publishOverlaySemantic(doc, generation, analysis)
@@ -2395,7 +2398,10 @@ func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, 
 	s.performance.addCounter(performanceCounterWorkspaceDeclarationBuilds, 1, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
 	s.notifyPerformanceHook("declaration-ready", doc.Path)
 	incomplete := false
-	if parsed, parseErr := snapshot.ParsedDocument(); parseErr == nil {
+	parsed, parseErr := snapshot.ParsedDocument()
+	if parseErr != nil {
+		incomplete = true
+	} else {
 		_ = parsed.Read(func(view vbaast.ParsedView) error {
 			incomplete = view.HasError || view.HasMissing
 			return nil
@@ -2435,24 +2441,29 @@ func (s *Server) analyzeWorkspaceOverlay(ctx context.Context, doc intel.Document
 	return analysis, true, nil
 }
 
-func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc intel.Document) (indexedFileAnalysis, bool, error) {
+func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc intel.Document) (indexedFileAnalysis, intel.Document, bool, error) {
 	file, included, err := symbols.SourceFileForPath(s.opts.RootDir, s.opts.Config, doc.Path)
 	if err != nil || !included {
-		return indexedFileAnalysis{}, included, err
+		return indexedFileAnalysis{}, doc, included, err
 	}
 	if err := ctx.Err(); err != nil {
-		return indexedFileAnalysis{}, true, err
+		return indexedFileAnalysis{}, doc, true, err
 	}
 	doc.Path = file.Path
 	doc.ModuleKind = file.ModuleKind
+	snapshot := doc.Snapshot
+	if snapshot == nil || !snapshot.Matches(doc) {
+		snapshot = intel.NewAnalysisSnapshot(doc)
+		doc = snapshot.Document()
+	}
 	analysis, err := s.analyzeIndexedDeclarationsDocumentContext(ctx, doc, "interactive")
 	if err != nil {
-		return indexedFileAnalysis{}, true, err
+		return indexedFileAnalysis{}, doc, true, err
 	}
 	if err := ctx.Err(); err != nil {
-		return indexedFileAnalysis{}, true, err
+		return indexedFileAnalysis{}, doc, true, err
 	}
-	return analysis, true, nil
+	return analysis, doc, true, nil
 }
 
 func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Document) (indexedFileAnalysis, error) {

@@ -124,6 +124,9 @@ func TestWorkspaceDeclarationIndexServesCrossFileHoverBeforeSemanticReady(t *tes
 	declarationReady := make(chan struct{})
 	semanticRelease := make(chan struct{})
 	var declarationOnce sync.Once
+	var semanticReleaseOnce sync.Once
+	releaseSemantic := func() { semanticReleaseOnce.Do(func() { close(semanticRelease) }) }
+	defer releaseSemantic()
 	s.performanceHook = func(stage, path string) {
 		if path != moduleB {
 			return
@@ -172,7 +175,7 @@ func TestWorkspaceDeclarationIndexServesCrossFileHoverBeforeSemanticReady(t *tes
 	if hover == nil || !strings.Contains(hover.Contents, "CrossFileTarget") {
 		t.Fatalf("cross-file hover before semantic readiness = %+v", hover)
 	}
-	close(semanticRelease)
+	releaseSemantic()
 	if err := s.analysis.waitReady(); err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +337,42 @@ func TestWorkspaceAnalysisIndexStopPreventsRestart(t *testing.T) {
 	}
 	if got := parses.Load(); got != 0 {
 		t.Fatalf("stopped index restarted %d parser jobs", got)
+	}
+}
+
+func TestWorkspaceAnalysisIndexCancellationMarksDeclarationReadiness(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("Sub Main()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	parseDeclarations := func(ctx context.Context, _ symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		close(started)
+		<-ctx.Done()
+		return indexedFileAnalysis{}, ctx.Err()
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{}, nil
+	}, nil)
+	index.parseDeclarations = parseDeclarations
+	index.initialWorkers = 1
+	index.semanticWorkers = 1
+	index.start()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for declaration parser")
+	}
+	index.stop()
+	if err := index.waitDeclarationsReady(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled declaration readiness = %v, want context.Canceled", err)
+	}
+	if err := index.waitReady(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled semantic readiness = %v, want context.Canceled", err)
 	}
 }
 

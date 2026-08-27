@@ -64,12 +64,7 @@ type workspaceAnalysisIndex struct {
 	// removed. Pending overlays make projectSnapshot incomplete and therefore
 	// cannot seed project-aware diagnostics.
 	revision            uint64
-	exactName           map[string][]symbolRef
 	qualified           map[string][]symbolRef
-	moduleName          map[string][]symbolRef
-	symbolKind          map[string][]symbolRef
-	exactKeys           []string
-	qualKeys            []string
 	all                 []symbolRef
 	allCalls            []callRef
 	byCaller            map[string][]callRef
@@ -190,7 +185,7 @@ func newWorkspaceAnalysisIndex(root string, cfg config.Config, parse func(contex
 	return &workspaceAnalysisIndex{
 		root: root, config: cfg, parse: parse, log: logInitial, ready: make(chan struct{}),
 		disk: map[string]indexedFileAnalysis{}, overlays: map[string]indexedFileAnalysis{}, pending: map[string]uint64{}, incomplete: map[string]bool{}, effective: map[string]indexedFileAnalysis{},
-		generation: map[string]uint64{}, diskParses: map[string]*diskParse{}, exactName: map[string][]symbolRef{}, qualified: map[string][]symbolRef{}, moduleName: map[string][]symbolRef{}, symbolKind: map[string][]symbolRef{},
+		generation: map[string]uint64{}, diskParses: map[string]*diskParse{}, qualified: map[string][]symbolRef{},
 		byCaller: map[string][]callRef{}, byBaseName: map[string][]callRef{}, byText: map[string][]callRef{},
 		declarations: newWorkspaceDeclarationIndex(root, cfg), initialWorkers: 1, semanticWorkers: 1,
 		initialCtx: initialCtx, initialCancel: initialCancel,
@@ -305,11 +300,14 @@ func (x *workspaceAnalysisIndex) buildInitial() {
 		// possible and keeps heavyweight IR/CFG work from delaying it.
 		declarationStarted := time.Now()
 		sources := x.buildInitialDeclarations(files)
-		x.declarations.markReady(nil)
+		err = x.initialCtx.Err()
+		x.declarations.markReady(err)
 		if x.logDeclarations != nil {
-			x.logDeclarations(len(files), declarationStarted, nil)
+			x.logDeclarations(len(files), declarationStarted, err)
 		}
-		x.buildInitialSemantics(files, sources)
+		if err == nil {
+			x.buildInitialSemantics(files, sources)
+		}
 	} else if err == nil {
 		for _, file := range files {
 			// Compatibility path for direct index users that provide one
@@ -317,18 +315,17 @@ func (x *workspaceAnalysisIndex) buildInitial() {
 			// layers after it completes.
 			_ = x.upsertDisk(file, true)
 		}
-		x.declarations.markReady(nil)
+		err = x.initialCtx.Err()
+		x.declarations.markReady(err)
 	} else {
 		x.declarations.markReady(err)
+	}
+	if err == nil {
+		err = x.initialCtx.Err()
 	}
 	x.mu.Lock()
 	x.readyErr = err
 	x.mu.Unlock()
-	if err != nil {
-		// A discovery failure is the only initial readiness error.  Per-file
-		// read/parse failures are represented by incomplete path state.
-		x.declarations.markReady(err)
-	}
 	if x.log != nil {
 		x.log(len(files), started, err)
 	}
@@ -385,6 +382,7 @@ sendJobs:
 	}
 	close(jobs)
 	wg.Wait()
+	x.declarations.sortAll()
 	return sources
 }
 
@@ -1195,10 +1193,7 @@ func (x *workspaceAnalysisIndex) replaceEffectiveLocked(key string, entry indexe
 	x.effective[key] = entry
 	for i, sym := range entry.symbols {
 		ref := symbolRef{path: key, index: i}
-		x.addPostingLocked(x.exactName, &x.exactKeys, normalizeSymbolQuery(sym.Name), ref)
-		x.addPostingLocked(x.qualified, &x.qualKeys, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
-		x.addPostingLocked(x.moduleName, nil, normalizeSymbolQuery(sym.Module), ref)
-		x.addPostingLocked(x.symbolKind, nil, normalizeSymbolQuery(sym.Kind), ref)
+		x.addPostingLocked(x.qualified, nil, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
 		x.all = insertSortedRef(x.all, ref, x.refLessLocked)
 	}
 	for i, site := range entry.callSites {
@@ -1219,10 +1214,7 @@ func (x *workspaceAnalysisIndex) removeEffectiveLocked(key string) {
 	}
 	for i, sym := range old.symbols {
 		ref := symbolRef{path: key, index: i}
-		x.removePostingLocked(x.exactName, &x.exactKeys, normalizeSymbolQuery(sym.Name), ref)
-		x.removePostingLocked(x.qualified, &x.qualKeys, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
-		x.removePostingLocked(x.moduleName, nil, normalizeSymbolQuery(sym.Module), ref)
-		x.removePostingLocked(x.symbolKind, nil, normalizeSymbolQuery(sym.Kind), ref)
+		x.removePostingLocked(x.qualified, nil, normalizeSymbolQuery(qualifiedSymbolName(sym)), ref)
 		x.all = removeRef(x.all, ref)
 	}
 	for i, site := range old.callSites {
