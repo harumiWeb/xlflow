@@ -191,6 +191,16 @@ Findings explain that xlflow-oriented macros should prefer explicit `run --arg` 
 
 `xlflow run --headless` is the default recommendation for AI agents and CI. It scans source before starting Excel. If GUI boundaries are present, it fails with `gui_boundary_detected` and returns top-level `gui_boundaries` so the agent can explain why execution was refused.
 
+For a configured project workbook, the headless preflight scopes GUI findings to
+the requested macro's conservative project call graph. A boundary in a
+procedure that cannot be reached from that macro is omitted from this run's
+failure, while reachable boundaries remain fatal. Resolved dynamic calls are
+followed as possible reachability. Unknown project dispatch, incomplete source
+parsing, implicit standard-module property accessors, or a boundary whose
+owning procedure cannot be identified retains the project-wide failure
+behavior; this check is not a proof about code outside the configured source
+tree.
+
 `xlflow run --interactive` is for human-assisted sessions. It runs Excel visibly with alerts enabled, allowing a person to complete file pickers, message boxes, or UserForms. `--timeout` defaults to five minutes; timeout failures return `macro_timeout` and should be interpreted as a possible unresolved dialog, form, file picker, or long-running loop.
 
 `xlflow inspect-gui` exposes the same boundary report without running Excel. `xlflow session attach` adopts the human-opened configured workbook as the live xlflow session before an interactive workflow continues. The legacy `xlflow attach --active` command is deprecated and only validates the active workbook.

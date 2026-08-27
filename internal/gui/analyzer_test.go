@@ -9,6 +9,182 @@ import (
 	"github.com/harumiWeb/xlflow/internal/config"
 )
 
+func writeHeadlessFixture(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(dir, "src", "modules", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestAnalyzerRunHeadlessFiltersUnreachableGUIBoundaries(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  Debug.Print \"safe\"\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("expected unreachable GUI boundary to be filtered, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessRetainsReachableGUIBoundaries(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  LegacyGui.PickFile\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.GetOpenFilename" {
+		t.Fatalf("expected reachable GUI boundary, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessDoesNotTreatExternalCallsAsProjectUncertainty(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  Debug.Print \"safe\"\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("external Debug.Print should not force project-wide fallback, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessIgnoresUnknownDynamicCallsFromUnreachableProcedures(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  Debug.Print \"safe\"\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n\nPrivate Sub Dead()\n  Application.Run macroName\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 0 {
+		t.Fatalf("unknown dynamic call in an unreachable procedure should not force fallback, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessTracksStaticDynamicTargets(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  Application.Run \"LegacyGui.PickFile\"\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.GetOpenFilename" {
+		t.Fatalf("expected static dynamic target to be retained, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessFallsBackForUnknownDynamicTarget(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  Application.Run macroName\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.GetOpenFilename" {
+		t.Fatalf("expected unknown dynamic target to preserve project-wide safety, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessRetainsObjectModuleBoundariesAsPossibleRoots(t *testing.T) {
+	dir := t.TempDir()
+	classes := filepath.Join(dir, "src", "classes")
+	modules := filepath.Join(dir, "src", "modules")
+	if err := os.MkdirAll(classes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modules, "SafeEntry.bas"), []byte("Option Explicit\nPublic Sub Run()\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(classes, "LegacyGui.cls"), []byte("VERSION 1.0 CLASS\nAttribute VB_Name = \"LegacyGui\"\nOption Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.GetOpenFilename" {
+		t.Fatalf("object-module boundaries must remain conservatively reachable, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessRetainsAutoMacroBoundariesAsPossibleRoots(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas":  "Option Explicit\nPublic Sub Run()\nEnd Sub\n",
+		"LegacyAuto.bas": "Option Explicit\nPublic Sub Auto_Open()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "Application.GetOpenFilename" {
+		t.Fatalf("automatic macro boundaries must remain conservatively reachable, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessRetainsImplicitPropertyBoundariesAsPossibleRoots(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\n  Debug.Print \"safe\"\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPrivate Property Get GuiValue() As String\n  GuiValue = InputBox(\"Name?\")\nEnd Property\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("SafeEntry.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 || boundaries[0].Symbol != "InputBox" {
+		t.Fatalf("implicit property boundaries must remain conservatively reachable, got %+v", boundaries)
+	}
+}
+
+func TestAnalyzerRunHeadlessRetainsBoundariesForUnknownTarget(t *testing.T) {
+	dir := writeHeadlessFixture(t, map[string]string{
+		"SafeEntry.bas": "Option Explicit\nPublic Sub Run()\nEnd Sub\n",
+		"LegacyGui.bas": "Option Explicit\nPublic Sub PickFile()\n  Application.GetOpenFilename \"CSV files (*.csv),*.csv\"\nEnd Sub\n",
+	})
+
+	boundaries, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunHeadless("Missing.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundaries) != 1 {
+		t.Fatalf("unknown target must retain project-wide GUI boundaries, got %+v", boundaries)
+	}
+}
+
 func TestAnalyzerDetectsGUIBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src", "modules")

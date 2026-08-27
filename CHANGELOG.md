@@ -20,6 +20,11 @@ All notable changes to xlflow will be documented in this file.
   modules plus `XlflowAssert.bas` from release builds by default; `push` and
   `pack` source selection is unchanged.
 
+- Fixed `run --headless` rejecting a macro because an unrelated procedure in the
+  same project contained a GUI boundary. Headless GUI preflight now follows the
+  requested macro's conservative call graph while retaining project-wide
+  rejection when project dispatch or source ownership is uncertain.
+
 - Fixed workbook-backed test execution for large suites by generating one small
   runner function per executable test case instead of expanding every case into
   a single `RunTest` dispatcher. Hook ordering, parameterized arguments, result
