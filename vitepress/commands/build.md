@@ -79,6 +79,9 @@ build to recreate the companion file.
 | `pack`  | Produce an experimental `.xlsm` with the pure-Go file-level writer.                                  | Never performed by `pack`; release-gate Excel smoke is required. |
 
 `[build].exclude` filters only `build`; it never changes `push` or `pack`.
+Projects created by `xlflow new` or `xlflow init` exclude the scaffold's
+`src/modules/Tests/**` and `src/modules/Xlflow/XlflowAssert.bas` by default;
+edit or clear the list when those components are required in the release.
 Supported base/output pairs are `.xlsm`, `.xlam`, and `.xlsb` with matching
 extensions. Excel and Trust Center VBA-project access are required for a real
 build. Save a matching dirty xlflow session before building.

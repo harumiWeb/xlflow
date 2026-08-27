@@ -8,6 +8,10 @@ All notable changes to xlflow will be documented in this file.
   modules, is normalized to CRLF before VBIDE import and is no longer
   misidentified as a standard module during `build` or `push`.
 
+- Scaffolded projects now expose `[build].exclude` and exclude generated test
+  modules plus `XlflowAssert.bas` from release builds by default; `push` and
+  `pack` source selection is unchanged.
+
 - Reduced duplicate LSP project-resolution preparation by sharing one canonical
   symbol index between procedure-only and full resolver views, reusing
   revision-local overlay fact IDs, and preventing canceled resolution builds
