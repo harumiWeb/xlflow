@@ -129,12 +129,12 @@ type SymbolResolver struct {
 	modules     map[string]struct{}
 	moduleKinds map[string]string
 	complete    bool
-	// procedureByName/modules/moduleKinds retain the procedure-only view that
-	// the effects and procedure-local analyzers historically consumed. The
-	// full resolver remains the canonical Resolution capability; callers that
-	// need the legacy call graph semantics can request an immutable view over
-	// these same indexes without rebuilding the project symbol table.
-	procedureByName      map[string][]resolverEntry
+	// procedureOnly is a view flag over the canonical byName index. The legacy
+	// procedure resolver deliberately sees only procedure symbols, but those
+	// entries are no longer copied into a second map. The module maps below are
+	// compact name metadata and are retained because procedure-only module
+	// visibility is a distinct semantic rule.
+	procedureOnly        bool
 	procedureModules     map[string]struct{}
 	procedureModuleKinds map[string]string
 }
@@ -154,7 +154,6 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 		modules:              map[string]struct{}{},
 		moduleKinds:          map[string]string{},
 		complete:             complete,
-		procedureByName:      map[string][]resolverEntry{},
 		procedureModules:     map[string]struct{}{},
 		procedureModuleKinds: map[string]string{},
 	}
@@ -181,20 +180,6 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 		}
 		key := strings.ToLower(cleanIdentifier(symbol.Name))
 		out.byName[key] = append(out.byName[key], entry)
-		if isLegacyProjectProcedureKind(symbol.Kind) {
-			// Match the legacy effects resolver, which indexed only the public
-			// procedure identity fields and therefore never treated recovered or
-			// conditional procedure metadata as uncertainty evidence.
-			procedureEntry := entry
-			procedureEntry.typeName = ""
-			procedureEntry.parent = ""
-			procedureEntry.recovered = false
-			procedureEntry.conditionalBranches = nil
-			procedureEntry.isArray = false
-			procedureEntry.isConst = false
-			procedureEntry.valueShape = ValueShapeUnknown
-			out.procedureByName[key] = append(out.procedureByName[key], procedureEntry)
-		}
 		if strings.TrimSpace(symbol.Module) != "" {
 			moduleKey := strings.ToLower(cleanIdentifier(symbol.Module))
 			out.modules[moduleKey] = struct{}{}
@@ -211,9 +196,6 @@ func NewSymbolResolverWithCompleteness(symbols []ResolverSymbol, complete bool) 
 	}
 	for key := range out.byName {
 		sortResolverEntries(out.byName[key])
-	}
-	for key := range out.procedureByName {
-		sortResolverEntries(out.procedureByName[key])
 	}
 	return out
 }
@@ -248,15 +230,15 @@ func isLegacyProjectProcedureKind(kind string) bool {
 }
 
 // ProcedureOnlyResolver returns an immutable resolver view backed by the
-// procedure-only symbol indexes collected while constructing the full project
-// resolver. It preserves the pre-capability-planner call/effect semantics
-// without constructing a second project symbol index.
+// canonical symbol index and compact procedure-module metadata collected while
+// constructing the full project resolver. It preserves the pre-capability-
+// planner call/effect semantics without constructing a second project index.
 func ProcedureOnlyResolver(resolver Resolver) Resolver {
 	r, ok := resolver.(SymbolResolver)
 	if !ok {
 		return resolver
 	}
-	r.byName = r.procedureByName
+	r.procedureOnly = true
 	r.modules = r.procedureModules
 	r.moduleKinds = r.procedureModuleKinds
 	// The historical effects resolver was built from the complete procedure
@@ -264,6 +246,14 @@ func ProcedureOnlyResolver(resolver Resolver) Resolver {
 	// that fail-open boundary for procedure-local/effect consumers.
 	r.complete = true
 	return r
+}
+
+// entriesByName returns the canonical candidate slice. The procedure-only
+// boundary is applied by visibleForCaller and the helper that needs
+// caller-independent visibility, so lookup does not allocate a filtered copy
+// for every call site.
+func (r SymbolResolver) entriesByName(key string) []resolverEntry {
+	return r.byName[key]
 }
 
 // NewResolver creates the default resolver backed by project symbols.
@@ -304,7 +294,7 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 	if site.Callee.Receiver == nil && containsFolded(site.NonCallableNames, base) {
 		return r.negativeCallResolution(CallResolution{Status: ResolutionNonCallable, ProjectLocal: true})
 	}
-	entries := r.visibleForCaller(r.byName[strings.ToLower(base)], caller, callerProcedure)
+	entries := r.visibleForCaller(r.entriesByName(strings.ToLower(base)), caller, callerProcedure)
 	if isDynamicCall(site) {
 		return r.negativeCallResolution(CallResolution{Status: ResolutionDynamic})
 	}
@@ -384,7 +374,7 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 			Status: ResolutionNonCallable, Candidates: entriesToCandidates(nonCallable), ProjectLocal: true,
 		}, nonCallable)
 	}
-	if inaccessible := inaccessibleProcedures(r.byName[strings.ToLower(base)], caller); len(inaccessible) > 0 {
+	if inaccessible := inaccessibleProcedures(r.entriesByName(strings.ToLower(base)), caller, r.procedureOnly); len(inaccessible) > 0 {
 		return r.negativeCallResolution(CallResolution{
 			Status: ResolutionNonCallable, Candidates: entriesToCandidates(inaccessible), ProjectLocal: true,
 		}, inaccessible)
@@ -396,14 +386,26 @@ func (r SymbolResolver) ResolveCall(site CallSite) CallResolution {
 	return CallResolution{Status: ResolutionUnresolved}
 }
 
-func inaccessibleProcedures(entries []resolverEntry, caller string) []resolverEntry {
+func inaccessibleProcedures(entries []resolverEntry, caller string, procedureOnly bool) []resolverEntry {
 	if strings.TrimSpace(caller) == "" {
 		return nil
 	}
 	result := make([]resolverEntry, 0, len(entries))
 	for _, entry := range entries {
+		if procedureOnly && !isLegacyProjectProcedureKind(entry.Kind) {
+			continue
+		}
 		if !isProcedureSymbolKind(entry.Kind) || !symbolIsPrivate(entry) || strings.EqualFold(entry.module, caller) {
 			continue
+		}
+		if procedureOnly {
+			entry.typeName = ""
+			entry.parent = ""
+			entry.recovered = false
+			entry.conditionalBranches = nil
+			entry.isArray = false
+			entry.isConst = false
+			entry.valueShape = ValueShapeUnknown
 		}
 		result = append(result, entry)
 	}
@@ -553,7 +555,7 @@ func (r SymbolResolver) projectLocalReceiver(receiver, caller, procedure string)
 	// A function result can itself be an object (`Specs.It(...)`). Do not
 	// mistake the function's name for a standard-module qualifier when its
 	// return type is unavailable or belongs to an external TypeLib.
-	for _, entry := range r.visibleForCaller(r.byName[first], caller, procedure) {
+	for _, entry := range r.visibleForCaller(r.entriesByName(first), caller, procedure) {
 		if !isProcedureSymbolKind(entry.Kind) {
 			continue
 		}
@@ -578,7 +580,7 @@ func (r SymbolResolver) projectReceiverType(receiver, caller, procedure string) 
 	}
 	first := strings.ToLower(cleanIdentifier(strings.Split(receiver, ".")[0]))
 	projectTypes := map[string]struct{}{}
-	for _, entry := range r.visibleForCaller(r.byName[first], caller, procedure) {
+	for _, entry := range r.visibleForCaller(r.entriesByName(first), caller, procedure) {
 		typeName := cleanQualifiedName(strings.TrimSpace(entry.typeName))
 		if typeName == "" {
 			// Multiple declarations of the same receiver name are common in
@@ -709,7 +711,7 @@ func (r SymbolResolver) ResolveSymbol(ref SymbolReference) SymbolResolution {
 	if caller == "" {
 		caller = strings.TrimSpace(ref.Module)
 	}
-	entries := r.visibleForCaller(r.byName[strings.ToLower(cleanIdentifier(ref.Name))], caller, callerProcedureName(ref.Caller))
+	entries := r.visibleForCaller(r.entriesByName(strings.ToLower(cleanIdentifier(ref.Name))), caller, callerProcedureName(ref.Caller))
 	if len(entries) > 0 {
 		allEnumMembers := true
 		for _, entry := range entries {
@@ -759,7 +761,7 @@ func (r SymbolResolver) ResolveEnumMember(ref EnumMemberReference) EnumResolutio
 	if caller == "" {
 		caller = strings.TrimSpace(ref.Module)
 	}
-	entries := r.visibleForCaller(r.byName[strings.ToLower(cleanIdentifier(ref.Name))], caller, callerProcedureName(ref.Caller))
+	entries := r.visibleForCaller(r.entriesByName(strings.ToLower(cleanIdentifier(ref.Name))), caller, callerProcedureName(ref.Caller))
 	filtered := make([]resolverEntry, 0, len(entries))
 	for _, entry := range entries {
 		if !isEnumMemberKind(entry.Kind) || strings.TrimSpace(entry.parent) == "" {
@@ -869,7 +871,7 @@ func (r SymbolResolver) ResolveEvent(ref SymbolReference) SymbolResolution {
 	if module == "" {
 		module = callerModule(ref.Caller)
 	}
-	entries := r.visibleForCaller(r.byName[strings.ToLower(cleanIdentifier(ref.Name))], module, callerProcedureName(ref.Caller))
+	entries := r.visibleForCaller(r.entriesByName(strings.ToLower(cleanIdentifier(ref.Name))), module, callerProcedureName(ref.Caller))
 	candidates := make([]resolverEntry, 0, len(entries))
 	for _, entry := range entries {
 		if !isEventSymbolKind(entry.Kind) || !strings.EqualFold(entry.module, module) {
@@ -907,6 +909,20 @@ func isEventSymbolKind(kind string) bool {
 func (r SymbolResolver) visibleForCaller(entries []resolverEntry, callerModule, callerProcedure string) []resolverEntry {
 	out := make([]resolverEntry, 0, len(entries))
 	for _, entry := range entries {
+		if r.procedureOnly {
+			if !isLegacyProjectProcedureKind(entry.Kind) {
+				continue
+			}
+			// Match the historical effects resolver, which indexed only public
+			// procedure identity fields and did not inherit uncertainty metadata.
+			entry.typeName = ""
+			entry.parent = ""
+			entry.recovered = false
+			entry.conditionalBranches = nil
+			entry.isArray = false
+			entry.isConst = false
+			entry.valueShape = ValueShapeUnknown
+		}
 		if symbolIsPrivate(entry) && !strings.EqualFold(entry.module, callerModule) {
 			continue
 		}

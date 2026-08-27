@@ -67,6 +67,10 @@ payload.
 | `project_snapshot_builds`      | Project snapshots assembled.                               |
 | `resolution_resolver_builds`   | Resolver constructions (revision cache misses).            |
 | `resolution_view_builds`       | Resolution views constructed (revision cache misses).      |
+| `canonical_resolver_builds`    | Canonical project resolver/index constructions.            |
+| `procedure_resolver_views`     | Procedure-only resolver views derived from the index.      |
+| `full_resolver_views`          | Full resolver views derived from the index.                |
+| `resolution_overlay_builds`    | Per-document resolution overlays built for both modes.     |
 | `resolution_materializations`  | Document IR materializations into resolution views.        |
 | `procedure_fingerprint_builds` | Procedure fingerprints computed for dependency comparison. |
 | `procedure_fingerprint_reuses` | Fingerprints served from a reusable dependency cache.      |
@@ -172,8 +176,11 @@ ROneCOne benchmark in CI unless the source path is supplied explicitly.
 `projectResolver`, `projectResolutionView`, and
 `projectResolutionMaterialization` are cache-miss/build boundaries. A repeated
 request on the same revision should show request latency without another build;
-the counter snapshot makes that distinction visible. Permit wait time is
-separate from execution time so an interactive request blocked behind a
+the counter snapshot makes that distinction visible. For one project
+preparation, `canonical_resolver_builds`, `procedure_resolver_views`, and
+`full_resolver_views` should each increase once, while
+`resolution_overlay_builds` increases once per document and mode. Permit wait
+time is separate from execution time so an interactive request blocked behind a
 background worker can be measured without attributing the delay to analysis.
 
 Project snapshots retain the canonical syntax-local `DocumentIR` and attach a

@@ -77,6 +77,32 @@ func TestIssue590ResolverNegativeOutcomes(t *testing.T) {
 	}
 }
 
+func TestProcedureOnlyResolverSharesCanonicalCandidateStorage(t *testing.T) {
+	full := NewResolver([]ResolverSymbol{
+		{Name: "Helper", Module: "Main", ModuleKind: "standard", Kind: "sub", Visibility: "Public"},
+		{Name: "Value", Module: "Main", ModuleKind: "standard", Kind: "const", Visibility: "Public"},
+	})
+	procedure, ok := ProcedureOnlyResolver(full).(SymbolResolver)
+	if !ok {
+		t.Fatal("ProcedureOnlyResolver did not return the canonical resolver view")
+	}
+	if !procedure.procedureOnly {
+		t.Fatal("procedure-only resolver view flag was not set")
+	}
+	fullEntries := full.byName["helper"]
+	procedureEntries := procedure.byName["helper"]
+	if len(fullEntries) != 1 || len(procedureEntries) != 1 || &fullEntries[0] != &procedureEntries[0] {
+		t.Fatal("procedure-only resolver copied canonical candidate storage")
+	}
+	call := CallSite{Module: "Main", Caller: ProcedureRef{QualifiedName: "Main.Run"}, Callee: Callee{Text: "Value", BaseName: "Value"}}
+	if got := full.ResolveCall(call); got.Status != ResolutionNonCallable {
+		t.Fatalf("full resolver const call = %#v, want non-callable", got)
+	}
+	if got := procedure.ResolveCall(call); got.Status != ResolutionUnresolved {
+		t.Fatalf("procedure-only const call = %#v, want unresolved", got)
+	}
+}
+
 func TestIssue590LocalDeclarationShadowsProcedure(t *testing.T) {
 	doc, err := BuildSource(BuildOptions{Path: "Main.bas", ModuleKind: "standard"}, []byte(`Public Sub Run()
     Dim Helper As Long

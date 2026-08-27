@@ -340,8 +340,12 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 	project.Revision = 19
 
 	ctx := context.Background()
-	s.projectResolution(ctx, project, true)
-	s.projectResolution(ctx, project, true)
+	if _, _, _, err := s.projectResolution(ctx, project, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.projectResolution(ctx, project, true); err != nil {
+		t.Fatal(err)
+	}
 	s.projectEffectSummaryWithResolution(ctx, project, nil, true)
 	s.projectEffectSummaryWithResolution(ctx, project, nil, true)
 	s.projectConstants(project, true, nil)
@@ -355,6 +359,10 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 		`stage="projectConstants"`,
 		`counter="resolution_resolver_builds" value=1`,
 		`counter="resolution_view_builds" value=1`,
+		`counter="canonical_resolver_builds" value=1`,
+		`counter="procedure_resolver_views" value=1`,
+		`counter="full_resolver_views" value=1`,
+		`counter="resolution_overlay_builds" value=2`,
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("preparation telemetry missing %q:\n%s", expected, output.String())
@@ -365,6 +373,18 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 	}
 	if got := s.performance.counterTotal(performanceCounterResolutionMaterializations); got != 0 {
 		t.Fatalf("resolution materializations = %d, want 0", got)
+	}
+	if got := s.performance.counterTotal(performanceCounterCanonicalResolverBuilds); got != 1 {
+		t.Fatalf("canonical resolver builds = %d, want 1", got)
+	}
+	if got := s.performance.counterTotal(performanceCounterProcedureResolverViews); got != 1 {
+		t.Fatalf("procedure resolver views = %d, want 1", got)
+	}
+	if got := s.performance.counterTotal(performanceCounterFullResolverViews); got != 1 {
+		t.Fatalf("full resolver views = %d, want 1", got)
+	}
+	if got := s.performance.counterTotal(performanceCounterResolutionOverlayBuilds); got != 2 {
+		t.Fatalf("resolution overlay builds = %d, want 2", got)
 	}
 }
 

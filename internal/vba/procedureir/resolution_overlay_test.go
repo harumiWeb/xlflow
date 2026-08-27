@@ -85,6 +85,29 @@ func TestResolveViewUsesFactIDsWithoutMutatingInput(t *testing.T) {
 	}
 }
 
+func TestResolveViewsShareRevisionFactIDsAndPreserveModeSemantics(t *testing.T) {
+	doc := overlayTestDocument()
+	procedureView, fullView := ResolveViews(doc, overlayTestResolver{}, overlayDiagnosticResolver{})
+	if !procedureView.HasOverlay() || !fullView.HasOverlay() {
+		t.Fatal("ResolveViews did not attach both immutable overlays")
+	}
+	if len(procedureView.callIDs) != 1 || len(fullView.callIDs) != 1 ||
+		&procedureView.callIDs[0][0] != &fullView.callIDs[0][0] {
+		t.Fatal("procedure-only and full views did not share revision fact IDs")
+	}
+	procedureCall, ok := procedureView.ResolvedCall(0, 1)
+	if !ok || procedureCall.Resolution.Status != ResolutionMatched {
+		t.Fatalf("procedure-only resolution = (%+v, %t)", procedureCall, ok)
+	}
+	fullCall, ok := fullView.ResolvedCall(0, 1)
+	if !ok || fullCall.Resolution.Status != ResolutionNonCallable {
+		t.Fatalf("full resolution = (%+v, %t)", fullCall, ok)
+	}
+	if !reflect.DeepEqual(doc, overlayTestDocument()) {
+		t.Fatal("ResolveViews mutated the canonical syntax-local document")
+	}
+}
+
 func TestResolvedProcedureProjectsFactsWithoutCloningSyntaxPayload(t *testing.T) {
 	doc := overlayTestDocument()
 	view := ResolveView(doc, overlayTestResolver{})

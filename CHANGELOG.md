@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced duplicate LSP project-resolution preparation by sharing one canonical
+  symbol index between procedure-only and full resolver views, reusing
+  revision-local overlay fact IDs, and preventing canceled resolution builds
+  from entering the cache. Existing call/effect semantics and diagnostic
+  payloads remain unchanged.
+
 - Reduced LSP project-resolution allocations by retaining canonical syntax-local
   procedure IR and reading project-dependent call, access, event, and
   resolution-diagnostic facts through immutable resolution views. Existing
