@@ -123,6 +123,27 @@ queries, full document-symbol builds, and interactive full-symbol fallbacks.
 These counters are developer telemetry only and do not alter LSP responses,
 symbol visibility, ordering, or cancellation and generation safety.
 
+### Amendment: end-to-end startup critical path (Issue #757)
+
+The extension must not make language intelligence wait for a separate
+`xlflow version` preflight or for project/sidebar detail refreshes. The
+language client starts optimistically after the workspace and LSP configuration
+metadata needed to construct its document selector are available. Process
+spawn or initialization failure remains actionable through the existing
+availability and restart paths; the short availability timeout is not applied
+to the complete LSP initialization because TypeLib preparation can be a valid
+cold-start cost.
+
+Startup timing is opt-in developer telemetry. A client-generated anonymous ID
+correlates client lifecycle records with server lifecycle and readiness records
+through the child process environment. Monotonic elapsed times are interpreted
+within each process, with wall-clock timestamps used only for correlation. The
+telemetry does not add protocol fields or requests, and a non-empty hover,
+definition, or completion response is required before reporting a first usable
+language feature. The CLI invokes best-effort TypeLib preparation through the
+server's pre-construction hook after the server baseline is captured, so that
+cold preparation remains part of the measured startup interval.
+
 The VS Code extension should remain a thin language client that launches:
 
 ```ts

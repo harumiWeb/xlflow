@@ -616,7 +616,7 @@ func makeLSPStartupBenchmarkFixture(tb testing.TB) lspStartupBenchmarkFixture {
 	moduleB := filepath.Join(moduleDir, "00_ModuleB.bas")
 	moduleA := filepath.Join(moduleDir, "01_ModuleA.bas")
 	sourceB := "Attribute VB_Name = \"ModuleB\"\nOption Explicit\n\nPublic Function CrossFileTarget(ByVal value As Long) As Long\n    CrossFileTarget = value + 1\nEnd Function\n"
-	sourceA := "Attribute VB_Name = \"ModuleA\"\nOption Explicit\n\nPublic Sub CallB()\n    Call CrossFileTarget(1)\nEnd Sub\n"
+	sourceA := "Attribute VB_Name = \"ModuleA\"\nOption Explicit\n\nPublic Sub CallB()\n    Call CrossFileTarget(1)\nEnd Sub\n\nPublic Sub CompletionTarget()\n    Worksheets(\"Input\").Ra\nEnd Sub\n"
 	if err := os.WriteFile(moduleB, []byte(sourceB), 0o644); err != nil {
 		tb.Fatal(err)
 	}
@@ -651,7 +651,7 @@ func TestLSPStartupBenchmarkFixture(t *testing.T) {
 	}
 }
 
-func startupInteractiveQueries(b *testing.B, s *Server, fixture lspStartupBenchmarkFixture) (int, int) {
+func startupInteractiveQueries(b *testing.B, s *Server, fixture lspStartupBenchmarkFixture) (int, int, int) {
 	b.Helper()
 	line := benchmarkSourceLine(fixture.sourceA, "    Call CrossFileTarget(1)")
 	character := len("    Call ")
@@ -683,7 +683,19 @@ func startupInteractiveQueries(b *testing.B, s *Server, fixture lspStartupBenchm
 			hovers = 1
 		}
 	}
-	return hovers, definitions
+	completionLine := benchmarkSourceLine(fixture.sourceA, "    Worksheets(\"Input\").Ra")
+	completion, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.moduleAURI)},
+		Position:     protocol.Position{Line: protocol.UInteger(completionLine), Character: 27},
+	}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	completions := 0
+	if list, ok := completion.(protocol.CompletionList); ok && len(list.Items) > 0 {
+		completions = 1
+	}
+	return hovers, definitions, completions
 }
 
 func waitLSPStartupEvent(b *testing.B, events <-chan struct{}) {
@@ -759,14 +771,15 @@ func BenchmarkLSPStartup(b *testing.B) {
 
 	b.Run("ImmediateInteractive", func(b *testing.B) {
 		b.ReportAllocs()
-		var hovers, definitions int
+		var hovers, definitions, completions int
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			s, cleanup := startLSPStartupServer(b, fixture)
 			b.StartTimer()
-			hover, definition := startupInteractiveQueries(b, s, fixture)
+			hover, definition, completion := startupInteractiveQueries(b, s, fixture)
 			hovers += hover
 			definitions += definition
+			completions += completion
 			b.StopTimer()
 			if err := s.analysis.waitReady(); err != nil {
 				b.Fatal(err)
@@ -775,11 +788,12 @@ func BenchmarkLSPStartup(b *testing.B) {
 		}
 		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+		b.ReportMetric(float64(completions)/float64(b.N), "completion_results/op")
 	})
 
 	b.Run("WhileIndexing", func(b *testing.B) {
 		b.ReportAllocs()
-		var hovers, definitions int
+		var hovers, definitions, completions int
 		for i := 0; i < b.N; i++ {
 			func() {
 				b.StopTimer()
@@ -812,9 +826,10 @@ func BenchmarkLSPStartup(b *testing.B) {
 				}
 				waitLSPStartupEvent(b, active)
 				b.StartTimer()
-				hover, definition := startupInteractiveQueries(b, s, fixture)
+				hover, definition, completion := startupInteractiveQueries(b, s, fixture)
 				hovers += hover
 				definitions += definition
+				completions += completion
 				b.StopTimer()
 				release()
 				if err := s.analysis.waitReady(); err != nil {
@@ -824,11 +839,12 @@ func BenchmarkLSPStartup(b *testing.B) {
 		}
 		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+		b.ReportMetric(float64(completions)/float64(b.N), "completion_results/op")
 	})
 
 	b.Run("AfterDeclarationBeforeSemantic", func(b *testing.B) {
 		b.ReportAllocs()
-		var hovers, definitions int
+		var hovers, definitions, completions int
 		for i := 0; i < b.N; i++ {
 			func() {
 				b.StopTimer()
@@ -869,12 +885,13 @@ func BenchmarkLSPStartup(b *testing.B) {
 				// corresponding posting publication before measuring the query itself.
 				waitForWorkspaceSymbol(b, s.analysis, "CrossFileTarget")
 				b.StartTimer()
-				hover, definition := startupInteractiveQueries(b, s, fixture)
+				hover, definition, completion := startupInteractiveQueries(b, s, fixture)
 				if hover != 1 || definition != 1 {
 					b.Fatalf("declaration-ready interactive results = hover %d, definition %d; want 1/1", hover, definition)
 				}
 				hovers += hover
 				definitions += definition
+				completions += completion
 				b.StopTimer()
 				release()
 				if err := s.analysis.waitReady(); err != nil {
@@ -884,11 +901,12 @@ func BenchmarkLSPStartup(b *testing.B) {
 		}
 		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+		b.ReportMetric(float64(completions)/float64(b.N), "completion_results/op")
 	})
 
 	b.Run("AfterSemanticReady", func(b *testing.B) {
 		b.ReportAllocs()
-		var hovers, definitions int
+		var hovers, definitions, completions int
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			s, cleanup := newLSPStartupServer(b, fixture)
@@ -917,13 +935,15 @@ func BenchmarkLSPStartup(b *testing.B) {
 				b.Fatal(err)
 			}
 			b.StartTimer()
-			hover, definition := startupInteractiveQueries(b, s, fixture)
+			hover, definition, completion := startupInteractiveQueries(b, s, fixture)
 			hovers += hover
 			definitions += definition
+			completions += completion
 			b.StopTimer()
 			cleanup()
 		}
 		b.ReportMetric(float64(hovers)/float64(b.N), "hover_results/op")
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
+		b.ReportMetric(float64(completions)/float64(b.N), "completion_results/op")
 	})
 }

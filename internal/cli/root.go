@@ -7294,7 +7294,7 @@ func (a *app) lspCommand() *cobra.Command {
 				env.Logs = []string{"lsp pre-launch check passed"}
 				return a.write(env, output.ExitSuccess)
 			}
-			a.ensureLSPTypeDBGenerated()
+			opts.BeforeStart = a.ensureLSPTypeDBGenerated
 			return lspserver.RunStdio(opts)
 		},
 	}

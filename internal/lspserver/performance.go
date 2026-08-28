@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,24 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 )
+
+const startupIDEnv = "XLFLOW_LSP_STARTUP_ID"
+
+type startupContext struct {
+	id      string
+	started time.Time
+}
+
+func startupContextFromEnvironment(enabled bool) *startupContext {
+	if !enabled {
+		return nil
+	}
+	id := strings.TrimSpace(os.Getenv(startupIDEnv))
+	if id == "" {
+		return nil
+	}
+	return &startupContext{id: id, started: time.Now()}
+}
 
 // Performance stage names are intentionally stable: they are consumed by
 // developer benchmark and profile scripts, but never enter an LSP payload.
@@ -113,10 +132,32 @@ var performanceCounterNames = [...]string{
 // nil-safe pointer and therefore do not pay a clock, lock, or map cost on the
 // normal path.
 type performanceRecorder struct {
-	logger   *log.Logger
-	enabled  bool
-	mu       sync.Mutex
+	logger  *log.Logger
+	enabled bool
+	mu      sync.Mutex
+	// startup is only populated for a server process started by the VS Code
+	// client with a per-attempt correlation ID. It remains nil for ordinary
+	// callers and for performance logging without startup correlation.
+	startup  *startupTelemetry
 	counters map[string]uint64
+}
+
+type startupTelemetry struct {
+	logger  *log.Logger
+	id      string
+	started time.Time
+	mu      sync.Mutex
+	events  map[string]struct{}
+}
+
+func newStartupTelemetry(logger *log.Logger, startup *startupContext) *startupTelemetry {
+	if logger == nil || startup == nil || startup.id == "" {
+		return nil
+	}
+	return &startupTelemetry{
+		logger: logger, id: startup.id, started: startup.started,
+		events: make(map[string]struct{}),
+	}
 }
 
 func newPerformanceRecorder(enabled bool, logger *log.Logger) *performanceRecorder {
@@ -128,6 +169,61 @@ func newPerformanceRecorder(enabled bool, logger *log.Logger) *performanceRecord
 		counters[name] = 0
 	}
 	return &performanceRecorder{logger: logger, enabled: true, counters: counters}
+}
+
+func (p *performanceRecorder) setStartup(startup *startupContext) {
+	if p == nil || !p.enabled {
+		return
+	}
+	p.startup = newStartupTelemetry(p.logger, startup)
+}
+
+func (p *performanceRecorder) startupEvent(event string) {
+	if p == nil || !p.enabled || p.startup == nil {
+		return
+	}
+	p.startup.event(event)
+}
+
+func (p *performanceRecorder) firstSuccessfulInteractive(operation string, resultCount int) {
+	if p == nil || !p.enabled || p.startup == nil || resultCount <= 0 {
+		return
+	}
+	event := ""
+	switch operation {
+	case "textDocument/hover":
+		event = "firstHoverHandled"
+	case "textDocument/definition":
+		event = "firstDefinitionHandled"
+	case "textDocument/completion":
+		event = "firstCompletionHandled"
+	default:
+		return
+	}
+	p.startup.event(event, resultCount)
+}
+
+func (t *startupTelemetry) event(event string, resultCount ...int) {
+	if t == nil || t.logger == nil || event == "" {
+		return
+	}
+	t.mu.Lock()
+	if _, ok := t.events[event]; ok {
+		t.mu.Unlock()
+		return
+	}
+	t.events[event] = struct{}{}
+	t.mu.Unlock()
+	now := time.Now()
+	count := 0
+	if len(resultCount) != 0 {
+		count = resultCount[0]
+	}
+	t.logger.Printf(
+		"performance operation=%q startup_id=%q event=%q elapsed_ms=%.3f wall_time_unix_ns=%d result_count=%d outcome=%q",
+		"lsp/startup", t.id, event,
+		float64(now.Sub(t.started))/float64(time.Millisecond), now.UnixNano(), count, "ok",
+	)
 }
 
 type performanceStageMeasurement struct {
@@ -390,6 +486,9 @@ func (m *performanceMeasurement) finish(resultCount int, err error) {
 		resultCount,
 		outcome,
 	)
+	if err == nil {
+		m.server.performance.firstSuccessfulInteractive(m.operation, resultCount)
+	}
 }
 
 func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation uint64, discarded bool) {
@@ -441,6 +540,9 @@ func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time
 	if !s.opts.PerformanceLog {
 		return
 	}
+	if err == nil {
+		s.performance.startupEvent("semanticIndexReady")
+	}
 	outcome := "ok"
 	if err != nil {
 		outcome = "error"
@@ -458,6 +560,9 @@ func (s *Server) logInitialWorkspaceIndexPerformance(fileCount int, started time
 func (s *Server) logInitialWorkspaceDeclarationPerformance(fileCount int, started time.Time, err error) {
 	if !s.opts.PerformanceLog {
 		return
+	}
+	if err == nil {
+		s.performance.startupEvent("declarationIndexReady")
 	}
 	outcome := "ok"
 	if err != nil {

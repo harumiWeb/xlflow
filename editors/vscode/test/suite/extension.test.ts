@@ -40,6 +40,12 @@ import {
   userFormSpecLSPGlob,
 } from "../../src/client";
 import {
+  hasCompletionResult,
+  hasDefinitionResult,
+  hasHoverResult,
+  StartupTelemetry,
+} from "../../src/startupTelemetry";
+import {
   isVbaSourcePath,
   mismatchedVbaLanguageDocuments,
   vbaFilesAssociationUpdate,
@@ -270,6 +276,63 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
   assert.strictEqual(config.get<boolean>("lsp.performanceLogging"), false);
+  let startupClock = 0;
+  const startupRecords: Array<{ event: string; elapsed_ms: number; startup_id: string }> = [];
+  const startupTelemetry = new StartupTelemetry(
+    true,
+    (record) => startupRecords.push(record),
+    () => startupClock,
+    () => "test-startup",
+    0,
+  );
+  startupClock = 12;
+  startupTelemetry.mark("extensionActivationStart");
+  startupTelemetry.mark("firstHoverHandled", { resultCount: 1 });
+  startupTelemetry.mark("firstHoverHandled", { resultCount: 2 });
+  assert.deepStrictEqual(
+    startupRecords.map((record) => [record.startup_id, record.event, record.elapsed_ms]),
+    [
+      ["test-startup", "extensionActivationStart", 12],
+      ["test-startup", "firstHoverHandled", 12],
+    ],
+  );
+  let nextStartupId = 0;
+  const attemptTelemetry = new StartupTelemetry(
+    true,
+    () => undefined,
+    () => 0,
+    () => `attempt-${++nextStartupId}`,
+    0,
+  );
+  const restartedTelemetry = attemptTelemetry.newAttempt(1);
+  assert.notStrictEqual(attemptTelemetry.id, restartedTelemetry.id);
+  assert.strictEqual(hasHoverResult({ contents: [] }), false);
+  assert.strictEqual(hasHoverResult({ contents: ["  "] }), false);
+  assert.strictEqual(hasHoverResult({ contents: "  " }), false);
+  assert.strictEqual(hasHoverResult({ contents: "target" }), true);
+  assert.strictEqual(hasHoverResult(undefined), false);
+  assert.strictEqual(hasDefinitionResult([]), false);
+  assert.strictEqual(hasDefinitionResult({ uri: "file:///target" }), true);
+  assert.strictEqual(hasCompletionResult({ items: [] }), false);
+  assert.strictEqual(hasCompletionResult({ items: [{ label: "target" }] }), true);
+  const disabledStartupRecords: unknown[] = [];
+  let disabledClockCalls = 0;
+  const disabledStartup = new StartupTelemetry(
+    false,
+    (record) => disabledStartupRecords.push(record),
+    () => {
+      disabledClockCalls += 1;
+      return 0;
+    },
+  );
+  disabledStartup.mark("ignored");
+  disabledStartup.newAttempt();
+  assert.strictEqual(disabledStartupRecords.length, 0);
+  assert.strictEqual(disabledClockCalls, 0);
+  const reconfiguredStartup = disabledStartup.withEnabled(true, 0);
+  reconfiguredStartup.mark("enabled");
+  assert.strictEqual(reconfiguredStartup.isEnabled, true);
+  assert.strictEqual(disabledStartupRecords.length, 1);
   assert.strictEqual(
     buildTerminalCommandLine("xlflow", ["run", "--interactive", "Sheet1.Sample"]),
     "xlflow run --interactive Sheet1.Sample",

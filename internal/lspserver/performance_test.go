@@ -73,6 +73,113 @@ func TestPerformanceLoggingIncludesStableDocumentFields(t *testing.T) {
 	}
 }
 
+func TestStartupTelemetryCorrelatesLifecycleReadinessAndInteractiveSuccess(t *testing.T) {
+	fixture := makeLSPStartupBenchmarkFixture(t)
+	var output bytes.Buffer
+	s, cleanup, err := New(Options{
+		RootDir:        fixture.root,
+		Config:         config.Default(),
+		Stderr:         &output,
+		PerformanceLog: true,
+		startup:        &startupContext{id: "attempt-test", started: time.Now()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaned := false
+	defer func() {
+		if !cleaned {
+			cleanup()
+		}
+	}()
+
+	if _, err := s.initialize(nil, &protocol.InitializeParams{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.initialized(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	completionSource := fixture.sourceA
+	if err := s.didOpen(nil, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: protocol.DocumentUri(fixture.moduleAURI), Version: 1, Text: completionSource,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.analysis.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+
+	line := benchmarkSourceLine(completionSource, "    Call CrossFileTarget(1)")
+	if _, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.moduleAURI)},
+		Position:     protocol.Position{Line: protocol.UInteger(line), Character: protocol.UInteger(len("    Call "))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.definition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.moduleAURI)},
+		Position:     protocol.Position{Line: protocol.UInteger(line), Character: protocol.UInteger(len("    Call "))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	completionLine := benchmarkSourceLine(completionSource, "    Worksheets(\"Input\").Ra")
+	if _, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.moduleAURI)},
+		Position:     protocol.Position{Line: protocol.UInteger(completionLine), Character: 27},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+	cleaned = true
+
+	logOutput := output.String()
+	for _, event := range []string{
+		"serverProcessStart", "serverConstructed", "initializeHandled", "initializedHandled",
+		"didOpenHandled", "declarationIndexStarted", "declarationIndexReady", "semanticIndexStarted", "semanticIndexReady",
+		"firstHoverHandled", "firstDefinitionHandled", "firstCompletionHandled",
+	} {
+		needle := `event="` + event + `"`
+		if count := strings.Count(logOutput, needle); count != 1 {
+			t.Fatalf("startup event %q count = %d, want one:\n%s", event, count, logOutput)
+		}
+	}
+	for _, field := range []string{`startup_id="attempt-test"`, `elapsed_ms=`, `wall_time_unix_ns=`} {
+		if !strings.Contains(logOutput, field) {
+			t.Fatalf("startup telemetry missing %q:\n%s", field, logOutput)
+		}
+	}
+}
+
+func TestStartupTelemetryIsDisabledWithoutPerformanceLogging(t *testing.T) {
+	var output bytes.Buffer
+	_, cleanup, err := New(Options{
+		RootDir: t.TempDir(), Config: config.Default(), Stderr: &output,
+		startup: &startupContext{id: "attempt-disabled", started: time.Now()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if strings.Contains(output.String(), `operation="lsp/startup"`) {
+		t.Fatalf("startup telemetry emitted while performance logging was disabled: %s", output.String())
+	}
+}
+
+func TestStartupContextReadsAnonymousEnvironmentIDWhenEnabled(t *testing.T) {
+	t.Setenv(startupIDEnv, "attempt-from-client")
+	if startup := startupContextFromEnvironment(false); startup != nil {
+		t.Fatal("startup context was created while performance logging was disabled")
+	}
+	startup := startupContextFromEnvironment(true)
+	if startup == nil || startup.id != "attempt-from-client" || startup.started.IsZero() {
+		t.Fatalf("startup context = %+v, want enabled environment context", startup)
+	}
+	t.Setenv(startupIDEnv, " ")
+	if startup := startupContextFromEnvironment(true); startup != nil {
+		t.Fatalf("startup context = %+v, want nil for missing environment ID", startup)
+	}
+}
+
 func TestDiagnosticsPerformanceLoggingIncludesGenerationAndDiscardStatus(t *testing.T) {
 	var output bytes.Buffer
 	s, cleanup, err := New(Options{
