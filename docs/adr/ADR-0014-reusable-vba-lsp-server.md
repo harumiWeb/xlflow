@@ -102,6 +102,27 @@ xlflow-owned source formats.
 - Load a curated built-in database for practical Excel, MSForms, Scripting,
   ADODB, VBIDE, Office, and VBA constant/type metadata.
 
+### Amendment: snapshot-scoped interactive symbol indexes (Issue #756)
+
+Each immutable `AnalysisSnapshot` owns one source-oriented interactive index
+for its revision. The index serves exact, qualified, and prefix symbol lookup,
+current-procedure and module declaration lookup, and the symbol-kind filtering
+needed by interactive completion and signature help. Interactive consumers
+reuse the snapshot's procedure catalog and index instead of rebuilding a
+whole-document symbol model for each request.
+
+Normal hover, definition, completion, and signature-help requests must be able
+to use these source declarations without building ProcedureIR, CFG, or Full
+diagnostics. A successor revision receives a new immutable index; no postings
+from an older revision are observable. Compatibility callers that do not have
+an analysis snapshot may retain their conservative fallback.
+
+The opt-in performance recorder exposes stable structural counters for index
+builds and hits, procedure-catalog builds and reuse, exact/prefix/qualified
+queries, full document-symbol builds, and interactive full-symbol fallbacks.
+These counters are developer telemetry only and do not alter LSP responses,
+symbol visibility, ordering, or cancellation and generation safety.
+
 The VS Code extension should remain a thin language client that launches:
 
 ```ts
@@ -124,6 +145,9 @@ The VS Code extension should remain a thin language client that launches:
   lifecycle notifications wait for full workspace and diagnostic analysis.
 - Positive: Cross-file declaration queries can become useful before the
   workspace has built every file's IR, CFG, and call-site artifacts.
+- Positive: Snapshot-scoped source declarations let latency-sensitive
+  interactive requests reuse one immutable index across hover, definition,
+  completion, and signature help.
 - Negative: The server coordinates two readiness and publication lifecycles;
   semantic consumers must continue to fail open until both declaration and
   semantic completeness are proven.
@@ -144,6 +168,9 @@ The VS Code extension should remain a thin language client that launches:
   adapter and must not fall through to VBA symbols, semantic tokens, or edits.
 - Negative: The curated COM database requires maintenance until a TypeLib
   importer and patch pipeline are available.
+- Negative: Every immutable document revision retains an additional index, and
+  compatibility callers without a snapshot still need an explicit fallback
+  path.
 
 ## Alternatives Considered
 

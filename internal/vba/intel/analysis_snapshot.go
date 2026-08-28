@@ -47,11 +47,15 @@ type AnalysisSnapshot struct {
 	lineStarts []int
 	lineEnds   []int
 
-	proceduresOnce       sync.Once
-	procedures           []ProcedureInfo
-	procedureLines       []int
-	procedureCatalogOnce sync.Once
-	procedureCatalog     ProcedureCatalog
+	proceduresOnce              sync.Once
+	procedures                  []ProcedureInfo
+	procedureLines              []int
+	procedureCatalogOnce        sync.Once
+	procedureCatalogRefreshOnce sync.Once
+	procedureCatalogMu          sync.Mutex
+	procedureCatalog            ProcedureCatalog
+	procedureCatalogBuilds      atomic.Uint64
+	procedureCatalogReuses      atomic.Uint64
 
 	symbolsMu   sync.Mutex
 	symbolsWait chan struct{}
@@ -78,6 +82,14 @@ type AnalysisSnapshot struct {
 	indexOnce sync.Once
 	index     *documentIndex
 	indexErr  error
+
+	interactiveIndexMu     sync.Mutex
+	interactiveIndexWait   chan struct{}
+	interactiveIndexDone   bool
+	interactiveIndex       *interactiveDocumentIndex
+	interactiveIndexErr    error
+	interactiveIndexBuilds atomic.Uint64
+	interactiveIndexHits   atomic.Uint64
 
 	semanticOnce        sync.Once
 	semanticIdentifiers [][]byteSpan
@@ -288,12 +300,90 @@ func (s *AnalysisSnapshot) ProcedureCatalog() ProcedureCatalog {
 	if s == nil {
 		return ProcedureCatalog{}
 	}
+	initialized := true
 	s.procedureCatalogOnce.Do(func() {
-		s.procedureCatalog = procedureCatalogForDocumentMode(s.Document(), true)
+		initialized = false
+		s.procedureCatalogBuilds.Add(1)
+		catalog := procedureCatalogForDocumentMode(s.Document(), true)
+		s.procedureCatalogMu.Lock()
+		s.procedureCatalog = catalog
+		s.procedureCatalogMu.Unlock()
 	})
+	s.procedureCatalogMu.Lock()
 	catalog := s.procedureCatalog
+	s.procedureCatalogMu.Unlock()
+	if !catalog.ReuseSafe {
+		if ready, _ := s.parsedRecoveryIfReady(); ready {
+			s.procedureCatalogRefreshOnce.Do(func() {
+				s.procedureCatalogBuilds.Add(1)
+				refreshed := procedureCatalogForDocumentMode(s.Document(), true)
+				s.procedureCatalogMu.Lock()
+				s.procedureCatalog = refreshed
+				s.procedureCatalogMu.Unlock()
+			})
+			s.procedureCatalogMu.Lock()
+			catalog = s.procedureCatalog
+			s.procedureCatalogMu.Unlock()
+		}
+	}
+	if initialized {
+		s.procedureCatalogReuses.Add(1)
+	}
 	catalog.Entries = append([]ProcedureCatalogEntry(nil), catalog.Entries...)
 	return catalog
+}
+
+// InteractiveIndexStats returns immutable-snapshot counters used by the
+// developer performance log. The values are observations only and do not
+// affect lookup behavior.
+func (s *AnalysisSnapshot) InteractiveIndexStats() (builds, hits uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	return s.interactiveIndexBuilds.Load(), s.interactiveIndexHits.Load()
+}
+
+// InteractiveIndexIncomplete reports whether the declaration-only parser saw
+// a syntax error or missing node for this revision.  Consumers use this to
+// preserve the existing conservative fallback behavior without forcing the
+// snapshot to construct its full syntax tree.
+func (s *AnalysisSnapshot) InteractiveIndexIncomplete() bool {
+	if s == nil {
+		return false
+	}
+	s.interactiveIndexMu.Lock()
+	defer s.interactiveIndexMu.Unlock()
+	return s.interactiveIndexDone && s.interactiveIndex != nil && s.interactiveIndex.incomplete
+}
+
+// interactiveIndexRecoveryKnown reports whether the interactive index reused
+// an already parsed full document. A compact declaration parse intentionally
+// omits procedure bodies, so its recovery state is not sufficient to certify
+// procedure-artifact reuse.
+func (s *AnalysisSnapshot) interactiveIndexRecoveryKnown() bool {
+	if s == nil {
+		return false
+	}
+	s.interactiveIndexMu.Lock()
+	defer s.interactiveIndexMu.Unlock()
+	return s.interactiveIndexDone && s.interactiveIndex != nil && s.interactiveIndex.recoveryKnown
+}
+
+func (s *AnalysisSnapshot) interactiveIndexReady() bool {
+	if s == nil {
+		return false
+	}
+	s.interactiveIndexMu.Lock()
+	defer s.interactiveIndexMu.Unlock()
+	return s.interactiveIndexDone
+}
+
+// ProcedureCatalogStats returns developer-only construction/reuse counters.
+func (s *AnalysisSnapshot) ProcedureCatalogStats() (builds, reuses uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	return s.procedureCatalogBuilds.Load(), s.procedureCatalogReuses.Load()
 }
 
 func (s *AnalysisSnapshot) sameRevision(doc Document) bool {
@@ -670,6 +760,27 @@ func (s *AnalysisSnapshot) ParsedDocument() (*ast.ParsedDocument, error) {
 		s.parseCount.Add(1)
 	}
 	return s.parsedDocument, s.parsedErr
+}
+
+func (s *AnalysisSnapshot) parsedRecoveryIfReady() (ready, hasRecovery bool) {
+	if s == nil {
+		return false, false
+	}
+	s.parsedMu.Lock()
+	defer s.parsedMu.Unlock()
+	if s.parsedDocument == nil && s.parsedErr == nil {
+		return false, false
+	}
+	if s.parsedErr != nil {
+		return true, true
+	}
+	if s.parsedDocument != nil {
+		_ = s.parsedDocument.Read(func(view ast.ParsedView) error {
+			hasRecovery = view.HasError || view.HasMissing
+			return nil
+		})
+	}
+	return true, hasRecovery
 }
 
 // ParseCount reports how many document-owned parses this snapshot created.

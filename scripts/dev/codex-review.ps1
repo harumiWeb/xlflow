@@ -10,7 +10,7 @@ param(
     [int]$HeartbeatSeconds = 15,
 
     [ValidateRange(30, 86400)]
-    [int]$TimeoutSeconds = 1800,
+    [int]$TimeoutSeconds = 2400,
 
     [switch]$SkipFetch,
 

@@ -455,6 +455,11 @@ func (x *workspaceAnalysisIndex) publishInitialSemantic(path string, entry index
 		x.replaceEffectiveLocked(key, entry)
 		x.revision++
 	}
+	if x.parseDeclarations == nil || len(entry.symbols) > 0 {
+		// Once the full semantic parse is ready, keep the declaration query layer
+		// in sync so closed-file lookups retain locals, constants, and labels.
+		x.declarations.setEffectiveFromEntry(path, entry)
+	}
 }
 
 func (x *workspaceAnalysisIndex) markInitialSemanticFailure(path string) {
@@ -603,10 +608,12 @@ func (x *workspaceAnalysisIndex) upsertDisk(file symbols.SourceFile, initial boo
 		x.replaceEffectiveLocked(key, entry)
 		x.revision++
 	}
-	if x.parseDeclarations == nil {
+	if x.parseDeclarations == nil || len(entry.symbols) > 0 {
 		// The compatibility parser returns declarations and semantic artifacts
-		// together, so project them into the independent declaration layer only
-		// after the combined parse has completed.
+		// together. With the split pipeline, project the complete semantic symbol
+		// set after it has replaced the declaration-only entry. An empty semantic
+		// result preserves the declaration result, which is useful for callers
+		// whose semantic parser intentionally omits symbols.
 		x.declarations.setEffectiveFromEntry(file.Path, entry)
 	}
 	return nil

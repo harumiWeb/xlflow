@@ -227,7 +227,14 @@ func TestWorkspaceAnalysisIndexBoundsDeclarationWorkersBeforeSemanticReady(t *te
 		case <-ctx.Done():
 			return indexedFileAnalysis{}, ctx.Err()
 		}
-		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		return indexedFileAnalysis{
+			path: file.Path, moduleKind: file.ModuleKind,
+			symbols: []intel.Symbol{
+				{Name: name, Kind: "module", Module: name, ModuleKind: file.ModuleKind, File: file.Path},
+				{Name: "local" + name, Kind: "local_variable", Parent: "Proc" + name, Module: name, ModuleKind: file.ModuleKind, File: file.Path},
+			},
+		}, nil
 	}
 	index := newWorkspaceAnalysisIndex(root, config.Default(), semanticParse, nil)
 	index.parseDeclarations = declarationParse
@@ -258,6 +265,9 @@ func TestWorkspaceAnalysisIndexBoundsDeclarationWorkersBeforeSemanticReady(t *te
 	close(semanticRelease)
 	if err := index.waitReady(); err != nil {
 		t.Fatal(err)
+	}
+	if got, err := index.searchExact("localM0"); err != nil || len(got) != 1 || got[0].Kind != "local_variable" {
+		t.Fatalf("closed-file semantic symbols = %+v, %v; want localM0", got, err)
 	}
 	index.stop()
 }

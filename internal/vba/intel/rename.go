@@ -3,6 +3,8 @@ package intel
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -169,7 +171,7 @@ func (a Analyzer) symbolRenameRanges(doc Document, target Symbol, open []Documen
 
 func renameSymbolIdentity(sym Symbol) symbolIdentity {
 	return symbolIdentity{
-		File:       pathKey(sym.File),
+		File:       renameFileKey(sym.File),
 		Module:     strings.ToLower(sym.Module),
 		ModuleKind: strings.ToLower(sym.ModuleKind),
 		Parent:     strings.ToLower(sym.Parent),
@@ -177,6 +179,24 @@ func renameSymbolIdentity(sym Symbol) symbolIdentity {
 		Range:      sym.Selection,
 		Name:       strings.ToLower(sym.Name),
 	}
+}
+
+func renameFileKey(value string) string {
+	value = strings.TrimSpace(value)
+	if parsed, err := url.Parse(value); err == nil && strings.EqualFold(parsed.Scheme, "file") {
+		path := parsed.Path
+		if parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost") {
+			// file://server/share/... is the URI form of a Windows UNC path.
+			// Keep the host so URI-backed and path-backed symbols share identity.
+			value = `\\` + parsed.Host + filepath.FromSlash(path)
+		} else {
+			value = path
+			if len(value) >= 3 && value[0] == '/' && value[2] == ':' {
+				value = value[1:]
+			}
+		}
+	}
+	return pathKey(value)
 }
 
 func (a Analyzer) checkRenameCollision(doc Document, target Symbol, newName string) error {

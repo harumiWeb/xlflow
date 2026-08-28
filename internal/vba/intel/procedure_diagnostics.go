@@ -356,10 +356,7 @@ func fastDiagnosticFragmentSource(source, modulePreamble string, modulePreambleE
 
 func procedureCatalogForDocument(doc Document) ProcedureCatalog {
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
-		snapshot.procedureCatalogOnce.Do(func() {
-			snapshot.procedureCatalog = procedureCatalogForDocumentMode(doc, true)
-		})
-		return snapshot.procedureCatalog
+		return snapshot.ProcedureCatalog()
 	}
 	return procedureCatalogForDocumentMode(doc, true)
 }
@@ -425,6 +422,24 @@ func procedureCatalogForDocumentMode(doc Document, checkRecovery bool) Procedure
 	copy(catalog.ConditionalHash[:], conditionalHasher.Sum(nil))
 	if checkRecovery {
 		if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+			// Interactive declaration indexing already records the parser's
+			// recovery state. Reusing that result keeps a first local completion
+			// or signature request from constructing the full document tree solely
+			// to decide whether procedure artifacts are reusable.
+			if snapshot.interactiveIndexReady() {
+				if snapshot.InteractiveIndexIncomplete() {
+					catalog.ReuseSafe = false
+					return catalog
+				}
+				if !snapshot.interactiveIndexRecoveryKnown() {
+					ready, hasRecovery := snapshot.parsedRecoveryIfReady()
+					if !ready || hasRecovery {
+						catalog.ReuseSafe = false
+						return catalog
+					}
+				}
+				return catalog
+			}
 			if parsed, err := snapshot.ParsedDocument(); err == nil {
 				_ = parsed.Read(func(view ast.ParsedView) error {
 					if view.HasError || view.HasMissing {

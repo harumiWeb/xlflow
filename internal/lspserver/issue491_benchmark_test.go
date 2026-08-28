@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -505,6 +506,270 @@ func benchmarkIssue491Interactive(b *testing.B, fixture lspBenchmarkFixture) {
 	})
 }
 
+// interactiveIndexBenchmarkStats keeps the structural counters next to the
+// request timing so a benchmark run can distinguish a cold index construction
+// from a warm lookup. The values are developer-only observations; they are not
+// part of the LSP response.
+type interactiveIndexBenchmarkStats struct {
+	indexBuilds         uint64
+	indexHits           uint64
+	catalogBuilds       uint64
+	catalogReuses       uint64
+	fullSymbolBuilds    uint64
+	fullSymbolFallbacks uint64
+	parses              uint64
+	irBuilds            uint64
+	cfgBuilds           uint64
+}
+
+func (s interactiveIndexBenchmarkStats) add(other interactiveIndexBenchmarkStats) interactiveIndexBenchmarkStats {
+	return interactiveIndexBenchmarkStats{
+		indexBuilds:         s.indexBuilds + other.indexBuilds,
+		indexHits:           s.indexHits + other.indexHits,
+		catalogBuilds:       s.catalogBuilds + other.catalogBuilds,
+		catalogReuses:       s.catalogReuses + other.catalogReuses,
+		fullSymbolBuilds:    s.fullSymbolBuilds + other.fullSymbolBuilds,
+		fullSymbolFallbacks: s.fullSymbolFallbacks + other.fullSymbolFallbacks,
+		parses:              s.parses + other.parses,
+		irBuilds:            s.irBuilds + other.irBuilds,
+		cfgBuilds:           s.cfgBuilds + other.cfgBuilds,
+	}
+}
+
+func (s interactiveIndexBenchmarkStats) subtract(before interactiveIndexBenchmarkStats) interactiveIndexBenchmarkStats {
+	return interactiveIndexBenchmarkStats{
+		indexBuilds:         s.indexBuilds - before.indexBuilds,
+		indexHits:           s.indexHits - before.indexHits,
+		catalogBuilds:       s.catalogBuilds - before.catalogBuilds,
+		catalogReuses:       s.catalogReuses - before.catalogReuses,
+		fullSymbolBuilds:    s.fullSymbolBuilds - before.fullSymbolBuilds,
+		fullSymbolFallbacks: s.fullSymbolFallbacks - before.fullSymbolFallbacks,
+		parses:              s.parses - before.parses,
+		irBuilds:            s.irBuilds - before.irBuilds,
+		cfgBuilds:           s.cfgBuilds - before.cfgBuilds,
+	}
+}
+
+func interactiveIndexStats(s *Server, doc intel.Document) interactiveIndexBenchmarkStats {
+	stats := interactiveIndexBenchmarkStats{}
+	if doc.Snapshot != nil && doc.Snapshot.Matches(doc) {
+		stats.indexBuilds, stats.indexHits = doc.Snapshot.InteractiveIndexStats()
+		stats.catalogBuilds, stats.catalogReuses = doc.Snapshot.ProcedureCatalogStats()
+		stats.parses = doc.Snapshot.ParseCount()
+		artifacts := doc.Snapshot.ProcedureArtifactStats()
+		stats.irBuilds, stats.cfgBuilds = artifacts.IRBuild, artifacts.CFGBuild
+	}
+	if s != nil && s.performance != nil {
+		stats.fullSymbolBuilds = s.performance.counterTotal(performanceCounterFullDocumentSymbolBuilds)
+		stats.fullSymbolFallbacks = s.performance.counterTotal(performanceCounterInteractiveFullSymbolFallbacks)
+	}
+	return stats
+}
+
+func reportInteractiveIndexStats(b *testing.B, stats interactiveIndexBenchmarkStats) {
+	count := float64(max(1, b.N))
+	b.ReportMetric(float64(stats.indexBuilds)/count, "interactive-index-builds/op")
+	b.ReportMetric(float64(stats.indexHits)/count, "interactive-index-hits/op")
+	b.ReportMetric(float64(stats.catalogBuilds)/count, "procedure-catalog-builds/op")
+	b.ReportMetric(float64(stats.catalogReuses)/count, "procedure-catalog-reuses/op")
+	b.ReportMetric(float64(stats.fullSymbolBuilds)/count, "full-document-symbol-builds/op")
+	b.ReportMetric(float64(stats.fullSymbolFallbacks)/count, "interactive-full-symbol-fallbacks/op")
+	b.ReportMetric(float64(stats.parses)/count, "snapshot-parses/op")
+	b.ReportMetric(float64(stats.irBuilds)/count, "ir-builds/op")
+	b.ReportMetric(float64(stats.cfgBuilds)/count, "cfg-builds/op")
+}
+
+type interactiveIndexBenchmarkCase struct {
+	name string
+	pos  intel.Position
+	run  func(intel.Analyzer, intel.Document, []intel.Document, intel.Position) error
+}
+
+func runInteractiveIndexBenchmarkCase(s *Server, doc intel.Document, test interactiveIndexBenchmarkCase) error {
+	return test.run(s.analyzer, doc, []intel.Document{doc}, test.pos)
+}
+
+func benchmarkInteractiveIndexCold(b *testing.B, fixture lspBenchmarkFixture, source string, test interactiveIndexBenchmarkCase) {
+	b.Helper()
+	s := newLSPBenchmarkServer(b, fixture)
+	s.performance = newPerformanceRecorder(true, log.New(io.Discard, "", 0))
+	var total interactiveIndexBenchmarkStats
+	b.ReportAllocs()
+	b.ReportMetric(float64(len(source)), "source-bytes")
+	b.ReportMetric(float64(strings.Count(source, "\n")), "source-lines")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		snapshot := intel.NewAnalysisSnapshot(intel.Document{
+			URI: fixture.largeURI, Path: fixture.largePath, Source: source,
+			ModuleKind: benchmarkModuleKind(fixture.largePath), Version: int32(i + 1),
+		})
+		doc := snapshot.Document()
+		before := interactiveIndexStats(s, doc)
+		b.StartTimer()
+		err := runInteractiveIndexBenchmarkCase(s, doc, test)
+		b.StopTimer()
+		after := interactiveIndexStats(s, doc)
+		total = total.add(after.subtract(before))
+		snapshot.Retire()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	reportInteractiveIndexStats(b, total)
+}
+
+func benchmarkInteractiveIndexWarm(b *testing.B, fixture lspBenchmarkFixture, source string, test interactiveIndexBenchmarkCase) {
+	b.Helper()
+	s := newLSPBenchmarkServer(b, fixture)
+	s.performance = newPerformanceRecorder(true, log.New(io.Discard, "", 0))
+	snapshot := intel.NewAnalysisSnapshot(intel.Document{
+		URI: fixture.largeURI, Path: fixture.largePath, Source: source,
+		ModuleKind: benchmarkModuleKind(fixture.largePath), Version: 1,
+	})
+	doc := snapshot.Document()
+	if err := runInteractiveIndexBenchmarkCase(s, doc, test); err != nil {
+		snapshot.Retire()
+		b.Fatal(err)
+	}
+	before := interactiveIndexStats(s, doc)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := runInteractiveIndexBenchmarkCase(s, doc, test); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	after := interactiveIndexStats(s, doc)
+	snapshot.Retire()
+	reportInteractiveIndexStats(b, after.subtract(before))
+}
+
+func benchmarkInteractiveIndexCases(b *testing.B, fixture lspBenchmarkFixture, source string, cases []interactiveIndexBenchmarkCase) {
+	b.Helper()
+	for _, test := range cases {
+		b.Run(test.name+"/Cold", func(b *testing.B) {
+			benchmarkInteractiveIndexCold(b, fixture, source, test)
+		})
+		b.Run(test.name+"/Warm", func(b *testing.B) {
+			benchmarkInteractiveIndexWarm(b, fixture, source, test)
+		})
+	}
+}
+
+func issue756InteractiveCases(source, lineText, identifier, completionPrefix string) []interactiveIndexBenchmarkCase {
+	lineNo := benchmarkSourceLine(source, lineText)
+	line := strings.Split(source, "\n")[lineNo]
+	start := strings.Index(line, identifier)
+	if start < 0 {
+		panic("interactive benchmark identifier missing")
+	}
+	return []interactiveIndexBenchmarkCase{
+		{name: "Hover", pos: intel.Position{Line: lineNo, Character: start + 2}, run: func(a intel.Analyzer, doc intel.Document, open []intel.Document, pos intel.Position) error {
+			_, err := a.Hover(doc, pos, open)
+			return err
+		}},
+		{name: "Definition", pos: intel.Position{Line: lineNo, Character: start + 2}, run: func(a intel.Analyzer, doc intel.Document, open []intel.Document, pos intel.Position) error {
+			_, err := a.Definition(doc, pos, open, pathToFileURI)
+			return err
+		}},
+		{name: "PrefixCompletion", pos: intel.Position{Line: lineNo, Character: start + len(completionPrefix)}, run: func(a intel.Analyzer, doc intel.Document, open []intel.Document, pos intel.Position) error {
+			_, err := a.Completions(doc, pos, open)
+			return err
+		}},
+	}
+}
+
+func benchmarkModuleKind(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cls":
+		return "class"
+	case ".frm":
+		return "form"
+	default:
+		return "standard"
+	}
+}
+
+func firstCallLine(source string) (lineText, identifier string, ok bool) {
+	for _, line := range strings.Split(source, "\n") {
+		lower := strings.ToLower(line)
+		call := strings.Index(lower, "call")
+		for call >= 0 {
+			if (call == 0 || !isIdentifierByte(line[call-1])) && call+4 < len(line) &&
+				(lower[call+4] == ' ' || lower[call+4] == '\t') {
+				start := call + 4
+				for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
+					start++
+				}
+				end := start
+				for end < len(line) && isIdentifierByte(line[end]) {
+					end++
+				}
+				if end > start {
+					return line, line[start:end], true
+				}
+			}
+			next := strings.Index(lower[call+4:], "call")
+			if next < 0 {
+				break
+			}
+			call += 4 + next
+		}
+	}
+	return "", "", false
+}
+
+func isIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
+}
+
+func BenchmarkLSPInteractiveIndexIssue756(b *testing.B) {
+	fixture := makeIssue491BenchmarkFixture(b)
+	benchmarkInteractiveIndexCases(b, fixture, fixture.largeSource, issue756InteractiveCases(
+		fixture.largeSource,
+		"        Call MassiveProcedure0001(value + 1)",
+		"MassiveProcedure",
+		"MassiveProcedure00",
+	))
+}
+
+func makeIssue756OrdinaryFixture(tb testing.TB) (lspBenchmarkFixture, string) {
+	tb.Helper()
+	root := tb.TempDir()
+	path := filepath.Join(root, "src", "modules", "Interactive.bas")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		tb.Fatal(err)
+	}
+	source := `Attribute VB_Name = "Interactive"
+Option Explicit
+
+Public Function ProjectTarget(ByVal value As Long) As Long
+    ProjectTarget = value + 1
+End Function
+
+Public Sub Caller()
+    Call ProjectTarget(1)
+End Sub
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		tb.Fatal(err)
+	}
+	return lspBenchmarkFixture{root: root, largePath: path, largeURI: pathToFileURI(path), largeSource: source}, source
+}
+
+func BenchmarkLSPInteractiveIndexOrdinary(b *testing.B) {
+	fixture, source := makeIssue756OrdinaryFixture(b)
+	benchmarkInteractiveIndexCases(b, fixture, source, issue756InteractiveCases(
+		source,
+		"    Call ProjectTarget(1)",
+		"ProjectTarget",
+		"ProjectT",
+	))
+}
+
 func benchmarkIssue491OpenImmediateInteractive(b *testing.B, fixture lspBenchmarkFixture) {
 	callLine := benchmarkSourceLine(fixture.largeSource, "        Call MassiveProcedure0001(value + 1)")
 	memberLine := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
@@ -739,6 +1004,15 @@ func BenchmarkLSPIssue491OptInROneCOne(b *testing.B) {
 	}
 	b.ReportMetric(float64(strings.Count(fixture.largeSource, "\n")), "source_lines")
 	b.ReportMetric(float64(len(fixture.largeSource)), "source_bytes")
+	if lineText, identifier, ok := firstCallLine(fixture.largeSource); ok {
+		prefix := identifier
+		if len(prefix) > 2 {
+			prefix = prefix[:len(prefix)-2]
+		}
+		b.Run("Interactive", func(b *testing.B) {
+			benchmarkInteractiveIndexCases(b, fixture, fixture.largeSource, issue756InteractiveCases(fixture.largeSource, lineText, identifier, prefix))
+		})
+	}
 
 	b.Run("Diagnostics/Cold", func(b *testing.B) {
 		b.ReportAllocs()

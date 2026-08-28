@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced interactive VBA LSP latency by adding snapshot-scoped declaration
+  indexes for hover, definition, completion, and signature help. Interactive
+  lookups now reuse immutable procedure catalogs, avoid procedure IR/CFG and
+  full-document symbol extraction on the normal path, preserve open-document
+  overlays, and expose opt-in cold/warm performance counters and benchmarks.
+
 - Reduced LSP project preparation invalidation for ordinary editor revisions.
   Resolution indexes and per-document overlays now use semantic dependency
   fingerprints, constants are reused across procedure-body edits, and effects

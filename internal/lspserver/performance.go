@@ -35,6 +35,15 @@ const (
 	performanceCounterWorkspaceFilesDiscovered       = "workspace_files_discovered"
 	performanceCounterWorkspaceDeclarationBuilds     = "workspace_declaration_builds"
 	performanceCounterWorkspaceSemanticBuilds        = "workspace_semantic_builds"
+	performanceCounterInteractiveIndexBuilds         = "interactive_index_builds"
+	performanceCounterInteractiveIndexHits           = "interactive_index_hits"
+	performanceCounterProcedureCatalogBuilds         = "procedure_catalog_builds"
+	performanceCounterProcedureCatalogReuses         = "procedure_catalog_reuses"
+	performanceCounterInteractiveExactQueries        = "interactive_exact_queries"
+	performanceCounterInteractivePrefixQueries       = "interactive_prefix_queries"
+	performanceCounterInteractiveQualifiedQueries    = "interactive_qualified_queries"
+	performanceCounterFullDocumentSymbolBuilds       = "full_document_symbol_builds"
+	performanceCounterInteractiveFullSymbolFallbacks = "interactive_full_symbol_fallbacks"
 	performanceCounterProjectSnapshotBuilds          = "project_snapshot_builds"
 	performanceCounterResolutionResolverBuilds       = "resolution_resolver_builds"
 	performanceCounterResolutionViewBuilds           = "resolution_view_builds"
@@ -63,6 +72,15 @@ var performanceCounterNames = [...]string{
 	performanceCounterWorkspaceFilesDiscovered,
 	performanceCounterWorkspaceDeclarationBuilds,
 	performanceCounterWorkspaceSemanticBuilds,
+	performanceCounterInteractiveIndexBuilds,
+	performanceCounterInteractiveIndexHits,
+	performanceCounterProcedureCatalogBuilds,
+	performanceCounterProcedureCatalogReuses,
+	performanceCounterInteractiveExactQueries,
+	performanceCounterInteractivePrefixQueries,
+	performanceCounterInteractiveQualifiedQueries,
+	performanceCounterFullDocumentSymbolBuilds,
+	performanceCounterInteractiveFullSymbolFallbacks,
 	performanceCounterProjectSnapshotBuilds,
 	performanceCounterResolutionResolverBuilds,
 	performanceCounterResolutionViewBuilds,
