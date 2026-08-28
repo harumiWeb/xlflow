@@ -23,6 +23,10 @@ type Options struct {
 	IncludePrivate bool
 	IncludeLabels  bool
 	Module         string
+	// DeclarationOnly stops traversal at procedure declarations after their
+	// signatures and parameters have been collected. It is used by the LSP
+	// interactive index; ordinary symbol extraction keeps the full walk.
+	DeclarationOnly bool
 }
 
 type Result struct {
@@ -107,11 +111,12 @@ type SourceFile struct {
 }
 
 type SourceOptions struct {
-	RootDir        string
-	Path           string
-	ModuleKind     string
-	IncludePrivate bool
-	IncludeLabels  bool
+	RootDir         string
+	Path            string
+	ModuleKind      string
+	IncludePrivate  bool
+	IncludeLabels   bool
+	DeclarationOnly bool
 }
 
 type extractor struct {
@@ -422,9 +427,10 @@ func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.P
 		ext := extractor{
 			ctx: ctx,
 			opts: Options{
-				RootDir:        rootDir,
-				IncludePrivate: opts.IncludePrivate,
-				IncludeLabels:  opts.IncludeLabels,
+				RootDir:         rootDir,
+				IncludePrivate:  opts.IncludePrivate,
+				IncludeLabels:   opts.IncludeLabels,
+				DeclarationOnly: opts.DeclarationOnly,
 			},
 			rootDir:     rootDir,
 			source:      view.Source,
@@ -448,6 +454,17 @@ func InspectParsedContext(ctx context.Context, opts SourceOptions, doc *vbaast.P
 		return nil
 	})
 	return result, err
+}
+
+// InspectParsedDeclarationsContext extracts only module and procedure-level
+// declarations from a parsed document. Procedure bodies are deliberately not
+// walked, making this suitable for latency-sensitive interactive lookups.
+// The returned ranges and metadata retain the same conventions as
+// InspectParsedContext; callers that need locals can inspect one procedure
+// separately through the regular extractor.
+func InspectParsedDeclarationsContext(ctx context.Context, opts SourceOptions, doc *vbaast.ParsedDocument) (FileResult, error) {
+	opts.DeclarationOnly = true
+	return InspectParsedContext(ctx, opts, doc)
 }
 
 func discoverFilesContext(ctx context.Context, opts Options) ([]fileCandidate, error) {
@@ -685,9 +702,12 @@ func (e *extractor) visit(node *tree_sitter.Node, parentProc string) {
 			}
 		}
 		parentProc = sym.Name
+		if e.opts.DeclarationOnly {
+			return
+		}
 	case "declare_statement", "declare_sub_statement", "declare_function_statement":
 		sym := e.simpleSymbol(node, "declare", "")
-		sym.Signature = declarationHeader(node.Utf8Text(e.source))
+		sym.Signature = declarationHeader(e.symbolNodeText(node))
 		switch node.Kind() {
 		case "declare_sub_statement":
 			sym.Kind = "declare_sub"
@@ -798,7 +818,7 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 	case "property_set_declaration":
 		kind = "property_set"
 	case "property_declaration":
-		sig := strings.ToLower(firstLine(node.Utf8Text(e.source)))
+		sig := strings.ToLower(firstLine(e.symbolNodeText(node)))
 		switch {
 		case strings.Contains(sig, "property get"):
 			kind = "property_get"
@@ -811,7 +831,7 @@ func (e *extractor) procedureSymbol(node *tree_sitter.Node) Symbol {
 		}
 	}
 	sym := e.simpleSymbol(node, kind, "")
-	sym.Signature = declarationHeader(node.Utf8Text(e.source))
+	sym.Signature = declarationHeader(e.symbolNodeText(node))
 	sym.Static = hasField(node, "static_modifier") || hasWord(sym.Signature, "Static")
 	sym.ReturnType = typeText(node, e.source)
 	sym.IsArray = procedureReturnsArray(node, e.source)
@@ -980,11 +1000,11 @@ func (e *extractor) simpleSymbol(node *tree_sitter.Node, kind, parent string) Sy
 func (e *extractor) symbolFromNode(node *tree_sitter.Node, kind, parent string) Symbol {
 	r := vbaast.NodeRange(node)
 	name := nodeName(node, e.source)
-	sig := firstLine(node.Utf8Text(e.source))
+	sig := firstLine(e.symbolNodeText(node))
 	return Symbol{
 		Name:        name,
 		Kind:        kind,
-		Visibility:  visibilityText(node, e.source),
+		Visibility:  visibilityTextMode(node, e.source, e.opts.DeclarationOnly),
 		Module:      e.moduleName,
 		File:        e.file,
 		Parent:      parent,
@@ -996,6 +1016,46 @@ func (e *extractor) symbolFromNode(node *tree_sitter.Node, kind, parent string) 
 		EndByte:     r.EndByte,
 		Signature:   sig,
 	}
+}
+
+// symbolNodeText returns only the declaration header when building the
+// interactive index. Calling Node.Utf8Text on a procedure would otherwise
+// copy its complete body merely to populate a signature string.
+func (e *extractor) symbolNodeText(node *tree_sitter.Node) string {
+	if node == nil {
+		return ""
+	}
+	if !e.opts.DeclarationOnly {
+		return node.Utf8Text(e.source)
+	}
+	start, end := int(node.StartByte()), int(node.EndByte())
+	if start < 0 || start >= len(e.source) || end <= start || end > len(e.source) {
+		return ""
+	}
+	var out strings.Builder
+	for offset := start; offset < end; {
+		lineEnd := offset
+		for lineEnd < end && e.source[lineEnd] != '\n' && e.source[lineEnd] != '\r' {
+			lineEnd++
+		}
+		line := string(e.source[offset:lineEnd])
+		out.WriteString(line)
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || !strings.HasSuffix(trimmed, "_") {
+			break
+		}
+		if lineEnd < end && e.source[lineEnd] == '\r' {
+			lineEnd++
+		}
+		if lineEnd < end && e.source[lineEnd] == '\n' {
+			lineEnd++
+		}
+		offset = lineEnd
+		if offset < end {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
 }
 
 func (e *extractor) includeSymbol(sym Symbol) bool {
@@ -1064,6 +1124,10 @@ func firstNamedChildKind(node *tree_sitter.Node, kind string) *tree_sitter.Node 
 }
 
 func visibilityText(node *tree_sitter.Node, source []byte) string {
+	return visibilityTextMode(node, source, false)
+}
+
+func visibilityTextMode(node *tree_sitter.Node, source []byte, declarationOnly bool) string {
 	if visibility := node.ChildByFieldName("visibility"); visibility != nil {
 		return normalizeKeyword(visibility.Utf8Text(source))
 	}
@@ -1084,13 +1148,35 @@ func visibilityText(node *tree_sitter.Node, source []byte) string {
 			}
 		}
 	}
-	text := firstLine(node.Utf8Text(source))
+	text := ""
+	if start, end := int(node.StartByte()), int(node.EndByte()); start >= 0 && start < len(source) {
+		if declarationOnly {
+			end = minSymbolTextEnd(start, end, len(source))
+		}
+		if end > len(source) {
+			end = len(source)
+		}
+		text = firstLine(string(source[start:end]))
+	}
 	for _, word := range []string{"Public", "Private", "Friend"} {
 		if hasWord(text, word) {
 			return word
 		}
 	}
 	return ""
+}
+
+func minSymbolTextEnd(start, end, length int) int {
+	if end <= start || end > length {
+		end = length
+	}
+	// Visibility is always encoded on the declaration line. A bounded slice
+	// keeps recovery paths from copying a large procedure body.
+	limit := start + 4096
+	if limit < end {
+		end = limit
+	}
+	return end
 }
 
 func typeText(node *tree_sitter.Node, source []byte) string {

@@ -60,33 +60,42 @@ zero values, so a profile can distinguish “not observed” from an omitted
 instrumentation field. The counters are stderr-only and never enter an LSP
 payload.
 
-| Counter                            | Meaning                                                                               |
-| ---------------------------------- | ------------------------------------------------------------------------------------- |
-| `workspace_files_discovered`       | Source files returned by workspace discovery.                                         |
-| `workspace_declaration_builds`     | Successful per-file declaration builds.                                               |
-| `workspace_semantic_builds`        | Successful per-file semantic builds.                                                  |
-| `project_snapshot_builds`          | Project snapshots assembled.                                                          |
-| `resolution_resolver_builds`       | Resolver constructions (revision cache misses).                                       |
-| `resolution_view_builds`           | Resolution views constructed (revision cache misses).                                 |
-| `canonical_resolver_builds`        | Canonical project resolver/index constructions.                                       |
-| `procedure_resolver_views`         | Procedure-only resolver views derived from the index.                                 |
-| `full_resolver_views`              | Full resolver views derived from the index.                                           |
-| `resolution_overlay_builds`        | Per-document resolution overlays built for both modes.                                |
-| `resolution_materializations`      | Document IR materializations into resolution views.                                   |
-| `procedure_fingerprint_builds`     | Procedure fingerprints computed for dependency comparison.                            |
-| `procedure_fingerprint_reuses`     | Fingerprints served from a reusable dependency cache.                                 |
-| `dependency_nodes_updated`         | Procedure dependency entries replaced or removed.                                     |
-| `dependency_edges_updated`         | Reverse or outgoing call edges added or removed.                                      |
-| `procedures_revisited`             | Procedures inspected during an incremental dependency update.                         |
-| `fast_diagnostic_runs`             | Fast diagnostic runs started.                                                         |
-| `full_diagnostic_runs`             | Full diagnostic runs started.                                                         |
-| `background_permit_waits`          | Background workers that waited for an analysis permit.                                |
-| `interactive_permit_waits`         | Interactive workers that waited for an analysis permit.                               |
-| `project_cache_hits`               | Completed project products (including capability plans) served from a dependency key. |
-| `project_cache_misses`             | Project product (including capability-plan) lookups without a reusable entry.         |
-| `project_cache_rebuilds`           | Project product builds started after a dependency miss.                               |
-| `project_dependency_invalidations` | Files or dependency roots invalidated for a project product.                          |
-| `project_cache_reused_entries`     | Immutable resolver, constant, effect, overlay, or capability-plan entries reused.     |
+| Counter                             | Meaning                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `workspace_files_discovered`        | Source files returned by workspace discovery.                                         |
+| `workspace_declaration_builds`      | Successful per-file declaration builds.                                               |
+| `workspace_semantic_builds`         | Successful per-file semantic builds.                                                  |
+| `interactive_index_builds`          | Snapshot-scoped interactive declaration indexes built.                                |
+| `interactive_index_hits`            | Interactive lookups served from an existing snapshot index.                           |
+| `procedure_catalog_builds`          | Procedure catalogs built for an interactive document revision.                        |
+| `procedure_catalog_reuses`          | Interactive lookups that reused a snapshot-owned procedure catalog.                   |
+| `interactive_exact_queries`         | Exact-name lookups issued through the interactive index.                              |
+| `interactive_prefix_queries`        | Prefix lookups issued through the interactive index.                                  |
+| `interactive_qualified_queries`     | Qualified-name lookups issued through the interactive index.                          |
+| `full_document_symbol_builds`       | Full document symbol models built for LSP requests.                                   |
+| `interactive_full_symbol_fallbacks` | Interactive lookups that fell back to full document symbol extraction.                |
+| `project_snapshot_builds`           | Project snapshots assembled.                                                          |
+| `resolution_resolver_builds`        | Resolver constructions (revision cache misses).                                       |
+| `resolution_view_builds`            | Resolution views constructed (revision cache misses).                                 |
+| `canonical_resolver_builds`         | Canonical project resolver/index constructions.                                       |
+| `procedure_resolver_views`          | Procedure-only resolver views derived from the index.                                 |
+| `full_resolver_views`               | Full resolver views derived from the index.                                           |
+| `resolution_overlay_builds`         | Per-document resolution overlays built for both modes.                                |
+| `resolution_materializations`       | Document IR materializations into resolution views.                                   |
+| `procedure_fingerprint_builds`      | Procedure fingerprints computed for dependency comparison.                            |
+| `procedure_fingerprint_reuses`      | Fingerprints served from a reusable dependency cache.                                 |
+| `dependency_nodes_updated`          | Procedure dependency entries replaced or removed.                                     |
+| `dependency_edges_updated`          | Reverse or outgoing call edges added or removed.                                      |
+| `procedures_revisited`              | Procedures inspected during an incremental dependency update.                         |
+| `fast_diagnostic_runs`              | Fast diagnostic runs started.                                                         |
+| `full_diagnostic_runs`              | Full diagnostic runs started.                                                         |
+| `background_permit_waits`           | Background workers that waited for an analysis permit.                                |
+| `interactive_permit_waits`          | Interactive workers that waited for an analysis permit.                               |
+| `project_cache_hits`                | Completed project products (including capability plans) served from a dependency key. |
+| `project_cache_misses`              | Project product (including capability-plan) lookups without a reusable entry.         |
+| `project_cache_rebuilds`            | Project product builds started after a dependency miss.                               |
+| `project_dependency_invalidations`  | Files or dependency roots invalidated for a project product.                          |
+| `project_cache_reused_entries`      | Immutable resolver, constant, effect, overlay, or capability-plan entries reused.     |
 
 `procedure_fingerprint_reuses` is reserved for reuse reporting and is emitted
 as zero until a reusable fingerprint cache is used. A counter increment is
@@ -104,6 +113,19 @@ uncertain (dynamic, ambiguous, incomplete, or project-local unresolved)
 resolution attaches to a project boundary so its reverse closure is invalidated
 on the next revision. These counters are structural observations and are never copied
 into LSP responses, normal CLI JSON, corpus snapshots, or review ledgers.
+
+Interactive index counters are scoped to the immutable document revision and
+are intended to expose cold versus warm request behavior. For one unchanged
+revision, `interactive_index_builds` and `procedure_catalog_builds` should each
+increase at most once; subsequent hover, definition, completion, and signature
+help requests should report `interactive_index_hits` and
+`procedure_catalog_reuses` rather than rebuilding the same source declarations.
+Exact, qualified, and prefix requests are counted separately. An ordinary
+prefix completion should not increment `interactive_full_symbol_fallbacks`, and
+normal hover or definition should not require a `full_document_symbol_builds`
+increment. Explicit full document-symbol requests may still build a complete
+symbol model. These counters are structural observations only and are never
+copied into LSP responses, normal CLI JSON, corpus snapshots, or review ledgers.
 
 Project preparation has a second, product-level cache layer. Resolver indexes,
 document overlays, constants, and effects are keyed by their explicit semantic
@@ -151,6 +173,14 @@ workspace indexing. The generated fixture is deterministic and does not add
 third-party source to the repository. `Lifecycle/DidOpenFirstPublication`
 measures time-to-first-publication, while `Lifecycle/InitialFastDiagnostics`
 isolates the bounded first-open Fast preview cost.
+
+Issue #756 interactive declaration-index benchmarks report separate cold and
+warm hover, definition, and prefix-completion requests for an ordinary module
+and the generated 1,200-procedure module:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPInteractiveIndex(Ordinary|Issue756)$' -benchmem -benchtime=1x -count 1 -timeout 20m
+```
 
 The opt-in local ROneCOne path remains available when a developer has a local
 specimen:

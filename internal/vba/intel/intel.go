@@ -47,6 +47,17 @@ const (
 type WorkspaceSymbolQuery struct {
 	Text string
 	Mode WorkspaceSymbolQueryMode
+	// Interactive marks queries issued by hover, definition, completion, or
+	// signature help. The scope fields let the open-document overlay add only
+	// locals from the document/procedure at the request position while the
+	// workspace index supplies module-level declarations.
+	Interactive  bool
+	DocumentPath string
+	Procedure    string
+	// RequestPosition identifies the editor position that selected Procedure.
+	// Interactive providers use it to disambiguate procedures that share a
+	// name, such as Property Get/Let/Set accessors.
+	RequestPosition *Position
 }
 
 type WorkspaceSymbolQueryFunc func(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error)
@@ -573,6 +584,37 @@ func (a Analyzer) DocumentSymbolsContext(ctx context.Context, doc Document) ([]S
 	return a.documentSymbolsParsedContext(ctx, doc, parsed)
 }
 
+// DeclarationSymbolsContext extracts only source declarations needed by the
+// interactive workspace index. It deliberately bypasses the full
+// DocumentSymbols callback and never walks procedure bodies. A valid document
+// snapshot owns and reuses the resulting immutable index.
+func (a Analyzer) DeclarationSymbolsContext(ctx context.Context, doc Document) ([]Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
+		idx, _, err := snapshot.buildInteractiveIndexContext(ctx)
+		if err != nil || idx == nil {
+			return nil, err
+		}
+		out := cloneAnalysisSymbols(idx.symbols)
+		out = append(out, a.formControlSymbols(doc)...)
+		return out, nil
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	defer snapshot.Retire()
+	idx, _, err := snapshot.buildInteractiveIndexContext(ctx)
+	if err != nil || idx == nil {
+		return nil, err
+	}
+	out := cloneAnalysisSymbols(idx.symbols)
+	out = append(out, a.formControlSymbols(doc)...)
+	return out, nil
+}
+
 func (a Analyzer) documentSymbolsParsed(doc Document, parsed *ast.ParsedDocument) ([]Symbol, error) {
 	load := func() ([]Symbol, error) {
 		return a.inspectDocumentSourceSymbols(doc, parsed)
@@ -734,6 +776,18 @@ func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQu
 		return a.WorkspaceSymbolsFunc(open, query.Text)
 	}
 	return a.workspaceSymbols(open, query.Text)
+}
+
+// interactiveWorkspaceSymbolsQuery annotates a lookup with the current
+// document scope. Workspace providers use the annotation to query immutable
+// module postings and load locals only from the active procedure.
+func (a Analyzer) interactiveWorkspaceSymbolsQuery(doc Document, pos Position, open []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
+	query.Interactive = true
+	query.DocumentPath = doc.Path
+	query.Procedure = currentProcedureNameForDocument(doc, pos)
+	requestPosition := pos
+	query.RequestPosition = &requestPosition
+	return a.WorkspaceSymbolsQuery(open, query)
 }
 
 func (a Analyzer) workspaceSymbols(open []Document, query string) ([]Symbol, error) {
@@ -938,7 +992,7 @@ func (a Analyzer) definitionSymbols(doc Document, pos Position, open []Document,
 	if a.unresolvedExternalMemberReference(doc, pos, word) {
 		return nil, nil
 	}
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return nil, err
 	}
@@ -1112,6 +1166,13 @@ func (a Analyzer) Hover(doc Document, pos Position, open []Document) (*Hover, er
 		detail := firstNonEmpty(sym.Detail, sym.Kind+" "+sym.Name)
 		return &Hover{Contents: symbolHoverWithDocumentation(detail, symbolSource(sym), sym.Documentation), Range: r}, nil
 	}
+	if inferred, ok := typedHoverSymbol(syms); ok {
+		typ := inferred.Type
+		if dbType, found := a.DB.ResolveType(typ); found {
+			return &Hover{Contents: variableHover(word, dbType.Name, inferred.Source), Range: r}, nil
+		}
+		return &Hover{Contents: variableHover(word, typ, inferred.Source), Range: r}, nil
+	}
 	if inferred, ok := a.inferWordTypeInfoAt(doc, word, byteOffsetForDocumentPosition(doc, pos)); ok {
 		typ := inferred.Type
 		if dbType, found := a.DB.ResolveType(typ); found {
@@ -1155,6 +1216,22 @@ func procedureHoverSymbol(symbol Symbol) bool {
 	}
 }
 
+// typedHoverSymbol projects a declaration result that already came from the
+// interactive index into the same inferred-type shape used by the legacy
+// hover path. Keeping this fast path ahead of inferWordTypeInfoAt avoids
+// constructing the full document index for ordinary typed locals, parameters,
+// and module variables. Object/Variant declarations remain on the inference
+// path so assignment-based type refinement keeps its existing behavior.
+func typedHoverSymbol(syms []Symbol) (inferredType, bool) {
+	for _, sym := range syms {
+		if strings.TrimSpace(sym.ReturnType) == "" || isObjectFallbackType(sym.ReturnType) {
+			continue
+		}
+		return inferredType{Type: sym.ReturnType, IsArray: sym.IsArray, Source: "declaration"}, true
+	}
+	return inferredType{}, false
+}
+
 func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Completion, error) {
 	line := lineAt(doc.Source, pos.Line)
 	prefix := utf16Prefix(line, pos.Character)
@@ -1191,7 +1268,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 			}
 			return a.memberCompletions(typ, memberPrefix), nil
 		}
-		return a.moduleMemberCompletions(open, receiverExpr, memberPrefix)
+		return a.moduleMemberCompletions(doc, pos, open, receiverExpr, memberPrefix)
 	}
 	if argPrefix, replaceRange, call, ok := a.namedArgumentCompletionContext(doc, pos); ok {
 		if items, err := a.namedArgumentCompletions(doc, pos, open, call, argPrefix, replaceRange); err != nil || len(items) > 0 {
@@ -1234,7 +1311,7 @@ func (a Analyzer) Completions(doc Document, pos Position, open []Document) ([]Co
 			})
 		}
 	}
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: word, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return nil, err
 	}
@@ -1709,7 +1786,7 @@ func (a Analyzer) resolveCallSignatureAtContextWithLocalPriority(doc Document, t
 	if member, found := a.DB.ResolveMember("VBA.Global", target); found {
 		return a.signatureFromMember("VBA.Global", member, a.memberKind("VBA.Global", target)), true, nil
 	}
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: target, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false, err
 	}
@@ -1731,7 +1808,7 @@ func (a Analyzer) resolveProjectMemberSignature(doc Document, receiverType, memb
 	if idx := strings.LastIndex(receiverType, "."); idx >= 0 {
 		receiverType = receiverType[idx+1:]
 	}
-	syms, err := a.WorkspaceSymbolsQuery([]Document{doc}, WorkspaceSymbolQuery{Text: memberName, Mode: WorkspaceSymbolQueryExact})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, []Document{doc}, WorkspaceSymbolQuery{Text: memberName, Mode: WorkspaceSymbolQueryExact})
 	if err != nil {
 		return Signature{}, false
 	}
@@ -3496,7 +3573,7 @@ func (a Analyzer) typeCompletions(prefix string, replaceRange Range, doc Documen
 			ReplaceRange: &replace,
 		})
 	}
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, replaceRange.End, open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -3598,7 +3675,7 @@ func (a Analyzer) namespaceCompletions(namespace, prefix string) []Completion {
 }
 
 func (a Analyzer) callCompletions(prefix string, replaceRange Range, doc Document, pos Position, open []Document) ([]Completion, error) {
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -3727,7 +3804,7 @@ func (a Analyzer) setRHSCompletions(prefix string, replaceRange Range, doc Docum
 			ReplaceRange: &replace,
 		})
 	}
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -3792,7 +3869,7 @@ func (a Analyzer) valueRHSCompletions(prefix string, replaceRange Range, doc Doc
 		})
 	}
 	out = append(out, localValueCompletionsFromSource(doc, pos, prefix, replaceRange)...)
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: prefix, Mode: WorkspaceSymbolQueryPrefix})
 	if err != nil {
 		return nil, err
 	}
@@ -4229,13 +4306,23 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 	}
 	var declared inferredType
 	if offset >= 0 {
-		if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
-			declared = inferred
-			if !isObjectFallbackType(inferred.Type) {
-				return inferred, true
+		if ctx == nil {
+			if inferred, ok := a.interactiveTypeInfo(doc, word, offset); ok {
+				declared = inferred
+				if !isObjectFallbackType(inferred.Type) {
+					return inferred, true
+				}
 			}
-		} else if currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), ctx) != "" {
-			return inferredType{}, false
+		}
+		if declared.Type == "" {
+			if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
+				declared = inferred
+				if !isObjectFallbackType(inferred.Type) {
+					return inferred, true
+				}
+			} else if currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), ctx) != "" {
+				return inferredType{}, false
+			}
 		}
 	}
 	if declared.Type != "" && !isObjectFallbackType(declared.Type) {
@@ -4291,6 +4378,49 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 		return declared, true
 	}
 	return inferredType{}, false
+}
+
+// interactiveTypeInfo resolves a declaration through the snapshot-scoped
+// interactive index. It is intentionally limited to an exact declaration
+// query, so the ordinary hover/member type path does not construct the full
+// document index merely to learn the declared type of a local or module
+// variable. Object and Variant callers may continue into assignment inference
+// after this method returns.
+func (a Analyzer) interactiveTypeInfo(doc Document, word string, offset int) (inferredType, bool) {
+	if analysisSnapshotForDocument(doc) == nil || strings.TrimSpace(word) == "" {
+		return inferredType{}, false
+	}
+	pos := positionForDocumentByteOffset(doc, offset)
+	requestPosition := pos
+	query := WorkspaceSymbolQuery{
+		Text:            word,
+		Mode:            WorkspaceSymbolQueryExact,
+		Interactive:     true,
+		DocumentPath:    doc.Path,
+		Procedure:       currentProcedureNameForDocument(doc, pos),
+		RequestPosition: &requestPosition,
+	}
+	syms, handled := a.LightweightDocumentSymbols(doc, query)
+	if !handled {
+		return inferredType{}, false
+	}
+	var fallback inferredType
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, word) || strings.TrimSpace(sym.ReturnType) == "" {
+			continue
+		}
+		inferred := inferredType{Type: sym.ReturnType, IsArray: sym.IsArray, Source: "declaration"}
+		if isLocalSymbol(sym) || strings.EqualFold(sym.Kind, "function_return") {
+			return inferred, true
+		}
+		if fallback.Type == "" {
+			fallback = inferred
+		}
+	}
+	if fallback.Type == "" {
+		return inferredType{}, false
+	}
+	return fallback, true
 }
 
 func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offset int, ctx *documentTypeContext) (inferredType, bool) {
@@ -5089,12 +5219,12 @@ func (a Analyzer) resolveRelativeMemberExpressionType(receiverType, expr string)
 	return current, true
 }
 
-func (a Analyzer) moduleMemberCompletions(open []Document, moduleName, prefix string) ([]Completion, error) {
+func (a Analyzer) moduleMemberCompletions(doc Document, pos Position, open []Document, moduleName, prefix string) ([]Completion, error) {
 	moduleName = strings.TrimSpace(moduleName)
 	if moduleName == "" {
 		return nil, nil
 	}
-	syms, err := a.WorkspaceSymbolsQuery(open, WorkspaceSymbolQuery{Text: moduleName, Mode: WorkspaceSymbolQueryModule})
+	syms, err := a.interactiveWorkspaceSymbolsQuery(doc, pos, open, WorkspaceSymbolQuery{Text: moduleName, Mode: WorkspaceSymbolQueryModule})
 	if err != nil {
 		return nil, err
 	}

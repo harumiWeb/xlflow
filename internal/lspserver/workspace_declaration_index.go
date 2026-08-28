@@ -156,8 +156,8 @@ func (d *workspaceDeclarationIndex) matchesVersion(path, version, moduleKind str
 	return ok && entry.version == version && entry.moduleKind == moduleKind && !d.incomplete[key]
 }
 
-// setEffectiveFromEntry is used by the legacy combined parser path, where a
-// semantic entry also contains the declarations needed by this layer.
+// setEffectiveFromEntry projects a complete semantic entry into the query
+// layer. It is also used by the compatibility combined-parser path.
 func (d *workspaceDeclarationIndex) setEffectiveFromEntry(filePath string, entry indexedFileAnalysis) {
 	key := symbolFileKey(filePath)
 	if key == "" {

@@ -2,10 +2,22 @@ package intel
 
 import (
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
 )
+
+func TestRenameFileKeyPreservesUNCFileURIHost(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("UNC file URI normalization is Windows-specific")
+	}
+	uriKey := renameFileKey("file://server/share/Book.bas")
+	pathKeyValue := pathKey(`\\server\share\Book.bas`)
+	if uriKey != pathKeyValue {
+		t.Fatalf("UNC rename key = %q, want %q", uriKey, pathKeyValue)
+	}
+}
 
 func TestRenameLocalVariableParameterAndConst(t *testing.T) {
 	analyzer := newTestAnalyzer(t)

@@ -504,6 +504,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `frm_path`
 - `frx_path`
 - `full_document_change`
+- `full_document_symbol_builds`
 - `full_fallback`
 - `full_incompressible_chunk_roundtrips`
 - `full_parse_failed`
@@ -556,6 +557,13 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `inspect_form_args_invalid`
 - `inspect_gui_failed`
 - `inspect_live_session`
+- `interactive_exact_queries`
+- `interactive_full_symbol_fallbacks`
+- `interactive_index_builds`
+- `interactive_index_hits`
+- `interactive_index_singleflight`
+- `interactive_prefix_queries`
+- `interactive_qualified_queries`
 - `invalid_backup_entry`
 - `invalid_base_cell`
 - `invalid_call_target`
@@ -840,6 +848,8 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `preprocessor_if`
 - `probe_mode`
 - `procedure_call`
+- `procedure_catalog_builds`
+- `procedure_catalog_reuses`
 - `procedure_count`
 - `procedure_declaration`
 - `procedure_exit`

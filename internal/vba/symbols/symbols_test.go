@@ -1,6 +1,7 @@
 package symbols
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -32,6 +33,43 @@ func TestInspectParsedMatchesInspectSource(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("InspectParsed = %+v, want %+v", got, want)
 	}
+}
+
+func TestInspectParsedDeclarationsSkipsProcedureBodies(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Main.bas")
+	source := []byte(`Attribute VB_Name = "Main"
+Option Explicit
+Private cache As Object
+Public Function Calculate(ByVal value As Long, Optional ByRef label As String = "") As Long
+    Dim localValue As Long
+    Const localLimit As Long = 10
+Start:
+    Calculate = value
+End Function
+`)
+	doc, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Close()
+	file, err := InspectParsedDeclarationsContext(context.Background(), SourceOptions{
+		RootDir: t.TempDir(), Path: path, ModuleKind: "standard", IncludePrivate: true, IncludeLabels: true,
+	}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calculate := assertSymbol(t, file.Symbols, "Calculate", "function")
+	if len(calculate.Parameters) != 2 || calculate.Parameters[0].Name != "value" || calculate.Parameters[1].Name != "label" {
+		t.Fatalf("procedure parameters = %+v", calculate.Parameters)
+	}
+	if calculate.ReturnType != "Long" || !strings.Contains(strings.ToLower(calculate.Signature), "function calculate") {
+		t.Fatalf("procedure declaration metadata = %+v", calculate)
+	}
+	assertSymbol(t, file.Symbols, "Main", "module")
+	assertSymbol(t, file.Symbols, "cache", "module_variable")
+	assertNoSymbol(t, file.Symbols, "localValue")
+	assertNoSymbol(t, file.Symbols, "localLimit")
+	assertNoSymbol(t, file.Symbols, "Start")
 }
 
 func TestInspectExtractsRepresentativeStandardModuleSymbols(t *testing.T) {

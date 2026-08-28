@@ -2605,7 +2605,16 @@ func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, 
 	doc = snapshot.Document()
 	s.notifyPerformanceHook("declaration-start", doc.Path)
 	declarationMeasurement := s.performance.start("workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
-	syms, err := s.analyzer.DocumentSymbolsContext(ctx, doc)
+	var indexBuildsBefore, indexHitsBefore, catalogBuildsBefore, catalogReusesBefore uint64
+	indexBuildsBefore, indexHitsBefore = snapshot.InteractiveIndexStats()
+	catalogBuildsBefore, catalogReusesBefore = snapshot.ProcedureCatalogStats()
+	syms, err := s.analyzer.DeclarationSymbolsContext(ctx, doc)
+	indexBuildsAfter, indexHitsAfter := snapshot.InteractiveIndexStats()
+	catalogBuildsAfter, catalogReusesAfter := snapshot.ProcedureCatalogStats()
+	s.performance.addCounter(performanceCounterInteractiveIndexBuilds, indexBuildsAfter-indexBuildsBefore, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
+	s.performance.addCounter(performanceCounterInteractiveIndexHits, indexHitsAfter-indexHitsBefore, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
+	s.performance.addCounter(performanceCounterProcedureCatalogBuilds, catalogBuildsAfter-catalogBuildsBefore, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
+	s.performance.addCounter(performanceCounterProcedureCatalogReuses, catalogReusesAfter-catalogReusesBefore, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
 	if err != nil {
 		declarationMeasurement.finish(len(syms), 0, err)
 		return indexedFileAnalysis{}, err
@@ -2617,19 +2626,9 @@ func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, 
 	declarationMeasurement.finish(len(syms), 0, nil)
 	s.performance.addCounter(performanceCounterWorkspaceDeclarationBuilds, 1, "workspace/file", performanceStageDeclarationIndexing, class, doc.Path)
 	s.notifyPerformanceHook("declaration-ready", doc.Path)
-	incomplete := false
-	parsed, parseErr := snapshot.ParsedDocument()
-	if parseErr != nil {
-		incomplete = true
-	} else {
-		_ = parsed.Read(func(view vbaast.ParsedView) error {
-			incomplete = view.HasError || view.HasMissing
-			return nil
-		})
-	}
 	return indexedFileAnalysis{
 		path: doc.Path, moduleKind: doc.ModuleKind, symbols: syms,
-		declarationIncomplete: incomplete,
+		declarationIncomplete: snapshot.InteractiveIndexIncomplete(),
 	}, nil
 }
 
@@ -2672,6 +2671,7 @@ func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc in
 	doc.Path = file.Path
 	doc.ModuleKind = file.ModuleKind
 	snapshot := doc.Snapshot
+	hadSnapshot := snapshot != nil && snapshot.Matches(doc)
 	if snapshot == nil || !snapshot.Matches(doc) {
 		snapshot = intel.NewAnalysisSnapshot(doc)
 		doc = snapshot.Document()
@@ -2682,6 +2682,15 @@ func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc in
 	}
 	if err := ctx.Err(); err != nil {
 		return indexedFileAnalysis{}, doc, true, err
+	}
+	if !hadSnapshot {
+		// Snapshot-less compatibility callers may immediately hand the returned
+		// document to semantic overlay analysis. Seed its full tree here so that
+		// semantic preparation can reuse the same owned revision. Open-document
+		// snapshots stay lazy and therefore retain the cold interactive fast path.
+		if _, parseErr := snapshot.ParsedDocument(); parseErr != nil {
+			return indexedFileAnalysis{}, doc, true, parseErr
+		}
 	}
 	return analysis, doc, true, nil
 }
@@ -2730,6 +2739,9 @@ func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.Docu
 		syms, hit, err = doc.Snapshot.SourceSymbols(load)
 	} else {
 		syms, err = load()
+	}
+	if !hit && err == nil && doc.Snapshot != nil && doc.Snapshot.Matches(doc) {
+		s.performance.addCounter(performanceCounterFullDocumentSymbolBuilds, 1, "documentSymbols/cache", performanceStageDeclarationIndexing, "interactive", doc.Path)
 	}
 	s.logDocumentCachePerformance("documentSymbols/cache", cacheStatus(hit), doc, len(syms), started, err)
 	return syms, err
@@ -2789,6 +2801,16 @@ func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.W
 	if err != nil {
 		return nil, err
 	}
+	if query.Interactive {
+		switch query.Mode {
+		case intel.WorkspaceSymbolQueryExact:
+			s.performance.addCounter(performanceCounterInteractiveExactQueries, 1, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", query.DocumentPath)
+		case intel.WorkspaceSymbolQueryPrefix:
+			s.performance.addCounter(performanceCounterInteractivePrefixQueries, 1, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", query.DocumentPath)
+		case intel.WorkspaceSymbolQueryQualified:
+			s.performance.addCounter(performanceCounterInteractiveQualifiedQueries, 1, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", query.DocumentPath)
+		}
+	}
 	openKeys := make(map[string]bool, len(open)*2)
 	for _, doc := range open {
 		for _, key := range workspaceSymbolPathKeys(s.opts.RootDir, doc.Path) {
@@ -2806,9 +2828,25 @@ func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.W
 		if s.documentKind(doc) != DocumentKindVBA {
 			continue
 		}
+		var indexBuildsBefore, indexHitsBefore, catalogBuildsBefore, catalogReusesBefore uint64
+		if doc.Snapshot != nil && doc.Snapshot.Matches(doc) {
+			indexBuildsBefore, indexHitsBefore = doc.Snapshot.InteractiveIndexStats()
+			catalogBuildsBefore, catalogReusesBefore = doc.Snapshot.ProcedureCatalogStats()
+		}
 		syms, handled := s.analyzer.LightweightDocumentSymbols(doc, query)
+		if doc.Snapshot != nil && doc.Snapshot.Matches(doc) {
+			indexBuildsAfter, indexHitsAfter := doc.Snapshot.InteractiveIndexStats()
+			catalogBuildsAfter, catalogReusesAfter := doc.Snapshot.ProcedureCatalogStats()
+			s.performance.addCounter(performanceCounterInteractiveIndexBuilds, indexBuildsAfter-indexBuildsBefore, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", doc.Path)
+			s.performance.addCounter(performanceCounterInteractiveIndexHits, indexHitsAfter-indexHitsBefore, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", doc.Path)
+			s.performance.addCounter(performanceCounterProcedureCatalogBuilds, catalogBuildsAfter-catalogBuildsBefore, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", doc.Path)
+			s.performance.addCounter(performanceCounterProcedureCatalogReuses, catalogReusesAfter-catalogReusesBefore, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", doc.Path)
+		}
 		var symbolErr error
 		if !handled {
+			if query.Interactive {
+				s.performance.addCounter(performanceCounterInteractiveFullSymbolFallbacks, 1, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", doc.Path)
+			}
 			syms, symbolErr = s.analyzer.DocumentSymbols(doc)
 		}
 		if symbolErr != nil {
