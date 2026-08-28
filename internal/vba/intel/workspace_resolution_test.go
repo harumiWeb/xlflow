@@ -496,6 +496,27 @@ func TestInteractiveMemberHoverTypedLocalDoesNotBuildFullDocumentSymbols(t *test
 	}
 }
 
+func TestInteractiveMemberHoverRefinesObjectReceiverFromAssignment(t *testing.T) {
+	source := "Attribute VB_Name = \"CurrentModule\"\nPublic Sub RunProcedure()\n  Dim ws As Worksheet\n  Dim target As Object\n  Set target = ws.Range(\"A1\")\n  target.Value\nEnd Sub\n"
+	doc := Document{Path: "CurrentModule.bas", Source: source, ModuleKind: "standard", Version: 1}
+	snapshot := NewAnalysisSnapshot(doc)
+	defer snapshot.Retire()
+	doc = snapshot.Document()
+	db, err := vbadb.LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyzer := Analyzer{DB: db}
+	line := "  target.Value"
+	hover, err := analyzer.Hover(doc, Position{Line: 5, Character: utf16Len(line[:strings.Index(line, "Value")+3])}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil || !strings.Contains(hover.Contents, "Excel.Range.Value") {
+		t.Fatalf("object receiver member hover = %+v, want Excel.Range.Value after assignment inference", hover)
+	}
+}
+
 func TestFastDiagnosticsDoNotReportMissingModulePreambleFromProcedureFragment(t *testing.T) {
 	source := "Attribute VB_Name = \"Module1\"\nOption Explicit\nPublic Sub Run()\n  Debug.Print 1\nEnd Sub\n"
 	doc := Document{Path: "Module1.bas", Source: source, ModuleKind: "standard", Version: 2}

@@ -4494,7 +4494,7 @@ func (a Analyzer) interactiveReceiverTypeAt(doc Document, expr string, offset in
 		return "", false
 	}
 	inferred, ok := a.interactiveTypeInfo(doc, expr, offset)
-	if !ok {
+	if !ok || isObjectFallbackType(inferred.Type) {
 		return "", false
 	}
 	return inferred.Type, true
