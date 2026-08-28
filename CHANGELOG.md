@@ -4,6 +4,16 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Kept LSP document changes responsive while diagnostics read the previous
+  revision. `didChange` now attempts incremental parsing only when the old tree
+  and parsed snapshot are immediately available; otherwise it publishes the
+  new immutable revision and defers its full parse.
+
+- Fixed automatic LSP code actions blocking hover, completion, and document
+  updates on large VBA files. Disabled VB044 fixes skip analysis; enabled fixes
+  scan only their rule with existing inline suppressions. Code actions now use
+  a bounded, cancellable worker and discard edits for obsolete documents.
+
 - Reduced VS Code language-intelligence startup latency by starting the LSP
   without a blocking CLI availability preflight, running project and UI detail
   refreshes asynchronously, and adding opt-in end-to-end startup/readiness

@@ -347,7 +347,7 @@ pnpm install
 pnpm compile
 ```
 
-VS Codeの開発環境モードで拡張機能を起動するには、このフォルダを開き、コンパイル後に［実行とデバッグ］ビューから拡張機能ホストを実行してください。
+VS Codeの開発環境モードで拡張機能を起動するには、リポジトリのルートを開き、［実行とデバッグ］ビューから `Run xlflow VS Code Extension` を実行してください。起動前に拡張機能をコンパイルし、同じチェックアウトのGo製LSPを `.vscode/xlflow-debug/xlflow.exe` にビルドします。この実行ファイルはデバッグ専用の `XLFLOW_VSCODE_DEBUG_PATH` 環境変数で拡張機能へ渡されるため、インストール済みの `xlflow` やユーザーの `xlflow.path` 設定は使用・変更されません。生成された実行ファイルはGitの管理対象外です。
 
 ## ライセンス
 

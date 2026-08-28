@@ -86,6 +86,8 @@ type Server struct {
 	semanticTokens            *semanticTokenCache
 	semanticTokenGenerator    func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig            intel.CodeLensConfig
+	codeActions               *codeActionRequests
+	codeActionDocumentChanges atomic.Bool
 	diagnostics               func(context.Context, intel.Document) []intel.Diagnostic
 	diagnosticsRequest        func(context.Context, intel.DiagnosticRequest) intel.DiagnosticResult
 	defaultDiagnosticsRequest uintptr
@@ -212,7 +214,7 @@ func RunStdio(opts Options) error {
 	}
 	defer cleanup()
 	stream := jsonrpc2.NewBufferedStream(stdioReadWriteCloser{}, jsonrpc2.VSCodeObjectCodec{})
-	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, custom: s.handleCustomNotification})
+	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, custom: s.handleCustomNotification, dispatch: s.dispatchCodeAction})
 	<-conn.DisconnectNotify()
 	return conn.Close()
 }
@@ -229,6 +231,8 @@ func New(opts Options) (*Server, func(), error) {
 	for _, warning := range typeDB.Warnings {
 		logger.Printf("type database warning: %s", warning)
 	}
+	executable, _ := os.Executable()
+	logger.Printf("server executable=%q version=%q commit=%q build_date=%q", executable, opts.Build.Version, opts.Build.Commit, opts.Build.Date)
 	docs := newDocuments(opts.RootDir, opts.Config.Src.Forms, opts.Config.Src.Workbook)
 	docs.cfg = opts.Config
 	s := &Server{
@@ -409,8 +413,10 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentSemanticTokensFullDelta: s.semanticTokensFullDelta,
 		TextDocumentCodeLens:                s.codeLens,
 	}
+	s.codeActions = newCodeActionRequests()
 	s.performance.startupEvent("serverConstructed")
 	return s, func() {
+		s.codeActions.stop()
 		s.stopDiagnostics()
 		if s.analysis != nil {
 			s.analysis.stop()
@@ -709,6 +715,12 @@ func newLogger(opts Options) (*log.Logger, func(), error) {
 
 func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	s.codeLensConfig = codeLensConfigFromInitialize(params)
+	versionedActions := false
+	if params != nil && params.Capabilities.Workspace != nil && params.Capabilities.Workspace.WorkspaceEdit != nil {
+		capability := params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges
+		versionedActions = capability != nil && *capability
+	}
+	s.codeActionDocumentChanges.Store(versionedActions)
 	s.applyDeclarationPriorityOptions(params)
 	capabilities := s.handler.CreateServerCapabilities()
 	capabilities.Experimental = map[string]any{"declarationPriority": true}
@@ -846,6 +858,7 @@ func codeLensConfigFromInitialize(params *protocol.InitializeParams) intel.CodeL
 }
 
 func (s *Server) shutdown(_ *glsp.Context) error {
+	s.codeActions.stop()
 	s.stopDiagnostics()
 	if s.analysis != nil {
 		s.analysis.stop()
@@ -863,6 +876,7 @@ func (s *Server) exit(_ *glsp.Context) error {
 func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
 	measurement := s.startPerformanceURI("textDocument/didOpen", string(params.TextDocument.URI))
 	uri := string(params.TextDocument.URI)
+	s.cancelDocumentCodeActions(uri)
 	unlock := s.lockDocumentLifecycle(uri)
 	doc, err := s.docs.open(uri, params.TextDocument.Text, int32(params.TextDocument.Version))
 	if err != nil {
@@ -897,6 +911,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		return nil
 	}
 	uri := string(params.TextDocument.URI)
+	s.cancelDocumentCodeActions(uri)
 	unlock := s.lockDocumentLifecycle(uri)
 	defer unlock()
 	changeStarted := time.Now()
@@ -1093,6 +1108,7 @@ func (s *Server) scheduleProjectReadyDiagnosticsForCompleteProject(project intel
 
 func (s *Server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
+	s.cancelDocumentCodeActions(uri)
 	unlock := s.lockDocumentLifecycle(uri)
 	closingSignatures := s.closeDiagnostics(ctx, uri)
 	if doc, err := s.docs.getOrRead(uri); err == nil && s.documentKind(doc) == DocumentKindVBA {
@@ -1497,10 +1513,18 @@ func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 	if err != nil {
 		return nil, err
 	}
+	return s.codeActionForDocument(context.Background(), doc, params)
+}
+
+func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, params *protocol.CodeActionParams) (any, error) {
 	if s.documentKind(doc) != DocumentKindVBA {
 		return []protocol.CodeAction{}, nil
 	}
-	actions, err := s.analyzer.CodeActions(doc, fromProtocolRange(params.Range))
+	only := make([]string, len(params.Context.Only))
+	for i, kind := range params.Context.Only {
+		only[i] = string(kind)
+	}
+	actions, err := s.analyzer.CodeActionsContext(ctx, doc, fromProtocolRange(params.Range), only)
 	if err != nil {
 		return nil, err
 	}
@@ -1521,6 +1545,28 @@ func (s *Server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 				}},
 			}},
 		})
+	}
+	if s.codeActionDocumentChanges.Load() {
+		// A versioned edit also protects the client-side gap: the editor may
+		// already have changed its buffer before didChange reaches the server.
+		var version *protocol.Integer
+		if s.docs.isOpen(doc.URI) {
+			capturedVersion := protocol.Integer(doc.Version)
+			version = &capturedVersion
+		}
+		for i := range out {
+			edits := out[i].Edit.Changes[requestURI]
+			versionedEdits := make([]any, len(edits))
+			for j, edit := range edits {
+				versionedEdits[j] = edit
+			}
+			out[i].Edit = &protocol.WorkspaceEdit{DocumentChanges: []any{protocol.TextDocumentEdit{
+				TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+					TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: requestURI}, Version: version,
+				},
+				Edits: versionedEdits,
+			}}}
+		}
 	}
 	return out, nil
 }
@@ -3386,31 +3432,19 @@ func (d *documents) applyChangesWithResult(uri string, changes []documentContent
 		snapshot, err = intel.NewIncrementalAnalysisSnapshot(doc, entry.snapshot, edits)
 	}
 	if snapshot == nil {
-		parseMode = "full_fallback"
+		parseMode = "deferred_full"
 		if !canIncrementallyParse {
 			fallbackReason = "full_document_change"
 		} else {
 			fallbackReason = "incremental_parse_unavailable"
 		}
-		snapshot, err = fullyParsedSnapshot(doc, entry.snapshot)
+		snapshot = intel.NewSuccessorAnalysisSnapshot(doc, entry.snapshot)
+		err = nil
 	}
 	if err != nil || snapshot == nil {
 		return documentChangeResult{document: entry.snapshot.Document(), parseMode: "retained", fallbackReason: "full_parse_failed"}, nil
 	}
 	return d.publishChangedSnapshot(uri, key, entry, snapshot, index, parseMode, fallbackReason)
-}
-
-func fullyParsedSnapshot(doc intel.Document, previous *intel.AnalysisSnapshot) (*intel.AnalysisSnapshot, error) {
-	parsed, err := vbaast.ParseDocument(doc.Path, []byte(doc.Source))
-	if err != nil {
-		return nil, err
-	}
-	snapshot := intel.NewSuccessorAnalysisSnapshotWithParsedDocument(doc, parsed, previous)
-	if _, err := snapshot.ParsedDocument(); err != nil {
-		snapshot.Retire()
-		return nil, err
-	}
-	return snapshot, nil
 }
 
 func (d *documents) publishChangedSnapshot(uri, key string, entry documentEntry, snapshot *intel.AnalysisSnapshot, lineIndex *lineOffsetIndex, parseMode, fallbackReason string) (documentChangeResult, error) {
@@ -3605,7 +3639,7 @@ func (d *documents) closeAll() {
 	d.closed = true
 	d.mu.Unlock()
 	for _, snapshot := range snapshots {
-		snapshot.Retire()
+		snapshot.RetireAndWait()
 	}
 }
 
@@ -3943,11 +3977,15 @@ func (stdioReadWriteCloser) Write(p []byte) (int, error) { return os.Stdout.Writ
 func (stdioReadWriteCloser) Close() error                { return nil }
 
 type rpcHandler struct {
-	handler glsp.Handler
-	custom  func(context.Context, string, []byte)
+	handler  glsp.Handler
+	custom   func(context.Context, string, []byte)
+	dispatch func(context.Context, *jsonrpc2.Conn, *jsonrpc2.Request) bool
 }
 
 func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
+	if h.dispatch != nil && h.dispatch(ctx, conn, req) {
+		return
+	}
 	params := []byte("{}")
 	if req.Params != nil {
 		params = *req.Params

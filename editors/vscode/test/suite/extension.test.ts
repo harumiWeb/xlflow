@@ -80,6 +80,12 @@ import {
   supportedCapabilityVersion,
 } from "../../src/capabilities";
 import {
+  effectiveXlflowPath,
+  readConfig,
+  vscodeDebugExecutableEnvironmentVariable,
+  vscodeDebugExecutablePath,
+} from "../../src/config";
+import {
   cliVersionSummary,
   lastCheckedKey,
   normalizeUpdateResult,
@@ -276,6 +282,39 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
 
   assert.strictEqual(config.get<string>("path"), "xlflow");
   assert.strictEqual(config.get<boolean>("lsp.performanceLogging"), false);
+  const previousDebugPath = process.env[vscodeDebugExecutableEnvironmentVariable];
+  process.env[vscodeDebugExecutableEnvironmentVariable] = "C:\\worktree\\xlflow.exe";
+  try {
+    assert.strictEqual(readConfig().path, "C:\\worktree\\xlflow.exe");
+  } finally {
+    if (previousDebugPath === undefined) {
+      delete process.env[vscodeDebugExecutableEnvironmentVariable];
+    } else {
+      process.env[vscodeDebugExecutableEnvironmentVariable] = previousDebugPath;
+    }
+  }
+  assert.strictEqual(readConfig().path, "xlflow");
+  assert.strictEqual(
+    vscodeDebugExecutablePath({
+      [vscodeDebugExecutableEnvironmentVariable]: " C:\\worktree\\xlflow.exe ",
+    }),
+    "C:\\worktree\\xlflow.exe",
+  );
+  assert.strictEqual(
+    vscodeDebugExecutablePath({ [vscodeDebugExecutableEnvironmentVariable]: "  " }),
+    undefined,
+  );
+  assert.strictEqual(
+    effectiveXlflowPath("C:\\installed\\xlflow.exe", {
+      [vscodeDebugExecutableEnvironmentVariable]: "C:\\worktree\\xlflow.exe",
+    }),
+    "C:\\worktree\\xlflow.exe",
+  );
+  assert.strictEqual(
+    effectiveXlflowPath("C:\\configured\\xlflow.exe", {}),
+    "C:\\configured\\xlflow.exe",
+  );
+  assert.strictEqual(effectiveXlflowPath("  ", {}), "xlflow");
   let startupClock = 0;
   const startupRecords: Array<{ event: string; elapsed_ms: number; startup_id: string }> = [];
   const startupTelemetry = new StartupTelemetry(

@@ -335,6 +335,205 @@ func TestProcedureNameConstantQuickFixPreservesCRLFRange(t *testing.T) {
 	t.Fatalf("VB044 quick fix missing: %+v", actions)
 }
 
+func TestCodeActionsContextFiltersKindsBeforeParsing(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.Config.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{
+		Enabled: true, ConstantName: "PROCEDURE_NAME",
+	}
+	doc := Document{
+		Path:   filepath.Join(analyzer.RootDir, "Main.bas"),
+		Source: "Public Sub Run()\n    Const PROCEDURE_NAME As String = \"Old\"\nEnd Sub\n",
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	doc.Snapshot = snapshot
+	defer snapshot.Retire()
+
+	for _, only := range [][]string{{"source"}, {"refactor.extract"}, {"quickfix.other"}} {
+		actions, err := analyzer.CodeActionsContext(context.Background(), doc, Range{}, only)
+		if err != nil {
+			t.Fatalf("CodeActionsContext(%v) error = %v", only, err)
+		}
+		if len(actions) != 0 {
+			t.Fatalf("CodeActionsContext(%v) = %+v, want no actions", only, actions)
+		}
+	}
+	if got := snapshot.ParseCount(); got != 0 {
+		t.Fatalf("unsupported code-action kinds parsed document %d times", got)
+	}
+}
+
+func TestCodeActionsContextDisabledVB044QuickFixSkipsParsing(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		Path:   filepath.Join(analyzer.RootDir, "Main.bas"),
+		Source: "Public Sub Run()\n    Const PROCEDURE_NAME As String = \"Old\"\nEnd Sub\n",
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	doc.Snapshot = snapshot
+	defer snapshot.Retire()
+
+	actions, err := analyzer.CodeActionsContext(context.Background(), doc, Range{}, []string{"quickfix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("disabled VB044 quickfix actions = %+v, want none", actions)
+	}
+	if got := snapshot.ParseCount(); got != 0 {
+		t.Fatalf("disabled VB044 quickfix parsed document %d times", got)
+	}
+}
+
+func TestCodeActionKindMatchingPreservesProtocolStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		only []string
+		want bool
+	}{
+		{name: "empty request kind is root", kind: "quickfix", only: []string{""}, want: true},
+		{name: "exact", kind: "quickfix", only: []string{"quickfix"}, want: true},
+		{name: "hierarchical parent", kind: "refactor.rewrite", only: []string{"refactor"}, want: true},
+		{name: "hierarchical exact", kind: "refactor.rewrite", only: []string{"refactor.rewrite"}, want: true},
+		{name: "child does not match parent action", kind: "refactor.rewrite", only: []string{"refactor.rewrite.more"}, want: false},
+		{name: "case is significant", kind: "quickfix", only: []string{"QuickFix"}, want: false},
+		{name: "spacing is significant", kind: "quickfix", only: []string{" quickfix"}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := codeActionKindAllowed(test.kind, test.only); got != test.want {
+				t.Fatalf("codeActionKindAllowed(%q, %#v) = %v, want %v", test.kind, test.only, got, test.want)
+			}
+		})
+	}
+}
+
+func TestCodeActionsContextQuickFixDoesNotBuildProcedureIR(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.Config.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{
+		Enabled: true, ConstantName: "PROCEDURE_NAME",
+	}
+	doc := Document{
+		Path:   filepath.Join(analyzer.RootDir, "Main.bas"),
+		Source: "Public Sub Run()\n    Const PROCEDURE_NAME As String = \"Old\"\nEnd Sub\n",
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	doc.Snapshot = snapshot
+	defer snapshot.Retire()
+
+	actions, err := analyzer.CodeActionsContext(context.Background(), doc, Range{
+		Start: Position{Line: 1}, End: Position{Line: 1, Character: 100},
+	}, []string{"quickfix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 1 || actions[0].Kind != "quickfix" || actions[0].NewText != `"Run"` {
+		t.Fatalf("quickfix actions = %+v, want one VB044 quickfix", actions)
+	}
+	if got := snapshot.ProcedureArtifactStats(); got.IRBuild != 0 || got.CFGBuild != 0 {
+		t.Fatalf("CodeActionsContext built procedure artifacts: %+v", got)
+	}
+}
+
+func TestCodeActionsContextRespectsProcedureNameConstantSuppression(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.Config.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{
+		Enabled: true, ConstantName: "PROCEDURE_NAME",
+	}
+	source := "Public Sub Run()\n    Const PROCEDURE_NAME As String = \"Old\" ' xlflow:disable-line VB044\nEnd Sub\n"
+	doc := Document{Path: filepath.Join(analyzer.RootDir, "Main.bas"), Source: source}
+	start := strings.Index(source, `"Old"`)
+	selection := Range{
+		Start: positionForDocumentByteOffset(doc, start),
+		End:   positionForDocumentByteOffset(doc, start+len(`"Old"`)),
+	}
+	actions, err := analyzer.CodeActionsContext(context.Background(), doc, selection, []string{"quickfix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("suppressed VB044 actions = %+v, want none", actions)
+	}
+}
+
+func TestCodeActionsContextMatchesLintVB044VisibilityAcrossSuppressions(t *testing.T) {
+	tests := []struct {
+		name       string
+		beforeLine string
+		suffix     string
+	}{
+		{name: "unsuppressed", beforeLine: "", suffix: ""},
+		{name: "disable-line", beforeLine: "", suffix: " ' xlflow:disable-line VB044"},
+		{name: "disable-next-line", beforeLine: "    ' xlflow:disable-next-line VB044\n", suffix: ""},
+		// These controls are intentionally unrecognized by the current
+		// suppression parser. Keep them in the compatibility table so the
+		// CodeAction path cannot invent suppression semantics that lint lacks.
+		{name: "unrecognized-block-control", beforeLine: "    ' xlflow:disable-block VB044\n", suffix: ""},
+		{name: "unrecognized-file-control", beforeLine: "    ' xlflow:disable-file VB044\n", suffix: ""},
+		{name: "unrecognized-family-control", beforeLine: "    ' xlflow:disable-family VB044\n", suffix: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			analyzer := newTestAnalyzer(t)
+			analyzer.Config.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{
+				Enabled: true, ConstantName: "PROCEDURE_NAME",
+			}
+			root := analyzer.RootDir
+			source := "Public Sub Run()\n" + test.beforeLine + "    Const PROCEDURE_NAME As String = \"Old\"" + test.suffix + "\nEnd Sub\n"
+			doc := Document{Path: filepath.Join(root, "Main.bas"), Source: source}
+			start := strings.Index(source, `"Old"`)
+			if start < 0 {
+				t.Fatal("test literal missing")
+			}
+			selection := Range{
+				Start: positionForDocumentByteOffset(doc, start),
+				End:   positionForDocumentByteOffset(doc, start+len(`"Old"`)),
+			}
+
+			parsed, err := vbaast.ParseDocument(doc.Path, []byte(doc.Source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer parsed.Close()
+			linter := lint.Linter{RootDir: root, Config: analyzer.Config}
+			issues, err := linter.LintParsed(parsed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			for _, issue := range issues {
+				if issue.Code == "VB044" {
+					want++
+				}
+			}
+
+			actions, err := analyzer.CodeActionsContext(context.Background(), doc, selection, []string{"quickfix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(actions) != want {
+				t.Fatalf("CodeActionsContext actions = %+v, want %d actions matching LintParsed VB044 visibility", actions, want)
+			}
+		})
+	}
+}
+
+func TestCodeActionsContextCancellationReturnsWithoutWork(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.Config.Lint.ProcedureNameConstant = config.ProcedureNameConstantConfig{
+		Enabled: true, ConstantName: "PROCEDURE_NAME",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	actions, err := analyzer.CodeActionsContext(ctx, Document{Source: "Public Sub Run()\nEnd Sub\n"}, Range{}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled CodeActionsContext error = %v, want context.Canceled", err)
+	}
+	if actions != nil {
+		t.Fatalf("canceled CodeActionsContext actions = %+v, want nil", actions)
+	}
+}
+
 func TestDiagnosticsIncludeAnalyzerNonShortCircuitObjectGuard(t *testing.T) {
 	analyzer := withRealtimeFindings(newTestAnalyzer(t), []RealtimeFinding{{
 		Code: "VBA212", Severity: "warning", Line: 4,

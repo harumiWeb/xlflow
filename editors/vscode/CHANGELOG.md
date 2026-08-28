@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep language features responsive after editing a large VBA file when
+  diagnostics are still reading its previous revision.
+
+- Keep automatic server code actions from blocking language features on large
+  files, with cancellation and stale-document protection in the matching LSP.
+
 - Start the language client without a blocking duplicate `xlflow version`
   preflight and keep update, capability, project, and sidebar refreshes off the
   activation critical path. Opt-in startup logs correlate LSP lifecycle stages

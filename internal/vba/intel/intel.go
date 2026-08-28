@@ -1353,24 +1353,83 @@ type CodeAction struct {
 }
 
 func (a Analyzer) CodeActions(doc Document, selection Range) ([]CodeAction, error) {
-	out, err := a.documentationCodeActions(doc, selection)
-	if err != nil {
-		return nil, err
-	}
-	procedureActions, err := a.procedureNameConstantCodeActions(doc, selection)
-	if err != nil {
-		return nil, err
-	}
-	return append(out, procedureActions...), nil
+	return a.CodeActionsContext(context.Background(), doc, selection, nil)
 }
 
-func (a Analyzer) documentationCodeActions(doc Document, selection Range) ([]CodeAction, error) {
-	syms, err := a.DocumentSymbols(doc)
+// CodeActionsContext returns the code actions that apply to selection. The
+// only list follows the LSP hierarchical code-action-kind contract: a
+// request for "refactor" also accepts "refactor.rewrite". Unsupported-only
+// requests return immediately, before parsing the document or constructing
+// any symbol indexes.
+func (a Analyzer) CodeActionsContext(ctx context.Context, doc Document, selection Range, only []string) ([]CodeAction, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	allowDocumentation, allowProcedureNameConstant := codeActionFamilies(only)
+	if !allowDocumentation && !allowProcedureNameConstant {
+		return []CodeAction{}, nil
+	}
+
+	var out []CodeAction
+	var err error
+	if allowDocumentation {
+		out, err = a.documentationCodeActionsContext(ctx, doc, selection)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if allowProcedureNameConstant {
+		procedureActions, procedureErr := a.procedureNameConstantCodeActionsContext(ctx, doc, selection)
+		if procedureErr != nil {
+			return nil, procedureErr
+		}
+		out = append(out, procedureActions...)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func codeActionFamilies(only []string) (documentation, procedureNameConstant bool) {
+	if len(only) == 0 {
+		return true, true
+	}
+	return codeActionKindAllowed("refactor.rewrite", only), codeActionKindAllowed("quickfix", only)
+}
+
+func codeActionKindAllowed(kind string, only []string) bool {
+	if len(only) == 0 {
+		return true
+	}
+	for _, rawKind := range only {
+		// CodeActionKind is a protocol string. Preserve its case and spacing;
+		// clients that send an unknown kind must not accidentally select an
+		// action through normalization. CodeActionKindEmpty is the root kind
+		// and therefore matches every action kind.
+		if rawKind == "" || kind == rawKind || strings.HasPrefix(kind, rawKind+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a Analyzer) documentationCodeActionsContext(ctx context.Context, doc Document, selection Range) ([]CodeAction, error) {
+	syms, err := a.DocumentSymbolsContext(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
 	var out []CodeAction
 	for _, sym := range syms {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !documentationSnippetSymbol(sym) || doccomments.HasDocumentation(sym.Documentation) {
 			continue
 		}
@@ -1387,30 +1446,53 @@ func (a Analyzer) documentationCodeActions(doc Document, selection Range) ([]Cod
 	return out, nil
 }
 
-func (a Analyzer) procedureNameConstantCodeActions(doc Document, selection Range) ([]CodeAction, error) {
+func (a Analyzer) procedureNameConstantCodeActionsContext(ctx context.Context, doc Document, selection Range) ([]CodeAction, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// VB044 is opt-in. In particular, do not parse the source merely because
+	// VS Code asks for generic code actions when the rule is disabled.
+	if !a.Config.Lint.ProcedureNameConstant.Enabled {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	parsed, closeParsed, err := parsedDocumentForDocument(doc)
 	if err != nil {
 		return nil, err
 	}
 	defer closeParsed()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	linter := lint.Linter{RootDir: a.RootDir, Config: a.Config}
-	issues, err := linter.LintParsed(parsed)
+	// The fix scanner is the same AST-backed rule implementation used by
+	// diagnostics. Calling LintParsed here used to run every lint rule (and
+	// build ProcedureIR/CFG) just to rediscover the VB044 locations.
+	fixes, err := linter.ProcedureNameConstantFixesParsedContext(ctx, parsed)
 	if err != nil {
 		return nil, err
 	}
-	visible := make(map[string]bool)
-	for _, issue := range issues {
-		if issue.Code == "VB044" {
-			visible[procedureNameConstantIssueKey(issue.Line, issue.Column)] = true
-		}
-	}
-	fixes, err := linter.ProcedureNameConstantFixesParsed(parsed)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Keep CodeAction visibility aligned with diagnostics: a suppressed VB044
+	// finding must not reappear as a quick fix. Apply uses the same source
+	// directive parser and family filtering as the normal lint path.
+	directives, _ := suppression.DirectivesForSource(a.RootDir, doc.Path, doc.Source)
+	file := documentSuppressionFile(a.RootDir, doc.Path)
+	records := make([]suppression.Diagnostic, len(fixes))
+	for i, fix := range fixes {
+		records[i] = suppression.Diagnostic{Code: "VB044", File: file, Line: fix.Line}
+	}
+	suppressed, _ := suppression.Apply(records, directives, suppression.FamilyLint)
 	out := make([]CodeAction, 0, len(fixes))
-	for _, fix := range fixes {
-		if !visible[procedureNameConstantIssueKey(fix.Line, fix.Column)] {
+	for i, fix := range fixes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if suppressed[i] {
 			continue
 		}
 		editRange := Range{
@@ -1430,8 +1512,15 @@ func (a Analyzer) procedureNameConstantCodeActions(doc Document, selection Range
 	return out, nil
 }
 
-func procedureNameConstantIssueKey(line, column int) string {
-	return fmt.Sprintf("%d:%d", line, column)
+func documentSuppressionFile(root, path string) string {
+	file := path
+	if rel, err := filepath.Rel(root, path); err == nil {
+		file = rel
+	}
+	if !filepath.IsAbs(path) {
+		file = path
+	}
+	return filepath.ToSlash(file)
 }
 
 func vbaStringLiteral(value string) string {

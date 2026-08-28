@@ -81,6 +81,71 @@ The VS Code client supplies `initializationOptions.declarationPriority` with
 These values are scheduling hints only; `didOpen` and `didChange` remain the
 source of truth for unsaved text.
 
+## Automatic code actions and transport readiness
+
+Code-action requests use one worker and at most 16 pending requests; the
+ordered stdio receive loop captures the document revision and continues to
+serve interactive requests and lifecycle notifications. `$/cancelRequest`
+cancels matching numeric or string request IDs. A newer automatic action for
+the same document supersedes older automatic actions, while explicitly invoked
+actions are not coalesced. Changes, close/reopen, and shutdown cancel affected
+work. Canceled, superseded, or excess requests return `RequestCancelled`
+(`-32800`), and edits from obsolete snapshots are never returned.
+
+Cancellation and final response publication share a request-local mutex in
+addition to document-lifecycle validation. If the client advertises
+`workspace.workspaceEdit.documentChanges`, open-document actions carry their
+captured version; disk-owned documents use a null version. Clients without
+that capability retain `changes` edits. Versioned edits protect against
+client-side changes that have not reached the server yet.
+
+Cancellation is cooperative, not a bound on response or shutdown latency.
+The shared initial `AnalysisSnapshot.ParsedDocument` / `ast.ParseDocument`
+construction does not accept a context, and waiting for its parse mutex is
+also not interruptible. On an unparsed large file, cancellation is observed
+after that construction returns; the single action worker and shutdown may
+wait until then. Canceled results are still discarded. Making initial parsing
+interruptible requires a separate change to shared parse ownership, retry
+after cancellation, and snapshot retirement; the action queue does not detach
+unowned parser goroutines to simulate immediate cancellation.
+
+`context.only` filters action families before their computation. VB044 being
+disabled skips its parse and fix scan. When enabled, its code actions evaluate
+only the procedure-name-constant rule and apply the same inline suppressions;
+they must not call whole-file `LintParsed` or construct ProcedureIR/CFG.
+Documentation actions retain their document-symbol projection.
+
+`didChange` must not wait for a background reader or an in-progress parse of
+the previous revision. It uses incremental tree-sitter parsing only when both
+the parsed snapshot and its tree lease are immediately available. Otherwise it
+publishes a lazy successor snapshot with `parse_mode="deferred_full"`; the new
+revision is parsed by its first consumer. `fallback_reason` distinguishes a
+busy/unavailable incremental tree from a full-document replacement. Completed
+immutable procedure artifacts may carry into the successor, but no stale tree
+or result may be published for the new version. Retiring the obsolete snapshot
+invalidates it immediately; if its parse mutex is busy, parsed resource cleanup
+finishes asynchronously. Server shutdown waits for cleanup of active snapshots.
+
+`operation="textDocument/codeAction"` starts at request dispatch and ends when
+its response is prepared, including time in the bounded action queue. Other
+handler timings do not include time spent waiting before dispatch. Measure
+client request-to-first-nonempty-response latency as well as handler duration,
+and include the automatic code actions emitted by the editor. Fast diagnostics
+publication is not proof of Full diagnostics completion.
+
+`TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation` blocks
+the action projection at a deterministic checkpoint and verifies a real
+JSON-RPC hover response, cancellation, and change/close/reopen invalidation.
+`TestCodeActionRequestsBoundedQueueAndAutomaticSupersession` covers the work
+bound and removal of obsolete queued requests. These are correctness and
+scheduling checks, not wall-clock speedup claims.
+
+For manual comparisons record the exact extension source, executable path,
+build revision, active file, profile settings, and request ordering. F5 extension
+compilation alone does not update a separately installed Go executable. Use a
+matching development build, and do not infer its revision from its modification
+time or a `dev` version string.
+
 ## Stage names
 
 The following names are stable and intended for benchmark/profile scripts:
@@ -253,6 +318,11 @@ The repository benchmark reproduces this comparison with
 ```powershell
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPDeclarationPriority$' -benchmem -benchtime=1x -count 1 -timeout 10m
 ```
+
+The declaration-priority benchmark injects a parser stub with a 2 ms wait for
+the giant file and fixes the worker count at one. It isolates queue ordering;
+it does not measure real VBA parsing, automatic code actions, transport waits,
+or VS Code activation. Its ratios must not be reported as editor speedups.
 
 Its `active_declaration_ready_ms` and `helper_declaration_ready_ms` metrics
 are reported independently from `workspace_declaration_ready_ms`. The

@@ -249,6 +249,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `default_member`
 - `default_value`
 - `default_wait_policy`
+- `deferred_full`
 - `defined_name_count`
 - `defined_names`
 - `deleted_entries`

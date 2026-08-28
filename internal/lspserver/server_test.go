@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -1098,6 +1099,287 @@ func TestCodeActionGeneratesDocumentationComment(t *testing.T) {
 	edits := edit.Changes[protocol.DocumentUri(uri)]
 	if len(edits) != 1 || !strings.Contains(edits[0].NewText, "customerCode: Parameter description.") || !strings.Contains(edits[0].NewText, "Returns:") || strings.Contains(edits[0].NewText, "${") {
 		t.Fatalf("unexpected code action edit: %+v", edits)
+	}
+}
+
+func TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation(t *testing.T) {
+	for _, invalidate := range []string{"cancel-string", "cancel-number", "change", "close", "reopen"} {
+		t.Run(invalidate, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), jsonrpcIntegrationTimeout)
+			defer cancel()
+			root := t.TempDir()
+			s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+			path := filepath.Join(root, "src", "modules", "Main.bas")
+			uri := pathToFileURI(path)
+			source := "Option Explicit\nPublic Sub Run()\n    Dim value As Long\nEnd Sub\n"
+			if _, err := s.docs.open(uri, source, 1); err != nil {
+				t.Fatal(err)
+			}
+			// Block only the code-action worker at its computation boundary, without a
+			// wall-clock sleep or a parse lease that would block document edits.
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			var startedOnce sync.Once
+			defer releaseOnce.Do(func() { close(release) })
+			s.performanceHook = func(stage, path string) {
+				if stage != "codeAction" {
+					return
+				}
+				startedOnce.Do(func() { close(started) })
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+			}
+			serverSide, clientSide := net.Pipe()
+			serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler, dispatch: s.dispatchCodeAction})
+			defer func() { _ = serverConn.Close() }()
+			clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), &rpcRecorder{})
+			defer func() { _ = clientConn.Close() }()
+			var initialized protocol.InitializeResult
+			if err := clientConn.Call(ctx, "initialize", protocol.InitializeParams{}, &initialized); err != nil {
+				t.Fatal(err)
+			}
+			id := jsonrpc2.ID{Str: "code-action", IsString: true}
+			if invalidate == "cancel-number" {
+				id = jsonrpc2.ID{Num: 1234}
+			}
+			waiter, err := clientConn.DispatchCall(ctx, "textDocument/codeAction", protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+				Range:        protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 16}},
+			}, jsonrpc2.PickID(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("code action did not start")
+			}
+			// A real interactive provider must finish while the action is still
+			// blocked. Calling the Go handler directly would miss this regression.
+			var hover *protocol.Hover
+			if err := clientConn.Call(ctx, "textDocument/hover", protocol.HoverParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+					Position:     protocol.Position{Line: 1, Character: 12},
+				},
+			}, &hover); err != nil || hover == nil {
+				t.Fatalf("hover blocked by code action: result=%+v err=%v", hover, err)
+			}
+			switch invalidate {
+			case "cancel-string", "cancel-number":
+				err = clientConn.Notify(ctx, "$/cancelRequest", map[string]any{"id": id})
+			case "change":
+				err = clientConn.Notify(ctx, "textDocument/didChange", map[string]any{
+					"textDocument":   map[string]any{"uri": uri, "version": 2},
+					"contentChanges": []any{map[string]any{"text": source + "' changed\n"}},
+				})
+			case "close":
+				err = clientConn.Notify(ctx, "textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": uri}})
+			case "reopen":
+				err = clientConn.Notify(ctx, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
+					"uri": uri, "version": 1, "languageId": "vba", "text": source,
+				}})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Ordered request barrier ensures the invalidation was handled, not
+			// merely written to the pipe, before allowing the action to return.
+			var ignored any
+			_ = clientConn.Call(ctx, "test/barrier", nil, &ignored)
+			releaseOnce.Do(func() { close(release) })
+			err = waiter.Wait(ctx, &ignored)
+			var rpcErr *jsonrpc2.Error
+			if !errors.As(err, &rpcErr) || rpcErr.Code != -32800 {
+				t.Fatalf("obsolete code action = %v, want RequestCancelled", err)
+			}
+		})
+	}
+}
+
+func TestCodeActionRequestsBoundedQueueAndAutomaticSupersession(t *testing.T) {
+	q := newCodeActionRequests()
+	defer q.stop()
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	replies := make(chan error, maxPendingCodeActions+4)
+	makeRequest := func(id uint64, automatic bool) *codeActionRequest {
+		ctx, cancel := context.WithCancel(context.Background())
+		return &codeActionRequest{id: jsonrpc2.ID{Num: id}, uri: "same-document", automatic: automatic, ctx: ctx, cancelContext: cancel,
+			run:   func(context.Context) (any, error) { t.Error("queued request should never run"); return nil, nil },
+			reply: func(_ any, err error) { replies <- err },
+		}
+	}
+	active := makeRequest(1, true)
+	active.run = func(ctx context.Context) (any, error) {
+		close(started)
+		<-release
+		return nil, ctx.Err()
+	}
+	q.enqueue(active)
+	<-started
+	old := makeRequest(2, true)
+	q.enqueue(old)
+	latest := makeRequest(3, true)
+	q.enqueue(latest)
+	if active.ctx.Err() == nil || old.ctx.Err() == nil || latest.ctx.Err() != nil {
+		t.Fatal("automatic supersession did not cancel obsolete work only")
+	}
+	for i := 0; i < maxPendingCodeActions-1; i++ {
+		q.enqueue(makeRequest(uint64(i+4), false))
+	}
+	overflow := makeRequest(100, false)
+	q.enqueue(overflow)
+	if overflow.ctx.Err() == nil {
+		t.Fatal("queue capacity did not reject excess work")
+	}
+	q.mu.Lock()
+	pending := len(q.pending)
+	q.mu.Unlock()
+	if pending != maxPendingCodeActions {
+		t.Fatalf("pending requests = %d, want %d", pending, maxPendingCodeActions)
+	}
+	q.cancelMatching(func(*codeActionRequest) bool { return true })
+	if latest.ctx.Err() == nil {
+		t.Fatal("queued cancellation was not propagated")
+	}
+}
+
+func TestCodeActionRequestsShutdownCancelsAndJoinsWorker(t *testing.T) {
+	q := newCodeActionRequests()
+	defer q.stop()
+	started := make(chan struct{})
+	replies := make(chan error, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	q.enqueue(&codeActionRequest{ctx: ctx, cancelContext: cancel,
+		run: func(ctx context.Context) (any, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+		reply: func(_ any, err error) { replies <- err },
+	})
+	<-started
+	queuedCtx, queuedCancel := context.WithCancel(context.Background())
+	q.enqueue(&codeActionRequest{ctx: queuedCtx, cancelContext: queuedCancel,
+		run:   func(context.Context) (any, error) { t.Error("shutdown ran queued work"); return nil, nil },
+		reply: func(_ any, err error) { replies <- err },
+	})
+	q.stop()
+	for i := 0; i < 2; i++ {
+		if err := <-replies; !errors.Is(err, context.Canceled) {
+			t.Fatalf("shutdown result = %v, want canceled", err)
+		}
+	}
+}
+
+func TestCodeActionRequestSerializesCancellationWithResponse(t *testing.T) {
+	for _, cancelFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelFirst=%v", cancelFirst), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			request := &codeActionRequest{ctx: ctx}
+			assertPublicationLocked := func() {
+				t.Helper()
+				if request.publishMu.TryLock() {
+					request.publishMu.Unlock()
+					t.Error("cancellation and publication must hold the same exclusion boundary")
+				}
+			}
+			request.cancelContext = func() {
+				assertPublicationLocked()
+				cancel()
+			}
+			request.reply = func(result any, err error) {
+				assertPublicationLocked()
+				if cancelFirst {
+					if result != nil || !errors.Is(err, context.Canceled) {
+						t.Fatalf("response after cancellation = %v, %v", result, err)
+					}
+				} else if result != "edit" || err != nil {
+					t.Fatalf("response before cancellation = %v, %v", result, err)
+				}
+			}
+			if cancelFirst {
+				request.cancel()
+			}
+			request.respond("edit", nil)
+			if !cancelFirst {
+				request.cancel()
+			}
+		})
+	}
+}
+
+func TestCodeActionVersionedEditsRespectClientCapabilityAndDocumentOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		versioned bool
+		open      bool
+	}{{"legacy", false, true}, {"open", true, true}, {"disk", true, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+			var initialization protocol.InitializeParams
+			if err := json.Unmarshal([]byte(fmt.Sprintf(`{"capabilities":{"workspace":{"workspaceEdit":{"documentChanges":%v}}}}`, tc.versioned)), &initialization); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.initialize(nil, &initialization); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "Main.bas")
+			uri := pathToFileURI(path)
+			source := "Option Explicit\nPublic Sub Run()\nEnd Sub\n"
+			if tc.open {
+				_, err = s.docs.open(uri, source, 7)
+			} else {
+				err = os.WriteFile(path, []byte(source), 0o644)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.codeAction(nil, &protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+				Range:        protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 16}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			actions := result.([]protocol.CodeAction)
+			if len(actions) != 1 || actions[0].Edit == nil {
+				t.Fatalf("code actions = %+v", actions)
+				return
+			}
+			edit := actions[0].Edit
+			if !tc.versioned {
+				if len(edit.Changes[protocol.DocumentUri(uri)]) != 1 || len(edit.DocumentChanges) != 0 {
+					t.Fatalf("legacy edit = %+v", edit)
+				}
+				return
+			}
+			if len(edit.DocumentChanges) != 1 || len(edit.Changes) != 0 {
+				t.Fatalf("versioned edit = %+v", edit)
+			}
+			change := edit.DocumentChanges[0].(protocol.TextDocumentEdit)
+			if change.TextDocument.URI != protocol.DocumentUri(uri) || len(change.Edits) != 1 {
+				t.Fatalf("document edit = %+v", change)
+			}
+			version := change.TextDocument.Version
+			if (tc.open && (version == nil || *version != 7)) || (!tc.open && version != nil) {
+				t.Fatalf("document version = %v, open=%v", version, tc.open)
+			}
+		})
 	}
 }
 

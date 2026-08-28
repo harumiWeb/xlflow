@@ -181,6 +181,54 @@ Benchmarks measure relevant declaration and first cross-file definition
 readiness independently from complete workspace readiness. Final postings,
 ordering, overlay authority, and semantic completeness remain unchanged.
 
+### Amendment: isolated, cancellable code-action requests
+
+Automatic editor code actions must not run full file lint on the ordered
+JSON-RPC receive loop. VB044 quick fixes evaluate only their own rule and
+reuse the existing inline-suppression policy; disabled rules and unrequested
+action kinds are excluded before parsing or symbol extraction.
+
+Dispatch code actions through one worker with at most 16 pending requests.
+Capture their document revision in receive order, while document lifecycle
+notifications and the remaining request handlers retain their ordered
+dispatch. Explicit cancellation, replacement automatic requests for the same
+document, document changes, close/reopen, and shutdown cancel obsolete work.
+Validate the captured revision under the document lifecycle lock before
+returning edits. Queue overflow returns RequestCancelled instead of blocking
+the receive loop or creating more workers.
+
+Each request serializes cancellation with final validation and response
+publication under one mutex; cancellation cannot slip between the final check
+and response write. Clients advertising versioned document changes receive
+the captured open-document version in their edits, protecting the client-side
+interval before a new `didChange` reaches the server. Legacy clients retain
+plain edits and the server-side invalidation checks.
+
+This narrow concurrency boundary avoids making every handler concurrently
+mutable. Unbounded asynchronous dispatch was rejected because it would break
+document ordering and multiply analysis load. Queue cancellation releases
+pending slots immediately, and shutdown waits for the active scan to unwind
+before retiring documents. Opt-in code-action timing includes its queue wait;
+client-to-response measurements remain necessary to observe waits outside
+individual handlers.
+
+Cancellation remains cooperative: initial shared tree-sitter construction and
+its parse-mutex wait are not interruptible. This change preserves snapshot
+ownership and waits for that construction before shutdown instead of detaching
+parser work. Interruptible initial parsing needs a separate design for shared
+waiters, retry after cancellation, and retirement.
+
+Document lifecycle notifications have a stricter transport requirement than
+background analysis: `didChange` must publish the new immutable source revision
+without waiting for a reader or parser of the previous revision. Incremental
+parsing is therefore opportunistic. When the previous parsed snapshot or tree
+lease is busy, the store publishes a lazy successor and lets its first consumer
+perform a full parse. This trades occasional incremental reuse for bounded
+receive-loop latency while preserving revision and ownership checks.
+Obsolete snapshots become invalid immediately, while cleanup waits outside the
+document-change handler for any in-progress parse construction. Shutdown keeps
+an explicit wait boundary for active snapshot cleanup.
+
 ## Consequences
 
 - Positive: CLI, editor, and future agent features can share the same VBA

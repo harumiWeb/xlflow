@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	vbaast "github.com/harumiWeb/xlflow/internal/vba/ast"
 	"github.com/harumiWeb/xlflow/internal/vba/calls"
@@ -214,6 +215,9 @@ func TestNewIncrementalAnalysisSnapshotRejectsDivergedPreviousSource(t *testing.
 	previous.parseDocument = func(string, []byte) (*vbaast.ParsedDocument, error) {
 		return vbaast.ParseDocument("Main.bas", []byte("Sub Other()\nEnd Sub\n"))
 	}
+	if _, err := previous.ParsedDocument(); err != nil {
+		t.Fatal(err)
+	}
 	_, err := NewIncrementalAnalysisSnapshot(
 		Document{Path: "Main.bas", Source: "Sub B()\nEnd Sub\n", Version: 2},
 		previous,
@@ -222,6 +226,72 @@ func TestNewIncrementalAnalysisSnapshotRejectsDivergedPreviousSource(t *testing.
 	if !errors.Is(err, ErrIncrementalSnapshotUnavailable) {
 		t.Fatalf("incremental snapshot error = %v, want ErrIncrementalSnapshotUnavailable", err)
 	}
+}
+
+func TestAnalysisSnapshotParsedDocumentIfReadyDoesNotWaitForConstruction(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	snapshot.parseDocument = func(path string, source []byte) (*vbaast.ParsedDocument, error) {
+		close(started)
+		<-release
+		return vbaast.ParseDocument(path, source)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := snapshot.ParsedDocument()
+		done <- err
+	}()
+	<-started
+	if parsed, ready := snapshot.ParsedDocumentIfReady(); ready || parsed != nil {
+		close(release)
+		t.Fatalf("constructing parsed document = (%p, %v), want unavailable", parsed, ready)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if parsed, ready := snapshot.ParsedDocumentIfReady(); !ready || parsed == nil {
+		t.Fatalf("completed parsed document = (%p, %v), want ready", parsed, ready)
+	}
+	snapshot.Retire()
+}
+
+func TestAnalysisSnapshotRetireDoesNotWaitForParseConstruction(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	snapshot.parseDocument = func(path string, source []byte) (*vbaast.ParsedDocument, error) {
+		close(started)
+		<-release
+		return vbaast.ParseDocument(path, source)
+	}
+	parseDone := make(chan error, 1)
+	go func() {
+		_, err := snapshot.ParsedDocument()
+		parseDone <- err
+	}()
+	<-started
+	retireReturned := make(chan struct{})
+	go func() {
+		snapshot.Retire()
+		close(retireReturned)
+	}()
+	select {
+	case <-retireReturned:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("Retire waited for an obsolete parse construction")
+	}
+	if !snapshot.Retired() {
+		close(release)
+		t.Fatal("Retire did not invalidate the snapshot immediately")
+	}
+	close(release)
+	if err := <-parseDone; err != nil {
+		t.Fatal(err)
+	}
+	snapshot.RetireAndWait()
 }
 
 func TestAnalysisSnapshotReusesSemanticSourceMetadata(t *testing.T) {
