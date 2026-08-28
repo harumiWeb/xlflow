@@ -149,7 +149,7 @@ jobs:
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
-          version: 11.11.0
+          package_json_file: editors/vscode/package.json
       - uses: actions/setup-node@v6
         with:
           node-version: 22

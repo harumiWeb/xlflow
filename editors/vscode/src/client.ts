@@ -172,7 +172,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     );
     this.client = client;
     let processStartObserved = false;
-    this.stateSubscription = client.onDidChangeState((event) => {
+    const stateSubscription = client.onDidChangeState((event) => {
       // State.Starting is the closest public boundary to child-process spawn;
       // the language-client package does not expose the enum from its node entrypoint.
       if (event.newState === 3) {
@@ -196,6 +196,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         telemetry?.mark("languageClientStartFailed", { outcome: "error" });
       }
     });
+    this.stateSubscription = stateSubscription;
 
     const startAttemptTelemetry = telemetry;
     try {
@@ -215,10 +216,14 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`}${logDescription}`,
       );
     } catch (error) {
-      this.client = undefined;
-      this.workspaceFolderKey = undefined;
-      this.stateSubscription.dispose();
-      this.stateSubscription = undefined;
+      if (this.client === client) {
+        this.client = undefined;
+        this.workspaceFolderKey = undefined;
+      }
+      stateSubscription.dispose();
+      if (this.stateSubscription === stateSubscription) {
+        this.stateSubscription = undefined;
+      }
       startAttemptTelemetry?.mark("languageClientStartFailed", { outcome: "error" });
       this.channels.output.error(`Failed to start xlflow lsp --stdio: ${String(error)}`);
       throw error;
