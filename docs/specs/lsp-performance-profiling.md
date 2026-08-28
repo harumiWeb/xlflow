@@ -27,6 +27,40 @@ postings are complete, while semantic preparation publishes the existing
 `operation="workspaceSymbols/index/initial"` after IR/CFG/call-site entries are
 complete. Neither record changes LSP response fields.
 
+## End-to-end startup correlation
+
+When performance logging is enabled, the VS Code client creates an anonymous
+`startup_id` for each language-client start attempt and passes it to the child
+process through `XLFLOW_LSP_STARTUP_ID`. Manual and automatic process restarts
+begin a fresh attempt with a new ID. The client writes records with
+`operation="lsp/startup"`, `side="client"`, `event`, `elapsed_ms`, and
+`wall_time_unix_ms`. The server writes the same operation and ID with its local
+monotonic elapsed time and `wall_time_unix_ns`. IDs are omitted when performance
+logging is disabled, and no source, workspace name, or user-identifying data is
+included.
+
+The client records `extensionActivationStart`, CLI availability start and
+completion, workspace/configuration discovery, `languageClientStart`, the
+nearest public process-spawn boundary, `initializeResponseReceived`,
+`initializedSent`, and the first successful `didOpen`. The
+`vscode-languageclient` API does not expose every JSON-RPC boundary, so the
+initialize and process events are explicitly nearest stable boundaries; the
+server lifecycle events provide the precise server-side counterparts.
+
+The server records `serverProcessStart`, `serverConstructed`,
+`initializeHandled`, `initializedHandled`, `didOpenHandled`, declaration and
+semantic index start/ready events, and the first non-empty hover, definition,
+and completion result. The CLI captures the server baseline before its
+best-effort TypeLib preparation hook, so that cold preparation remains visible
+in the server startup interval. An empty result, error, or cancellation is not
+a first-success event. Each event is emitted at most once per startup ID.
+
+Startup telemetry is observational only. It does not add an LSP notification,
+change a response, delay document lifecycle handling, or change availability,
+restart, generation, or cancellation behavior. `wall_time_unix_*` is used only
+to correlate the two processes; elapsed durations are compared within the
+process that produced them.
+
 ## Stage names
 
 The following names are stable and intended for benchmark/profile scripts:

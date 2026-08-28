@@ -67,6 +67,11 @@ type Options struct {
 	Stderr         io.Writer
 	TypeDBDir      string
 	PerformanceLog bool
+	// BeforeStart runs after the process startup baseline is captured and
+	// before server construction. The CLI uses it for best-effort TypeLib
+	// preparation so that cold-start cost remains in startup telemetry.
+	BeforeStart func()
+	startup     *startupContext
 }
 
 type Server struct {
@@ -196,6 +201,10 @@ func Check(opts Options) error {
 }
 
 func RunStdio(opts Options) error {
+	opts.startup = startupContextFromEnvironment(opts.PerformanceLog)
+	if opts.BeforeStart != nil {
+		opts.BeforeStart()
+	}
 	s, cleanup, err := New(opts)
 	if err != nil {
 		return err
@@ -254,6 +263,10 @@ func New(opts Options) (*Server, func(), error) {
 		semanticInvalidationPaths: make(map[string]struct{}),
 		analysisPermits:           make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
 		analysisPermitChanged:     make(chan struct{}),
+	}
+	if opts.startup != nil {
+		s.performance.setStartup(opts.startup)
+		s.performance.startupEvent("serverProcessStart")
 	}
 	s.analysis = s.newWorkspaceAnalysisIndex()
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
@@ -395,6 +408,7 @@ func New(opts Options) (*Server, func(), error) {
 		TextDocumentSemanticTokensFullDelta: s.semanticTokensFullDelta,
 		TextDocumentCodeLens:                s.codeLens,
 	}
+	s.performance.startupEvent("serverConstructed")
 	return s, func() {
 		s.stopDiagnostics()
 		if s.analysis != nil {
@@ -727,17 +741,20 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	if version == "" {
 		version = "dev"
 	}
-	return protocol.InitializeResult{
+	result := protocol.InitializeResult{
 		Capabilities: capabilities,
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    serverName,
 			Version: &version,
 		},
-	}, nil
+	}
+	s.performance.startupEvent("initializeHandled")
+	return result, nil
 }
 
 func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
 	s.analysis.start()
+	s.performance.startupEvent("initializedHandled")
 	s.logger.Printf("initialized")
 	return nil
 }
@@ -803,6 +820,7 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 	s.openDiagnostics(ctx, doc)
 	unlock()
 	measurement.finish(0, nil)
+	s.performance.startupEvent("didOpenHandled")
 	return nil
 }
 
@@ -1263,7 +1281,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	measurement.setDocument(doc)
 	if s.documentKind(doc) == DocumentKindUserFormYAML {
 		hover := formsintel.HoverYAML(doc.Source, formsintel.Position{Line: int(params.Position.Line), Character: int(params.Position.Character)})
-		if hover == nil {
+		if hover == nil || strings.TrimSpace(hover.Contents) == "" {
 			measurement.finish(0, nil)
 			return nil, nil
 		}
@@ -1278,7 +1296,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return nil, nil
 	}
 	hover, err := s.analyzer.Hover(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
-	if err != nil || hover == nil {
+	if err != nil || hover == nil || strings.TrimSpace(hover.Contents) == "" {
 		measurement.finish(0, err)
 		return nil, err
 	}

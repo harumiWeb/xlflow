@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Start the language client without a blocking duplicate `xlflow version`
+  preflight and keep update, capability, project, and sidebar refreshes off the
+  activation critical path. Opt-in startup logs correlate LSP lifecycle stages
+  and the first usable hover, definition, and completion results.
+
 ## v0.10.0
 
 - Fixed VBA hover documentation for procedures in currently open modules.

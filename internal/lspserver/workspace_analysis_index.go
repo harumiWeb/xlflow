@@ -305,6 +305,7 @@ func (x *workspaceAnalysisIndex) buildInitial() {
 		// The declaration phase is intentionally complete before semantic
 		// preparation starts.  This makes the symbol index useful as soon as
 		// possible and keeps heavyweight IR/CFG work from delaying it.
+		x.performance.startupEvent("declarationIndexStarted")
 		declarationStarted := time.Now()
 		sources := x.buildInitialDeclarations(files)
 		err = x.initialCtx.Err()
@@ -394,6 +395,7 @@ sendJobs:
 }
 
 func (x *workspaceAnalysisIndex) buildInitialSemantics(files []symbols.SourceFile, sources map[string]initialSource) {
+	x.performance.startupEvent("semanticIndexStarted")
 	workers := max(1, x.semanticWorkers)
 	jobs := make(chan symbols.SourceFile)
 	var wg sync.WaitGroup

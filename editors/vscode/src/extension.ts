@@ -8,9 +8,11 @@ import { XlflowLanguageClientManager } from "./client";
 import { registerCommands } from "./commands";
 import { checkVbaLanguageAssociation } from "./languageAssociation";
 import { createChannels } from "./logging";
+import { readConfig } from "./config";
 import { selectedWorkspaceFolder, XlflowProjectStateService } from "./projectState";
 import { SessionManager } from "./session";
 import { XlflowSidebar } from "./sidebar";
+import { StartupTelemetry } from "./startupTelemetry";
 import { XlflowUpdateService } from "./updateCheck";
 import { XlflowTestController } from "./testing";
 import { XlflowCapabilitiesService } from "./capabilities";
@@ -27,10 +29,19 @@ let updateService: XlflowUpdateService | undefined;
 let capabilitiesService: XlflowCapabilitiesService | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const activationStarted = performance.now();
   const channels = createChannels();
+  const startup = new StartupTelemetry(
+    readConfig().lspPerformanceLogging,
+    (record) => channels.output.info(`performance ${JSON.stringify(record)}`),
+    undefined,
+    undefined,
+    activationStarted,
+  );
+  startup.mark("extensionActivationStart");
   cliAvailability = new XlflowCliAvailabilityService();
   setXlflowCliAvailabilityService(cliAvailability);
-  clientManager = new XlflowLanguageClientManager(channels, cliAvailability);
+  clientManager = new XlflowLanguageClientManager(channels, startup);
   testController = new XlflowTestController(channels);
   sessionManager = new SessionManager(channels);
   capabilitiesService = new XlflowCapabilitiesService(channels, {
@@ -194,7 +205,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await updateService?.checkAutomatic(cliAvailability?.current());
       }
       if (pathChanged || lspChanged) {
-        await clientManager?.restart();
+        try {
+          await clientManager?.restart();
+        } catch (error) {
+          channels.output.error(`xlflow language server restart failed: ${String(error)}`);
+        }
       }
       if (pathChanged) {
         await refreshSelectedProject();
@@ -204,6 +219,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+
+  const availabilityPromise = (async () => {
+    startup.mark("cliAvailabilityStart");
+    const availability = await cliAvailability!.refresh();
+    startup.mark("cliAvailabilityComplete", { outcome: availability.ok ? "ok" : "error" });
+    return availability;
+  })();
+  const projectRefreshPromise = refreshSelectedProject({ restartLsp: false });
+  const projectRefreshState = projectRefreshPromise.then(
+    () => projectState?.current(),
+    () => projectState?.current(),
+  );
+  void availabilityPromise
+    .then(async (availability) => {
+      await updateService?.checkAutomatic(availability);
+      const state = await projectRefreshState;
+      if (state?.kind === "ready") {
+        await showProjectCliUnavailableNotice(context, state.workspaceFolder, availability);
+      }
+    })
+    .catch((error) =>
+      channels.output.error(`xlflow CLI availability refresh failed: ${String(error)}`),
+    );
+  void rulesRegistry.load().catch((error) => {
+    channels.output.error(`xlflow rules refresh failed: ${String(error)}`);
+  });
+  void capabilitiesService.load().catch((error) => {
+    channels.output.error(`xlflow capabilities refresh failed: ${String(error)}`);
+  });
+  void projectRefreshPromise.catch((error) => {
+    channels.output.error(`xlflow project refresh failed: ${String(error)}`);
+  });
+  void checkVbaLanguageAssociation(context).catch((error) => {
+    channels.output.error(`xlflow VBA language association check failed: ${String(error)}`);
+  });
 
   try {
     await clientManager.start();
@@ -215,12 +265,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ),
     );
   }
-  await cliAvailability.refresh();
-  void rulesRegistry.load().catch(() => undefined);
-  void capabilitiesService.load();
-  await updateService.checkAutomatic(cliAvailability.current());
-  await refreshSelectedProject({ restartLsp: false });
-  await checkVbaLanguageAssociation(context);
 }
 
 export async function deactivate(): Promise<void> {

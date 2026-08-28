@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Reduced VS Code language-intelligence startup latency by starting the LSP
+  without a blocking CLI availability preflight, running project and UI detail
+  refreshes asynchronously, and adding opt-in end-to-end startup/readiness
+  correlation for the first usable hover, definition, and completion results.
+
 - Reduced interactive VBA LSP latency by adding snapshot-scoped declaration
   indexes for hover, definition, completion, and signature help. Interactive
   lookups now reuse immutable procedure catalogs, avoid procedure IR/CFG and

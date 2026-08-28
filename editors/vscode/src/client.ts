@@ -6,11 +6,35 @@ import {
   Trace,
   TransportKind,
 } from "vscode-languageclient/node";
-import { XlflowCliAvailabilityService } from "./cliAvailability";
+import type { XlflowCliAvailabilityService } from "./cliAvailability";
 import { readConfig, TraceServer, XlflowConfig } from "./config";
 import { XlflowChannels } from "./logging";
 import { readFormsRootFromToml } from "./sidebar";
+import {
+  hasCompletionResult,
+  hasDefinitionResult,
+  hasHoverResult,
+  completionResultCount,
+  StartupTelemetry,
+} from "./startupTelemetry";
 import { resolveWorkspaceRoot } from "./xlflow";
+
+class StartupLanguageClient extends LanguageClient {
+  public constructor(
+    id: string,
+    name: string,
+    serverOptions: ServerOptions,
+    clientOptions: LanguageClientOptions,
+    private readonly onInitialized: () => void,
+  ) {
+    super(id, name, serverOptions, clientOptions);
+  }
+
+  public override async start(): Promise<void> {
+    await super.start();
+    this.onInitialized();
+  }
+}
 
 export function userFormSpecLSPGlob(formsRoot = "src/forms"): string {
   const normalizedRoot = formsRoot.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -21,42 +45,70 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
   private client: LanguageClient | undefined;
   private workspaceFolderKey: string | undefined;
   private suggestTimer: NodeJS.Timeout | undefined;
+  private stateSubscription: vscode.Disposable | undefined;
+  private hasStarted = false;
+  private startup: StartupTelemetry | undefined;
 
   public constructor(
     private readonly channels: XlflowChannels,
-    private readonly cliAvailability: XlflowCliAvailabilityService,
-  ) {}
+    cliAvailabilityOrStartup?: XlflowCliAvailabilityService | StartupTelemetry,
+    startup?: StartupTelemetry,
+  ) {
+    // Keep the pre-#757 constructor shape source-compatible for callers that
+    // still pass the availability service. The service is no longer a startup
+    // dependency because process launch is the availability check.
+    this.startup =
+      startup ??
+      (cliAvailabilityOrStartup instanceof StartupTelemetry ? cliAvailabilityOrStartup : undefined);
+  }
 
   public async start(): Promise<void> {
     const config = readConfig();
     if (!config.lspEnabled) {
+      this.hasStarted = true;
       this.channels.output.info("xlflow LSP is disabled by xlflow.lsp.enabled.");
       return;
     }
     if (this.client !== undefined) {
       return;
     }
-    const availability = await this.cliAvailability.refresh();
-    if (!availability.ok) {
-      this.channels.output.info(
-        `Skipping xlflow lsp --stdio startup because ${availability.executable} is unavailable: ${availability.message}`,
-      );
-      return;
+    if (this.startup !== undefined) {
+      if (this.startup.isEnabled !== config.lspPerformanceLogging) {
+        this.startup = this.startup.withEnabled(config.lspPerformanceLogging);
+      } else if (this.hasStarted) {
+        this.startup = this.startup.newAttempt();
+      }
     }
+    this.hasStarted = true;
+
+    this.startup?.mark("workspaceResolutionStart");
 
     const folder = await resolveWorkspaceRoot({ prompt: false, fallbackToFirst: true });
     const cwd = folder?.uri.fsPath;
     const workspaceFolderKey = folder?.uri.toString();
-    const xlflowProject = await hasXlflowConfig(folder);
-    const formSpecGlob = await userFormSpecGlobForWorkspace(folder);
+    this.startup?.mark("workspaceResolutionComplete");
+    this.startup?.mark("projectConfigDiscoveryStart");
+    const [xlflowProject, formSpecGlob] = await Promise.all([
+      hasXlflowConfig(folder),
+      userFormSpecGlobForWorkspace(folder),
+    ]);
+    this.startup?.mark("projectConfigDiscoveryComplete");
     const args = lspServerArgsForProject(config, xlflowProject);
     const codeLens = lspCodeLensOptions(config, xlflowProject);
+    const startupEnv =
+      this.startup?.isEnabled === true
+        ? { ...process.env, XLFLOW_LSP_STARTUP_ID: this.startup.id }
+        : undefined;
     const serverOptions: ServerOptions = {
       command: config.path,
       args,
       transport: TransportKind.stdio,
-      options: cwd === undefined ? undefined : { cwd },
+      options:
+        cwd === undefined && startupEnv === undefined
+          ? undefined
+          : { ...(cwd === undefined ? {} : { cwd }), env: startupEnv },
     };
+    let telemetry = this.startup;
     const clientOptions: LanguageClientOptions = {
       documentSelector: [
         { scheme: "file", language: "vba" },
@@ -74,13 +126,87 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       initializationOptions: {
         codeLens,
       },
+      middleware: {
+        didOpen: (document, next) => {
+          const requestTelemetry = telemetry;
+          return next(document).then(() => {
+            requestTelemetry?.mark("firstDidOpenSent");
+          });
+        },
+        provideHover: async (document, position, token, next) => {
+          const requestTelemetry = telemetry;
+          const result = await next(document, position, token);
+          if (!token.isCancellationRequested && hasHoverResult(result)) {
+            requestTelemetry?.mark("firstHoverHandled", { resultCount: 1 });
+          }
+          return result;
+        },
+        provideDefinition: async (document, position, token, next) => {
+          const requestTelemetry = telemetry;
+          const result = await next(document, position, token);
+          if (!token.isCancellationRequested && hasDefinitionResult(result)) {
+            const resultCount = Array.isArray(result) ? result.length : 1;
+            requestTelemetry?.mark("firstDefinitionHandled", { resultCount });
+          }
+          return result;
+        },
+        provideCompletionItem: async (document, position, context, token, next) => {
+          const requestTelemetry = telemetry;
+          const result = await next(document, position, context, token);
+          if (!token.isCancellationRequested && hasCompletionResult(result)) {
+            requestTelemetry?.mark("firstCompletionHandled", {
+              resultCount: completionResultCount(result),
+            });
+          }
+          return result;
+        },
+      },
     };
 
-    const client = new LanguageClient("xlflow-vscode", "xlflow", serverOptions, clientOptions);
+    const client = new StartupLanguageClient(
+      "xlflow-vscode",
+      "xlflow",
+      serverOptions,
+      clientOptions,
+      () => telemetry?.mark("initializedSent"),
+    );
     this.client = client;
+    let processStartObserved = false;
+    const stateSubscription = client.onDidChangeState((event) => {
+      // State.Starting is the closest public boundary to child-process spawn;
+      // the language-client package does not expose the enum from its node entrypoint.
+      if (event.newState === 3) {
+        const restarting = processStartObserved;
+        if (restarting && telemetry?.isEnabled === true) {
+          telemetry = telemetry.newAttempt();
+          this.startup = telemetry;
+          if (startupEnv !== undefined) {
+            startupEnv.XLFLOW_LSP_STARTUP_ID = telemetry.id;
+          }
+          telemetry.mark("languageClientStart");
+        }
+        processStartObserved = true;
+        telemetry?.mark("serverProcessSpawned");
+        if (restarting) {
+          telemetry?.mark("initializeRequestSent");
+        }
+      } else if (event.newState === 2) {
+        telemetry?.mark("initializeResponseReceived");
+      } else if (event.newState === 4) {
+        telemetry?.mark("languageClientStartFailed", { outcome: "error" });
+      }
+    });
+    this.stateSubscription = stateSubscription;
 
+    const startAttemptTelemetry = telemetry;
     try {
-      await client.start();
+      startAttemptTelemetry?.mark("languageClientStart");
+      // start() publishes State.Starting before its first asynchronous
+      // connection step, so the process boundary is observed before the
+      // initialize request is recorded below.
+      const startPromise = client.start();
+      startAttemptTelemetry?.mark("initializeRequestSent");
+      await startPromise;
       this.workspaceFolderKey = workspaceFolderKey;
       await client.setTrace(toProtocolTrace(config.lspTraceServer));
       const logDescription = args.includes("--log-file")
@@ -90,8 +216,15 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
         `Started xlflow lsp --stdio${cwd === undefined ? "" : ` in ${cwd}`}${logDescription}`,
       );
     } catch (error) {
-      this.client = undefined;
-      this.workspaceFolderKey = undefined;
+      if (this.client === client) {
+        this.client = undefined;
+        this.workspaceFolderKey = undefined;
+      }
+      stateSubscription.dispose();
+      if (this.stateSubscription === stateSubscription) {
+        this.stateSubscription = undefined;
+      }
+      startAttemptTelemetry?.mark("languageClientStartFailed", { outcome: "error" });
       this.channels.output.error(`Failed to start xlflow lsp --stdio: ${String(error)}`);
       throw error;
     }
@@ -101,6 +234,8 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     const client = this.client;
     this.client = undefined;
     this.workspaceFolderKey = undefined;
+    this.stateSubscription?.dispose();
+    this.stateSubscription = undefined;
     this.clearPendingSuggest();
     await client?.stop();
   }

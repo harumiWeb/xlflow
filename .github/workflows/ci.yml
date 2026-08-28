@@ -139,6 +139,29 @@ jobs:
       - run: dotnet test bridge/dotnet/tests/Xlflow.ExcelBridge.Tests/Xlflow.ExcelBridge.Tests.csproj
       - run: go vet ./...
 
+  vscode:
+    needs: changes
+    if: needs.changes.outputs.run_ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+        working-directory: editors/vscode
+      - name: Run VS Code extension tests
+        run: xvfb-run -a pnpm test
+        working-directory: editors/vscode
+
   security:
     needs: changes
     if: needs.changes.outputs.run_ci == 'true'
