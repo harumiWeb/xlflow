@@ -595,17 +595,11 @@ func (a Analyzer) DeclarationSymbolsContext(ctx context.Context, doc Document) (
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
-		idx, _, err := snapshot.buildInteractiveIndexContext(ctx)
-		if err != nil || idx == nil {
-			return nil, err
-		}
-		out := cloneAnalysisSymbols(idx.symbols)
-		out = append(out, a.formControlSymbols(doc)...)
-		return out, nil
+	snapshot := analysisSnapshotForDocument(doc)
+	if snapshot == nil {
+		snapshot = NewAnalysisSnapshot(doc)
+		defer snapshot.Retire()
 	}
-	snapshot := NewAnalysisSnapshot(doc)
-	defer snapshot.Retire()
 	idx, _, err := snapshot.buildInteractiveIndexContext(ctx)
 	if err != nil || idx == nil {
 		return nil, err

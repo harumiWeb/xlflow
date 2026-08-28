@@ -145,6 +145,9 @@ The VS Code extension should remain a thin language client that launches:
   lifecycle notifications wait for full workspace and diagnostic analysis.
 - Positive: Cross-file declaration queries can become useful before the
   workspace has built every file's IR, CFG, and call-site artifacts.
+- Positive: Snapshot-scoped source declarations let latency-sensitive
+  interactive requests reuse one immutable index across hover, definition,
+  completion, and signature help.
 - Negative: The server coordinates two readiness and publication lifecycles;
   semantic consumers must continue to fail open until both declaration and
   semantic completeness are proven.
@@ -165,9 +168,6 @@ The VS Code extension should remain a thin language client that launches:
   adapter and must not fall through to VBA symbols, semantic tokens, or edits.
 - Negative: The curated COM database requires maintenance until a TypeLib
   importer and patch pipeline are available.
-- Positive: Snapshot-scoped source declarations let latency-sensitive
-  interactive requests reuse one immutable index across hover, definition,
-  completion, and signature help.
 - Negative: Every immutable document revision retains an additional index, and
   compatibility callers without a snapshot still need an explicit fallback
   path.

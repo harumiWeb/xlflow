@@ -256,7 +256,13 @@ func (s *AnalysisSnapshot) buildInteractiveIndexValue(ctx context.Context) (*int
 		}
 	}
 	idx := buildInteractiveDocumentIndexOwned(converted)
-	idx.incomplete = file.Parse.HasError || file.Parse.HasMissing || compactDeclarationRecovery(s.lines, s.Procedures())
+	idx.incomplete = file.Parse.HasError || file.Parse.HasMissing
+	if parsed == nil {
+		// The compact source omits procedure bodies, so the declaration parse
+		// cannot observe body-level recovery. Keep the bounded lexical pass for
+		// that path only.
+		idx.incomplete = idx.incomplete || compactDeclarationRecovery(s.lines, s.Procedures())
+	}
 	idx.recoveryKnown = parsed != nil
 	return idx, nil
 }
@@ -420,8 +426,7 @@ func compactDeclarationRecovery(lines []string, procedures []ProcedureInfo) bool
 				return true
 			}
 			for _, statement := range splitRecoveryStatements(text) {
-				lower := strings.ToLower(strings.TrimSpace(statement))
-				trimmedLower := strings.TrimSpace(lower)
+				trimmedLower := strings.ToLower(strings.TrimSpace(statement))
 				if trimmedLower == "" {
 					continue
 				}
@@ -455,33 +460,33 @@ func compactDeclarationRecovery(lines []string, procedures []ProcedureInfo) bool
 					if !popRecoveryBlock(&blockStack, "if") {
 						return true
 					}
-				case strings.HasPrefix(lower, "if ") && multilineIfLine(lower):
+				case strings.HasPrefix(trimmedLower, "if ") && multilineIfLine(trimmedLower):
 					blockStack = append(blockStack, "if")
-				case strings.HasPrefix(lower, "for "):
+				case strings.HasPrefix(trimmedLower, "for "):
 					blockStack = append(blockStack, "for")
 				case recoveryKeyword(trimmedLower, "next"):
 					if !popRecoveryBlock(&blockStack, "for") {
 						return true
 					}
-				case strings.HasPrefix(lower, "do") && (lower == "do" || strings.HasPrefix(lower, "do ")):
+				case trimmedLower == "do" || strings.HasPrefix(trimmedLower, "do "):
 					blockStack = append(blockStack, "do")
 				case recoveryKeyword(trimmedLower, "loop"):
 					if !popRecoveryBlock(&blockStack, "do") {
 						return true
 					}
-				case strings.HasPrefix(lower, "select case"):
+				case strings.HasPrefix(trimmedLower, "select case"):
 					blockStack = append(blockStack, "select")
 				case recoveryKeyword(trimmedLower, "end select"):
 					if !popRecoveryBlock(&blockStack, "select") {
 						return true
 					}
-				case strings.HasPrefix(lower, "with "):
+				case strings.HasPrefix(trimmedLower, "with "):
 					blockStack = append(blockStack, "with")
 				case recoveryKeyword(trimmedLower, "end with"):
 					if !popRecoveryBlock(&blockStack, "with") {
 						return true
 					}
-				case strings.HasPrefix(lower, "while "):
+				case strings.HasPrefix(trimmedLower, "while "):
 					blockStack = append(blockStack, "while")
 				case recoveryKeyword(trimmedLower, "wend"):
 					if !popRecoveryBlock(&blockStack, "while") {

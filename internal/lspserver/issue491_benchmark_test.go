@@ -615,8 +615,8 @@ func benchmarkInteractiveIndexCold(b *testing.B, fixture lspBenchmarkFixture, so
 		if err != nil {
 			b.Fatal(err)
 		}
-		b.StartTimer()
 	}
+	b.StopTimer()
 	reportInteractiveIndexStats(b, total)
 }
 

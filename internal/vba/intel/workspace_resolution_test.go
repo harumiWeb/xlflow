@@ -124,7 +124,7 @@ func TestLightweightDocumentSymbolsUsesSnapshotPrefixIndex(t *testing.T) {
 }
 
 func TestDeclarationSymbolsContextUsesSnapshotInteractiveIndex(t *testing.T) {
-	source := "Attribute VB_Name = \"CurrentModule\"\nPublic Sub RunProcedure(ByVal value As Long)\n  Dim localValue As Long\nEnd Sub\n"
+	source := "Attribute VB_Name = \"CurrentModule\"\n''' Runs the current procedure.\nPublic Sub RunProcedure(ByVal value As Long)\n  Dim localValue As Long\nEnd Sub\n"
 	doc := Document{Path: "CurrentModule.bas", Source: source, ModuleKind: "standard", Version: 1}
 	snapshot := NewAnalysisSnapshot(doc)
 	defer snapshot.Retire()
@@ -140,10 +140,20 @@ func TestDeclarationSymbolsContextUsesSnapshotInteractiveIndex(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("declaration index returned no symbols")
 	}
+	foundProcedure := false
 	for _, symbol := range got {
 		if symbol.Name == "localValue" {
 			t.Fatalf("declaration index walked procedure body: %+v", got)
 		}
+		if symbol.Name == "RunProcedure" {
+			foundProcedure = true
+			if symbol.Documentation.Summary != "Runs the current procedure." {
+				t.Fatalf("declaration index lost procedure documentation: %+v", symbol)
+			}
+		}
+	}
+	if !foundProcedure {
+		t.Fatalf("declaration index omitted RunProcedure: %+v", got)
 	}
 	if snapshot.ParseCount() != 0 {
 		t.Fatalf("declaration index created a full parsed document: parse count %d", snapshot.ParseCount())
@@ -179,8 +189,9 @@ func TestLightweightDocumentSymbolsLoadsOnlyCurrentProcedureLocals(t *testing.T)
 }
 
 func TestCompactInteractiveIndexAcceptsColonSeparatedBlockTerminators(t *testing.T) {
-	source := "Public Sub ColonBlocks()\n" +
-		"  For i = 1 To 3: Next i\n" +
+	source := "Attribute VB_Name = \"ColonModule\"\n" +
+		"Public Sub ColonBlocks()\n" +
+		"  For i = 1 To 3: total = total + i: Next i\n" +
 		"  Do: Loop\n" +
 		"  With Application: End With\n" +
 		"End Sub\n"
@@ -412,8 +423,20 @@ func TestCompactInteractiveIndexDoesNotCertifyProcedureReuse(t *testing.T) {
 	}
 }
 
+func TestUniqueInteractiveSymbolsPreservesDistinctKinds(t *testing.T) {
+	start := Position{Line: 1, Character: 0}
+	end := Position{Line: 1, Character: 5}
+	base := Symbol{File: "Module1.bas", Name: "Value", Parent: "Run", Selection: Range{Start: start, End: end}}
+	other := base
+	other.Kind = "const"
+	got := uniqueInteractiveSymbols([]Symbol{base, other})
+	if len(got) != 2 {
+		t.Fatalf("distinct symbol kinds collapsed = %+v, want two symbols", got)
+	}
+}
+
 func TestInteractiveHoverTypedLocalDoesNotBuildFullDocumentSymbols(t *testing.T) {
-	source := "Attribute VB_Name = \"CurrentModule\"\nPublic Sub RunProcedure()\n  Dim localValue As Long\n  Debug.Print localValue\nEnd Sub\n"
+	source := "Attribute VB_Name = \"CurrentModule\"\nPublic localValue As String\nPublic Sub RunProcedure()\n  Dim localValue As Long\n  Debug.Print localValue\nEnd Sub\n"
 	doc := Document{Path: "CurrentModule.bas", Source: source, ModuleKind: "standard", Version: 1}
 	snapshot := NewAnalysisSnapshot(doc)
 	defer snapshot.Retire()
@@ -434,7 +457,7 @@ func TestInteractiveHoverTypedLocalDoesNotBuildFullDocumentSymbols(t *testing.T)
 		return out, nil
 	}
 	line := "  Debug.Print localValue"
-	hover, err := analyzer.Hover(doc, Position{Line: 3, Character: utf16Len(line[:strings.Index(line, "localValue")+3])}, []Document{doc})
+	hover, err := analyzer.Hover(doc, Position{Line: 4, Character: utf16Len(line[:strings.Index(line, "localValue")+3])}, []Document{doc})
 	if err != nil {
 		t.Fatal(err)
 	}

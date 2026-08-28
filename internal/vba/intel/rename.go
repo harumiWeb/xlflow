@@ -185,10 +185,7 @@ func renameFileKey(value string) string {
 	value = strings.TrimSpace(value)
 	if parsed, err := url.Parse(value); err == nil && strings.EqualFold(parsed.Scheme, "file") {
 		path := parsed.Path
-		if decoded, err := url.PathUnescape(path); err == nil {
-			path = decoded
-		}
-		if parsed.Host != "" {
+		if parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost") {
 			// file://server/share/... is the URI form of a Windows UNC path.
 			// Keep the host so URI-backed and path-backed symbols share identity.
 			value = `\\` + parsed.Host + filepath.FromSlash(path)

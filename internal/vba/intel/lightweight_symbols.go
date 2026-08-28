@@ -301,7 +301,7 @@ func uniqueInteractiveSymbols(symbols []Symbol) []Symbol {
 	seen := make(map[string]struct{}, len(symbols))
 	out := make([]Symbol, 0, len(symbols))
 	for _, symbol := range symbols {
-		key := symbol.File + "\x00" + symbol.Name + "\x00" + symbol.Parent + "\x00" +
+		key := symbol.File + "\x00" + symbol.Name + "\x00" + symbol.Kind + "\x00" + symbol.Parent + "\x00" +
 			formatPositionKey(symbol.Selection.Start) + "\x00" + formatPositionKey(symbol.Selection.End)
 		if _, ok := seen[key]; ok {
 			continue

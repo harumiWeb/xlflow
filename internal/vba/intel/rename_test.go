@@ -19,6 +19,30 @@ func TestRenameFileKeyPreservesUNCFileURIHost(t *testing.T) {
 	}
 }
 
+func TestRenameFileKeyTreatsLocalFileAuthoritiesEqually(t *testing.T) {
+	want := renameFileKey("file:///C:/work/Book.bas")
+	for _, value := range []string{
+		"file:///C:/work/Book.bas",
+		"file://localhost/C:/work/Book.bas",
+		"file://LOCALHOST/C:/work/Book.bas",
+	} {
+		if got := renameFileKey(value); got != want {
+			t.Fatalf("local file URI %q = %q, want %q", value, got, want)
+		}
+	}
+}
+
+func TestRenameFileKeyPreservesEncodedPercent(t *testing.T) {
+	got := renameFileKey("file:///C:/work/name%2520.txt")
+	want := renameFileKey("C:/work/name%20.txt")
+	if got != want {
+		t.Fatalf("encoded percent rename key = %q, want %q", got, want)
+	}
+	if got == renameFileKey("C:/work/name .txt") {
+		t.Fatalf("encoded percent was decoded into a space: %q", got)
+	}
+}
+
 func TestRenameLocalVariableParameterAndConst(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	source := `Option Explicit
