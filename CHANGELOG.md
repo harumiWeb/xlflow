@@ -9,6 +9,13 @@ All notable changes to xlflow will be documented in this file.
   refreshes asynchronously, and adding opt-in end-to-end startup/readiness
   correlation for the first usable hover, definition, and completion results.
 
+- Prioritized initial VBA declaration indexing for active/open documents and
+  uniquely identified direct module dependencies with a bounded P0/P1/P2
+  queue. Open-document overlays can skip redundant disk declaration work, and
+  VS Code reports active-document changes without changing LSP result or
+  completeness semantics. Added opt-in priority scheduling counters,
+  readiness timings, and a giant-module startup benchmark.
+
 - Reduced interactive VBA LSP latency by adding snapshot-scoped declaration
   indexes for hover, definition, completion, and signature help. Interactive
   lookups now reuse immutable procedure catalogs, avoid procedure IR/CFG and

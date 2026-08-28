@@ -60,6 +60,26 @@ change a response, delay document lifecycle handling, or change availability,
 restart, generation, or cancellation behavior. `wall_time_unix_*` is used only
 to correlate the two processes; elapsed durations are compared within the
 process that produced them.
+Initial declaration jobs use a bounded priority queue. Active/open documents
+are P0, uniquely matched direct module hints are P1, and the remaining files
+are P2. A promotion updates an existing queued job; it never creates duplicate
+parsing work, and an already running job is not preempted. Open-document
+overlays remain authoritative through their existing generation checks. The
+priority counters describe scheduling only and do not change readiness or
+result ordering.
+
+Readiness records use `outcome="readiness"` and report the elapsed time from
+workspace startup to the first accepted declaration at each boundary:
+`active_document_declaration_ready_ms`,
+`referenced_document_declaration_ready_ms`, and
+`workspace_declaration_ready_ms`. An active overlay declaration counts as the
+P0 boundary when it supersedes a queued saved-file job.
+
+The VS Code client supplies `initializationOptions.declarationPriority` with
+`activeDocumentUri` and `openDocumentUris`, then sends the optional
+`xlflow/didChangeActiveDocument` notification as the active editor changes.
+These values are scheduling hints only; `didOpen` and `didChange` remain the
+source of truth for unsaved text.
 
 ## Stage names
 
@@ -99,6 +119,11 @@ payload.
 | `workspace_files_discovered`        | Source files returned by workspace discovery.                                         |
 | `workspace_declaration_builds`      | Successful per-file declaration builds.                                               |
 | `workspace_semantic_builds`         | Successful per-file semantic builds.                                                  |
+| `declaration_priority_p0_jobs`      | Initial declaration jobs started for active/open documents.                           |
+| `declaration_priority_p1_jobs`      | Initial declaration jobs started for uniquely identified direct dependencies.         |
+| `declaration_priority_p2_jobs`      | Initial declaration jobs started for the remaining workspace.                         |
+| `declaration_promotions`            | Queued declaration jobs moved to a higher priority.                                   |
+| `declaration_priority_hits`         | Promotion hints that matched an already queued declaration job.                       |
 | `interactive_index_builds`          | Snapshot-scoped interactive declaration indexes built.                                |
 | `interactive_index_hits`            | Interactive lookups served from an existing snapshot index.                           |
 | `procedure_catalog_builds`          | Procedure catalogs built for an interactive document revision.                        |
@@ -215,6 +240,25 @@ and the generated 1,200-procedure module:
 ```powershell
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPInteractiveIndex(Ordinary|Issue756)$' -benchmem -benchtime=1x -count 1 -timeout 20m
 ```
+
+Issue #758 startup comparisons should use the same fixture and permit budget
+with the target module placed after unrelated files, plus one generated giant
+unrelated module. Record P0 declaration readiness, P1 helper readiness, the
+first successful cross-file definition, and complete declaration readiness
+separately. Compare the priority queue with a deterministic discovery-order
+run; these measurements are diagnostic evidence, not a CI latency threshold.
+The repository benchmark reproduces this comparison with
+`BenchmarkLSPDeclarationPriority`:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPDeclarationPriority$' -benchmem -benchtime=1x -count 1 -timeout 10m
+```
+
+Its `active_declaration_ready_ms` and `helper_declaration_ready_ms` metrics
+are reported independently from `workspace_declaration_ready_ms`. The
+existing large-class lifecycle benchmark covers the giant-active path, where
+an active overlay is promoted before startup work can restore saved
+declarations.
 
 The opt-in local ROneCOne path remains available when a developer has a local
 specimen:

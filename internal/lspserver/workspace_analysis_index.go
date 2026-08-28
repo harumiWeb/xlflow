@@ -34,9 +34,14 @@ type workspaceAnalysisIndex struct {
 	// pipeline.  It is optional so the direct index tests and compatibility
 	// callers can continue to provide one combined parser.
 	parseDeclarations func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
-	log               func(fileCount int, started time.Time, err error)
-	logDeclarations   func(fileCount int, started time.Time, err error)
-	performance       *performanceRecorder
+	// parseInitialDeclarations is the startup variant used when the worker has
+	// already acquired the global background permit. The regular callback keeps
+	// its own permit acquisition for watcher and compatibility paths.
+	parseInitialDeclarations func(context.Context, symbols.SourceFile, []byte) (indexedFileAnalysis, error)
+	initialPermit            func(context.Context) (func(), time.Duration, error)
+	log                      func(fileCount int, started time.Time, err error)
+	logDeclarations          func(fileCount int, started time.Time, err error)
+	performance              *performanceRecorder
 	// nonBlockingQueries allows LSP requests to observe the coherently indexed
 	// subset while the initial background scan is still running. Direct index
 	// users retain the historical wait-for-ready behavior by default.
@@ -85,12 +90,61 @@ type workspaceAnalysisIndex struct {
 	initialCancel         context.CancelFunc
 	initialWG             sync.WaitGroup
 	stopOnce              sync.Once
+
+	// initial declaration scheduling is deliberately separate from semantic
+	// preparation.  A priority update only changes work that has not started;
+	// an already running parser remains non-preemptive and is still guarded by
+	// the source generation checks below.
+	initialQueueMu        sync.Mutex
+	initialQueue          []*initialDeclarationJob
+	initialJobs           map[string]*initialDeclarationJob
+	initialQueueWake      chan struct{}
+	initialQueueFinished  bool
+	initialQueueSeq       uint64
+	initialPromotionSeq   uint64
+	initialPriorityHints  map[string]int
+	initialCandidateHints map[string]int
+	initialReadinessMu    sync.Mutex
+	initialReadinessStart time.Time
+	initialReadinessSeen  map[string]bool
+	initialActivePath     string
 }
 
 type diskParse struct {
 	generation uint64
 	cancel     context.CancelFunc
 }
+
+type initialDeclarationJob struct {
+	file      symbols.SourceFile
+	priority  int
+	sequence  uint64
+	promotion uint64
+	state     initialDeclarationJobState
+	cancel    context.CancelFunc
+}
+
+type initialDeclarationJobState uint8
+
+const (
+	initialDeclarationQueued initialDeclarationJobState = iota
+	initialDeclarationRunning
+	initialDeclarationComplete
+	initialDeclarationSkipped
+)
+
+// newInitialDeclarationContext keeps ownership of the cancel function with
+// the queued job. The caller stores it on the job and invokes it when the
+// parser finishes or an overlay supersedes the disk result.
+func newInitialDeclarationContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(parent)
+}
+
+const (
+	declarationPriorityActive     = 0
+	declarationPriorityReferenced = 1
+	declarationPriorityBackground = 2
+)
 
 type diskRefresh struct {
 	key        string
@@ -215,6 +269,414 @@ func (x *workspaceAnalysisIndex) start() {
 	})
 }
 
+func (x *workspaceAnalysisIndex) beginInitialReadiness(started time.Time) {
+	x.initialReadinessMu.Lock()
+	x.initialReadinessStart = started
+	x.initialReadinessSeen = make(map[string]bool, 3)
+	x.initialReadinessMu.Unlock()
+}
+
+func (x *workspaceAnalysisIndex) endInitialReadiness() {
+	x.initialReadinessMu.Lock()
+	x.initialReadinessStart = time.Time{}
+	x.initialReadinessSeen = nil
+	x.initialReadinessMu.Unlock()
+}
+
+func (x *workspaceAnalysisIndex) recordInitialReadiness(metric, path string) {
+	if metric == "" {
+		return
+	}
+	x.initialReadinessMu.Lock()
+	started := x.initialReadinessStart
+	if started.IsZero() || x.initialReadinessSeen[metric] {
+		x.initialReadinessMu.Unlock()
+		return
+	}
+	x.initialReadinessSeen[metric] = true
+	x.initialReadinessMu.Unlock()
+	x.performance.logReadiness("workspaceDeclarations/index/initial", performanceStageDeclarationIndexing, "background", path, metric, time.Since(started))
+}
+
+func declarationReadinessMetric(priority int) string {
+	switch priority {
+	case declarationPriorityActive:
+		return performanceMetricActiveDocumentDeclarationReady
+	case declarationPriorityReferenced:
+		return performanceMetricReferencedDocumentDeclarationReady
+	default:
+		return ""
+	}
+}
+
+func (x *workspaceAnalysisIndex) recordInitialDeclarationReadiness(job *initialDeclarationJob) {
+	if job == nil {
+		return
+	}
+	x.initialQueueMu.Lock()
+	priority := job.priority
+	path := job.file.Path
+	x.initialQueueMu.Unlock()
+	if priority == declarationPriorityActive && !x.isActiveDeclarationPath(path) {
+		return
+	}
+	x.recordInitialReadiness(declarationReadinessMetric(priority), path)
+}
+
+func (x *workspaceAnalysisIndex) isActiveDeclarationPath(path string) bool {
+	key := symbolFileKey(path)
+	if key == "" {
+		return false
+	}
+	x.initialQueueMu.Lock()
+	active := x.initialActivePath == key
+	x.initialQueueMu.Unlock()
+	return active
+}
+
+func (x *workspaceAnalysisIndex) promoteActiveDeclarationPath(path string) {
+	key := symbolFileKey(path)
+	if key == "" {
+		return
+	}
+	x.initialQueueMu.Lock()
+	x.initialActivePath = key
+	x.initialQueueMu.Unlock()
+	x.promoteDeclarationPath(path, declarationPriorityActive)
+}
+
+func (x *workspaceAnalysisIndex) clearActiveDeclarationPath() {
+	x.initialQueueMu.Lock()
+	x.initialActivePath = ""
+	x.initialQueueMu.Unlock()
+}
+
+// promoteDeclarationPath moves an initial declaration job ahead of unrelated
+// background work. It is safe to call before discovery has initialized the
+// queue; the requested priority is retained in a path keyed table once the
+// queue is materialized.
+func (x *workspaceAnalysisIndex) promoteDeclarationPath(path string, priority int) {
+	key := symbolFileKey(path)
+	if key == "" {
+		return
+	}
+	if priority < declarationPriorityActive {
+		priority = declarationPriorityActive
+	}
+	if priority > declarationPriorityBackground {
+		priority = declarationPriorityBackground
+	}
+	x.initialQueueMu.Lock()
+	if x.initialJobs == nil {
+		x.initialJobs = make(map[string]*initialDeclarationJob)
+	}
+	if x.initialPriorityHints == nil {
+		x.initialPriorityHints = make(map[string]int)
+	}
+	if previous, ok := x.initialPriorityHints[key]; !ok || priority < previous {
+		x.initialPriorityHints[key] = priority
+	}
+	job := x.initialJobs[key]
+	existing := job != nil
+	if job == nil {
+		// A placeholder is replaced with the discovered SourceFile below.
+		job = &initialDeclarationJob{priority: priority, state: initialDeclarationQueued}
+		x.initialJobs[key] = job
+	} else if priority >= job.priority {
+		x.initialQueueMu.Unlock()
+		return
+	} else {
+		job.priority = priority
+		if x.performance != nil {
+			x.performance.addCounter(performanceCounterDeclarationPromotions, 1, "workspace/index", performanceStageDeclarationIndexing, "background", path)
+		}
+	}
+	x.initialPromotionSeq++
+	job.promotion = x.initialPromotionSeq
+	if existing && job.state == initialDeclarationQueued {
+		for i, queued := range x.initialQueue {
+			if queued == job {
+				x.initialQueue = append(x.initialQueue[:i], x.initialQueue[i+1:]...)
+				break
+			}
+		}
+		x.insertInitialJobLocked(job)
+	}
+	if existing && job.state == initialDeclarationQueued && x.performance != nil {
+		x.performance.addCounter(performanceCounterDeclarationPriorityHits, 1, "workspace/index", performanceStageDeclarationIndexing, "background", path)
+	}
+	x.initialQueueMu.Unlock()
+	x.signalInitialQueue()
+}
+
+// promoteDeclarationCandidates resolves only cheap module-name hints. A
+// candidate is promoted when exactly one discovered source has the matching
+// basename; ambiguous or unknown names remain background work.
+func (x *workspaceAnalysisIndex) promoteDeclarationCandidates(names []string, priority int) {
+	if len(names) == 0 {
+		return
+	}
+	if priority < declarationPriorityActive {
+		priority = declarationPriorityActive
+	}
+	if priority > declarationPriorityBackground {
+		priority = declarationPriorityBackground
+	}
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			wanted[name] = struct{}{}
+		}
+	}
+	x.initialQueueMu.Lock()
+	if x.initialCandidateHints == nil {
+		x.initialCandidateHints = make(map[string]int)
+	}
+	for name := range wanted {
+		if old, ok := x.initialCandidateHints[name]; !ok || priority < old {
+			x.initialCandidateHints[name] = priority
+		}
+	}
+	paths := make([]string, 0, len(wanted))
+	counts := make(map[string]int)
+	for _, job := range x.initialJobs {
+		if job == nil || job.file.Path == "" {
+			continue
+		}
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(job.file.Path), filepath.Ext(job.file.Path)))
+		counts[base]++
+	}
+	for _, job := range x.initialJobs {
+		if job == nil || job.file.Path == "" {
+			continue
+		}
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(job.file.Path), filepath.Ext(job.file.Path)))
+		if _, ok := wanted[base]; ok && counts[base] == 1 {
+			paths = append(paths, job.file.Path)
+		}
+	}
+	sort.Strings(paths)
+	x.initialQueueMu.Unlock()
+	for _, path := range paths {
+		x.promoteDeclarationPath(path, priority)
+	}
+}
+
+// promoteOpenDocument is called by the lifecycle overlay and by the editor's
+// active-document hint. It never performs synchronous parsing.
+func (x *workspaceAnalysisIndex) promoteOpenDocument(doc intel.Document) {
+	x.promoteDeclarationPath(doc.Path, declarationPriorityActive)
+	x.skipInitialDeclarationPath(doc.Path)
+	x.promoteDocumentDependencies(doc.Source)
+}
+
+func (x *workspaceAnalysisIndex) promoteDocumentDependencies(source string) {
+	x.promoteDeclarationCandidates(declarationDependencyHints(source), declarationPriorityReferenced)
+}
+
+func (x *workspaceAnalysisIndex) declarationProcedureSignatures(path string) (map[string]procedureSignature, bool) {
+	if x == nil || x.declarations == nil {
+		return nil, false
+	}
+	key := symbolFileKey(path)
+	if key == "" {
+		return nil, false
+	}
+	x.declarations.mu.RLock()
+	entry, ok := x.declarations.disk[key]
+	complete := ok && !x.declarations.incomplete[key]
+	x.declarations.mu.RUnlock()
+	if !complete {
+		return nil, false
+	}
+	return procedureSignaturesFromSymbols(entry.symbols), true
+}
+
+func (x *workspaceAnalysisIndex) skipInitialDeclarationPath(path string) {
+	key := symbolFileKey(path)
+	if key == "" {
+		return
+	}
+	x.initialQueueMu.Lock()
+	job := x.initialJobs[key]
+	if job != nil {
+		switch job.state {
+		case initialDeclarationQueued:
+			job.state = initialDeclarationSkipped
+		case initialDeclarationRunning:
+			if job.cancel != nil {
+				job.cancel()
+			}
+		}
+	}
+	wake := x.initialQueueWake
+	x.initialQueueMu.Unlock()
+	if wake != nil {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (x *workspaceAnalysisIndex) signalInitialQueue() {
+	x.initialQueueMu.Lock()
+	wake := x.initialQueueWake
+	x.initialQueueMu.Unlock()
+	if wake == nil {
+		return
+	}
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+func (x *workspaceAnalysisIndex) initialJobLess(left, right *initialDeclarationJob) bool {
+	if left.priority != right.priority {
+		return left.priority < right.priority
+	}
+	if left.promotion != right.promotion {
+		if left.promotion == 0 {
+			return false
+		}
+		if right.promotion == 0 {
+			return true
+		}
+		return left.promotion < right.promotion
+	}
+	if left.sequence != right.sequence {
+		return left.sequence < right.sequence
+	}
+	return symbolFileKey(left.file.Path) < symbolFileKey(right.file.Path)
+}
+
+func (x *workspaceAnalysisIndex) insertInitialJobLocked(job *initialDeclarationJob) {
+	index := sort.Search(len(x.initialQueue), func(i int) bool {
+		return x.initialJobLess(job, x.initialQueue[i])
+	})
+	x.initialQueue = append(x.initialQueue, nil)
+	copy(x.initialQueue[index+1:], x.initialQueue[index:])
+	x.initialQueue[index] = job
+}
+
+func (x *workspaceAnalysisIndex) nextInitialDeclarationJob() (*initialDeclarationJob, context.Context, func(), bool) {
+	for {
+		x.initialQueueMu.Lock()
+		if err := x.initialCtx.Err(); err != nil {
+			x.initialQueueMu.Unlock()
+			return nil, nil, nil, false
+		}
+		hasQueued := false
+		for _, job := range x.initialQueue {
+			if job != nil && job.state == initialDeclarationQueued {
+				hasQueued = true
+				break
+			}
+		}
+		if !hasQueued {
+			if x.initialQueueFinished {
+				x.initialQueueMu.Unlock()
+				return nil, nil, nil, false
+			}
+			wake := x.initialQueueWake
+			x.initialQueueMu.Unlock()
+			select {
+			case <-wake:
+			case <-x.initialCtx.Done():
+				return nil, nil, nil, false
+			}
+			continue
+		}
+		ctx, cancel := newInitialDeclarationContext(x.initialCtx)
+		permit := x.initialPermit
+		x.initialQueueMu.Unlock()
+
+		var release func()
+		if permit != nil {
+			var err error
+			release, _, err = permit(ctx)
+			if err != nil {
+				cancel()
+				return nil, nil, nil, false
+			}
+		}
+
+		// Recheck the queue after permit acquisition. Promotions can happen
+		// while this worker waits, so claim the current highest-priority job
+		// rather than the entry observed before waiting.
+		x.initialQueueMu.Lock()
+		if err := x.initialCtx.Err(); err != nil {
+			x.initialQueueMu.Unlock()
+			if release != nil {
+				release()
+			}
+			cancel()
+			return nil, nil, nil, false
+		}
+		var job *initialDeclarationJob
+		for i, candidate := range x.initialQueue {
+			if candidate == nil || candidate.state != initialDeclarationQueued {
+				continue
+			}
+			job = candidate
+			x.initialQueue = append(x.initialQueue[:i], x.initialQueue[i+1:]...)
+			job.state = initialDeclarationRunning
+			job.cancel = func() {
+				cancel()
+			}
+			break
+		}
+		if job == nil {
+			finished := x.initialQueueFinished
+			x.initialQueueMu.Unlock()
+			if release != nil {
+				release()
+			}
+			cancel()
+			if finished {
+				return nil, nil, nil, false
+			}
+			continue
+		}
+		priority := job.priority
+		path := job.file.Path
+		x.initialQueueMu.Unlock()
+		if x.performance != nil {
+			counter := performanceCounterDeclarationPriorityP2Jobs
+			switch priority {
+			case declarationPriorityActive:
+				counter = performanceCounterDeclarationPriorityP0Jobs
+			case declarationPriorityReferenced:
+				counter = performanceCounterDeclarationPriorityP1Jobs
+			}
+			x.performance.addCounter(counter, 1, "workspace/index", performanceStageDeclarationIndexing, "background", path)
+		}
+		return job, ctx, release, true
+	}
+}
+
+func (x *workspaceAnalysisIndex) finishInitialDeclarationJob(job *initialDeclarationJob, skipped bool) {
+	if job == nil {
+		return
+	}
+	x.initialQueueMu.Lock()
+	if job.cancel != nil {
+		job.cancel()
+	}
+	// A queued job can be canceled by an overlay while its parser is still
+	// returning. Preserve that terminal state even if the parser ignored the
+	// cancellation and produced a result.
+	if skipped || job.state == initialDeclarationSkipped {
+		job.state = initialDeclarationSkipped
+	} else {
+		job.state = initialDeclarationComplete
+	}
+	job.cancel = nil
+	x.initialQueueMu.Unlock()
+}
+
 func (x *workspaceAnalysisIndex) waitReady() error {
 	x.start()
 	<-x.ready
@@ -297,6 +759,7 @@ func (x *workspaceAnalysisIndex) completeLocked() bool {
 
 func (x *workspaceAnalysisIndex) buildInitial() {
 	started := time.Now()
+	x.beginInitialReadiness(started)
 	discovery := x.performance.start("workspace/index", performanceStageWorkspaceDiscovery, "background", x.root)
 	files, err := symbols.DiscoverSourceFilesContext(x.initialCtx, symbols.Options{RootDir: x.root, Config: x.config})
 	discovery.finish(len(files), 0, err)
@@ -310,6 +773,10 @@ func (x *workspaceAnalysisIndex) buildInitial() {
 		sources := x.buildInitialDeclarations(files)
 		err = x.initialCtx.Err()
 		x.declarations.markReady(err)
+		if err == nil {
+			x.recordInitialReadiness(performanceMetricWorkspaceDeclarationReady, x.root)
+		}
+		x.endInitialReadiness()
 		if x.logDeclarations != nil {
 			x.logDeclarations(len(files), declarationStarted, err)
 		}
@@ -325,8 +792,13 @@ func (x *workspaceAnalysisIndex) buildInitial() {
 		}
 		err = x.initialCtx.Err()
 		x.declarations.markReady(err)
+		if err == nil {
+			x.recordInitialReadiness(performanceMetricWorkspaceDeclarationReady, x.root)
+		}
+		x.endInitialReadiness()
 	} else {
 		x.declarations.markReady(err)
+		x.endInitialReadiness()
 	}
 	if err == nil {
 		err = x.initialCtx.Err()
@@ -342,56 +814,185 @@ func (x *workspaceAnalysisIndex) buildInitial() {
 
 func (x *workspaceAnalysisIndex) buildInitialDeclarations(files []symbols.SourceFile) map[string]initialSource {
 	workers := max(1, x.initialWorkers)
-	jobs := make(chan symbols.SourceFile)
 	sources := make(map[string]initialSource, len(files))
 	var sourcesMu sync.Mutex
 	var wg sync.WaitGroup
+	x.initialQueueMu.Lock()
+	if x.initialJobs == nil {
+		x.initialJobs = make(map[string]*initialDeclarationJob, len(files))
+	}
+	if x.initialQueueWake == nil {
+		x.initialQueueWake = make(chan struct{}, 1)
+	}
+	moduleCounts := make(map[string]int, len(files))
+	for _, file := range files {
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path)))
+		if base != "" {
+			moduleCounts[base]++
+		}
+	}
+	for _, file := range files {
+		key := symbolFileKey(file.Path)
+		if key == "" {
+			continue
+		}
+		job := x.initialJobs[key]
+		if job == nil {
+			priority := declarationPriorityBackground
+			if hint, ok := x.initialPriorityHints[key]; ok {
+				priority = hint
+			}
+			base := strings.ToLower(strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path)))
+			if hint, ok := x.initialCandidateHints[base]; ok && moduleCounts[base] == 1 && hint < priority {
+				priority = hint
+			}
+			job = &initialDeclarationJob{file: file, priority: priority, state: initialDeclarationQueued}
+			x.initialQueueSeq++
+			job.sequence = x.initialQueueSeq
+			x.initialJobs[key] = job
+		} else {
+			job.file = file
+			if job.state == 0 {
+				job.state = initialDeclarationQueued
+			}
+		}
+		x.insertInitialJobLocked(job)
+	}
+	// All startup jobs are materialized before workers begin. Marking the
+	// queue finished here lets workers terminate after draining skipped jobs
+	// instead of waiting for a second signal while this function waits on them.
+	x.initialQueueFinished = true
+	x.initialQueueMu.Unlock()
+
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for file := range jobs {
-				if x.initialCtx != nil {
-					if err := x.initialCtx.Err(); err != nil {
+			for {
+				job, jobCtx, releasePermit, ok := x.nextInitialDeclarationJob()
+				if !ok {
+					return
+				}
+				func() {
+					if releasePermit != nil {
+						defer releasePermit()
+					}
+					file := job.file
+					source, readErr := os.ReadFile(file.Path)
+					if readErr != nil {
+						x.declarations.recordInitialFailure(file.Path)
+						x.finishInitialDeclarationJob(job, true)
 						return
 					}
-				}
-				source, readErr := os.ReadFile(file.Path)
-				if readErr != nil {
-					x.declarations.recordInitialFailure(file.Path)
-					continue
-				}
-				key := symbolFileKey(file.Path)
-				version := sourceVersion(source)
-				if key != "" {
-					sourcesMu.Lock()
-					sources[key] = initialSource{source: append([]byte(nil), source...), version: version}
-					sourcesMu.Unlock()
-				}
-				entry, parseErr := x.parseDeclarations(x.initialCtx, file, source)
-				if parseErr != nil {
-					x.declarations.recordInitialFailure(file.Path)
-					continue
-				}
-				entry.path = file.Path
-				entry.version = version
-				entry.moduleKind = file.ModuleKind
-				x.declarations.setDisk(file.Path, entry, 0, true)
+					key := symbolFileKey(file.Path)
+					version := sourceVersion(source)
+					if key != "" {
+						sourcesMu.Lock()
+						sources[key] = initialSource{source: append([]byte(nil), source...), version: version}
+						sourcesMu.Unlock()
+					}
+					parser := x.parseDeclarations
+					if x.parseInitialDeclarations != nil {
+						parser = x.parseInitialDeclarations
+					}
+					entry, parseErr := parser(jobCtx, file, source)
+					if parseErr != nil {
+						x.declarations.recordInitialFailure(file.Path)
+						x.finishInitialDeclarationJob(job, true)
+						return
+					}
+					entry.path = file.Path
+					entry.version = version
+					entry.moduleKind = file.ModuleKind
+					if x.declarations.setDisk(file.Path, entry, 0, true) {
+						x.recordInitialDeclarationReadiness(job)
+					}
+					x.finishInitialDeclarationJob(job, false)
+				}()
 			}
 		}()
 	}
-sendJobs:
-	for _, file := range files {
-		select {
-		case jobs <- file:
-		case <-x.initialCtx.Done():
-			break sendJobs
-		}
-	}
-	close(jobs)
 	wg.Wait()
 	x.declarations.sortAll()
 	return sources
+}
+
+func declarationDependencyHints(source string) []string {
+	identifiers := make(map[string]struct{})
+	for _, line := range strings.Split(source, "\n") {
+		for _, identifier := range declarationLineHints(line) {
+			identifiers[identifier] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(identifiers))
+	for identifier := range identifiers {
+		out = append(out, identifier)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func declarationLineHints(line string) []string {
+	var out []string
+	var previous string
+	inString := false
+	statementStart := true
+	for i := 0; i < len(line); {
+		if line[i] == '"' {
+			inString = !inString
+			i++
+			continue
+		}
+		if inString {
+			i++
+			continue
+		}
+		if line[i] == '\'' {
+			break
+		}
+		if line[i] == ':' {
+			statementStart = true
+			previous = ""
+			i++
+			continue
+		}
+		if (line[i] >= 'A' && line[i] <= 'Z') || (line[i] >= 'a' && line[i] <= 'z') || line[i] == '_' {
+			start := i
+			i++
+			for i < len(line) && ((line[i] >= 'A' && line[i] <= 'Z') || (line[i] >= 'a' && line[i] <= 'z') || (line[i] >= '0' && line[i] <= '9') || line[i] == '_') {
+				i++
+			}
+			word := line[start:i]
+			lower := strings.ToLower(word)
+			if lower == "rem" && (statementStart || previous == "then") {
+				break
+			}
+			j := i
+			for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
+				j++
+			}
+			nextIsMember := j < len(line) && line[j] == '.'
+			if nextIsMember || previous == "as" || previous == "new" {
+				if lower != "as" && lower != "new" && declarationHintCandidate(lower) {
+					out = append(out, word)
+				}
+			}
+			previous = lower
+			statementStart = false
+			continue
+		}
+		i++
+	}
+	return out
+}
+
+func declarationHintCandidate(name string) bool {
+	switch strings.ToLower(name) {
+	case "application", "cells", "debug", "me", "range", "thisworkbook", "workbook", "worksheet":
+		return false
+	default:
+		return true
+	}
 }
 
 func (x *workspaceAnalysisIndex) buildInitialSemantics(files []symbols.SourceFile, sources map[string]initialSource) {

@@ -153,6 +153,34 @@ The VS Code extension should remain a thin language client that launches:
 }
 ```
 
+### Amendment: demand-prioritized declaration startup (Issue #758)
+
+Initial declaration extraction uses a bounded priority queue. Active and open
+documents are P0, uniquely identified direct module references from cheap
+source-level hints are P1, and all remaining discovered files are P2. The
+semantic phase keeps its existing worker budget and starts only after the
+declaration boundary.
+
+The queue owns one state per normalized source path. Promotion changes that
+state in place, preserves deterministic ordering within a priority, and never
+duplicates a queued, running, or completed parse. Permit acquisition happens
+before a job is claimed, so background waiters cannot reserve a slot ahead of
+new interactive work. Running jobs are not preempted; cancellation and
+generation checks continue to reject obsolete results.
+
+An open-document lifecycle may skip a queued disk declaration job because its
+overlay is authoritative. The editor sends initial active/open URI hints and
+the optional `xlflow/didChangeActiveDocument` notification. These hints only
+affect scheduling; document contents remain authoritative through `didOpen` and
+`didChange`, and clients that do not send the extension notification retain the
+existing conservative behavior.
+
+Startup telemetry reports P0/P1/P2 jobs, promotions, matched priority hints,
+and separate active, referenced, and complete declaration readiness timings.
+Benchmarks measure relevant declaration and first cross-file definition
+readiness independently from complete workspace readiness. Final postings,
+ordering, overlay authority, and semantic completeness remain unchanged.
+
 ## Consequences
 
 - Positive: CLI, editor, and future agent features can share the same VBA

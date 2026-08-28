@@ -158,31 +158,32 @@ type diagnosticTimer interface {
 }
 
 type diagnosticState struct {
-	mu                   sync.Mutex
-	generation           uint64
-	latest               intel.Document
-	notify               *glsp.Context
-	timer                diagnosticTimer
-	fullTimer            diagnosticTimer
-	running              bool
-	ready                bool
-	readyMode            intel.DiagnosticMode
-	runningMode          intel.DiagnosticMode
-	publishedMode        intel.DiagnosticMode
-	hasPublished         bool
-	initialFast          bool
-	open                 bool
-	cancel               context.CancelFunc
-	buildOverlay         bool
-	runningOverlay       bool
-	dependentPending     bool
-	publishedSignatures  map[string]procedureSignature
-	baselineKnown        bool
-	diagnosticCache      *intel.DiagnosticCache
-	changes              intel.ProcedureChangeSet
-	overlayGeneration    uint64
-	dependencyGeneration uint64
-	projectReadyPending  bool
+	mu                     sync.Mutex
+	generation             uint64
+	latest                 intel.Document
+	notify                 *glsp.Context
+	timer                  diagnosticTimer
+	fullTimer              diagnosticTimer
+	running                bool
+	ready                  bool
+	readyMode              intel.DiagnosticMode
+	runningMode            intel.DiagnosticMode
+	publishedMode          intel.DiagnosticMode
+	hasPublished           bool
+	initialFast            bool
+	open                   bool
+	cancel                 context.CancelFunc
+	buildOverlay           bool
+	runningOverlay         bool
+	dependentPending       bool
+	publishedSignatures    map[string]procedureSignature
+	baselineKnown          bool
+	baselineMatchesOverlay bool
+	diagnosticCache        *intel.DiagnosticCache
+	changes                intel.ProcedureChangeSet
+	overlayGeneration      uint64
+	dependencyGeneration   uint64
+	projectReadyPending    bool
 }
 
 func Check(opts Options) error {
@@ -211,7 +212,7 @@ func RunStdio(opts Options) error {
 	}
 	defer cleanup()
 	stream := jsonrpc2.NewBufferedStream(stdioReadWriteCloser{}, jsonrpc2.VSCodeObjectCodec{})
-	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler})
+	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, custom: s.handleCustomNotification})
 	<-conn.DisconnectNotify()
 	return conn.Close()
 }
@@ -708,7 +709,9 @@ func newLogger(opts Options) (*log.Logger, func(), error) {
 
 func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	s.codeLensConfig = codeLensConfigFromInitialize(params)
+	s.applyDeclarationPriorityOptions(params)
 	capabilities := s.handler.CreateServerCapabilities()
+	capabilities.Experimental = map[string]any{"declarationPriority": true}
 	if capabilities.CodeLensProvider != nil {
 		resolveProvider := false
 		capabilities.CodeLensProvider.ResolveProvider = &resolveProvider
@@ -750,6 +753,61 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	}
 	s.performance.startupEvent("initializeHandled")
 	return result, nil
+}
+
+func (s *Server) applyDeclarationPriorityOptions(params *protocol.InitializeParams) {
+	if s == nil || s.analysis == nil || params == nil {
+		return
+	}
+	options, ok := params.InitializationOptions.(map[string]any)
+	if !ok {
+		return
+	}
+	value, ok := options["declarationPriority"].(map[string]any)
+	if !ok {
+		return
+	}
+	if active, ok := value["activeDocumentUri"].(string); ok && active != "" {
+		if path, err := fileURIToPath(active); err == nil {
+			s.analysis.promoteActiveDeclarationPath(path)
+		}
+	}
+	promoteURI := func(uri string) {
+		if path, err := fileURIToPath(uri); err == nil {
+			s.analysis.promoteDeclarationPath(path, declarationPriorityActive)
+		}
+	}
+	switch open := value["openDocumentUris"].(type) {
+	case []any:
+		for _, item := range open {
+			if uri, ok := item.(string); ok {
+				promoteURI(uri)
+			}
+		}
+	case []string:
+		for _, uri := range open {
+			promoteURI(uri)
+		}
+	}
+}
+
+func (s *Server) handleCustomNotification(_ context.Context, method string, params []byte) {
+	if method != "xlflow/didChangeActiveDocument" || s == nil || s.analysis == nil {
+		return
+	}
+	var payload struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return
+	}
+	if payload.URI == "" {
+		s.analysis.clearActiveDeclarationPath()
+		return
+	}
+	if path, err := fileURIToPath(payload.URI); err == nil {
+		s.analysis.promoteActiveDeclarationPath(path)
+	}
 }
 
 func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
@@ -818,6 +876,11 @@ func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 		s.semanticTokens.invalidateWorkspace()
 	}
 	s.openDiagnostics(ctx, doc)
+	// The overlay reservation must happen before queued startup work is
+	// skipped, otherwise the lifecycle could briefly expose a disk generation.
+	if s.documentKind(doc) == DocumentKindVBA {
+		s.analysis.promoteOpenDocument(doc)
+	}
 	unlock()
 	measurement.finish(0, nil)
 	s.performance.startupEvent("didOpenHandled")
@@ -848,6 +911,7 @@ func (s *Server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 	}
 	if s.documentKind(change.document) == DocumentKindVBA {
 		s.semanticTokens.invalidateWorkspace()
+		s.analysis.promoteDocumentDependencies(change.document.Source)
 	}
 	s.scheduleDiagnostics(ctx, change.document, diagnosticChangeSet(changes))
 	return nil
@@ -1748,6 +1812,7 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 	state.open = true
 	state.buildOverlay = documentKind == DocumentKindVBA
 	if state.buildOverlay {
+		state.baselineMatchesOverlay = false
 		_, _ = s.analysis.projectChange()
 		previous, exists := s.analysis.beginOverlay(doc, generation)
 		if exists {
@@ -1757,6 +1822,11 @@ func (s *Server) openDiagnostics(ctx *glsp.Context, doc intel.Document) <-chan s
 			state.publishedSignatures = nil
 			state.baselineKnown = false
 		}
+		// An open overlay is authoritative for this path.  Prevent the startup
+		// declaration queue from doing the same path after the overlay has been
+		// reserved; the saved baseline is loaded synchronously below only when it
+		// was not already published by the declaration index.
+		s.analysis.skipInitialDeclarationPath(doc.Path)
 	}
 	if state.timer != nil {
 		state.timer.Stop()
@@ -1867,6 +1937,7 @@ func (s *Server) scheduleDocumentAnalysis(ctx *glsp.Context, doc intel.Document,
 			state.publishedSignatures = procedureSignaturesFromSymbols(previous.symbols)
 			state.baselineKnown = true
 		}
+		state.baselineMatchesOverlay = false
 	}
 	if state.timer != nil {
 		state.timer.Stop()
@@ -1986,14 +2057,24 @@ func (s *Server) runDocumentAnalysis(
 		baselineKnown := state.baselineKnown
 		state.mu.Unlock()
 		if !baselineKnown {
-			baseline, baselineErr := s.diskProcedureSignatures(runCtx, doc.Path)
-			if baselineErr != nil && runCtx.Err() == nil {
-				s.logger.Printf("workspace analysis disk signature baseline failed for %q: %v", doc.Path, baselineErr)
+			baseline, declarationKnown := s.analysis.declarationProcedureSignatures(doc.Path)
+			baselineMatchesOverlay := false
+			var baselineErr error
+			if !declarationKnown {
+				// This path already has an authoritative overlay. If its startup
+				// declaration job has not completed, cancel it before reading the
+				// saved baseline so the fallback cannot create duplicate disk work.
+				s.analysis.skipInitialDeclarationPath(doc.Path)
+				baseline, baselineMatchesOverlay, baselineErr = s.diskProcedureSignatures(runCtx, doc.Path, doc.Source)
+				if baselineErr != nil && runCtx.Err() == nil {
+					s.logger.Printf("workspace analysis disk signature baseline failed for %q: %v", doc.Path, baselineErr)
+				}
 			}
 			state.mu.Lock()
 			if state.open && state.generation == generation && !state.baselineKnown {
 				state.publishedSignatures = baseline
-				state.baselineKnown = baselineErr == nil
+				state.baselineKnown = declarationKnown || baselineErr == nil
+				state.baselineMatchesOverlay = baselineMatchesOverlay
 			}
 			state.mu.Unlock()
 		}
@@ -2006,6 +2087,9 @@ func (s *Server) runDocumentAnalysis(
 		publishedDeclarations := false
 		if err == nil && included && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
 			publishedDeclarations = s.analysis.publishOverlayDeclarations(doc, generation, declarations)
+		}
+		if publishedDeclarations && s.analysis.isActiveDeclarationPath(doc.Path) {
+			s.analysis.recordInitialReadiness(performanceMetricActiveDocumentDeclarationReady, doc.Path)
 		}
 		if !publishedDeclarations && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
 			s.analysis.abandonOverlay(doc, generation)
@@ -2028,8 +2112,12 @@ func (s *Server) runDocumentAnalysis(
 				newSignatures := procedureSignaturesFromSymbols(declarations.symbols)
 				state.mu.Lock()
 				oldSignatures := state.publishedSignatures
+				if state.baselineMatchesOverlay {
+					oldSignatures = newSignatures
+				}
 				if state.open && state.generation == generation {
 					state.publishedSignatures = newSignatures
+					state.baselineMatchesOverlay = false
 					state.overlayGeneration = generation
 				}
 				state.mu.Unlock()
@@ -2332,6 +2420,7 @@ func (state *diagnosticState) close() {
 	state.dependentPending = false
 	state.publishedSignatures = nil
 	state.baselineKnown = false
+	state.baselineMatchesOverlay = false
 	state.diagnosticCache = nil
 	state.hasPublished = false
 	state.initialFast = false
@@ -2389,6 +2478,10 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	index.performance = s.performance
 	index.logDeclarations = s.logInitialWorkspaceDeclarationPerformance
 	index.parseDeclarations = s.parseIndexedDeclarationsContext
+	index.parseInitialDeclarations = s.parseIndexedDeclarationsInitialContext
+	index.initialPermit = func(ctx context.Context) (func(), time.Duration, error) {
+		return s.acquireAnalysisPermit(ctx, "background")
+	}
 	if permits := cap(s.analysisPermits); permits > 0 {
 		index.initialWorkers = permits
 		index.semanticWorkers = max(1, permits-1)
@@ -2614,6 +2707,11 @@ func (s *Server) parseIndexedDeclarationsContext(ctx context.Context, file symbo
 	return s.analyzeIndexedDeclarationsDocumentContext(ctx, doc, "background")
 }
 
+func (s *Server) parseIndexedDeclarationsInitialContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {
+	doc := intel.Document{Path: file.Path, Source: string(body), ModuleKind: file.ModuleKind}
+	return s.analyzeIndexedDeclarationsDocumentContext(ctx, doc, "background")
+}
+
 func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, doc intel.Document, class string) (indexedFileAnalysis, error) {
 	snapshot := doc.Snapshot
 	if snapshot == nil || !snapshot.Matches(doc) {
@@ -2648,6 +2746,42 @@ func (s *Server) analyzeIndexedDeclarationsDocumentContext(ctx context.Context, 
 		path: doc.Path, moduleKind: doc.ModuleKind, symbols: syms,
 		declarationIncomplete: snapshot.InteractiveIndexIncomplete(),
 	}, nil
+}
+
+// diskProcedureSignatures captures the saved declaration baseline when the
+// startup declaration queue has not published this path yet. The caller
+// skips that queued job before falling back here, so an unsaved first-open can
+// compare its overlay against the saved source without scheduling a second
+// startup parse for the same path. If the saved bytes are identical to the
+// overlay, no declaration parse is needed at all.
+func (s *Server) diskProcedureSignatures(ctx context.Context, path, overlaySource string) (map[string]procedureSignature, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	file, included, err := symbols.SourceFileForPath(s.opts.RootDir, s.opts.Config, path)
+	if err != nil || !included {
+		return nil, false, err
+	}
+	body, err := os.ReadFile(file.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if string(body) == overlaySource {
+		return nil, true, nil
+	}
+	snapshot := intel.NewAnalysisSnapshot(intel.Document{Path: file.Path, Source: string(body), ModuleKind: file.ModuleKind})
+	defer snapshot.Retire()
+	syms, err := s.analyzer.DocumentSymbols(snapshot.Document())
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	return procedureSignaturesFromSymbols(syms), false, nil
 }
 
 func (s *Server) notifyPerformanceHook(stage, path string) {
@@ -2715,37 +2849,6 @@ func (s *Server) analyzeWorkspaceOverlayDeclarations(ctx context.Context, doc in
 
 func (s *Server) analyzeIndexedDocumentContext(ctx context.Context, doc intel.Document) (indexedFileAnalysis, error) {
 	return s.analyzeIndexedDocumentContextClass(ctx, doc, "interactive")
-}
-
-// diskProcedureSignatures captures the saved declaration baseline in the
-// background worker when the initial workspace index has not published this
-// path yet. This lets an unsaved first-open rename/removal refresh callers
-// without making didOpen parse the disk file synchronously.
-func (s *Server) diskProcedureSignatures(ctx context.Context, path string) (map[string]procedureSignature, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	file, included, err := symbols.SourceFileForPath(s.opts.RootDir, s.opts.Config, path)
-	if err != nil || !included {
-		return nil, err
-	}
-	body, err := os.ReadFile(file.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	snapshot := intel.NewAnalysisSnapshot(intel.Document{Path: file.Path, Source: string(body), ModuleKind: file.ModuleKind})
-	defer snapshot.Retire()
-	syms, err := s.analyzer.DocumentSymbols(snapshot.Document())
-	if err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return procedureSignaturesFromSymbols(syms), nil
 }
 
 func (s *Server) cachedDocumentSourceSymbols(doc intel.Document, load intel.DocumentSymbolLoader) ([]intel.Symbol, error) {
@@ -3841,12 +3944,20 @@ func (stdioReadWriteCloser) Close() error                { return nil }
 
 type rpcHandler struct {
 	handler glsp.Handler
+	custom  func(context.Context, string, []byte)
 }
 
 func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
 	params := []byte("{}")
 	if req.Params != nil {
 		params = *req.Params
+	}
+	if h.custom != nil && req.Method == "xlflow/didChangeActiveDocument" {
+		h.custom(ctx, req.Method, params)
+		if !req.Notif {
+			_ = conn.Reply(ctx, req.ID, nil)
+		}
+		return
 	}
 	glspCtx := &glsp.Context{
 		Method: req.Method,

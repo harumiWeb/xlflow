@@ -3,6 +3,8 @@
 Generated from structured error-code literals in `internal/`. Descriptions and recovery guidance remain curated in [Error Codes](./error-codes) and [Troubleshooting](../help/troubleshooting).
 
 - `access_denied`
+- `active_declaration_ready_ms`
+- `active_document_declaration_ready_ms`
 - `active_sheet`
 - `active_signal_count`
 - `active_workbook_mismatch`
@@ -230,6 +232,11 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `dataflow_cfg_walks`
 - `debug_log`
 - `debug_stream_init_failed`
+- `declaration_priority_hits`
+- `declaration_priority_p0_jobs`
+- `declaration_priority_p1_jobs`
+- `declaration_priority_p2_jobs`
+- `declaration_promotions`
 - `declaration_range`
 - `declaration_spacing`
 - `declare_function`
@@ -530,6 +537,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `has_frx`
 - `has_workbook`
 - `height_px`
+- `helper_declaration_ready_ms`
 - `horizontal_alignment`
 - `html_url`
 - `http_dataflow_cfg_walks`
@@ -938,6 +946,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `recovery_required`
 - `redim_declarator`
 - `redim_statement`
+- `referenced_document_declaration_ready_ms`
 - `refers_to`
 - `relative_path`
 - `replaced_existing`
@@ -1294,6 +1303,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `worksheet_cell`
 - `worksheet_change`
 - `worksheet_selectionchange`
+- `workspace_declaration_ready_ms`
 - `workspace_failure`
 - `workspace_resolution_views`
 - `write_only`

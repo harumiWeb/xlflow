@@ -14,6 +14,7 @@ import (
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
+	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
@@ -946,4 +947,135 @@ func BenchmarkLSPStartup(b *testing.B) {
 		b.ReportMetric(float64(definitions)/float64(b.N), "definition_results/op")
 		b.ReportMetric(float64(completions)/float64(b.N), "completion_results/op")
 	})
+}
+
+type lspDeclarationPriorityBenchmarkFixture struct {
+	root       string
+	activePath string
+	helperPath string
+	giantPath  string
+}
+
+func makeLSPDeclarationPriorityBenchmarkFixture(tb testing.TB) lspDeclarationPriorityBenchmarkFixture {
+	tb.Helper()
+	root := tb.TempDir()
+	modules := filepath.Join(root, "src", "modules")
+	giantDir := filepath.Join(modules, "00-unrelated")
+	activeDir := filepath.Join(modules, "10-active")
+	helperDir := filepath.Join(modules, "20-helper")
+	for _, dir := range []string{giantDir, activeDir, helperDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			tb.Fatal(err)
+		}
+	}
+	giantPath := filepath.Join(giantDir, "Giant.bas")
+	activePath := filepath.Join(activeDir, "Active.bas")
+	helperPath := filepath.Join(helperDir, "Helper.bas")
+	var giant strings.Builder
+	giant.WriteString("Attribute VB_Name = \"Giant\"\nOption Explicit\n")
+	for i := 0; i < 1_200; i++ {
+		fmt.Fprintf(&giant, "Public Sub GiantProcedure%04d()\nEnd Sub\n", i)
+	}
+	files := map[string]string{
+		giantPath:  giant.String(),
+		activePath: "Attribute VB_Name = \"Active\"\nOption Explicit\nPublic Sub Run()\n    Call Helper.Run\nEnd Sub\n",
+		helperPath: "Attribute VB_Name = \"Helper\"\nOption Explicit\nPublic Sub Run()\nEnd Sub\n",
+	}
+	for path, source := range files {
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			tb.Fatal(err)
+		}
+	}
+	for i := 0; i < 64; i++ {
+		dir := filepath.Join(modules, "90-unrelated")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			tb.Fatal(err)
+		}
+		path := filepath.Join(dir, fmt.Sprintf("Filler%03d.bas", i))
+		source := fmt.Sprintf("Attribute VB_Name = \"Filler%03d\"\nPublic Sub Run()\nEnd Sub\n", i)
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			tb.Fatal(err)
+		}
+	}
+	return lspDeclarationPriorityBenchmarkFixture{root: root, activePath: activePath, helperPath: helperPath, giantPath: giantPath}
+}
+
+func runLSPDeclarationPriorityBenchmarkIteration(b *testing.B, fixture lspDeclarationPriorityBenchmarkFixture, prioritize bool) (time.Duration, time.Duration, time.Duration) {
+	b.Helper()
+	started := time.Now()
+	ready := map[string]chan time.Duration{
+		symbolFileKey(fixture.activePath): make(chan time.Duration, 1),
+		symbolFileKey(fixture.helperPath): make(chan time.Duration, 1),
+	}
+	parseDeclarations := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		if symbolFileKey(file.Path) == symbolFileKey(fixture.giantPath) {
+			timer := time.NewTimer(2 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return indexedFileAnalysis{}, ctx.Err()
+			}
+		}
+		if event, ok := ready[symbolFileKey(file.Path)]; ok {
+			event <- time.Since(started)
+		}
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Module: name, Kind: "sub", File: file.Path}}}, nil
+	}
+	parseSemantic := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(fixture.root, config.Default(), parseSemantic, nil)
+	index.parseDeclarations = parseDeclarations
+	index.initialWorkers = 1
+	index.semanticWorkers = 1
+	if prioritize {
+		index.promoteDeclarationPath(fixture.activePath, declarationPriorityActive)
+		index.promoteDeclarationCandidates([]string{"Helper"}, declarationPriorityReferenced)
+	}
+	started = time.Now()
+	index.start()
+	activeReady := <-ready[symbolFileKey(fixture.activePath)]
+	helperReady := <-ready[symbolFileKey(fixture.helperPath)]
+	if err := index.waitReady(); err != nil {
+		index.stop()
+		b.Fatal(err)
+	}
+	total := time.Since(started)
+	index.stop()
+	return activeReady, helperReady, total
+}
+
+// BenchmarkLSPDeclarationPriority compares deterministic discovery order with
+// P0/P1 startup scheduling in a workspace where an unrelated giant module is
+// encountered first. The reported readiness timings are deliberately separate
+// from complete declaration readiness.
+func BenchmarkLSPDeclarationPriority(b *testing.B) {
+	fixture := makeLSPDeclarationPriorityBenchmarkFixture(b)
+	for _, tc := range []struct {
+		name       string
+		prioritize bool
+	}{
+		{name: "DiscoveryOrder", prioritize: false},
+		{name: "PriorityQueue", prioritize: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			var active, helper, total time.Duration
+			for i := 0; i < b.N; i++ {
+				activeReady, helperReady, totalReady := runLSPDeclarationPriorityBenchmarkIteration(b, fixture, tc.prioritize)
+				active += activeReady
+				helper += helperReady
+				total += totalReady
+			}
+			b.ReportMetric(float64(active)/float64(b.N)/float64(time.Millisecond), "active_declaration_ready_ms")
+			b.ReportMetric(float64(helper)/float64(b.N)/float64(time.Millisecond), "helper_declaration_ready_ms")
+			b.ReportMetric(float64(total)/float64(b.N)/float64(time.Millisecond), "workspace_declaration_ready_ms")
+		})
+	}
 }

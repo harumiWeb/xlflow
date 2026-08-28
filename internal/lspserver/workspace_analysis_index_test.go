@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1602,5 +1603,199 @@ func BenchmarkWorkspaceAnalysisIndexWarmCallQuery(b *testing.B) {
 		if err != nil || len(got) != 1 {
 			b.Fatalf("query = %+v, %v", got, err)
 		}
+	}
+}
+
+func TestWorkspaceAnalysisIndexPrioritizesDeclarationJobs(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]string, 3)
+	for _, name := range []string{"A", "B", "Helper"} {
+		path := filepath.Join(moduleDir, name+".bas")
+		paths[name] = path
+		if err := os.WriteFile(path, []byte("Sub "+name+"()\nEnd Sub\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var mu sync.Mutex
+	var order []string
+	parseDeclaration := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		mu.Lock()
+		order = append(order, strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path)))
+		mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return indexedFileAnalysis{}, ctx.Err()
+		default:
+		}
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Module: name, Kind: "sub", File: file.Path}}}, nil
+	}
+	parseSemantic := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Module: name, Kind: "sub", File: file.Path}}}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parseSemantic, nil)
+	index.parseDeclarations = parseDeclaration
+	index.initialWorkers = 1
+	index.semanticWorkers = 1
+	index.promoteDeclarationPath(paths["B"], declarationPriorityActive)
+	index.promoteDeclarationCandidates([]string{"Helper"}, declarationPriorityReferenced)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	want := []string{"B", "Helper", "A"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("declaration order = %v, want %v", got, want)
+	}
+	index.stop()
+}
+
+func TestDeclarationDependencyHintsIgnoreStringsAndComments(t *testing.T) {
+	source := `Sub Main()
+    Call Helper.Run
+    Dim value As UserType
+    Dim item As New Thing
+    Debug.Print "Ignored.Member"
+    ' IgnoredComment.Member
+    Rem IgnoredRem.Member
+    If True Then Rem IgnoredThen.Member
+    x = 1: Rem IgnoredAfterColon.Member
+End Sub`
+	got := declarationDependencyHints(source)
+	want := []string{"Helper", "Thing", "UserType"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dependency hints = %v, want %v", got, want)
+	}
+}
+
+func TestWorkspaceAnalysisIndexPromotesQueuedActiveDocument(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]string, 3)
+	for _, name := range []string{"Giant", "ZActive", "Other"} {
+		path := filepath.Join(moduleDir, name+".bas")
+		paths[name] = path
+		if err := os.WriteFile(path, []byte("Sub "+name+"()\nEnd Sub\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var mu sync.Mutex
+	var order []string
+	parseDeclaration := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		mu.Lock()
+		order = append(order, name)
+		mu.Unlock()
+		if name == "Giant" {
+			startedOnce.Do(func() { close(started) })
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return indexedFileAnalysis{}, ctx.Err()
+			}
+		}
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Module: name, Kind: "sub", File: file.Path}}}, nil
+	}
+	parseSemantic := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parseSemantic, nil)
+	index.parseDeclarations = parseDeclaration
+	index.initialWorkers = 1
+	index.semanticWorkers = 1
+	defer index.stop()
+	index.start()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for giant declaration parse")
+	}
+	index.promoteDeclarationPath(paths["ZActive"], declarationPriorityActive)
+	close(release)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	want := []string{"Giant", "ZActive", "Other"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("declaration order after active switch = %v, want %v", got, want)
+	}
+}
+
+func TestWorkspaceAnalysisIndexWaitsForPermitBeforeClaiming(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "src", "modules")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]string, 3)
+	for _, name := range []string{"Giant", "ZActive", "Other"} {
+		path := filepath.Join(moduleDir, name+".bas")
+		paths[name] = path
+		if err := os.WriteFile(path, []byte("Sub "+name+"()\nEnd Sub\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	permitStarted := make(chan struct{})
+	permitRelease := make(chan struct{})
+	var permitOnce sync.Once
+	var mu sync.Mutex
+	var order []string
+	parseDeclaration := func(ctx context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		name := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+		mu.Lock()
+		order = append(order, name)
+		mu.Unlock()
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind, symbols: []intel.Symbol{{Name: name, Module: name, Kind: "sub", File: file.Path}}}, nil
+	}
+	parseSemantic := func(_ context.Context, file symbols.SourceFile, _ []byte) (indexedFileAnalysis, error) {
+		return indexedFileAnalysis{path: file.Path, moduleKind: file.ModuleKind}, nil
+	}
+	index := newWorkspaceAnalysisIndex(root, config.Default(), parseSemantic, nil)
+	index.parseDeclarations = parseDeclaration
+	index.initialPermit = func(ctx context.Context) (func(), time.Duration, error) {
+		permitOnce.Do(func() { close(permitStarted) })
+		select {
+		case <-permitRelease:
+			return func() {}, 0, nil
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		}
+	}
+	index.initialWorkers = 1
+	index.semanticWorkers = 1
+	defer index.stop()
+	index.start()
+	select {
+	case <-permitStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial permit")
+	}
+	index.promoteDeclarationPath(paths["ZActive"], declarationPriorityActive)
+	close(permitRelease)
+	if err := index.waitReady(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	want := []string{"ZActive", "Giant", "Other"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("declaration order after permit wait = %v, want %v", got, want)
 	}
 }

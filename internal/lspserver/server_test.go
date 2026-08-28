@@ -3,6 +3,7 @@ package lspserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -1910,6 +1911,8 @@ func TestInitializeAdvertisesCodeLensProviderAndParsesConfig(t *testing.T) {
 	}
 	defer cleanup()
 
+	activePath := filepath.Join(root, "src", "modules", "Active.bas")
+	openPath := filepath.Join(root, "src", "modules", "Open.bas")
 	result, err := s.initialize(nil, &protocol.InitializeParams{
 		InitializationOptions: map[string]any{
 			"codeLens": map[string]any{
@@ -1917,6 +1920,10 @@ func TestInitializeAdvertisesCodeLensProviderAndParsesConfig(t *testing.T) {
 				"runProcedure":   false,
 				"runTests":       true,
 				"userFormEvents": true,
+			},
+			"declarationPriority": map[string]any{
+				"activeDocumentUri": pathToFileURI(activePath),
+				"openDocumentUris":  []any{pathToFileURI(openPath)},
 			},
 		},
 	})
@@ -1933,6 +1940,31 @@ func TestInitializeAdvertisesCodeLensProviderAndParsesConfig(t *testing.T) {
 	if s.codeLensConfig.RunProcedure || !s.codeLensConfig.RunTests || !s.codeLensConfig.UserFormEvents {
 		t.Fatalf("codeLensConfig = %+v", s.codeLensConfig)
 	}
+	experimental, ok := init.Capabilities.Experimental.(map[string]any)
+	if !ok || experimental["declarationPriority"] != true {
+		t.Fatalf("experimental capabilities = %+v", init.Capabilities.Experimental)
+	}
+	for _, path := range []string{activePath, openPath} {
+		if got := s.analysis.initialPriorityHints[symbolFileKey(path)]; got != declarationPriorityActive {
+			t.Fatalf("declaration priority hint for %q = %d, want %d", path, got, declarationPriorityActive)
+		}
+	}
+}
+
+func TestActiveDocumentNotificationPromotesDeclarationPath(t *testing.T) {
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	path := filepath.Join(root, "src", "modules", "Active.bas")
+	s.handleCustomNotification(context.Background(), "xlflow/didChangeActiveDocument", []byte(fmt.Sprintf(`{"uri":%q}`, pathToFileURI(path))))
+	if got := s.analysis.initialPriorityHints[symbolFileKey(path)]; got != declarationPriorityActive {
+		t.Fatalf("active declaration priority = %d, want %d", got, declarationPriorityActive)
+	}
+	s.handleCustomNotification(context.Background(), "xlflow/didChangeActiveDocument", []byte(`{"uri":null}`))
 }
 
 func TestPrepareRenameAndRenameReturnWorkspaceEdit(t *testing.T) {

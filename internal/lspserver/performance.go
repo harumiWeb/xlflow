@@ -54,6 +54,11 @@ const (
 	performanceCounterWorkspaceFilesDiscovered       = "workspace_files_discovered"
 	performanceCounterWorkspaceDeclarationBuilds     = "workspace_declaration_builds"
 	performanceCounterWorkspaceSemanticBuilds        = "workspace_semantic_builds"
+	performanceCounterDeclarationPriorityP0Jobs      = "declaration_priority_p0_jobs"
+	performanceCounterDeclarationPriorityP1Jobs      = "declaration_priority_p1_jobs"
+	performanceCounterDeclarationPriorityP2Jobs      = "declaration_priority_p2_jobs"
+	performanceCounterDeclarationPromotions          = "declaration_promotions"
+	performanceCounterDeclarationPriorityHits        = "declaration_priority_hits"
 	performanceCounterInteractiveIndexBuilds         = "interactive_index_builds"
 	performanceCounterInteractiveIndexHits           = "interactive_index_hits"
 	performanceCounterProcedureCatalogBuilds         = "procedure_catalog_builds"
@@ -87,10 +92,21 @@ const (
 	performanceCounterProjectCacheReusedEntries      = "project_cache_reused_entries"
 )
 
+const (
+	performanceMetricActiveDocumentDeclarationReady     = "active_document_declaration_ready_ms"
+	performanceMetricReferencedDocumentDeclarationReady = "referenced_document_declaration_ready_ms"
+	performanceMetricWorkspaceDeclarationReady          = "workspace_declaration_ready_ms"
+)
+
 var performanceCounterNames = [...]string{
 	performanceCounterWorkspaceFilesDiscovered,
 	performanceCounterWorkspaceDeclarationBuilds,
 	performanceCounterWorkspaceSemanticBuilds,
+	performanceCounterDeclarationPriorityP0Jobs,
+	performanceCounterDeclarationPriorityP1Jobs,
+	performanceCounterDeclarationPriorityP2Jobs,
+	performanceCounterDeclarationPromotions,
+	performanceCounterDeclarationPriorityHits,
 	performanceCounterInteractiveIndexBuilds,
 	performanceCounterInteractiveIndexHits,
 	performanceCounterProcedureCatalogBuilds,
@@ -295,6 +311,17 @@ func (p *performanceRecorder) logCounterSnapshot(operation, stage, class, path s
 			operation, stage, class, path, name, 0, values[name], "counter_snapshot",
 		)
 	}
+}
+
+func (p *performanceRecorder) logReadiness(operation, stage, class, path, metric string, elapsed time.Duration) {
+	if p == nil || !p.enabled || p.logger == nil {
+		return
+	}
+	p.logger.Printf(
+		"performance operation=%q stage=%q class=%q path=%q metric=%q elapsed_ms=%.3f outcome=%q",
+		operation, stage, class, path, metric,
+		float64(elapsed)/float64(time.Millisecond), "readiness",
+	)
 }
 
 func (p *performanceRecorder) counterTotal(name string) uint64 {
