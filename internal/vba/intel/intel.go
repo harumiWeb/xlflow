@@ -4300,23 +4300,13 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 	}
 	var declared inferredType
 	if offset >= 0 {
-		if ctx == nil {
-			if inferred, ok := a.interactiveTypeInfo(doc, word, offset); ok {
-				declared = inferred
-				if !isObjectFallbackType(inferred.Type) {
-					return inferred, true
-				}
+		if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
+			declared = inferred
+			if !isObjectFallbackType(inferred.Type) {
+				return inferred, true
 			}
-		}
-		if declared.Type == "" {
-			if inferred, ok := a.visibleSymbolTypeInfoAtContext(doc, word, offset, ctx); ok {
-				declared = inferred
-				if !isObjectFallbackType(inferred.Type) {
-					return inferred, true
-				}
-			} else if currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), ctx) != "" {
-				return inferredType{}, false
-			}
+		} else if currentProcedureNameAt(doc, positionForDocumentByteOffset(doc, offset), ctx) != "" {
+			return inferredType{}, false
 		}
 	}
 	if declared.Type != "" && !isObjectFallbackType(declared.Type) {
@@ -4372,49 +4362,6 @@ func (a Analyzer) inferWordTypeInfoAtContextWithState(doc Document, word string,
 		return declared, true
 	}
 	return inferredType{}, false
-}
-
-// interactiveTypeInfo resolves a declaration through the snapshot-scoped
-// interactive index. It is intentionally limited to an exact declaration
-// query, so the ordinary hover/member type path does not construct the full
-// document index merely to learn the declared type of a local or module
-// variable. Object and Variant callers may continue into assignment inference
-// after this method returns.
-func (a Analyzer) interactiveTypeInfo(doc Document, word string, offset int) (inferredType, bool) {
-	if analysisSnapshotForDocument(doc) == nil || strings.TrimSpace(word) == "" {
-		return inferredType{}, false
-	}
-	pos := positionForDocumentByteOffset(doc, offset)
-	requestPosition := pos
-	query := WorkspaceSymbolQuery{
-		Text:            word,
-		Mode:            WorkspaceSymbolQueryExact,
-		Interactive:     true,
-		DocumentPath:    doc.Path,
-		Procedure:       currentProcedureNameForDocument(doc, pos),
-		RequestPosition: &requestPosition,
-	}
-	syms, handled := a.LightweightDocumentSymbols(doc, query)
-	if !handled {
-		return inferredType{}, false
-	}
-	var fallback inferredType
-	for _, sym := range syms {
-		if !strings.EqualFold(sym.Name, word) || strings.TrimSpace(sym.ReturnType) == "" {
-			continue
-		}
-		inferred := inferredType{Type: sym.ReturnType, IsArray: sym.IsArray, Source: "declaration"}
-		if isLocalSymbol(sym) || strings.EqualFold(sym.Kind, "function_return") {
-			return inferred, true
-		}
-		if fallback.Type == "" {
-			fallback = inferred
-		}
-	}
-	if fallback.Type == "" {
-		return inferredType{}, false
-	}
-	return fallback, true
 }
 
 func (a Analyzer) visibleSymbolTypeInfoAtContext(doc Document, word string, offset int, ctx *documentTypeContext) (inferredType, bool) {
@@ -4515,7 +4462,10 @@ func (a Analyzer) memberHover(doc Document, word string, wordRange Range, offset
 			return &Hover{Contents: variableHover(word, control.Type, "UserForm control"), Range: wordRange}, true
 		}
 	}
-	receiverType, ok := a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+	receiverType, ok := a.interactiveReceiverTypeAt(doc, receiverExpr, offset)
+	if !ok {
+		receiverType, ok = a.resolveDocumentExpressionTypeAt(doc, receiverExpr, offset)
+	}
 	if !ok {
 		return nil, false
 	}
@@ -4532,6 +4482,59 @@ func (a Analyzer) memberHover(doc Document, word string, wordRange Range, offset
 		return nil, false
 	}
 	return &Hover{Contents: memberHover(receiverType, member, a.memberKind(receiverType, word)), Range: wordRange}, true
+}
+
+// interactiveReceiverTypeAt resolves the simple receiver form used by hover
+// without building the full document index. Other expression forms continue
+// through resolveDocumentExpressionTypeAt, whose callers include batch
+// diagnostics and therefore must retain their conservative type inference.
+func (a Analyzer) interactiveReceiverTypeAt(doc Document, expr string, offset int) (string, bool) {
+	expr = strings.TrimSpace(expr)
+	if !isIdentifier(expr) {
+		return "", false
+	}
+	inferred, ok := a.interactiveTypeInfo(doc, expr, offset)
+	if !ok {
+		return "", false
+	}
+	return inferred.Type, true
+}
+
+func (a Analyzer) interactiveTypeInfo(doc Document, word string, offset int) (inferredType, bool) {
+	if analysisSnapshotForDocument(doc) == nil || strings.TrimSpace(word) == "" {
+		return inferredType{}, false
+	}
+	pos := positionForDocumentByteOffset(doc, offset)
+	requestPosition := pos
+	query := WorkspaceSymbolQuery{
+		Text:            word,
+		Mode:            WorkspaceSymbolQueryExact,
+		Interactive:     true,
+		DocumentPath:    doc.Path,
+		Procedure:       currentProcedureNameForDocument(doc, pos),
+		RequestPosition: &requestPosition,
+	}
+	syms, handled := a.LightweightDocumentSymbols(doc, query)
+	if !handled {
+		return inferredType{}, false
+	}
+	var fallback inferredType
+	for _, sym := range syms {
+		if !strings.EqualFold(sym.Name, word) || strings.TrimSpace(sym.ReturnType) == "" {
+			continue
+		}
+		inferred := inferredType{Type: sym.ReturnType, IsArray: sym.IsArray, Source: "declaration"}
+		if isLocalSymbol(sym) || strings.EqualFold(sym.Kind, "function_return") {
+			return inferred, true
+		}
+		if fallback.Type == "" {
+			fallback = inferred
+		}
+	}
+	if fallback.Type == "" {
+		return inferredType{}, false
+	}
+	return fallback, true
 }
 
 func (a Analyzer) memberKind(receiverType, memberName string) string {
