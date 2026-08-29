@@ -4,6 +4,12 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Full LSP diagnostics stalling indefinitely on giant VBA modules. The
+  editor path now reuses the open-document expression index, prepares Excel
+  helper summaries and project constants once per revision, and analyzes large
+  procedure sets with the same bounded parallelism as batch analysis while
+  preserving diagnostic ordering and cancellation.
+
 - Kept LSP document changes responsive while diagnostics read the previous
   revision. `didChange` now attempts incremental parsing only when the old tree
   and parsed snapshot are immediately available; otherwise it publishes the

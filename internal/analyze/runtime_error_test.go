@@ -35,6 +35,24 @@ func TestRuntimeConstantEnvironmentUsesImmutableOverlay(t *testing.T) {
 	}
 }
 
+func TestRuntimeConstantScopeHidesProcedureLocalShadows(t *testing.T) {
+	base := constexpr.NewValues(map[string]constexpr.Value{
+		"ProjectZero": {Kind: constexpr.ValueLong, Integer: 0},
+		"SharedText":  {Kind: constexpr.ValueString, String: "base"},
+	})
+	scope := runtimeConstantScope{
+		base:   base,
+		hidden: map[string]bool{"projectzero": true},
+	}
+
+	if _, ok := scope.Resolve("PROJECTZERO"); ok {
+		t.Fatal("procedure-local declaration did not hide the project constant")
+	}
+	if got, ok := scope.Resolve("SharedText"); !ok || got.String != "base" {
+		t.Fatalf("unshadowed project constant = %#v, %v; want base value", got, ok)
+	}
+}
+
 func TestVBA249DetectsLiteralAndProjectConstantRuntimeFailures(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

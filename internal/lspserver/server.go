@@ -359,7 +359,7 @@ func New(opts Options) (*Server, func(), error) {
 				resolution = &projectDocument.Resolution
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution)
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, request.Document, procedureWorkerLimit(runtime.GOMAXPROCS(0), cap(s.analysisPermits)))
 			if err != nil {
 				return nil, err
 			}
@@ -2516,6 +2516,16 @@ func (s *Server) lockDocumentLifecycle(uri string) func() {
 	s.docLifecycleMu.Unlock()
 	lifecycle.Lock()
 	return lifecycle.Unlock
+}
+
+func procedureWorkerLimit(totalWorkers, concurrentAnalyses int) int {
+	if totalWorkers < 1 {
+		totalWorkers = 1
+	}
+	if concurrentAnalyses < 1 {
+		concurrentAnalyses = 1
+	}
+	return max(1, totalWorkers/concurrentAnalyses)
 }
 
 func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {

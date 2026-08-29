@@ -3080,6 +3080,35 @@ End Sub
 	}
 }
 
+func TestDocumentExpressionTypeResolverReusesSnapshotIndex(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	doc := Document{
+		URI:     "file:///Main.bas",
+		Path:    "Main.bas",
+		Version: 1,
+		Source: `Option Explicit
+Public Sub Run()
+    Dim rng As Excel.Range
+    Debug.Print rng.Cells(1, 1).Value2
+End Sub
+`,
+	}
+	snapshot := NewAnalysisSnapshot(doc)
+	doc = snapshot.Document()
+	resolver, ok := analyzer.NewDocumentExpressionTypeResolver(doc)
+	if !ok {
+		t.Fatal("failed to prepare document expression type resolver")
+	}
+	for range 10 {
+		if got, resolved := resolver.ResolveAt("rng.Cells(1, 1)", 3); !resolved || got != "Excel.Range" {
+			t.Fatalf("local Excel range type = %q, %v; want Excel.Range", got, resolved)
+		}
+	}
+	if got := snapshot.ParseCount(); got != 1 {
+		t.Fatalf("snapshot parse count = %d, want one parse for repeated type queries", got)
+	}
+}
+
 func TestResolveExpressionTypeHandlesExcelCollectionsAndCreateObject(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 

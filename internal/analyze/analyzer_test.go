@@ -46,6 +46,58 @@ func TestSourceRealtimeRuleIDsMatchRegistry(t *testing.T) {
 	}
 }
 
+func TestSourceRealtimeSnapshotResolverDoesNotReenterParsedDocumentRead(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	source := []byte(`Option Explicit
+Public Sub Run()
+    Dim rng As Excel.Range
+    Debug.Print rng.Cells(1, 1).Value2
+End Sub
+`)
+	parsed, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ir, err := procedureir.BuildParsedContext(context.Background(), procedureir.BuildOptions{RootDir: root}, parsed)
+	if err != nil {
+		parsed.Close()
+		t.Fatal(err)
+	}
+	controlFlow, err := vbacfg.BuildDocumentContext(context.Background(), ir)
+	if err != nil {
+		parsed.Close()
+		t.Fatal(err)
+	}
+	snapshot := intel.NewAnalysisSnapshotWithArtifacts(intel.Document{
+		URI: "file:///Main.bas", Path: path, ModuleKind: "standard", Source: string(source), Version: 1,
+	}, parsed, intel.AnalysisArtifacts{ProcedureIR: ir, ControlFlow: controlFlow})
+	typeDB, err := vbadb.LoadBuiltin()
+	if err != nil {
+		snapshot.RetireAndWait()
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, analysisErr := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(
+			context.Background(), root, config.Default(), parsed, ir, controlFlow, typeDB,
+			effects.ProjectSummary{}, nil, nil, snapshot.Document(), 1,
+		)
+		result <- analysisErr
+	}()
+	select {
+	case err := <-result:
+		snapshot.RetireAndWait()
+		if err != nil {
+			t.Fatalf("snapshot-aware realtime analysis: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		snapshot.Retire()
+		t.Fatal("snapshot-aware realtime analysis reentered the parsed-document read gate")
+	}
+}
+
 func TestProcedureEffectIdentityCanonicalizesPath(t *testing.T) {
 	t.Parallel()
 	document := procedureir.DocumentIR{

@@ -85,8 +85,9 @@ type excelRangeVariables struct {
 }
 
 type excelLoopAccessIndex struct {
-	Summaries    map[string]excelAccessSummary
-	RootBindings excelRootBindingIndex
+	Summaries          map[string]excelAccessSummary
+	RootBindings       excelRootBindingIndex
+	AllowLocalFallback bool
 }
 
 type excelRootBinding struct {
@@ -296,7 +297,7 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		}
 	}
 	for call := range proc.Calls.All() {
-		if a.excelLoopAccess != nil && (call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1) {
+		if a.excelLoopAccess != nil && !a.excelLoopAccess.AllowLocalFallback && (call.Resolution.Status != procedureir.ResolutionMatched || len(call.Resolution.Candidates) != 1) {
 			continue
 		}
 		if a.excelLoopAccess == nil && !needHelperSummaries {
@@ -1008,6 +1009,9 @@ func classifyExcelStatement(file parsedFile, proc sourceProcedure, statement pro
 func resolveExcelExpressionType(file parsedFile, db *vbadb.DB, expression string, line int, rootDir string, cfg config.Config) (string, bool) {
 	if db == nil || strings.TrimSpace(expression) == "" {
 		return "", false
+	}
+	if file.ExpressionTypeResolver != nil {
+		return file.ExpressionTypeResolver.ResolveAt(expression, line)
 	}
 	return (intel.Analyzer{RootDir: rootDir, Config: cfg, DB: db}).ResolveDocumentExpressionTypeAt(file.intelDocument(), expression, line)
 }

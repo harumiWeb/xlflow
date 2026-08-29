@@ -77,7 +77,9 @@ type Analyzer struct {
 	VisibleConstants map[string]bool
 	// ConstantValues carries the immutable value-bearing project constants for
 	// compile-equivalent declaration and array checks.
-	ConstantValues map[string]constexpr.Value
+	ConstantValues    map[string]constexpr.Value
+	formControlLookup map[string]userforms.Control
+	formControlsKnown bool
 	// TypeDBResolutionIncomplete is true when the production type database
 	// loaded with warnings. Type-dependent unresolved-name diagnostics must
 	// fail closed until the generated TypeLib view is complete.
@@ -4671,6 +4673,49 @@ func (a Analyzer) ResolveDocumentExpressionTypeAt(doc Document, expr string, lin
 	return a.resolveDocumentExpressionTypeAt(doc, expr, offset)
 }
 
+// DocumentExpressionTypeResolver owns the immutable document indexes used by
+// repeated type queries. Analyzer rules should create one resolver per source
+// revision rather than rebuilding document and UserForm indexes per expression.
+type DocumentExpressionTypeResolver struct {
+	analyzer    Analyzer
+	document    Document
+	typeContext *documentTypeContext
+}
+
+// NewDocumentExpressionTypeResolver prepares a revision-scoped resolver for
+// repeated expression type queries against one document.
+func (a Analyzer) NewDocumentExpressionTypeResolver(doc Document) (*DocumentExpressionTypeResolver, bool) {
+	if a.DB == nil {
+		return nil, false
+	}
+	index, ok := a.documentIndexFor(doc)
+	if !ok || index == nil {
+		return nil, false
+	}
+	a.formControlLookup = make(map[string]userforms.Control)
+	for _, control := range a.formControls(doc) {
+		a.formControlLookup[strings.ToLower(control.Name)] = control
+	}
+	a.formControlsKnown = true
+	return &DocumentExpressionTypeResolver{
+		analyzer:    a,
+		document:    doc,
+		typeContext: newDocumentTypeContext(doc, documentLines(doc), nil, index),
+	}, true
+}
+
+// ResolveAt resolves an expression using the prepared document revision.
+func (r *DocumentExpressionTypeResolver) ResolveAt(expr string, line int) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	if line < 0 {
+		line = 0
+	}
+	offset := byteOffsetForDocumentPosition(r.document, Position{Line: line, Character: 0})
+	return r.analyzer.resolveDocumentExpressionTypeAtContext(r.document, expr, offset, r.typeContext)
+}
+
 func (a Analyzer) resolveDocumentExpressionTypeAt(doc Document, expr string, offset int) (string, bool) {
 	return a.resolveDocumentExpressionTypeAtContext(doc, expr, offset, nil)
 }
@@ -4935,6 +4980,10 @@ func (a Analyzer) formControls(doc Document) []userforms.Control {
 }
 
 func (a Analyzer) resolveFormControl(doc Document, name string) (userforms.Control, bool) {
+	if a.formControlsKnown {
+		control, ok := a.formControlLookup[strings.ToLower(name)]
+		return control, ok
+	}
 	for _, control := range a.formControls(doc) {
 		if strings.EqualFold(control.Name, name) {
 			return control, true

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Publish Full diagnostics for giant VBA modules by reusing revision-scoped
+  analysis indexes and bounded procedure parallelism in the language server.
+
 - Keep language features responsive after editing a large VBA file when
   diagnostics are still reading its previous revision.
 

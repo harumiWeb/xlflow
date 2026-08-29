@@ -172,6 +172,15 @@ signature help retain their request operation records. The diagnostics stage
 records produced by `analysisstats` continue to report analyzer-owned stages
 and capability counters.
 
+Full diagnostics must reuse the exact immutable open-document snapshot for
+repeated expression type queries. Revision-scoped Excel helper summaries and
+normalized project constants are prepared once, not once per procedure or
+expression. When a single module reaches the batch analyzer's large-procedure
+threshold, its realtime procedure projections use the same bounded worker
+limit and merge results in source order. Shared indexes are immutable during
+the run, parser roots are not exposed to workers, and cancellation or a newer
+document generation still discards the complete obsolete result.
+
 ## Counter names
 
 The initial workspace-index record emits a complete counter snapshot, including

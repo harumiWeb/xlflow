@@ -136,3 +136,4 @@
 - When filtering a copied CFG, do not call value-receiver indexed lookups inside the edge loop: the copied slices invalidate the shared index. Build one local block-ID map before filtering, then rebuild the final index once.
 - Every CFG transformation that mutates cloned block or edge elements in place must rebuild the query index before publication; slice identity checks cannot detect element edits.
 - LSP の体感性能確認では初回表示だけでなく、巨大ファイルを編集して診断開始後に再編集する経路も実機計測する。`didChange` が旧 snapshot の tree lease を同期取得すると、バックグラウンド解析の終了まで JSON-RPC 受信ループを止めるため、旧 revision が使用中なら差分パースを待たず新 revision を公開する。
+- 巨大モジュールの LSP Full 診断は `analyze` の所要時間だけで推測せず、project-aware realtime 経路を実 VS Code で計測する。式ごとの document/UserForm index 再構築、procedure ごとの helper summary・project constant 正規化、batch と realtime の並列境界差を CPU profile と goroutine stack で確認する。
