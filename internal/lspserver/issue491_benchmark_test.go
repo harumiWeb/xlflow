@@ -114,10 +114,10 @@ func TestIssue491LightweightProcedureSymbols(t *testing.T) {
 	}
 	callLine := benchmarkSourceLine(fixture.largeSource, "        Call MassiveProcedure0001(value + 1)")
 	var captured intel.WorkspaceSymbolQuery
-	original := s.analyzer.WorkspaceSymbolQueryFunc
-	s.analyzer.WorkspaceSymbolQueryFunc = func(open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+	original := s.analyzer.WorkspaceSymbolQueryContextFunc
+	s.analyzer.WorkspaceSymbolQueryContextFunc = func(ctx context.Context, open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
 		captured = query
-		return original(open, query)
+		return original(ctx, open, query)
 	}
 	_, _ = s.analyzer.SignatureHelp(doc, intel.Position{Line: callLine, Character: 42}, s.docs.openDocuments())
 	if captured.Text != "MassiveProcedure0001" {
@@ -932,6 +932,54 @@ func benchmarkIssue491Lifecycle(b *testing.B, fixture lspBenchmarkFixture) {
 			waitLSPStartupEvent(b, started)
 			b.StartTimer()
 			if _, err := s.hover(nil, params); err != nil {
+				b.Fatal(err)
+			}
+			b.StopTimer()
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				b.Fatal("full diagnostics did not finish")
+			}
+			cleanup()
+		}
+	})
+
+	b.Run("Lifecycle/CompletionDuringFullDiagnostics", func(b *testing.B) {
+		memberLine := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
+		params := &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.largeURI)},
+			Position:     protocol.Position{Line: protocol.UInteger(memberLine), Character: protocol.UInteger(len("    Debug.Print cellRef."))},
+		}}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := newLSPBenchmarkServerWithCleanup(b, fixture)
+			doc, err := s.docs.getOrRead(fixture.largeURI)
+			if err != nil {
+				b.Fatal(err)
+			}
+			state := &diagnosticState{open: true, generation: 1, latest: doc}
+			started := make(chan struct{}, 1)
+			release := make(chan struct{})
+			s.performanceHook = func(stage, path string) {
+				if path == fixture.largePath && stage == "diagnostics-full-start" {
+					select {
+					case started <- struct{}{}:
+					default:
+					}
+					<-release
+				}
+			}
+			s.diagWorkers.Add(1)
+			done := make(chan struct{})
+			go func() {
+				s.runDocumentAnalysis(context.Background(), fixture.largeURI, state, 1, doc, nil, false, intel.DiagnosticModeFull)
+				close(done)
+			}()
+			waitLSPStartupEvent(b, started)
+			b.StartTimer()
+			if _, err := s.completion(nil, params); err != nil {
 				b.Fatal(err)
 			}
 			b.StopTimer()

@@ -148,7 +148,7 @@ func TestLargeDidOpenFastPublishesBeforeWorkspaceIndexReady(t *testing.T) {
 	defer cleanup()
 	// Keep the background index and interactive Fast analysis independently
 	// schedulable while the test holds the index at its semantic checkpoint.
-	s.analysisPermits = make(chan struct{}, 2)
+	s.analysisScheduler = newAnalysisScheduler(2)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
@@ -192,7 +192,93 @@ func TestLargeDidOpenFastPublishesBeforeWorkspaceIndexReady(t *testing.T) {
 	if len(publication[0].Diagnostics) != 1 || publication[0].Diagnostics[0].Message != "fast-before-ready" {
 		t.Fatalf("publication while workspace index pending = %+v, want Fast diagnostics", publication)
 	}
+	assertInteractiveRequestsComplete(t, s, uri)
 	releaseWorkspace()
+}
+
+func TestInteractiveRequestsCompleteWhileFullDiagnosticsIsRunning(t *testing.T) {
+	s, timers, cleanup := newDiagnosticsTestServer(t)
+	defer cleanup()
+	s.analysisScheduler = newAnalysisScheduler(2)
+
+	fullStarted := make(chan struct{})
+	releaseFull := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFull) }) }
+	defer release()
+	s.diagnosticsRequest = func(ctx context.Context, request intel.DiagnosticRequest) intel.DiagnosticResult {
+		if request.Mode == intel.DiagnosticModeFull {
+			close(fullStarted)
+			select {
+			case <-releaseFull:
+			case <-ctx.Done():
+			}
+		}
+		return intel.DiagnosticResult{}
+	}
+
+	uri := pathToFileURI(filepath.Join(s.opts.RootDir, "Interactive.bas"))
+	source := "Option Explicit\nPublic Function Value() As Long\nValue = 1\nEnd Function\nPublic Sub Run()\nDim result As Long\nresult = Value()\nEnd Sub\n"
+	doc, err := s.docs.open(uri, source, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.scheduleDiagnosticsOnly(diagnosticTestContext(nil), doc)
+	created := timers.snapshot()
+	if len(created) != 1 {
+		t.Fatalf("Full diagnostic timers = %d, want 1", len(created))
+	}
+	created[0].Fire()
+	waitClosed(t, fullStarted, "Full diagnostics")
+
+	assertInteractiveRequestsComplete(t, s, uri)
+	if state := s.analysisScheduler.state(analysisWorkBackground); state.Current != 1 || state.Maximum > 1 {
+		t.Fatalf("background worker state while Full diagnostics runs = %+v, want current/max 1", state)
+	}
+	release()
+	waitDiagnosticsIdle(t, s, uri)
+}
+
+func assertInteractiveRequestsComplete(t *testing.T, s *Server, uri string) {
+	t.Helper()
+	requests := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "hover", run: func() error {
+			_, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+				Position:     protocol.Position{},
+			}})
+			return err
+		}},
+		{name: "definition", run: func() error {
+			_, err := s.definition(nil, &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+				Position:     protocol.Position{},
+			}})
+			return err
+		}},
+		{name: "completion", run: func() error {
+			_, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+				Position:     protocol.Position{},
+			}})
+			return err
+		}},
+	}
+	for _, request := range requests {
+		done := make(chan error, 1)
+		go func() { done <- request.run() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s while background work runs: %v", request.name, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s waited behind background work", request.name)
+		}
+	}
 }
 
 func TestLargeDidOpenEditInvalidatesPendingFull(t *testing.T) {

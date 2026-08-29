@@ -84,7 +84,7 @@ type Server struct {
 	performance               *performanceRecorder
 	analysis                  *workspaceAnalysisIndex
 	semanticTokens            *semanticTokenCache
-	semanticTokenGenerator    func(intel.Document, []intel.Document) ([]intel.SemanticToken, error)
+	semanticTokenGenerator    func(context.Context, intel.Document, []intel.Document) ([]intel.SemanticToken, error)
 	codeLensConfig            intel.CodeLensConfig
 	codeActions               *codeActionRequests
 	codeActionDocumentChanges atomic.Bool
@@ -101,16 +101,13 @@ type Server struct {
 	// set by production construction and therefore has no runtime cost there.
 	performanceHook func(stage, path string)
 
-	diagMu                   sync.Mutex
-	diagStates               map[string]*diagnosticState
-	diagWorkers              sync.WaitGroup
-	diagStopped              bool
-	analysisPermits          chan struct{}
-	analysisPermitMu         sync.Mutex
-	analysisPermitChanged    chan struct{}
-	interactivePermitWaiters atomic.Int64
-	overlayBuilds            atomic.Uint64
-	overlayPublications      atomic.Uint64
+	diagMu              sync.Mutex
+	diagStates          map[string]*diagnosticState
+	diagWorkers         sync.WaitGroup
+	diagStopped         bool
+	analysisScheduler   *analysisScheduler
+	overlayBuilds       atomic.Uint64
+	overlayPublications atomic.Uint64
 
 	docLifecycleMu      sync.Mutex
 	docLifecycles       map[string]*sync.Mutex
@@ -266,8 +263,7 @@ func New(opts Options) (*Server, func(), error) {
 		docLifecycles:             make(map[string]*sync.Mutex),
 		semanticQueries:           semanticquery.New(semanticquery.Options{}),
 		semanticInvalidationPaths: make(map[string]struct{}),
-		analysisPermits:           make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2)),
-		analysisPermitChanged:     make(chan struct{}),
+		analysisScheduler:         newAnalysisScheduler(max(1, runtime.GOMAXPROCS(0)/2)),
 	}
 	if opts.startup != nil {
 		s.performance.setStartup(opts.startup)
@@ -277,8 +273,9 @@ func New(opts Options) (*Server, func(), error) {
 	s.analyzer.DocumentSymbolsFunc = s.cachedDocumentSourceSymbols
 	s.analyzer.WorkspaceSymbolsFunc = s.cachedWorkspaceSymbols
 	s.analyzer.WorkspaceSymbolQueryFunc = s.cachedWorkspaceSymbolQuery
+	s.analyzer.WorkspaceSymbolQueryContextFunc = s.cachedWorkspaceSymbolQueryContext
 	s.analyzer.WorkspaceSymbolsSnapshotFunc = s.cachedWorkspaceSymbolsSnapshot
-	s.semanticTokenGenerator = s.analyzer.SemanticTokens
+	s.semanticTokenGenerator = s.analyzer.SemanticTokensContext
 	s.diagnostics = s.analyzer.DiagnosticsContext
 	s.diagnosticsRequest = s.analyzer.DiagnosticsRequestContext
 	s.defaultDiagnosticsRequest = reflect.ValueOf(s.diagnosticsRequest).Pointer()
@@ -359,7 +356,7 @@ func New(opts Options) (*Server, func(), error) {
 				resolution = &projectDocument.Resolution
 				controlFlow = projectDocument.CFG
 			}
-			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, request.Document, procedureWorkerLimit(runtime.GOMAXPROCS(0), cap(s.analysisPermits)))
+			findings, err := analyze.SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB.DB, projectEffects, projectConstants.values, resolution, request.Document, s.backgroundProcedureWorkerLimit())
 			if err != nil {
 				return nil, err
 			}
@@ -1201,6 +1198,13 @@ func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbol
 		measurement.finish(0, nil)
 		return []protocol.DocumentSymbol{}, nil
 	}
+	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	defer release()
+	measurement.setPermitWait(analysisWorkInteractive, wait)
 	syms, err := s.analyzer.DocumentSymbols(doc)
 	if err != nil {
 		measurement.finish(0, err)
@@ -1260,6 +1264,13 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		measurement.finish(0, nil)
 		return []protocol.Location{}, nil
 	}
+	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	defer release()
+	measurement.setPermitWait(analysisWorkInteractive, wait)
 	locs, err := s.analyzer.Definition(doc, fromProtocolPosition(params.Position), s.docs.openDocuments(), s.docs.uriForDisplayPath)
 	if err != nil {
 		measurement.finish(0, err)
@@ -1375,6 +1386,13 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		measurement.finish(0, nil)
 		return nil, nil
 	}
+	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	defer release()
+	measurement.setPermitWait(analysisWorkInteractive, wait)
 	hover, err := s.analyzer.Hover(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil || hover == nil || strings.TrimSpace(hover.Contents) == "" {
 		measurement.finish(0, err)
@@ -1410,6 +1428,13 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		measurement.finish(0, nil)
 		return protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil
 	}
+	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	defer release()
+	measurement.setPermitWait(analysisWorkInteractive, wait)
 	completions, err := s.analyzer.Completions(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil {
 		measurement.finish(0, err)
@@ -1583,6 +1608,13 @@ func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpPa
 		measurement.finish(0, nil)
 		return nil, nil
 	}
+	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	defer release()
+	measurement.setPermitWait(analysisWorkInteractive, wait)
 	help, err := s.analyzer.SignatureHelp(doc, fromProtocolPosition(params.Position), s.docs.openDocuments())
 	if err != nil || help == nil || len(help.Signatures) == 0 {
 		measurement.finish(0, err)
@@ -1661,8 +1693,9 @@ func (s *Server) semanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 		return &protocol.SemanticTokens{Data: []protocol.UInteger{}}, nil
 	}
 	cacheStarted := time.Now()
-	result, doc, hit, err := s.semanticTokenResult(string(params.TextDocument.URI))
+	result, doc, hit, permitWait, err := s.semanticTokenResult(string(params.TextDocument.URI))
 	measurement.setDocument(doc)
+	measurement.setPermitWait(analysisWorkBackground, permitWait)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1687,8 +1720,9 @@ func (s *Server) semanticTokensFullDelta(_ *glsp.Context, params *protocol.Seman
 		return &protocol.SemanticTokens{Data: []protocol.UInteger{}}, nil
 	}
 	cacheStarted := time.Now()
-	result, doc, hit, err := s.semanticTokenResult(string(params.TextDocument.URI))
+	result, doc, hit, permitWait, err := s.semanticTokenResult(string(params.TextDocument.URI))
 	measurement.setDocument(doc)
+	measurement.setPermitWait(analysisWorkBackground, permitWait)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1712,15 +1746,22 @@ func (s *Server) semanticTokensFullDelta(_ *glsp.Context, params *protocol.Seman
 	return delta, nil
 }
 
-func (s *Server) semanticTokenResult(uri string) (cachedSemanticTokens, intel.Document, bool, error) {
+func (s *Server) semanticTokenResult(uri string) (cachedSemanticTokens, intel.Document, bool, time.Duration, error) {
 	for {
 		generation := s.semanticTokens.begin()
 		doc, err := s.docs.getOrRead(uri)
 		if err != nil {
-			return cachedSemanticTokens{}, intel.Document{}, false, err
+			return cachedSemanticTokens{}, intel.Document{}, false, 0, err
 		}
-		result, hit, err := s.semanticTokens.get(doc, generation, func() ([]protocol.UInteger, error) {
-			tokens, err := s.semanticTokenGenerator(doc, s.docs.openDocuments())
+		var permitWait time.Duration
+		result, hit, err := s.semanticTokens.getContext(context.Background(), doc, generation, func(producerCtx context.Context) ([]protocol.UInteger, error) {
+			release, wait, acquireErr := s.acquireAnalysisPermit(producerCtx, analysisWorkBackground)
+			permitWait += wait
+			if acquireErr != nil {
+				return nil, acquireErr
+			}
+			defer release()
+			tokens, err := s.semanticTokenGenerator(producerCtx, doc, s.docs.openDocuments())
 			if err != nil {
 				return nil, err
 			}
@@ -1729,7 +1770,7 @@ func (s *Server) semanticTokenResult(uri string) (cachedSemanticTokens, intel.Do
 		if errors.Is(err, errSemanticTokensSuperseded) {
 			continue
 		}
-		return result, doc, hit, err
+		return result, doc, hit, permitWait, err
 	}
 }
 
@@ -1781,6 +1822,13 @@ func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]p
 		measurement.finish(0, nil)
 		return []protocol.CodeLens{}, nil
 	}
+	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		measurement.finish(0, err)
+		return nil, err
+	}
+	defer release()
+	measurement.setPermitWait(analysisWorkInteractive, wait)
 	procedures, err := s.analyzer.RunnableProcedures(doc, s.codeLensConfig)
 	if err != nil {
 		measurement.finish(0, err)
@@ -2087,15 +2135,38 @@ func (s *Server) runDocumentAnalysis(
 	mode intel.DiagnosticMode,
 ) {
 	defer s.diagWorkers.Done()
-	release, _, err := s.acquireAnalysisPermit(runCtx, "interactive")
+	class := analysisWorkBackground
+	if mode == intel.DiagnosticModeFast || buildOverlay {
+		class = analysisWorkFast
+	}
+	release, permitWait, err := s.acquireAnalysisPermit(runCtx, class)
 	if err != nil {
 		s.finishDocumentAnalysis(uri, state)
 		return
 	}
-	defer release()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
+	switchToBackground := func() bool {
+		if class == analysisWorkBackground {
+			return true
+		}
+		release()
+		release = nil
+		var acquireErr error
+		release, permitWait, acquireErr = s.acquireAnalysisPermit(runCtx, analysisWorkBackground)
+		if acquireErr != nil {
+			s.finishDocumentAnalysis(uri, state)
+			return false
+		}
+		class = analysisWorkBackground
+		return true
+	}
 
 	if mode == intel.DiagnosticModeFast {
-		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode)
+		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode, permitWait)
 	}
 
 	if buildOverlay && runCtx.Err() == nil {
@@ -2144,6 +2215,9 @@ func (s *Server) runDocumentAnalysis(
 			s.logWorkspaceOverlayPerformance(doc, generation, started, err, true)
 		}
 		if publishedDeclarations && runCtx.Err() == nil {
+			if !switchToBackground() {
+				return
+			}
 			analysis, semanticIncluded, semanticErr := s.analyzeWorkspaceOverlay(runCtx, overlayDoc)
 			publishedSemantic := false
 			if semanticErr == nil && semanticIncluded && runCtx.Err() == nil && s.analysisGenerationCurrent(state, generation, doc) {
@@ -2168,7 +2242,7 @@ func (s *Server) runDocumentAnalysis(
 				}
 				state.mu.Unlock()
 				s.scheduleByRefDependentDiagnostics(notify, doc.URI, changedProcedureNames(oldSignatures, newSignatures))
-				project, impacted := s.analysis.projectChangeClass("interactive")
+				project, impacted := s.analysis.projectChangeClassContext(runCtx, analysisWorkBackground.String())
 				s.scheduleProjectDependentDiagnostics(notify, doc.URI, impacted)
 				s.scheduleProjectReadyDiagnosticsForCompleteProject(project)
 			}
@@ -2176,7 +2250,10 @@ func (s *Server) runDocumentAnalysis(
 	}
 	// Overlay failure deliberately does not suppress file-local diagnostics.
 	if mode == intel.DiagnosticModeFull && runCtx.Err() == nil {
-		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode)
+		if !switchToBackground() {
+			return
+		}
+		s.runDiagnosticsBody(runCtx, uri, state, generation, doc, notify, mode, permitWait)
 	}
 	s.completeDocumentAnalysis(uri, state, generation, mode)
 }
@@ -2225,8 +2302,14 @@ func (s *Server) runDiagnosticsBody(
 	doc intel.Document,
 	notify *glsp.Context,
 	mode intel.DiagnosticMode,
+	permitWait time.Duration,
 ) {
 	measurement := s.startPerformance("diagnostics", doc)
+	permitClass := analysisWorkBackground
+	if mode == intel.DiagnosticModeFast {
+		permitClass = analysisWorkFast
+	}
+	measurement.setPermitWait(permitClass, permitWait)
 	phase := "full"
 	if mode == intel.DiagnosticModeFast {
 		phase = "fast"
@@ -2257,7 +2340,7 @@ func (s *Server) runDiagnosticsBody(
 		request := intel.DiagnosticRequest{Document: doc, Mode: mode, Changes: changes, PreviousCache: previousCache, Recorder: recorder, InitialFast: initialFast && mode == intel.DiagnosticModeFast}
 		project := intel.ProjectAnalysisSnapshot{}
 		if mode == intel.DiagnosticModeFull {
-			project = s.analysis.projectSnapshotClass("interactive")
+			project = s.analysis.projectSnapshotClassContext(runCtx, analysisWorkBackground.String())
 			if !project.Complete && s.projectDiagnosticsEnabled() {
 				s.scheduleProjectReadyDiagnostics(state)
 			}
@@ -2528,6 +2611,15 @@ func procedureWorkerLimit(totalWorkers, concurrentAnalyses int) int {
 	return max(1, totalWorkers/concurrentAnalyses)
 }
 
+func (s *Server) backgroundProcedureWorkerLimit() int {
+	_, background := s.analysisScheduler.limits()
+	reservedWorkers := runtime.GOMAXPROCS(0)
+	if reservedWorkers > 1 {
+		reservedWorkers--
+	}
+	return procedureWorkerLimit(reservedWorkers, background)
+}
+
 func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	index := newWorkspaceAnalysisIndex(s.opts.RootDir, s.opts.Config, s.parseIndexedFileContext, s.logInitialWorkspaceIndexPerformance)
 	index.nonBlockingQueries = true
@@ -2536,11 +2628,11 @@ func (s *Server) newWorkspaceAnalysisIndex() *workspaceAnalysisIndex {
 	index.parseDeclarations = s.parseIndexedDeclarationsContext
 	index.parseInitialDeclarations = s.parseIndexedDeclarationsInitialContext
 	index.initialPermit = func(ctx context.Context) (func(), time.Duration, error) {
-		return s.acquireAnalysisPermit(ctx, "background")
+		return s.acquireAnalysisPermit(ctx, analysisWorkBackground)
 	}
-	if permits := cap(s.analysisPermits); permits > 0 {
-		index.initialWorkers = permits
-		index.semanticWorkers = max(1, permits-1)
+	if _, background := s.analysisScheduler.limits(); background > 0 {
+		index.initialWorkers = background
+		index.semanticWorkers = background
 	}
 	return index
 }
@@ -2667,7 +2759,7 @@ func workspaceTypeLibResolverSymbols(typeDB *vbadb.DB) []procedureir.ResolverSym
 }
 
 func (s *Server) parseIndexedFileContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {
-	release, _, err := s.acquireAnalysisPermit(ctx, "background")
+	release, _, err := s.acquireAnalysisPermit(ctx, analysisWorkBackground)
 	if err != nil {
 		return indexedFileAnalysis{}, err
 	}
@@ -2754,7 +2846,7 @@ func (s *Server) analyzeIndexedDocumentContextClass(ctx context.Context, doc int
 // call-site, and CFG construction; the semantic phase reparses through the
 // existing full callback after declaration readiness is published.
 func (s *Server) parseIndexedDeclarationsContext(ctx context.Context, file symbols.SourceFile, body []byte) (indexedFileAnalysis, error) {
-	release, _, err := s.acquireAnalysisPermit(ctx, "background")
+	release, _, err := s.acquireAnalysisPermit(ctx, analysisWorkBackground)
 	if err != nil {
 		return indexedFileAnalysis{}, err
 	}
@@ -2970,12 +3062,25 @@ func (s *Server) cachedWorkspaceSymbolsSnapshot(open []intel.Document) ([]intel.
 }
 
 func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+	return s.cachedWorkspaceSymbolQueryContext(context.Background(), open, query)
+}
+
+func (s *Server) cachedWorkspaceSymbolQueryContext(ctx context.Context, open []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Open-document overlays are produced only by the lifecycle pipeline.
 	// Queries never synchronously publish them; current snapshot symbols are
 	// merged here so interactive handlers remain available while publication is
 	// pending and stale disk/overlay entries stay hidden.
 	indexed, err := s.queryWorkspaceSymbolIndex(query)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if query.Interactive {
@@ -2990,18 +3095,27 @@ func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.W
 	}
 	openKeys := make(map[string]bool, len(open)*2)
 	for _, doc := range open {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for _, key := range workspaceSymbolPathKeys(s.opts.RootDir, doc.Path) {
 			openKeys[key] = true
 		}
 	}
 	out := indexed[:0]
 	for _, sym := range indexed {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if hasWorkspaceSymbolPathKey(openKeys, workspaceSymbolPathKeys(s.opts.RootDir, sym.File)) {
 			continue
 		}
 		out = append(out, sym)
 	}
 	for _, doc := range open {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if s.documentKind(doc) != DocumentKindVBA {
 			continue
 		}
@@ -3024,12 +3138,18 @@ func (s *Server) cachedWorkspaceSymbolQuery(open []intel.Document, query intel.W
 			if query.Interactive {
 				s.performance.addCounter(performanceCounterInteractiveFullSymbolFallbacks, 1, "textDocument/interactive", performanceStageDeclarationIndexing, "interactive", doc.Path)
 			}
-			syms, symbolErr = s.analyzer.DocumentSymbols(doc)
+			syms, symbolErr = s.analyzer.DocumentSymbolsContext(ctx, doc)
 		}
 		if symbolErr != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		for _, sym := range syms {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if workspaceSymbolMatchesQuery(sym, query) {
 				out = append(out, sym)
 			}

@@ -147,6 +147,17 @@ For GitHub Copilot, use `agents` because Copilot reads repository instructions f
 
 TypeDB is loaded once during LSP server construction, outside the revision-scoped diagnostics recorder; `capability_typedb_builds` is therefore not emitted by LSP performance telemetry.
 
+LSP analysis execution is bounded and classed as interactive, Fast, or
+background. Interactive hover, definition, completion, signature help,
+document-symbol, and CodeLens work has admission priority over Fast diagnostics
+and background Full diagnostics, semantic indexing, deferred project work, and
+semantic-token cache misses. Background work leaves practical capacity for
+interactive requests and releases it cooperatively when a document generation
+is superseded. Performance records expose `analysis_permit_wait_ms`,
+`interactive_wait_ms`, `background_wait_ms`, `current_workers`, and
+`max_active_workers`; scheduling does not alter diagnostic contents, symbol
+results, generation ordering, or publication determinism.
+
 Revision-scoped semantic query reuse in Full diagnostics follows the
 process-local ownership, key, invalidation, and cancellation contract in
 `docs/specs/vba-semantic-query-dag.md`. Its hit, miss, invalidation, and kernel

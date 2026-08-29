@@ -988,8 +988,11 @@ func TestServerDiskAnalysisUsesBackgroundAnalysisPermit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	s.analysisPermits = make(chan struct{}, 1)
-	s.analysisPermits <- struct{}{}
+	s.analysisScheduler = newAnalysisScheduler(1)
+	heldRelease, _, acquireErr := s.acquireAnalysisPermit(context.Background(), analysisWorkBackground)
+	if acquireErr != nil {
+		t.Fatal(acquireErr)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = s.parseIndexedFileContext(ctx, symbols.SourceFile{
@@ -998,10 +1001,10 @@ func TestServerDiskAnalysisUsesBackgroundAnalysisPermit(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("disk analysis waiting on full permit = %v, want context.Canceled", err)
 	}
-	if got := len(s.analysisPermits); got != 1 {
+	if got := s.analysisScheduler.state(analysisWorkBackground).Current; got != 1 {
 		t.Fatalf("disk analysis changed occupied permit count to %d, want 1", got)
 	}
-	<-s.analysisPermits
+	heldRelease()
 }
 
 func TestDocumentVersionReusesMatchingSnapshotHash(t *testing.T) {
@@ -1119,8 +1122,11 @@ func TestCachedWorkspaceSymbolQueryUsesCurrentSnapshotWhileOverlayPending(t *tes
 		t.Fatal(err)
 	}
 	defer cleanup()
-	s.analysisPermits = make(chan struct{}, 1)
-	s.analysisPermits <- struct{}{}
+	s.analysisScheduler = newAnalysisScheduler(1)
+	heldRelease, _, acquireErr := s.acquireAnalysisPermit(context.Background(), analysisWorkBackground)
+	if acquireErr != nil {
+		t.Fatal(acquireErr)
+	}
 	ctx := &glsp.Context{Notify: func(string, any) {}}
 	uri := pathToFileURI(path)
 	if err := s.didOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
@@ -1136,7 +1142,7 @@ func TestCachedWorkspaceSymbolQueryUsesCurrentSnapshotWhileOverlayPending(t *tes
 	if stale, err := s.cachedWorkspaceSymbolQuery(open, intel.WorkspaceSymbolQuery{Text: "SavedName", Mode: intel.WorkspaceSymbolQueryExact}); err != nil || len(stale) != 0 {
 		t.Fatalf("saved symbols leaked while overlay pending = %+v, %v", stale, err)
 	}
-	<-s.analysisPermits
+	heldRelease()
 }
 
 func waitForWorkspaceSymbol(t testing.TB, index *workspaceAnalysisIndex, name string) {

@@ -181,6 +181,38 @@ Benchmarks measure relevant declaration and first cross-file definition
 readiness independently from complete workspace readiness. Final postings,
 ordering, overlay authority, and semantic completeness remain unchanged.
 
+### Amendment: bounded priority analysis scheduling (Issue #740)
+
+Analysis execution uses one bounded scheduler with three practical work
+classes: interactive requests, Fast diagnostics, and background semantic work.
+Completion, signature help, hover, definition, document symbols, and CodeLens
+enter the interactive class. Fast diagnostics uses its own middle class. Full
+diagnostics, workspace semantic indexing, deferred overlay/project preparation,
+and semantic-token cache misses use the background class.
+
+The background limit leaves one slot of the total analysis budget unused when
+the host has more than one slot. Admission order is interactive, then Fast,
+then background. Running work is not forcibly preempted, but a newly available
+slot cannot be claimed by lower-priority waiters while a higher-priority waiter
+exists. On a one-slot host, one interactive request may run alongside one
+background worker so background progress cannot make editor requests wait
+indefinitely. Analyzer-internal procedure workers derive their limit from the
+same background budget; the server must not create a nested unbounded pool.
+
+Fast diagnostics releases its permit before deferred semantic overlay and Full
+diagnostics stages, which reacquire the background class. Superseding edits
+cancel obsolete diagnostic, initial semantic-index, project-snapshot, and
+semantic-token work cooperatively. Canceled work releases its permit and cannot
+publish or populate a completed cache entry. Opening an active document may
+cancel or replace its queued/running disk semantic parse, but interactive
+requests do not synchronously construct a complete workspace CFG.
+
+Scheduling never participates in result selection. Existing immutable
+snapshots, generation checks, source-order merges, diagnostic phase ordering,
+and deterministic publication remain authoritative regardless of worker
+completion order. Opt-in telemetry records class-specific permit wait time and
+current/maximum active workers; these fields are not part of LSP responses.
+
 ### Amendment: isolated, cancellable code-action requests
 
 Automatic editor code actions must not run full file lint on the ordered

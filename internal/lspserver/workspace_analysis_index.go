@@ -1015,9 +1015,17 @@ func (x *workspaceAnalysisIndex) buildInitialSemantics(files []symbols.SourceFil
 					x.markInitialSemanticFailure(file.Path)
 					continue
 				}
-				entry, parseErr := x.parse(x.initialCtx, file, initial.source)
+				jobCtx, active, ok := x.beginInitialSemanticParse(file.Path)
+				if !ok {
+					continue
+				}
+				entry, parseErr := x.parse(jobCtx, file, initial.source)
+				canceled := jobCtx.Err() != nil
+				x.finishInitialSemanticParse(file.Path, active)
 				if parseErr != nil {
-					x.markInitialSemanticFailure(file.Path)
+					if !canceled {
+						x.markInitialSemanticFailure(file.Path)
+					}
 					continue
 				}
 				entry.path = file.Path
@@ -1038,6 +1046,41 @@ sendJobs:
 	}
 	close(jobs)
 	wg.Wait()
+}
+
+func (x *workspaceAnalysisIndex) beginInitialSemanticParse(path string) (context.Context, *diskParse, bool) {
+	key := symbolFileKey(path)
+	if key == "" {
+		return nil, nil, false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.generation[key] != 0 || x.pending[key] != 0 {
+		return nil, nil, false
+	}
+	if _, open := x.overlays[key]; open {
+		return nil, nil, false
+	}
+	if previous := x.diskParses[key]; previous != nil {
+		previous.cancel()
+	}
+	ctx, cancel := context.WithCancel(x.initialCtx)
+	active := &diskParse{generation: 0, cancel: cancel}
+	x.diskParses[key] = active
+	return ctx, active, true
+}
+
+func (x *workspaceAnalysisIndex) finishInitialSemanticParse(path string, active *diskParse) {
+	if active == nil {
+		return
+	}
+	active.cancel()
+	key := symbolFileKey(path)
+	x.mu.Lock()
+	if x.diskParses[key] == active {
+		delete(x.diskParses, key)
+	}
+	x.mu.Unlock()
 }
 
 func (x *workspaceAnalysisIndex) publishInitialSemantic(path string, entry indexedFileAnalysis) {
@@ -1529,12 +1572,23 @@ func (x *workspaceAnalysisIndex) completeClearWithoutEntry(refresh *diskRefresh)
 // overlay is pending, a disk parse failed, or recovered IR was published.
 // Callers must not publish project diagnostics from an incomplete view.
 func (x *workspaceAnalysisIndex) projectSnapshot() intel.ProjectAnalysisSnapshot {
-	return x.projectSnapshotClass("background")
+	return x.projectSnapshotClassContext(context.Background(), "background")
 }
 
 func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.ProjectAnalysisSnapshot {
+	return x.projectSnapshotClassContext(context.Background(), class)
+}
+
+func (x *workspaceAnalysisIndex) projectSnapshotClassContext(ctx context.Context, class string) intel.ProjectAnalysisSnapshot {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	x.start()
 	snapshotMeasurement := x.performance.start("workspace/project", performanceStageProjectSnapshot, class, x.root)
+	if err := ctx.Err(); err != nil {
+		snapshotMeasurement.finish(0, 0, err)
+		return intel.ProjectAnalysisSnapshot{Complete: false}
+	}
 	x.performance.addCounter(performanceCounterProjectSnapshotBuilds, 1, "workspace/project", performanceStageProjectSnapshot, class, x.root)
 	x.mu.RLock()
 	complete := x.completeLocked()
@@ -1555,6 +1609,10 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	resolverSymbols := make([]procedureir.ResolverSymbol, 0, symbolCapacity)
 	graphSymbols := make([]callgraph.Symbol, 0, symbolCapacity)
 	for _, raw := range rawEntries {
+		if err := ctx.Err(); err != nil {
+			snapshotMeasurement.finish(0, 0, err)
+			return intel.ProjectAnalysisSnapshot{Revision: revision, Complete: false}
+		}
 		entry := indexedFileAnalysis{
 			path: raw.path, version: raw.version, source: raw.source, procedureIR: procedureir.Clone(raw.procedureIR),
 			controlFlow: vbacfg.CloneDocument(raw.controlFlow),
@@ -1580,7 +1638,7 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	}
 
 	resolverKey := resolverSymbolsFingerprint(resolverSymbols, complete)
-	resolver, resolverErr, resolverHit := x.snapshotResolverCache.getOrBuildContext(context.Background(), resolverKey, func() (procedureir.Resolver, error) {
+	resolver, resolverErr, resolverHit := x.snapshotResolverCache.getOrBuildContext(ctx, resolverKey, func() (procedureir.Resolver, error) {
 		resolverMeasurement := x.performance.start("workspace/project", performanceStageProjectResolver, class, x.root)
 		x.performance.addCounter(performanceCounterResolutionResolverBuilds, 1, "workspace/project", performanceStageProjectResolver, class, x.root)
 		value := procedureir.NewResolverWithCompleteness(resolverSymbols, complete)
@@ -1613,8 +1671,13 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	var typeReferences []calls.TypeReference
 	materializationMeasurement := x.performance.start("workspace/project", performanceStageResolutionMaterialize, class, x.root)
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			materializationMeasurement.finish(0, 0, err)
+			snapshotMeasurement.finish(0, 0, err)
+			return intel.ProjectAnalysisSnapshot{Revision: revision, Complete: false}
+		}
 		viewKey := workspaceResolutionDocumentFingerprint(entry.path, entry.version, resolverKey, complete)
-		resolution, viewErr, viewHit := x.snapshotViewCache.getOrBuildContext(context.Background(), viewKey, func() (procedureir.ResolvedDocumentView, error) {
+		resolution, viewErr, viewHit := x.snapshotViewCache.getOrBuildContext(ctx, viewKey, func() (procedureir.ResolvedDocumentView, error) {
 			return procedureir.ResolveView(entry.procedureIR, resolver), nil
 		})
 		if viewErr != nil {
@@ -1640,6 +1703,10 @@ func (x *workspaceAnalysisIndex) projectSnapshotClass(class string) intel.Projec
 	materializationMeasurement.finish(0, 0, nil)
 	resolvedCalls := make([]calls.Call, len(sites))
 	for i, site := range sites {
+		if err := ctx.Err(); err != nil {
+			snapshotMeasurement.finish(0, 0, err)
+			return intel.ProjectAnalysisSnapshot{Revision: revision, Complete: false}
+		}
 		resolvedCalls[i] = callResolver.Resolve(site)
 	}
 	sort.SliceStable(resolvedCalls, func(i, j int) bool { return callSiteLess(resolvedCalls[i].CallSite, resolvedCalls[j].CallSite) })
@@ -1672,12 +1739,20 @@ func (x *workspaceAnalysisIndex) initialReady() bool {
 // so overlapping pending overlays are compared once the workspace becomes
 // coherent again.
 func (x *workspaceAnalysisIndex) projectChange() (intel.ProjectAnalysisSnapshot, []string) {
-	return x.projectChangeClass("background")
+	return x.projectChangeClassContext(context.Background(), "background")
 }
 
 func (x *workspaceAnalysisIndex) projectChangeClass(class string) (intel.ProjectAnalysisSnapshot, []string) {
+	return x.projectChangeClassContext(context.Background(), class)
+}
+
+func (x *workspaceAnalysisIndex) projectChangeClassContext(ctx context.Context, class string) (intel.ProjectAnalysisSnapshot, []string) {
 	changeMeasurement := x.performance.start("workspace/project", performanceStageProjectChange, class, x.root)
-	current := x.projectSnapshotClass(class)
+	current := x.projectSnapshotClassContext(ctx, class)
+	if err := ctx.Err(); err != nil {
+		changeMeasurement.finish(0, 0, err)
+		return current, nil
+	}
 	if !current.Complete {
 		changeMeasurement.finish(0, 0, nil)
 		return current, nil
