@@ -5,13 +5,12 @@
       "name": "Run xlflow VS Code Extension",
       "type": "extensionHost",
       "request": "launch",
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode"
-      ],
-      "outFiles": [
-        "${workspaceFolder}/editors/vscode/dist/**/*.js"
-      ],
-      "preLaunchTask": "compile xlflow VS Code Extension"
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/editors/vscode"],
+      "outFiles": ["${workspaceFolder}/editors/vscode/dist/**/*.js"],
+      "preLaunchTask": "build xlflow VS Code Extension",
+      "env": {
+        "XLFLOW_VSCODE_DEBUG_PATH": "${workspaceFolder}/.vscode/xlflow-debug/xlflow.exe"
+      }
     }
   ]
 }

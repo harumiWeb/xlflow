@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,6 +62,30 @@ func TestAnalyzerSingleModuleProcedureAnalysisIsDeterministic(t *testing.T) {
 	}
 	if !bytes.Equal(serialJSON, parallelJSON) {
 		t.Fatalf("serial and bounded JSON differ:\nserial:   %s\nbounded: %s", serialJSON, parallelJSON)
+	}
+}
+
+func TestSourceRealtimeSingleModuleProcedureAnalysisIsDeterministic(t *testing.T) {
+	root := t.TempDir()
+	source := singleModuleBenchmarkSource(singleModuleBenchmarkWorkload{shape: "independent", size: procedureParallelThreshold})
+	path := filepath.Join(root, "src", "modules", "Large.bas")
+	t.Setenv(typedb.EnvDir, filepath.Join(t.TempDir(), "typelib"))
+
+	previous := runtime.GOMAXPROCS(1)
+	serial, err := SourceRealtimeFindings(root, path, config.Default(), []byte(source))
+	runtime.GOMAXPROCS(previous)
+	if err != nil {
+		t.Fatalf("serial realtime analysis: %v", err)
+	}
+
+	previous = runtime.GOMAXPROCS(4)
+	parallel, err := SourceRealtimeFindings(root, path, config.Default(), []byte(source))
+	runtime.GOMAXPROCS(previous)
+	if err != nil {
+		t.Fatalf("bounded realtime analysis: %v", err)
+	}
+	if !reflect.DeepEqual(serial, parallel) {
+		t.Fatalf("serial and bounded realtime results differ:\nserial:   %+v\nbounded: %+v", serial, parallel)
 	}
 }
 

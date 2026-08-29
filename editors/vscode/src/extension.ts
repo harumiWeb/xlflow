@@ -169,6 +169,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void refreshSelectedProject({ restartLsp: true });
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
+      clientManager?.notifyActiveDocument(vscode.window.activeTextEditor?.document);
       const key = selectedWorkspaceKey();
       if (key === lastSelectedWorkspaceKey) {
         void checkVbaLanguageAssociation(context);

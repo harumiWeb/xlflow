@@ -125,6 +125,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       traceOutputChannel: this.channels.trace,
       initializationOptions: {
         codeLens,
+        declarationPriority: declarationPriorityInitializationOptions(),
       },
       middleware: {
         didOpen: (document, next) => {
@@ -209,6 +210,7 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       await startPromise;
       this.workspaceFolderKey = workspaceFolderKey;
       await client.setTrace(toProtocolTrace(config.lspTraceServer));
+      this.notifyActiveDocument(vscode.window.activeTextEditor?.document);
       const logDescription = args.includes("--log-file")
         ? ` with log file ${config.lspLogFile}`
         : " without workspace log file";
@@ -260,6 +262,17 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
     await this.start();
   }
 
+  public notifyActiveDocument(document: vscode.TextDocument | undefined): void {
+    if (this.client === undefined) {
+      return;
+    }
+    void this.client
+      .sendNotification("xlflow/didChangeActiveDocument", {
+        uri: document?.languageId === "vba" ? document.uri.toString() : null,
+      })
+      .catch(() => undefined);
+  }
+
   public scheduleSuggest(document: vscode.TextDocument): void {
     const config = readConfig();
     if (!config.completionTriggerSuggestInStatements && !config.completionProgIdsInStrings) {
@@ -306,6 +319,20 @@ export class XlflowLanguageClientManager implements vscode.Disposable {
       this.suggestTimer = undefined;
     }
   }
+}
+
+export function declarationPriorityInitializationOptions(): {
+  activeDocumentUri: string | null;
+  openDocumentUris: string[];
+} {
+  const active = vscode.window.activeTextEditor?.document;
+  const openDocumentUris = vscode.workspace.textDocuments
+    .filter((document) => document.languageId === "vba")
+    .map((document) => document.uri.toString());
+  return {
+    activeDocumentUri: active?.languageId === "vba" ? active.uri.toString() : null,
+    openDocumentUris: [...new Set(openDocumentUris)],
+  };
 }
 
 export async function lspServerArgs(

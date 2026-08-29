@@ -396,3 +396,34 @@ func TestParseDocumentIncrementalRejectsClosedPreviousTree(t *testing.T) {
 		t.Fatalf("incremental parse error = %v, want ErrIncrementalParseUnavailable", err)
 	}
 }
+
+func TestParseDocumentIncrementalIfAvailableDoesNotWaitForReader(t *testing.T) {
+	oldSource := []byte("Sub A()\nEnd Sub\n")
+	previous, err := ParseDocument("Main.bas", oldSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer previous.Close()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- previous.Read(func(ParsedView) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	edits := []tree_sitter.InputEdit{{
+		StartByte: 4, OldEndByte: 5, NewEndByte: 5,
+		StartPosition: tree_sitter.Point{Column: 4}, OldEndPosition: tree_sitter.Point{Column: 5}, NewEndPosition: tree_sitter.Point{Column: 5},
+	}}
+	if _, err := ParseDocumentIncrementalIfAvailable("Main.bas", []byte("Sub B()\nEnd Sub\n"), oldSource, previous, edits); !errors.Is(err, ErrIncrementalParseUnavailable) {
+		t.Fatalf("busy incremental parse error = %v, want ErrIncrementalParseUnavailable", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

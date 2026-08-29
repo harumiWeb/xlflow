@@ -329,7 +329,7 @@ pnpm install
 pnpm compile
 ```
 
-To launch the extension in VS Code's development mode, open this folder and run the Extension Host from the [Run and Debug] view after compilation is complete.
+To launch the extension in VS Code's development mode, open the repository root and run `Run xlflow VS Code Extension` from the [Run and Debug] view. The launch configuration first compiles the extension and builds the Go LSP into `.vscode/xlflow-debug/xlflow.exe` from the same checkout. It passes that executable through the debug-only `XLFLOW_VSCODE_DEBUG_PATH` environment variable, so F5 does not use or modify the installed `xlflow` binary or the user's `xlflow.path` setting. The generated executable is ignored by Git.
 
 ## License
 

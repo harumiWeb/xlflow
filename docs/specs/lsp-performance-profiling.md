@@ -60,6 +60,91 @@ change a response, delay document lifecycle handling, or change availability,
 restart, generation, or cancellation behavior. `wall_time_unix_*` is used only
 to correlate the two processes; elapsed durations are compared within the
 process that produced them.
+Initial declaration jobs use a bounded priority queue. Active/open documents
+are P0, uniquely matched direct module hints are P1, and the remaining files
+are P2. A promotion updates an existing queued job; it never creates duplicate
+parsing work, and an already running job is not preempted. Open-document
+overlays remain authoritative through their existing generation checks. The
+priority counters describe scheduling only and do not change readiness or
+result ordering.
+
+Readiness records use `outcome="readiness"` and report the elapsed time from
+workspace startup to the first accepted declaration at each boundary:
+`active_document_declaration_ready_ms`,
+`referenced_document_declaration_ready_ms`, and
+`workspace_declaration_ready_ms`. An active overlay declaration counts as the
+P0 boundary when it supersedes a queued saved-file job.
+
+The VS Code client supplies `initializationOptions.declarationPriority` with
+`activeDocumentUri` and `openDocumentUris`, then sends the optional
+`xlflow/didChangeActiveDocument` notification as the active editor changes.
+These values are scheduling hints only; `didOpen` and `didChange` remain the
+source of truth for unsaved text.
+
+## Automatic code actions and transport readiness
+
+Code-action requests use one worker and at most 16 pending requests; the
+ordered stdio receive loop captures the document revision and continues to
+serve interactive requests and lifecycle notifications. `$/cancelRequest`
+cancels matching numeric or string request IDs. A newer automatic action for
+the same document supersedes older automatic actions, while explicitly invoked
+actions are not coalesced. Changes, close/reopen, and shutdown cancel affected
+work. Canceled, superseded, or excess requests return `RequestCancelled`
+(`-32800`), and edits from obsolete snapshots are never returned.
+
+Cancellation and final response publication share a request-local mutex in
+addition to document-lifecycle validation. If the client advertises
+`workspace.workspaceEdit.documentChanges`, open-document actions carry their
+captured version; disk-owned documents use a null version. Clients without
+that capability retain `changes` edits. Versioned edits protect against
+client-side changes that have not reached the server yet.
+
+Cancellation is cooperative, not a bound on response or shutdown latency.
+The shared initial `AnalysisSnapshot.ParsedDocument` / `ast.ParseDocument`
+construction does not accept a context, and waiting for its parse mutex is
+also not interruptible. On an unparsed large file, cancellation is observed
+after that construction returns; the single action worker and shutdown may
+wait until then. Canceled results are still discarded. Making initial parsing
+interruptible requires a separate change to shared parse ownership, retry
+after cancellation, and snapshot retirement; the action queue does not detach
+unowned parser goroutines to simulate immediate cancellation.
+
+`context.only` filters action families before their computation. VB044 being
+disabled skips its parse and fix scan. When enabled, its code actions evaluate
+only the procedure-name-constant rule and apply the same inline suppressions;
+they must not call whole-file `LintParsed` or construct ProcedureIR/CFG.
+Documentation actions retain their document-symbol projection.
+
+`didChange` must not wait for a background reader or an in-progress parse of
+the previous revision. It uses incremental tree-sitter parsing only when both
+the parsed snapshot and its tree lease are immediately available. Otherwise it
+publishes a lazy successor snapshot with `parse_mode="deferred_full"`; the new
+revision is parsed by its first consumer. `fallback_reason` distinguishes a
+busy/unavailable incremental tree from a full-document replacement. Completed
+immutable procedure artifacts may carry into the successor, but no stale tree
+or result may be published for the new version. Retiring the obsolete snapshot
+invalidates it immediately; if its parse mutex is busy, parsed resource cleanup
+finishes asynchronously. Server shutdown waits for cleanup of active snapshots.
+
+`operation="textDocument/codeAction"` starts at request dispatch and ends when
+its response is prepared, including time in the bounded action queue. Other
+handler timings do not include time spent waiting before dispatch. Measure
+client request-to-first-nonempty-response latency as well as handler duration,
+and include the automatic code actions emitted by the editor. Fast diagnostics
+publication is not proof of Full diagnostics completion.
+
+`TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation` blocks
+the action projection at a deterministic checkpoint and verifies a real
+JSON-RPC hover response, cancellation, and change/close/reopen invalidation.
+`TestCodeActionRequestsBoundedQueueAndAutomaticSupersession` covers the work
+bound and removal of obsolete queued requests. These are correctness and
+scheduling checks, not wall-clock speedup claims.
+
+For manual comparisons record the exact extension source, executable path,
+build revision, active file, profile settings, and request ordering. F5 extension
+compilation alone does not update a separately installed Go executable. Use a
+matching development build, and do not infer its revision from its modification
+time or a `dev` version string.
 
 ## Stage names
 
@@ -87,6 +172,15 @@ signature help retain their request operation records. The diagnostics stage
 records produced by `analysisstats` continue to report analyzer-owned stages
 and capability counters.
 
+Full diagnostics must reuse the exact immutable open-document snapshot for
+repeated expression type queries. Revision-scoped Excel helper summaries and
+normalized project constants are prepared once, not once per procedure or
+expression. When a single module reaches the batch analyzer's large-procedure
+threshold, its realtime procedure projections use the same bounded worker
+limit and merge results in source order. Shared indexes are immutable during
+the run, parser roots are not exposed to workers, and cancellation or a newer
+document generation still discards the complete obsolete result.
+
 ## Counter names
 
 The initial workspace-index record emits a complete counter snapshot, including
@@ -99,6 +193,11 @@ payload.
 | `workspace_files_discovered`        | Source files returned by workspace discovery.                                         |
 | `workspace_declaration_builds`      | Successful per-file declaration builds.                                               |
 | `workspace_semantic_builds`         | Successful per-file semantic builds.                                                  |
+| `declaration_priority_p0_jobs`      | Initial declaration jobs started for active/open documents.                           |
+| `declaration_priority_p1_jobs`      | Initial declaration jobs started for uniquely identified direct dependencies.         |
+| `declaration_priority_p2_jobs`      | Initial declaration jobs started for the remaining workspace.                         |
+| `declaration_promotions`            | Queued declaration jobs moved to a higher priority.                                   |
+| `declaration_priority_hits`         | Promotion hints that matched an already queued declaration job.                       |
 | `interactive_index_builds`          | Snapshot-scoped interactive declaration indexes built.                                |
 | `interactive_index_hits`            | Interactive lookups served from an existing snapshot index.                           |
 | `procedure_catalog_builds`          | Procedure catalogs built for an interactive document revision.                        |
@@ -215,6 +314,30 @@ and the generated 1,200-procedure module:
 ```powershell
 rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPInteractiveIndex(Ordinary|Issue756)$' -benchmem -benchtime=1x -count 1 -timeout 20m
 ```
+
+Issue #758 startup comparisons should use the same fixture and permit budget
+with the target module placed after unrelated files, plus one generated giant
+unrelated module. Record P0 declaration readiness, P1 helper readiness, the
+first successful cross-file definition, and complete declaration readiness
+separately. Compare the priority queue with a deterministic discovery-order
+run; these measurements are diagnostic evidence, not a CI latency threshold.
+The repository benchmark reproduces this comparison with
+`BenchmarkLSPDeclarationPriority`:
+
+```powershell
+rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 test ./internal/lspserver -run '^$' -bench '^BenchmarkLSPDeclarationPriority$' -benchmem -benchtime=1x -count 1 -timeout 10m
+```
+
+The declaration-priority benchmark injects a parser stub with a 2 ms wait for
+the giant file and fixes the worker count at one. It isolates queue ordering;
+it does not measure real VBA parsing, automatic code actions, transport waits,
+or VS Code activation. Its ratios must not be reported as editor speedups.
+
+Its `active_declaration_ready_ms` and `helper_declaration_ready_ms` metrics
+are reported independently from `workspace_declaration_ready_ms`. The
+existing large-class lifecycle benchmark covers the giant-active path, where
+an active overlay is promoted before startup work can restore saved
+declarations.
 
 The opt-in local ROneCOne path remains available when a developer has a local
 specimen:

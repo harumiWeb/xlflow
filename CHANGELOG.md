@@ -4,10 +4,33 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed Full LSP diagnostics stalling indefinitely on giant VBA modules. The
+  editor path now reuses the open-document expression index, prepares Excel
+  helper summaries and project constants once per revision, and analyzes large
+  procedure sets with the same bounded parallelism as batch analysis while
+  preserving diagnostic ordering and cancellation.
+
+- Kept LSP document changes responsive while diagnostics read the previous
+  revision. `didChange` now attempts incremental parsing only when the old tree
+  and parsed snapshot are immediately available; otherwise it publishes the
+  new immutable revision and defers its full parse.
+
+- Fixed automatic LSP code actions blocking hover, completion, and document
+  updates on large VBA files. Disabled VB044 fixes skip analysis; enabled fixes
+  scan only their rule with existing inline suppressions. Code actions now use
+  a bounded, cancellable worker and discard edits for obsolete documents.
+
 - Reduced VS Code language-intelligence startup latency by starting the LSP
   without a blocking CLI availability preflight, running project and UI detail
   refreshes asynchronously, and adding opt-in end-to-end startup/readiness
   correlation for the first usable hover, definition, and completion results.
+
+- Prioritized initial VBA declaration indexing for active/open documents and
+  uniquely identified direct module dependencies with a bounded P0/P1/P2
+  queue. Open-document overlays can skip redundant disk declaration work, and
+  VS Code reports active-document changes without changing LSP result or
+  completeness semantics. Added opt-in priority scheduling counters,
+  readiness timings, and a giant-module startup benchmark.
 
 - Reduced interactive VBA LSP latency by adding snapshot-scoped declaration
   indexes for hover, definition, completion, and signature help. Interactive

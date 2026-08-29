@@ -76,6 +76,21 @@ func ParseDocumentIncremental(path string, source []byte, previous *ParsedDocume
 	return parseDocument(path, source, oldTree)
 }
 
+// ParseDocumentIncrementalIfAvailable performs an incremental parse only when
+// the previous tree can be leased immediately. Interactive document updates
+// must not wait behind a long-running reader of the obsolete revision.
+func ParseDocumentIncrementalIfAvailable(path string, source, previousSource []byte, previous *ParsedDocument, edits []tree_sitter.InputEdit) (*ParsedDocument, error) {
+	if previous == nil || len(edits) == 0 {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	oldTree, err := previous.tryCloneEditedTree(previousSource, edits)
+	if err != nil {
+		return nil, err
+	}
+	defer oldTree.Close()
+	return parseDocument(path, source, oldTree)
+}
+
 func parseDocument(path string, source []byte, oldTree *tree_sitter.Tree) (*ParsedDocument, error) {
 	parser, err := NewParser()
 	if err != nil {
@@ -197,6 +212,40 @@ func (d *ParsedDocument) cloneEditedTree(edits []tree_sitter.InputEdit) (*tree_s
 	}
 	if clone == nil {
 		return nil, ErrIncrementalParseUnavailable
+	}
+	return clone, nil
+}
+
+func (d *ParsedDocument) tryCloneEditedTree(expectedSource []byte, edits []tree_sitter.InputEdit) (*tree_sitter.Tree, error) {
+	if d == nil {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	d.mu.Lock()
+	if d.closed || d.result == nil || d.result.Tree == nil {
+		d.mu.Unlock()
+		return nil, ErrIncrementalParseUnavailable
+	}
+	d.readers++
+	result := d.result
+	d.mu.Unlock()
+
+	select {
+	case <-d.treeGate:
+	default:
+		d.releaseRead()
+		return nil, ErrIncrementalParseUnavailable
+	}
+	defer func() { d.treeGate <- struct{}{} }()
+	defer d.releaseRead()
+	if !bytes.Equal(result.Source, expectedSource) {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	clone := result.Tree.Clone()
+	if clone == nil {
+		return nil, ErrIncrementalParseUnavailable
+	}
+	for index := range edits {
+		clone.Edit(&edits[index])
 	}
 	return clone, nil
 }

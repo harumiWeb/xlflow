@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +31,27 @@ func TestPerformanceLoggingIsOptIn(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "performance operation=") {
 		t.Fatalf("performance output was emitted without opt-in: %s", output.String())
+	}
+}
+
+func TestServerLogIdentifiesExecutableWithoutPerformanceLogging(t *testing.T) {
+	var output bytes.Buffer
+	_, cleanup, err := New(Options{
+		RootDir: t.TempDir(), Config: config.Default(), Stderr: &output,
+		Build: BuildInfo{Version: "dev", Commit: "abc123-dirty", Date: "2026-08-28"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{strconv.Quote(executable), `version="dev"`, `commit="abc123-dirty"`, `build_date="2026-08-28"`} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("server provenance missing %q: %s", expected, output.String())
+		}
 	}
 }
 

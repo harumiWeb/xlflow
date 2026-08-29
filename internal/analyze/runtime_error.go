@@ -38,29 +38,33 @@ func (a Analyzer) deterministicRuntimeErrorFindingsWithArrayResult(file parsedFi
 		return nil
 	}
 
-	values := make(map[string]constexpr.Value, len(a.visibleConstantValues)+len(file.ConstantValues)+8)
-	for name, value := range a.visibleConstantValues {
-		values[name] = value
-	}
-	// Batch and realtime callers materialize the file-local cache once when
-	// VBA249 is enabled. Keep a fallback for direct helper callers that build a
-	// parsedFile by hand, but never rescan the complete source once per
-	// procedure in the normal analyzer path.
-	if file.ConstantValues == nil {
-		for name, value := range lint.ConstantValuesFromSource(string(file.Source), &file.IR, values) {
-			values[name] = value
-		}
-	} else {
-		for name, value := range file.ConstantValues {
-			values[name] = value
-		}
-	}
 	facts := proc.analysisFacts()
 	localNames := runtimeLocalNames(proc)
-	for name := range localNames {
-		delete(values, name)
+	var base constexpr.Environment
+	if file.RuntimeConstantBase != nil {
+		base = runtimeConstantScope{base: file.RuntimeConstantBase, hidden: localNames}
+	} else {
+		// Focused helper callers may omit the revision-scoped cache. Preserve the
+		// compatibility path while production batch/realtime analysis normalizes
+		// the large project environment only once per file.
+		values := make(map[string]constexpr.Value, len(a.visibleConstantValues)+len(file.ConstantValues)+8)
+		for name, value := range a.visibleConstantValues {
+			values[name] = value
+		}
+		if file.ConstantValues == nil {
+			for name, value := range lint.ConstantValuesFromSource(string(file.Source), &file.IR, values) {
+				values[name] = value
+			}
+		} else {
+			for name, value := range file.ConstantValues {
+				values[name] = value
+			}
+		}
+		for name := range localNames {
+			delete(values, name)
+		}
+		base = constexpr.NewValues(values)
 	}
-	base := constexpr.NewValues(values)
 	initial := runtimeLocalConstantState(file, proc, base)
 	findings := make([]Finding, 0)
 	seen := make(map[string]bool)
@@ -315,6 +319,19 @@ func runtimeConstantEnvironment(base constexpr.Environment, state runtimeConstan
 type runtimeConstantOverlay struct {
 	base  constexpr.Environment
 	state runtimeConstantState
+}
+
+type runtimeConstantScope struct {
+	base   constexpr.Environment
+	hidden map[string]bool
+}
+
+func (scope runtimeConstantScope) Resolve(name string) (constexpr.Value, bool) {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if scope.hidden[key] || scope.base == nil {
+		return constexpr.Value{}, false
+	}
+	return scope.base.Resolve(key)
 }
 
 func (overlay runtimeConstantOverlay) Resolve(name string) (constexpr.Value, bool) {

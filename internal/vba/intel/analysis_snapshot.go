@@ -106,7 +106,8 @@ type AnalysisSnapshot struct {
 	cfgReuseCount         atomic.Uint64
 	artifacts             *procedureArtifactStore
 
-	retired atomic.Bool
+	retired    atomic.Bool
+	retireDone chan struct{}
 }
 
 // AnalysisArtifacts contains derived values that were built for the exact
@@ -141,6 +142,7 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 		lineEnds:      lineEnds,
 		parseDocument: ast.ParseDocument,
 		artifacts:     newProcedureArtifactStore(),
+		retireDone:    make(chan struct{}),
 	}
 }
 
@@ -243,17 +245,28 @@ func NewIncrementalAnalysisSnapshot(doc Document, previous *AnalysisSnapshot, ed
 	if previous == nil || len(edits) == 0 || previous.Retired() {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
-	parsed, err := previous.ParsedDocument()
-	if err != nil || parsed == nil || !parsed.SourceMatches([]byte(previous.Source())) {
+	parsed, ready := previous.ParsedDocumentIfReady()
+	if !ready {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
-	next, err := ast.ParseDocumentIncremental(doc.Path, []byte(doc.Source), parsed, edits)
+	next, err := ast.ParseDocumentIncrementalIfAvailable(doc.Path, []byte(doc.Source), []byte(previous.Source()), parsed, edits)
 	if err != nil || next == nil {
 		return nil, ErrIncrementalSnapshotUnavailable
 	}
 	snapshot := NewAnalysisSnapshotWithParsedDocument(doc, next)
 	snapshot.artifacts = previous.artifacts.clone()
 	return snapshot, nil
+}
+
+// NewSuccessorAnalysisSnapshot captures a replacement revision without
+// parsing it synchronously. Completed immutable procedure artifacts remain
+// available for later changed-procedure reuse.
+func NewSuccessorAnalysisSnapshot(doc Document, previous *AnalysisSnapshot) *AnalysisSnapshot {
+	snapshot := NewAnalysisSnapshot(doc)
+	if previous != nil && !previous.Retired() {
+		snapshot.artifacts = previous.artifacts.clone()
+	}
+	return snapshot
 }
 
 // NewSuccessorAnalysisSnapshotWithParsedDocument creates a full-replacement
@@ -762,6 +775,20 @@ func (s *AnalysisSnapshot) ParsedDocument() (*ast.ParsedDocument, error) {
 	return s.parsedDocument, s.parsedErr
 }
 
+// ParsedDocumentIfReady returns the already-created parsed document without
+// waiting for another goroutine that is currently constructing it. It never
+// starts a parse itself.
+func (s *AnalysisSnapshot) ParsedDocumentIfReady() (*ast.ParsedDocument, bool) {
+	if s == nil || !s.parsedMu.TryLock() {
+		return nil, false
+	}
+	defer s.parsedMu.Unlock()
+	if s.retired.Load() || s.parsedDocument == nil || s.parsedErr != nil {
+		return nil, false
+	}
+	return s.parsedDocument, true
+}
+
 func (s *AnalysisSnapshot) parsedRecoveryIfReady() (ready, hasRecovery bool) {
 	if s == nil {
 		return false, false
@@ -808,11 +835,37 @@ func (s *AnalysisSnapshot) Retire() {
 	if s == nil || !s.retired.CompareAndSwap(false, true) {
 		return
 	}
-	s.parsedMu.Lock()
+	if s.parsedMu.TryLock() {
+		s.finishRetireLocked()
+		return
+	}
+	go func() {
+		s.parsedMu.Lock()
+		s.finishRetireLocked()
+	}()
+}
+
+// RetireAndWait is the shutdown boundary for callers that must observe parsed
+// resource cleanup. Ordinary revision replacement should use non-blocking
+// Retire so a parser for the obsolete revision cannot stall didChange.
+func (s *AnalysisSnapshot) RetireAndWait() {
+	if s == nil {
+		return
+	}
+	s.Retire()
+	if s.retireDone != nil {
+		<-s.retireDone
+	}
+}
+
+func (s *AnalysisSnapshot) finishRetireLocked() {
+	defer s.parsedMu.Unlock()
 	if s.parsedDocument != nil {
 		s.parsedDocument.Close()
 	}
-	s.parsedMu.Unlock()
+	if s.retireDone != nil {
+		close(s.retireDone)
+	}
 }
 
 func (s *AnalysisSnapshot) Retired() bool { return s != nil && s.retired.Load() }

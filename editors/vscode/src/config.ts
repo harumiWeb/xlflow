@@ -19,10 +19,32 @@ export interface XlflowConfig {
   testingAutoDiscover: boolean;
 }
 
+/**
+ * The Extension Host launch configuration uses this variable to point at the
+ * Go binary built from the current checkout. It is intentionally an
+ * environment variable rather than a workspace setting so F5 does not alter
+ * the user's normal xlflow executable selection.
+ */
+export const vscodeDebugExecutableEnvironmentVariable = "XLFLOW_VSCODE_DEBUG_PATH";
+
+export function vscodeDebugExecutablePath(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const value = environment[vscodeDebugExecutableEnvironmentVariable]?.trim();
+  return value === undefined || value.length === 0 ? undefined : value;
+}
+
+export function effectiveXlflowPath(
+  configuredPath: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return vscodeDebugExecutablePath(environment) ?? (configuredPath.trim() || "xlflow");
+}
+
 export function readConfig(): XlflowConfig {
   const config = vscode.workspace.getConfiguration("xlflow");
   return {
-    path: readString(config, "path", "xlflow"),
+    path: effectiveXlflowPath(readString(config, "path", "xlflow")),
     lspEnabled: config.get<boolean>("lsp.enabled", true),
     lspLogFile: readString(config, "lsp.logFile", ".xlflow/lsp.log"),
     lspLogFileConfigured: hasConfiguredValue(config, "lsp.logFile"),

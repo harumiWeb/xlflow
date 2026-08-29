@@ -2,17 +2,37 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "build xlflow LSP for Extension Host",
+      "type": "process",
+      "command": "powershell",
+      "windows": {
+        "command": "powershell.exe"
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/dev/build-vscode-lsp.ps1",
+        "-OutputPath",
+        "${workspaceFolder}/.vscode/xlflow-debug/xlflow.exe"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "build xlflow VS Code Extension",
+      "dependsOn": ["compile xlflow VS Code Extension", "build xlflow LSP for Extension Host"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
       "label": "compile xlflow VS Code Extension",
       "type": "process",
       "command": "pnpm",
       "windows": {
         "command": "pnpm.cmd"
       },
-      "args": [
-        "--dir",
-        "editors/vscode",
-        "compile"
-      ],
+      "args": ["--dir", "editors/vscode", "compile"],
       "problemMatcher": "$tsc",
       "group": "build"
     }

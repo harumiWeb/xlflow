@@ -121,11 +121,11 @@ func TestDocumentsApplyChangesFullFallbackAndRetainedRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	full, err := docs.applyChangesWithResult(uri, []documentContentChange{{text: "Sub B()\nEnd Sub\n"}}, 2)
-	if err != nil || !full.applied || full.parseMode != "full_fallback" || full.fallbackReason != "full_document_change" {
+	if err != nil || !full.applied || full.parseMode != "deferred_full" || full.fallbackReason != "full_document_change" {
 		t.Fatalf("full fallback = (%+v, %v)", full, err)
 	}
-	if full.document.Snapshot.ParseCount() != 1 {
-		t.Fatalf("full fallback parse count = %d, want 1", full.document.Snapshot.ParseCount())
+	if full.document.Snapshot.ParseCount() != 0 {
+		t.Fatalf("deferred full parse count = %d, want 0", full.document.Snapshot.ParseCount())
 	}
 	stale, err := docs.applyChangesWithResult(uri, []documentContentChange{{text: "Sub Stale()\nEnd Sub\n"}}, 2)
 	if err != nil || stale.applied || stale.document.Snapshot != full.document.Snapshot || stale.fallbackReason != "invalid_version" {
@@ -140,10 +140,69 @@ func TestDocumentsApplyChangesFullFallbackAndRetainedRecovery(t *testing.T) {
 	}
 }
 
+func TestDocumentsApplyChangesDoesNotWaitForBusyPreviousTree(t *testing.T) {
+	docs := newDocuments(t.TempDir())
+	defer docs.closeAll()
+	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
+	oldSource := "Sub A()\nEnd Sub\n"
+	opened, err := docs.open(uri, oldSource, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := opened.Snapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	readerDone := make(chan error, 1)
+	go func() {
+		readerDone <- parsed.Read(func(vbaast.ParsedView) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	result, err := docs.applyChangesWithResult(uri, []documentContentChange{{rng: protocolRange(0, 4, 0, 5), text: "B"}}, 2)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	if !result.applied || result.parseMode != "deferred_full" || result.fallbackReason != "incremental_parse_unavailable" {
+		close(release)
+		t.Fatalf("busy-tree change result = %+v", result)
+	}
+	if !opened.Snapshot.Retired() || result.document.Snapshot.ParseCount() != 0 {
+		close(release)
+		t.Fatalf("busy-tree lifecycle = oldRetired:%v parses:%d", opened.Snapshot.Retired(), result.document.Snapshot.ParseCount())
+	}
+	close(release)
+	if err := <-readerDone; err != nil {
+		t.Fatal(err)
+	}
+	parsedNext, err := result.document.Snapshot.ParsedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parsedNext.Read(func(view vbaast.ParsedView) error {
+		if string(view.Source) != "Sub B()\nEnd Sub\n" {
+			t.Fatalf("deferred source = %q", view.Source)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDocumentsApplyChangesIncrementalMultilineMatchesFullParse(t *testing.T) {
 	docs := newDocuments(t.TempDir())
 	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
-	if _, err := docs.open(uri, "Sub A()\nEnd Sub\n", 1); err != nil {
+	opened, err := docs.open(uri, "Sub A()\nEnd Sub\n", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := opened.Snapshot.ParsedDocument(); err != nil {
 		t.Fatal(err)
 	}
 	result, err := docs.applyChangesWithResult(uri, []documentContentChange{{rng: protocolRange(1, 0, 1, 0), text: "    Dim value As Long\n"}}, 2)

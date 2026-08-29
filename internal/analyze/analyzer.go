@@ -488,11 +488,13 @@ type parsedFile struct {
 	moduleFactsFingerprint      string
 	Parsed                      *vbaast.ParsedDocument
 	IntelDocument               intel.Document
+	ExpressionTypeResolver      *intel.DocumentExpressionTypeResolver
 	RangeValueModuleConstants   map[string]int
 	ArrayIntegerModuleConstants map[string]int
 	ArrayOptionBase             int
 	ArrayOptionBaseSet          bool
 	ConstantValues              map[string]constexpr.Value
+	RuntimeConstantBase         constexpr.Values
 	DataFlowModuleBindings      map[string]bool
 	// semanticQueryFacts is populated once the immutable revision capabilities
 	// (effects, resolution and array participant state) are ready.  Procedure
@@ -1769,7 +1771,7 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectContext(ctx context.Co
 // the snapshot-aware form used by LSP and other project callers that already
 // own a value-bearing constant environment.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, nil, nil, 0)
 }
 
 // SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext is
@@ -1777,10 +1779,18 @@ func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsContext(ctx c
 // and reads project-dependent call/access/event facts through resolution
 // views, avoiding a full resolved DocumentIR clone per file.
 func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
-	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution)
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, nil, 0)
 }
 
-func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView) ([]Finding, error) {
+// SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext
+// is the editor snapshot-aware form. Typed Excel rules reuse sourceDocument's
+// immutable document index instead of reparsing the complete buffer for every
+// expression they resolve.
+func SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument intel.Document, procedureWorkerLimit int) ([]Finding, error) {
+	return sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx, rootDir, cfg, doc, ir, controlFlow, typeDB, projectEffects, projectConstants, resolution, &sourceDocument, procedureWorkerLimit)
+}
+
+func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context, rootDir string, cfg config.Config, doc *vbaast.ParsedDocument, ir procedureir.DocumentIR, controlFlow vbacfg.Document, typeDB *vbadb.DB, projectEffects effects.ProjectSummary, projectConstants map[string]constexpr.Value, resolution *procedureir.ResolvedDocumentView, sourceDocument *intel.Document, procedureWorkerLimit int) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1797,6 +1807,24 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 	}
 	var findings []Finding
 	var queryRevision *semanticquery.Revision
+	var expressionDocument *intel.Document
+	var sourceExpressionResolver *intel.DocumentExpressionTypeResolver
+	if sourceDocument != nil && sourceDocument.Snapshot != nil && sourceDocument.Snapshot.Matches(*sourceDocument) {
+		prepared := *sourceDocument
+		expressionDocument = &prepared
+	} else if typeDB != nil {
+		var prepared intel.Document
+		if err := doc.ReadContext(ctx, func(view vbaast.ParsedView) error {
+			prepared = intel.Document{Path: view.Path, Source: string(view.Source)}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		expressionDocument = &prepared
+	}
+	if expressionDocument != nil {
+		sourceExpressionResolver, _ = (intel.Analyzer{RootDir: rootDir, Config: cfg, DB: typeDB}).NewDocumentExpressionTypeResolver(*expressionDocument)
+	}
 	defer func() {
 		if queryRevision != nil {
 			queryRevision.Close()
@@ -1840,6 +1868,13 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			ConstantValues:            constantValues,
 			DataFlowModuleBindings:    dataFlowModuleBindings,
 		}
+		if constantValues != nil {
+			file.RuntimeConstantBase = constexpr.NewValues(constantValues)
+		}
+		if expressionDocument != nil && expressionDocument.Path == view.Path && expressionDocument.Source == string(view.Source) {
+			file.IntelDocument = *expressionDocument
+			file.ExpressionTypeResolver = sourceExpressionResolver
+		}
 		file.ensureModuleAnalysisFacts()
 		file.moduleFactsFingerprint = semanticModuleFactsFingerprint(file)
 		materializeProcedureAnalysisPlans(&file, projectEffects, cfg.Analyze)
@@ -1860,6 +1895,20 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		analyzer := Analyzer{
 			RootDir: rootDir, Config: cfg, typeDB: typeDB,
 			visibleConstantValues: projectConstants, excelRootBindings: excelRootBindings,
+		}
+		if procedureWorkerLimit > 0 {
+			analyzer.analysisWorkerLimit = procedureWorkerLimit
+		}
+		if cfg.Analyze.DetectExcelCellAccessInLoops && typeDB != nil {
+			summaryFile := file
+			analyzer.excelLoopAccess = &excelLoopAccessIndex{
+				RootBindings:       excelRootBindings,
+				AllowLocalFallback: true,
+				LocalProcedures:    buildExcelProcedureIndexes([]parsedFile{summaryFile}),
+				SummaryBuilder: func() map[string]excelAccessSummary {
+					return buildRealtimeExcelLoopSummaries(summaryFile, typeDB, excelRootBindings, rootDir, cfg)
+				},
+			}
 		}
 		if dictionaryCollectionAnalysisEnabled(cfg.Analyze) && projectPlansDomain(cfg.Analyze, []parsedFile{file}, projectEffects, procedureDomainDictionary) {
 			analyzer.dictionaryCollection = buildDictionaryCollectionIndex([]parsedFile{file})
@@ -1899,18 +1948,11 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		// prepareSemanticQueryFacts attaches the immutable projection to the
 		// context-file slice; refresh the value copy used by realtime workers.
 		file = contextFiles[0]
-		for i, proc := range procedures {
-			if i&0x1f == 0 {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-			}
-			procedureFindings, err := analyzer.sourceRealtimeProcedureFindingsContext(ctx, file, proc, moduleDecls, worksheetCodenames, analysisCtx)
-			if err != nil {
-				return err
-			}
-			findings = append(findings, procedureFindings...)
+		procedureFindings, procedureErr := analyzer.sourceRealtimeProcedureFindingsBounded(ctx, file, procedures, moduleDecls, worksheetCodenames, analysisCtx)
+		if procedureErr != nil {
+			return procedureErr
 		}
+		findings = append(findings, procedureFindings...)
 		if cfg.Analyze.DetectNonShortCircuitObjectGuard {
 			guardFindings, err := analyzer.vba212ScanWithContext(ctx, file, procedures, nil, vba212Context{projectEffects: projectEffects})
 			if err != nil {
@@ -1943,6 +1985,85 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 		return nil
 	})
 	return findings, err
+}
+
+// sourceRealtimeProcedureFindingsBounded gives the single-file editor path the
+// same large-module parallel boundary as batch analysis. Results are merged in
+// source order so scheduling cannot change diagnostic ordering.
+func (a Analyzer) sourceRealtimeProcedureFindingsBounded(ctx context.Context, file parsedFile, procedures []sourceProcedure, moduleDecls map[string]sourceDeclaration, worksheetCodenames map[string]string, analysisCtx analysisContext) ([]Finding, error) {
+	workerLimit := runtime.GOMAXPROCS(0)
+	if a.analysisWorkerLimit > 0 {
+		workerLimit = a.analysisWorkerLimit
+	}
+	if workerLimit < 2 || len(procedures) < procedureParallelThreshold {
+		var findings []Finding
+		for i, proc := range procedures {
+			if i&0x1f == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
+			procedureFindings, err := a.sourceRealtimeProcedureFindingsContext(ctx, file, proc, moduleDecls, worksheetCodenames, analysisCtx)
+			if err != nil {
+				return nil, err
+			}
+			findings = append(findings, procedureFindings...)
+		}
+		return findings, nil
+	}
+	if workerLimit > len(procedures) {
+		workerLimit = len(procedures)
+	}
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make([][]Finding, len(procedures))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	var firstErr error
+	var errOnce sync.Once
+	workers.Add(workerLimit)
+	for range workerLimit {
+		go func() {
+			defer workers.Done()
+			workerFile := file
+			workerFile.Root = nil
+			for index := range jobs {
+				if err := workCtx.Err(); err != nil {
+					return
+				}
+				procedureFindings, err := a.sourceRealtimeProcedureFindingsContext(workCtx, workerFile, procedures[index], moduleDecls, worksheetCodenames, analysisCtx)
+				if err != nil {
+					errOnce.Do(func() {
+						firstErr = err
+						cancel()
+					})
+					return
+				}
+				results[index] = procedureFindings
+			}
+		}()
+	}
+sendJobs:
+	for index := range procedures {
+		select {
+		case <-workCtx.Done():
+			break sendJobs
+		case jobs <- index:
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var findings []Finding
+	for _, procedureFindings := range results {
+		findings = append(findings, procedureFindings...)
+	}
+	return findings, nil
 }
 
 // VBA206 is evaluated by intel.Diagnostics after this callback so the LSP can

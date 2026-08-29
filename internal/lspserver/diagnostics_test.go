@@ -18,6 +18,24 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
+func TestProcedureWorkerLimitSharesLSPProcessBudget(t *testing.T) {
+	tests := []struct {
+		total      int
+		concurrent int
+		want       int
+	}{
+		{total: 8, concurrent: 4, want: 2},
+		{total: 12, concurrent: 3, want: 4},
+		{total: 1, concurrent: 1, want: 1},
+		{total: 0, concurrent: 0, want: 1},
+	}
+	for _, test := range tests {
+		if got := procedureWorkerLimit(test.total, test.concurrent); got != test.want {
+			t.Fatalf("procedure worker limit (%d, %d) = %d, want %d", test.total, test.concurrent, got, test.want)
+		}
+	}
+}
+
 func TestDiagnosticsChangesCoalesceToLatestDebouncedGeneration(t *testing.T) {
 	s, timers, cleanup := newDiagnosticsTestServer(t)
 	defer cleanup()
