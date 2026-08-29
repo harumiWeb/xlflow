@@ -120,6 +120,8 @@ func parseDocumentContext(ctx context.Context, path string, source []byte, oldTr
 	var cancelDone chan struct{}
 	if ctx.Done() != nil {
 		cancellationFlag := new(uintptr)
+		var pinner runtime.Pinner
+		pinner.Pin(cancellationFlag)
 		//nolint:staticcheck // ParseWithOptions leaks non-nil ParseOptions handles in v0.25.0.
 		parser.parser.SetCancellationFlag(cancellationFlag)
 		parseDone = make(chan struct{})
@@ -136,6 +138,7 @@ func parseDocumentContext(ctx context.Context, path string, source []byte, oldTr
 			close(parseDone)
 			<-cancelDone
 			runtime.KeepAlive(cancellationFlag)
+			pinner.Unpin()
 		}()
 	}
 	tree := parser.parser.Parse(copySource, oldTree)
