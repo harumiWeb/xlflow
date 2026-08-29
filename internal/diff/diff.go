@@ -320,10 +320,3 @@ func sortedKeys[T any](m map[string]T) []string {
 	sort.Strings(keys)
 	return keys
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
