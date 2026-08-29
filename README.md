@@ -116,7 +116,7 @@ pull → fmt → edit → push → lint → test/run → inspect
 | Diffing                                           | Compare workbook cell values, formulas, sheet structure, and exported VBA source                                                                                             |
 | AI agents                                         | Return stable JSON and install bundled Skills for Codex, Claude, Cursor, Gemini, GitHub Copilot-style agent workflows, and other agents                                      |
 | LSP Server                                        | Provides features like code completion, jump-to-definition, and real-time diagnostics                                                                                        |
-| [VS Code Extension](<(editors/vscode/README.md)>) | Graphical user interface for all xlflow operations, offering an enhanced development experience with the LSP server                                                          |
+| [VS Code Extension](editors/vscode/README.md) | Graphical user interface for all xlflow operations, offering an enhanced development experience with the LSP server                                                          |
 
 Formula snapshots can also be created outside an xlflow workspace:
 

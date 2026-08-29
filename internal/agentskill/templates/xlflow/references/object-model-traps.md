@@ -66,7 +66,7 @@ their counts can exceed the number of cells; both are right at once and the
 totals will not reconcile, with no error to notice.
 
 **Safe rule.** Do not derive one criterion from another by negation. When a
-column may hold text that looks numeric, either normalise the column before
+column may hold text that looks numeric, either normalize the column before
 counting, or state the comparison you actually mean and verify both halves
 against the row count.
 

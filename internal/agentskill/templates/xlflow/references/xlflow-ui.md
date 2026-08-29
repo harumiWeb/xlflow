@@ -75,7 +75,7 @@ Supported `--filedialog` kinds:
 - `save-as`
 - `folder`
 
-Repeat the same `kind:id=value` flag to supply multi-select paths in order. Use `@cancel` to represent a cancelled file dialog.
+Repeat the same `kind:id=value` flag to supply multi-select paths in order. Use `@cancel` to represent a canceled file dialog.
 
 `--ui-stream` writes realtime `XlflowUI` summaries to stderr, not stdout, so `--json` stdout remains machine-readable. Example stderr lines:
 

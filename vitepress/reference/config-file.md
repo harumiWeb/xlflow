@@ -11,7 +11,7 @@ The `[fmt]` table controls the source formatter. These options are read by `fmt`
 | `keyword_casing`      | Normalize VBA keyword casing.                                        |
 | `builtin_casing`      | Normalize curated built-in names without recasing user declarations. |
 
-xlflow reads `xlflow.toml` from the project root. It is the single source of truth for workbook paths, source directories, VBE behaviour, and static analysis rules.
+xlflow reads `xlflow.toml` from the project root. It is the single source of truth for workbook paths, source directories, VBE behavior, and static analysis rules.
 
 ## Full annotated example
 
