@@ -78,14 +78,31 @@ End Sub
 		t.Fatal(err)
 	}
 
+	analysisCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	result := make(chan error, 1)
-	go func() {
-		_, analysisErr := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(
-			context.Background(), root, config.Default(), parsed, ir, controlFlow, typeDB,
-			effects.ProjectSummary{}, nil, nil, snapshot.Document(), 1,
-		)
-		result <- analysisErr
-	}()
+	readErr := parsed.ReadContext(context.Background(), func(vbaast.ParsedView) error {
+		go func() {
+			_, analysisErr := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewDocumentContext(
+				analysisCtx, root, config.Default(), parsed, ir, controlFlow, typeDB,
+				effects.ProjectSummary{}, nil, nil, snapshot.Document(), 1,
+			)
+			result <- analysisErr
+		}()
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case analysisErr := <-result:
+			return fmt.Errorf("snapshot-aware realtime analysis completed while the parsed-document read lease was held: %v", analysisErr)
+		case <-timer.C:
+			return nil
+		}
+	})
+	if readErr != nil {
+		cancel()
+		snapshot.Retire()
+		t.Fatal(readErr)
+	}
 	select {
 	case err := <-result:
 		snapshot.RetireAndWait()
@@ -93,6 +110,7 @@ End Sub
 			t.Fatalf("snapshot-aware realtime analysis: %v", err)
 		}
 	case <-time.After(3 * time.Second):
+		cancel()
 		snapshot.Retire()
 		t.Fatal("snapshot-aware realtime analysis reentered the parsed-document read gate")
 	}
@@ -653,6 +671,89 @@ End Sub
 	}
 	if got := findingsByCode(realtime, "VBA225"); len(got) != 1 || !strings.Contains(got[0].Message, "ReadLocal") {
 		t.Fatalf("realtime helper VBA225 findings = %+v, want one local helper finding", got)
+	}
+}
+
+func TestExcelProcedureHasLocalLoopCallIncludesResolvedQualifiedCalls(t *testing.T) {
+	receiver := "Me"
+	file := parsedFile{
+		Path: "Realtime.cls",
+		IR: procedureir.DocumentIR{
+			Path: "Realtime.cls",
+			Procedures: []procedureir.ProcedureIR{
+				{Symbol: procedureir.ProcedureSymbol{Name: "ReadLocal", QualifiedName: "Realtime.ReadLocal", Kind: procedureir.ProcedureSub, DeclarationRange: vbaast.Range{StartLine: 1}}},
+			},
+		},
+	}
+	proc := sourceProcedure{Calls: newReadOnlySpan([]procedureir.CallSite{{
+		StatementID: 2,
+		Callee:      procedureir.Callee{Text: "Me.ReadLocal", BaseName: "ReadLocal", Receiver: &receiver},
+		Resolution: procedureir.CallResolution{
+			Status:     procedureir.ResolutionMatched,
+			Candidates: []procedureir.Candidate{{QualifiedName: "Realtime.ReadLocal", Kind: string(procedureir.ProcedureSub), File: "Realtime.cls", Line: 1}},
+		},
+	}})}
+	regions := []excelLoopRegion{{StatementID: 1, Body: map[int]bool{2: true}}}
+	if !excelProcedureHasLocalLoopCall(file, proc, regions) {
+		t.Fatal("resolved qualified helper call inside a loop did not request local summaries")
+	}
+}
+
+func TestVBA225RealtimeResolvesQualifiedLocalHelper(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "classes", "Realtime.cls")
+	source := []byte(`Option Explicit
+Private Sub ReadLocal(ByVal rng As Range, ByVal i As Long)
+  Debug.Print rng.Cells(i, 1).Value2
+End Sub
+
+Private Sub Outer(ByVal rng As Range, ByVal i As Long)
+  Me.ReadLocal rng, i
+End Sub
+
+Public Sub Run()
+  Dim rng As Range
+  Dim i As Long
+  Set rng = Range("A1:A100")
+  For i = 1 To 100
+    Me.Outer rng, i
+  Next i
+End Sub
+`)
+	parsed, err := vbaast.ParseDocument(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parsed.Close()
+	ir, err := procedureir.BuildParsedContext(context.Background(), procedureir.BuildOptions{
+		RootDir: root, Path: path, ModuleName: "Realtime", ModuleKind: "class",
+	}, parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlFlow, err := vbacfg.BuildDocumentContext(context.Background(), ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typeDB, err := vbadb.LoadBuiltin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution := procedureir.ResolveView(ir, procedureir.NewResolver([]procedureir.ResolverSymbol{
+		{Name: "ReadLocal", Module: "Realtime", ModuleKind: "class", Kind: "sub", Visibility: "Private", File: ir.Path, Line: 2},
+		{Name: "Outer", Module: "Realtime", ModuleKind: "class", Kind: "sub", Visibility: "Private", File: ir.Path, Line: 6},
+	}))
+	findings, err := SourceRealtimeFindingsParsedIRCFGWithTypeDBAndProjectConstantsViewContext(
+		context.Background(), root, config.Default(), parsed, ir, controlFlow, typeDB,
+		effects.ProjectSummary{}, nil, &resolution,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA225")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "Outer") {
+		t.Fatalf("qualified local helper VBA225 findings = %+v, want one finding", got)
 	}
 }
 

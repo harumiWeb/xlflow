@@ -897,7 +897,9 @@ func (x *workspaceAnalysisIndex) buildInitialDeclarations(files []symbols.Source
 					}
 					entry, parseErr := parser(jobCtx, file, source)
 					if parseErr != nil {
-						x.declarations.recordInitialFailure(file.Path)
+						if jobCtx.Err() == nil {
+							x.declarations.recordInitialFailure(file.Path)
+						}
 						x.finishInitialDeclarationJob(job, true)
 						return
 					}

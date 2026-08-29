@@ -283,6 +283,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
   assert.strictEqual(config.get<string>("path"), "xlflow");
   assert.strictEqual(config.get<boolean>("lsp.performanceLogging"), false);
   const previousDebugPath = process.env[vscodeDebugExecutableEnvironmentVariable];
+  const expectedRestoredPath = previousDebugPath?.trim() || "xlflow";
   process.env[vscodeDebugExecutableEnvironmentVariable] = "C:\\worktree\\xlflow.exe";
   try {
     assert.strictEqual(readConfig().path, "C:\\worktree\\xlflow.exe");
@@ -293,7 +294,7 @@ async function runAssertions(config: vscode.WorkspaceConfiguration): Promise<voi
       process.env[vscodeDebugExecutableEnvironmentVariable] = previousDebugPath;
     }
   }
-  assert.strictEqual(readConfig().path, "xlflow");
+  assert.strictEqual(readConfig().path, expectedRestoredPath);
   assert.strictEqual(
     vscodeDebugExecutablePath({
       [vscodeDebugExecutableEnvironmentVariable]: " C:\\worktree\\xlflow.exe ",

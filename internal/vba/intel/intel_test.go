@@ -3094,6 +3094,7 @@ End Sub
 `,
 	}
 	snapshot := NewAnalysisSnapshot(doc)
+	defer snapshot.RetireAndWait()
 	doc = snapshot.Document()
 	resolver, ok := analyzer.NewDocumentExpressionTypeResolver(doc)
 	if !ok {

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
@@ -77,6 +78,11 @@ type excelAccessSummary struct {
 	Members    map[string]bool
 }
 
+type excelProcedureIndex struct {
+	LocalNames      map[string]int
+	LocalCandidates map[string]bool
+}
+
 type excelRangeVariables struct {
 	Range        map[string]bool
 	PerCell      map[string]bool
@@ -88,6 +94,63 @@ type excelLoopAccessIndex struct {
 	Summaries          map[string]excelAccessSummary
 	RootBindings       excelRootBindingIndex
 	AllowLocalFallback bool
+	SummaryBuilder     func() map[string]excelAccessSummary
+	LocalProcedures    map[string]excelProcedureIndex
+	summaryOnce        sync.Once
+}
+
+func (index *excelLoopAccessIndex) summaries() map[string]excelAccessSummary {
+	if index == nil {
+		return nil
+	}
+	index.summaryOnce.Do(func() {
+		if index.Summaries == nil && index.SummaryBuilder != nil {
+			index.Summaries = index.SummaryBuilder()
+		}
+	})
+	return index.Summaries
+}
+
+func excelProcedureIndexKey(file parsedFile) string {
+	path := strings.TrimSpace(file.IR.Path)
+	if path == "" {
+		path = strings.TrimSpace(file.Path)
+	}
+	return strings.ToLower(path)
+}
+
+func buildExcelProcedureIndex(file parsedFile) excelProcedureIndex {
+	index := excelProcedureIndex{
+		LocalNames:      map[string]int{},
+		LocalCandidates: map[string]bool{},
+	}
+	for _, procedure := range file.IR.Procedures {
+		index.LocalNames[strings.ToLower(procedure.Symbol.Name)]++
+		index.LocalCandidates[excelCandidateKey(procedureir.Candidate{
+			QualifiedName: procedure.Symbol.QualifiedName,
+			Kind:          string(procedure.Symbol.Kind),
+			File:          file.IR.Path,
+			Line:          procedure.Symbol.DeclarationRange.StartLine,
+		})] = true
+	}
+	return index
+}
+
+func buildExcelProcedureIndexes(files []parsedFile) map[string]excelProcedureIndex {
+	indexes := make(map[string]excelProcedureIndex, len(files))
+	for _, file := range files {
+		indexes[excelProcedureIndexKey(file)] = buildExcelProcedureIndex(file)
+	}
+	return indexes
+}
+
+func (index *excelLoopAccessIndex) localProcedureIndex(file parsedFile) excelProcedureIndex {
+	if index != nil {
+		if local, ok := index.LocalProcedures[excelProcedureIndexKey(file)]; ok {
+			return local
+		}
+	}
+	return buildExcelProcedureIndex(file)
 }
 
 type excelRootBinding struct {
@@ -154,8 +217,9 @@ func excelModuleVariableKind(moduleKind string) string {
 
 func buildExcelLoopAccessIndex(files []parsedFile, db *vbadb.DB, rootDir string, cfg config.Config) *excelLoopAccessIndex {
 	index := &excelLoopAccessIndex{
-		Summaries:    map[string]excelAccessSummary{},
-		RootBindings: buildExcelRootBindingIndex(files),
+		Summaries:       map[string]excelAccessSummary{},
+		RootBindings:    buildExcelRootBindingIndex(files),
+		LocalProcedures: buildExcelProcedureIndexes(files),
 	}
 	if db == nil {
 		return index
@@ -266,9 +330,23 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 		return nil
 	}
 	summaries := map[string]excelAccessSummary{}
-	needHelperSummaries := a.excelLoopAccess == nil && excelProcedureHasLocalLoopCall(file, proc, regions)
+	var localProcedures excelProcedureIndex
+	needHelperSummaries := false
 	if a.excelLoopAccess != nil {
-		summaries = a.excelLoopAccess.Summaries
+		localProcedures = a.excelLoopAccess.localProcedureIndex(file)
+	} else {
+		localProcedures = buildExcelProcedureIndex(file)
+	}
+	if a.excelLoopAccess == nil || a.excelLoopAccess.SummaryBuilder != nil {
+		needHelperSummaries = excelProcedureHasLocalLoopCallWithIndex(proc, regions, localProcedures)
+	}
+	if a.excelLoopAccess != nil {
+		// Batch indexes already own their complete summary map. Realtime indexes
+		// install a lazy builder and only need it for a local helper call inside
+		// this procedure's loop.
+		if a.excelLoopAccess.SummaryBuilder == nil || needHelperSummaries {
+			summaries = a.excelLoopAccess.summaries()
+		}
 	} else if needHelperSummaries {
 		// Realtime analysis owns one document and does not have the batch
 		// resolver. Build same-document summaries so local helpers still work.
@@ -413,22 +491,31 @@ func (a Analyzer) excelLoopAccessFindings(file parsedFile, proc sourceProcedure)
 }
 
 func excelProcedureHasLocalLoopCall(file parsedFile, proc sourceProcedure, regions []excelLoopRegion) bool {
-	localNames := map[string]int{}
-	for _, procedure := range file.IR.Procedures {
-		localNames[strings.ToLower(procedure.Symbol.Name)]++
-	}
+	return excelProcedureHasLocalLoopCallWithIndex(proc, regions, buildExcelProcedureIndex(file))
+}
+
+func excelProcedureHasLocalLoopCallWithIndex(proc sourceProcedure, regions []excelLoopRegion, localProcedures excelProcedureIndex) bool {
 	for call := range proc.Calls.All() {
+		inLoop := false
+		for _, region := range regions {
+			if region.Body[call.StatementID] || region.StatementID == call.StatementID {
+				inLoop = true
+				break
+			}
+		}
+		if !inLoop {
+			continue
+		}
+		if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 && localProcedures.LocalCandidates[excelCandidateKey(call.Resolution.Candidates[0])] {
+			return true
+		}
 		if call.Callee.Receiver != nil || strings.TrimSpace(call.Callee.BaseName) == "" {
 			continue
 		}
-		if localNames[strings.ToLower(call.Callee.BaseName)] != 1 {
+		if localProcedures.LocalNames[strings.ToLower(call.Callee.BaseName)] != 1 {
 			continue
 		}
-		for _, region := range regions {
-			if region.Body[call.StatementID] || region.StatementID == call.StatementID {
-				return true
-			}
-		}
+		return true
 	}
 	return false
 }
@@ -458,7 +545,7 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 			key := excelProcedureKey(file.IR, procedure.IR.Symbol)
 			current := summaries[key]
 			for call := range procedure.Calls.All() {
-				callee, ok := excelHelperProcedureKey(file, call)
+				callee, ok := excelHelperSummaryKey(file, call)
 				if !ok {
 					continue
 				}
@@ -470,6 +557,13 @@ func buildRealtimeExcelLoopSummaries(file parsedFile, db *vbadb.DB, rootBindings
 		}
 	}
 	return summaries
+}
+
+func excelHelperSummaryKey(file parsedFile, call procedureir.CallSite) (string, bool) {
+	if call.Resolution.Status == procedureir.ResolutionMatched && len(call.Resolution.Candidates) == 1 {
+		return excelCandidateKey(call.Resolution.Candidates[0]), true
+	}
+	return excelHelperProcedureKey(file, call)
 }
 
 func buildRealtimeExcelRootBindingIndex(rootDir string, cfg config.Config, file parsedFile) excelRootBindingIndex {

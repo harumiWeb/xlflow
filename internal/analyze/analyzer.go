@@ -1900,10 +1900,14 @@ func sourceRealtimeFindingsParsedIRCFGWithResolutionContext(ctx context.Context,
 			analyzer.analysisWorkerLimit = procedureWorkerLimit
 		}
 		if cfg.Analyze.DetectExcelCellAccessInLoops && typeDB != nil {
+			summaryFile := file
 			analyzer.excelLoopAccess = &excelLoopAccessIndex{
-				Summaries:          buildRealtimeExcelLoopSummaries(file, typeDB, excelRootBindings, rootDir, cfg),
 				RootBindings:       excelRootBindings,
 				AllowLocalFallback: true,
+				LocalProcedures:    buildExcelProcedureIndexes([]parsedFile{summaryFile}),
+				SummaryBuilder: func() map[string]excelAccessSummary {
+					return buildRealtimeExcelLoopSummaries(summaryFile, typeDB, excelRootBindings, rootDir, cfg)
+				},
 			}
 		}
 		if dictionaryCollectionAnalysisEnabled(cfg.Analyze) && projectPlansDomain(cfg.Analyze, []parsedFile{file}, projectEffects, procedureDomainDictionary) {

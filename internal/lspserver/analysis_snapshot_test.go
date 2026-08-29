@@ -142,6 +142,7 @@ func TestDocumentsApplyChangesFullFallbackAndRetainedRecovery(t *testing.T) {
 
 func TestDocumentsApplyChangesDoesNotWaitForBusyPreviousTree(t *testing.T) {
 	docs := newDocuments(t.TempDir())
+	defer docs.closeAll()
 	uri := pathToFileURI(filepath.Join(t.TempDir(), "Main.bas"))
 	oldSource := "Sub A()\nEnd Sub\n"
 	opened, err := docs.open(uri, oldSource, 1)
