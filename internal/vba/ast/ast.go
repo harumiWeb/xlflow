@@ -56,7 +56,13 @@ type ParsedDocument struct {
 // supplied source is copied so callers cannot mutate the bytes backing a
 // shared parsed document after construction.
 func ParseDocument(path string, source []byte) (*ParsedDocument, error) {
-	return parseDocument(path, source, nil)
+	return ParseDocumentContext(context.Background(), path, source)
+}
+
+// ParseDocumentContext parses immutable source while allowing tree-sitter to
+// stop at a cooperative cancellation checkpoint.
+func ParseDocumentContext(ctx context.Context, path string, source []byte) (*ParsedDocument, error) {
+	return parseDocumentContext(ctx, path, source, nil)
 }
 
 // ParseDocumentIncremental parses source using an edited clone of previous's
@@ -73,7 +79,7 @@ func ParseDocumentIncremental(path string, source []byte, previous *ParsedDocume
 		return nil, err
 	}
 	defer oldTree.Close()
-	return parseDocument(path, source, oldTree)
+	return parseDocumentContext(context.Background(), path, source, oldTree)
 }
 
 // ParseDocumentIncrementalIfAvailable performs an incremental parse only when
@@ -88,19 +94,40 @@ func ParseDocumentIncrementalIfAvailable(path string, source, previousSource []b
 		return nil, err
 	}
 	defer oldTree.Close()
-	return parseDocument(path, source, oldTree)
+	return parseDocumentContext(context.Background(), path, source, oldTree)
 }
 
-func parseDocument(path string, source []byte, oldTree *tree_sitter.Tree) (*ParsedDocument, error) {
+func parseDocumentContext(ctx context.Context, path string, source []byte, oldTree *tree_sitter.Tree) (*ParsedDocument, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	parser, err := NewParser()
 	if err != nil {
 		return nil, err
 	}
 	defer parser.Close()
 	copySource := append([]byte(nil), source...)
-	tree := parser.parser.Parse(copySource, oldTree)
+	var options *tree_sitter.ParseOptions
+	if ctx.Done() != nil {
+		options = &tree_sitter.ParseOptions{ProgressCallback: func(tree_sitter.ParseState) bool {
+			return ctx.Err() != nil
+		}}
+	}
+	tree := parser.parser.ParseWithOptions(func(index int, _ tree_sitter.Point) []byte {
+		if index < len(copySource) {
+			return copySource[index:]
+		}
+		return []byte{}
+	}, oldTree, options)
 	if tree == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, ErrIncrementalParseUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		tree.Close()
+		return nil, err
 	}
 	root := tree.RootNode()
 	if root == nil {

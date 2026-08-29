@@ -32,6 +32,24 @@ func TestDiagnosticsContextReturnsNoPartialResultsWhenAlreadyCanceled(t *testing
 	}
 }
 
+func TestDocumentSymbolsContextChecksCancellationBeforeParsing(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+	parsed := false
+	snapshot.parseDocument = func(path string, source []byte) (*vbaast.ParsedDocument, error) {
+		parsed = true
+		return vbaast.ParseDocument(path, source)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (Analyzer{}).DocumentSymbolsContext(ctx, snapshot.Document())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled document symbols = %v, want context.Canceled", err)
+	}
+	if parsed {
+		t.Fatal("canceled document symbols started parsing")
+	}
+}
+
 func TestDiagnosticsWrapperMatchesDiagnosticsContext(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
 	doc := Document{

@@ -580,11 +580,20 @@ func (a Analyzer) DocumentSymbols(doc Document) ([]Symbol, error) {
 // DocumentSymbolsContext extracts source symbols with cooperative CST-walk
 // cancellation while preserving the snapshot's retryable lazy cache.
 func (a Analyzer) DocumentSymbolsContext(ctx context.Context, doc Document) ([]Symbol, error) {
-	parsed, closeParsed, err := parsedDocumentForDocument(doc)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	parsed, closeParsed, err := parsedDocumentForDocumentContext(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
 	defer closeParsed()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return a.documentSymbolsParsedContext(ctx, doc, parsed)
 }
 
