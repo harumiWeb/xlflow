@@ -826,6 +826,51 @@ func benchmarkIssue491OpenImmediateInteractive(b *testing.B, fixture lspBenchmar
 	}
 }
 
+func benchmarkIssue491DuringFullDiagnostics(b *testing.B, fixture lspBenchmarkFixture, name string, request func(*Server) error) {
+	b.Run("Lifecycle/"+name+"DuringFullDiagnostics", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s, cleanup := newLSPBenchmarkServerWithCleanup(b, fixture)
+			doc, err := s.docs.getOrRead(fixture.largeURI)
+			if err != nil {
+				b.Fatal(err)
+			}
+			state := &diagnosticState{open: true, generation: 1, latest: doc}
+			started := make(chan struct{}, 1)
+			release := make(chan struct{})
+			s.performanceHook = func(stage, path string) {
+				if path == fixture.largePath && stage == "diagnostics-full-start" {
+					select {
+					case started <- struct{}{}:
+					default:
+					}
+					<-release
+				}
+			}
+			s.diagWorkers.Add(1)
+			done := make(chan struct{})
+			go func() {
+				s.runDocumentAnalysis(context.Background(), fixture.largeURI, state, 1, doc, nil, false, intel.DiagnosticModeFull)
+				close(done)
+			}()
+			waitLSPStartupEvent(b, started)
+			b.StartTimer()
+			if err := request(s); err != nil {
+				b.Fatal(err)
+			}
+			b.StopTimer()
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				b.Fatal("full diagnostics did not finish")
+			}
+			cleanup()
+		}
+	})
+}
+
 func benchmarkIssue491Lifecycle(b *testing.B, fixture lspBenchmarkFixture) {
 	b.Run("Lifecycle/InitialFastDiagnostics", func(b *testing.B) {
 		b.ReportAllocs()
@@ -897,52 +942,21 @@ func benchmarkIssue491Lifecycle(b *testing.B, fixture lspBenchmarkFixture) {
 		}
 	})
 
-	b.Run("Lifecycle/HoverDuringFullDiagnostics", func(b *testing.B) {
-		memberLine := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
-		params := &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+	memberLine := benchmarkSourceLine(fixture.largeSource, "    Debug.Print cellRef.Address")
+	benchmarkIssue491DuringFullDiagnostics(b, fixture, "Hover", func(s *Server) error {
+		_, err := s.hover(nil, &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.largeURI)},
 			Position:     protocol.Position{Line: protocol.UInteger(memberLine), Character: protocol.UInteger(len("    Debug.Print "))},
-		}}
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			s, cleanup := newLSPBenchmarkServerWithCleanup(b, fixture)
-			doc, err := s.docs.getOrRead(fixture.largeURI)
-			if err != nil {
-				b.Fatal(err)
-			}
-			state := &diagnosticState{open: true, generation: 1, latest: doc}
-			started := make(chan struct{}, 1)
-			release := make(chan struct{})
-			s.performanceHook = func(stage, path string) {
-				if path == fixture.largePath && stage == "diagnostics-full-start" {
-					select {
-					case started <- struct{}{}:
-					default:
-					}
-					<-release
-				}
-			}
-			s.diagWorkers.Add(1)
-			done := make(chan struct{})
-			go func() {
-				s.runDocumentAnalysis(context.Background(), fixture.largeURI, state, 1, doc, nil, false, intel.DiagnosticModeFull)
-				close(done)
-			}()
-			waitLSPStartupEvent(b, started)
-			b.StartTimer()
-			if _, err := s.hover(nil, params); err != nil {
-				b.Fatal(err)
-			}
-			b.StopTimer()
-			close(release)
-			select {
-			case <-done:
-			case <-time.After(30 * time.Second):
-				b.Fatal("full diagnostics did not finish")
-			}
-			cleanup()
-		}
+		}})
+		return err
+	})
+
+	benchmarkIssue491DuringFullDiagnostics(b, fixture, "Completion", func(s *Server) error {
+		_, err := s.completion(nil, &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(fixture.largeURI)},
+			Position:     protocol.Position{Line: protocol.UInteger(memberLine), Character: protocol.UInteger(len("    Debug.Print cellRef."))},
+		}})
+		return err
 	})
 
 	b.Run("Lifecycle/DefinitionDuringWorkspaceIndexing", func(b *testing.B) {

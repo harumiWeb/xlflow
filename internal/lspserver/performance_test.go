@@ -436,7 +436,7 @@ func TestSemanticTokenCachePerformanceReportsMissHitAndGenerationTime(t *testing
 	if _, err := s.docs.open(uri, "Option Explicit\n", 3); err != nil {
 		t.Fatal(err)
 	}
-	s.semanticTokenGenerator = func(intel.Document, []intel.Document) ([]intel.SemanticToken, error) {
+	s.semanticTokenGenerator = func(context.Context, intel.Document, []intel.Document) ([]intel.SemanticToken, error) {
 		return []intel.SemanticToken{{
 			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: 6}},
 			Type:  intel.SemanticTokenKeyword,
@@ -571,13 +571,12 @@ func TestLSPPreparationTelemetryReportsStagesAndCounters(t *testing.T) {
 func TestAnalysisPermitPreCanceledContextDoesNotWait(t *testing.T) {
 	var output bytes.Buffer
 	s := &Server{
-		performance:     newPerformanceRecorder(true, log.New(&output, "", 0)),
-		analysisPermits: make(chan struct{}, 1),
+		performance:       newPerformanceRecorder(true, log.New(&output, "", 0)),
+		analysisScheduler: newAnalysisScheduler(1),
 	}
-	s.analysisPermits <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if release, _, err := s.acquireAnalysisPermit(ctx, "background"); release != nil || !errors.Is(err, context.Canceled) {
+	if release, _, err := s.acquireAnalysisPermit(ctx, analysisWorkBackground); release != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("acquire canceled = (release=%v, err=%v)", release != nil, err)
 	}
 	if got := s.performance.counterTotal(performanceCounterBackgroundPermitWaits); got != 0 {
@@ -586,24 +585,70 @@ func TestAnalysisPermitPreCanceledContextDoesNotWait(t *testing.T) {
 	if strings.Contains(output.String(), `stage="permitWait"`) {
 		t.Fatalf("pre-canceled permit emitted a wait record: %s", output.String())
 	}
-	<-s.analysisPermits
+}
+
+func TestAnalysisPermitFastWaitDoesNotIncrementInteractiveOrBackgroundCounters(t *testing.T) {
+	var output bytes.Buffer
+	s := &Server{
+		performance:       newPerformanceRecorder(true, log.New(&output, "", 0)),
+		analysisScheduler: newAnalysisScheduler(1),
+	}
+	holder, _, err := s.acquireAnalysisPermit(context.Background(), analysisWorkFast)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, acquireErr := s.acquireAnalysisPermit(ctx, analysisWorkFast)
+		done <- acquireErr
+	}()
+	waitForAnalysisWaiter(t, s.analysisScheduler, analysisWorkFast)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Fast wait error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Fast waiter did not observe cancellation")
+	}
+	holder()
+	if got := s.performance.counterTotal(performanceCounterInteractivePermitWaits); got != 0 {
+		t.Fatalf("interactive permit waits = %d, want 0 for Fast work", got)
+	}
+	if got := s.performance.counterTotal(performanceCounterBackgroundPermitWaits); got != 0 {
+		t.Fatalf("background permit waits = %d, want 0 for Fast work", got)
+	}
+	if !strings.Contains(output.String(), `class="fast"`) || !strings.Contains(output.String(), `analysis_permit_wait_ms=`) {
+		t.Fatalf("Fast permit telemetry missing wait record:\n%s", output.String())
+	}
 }
 
 func TestAnalysisPermitInteractivePriority(t *testing.T) {
-	s := &Server{analysisPermits: make(chan struct{}, 1)}
-	holderRelease, _, err := s.acquireAnalysisPermit(context.Background(), "background")
+	var output bytes.Buffer
+	s := &Server{
+		performance:       newPerformanceRecorder(true, log.New(&output, "", 0)),
+		analysisScheduler: newAnalysisScheduler(2),
+	}
+	backgroundHolderRelease, _, err := s.acquireAnalysisPermit(context.Background(), analysisWorkBackground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fastHolderRelease, _, err := s.acquireAnalysisPermit(context.Background(), analysisWorkFast)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	backgroundDone := make(chan func(), 1)
 	go func() {
-		release, _, acquireErr := s.acquireAnalysisPermit(context.Background(), "background")
+		release, _, acquireErr := s.acquireAnalysisPermit(context.Background(), analysisWorkBackground)
 		if acquireErr != nil {
 			return
 		}
 		backgroundDone <- release
 	}()
+	waitForAnalysisWaiter(t, s.analysisScheduler, analysisWorkBackground)
 	select {
 	case release := <-backgroundDone:
 		release()
@@ -613,21 +658,18 @@ func TestAnalysisPermitInteractivePriority(t *testing.T) {
 
 	interactiveDone := make(chan func(), 1)
 	go func() {
-		release, _, acquireErr := s.acquireAnalysisPermit(context.Background(), "interactive")
+		release, _, acquireErr := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
 		if acquireErr != nil {
 			return
 		}
 		interactiveDone <- release
 	}()
-	deadline := time.Now().Add(time.Second)
-	for s.interactivePermitWaiters.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if s.interactivePermitWaiters.Load() == 0 {
+	waitForAnalysisWaiter(t, s.analysisScheduler, analysisWorkInteractive)
+	if s.analysisScheduler.waiterCount(analysisWorkInteractive) == 0 {
 		t.Fatal("interactive waiter did not register")
 	}
 
-	holderRelease()
+	fastHolderRelease()
 	var interactiveRelease func()
 	select {
 	case interactiveRelease = <-interactiveDone:
@@ -640,11 +682,41 @@ func TestAnalysisPermitInteractivePriority(t *testing.T) {
 		t.Fatal("background waiter bypassed the interactive waiter")
 	default:
 	}
+	backgroundHolderRelease()
 	interactiveRelease()
 	select {
 	case release := <-backgroundDone:
 		release()
 	case <-time.After(time.Second):
 		t.Fatal("background waiter did not resume after interactive release")
+	}
+	for _, expected := range []string{
+		`interactive_wait_ms=`,
+		`background_wait_ms=`,
+		`analysis_permit_wait_ms=`,
+		`current_workers=`,
+		`max_active_workers=`,
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("analysis scheduler telemetry missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func waitForAnalysisWaiter(t *testing.T, scheduler *analysisScheduler, class analysisWorkClass) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if scheduler.waiterCount(class) > 0 {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("%s waiter did not register", class)
+		}
 	}
 }

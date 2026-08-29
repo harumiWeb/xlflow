@@ -27,6 +27,34 @@ postings are complete, while semantic preparation publishes the existing
 `operation="workspaceSymbols/index/initial"` after IR/CFG/call-site entries are
 complete. Neither record changes LSP response fields.
 
+## Analysis scheduling contract
+
+The server has one bounded analysis scheduler. Its admission order is
+`interactive`, `fast`, then `background`:
+
+- interactive: completion, signature help, hover, definition, document
+  symbols, and CodeLens;
+- fast: Fast diagnostics and the document-local work needed before their first
+  publication;
+- background: Full diagnostics, workspace semantic indexing, deferred semantic
+  overlays and project preparation, and semantic-token generation on a cache
+  miss.
+
+For a total budget greater than one, background work may use at most
+`total_budget - 1` permits. This reserve prevents Full diagnostics and semantic
+indexing from consuming the complete practical execution budget. A one-permit
+host permits one interactive request to overlap one background worker. Work is
+cooperatively cancellable rather than forcibly preempted, and analyzer-local
+procedure parallelism is derived from the background budget instead of adding
+an unbounded nested pool.
+
+Scheduler wait records include `analysis_permit_wait_ms` and the matching
+class-specific field: `interactive_wait_ms` or `background_wait_ms`. Fast work
+uses `analysis_permit_wait_ms` without being counted as either class. Worker
+state records use `operation="scheduler/workers"`, class, `current_workers`,
+and `max_active_workers`. These gauges are process-local observations, not a
+protocol or stable concurrency-size promise.
+
 ## End-to-end startup correlation
 
 When performance logging is enabled, the VS Code client creates an anonymous
@@ -172,6 +200,14 @@ signature help retain their request operation records. The diagnostics stage
 records produced by `analysisstats` continue to report analyzer-owned stages
 and capability counters.
 
+The overlap regression boundary deliberately blocks Full diagnostics and
+workspace semantic indexing, then requires hover, definition, and completion
+to finish without waiting for those background checkpoints. Edit invalidation
+must cancel obsolete background generations and release scheduler capacity.
+Tests assert structural boundedness and ordering; wall-clock targets are
+measured by the deterministic and opt-in ROneCOne benchmarks rather than used
+as timing-sensitive unit-test thresholds.
+
 Full diagnostics must reuse the exact immutable open-document snapshot for
 repeated expression type queries. Revision-scoped Excel helper summaries and
 normalized project constants are prepared once, not once per procedure or
@@ -301,8 +337,8 @@ rtk powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\go.ps1 tes
 ```
 
 It reports the actual first diagnostics publication after `didOpen`, first Fast
-and Full diagnostic costs, hover during Full diagnostics, and definition during
-workspace indexing. The generated fixture is deterministic and does not add
+and Full diagnostic costs, hover and completion during Full diagnostics, and
+definition during workspace indexing. The generated fixture is deterministic and does not add
 third-party source to the repository. `Lifecycle/DidOpenFirstPublication`
 measures time-to-first-publication, while `Lifecycle/InitialFastDiagnostics`
 isolates the bounded first-open Fast preview cost.

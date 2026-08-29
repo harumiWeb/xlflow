@@ -61,6 +61,7 @@ type WorkspaceSymbolQuery struct {
 }
 
 type WorkspaceSymbolQueryFunc func(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error)
+type WorkspaceSymbolQueryContextFunc func(context.Context, []Document, WorkspaceSymbolQuery) ([]Symbol, error)
 
 // WorkspaceSymbolsSnapshotFunc returns one coherent symbol snapshot for a
 // request. Diagnostics use it to avoid rebuilding and cloning the effective
@@ -83,15 +84,16 @@ type Analyzer struct {
 	// TypeDBResolutionIncomplete is true when the production type database
 	// loaded with warnings. Type-dependent unresolved-name diagnostics must
 	// fail closed until the generated TypeLib view is complete.
-	TypeDBResolutionIncomplete   bool
-	DocumentSymbolsFunc          DocumentSymbolsFunc
-	WorkspaceSymbolsFunc         func(open []Document, query string) ([]Symbol, error)
-	WorkspaceSymbolQueryFunc     WorkspaceSymbolQueryFunc
-	WorkspaceSymbolsSnapshotFunc WorkspaceSymbolsSnapshotFunc
-	RealtimeFindingsFunc         RealtimeFindingsFunc
-	visibleDeclarations          map[string]bool
-	typeDeclarations             map[string]int
-	objectTypeDeclarations       map[string]int
+	TypeDBResolutionIncomplete      bool
+	DocumentSymbolsFunc             DocumentSymbolsFunc
+	WorkspaceSymbolsFunc            func(open []Document, query string) ([]Symbol, error)
+	WorkspaceSymbolQueryFunc        WorkspaceSymbolQueryFunc
+	WorkspaceSymbolQueryContextFunc WorkspaceSymbolQueryContextFunc
+	WorkspaceSymbolsSnapshotFunc    WorkspaceSymbolsSnapshotFunc
+	RealtimeFindingsFunc            RealtimeFindingsFunc
+	visibleDeclarations             map[string]bool
+	typeDeclarations                map[string]int
+	objectTypeDeclarations          map[string]int
 }
 
 // RealtimeFinding is a protocol-neutral analyzer result that can be adapted by
@@ -747,6 +749,13 @@ func (a Analyzer) WorkspaceSymbolsContext(ctx context.Context, open []Document, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if a.WorkspaceSymbolQueryContextFunc != nil {
+		out, err := a.WorkspaceSymbolQueryContextFunc(ctx, open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
+	}
 	if a.WorkspaceSymbolQueryFunc != nil {
 		out, err := a.WorkspaceSymbolQueryFunc(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
 		if err != nil {
@@ -767,6 +776,9 @@ func (a Analyzer) WorkspaceSymbolsContext(ctx context.Context, open []Document, 
 func (a Analyzer) WorkspaceSymbolsQuery(open []Document, query WorkspaceSymbolQuery) ([]Symbol, error) {
 	if a.WorkspaceSymbolQueryFunc != nil {
 		return a.WorkspaceSymbolQueryFunc(open, query)
+	}
+	if a.WorkspaceSymbolQueryContextFunc != nil {
+		return a.WorkspaceSymbolQueryContextFunc(context.Background(), open, query)
 	}
 	if a.WorkspaceSymbolsFunc != nil {
 		return a.WorkspaceSymbolsFunc(open, query.Text)

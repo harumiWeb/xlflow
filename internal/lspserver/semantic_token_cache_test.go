@@ -173,6 +173,62 @@ func TestSemanticTokenCacheCoalescesMissesAndRejectsInvalidatedResult(t *testing
 	}
 }
 
+func TestSemanticTokenCacheInvalidationCancelsProducer(t *testing.T) {
+	cache := newSemanticTokenCache()
+	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
+	started := make(chan struct{})
+	producerCanceled := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := cache.getContext(context.Background(), doc, cache.begin(), func(ctx context.Context) ([]protocol.UInteger, error) {
+			close(started)
+			<-ctx.Done()
+			close(producerCanceled)
+			return nil, ctx.Err()
+		})
+		done <- err
+	}()
+	<-started
+	cache.invalidate(doc)
+	waitClosed(t, producerCanceled, "semantic token producer cancellation")
+	select {
+	case err := <-done:
+		if !errors.Is(err, errSemanticTokensSuperseded) {
+			t.Fatalf("invalidated producer error = %v, want superseded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("invalidated semantic token producer did not return")
+	}
+}
+
+func TestSemanticTokenCacheStopCancelsProducer(t *testing.T) {
+	cache := newSemanticTokenCache()
+	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
+	started := make(chan struct{})
+	producerCanceled := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := cache.getContext(context.Background(), doc, cache.begin(), func(ctx context.Context) ([]protocol.UInteger, error) {
+			close(started)
+			<-ctx.Done()
+			close(producerCanceled)
+			return nil, ctx.Err()
+		})
+		done <- err
+	}()
+	<-started
+	cache.stop()
+	waitClosed(t, producerCanceled, "semantic token producer shutdown cancellation")
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("stopped producer error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopped semantic token producer did not return")
+	}
+}
+
 func TestSemanticTokenCacheRetainsHistoryOnlyForOpenDocuments(t *testing.T) {
 	cache := newSemanticTokenCache()
 	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
@@ -219,7 +275,7 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	defer cleanup()
 	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic { return nil }
 	var generations atomic.Int32
-	s.semanticTokenGenerator = func(doc intel.Document, open []intel.Document) ([]intel.SemanticToken, error) {
+	s.semanticTokenGenerator = func(_ context.Context, doc intel.Document, open []intel.Document) ([]intel.SemanticToken, error) {
 		generations.Add(1)
 		return []intel.SemanticToken{{
 			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: len(open)}},
@@ -283,7 +339,7 @@ func TestSemanticTokensFullCachesAndInvalidatesOnDocumentLifecycle(t *testing.T)
 	}
 }
 
-func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testing.T) {
+func TestSemanticTokensFullCancelsObsoleteGenerationAndRetriesLatest(t *testing.T) {
 	root := t.TempDir()
 	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
 	if err != nil {
@@ -292,13 +348,14 @@ func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testi
 	defer cleanup()
 	s.diagnostics = func(context.Context, intel.Document) []intel.Diagnostic { return nil }
 	started := make(chan struct{})
-	release := make(chan struct{})
+	producerCanceled := make(chan struct{})
 	var generations atomic.Int32
 	var active atomic.Int32
 	var maximum atomic.Int32
-	s.semanticTokenGenerator = func(doc intel.Document, _ []intel.Document) ([]intel.SemanticToken, error) {
+	s.semanticTokenGenerator = func(ctx context.Context, doc intel.Document, _ []intel.Document) ([]intel.SemanticToken, error) {
 		generation := generations.Add(1)
 		current := active.Add(1)
+		defer active.Add(-1)
 		for {
 			observed := maximum.Load()
 			if current <= observed || maximum.CompareAndSwap(observed, current) {
@@ -307,9 +364,10 @@ func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testi
 		}
 		if generation == 1 {
 			close(started)
-			<-release
+			<-ctx.Done()
+			close(producerCanceled)
+			return nil, ctx.Err()
 		}
-		active.Add(-1)
 		return []intel.SemanticToken{{
 			Range: intel.Range{Start: intel.Position{}, End: intel.Position{Character: len(doc.Source)}},
 			Type:  intel.SemanticTokenKeyword,
@@ -346,22 +404,7 @@ func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testi
 		tokens, err := s.semanticTokensFull(nil, params)
 		results <- result{tokens: tokens, err: err}
 	}()
-	identity := documentSymbolKey(intel.Document{Path: path, URI: uri})
-	deadline := time.Now().Add(time.Second)
-	for {
-		s.semanticTokens.mu.Lock()
-		call := s.semanticTokens.inflight[identity]
-		waiting := call != nil && call.waiters > 0
-		s.semanticTokens.mu.Unlock()
-		if waiting {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("latest semantic request did not wait for obsolete generation")
-		}
-		runtime.Gosched()
-	}
-	close(release)
+	waitClosed(t, producerCanceled, "obsolete semantic token generation cancellation")
 	for range 2 {
 		select {
 		case got := <-results:
@@ -378,6 +421,7 @@ func TestSemanticTokensFullSerializesObsoleteGenerationAndRetriesLatest(t *testi
 	if generations.Load() != 2 || maximum.Load() != 1 {
 		t.Fatalf("generation stats = calls:%d max_active:%d, want 2 calls and one active", generations.Load(), maximum.Load())
 	}
+	identity := documentSymbolKey(intel.Document{Path: path, URI: uri})
 	s.semanticTokens.mu.Lock()
 	history := append([]cachedSemanticTokens(nil), s.semanticTokens.histories[identity]...)
 	s.semanticTokens.mu.Unlock()

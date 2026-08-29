@@ -185,6 +185,7 @@ func (s *Server) dispatchCodeAction(ctx context.Context, conn *jsonrpc2.Conn, re
 			ID *jsonrpc2.ID `json:"id"`
 		}
 		if req.Params != nil && json.Unmarshal(*req.Params, &params) == nil && params.ID != nil {
+			s.cancelRequest(*params.ID)
 			s.codeActions.cancelMatching(func(request *codeActionRequest) bool { return request.id == *params.ID })
 		}
 		return true

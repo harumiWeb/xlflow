@@ -1,6 +1,7 @@
 package lspserver
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ type semanticTokenCall struct {
 	result     cachedSemanticTokens
 	err        error
 	waiters    int
+	cancel     context.CancelFunc
 }
 
 type semanticTokenCache struct {
@@ -75,9 +77,26 @@ func (c *semanticTokenCache) get(
 	generation uint64,
 	load func() ([]protocol.UInteger, error),
 ) (cachedSemanticTokens, bool, error) {
+	return c.getContext(context.Background(), doc, generation, func(context.Context) ([]protocol.UInteger, error) {
+		return load()
+	})
+}
+
+func (c *semanticTokenCache) getContext(
+	ctx context.Context,
+	doc intel.Document,
+	generation uint64,
+	load func(context.Context) ([]protocol.UInteger, error),
+) (cachedSemanticTokens, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return cachedSemanticTokens{}, false, err
+	}
 	identity := documentSymbolKey(doc)
 	if identity == "" {
-		data, err := load()
+		data, err := load(ctx)
 		return cachedSemanticTokens{data: cloneSemanticTokenData(data)}, false, err
 	}
 	signature := semanticTokenSignature{
@@ -103,24 +122,33 @@ func (c *semanticTokenCache) get(
 	if call, ok := c.inflight[identity]; ok {
 		call.waiters++
 		c.mu.Unlock()
-		<-call.done
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return cachedSemanticTokens{}, false, ctx.Err()
+		}
 		if call.generation == generation && call.revision == revision && call.signature == signature {
 			return cloneCachedSemanticTokens(call.result), call.err == nil, call.err
 		}
 		return cachedSemanticTokens{}, false, errSemanticTokensSuperseded
 	}
-	call := &semanticTokenCall{done: make(chan struct{}), generation: generation, revision: revision, signature: signature}
+	// The shared producer outlives an individual caller; cache invalidation or
+	// producer completion, not waiter cancellation, cancels this context.
+	producerCtx, cancel := context.WithCancel(context.Background())
+	call := &semanticTokenCall{done: make(chan struct{}), generation: generation, revision: revision, signature: signature, cancel: cancel}
 	c.inflight[identity] = call
 	c.mu.Unlock()
 
-	data, err := load()
+	data, err := load(producerCtx)
 	cloned := cloneSemanticTokenData(data)
 
 	c.mu.Lock()
 	delete(c.inflight, identity)
 	current := generation == c.generation && c.revisions[identity] == revision && c.signatures[identity] == signature
 	resultErr := err
-	if err == nil && current {
+	if !current {
+		resultErr = errSemanticTokensSuperseded
+	} else if err == nil {
 		c.nextResultID++
 		entry := cachedSemanticTokens{
 			generation: generation,
@@ -134,10 +162,9 @@ func (c *semanticTokenCache) get(
 			c.appendHistoryLocked(identity, entry)
 		}
 		call.result = cloneCachedSemanticTokens(entry)
-	} else if resultErr == nil {
-		resultErr = errSemanticTokensSuperseded
 	}
 	call.err = resultErr
+	cancel()
 	close(call.done)
 	c.mu.Unlock()
 
@@ -198,6 +225,9 @@ func (c *semanticTokenCache) close(doc intel.Document) {
 }
 
 func (c *semanticTokenCache) resetDocumentLocked(identity string) {
+	if call := c.inflight[identity]; call != nil && call.cancel != nil {
+		call.cancel()
+	}
 	c.revisions[identity]++
 	delete(c.signatures, identity)
 	delete(c.entries, identity)
@@ -206,6 +236,7 @@ func (c *semanticTokenCache) resetDocumentLocked(identity string) {
 
 func (c *semanticTokenCache) invalidateAll() {
 	c.mu.Lock()
+	c.cancelInflightLocked()
 	c.generation++
 	c.signatures = make(map[string]semanticTokenSignature)
 	c.entries = make(map[string]cachedSemanticTokens)
@@ -213,14 +244,36 @@ func (c *semanticTokenCache) invalidateAll() {
 	c.mu.Unlock()
 }
 
+// stop cancels producers that may still be using document snapshots while the
+// server is shutting down. Producers are expected to observe cancellation at
+// their existing cooperative checkpoints; waiting callers will then finish
+// through the normal cache completion path.
+func (c *semanticTokenCache) stop() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.cancelInflightLocked()
+	c.mu.Unlock()
+}
+
 // invalidateWorkspace supersedes current token results that may depend on the
 // open workspace while retaining bounded per-document histories as delta bases.
 func (c *semanticTokenCache) invalidateWorkspace() {
 	c.mu.Lock()
+	c.cancelInflightLocked()
 	c.generation++
 	c.signatures = make(map[string]semanticTokenSignature)
 	c.entries = make(map[string]cachedSemanticTokens)
 	c.mu.Unlock()
+}
+
+func (c *semanticTokenCache) cancelInflightLocked() {
+	for _, call := range c.inflight {
+		if call != nil && call.cancel != nil {
+			call.cancel()
+		}
+	}
 }
 
 // invalidate retires semantic-token state for one document, including retained

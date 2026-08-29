@@ -4,6 +4,14 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+## v0.31.1
+
+- Kept LSP completion, signature help, hover, and definition responsive while
+  Full diagnostics and workspace semantic indexing run. Analysis now uses a
+  bounded priority budget with interactive capacity, prompt cancellation of
+  obsolete semantic work, and opt-in wait/worker telemetry without changing
+  diagnostic or symbol ordering.
+
 - Fixed Full LSP diagnostics stalling indefinitely on giant VBA modules. The
   editor path now reuses the open-document expression index, prepares Excel
   helper summaries and project constants once per revision, and analyzes large

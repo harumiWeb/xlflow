@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.10.1
+
+- Keep completion, signature help, hover, and definition responsive while Full
+  diagnostics and workspace semantic indexing run in the language server.
+
 - Publish Full diagnostics for giant VBA modules by reusing revision-scoped
   analysis indexes and bounded procedure parallelism in the language server.
 

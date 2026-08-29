@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"context"
 	"regexp"
 	"sort"
 	"strconv"
@@ -73,6 +74,7 @@ type SemanticToken struct {
 }
 
 type semanticBuilder struct {
+	ctx                context.Context
 	analyzer           Analyzer
 	doc                Document
 	lines              []string
@@ -115,16 +117,42 @@ var propertyDeclRe = regexp.MustCompile(`(?i)\b(?:Public|Private|Friend|Static)?
 var projectTypeReferenceRe = regexp.MustCompile(`(?i)\b(?:As\s+(?:New\s+)?|New\s+|Implements\s+)(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*([A-Za-z_][A-Za-z0-9_]*)`)
 
 func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken, error) {
-	documentSymbols, documentSymbolsErr := a.DocumentSymbols(doc)
+	return a.SemanticTokensContext(context.Background(), doc, open)
+}
+
+// SemanticTokensContext is the cancellable variant of SemanticTokens. It
+// checks for cancellation between semantic stages and while walking the
+// document so superseded background generations release execution capacity
+// promptly.
+func (a Analyzer) SemanticTokensContext(ctx context.Context, doc Document, open []Document) ([]SemanticToken, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	documentSymbols, documentSymbolsErr := a.DocumentSymbolsContext(ctx, doc)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	workspaceOpen := make([]Document, 0, len(open))
 	for _, candidate := range open {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !a.sameSemanticDocument(doc, candidate) {
 			workspaceOpen = append(workspaceOpen, candidate)
 		}
 	}
-	workspaceSymbols, workspaceSymbolsErr := a.WorkspaceSymbols(workspaceOpen, "")
+	workspaceSymbols, workspaceSymbolsErr := a.WorkspaceSymbolsContext(ctx, workspaceOpen, "")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	filteredWorkspace := make([]Symbol, 0, len(workspaceSymbols)+len(documentSymbols))
 	for _, sym := range workspaceSymbols {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !a.sameDocumentSymbol(doc, sym) {
 			filteredWorkspace = append(filteredWorkspace, sym)
 		}
@@ -136,11 +164,18 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 		identifiers = snapshot.identifiers()
 	} else {
 		for lineNo, line := range lines {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			identifiers[lineNo] = codeIdentifierSpans(line)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	typeIndex, _ := a.documentIndexFor(doc)
 	builder := semanticBuilder{
+		ctx:                ctx,
 		analyzer:           a,
 		doc:                doc,
 		lines:              lines,
@@ -159,7 +194,14 @@ func (a Analyzer) SemanticTokens(doc Document, open []Document) ([]SemanticToken
 	builder.addKnownIdentifierTokens()
 	builder.addMemberTokens()
 	builder.addUserFormControlTokens()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return normalizeSemanticTokens(builder.tokens), nil
+}
+
+func (b *semanticBuilder) canceled() bool {
+	return b.ctx != nil && b.ctx.Err() != nil
 }
 
 // addParameterReferenceTokens applies the parameter classification to uses in
@@ -172,6 +214,9 @@ func (b *semanticBuilder) addParameterReferenceTokens() {
 	}
 	parameters := make(map[string]bool)
 	for _, sym := range b.documentSymbols {
+		if b.canceled() {
+			return
+		}
 		if !strings.EqualFold(sym.Kind, "parameter") || sym.Name == "" {
 			continue
 		}
@@ -181,6 +226,9 @@ func (b *semanticBuilder) addParameterReferenceTokens() {
 		}
 	}
 	for lineNo, spans := range b.identifiers {
+		if b.canceled() {
+			return
+		}
 		_, scope := b.typeContext.procedureAt(Position{Line: lineNo})
 		for _, span := range spans {
 			name := b.lines[lineNo][span.start:span.end]
@@ -230,6 +278,9 @@ func (b *semanticBuilder) addProjectTypeReferenceTokens() {
 	}
 	types := make(map[string]string)
 	for _, sym := range b.workspaceSymbols {
+		if b.canceled() {
+			return
+		}
 		tokenType := semanticTypeForProjectTypeSymbol(sym)
 		if tokenType == "" || !b.analyzer.visibleCompletionSymbol(b.doc, "", sym) {
 			continue
@@ -237,6 +288,9 @@ func (b *semanticBuilder) addProjectTypeReferenceTokens() {
 		types[strings.ToLower(sym.Name)] = tokenType
 	}
 	for lineNo, line := range b.lines {
+		if b.canceled() {
+			return
+		}
 		limit := codeLimit(line)
 		for _, match := range projectTypeReferenceRe.FindAllStringSubmatchIndex(line[:limit], -1) {
 			if len(match) < 4 || match[2] < 0 || match[3] < 0 {
@@ -276,6 +330,9 @@ func (b *semanticBuilder) addProjectProcedureReferenceTokens() {
 	}
 	procedures := make(map[string]bool)
 	for _, sym := range b.workspaceSymbols {
+		if b.canceled() {
+			return
+		}
 		if !isProjectProcedureSymbol(sym) || !b.analyzer.visibleCompletionSymbol(b.doc, "", sym) {
 			continue
 		}
@@ -289,6 +346,9 @@ func (b *semanticBuilder) addProjectProcedureReferenceTokens() {
 	locals := make(map[string]bool)
 	functions := make(map[string]bool)
 	for _, sym := range b.documentSymbols {
+		if b.canceled() {
+			return
+		}
 		if isProjectProcedureSymbol(sym) {
 			declarations[semanticRangeKey(b.symbolNameRange(sym))] = true
 		}
@@ -300,6 +360,9 @@ func (b *semanticBuilder) addProjectProcedureReferenceTokens() {
 		}
 	}
 	for lineNo, line := range b.lines {
+		if b.canceled() {
+			return
+		}
 		for _, span := range b.identifiers[lineNo] {
 			name := line[span.start:span.end]
 			if !procedures[strings.ToLower(name)] {
@@ -353,6 +416,9 @@ func (b *semanticBuilder) isAssignment(rng Range) bool {
 
 func (b *semanticBuilder) addLexicalTokens() {
 	for lineNo, line := range b.lines {
+		if b.canceled() {
+			return
+		}
 		limit := len(line)
 		for i := 0; i < limit; {
 			r, size := firstRune(line[i:])
@@ -418,6 +484,9 @@ func (b *semanticBuilder) addSymbolTokens() {
 		return
 	}
 	for _, sym := range b.documentSymbols {
+		if b.canceled() {
+			return
+		}
 		if sym.Name == "" || sym.Selection == (Range{}) {
 			continue
 		}
@@ -436,6 +505,9 @@ func (b *semanticBuilder) addSymbolTokens() {
 		b.add(rng, tokenType, mods...)
 	}
 	for _, sym := range b.workspaceSymbols {
+		if b.canceled() {
+			return
+		}
 		if !sameDocumentSymbol(sym, b.doc) {
 			continue
 		}
@@ -449,6 +521,9 @@ func (b *semanticBuilder) addSymbolTokens() {
 
 func (b *semanticBuilder) addKnownIdentifierTokens() {
 	for lineNo, line := range b.lines {
+		if b.canceled() {
+			return
+		}
 		limit := codeLimit(line)
 		for start := 0; start < limit; {
 			r, size := firstRune(line[start:limit])
@@ -501,6 +576,9 @@ func (b *semanticBuilder) addMemberTokens() {
 		return
 	}
 	for lineNo, line := range b.lines {
+		if b.canceled() {
+			return
+		}
 		limit := codeLimit(line)
 		for _, match := range memberExprRe.FindAllStringSubmatchIndex(line[:limit], -1) {
 			if len(match) < 6 || match[2] < 0 || match[3] < 0 || match[4] < 0 || match[5] < 0 {
@@ -541,6 +619,9 @@ func (b *semanticBuilder) addMemberTokens() {
 
 func (b *semanticBuilder) addProcedureDeclarationFallbackTokens() {
 	for lineNo, line := range b.lines {
+		if b.canceled() {
+			return
+		}
 		limit := codeLimit(line)
 		for _, match := range procedureDeclRe.FindAllStringSubmatchIndex(line[:limit], -1) {
 			if len(match) >= 6 && match[4] >= 0 && match[5] >= 0 {
@@ -598,6 +679,9 @@ func (b *semanticBuilder) addUserFormControlTokens() {
 		return
 	}
 	for _, control := range b.analyzer.formControls(b.doc) {
+		if b.canceled() {
+			return
+		}
 		for _, rng := range identifierRanges(b.doc.Source, control.Name) {
 			b.add(rng, SemanticTokenVariable)
 		}

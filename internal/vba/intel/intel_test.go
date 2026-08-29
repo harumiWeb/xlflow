@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harumiWeb/xlflow/internal/config"
 	"github.com/harumiWeb/xlflow/internal/lint"
@@ -4914,6 +4915,92 @@ End Sub
 	commentLine := lineIndex(source, "' 日本語コメント")
 	if !hasSemanticTokenAtLine(tokens, SemanticTokenComment, commentLine) {
 		t.Fatalf("comment token after Japanese text missing: %+v", tokens)
+	}
+}
+
+func TestSemanticTokensContextReturnsCanceledBeforeAnalysis(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		t.Fatal("document symbols should not be requested for a canceled semantic-token generation")
+		return nil, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := analyzer.SemanticTokensContext(ctx, Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nSub Run()\nEnd Sub\n",
+	}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SemanticTokensContext error = %v, want context.Canceled", err)
+	}
+}
+
+func TestWorkspaceSymbolsQueryKeepsLegacyProviderForNonContextCalls(t *testing.T) {
+	legacyCalled := false
+	contextCalled := false
+	analyzer := Analyzer{
+		WorkspaceSymbolQueryFunc: func(_ []Document, _ WorkspaceSymbolQuery) ([]Symbol, error) {
+			legacyCalled = true
+			return []Symbol{{Name: "legacy"}}, nil
+		},
+		WorkspaceSymbolQueryContextFunc: func(context.Context, []Document, WorkspaceSymbolQuery) ([]Symbol, error) {
+			contextCalled = true
+			return []Symbol{{Name: "context"}}, nil
+		},
+	}
+	symbols, err := analyzer.WorkspaceSymbolsQuery(nil, WorkspaceSymbolQuery{Text: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !legacyCalled || contextCalled || len(symbols) != 1 || symbols[0].Name != "legacy" {
+		t.Fatalf("provider dispatch = (legacy=%t, context=%t, symbols=%+v)", legacyCalled, contextCalled, symbols)
+	}
+}
+
+func TestWorkspaceSymbolsContextReturnsCanceledAfterContextProvider(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	analyzer := Analyzer{
+		WorkspaceSymbolQueryContextFunc: func(context.Context, []Document, WorkspaceSymbolQuery) ([]Symbol, error) {
+			cancel()
+			return []Symbol{{Name: "late"}}, nil
+		},
+	}
+	symbols, err := analyzer.WorkspaceSymbolsContext(ctx, nil, "target")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WorkspaceSymbolsContext error = %v, want context.Canceled", err)
+	}
+	if len(symbols) != 1 || symbols[0].Name != "late" {
+		t.Fatalf("WorkspaceSymbolsContext symbols = %+v, want the provider result", symbols)
+	}
+}
+
+func TestSemanticTokensContextCancelsWorkspaceSymbolProvider(t *testing.T) {
+	analyzer := newTestAnalyzer(t)
+	providerStarted := make(chan struct{})
+	analyzer.WorkspaceSymbolQueryContextFunc = func(ctx context.Context, _ []Document, _ WorkspaceSymbolQuery) ([]Symbol, error) {
+		close(providerStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	doc := Document{
+		Path:   filepath.Join(t.TempDir(), "Main.bas"),
+		Source: "Option Explicit\nSub Run()\nEnd Sub\n",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := analyzer.SemanticTokensContext(ctx, doc, []Document{doc})
+		done <- err
+	}()
+	<-providerStarted
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("SemanticTokensContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("semantic token workspace provider did not observe cancellation")
 	}
 }
 

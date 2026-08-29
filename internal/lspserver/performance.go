@@ -270,10 +270,20 @@ func (m performanceStageMeasurement) finish(resultCount int, wait time.Duration,
 			outcome = "error"
 		}
 	}
+	interactiveWait := time.Duration(0)
+	backgroundWait := time.Duration(0)
+	if m.class == analysisWorkInteractive.String() {
+		interactiveWait = wait
+	} else if m.class == analysisWorkBackground.String() {
+		backgroundWait = wait
+	}
 	m.recorder.logger.Printf(
-		"performance operation=%q stage=%q class=%q path=%q elapsed_ms=%.3f wait_ms=%.3f result_count=%d outcome=%q",
+		"performance operation=%q stage=%q class=%q path=%q elapsed_ms=%.3f wait_ms=%.3f interactive_wait_ms=%.3f background_wait_ms=%.3f analysis_permit_wait_ms=%.3f result_count=%d outcome=%q",
 		m.operation, m.stage, m.class, m.path,
 		float64(time.Since(m.started))/float64(time.Millisecond),
+		float64(wait)/float64(time.Millisecond),
+		float64(interactiveWait)/float64(time.Millisecond),
+		float64(backgroundWait)/float64(time.Millisecond),
 		float64(wait)/float64(time.Millisecond), resultCount, outcome,
 	)
 }
@@ -333,102 +343,54 @@ func (p *performanceRecorder) counterTotal(name string) uint64 {
 	return p.counters[name]
 }
 
-// acquireAnalysisPermit keeps the existing bounded worker budget while making
-// contention visible. Interactive waiters are registered before they try the
-// channel, and background waiters sleep on a generation signal instead of
-// competing in the channel's FIFO-less send queue. This gives a released slot
-// to an interactive request before resuming background work.
-func (s *Server) acquireAnalysisPermit(ctx context.Context, class string) (func(), time.Duration, error) {
+// acquireAnalysisPermit keeps analysis work within the scheduler's bounded
+// class budgets and records the complete wait separately from execution time.
+func (s *Server) acquireAnalysisPermit(ctx context.Context, class analysisWorkClass) (func(), time.Duration, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
-	if s.analysisPermits == nil {
-		return func() {}, 0, nil
+	measurement := s.performance.start("scheduler/permit", performanceStagePermitWait, class.String(), "")
+	release, wait, state, err := s.analysisScheduler.acquire(ctx, class)
+	if wait > 0 {
+		switch class {
+		case analysisWorkInteractive:
+			s.performance.addCounter(performanceCounterInteractivePermitWaits, 1, "scheduler/permit", performanceStagePermitWait, class.String(), "")
+		case analysisWorkBackground:
+			s.performance.addCounter(performanceCounterBackgroundPermitWaits, 1, "scheduler/permit", performanceStagePermitWait, class.String(), "")
+		}
+		measurement.finish(0, wait, err)
 	}
-	if class == "interactive" {
-		s.analysisPermitMu.Lock()
-		s.interactivePermitWaiters.Add(1)
-		s.analysisPermitMu.Unlock()
-		defer s.interactivePermitWaiters.Add(-1)
+	if err != nil {
+		return nil, wait, err
 	}
-
-	var measurement performanceStageMeasurement
-	waited := false
-	for {
-		s.analysisPermitMu.Lock()
-		if s.analysisPermitChanged == nil {
-			s.analysisPermitChanged = make(chan struct{})
-		}
-		changed := s.analysisPermitChanged
-		backgroundBlocked := class == "background" && s.interactivePermitWaiters.Load() > 0
-		if !backgroundBlocked {
-			select {
-			case s.analysisPermits <- struct{}{}:
-				s.analysisPermitMu.Unlock()
-				if !waited {
-					return s.releaseAnalysisPermit, 0, nil
-				}
-				wait := time.Duration(0)
-				if measurement.recorder != nil {
-					wait = time.Since(measurement.started)
-				}
-				counter := performanceCounterInteractivePermitWaits
-				if class == "background" {
-					counter = performanceCounterBackgroundPermitWaits
-				}
-				s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
-				measurement.finish(0, wait, nil)
-				return s.releaseAnalysisPermit, wait, nil
-			default:
-			}
-		}
-		s.analysisPermitMu.Unlock()
-		if !waited {
-			measurement = s.performance.start("scheduler/permit", performanceStagePermitWait, class, "")
-			waited = true
-		}
-		select {
-		case <-changed:
-		case <-time.After(10 * time.Millisecond):
-		case <-ctx.Done():
-			wait := time.Duration(0)
-			if measurement.recorder != nil {
-				wait = time.Since(measurement.started)
-			}
-			counter := performanceCounterInteractivePermitWaits
-			if class == "background" {
-				counter = performanceCounterBackgroundPermitWaits
-			}
-			s.performance.addCounter(counter, 1, "scheduler/permit", performanceStagePermitWait, class, "")
-			measurement.finish(0, wait, ctx.Err())
-			return nil, wait, ctx.Err()
-		}
-	}
+	s.performance.logWorkerState(class.String(), state)
+	return func() {
+		release()
+		s.performance.logWorkerState(class.String(), s.analysisScheduler.state(class))
+	}, wait, nil
 }
 
-func (s *Server) releaseAnalysisPermit() {
-	if s.analysisPermits == nil {
+func (p *performanceRecorder) logWorkerState(class string, state analysisWorkerState) {
+	if p == nil || !p.enabled || p.logger == nil {
 		return
 	}
-	<-s.analysisPermits
-	s.analysisPermitMu.Lock()
-	if s.analysisPermitChanged == nil {
-		s.analysisPermitChanged = make(chan struct{})
-	}
-	close(s.analysisPermitChanged)
-	s.analysisPermitChanged = make(chan struct{})
-	s.analysisPermitMu.Unlock()
+	p.logger.Printf(
+		"performance operation=%q stage=%q class=%q current_workers=%d max_active_workers=%d outcome=%q",
+		"scheduler/workers", "workerState", class, state.Current, state.Maximum, "gauge",
+	)
 }
 
 type performanceMeasurement struct {
-	server    *Server
-	operation string
-	phase     string
-	document  intel.Document
-	started   time.Time
+	server      *Server
+	operation   string
+	phase       string
+	document    intel.Document
+	started     time.Time
+	permitWait  time.Duration
+	permitClass analysisWorkClass
 }
 
 func (s *Server) logDiagnosticStages(doc intel.Document, generation uint64, mode intel.DiagnosticMode, recorder *analysisstats.Recorder) {
@@ -491,6 +453,13 @@ func (m *performanceMeasurement) setPhase(phase string) {
 	}
 }
 
+func (m *performanceMeasurement) setPermitWait(class analysisWorkClass, wait time.Duration) {
+	if m != nil {
+		m.permitWait = wait
+		m.permitClass = class
+	}
+}
+
 func (m *performanceMeasurement) finish(resultCount int, err error) {
 	if m == nil {
 		return
@@ -500,8 +469,16 @@ func (m *performanceMeasurement) finish(resultCount int, err error) {
 		outcome = "error"
 	}
 	doc := m.document
+	interactiveWait := time.Duration(0)
+	backgroundWait := time.Duration(0)
+	switch m.permitClass {
+	case analysisWorkInteractive:
+		interactiveWait = m.permitWait
+	case analysisWorkBackground:
+		backgroundWait = m.permitWait
+	}
 	m.server.logger.Printf(
-		"performance operation=%q stage=%q uri=%q path=%q version=%d bytes=%d lines=%d elapsed_ms=%.3f wait_ms=0 result_count=%d outcome=%q",
+		"performance operation=%q stage=%q uri=%q path=%q version=%d bytes=%d lines=%d elapsed_ms=%.3f wait_ms=%.3f interactive_wait_ms=%.3f background_wait_ms=%.3f analysis_permit_wait_ms=%.3f result_count=%d outcome=%q",
 		m.operation,
 		m.operation,
 		doc.URI,
@@ -510,6 +487,10 @@ func (m *performanceMeasurement) finish(resultCount int, err error) {
 		len(doc.Source),
 		sourceLineCount(doc.Source),
 		float64(time.Since(m.started))/float64(time.Millisecond),
+		float64(m.permitWait)/float64(time.Millisecond),
+		float64(interactiveWait)/float64(time.Millisecond),
+		float64(backgroundWait)/float64(time.Millisecond),
+		float64(m.permitWait)/float64(time.Millisecond),
 		resultCount,
 		outcome,
 	)
@@ -527,8 +508,12 @@ func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation u
 	if discarded {
 		outcome = "discarded"
 	}
+	backgroundWait := time.Duration(0)
+	if m.phase == "full" {
+		backgroundWait = m.permitWait
+	}
 	m.server.logger.Printf(
-		"performance operation=%q stage=%q phase=%q uri=%q path=%q version=%d generation=%d bytes=%d lines=%d elapsed_ms=%.3f wait_ms=0 result_count=%d outcome=%q discarded=%t",
+		"performance operation=%q stage=%q phase=%q uri=%q path=%q version=%d generation=%d bytes=%d lines=%d elapsed_ms=%.3f wait_ms=%.3f background_wait_ms=%.3f analysis_permit_wait_ms=%.3f result_count=%d outcome=%q discarded=%t",
 		m.operation,
 		m.operation,
 		m.phase,
@@ -539,6 +524,9 @@ func (m *performanceMeasurement) finishDiagnostics(resultCount int, generation u
 		len(doc.Source),
 		sourceLineCount(doc.Source),
 		float64(time.Since(m.started))/float64(time.Millisecond),
+		float64(m.permitWait)/float64(time.Millisecond),
+		float64(backgroundWait)/float64(time.Millisecond),
+		float64(m.permitWait)/float64(time.Millisecond),
 		resultCount,
 		outcome,
 		discarded,
