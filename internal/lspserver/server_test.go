@@ -1204,6 +1204,62 @@ func TestJSONRPCCodeActionDoesNotBlockInteractiveRequestsOrCancellation(t *testi
 	}
 }
 
+func TestJSONRPCInteractiveCancellationReleasesAnalysisWaiter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), jsonrpcIntegrationTimeout)
+	defer cancel()
+	root := t.TempDir()
+	s, cleanup, err := New(Options{RootDir: root, Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	s.analysisScheduler = newAnalysisScheduler(1)
+	holder, _, _, err := s.analysisScheduler.acquire(context.Background(), analysisWorkInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder()
+
+	path := filepath.Join(root, "src", "modules", "Main.bas")
+	uri := pathToFileURI(path)
+	if _, err := s.docs.open(uri, "Option Explicit\nPublic Sub Target()\nEnd Sub\n", 1); err != nil {
+		t.Fatal(err)
+	}
+	serverSide, clientSide := net.Pipe()
+	serverConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(serverSide, jsonrpc2.VSCodeObjectCodec{}), rpcHandler{handler: &s.handler, server: s, dispatch: s.dispatchCodeAction})
+	defer func() { _ = serverConn.Close() }()
+	clientConn := jsonrpc2.NewConn(ctx, jsonrpc2.NewBufferedStream(clientSide, jsonrpc2.VSCodeObjectCodec{}), &rpcRecorder{})
+	defer func() { _ = clientConn.Close() }()
+	var initialized protocol.InitializeResult
+	if err := clientConn.Call(ctx, "initialize", protocol.InitializeParams{}, &initialized); err != nil {
+		t.Fatal(err)
+	}
+
+	id := jsonrpc2.ID{Str: "hover-cancel", IsString: true}
+	waiter, err := clientConn.DispatchCall(ctx, "textDocument/hover", protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentUri(uri)},
+			Position:     protocol.Position{Line: 1, Character: 12},
+		},
+	}, jsonrpc2.PickID(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForAnalysisWaiter(t, s.analysisScheduler, analysisWorkInteractive)
+	if err := clientConn.Notify(ctx, "$/cancelRequest", map[string]any{"id": id}); err != nil {
+		t.Fatal(err)
+	}
+	var ignored any
+	err = waiter.Wait(ctx, &ignored)
+	var rpcErr *jsonrpc2.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != -32800 {
+		t.Fatalf("canceled interactive request = %v, want RequestCancelled", err)
+	}
+	if got := s.analysisScheduler.waiterCount(analysisWorkInteractive); got != 0 {
+		t.Fatalf("interactive waiters after cancellation = %d, want 0", got)
+	}
+}
+
 func TestCodeActionRequestsBoundedQueueAndAutomaticSupersession(t *testing.T) {
 	q := newCodeActionRequests()
 	defer q.stop()

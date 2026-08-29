@@ -244,6 +244,19 @@ func (c *semanticTokenCache) invalidateAll() {
 	c.mu.Unlock()
 }
 
+// stop cancels producers that may still be using document snapshots while the
+// server is shutting down. Producers are expected to observe cancellation at
+// their existing cooperative checkpoints; waiting callers will then finish
+// through the normal cache completion path.
+func (c *semanticTokenCache) stop() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.cancelInflightLocked()
+	c.mu.Unlock()
+}
+
 // invalidateWorkspace supersedes current token results that may depend on the
 // open workspace while retaining bounded per-document histories as delta bases.
 func (c *semanticTokenCache) invalidateWorkspace() {

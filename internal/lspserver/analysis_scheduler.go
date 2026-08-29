@@ -78,14 +78,14 @@ func (s *analysisScheduler) acquire(ctx context.Context, class analysisWorkClass
 		s.mu.Lock()
 		if err := ctx.Err(); err != nil {
 			if waiting {
-				s.waiters[class]--
+				s.removeWaiterLocked(class)
 			}
 			s.mu.Unlock()
 			return nil, time.Since(started), analysisWorkerState{}, err
 		}
 		if s.canAcquireLocked(class) {
 			if waiting {
-				s.waiters[class]--
+				s.removeWaiterLocked(class)
 			}
 			s.active[class]++
 			if s.active[class] > s.maximum[class] {
@@ -114,7 +114,7 @@ func (s *analysisScheduler) acquire(ctx context.Context, class analysisWorkClass
 		case <-ctx.Done():
 			s.mu.Lock()
 			if waiting {
-				s.waiters[class]--
+				s.removeWaiterLocked(class)
 			}
 			s.mu.Unlock()
 			return nil, time.Since(started), analysisWorkerState{}, ctx.Err()
@@ -154,9 +154,20 @@ func (s *analysisScheduler) release(class analysisWorkClass) {
 	if s.active[class] > 0 {
 		s.active[class]--
 	}
+	s.notifyLocked()
+	s.mu.Unlock()
+}
+
+func (s *analysisScheduler) removeWaiterLocked(class analysisWorkClass) {
+	if s.waiters[class] > 0 {
+		s.waiters[class]--
+		s.notifyLocked()
+	}
+}
+
+func (s *analysisScheduler) notifyLocked() {
 	close(s.changed)
 	s.changed = make(chan struct{})
-	s.mu.Unlock()
 }
 
 func (s *analysisScheduler) limits() (total, background int) {

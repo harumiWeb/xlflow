@@ -82,6 +82,28 @@ func TestAnalysisSchedulerCancellationRemovesWaitingWork(t *testing.T) {
 	release()
 }
 
+func TestAnalysisSchedulerCancellationWakesOtherWaiters(t *testing.T) {
+	scheduler := newAnalysisScheduler(1)
+	scheduler.mu.Lock()
+	changed := scheduler.changed
+	scheduler.waiters[analysisWorkInteractive] = 1
+	scheduler.waiters[analysisWorkFast] = 1
+	scheduler.removeWaiterLocked(analysisWorkInteractive)
+	scheduler.mu.Unlock()
+
+	select {
+	case <-changed:
+	default:
+		t.Fatal("removing a canceled waiter did not notify other waiters")
+	}
+	if got := scheduler.waiterCount(analysisWorkInteractive); got != 0 {
+		t.Fatalf("interactive waiters = %d, want 0", got)
+	}
+	if got := scheduler.waiterCount(analysisWorkFast); got != 1 {
+		t.Fatalf("fast waiters = %d, want 1", got)
+	}
+}
+
 func waitForScheduledClass(t *testing.T, acquired <-chan acquiredSchedulerWork, want analysisWorkClass) acquiredSchedulerWork {
 	t.Helper()
 	select {

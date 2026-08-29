@@ -125,6 +125,11 @@ type Server struct {
 	semanticInvalidationMu     sync.Mutex
 	semanticInvalidationPaths  map[string]struct{}
 	resolutionTypeLibSymbols   []procedureir.ResolverSymbol
+	// Interactive requests are dispatched separately so a $/cancelRequest can
+	// reach a request waiting for an analysis permit.
+	requestMu       sync.Mutex
+	requestContexts map[*glsp.Context]context.Context
+	requestCancels  map[jsonrpc2.ID]context.CancelFunc
 }
 
 type projectConstantsResult struct {
@@ -211,7 +216,7 @@ func RunStdio(opts Options) error {
 	}
 	defer cleanup()
 	stream := jsonrpc2.NewBufferedStream(stdioReadWriteCloser{}, jsonrpc2.VSCodeObjectCodec{})
-	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, custom: s.handleCustomNotification, dispatch: s.dispatchCodeAction})
+	conn := jsonrpc2.NewConn(context.Background(), stream, rpcHandler{handler: &s.handler, server: s, custom: s.handleCustomNotification, dispatch: s.dispatchCodeAction})
 	<-conn.DisconnectNotify()
 	return conn.Close()
 }
@@ -263,6 +268,8 @@ func New(opts Options) (*Server, func(), error) {
 		docLifecycles:             make(map[string]*sync.Mutex),
 		semanticQueries:           semanticquery.New(semanticquery.Options{}),
 		semanticInvalidationPaths: make(map[string]struct{}),
+		requestContexts:           make(map[*glsp.Context]context.Context),
+		requestCancels:            make(map[jsonrpc2.ID]context.CancelFunc),
 		analysisScheduler:         newAnalysisScheduler(max(1, runtime.GOMAXPROCS(0)/2)),
 	}
 	if opts.startup != nil {
@@ -418,6 +425,7 @@ func New(opts Options) (*Server, func(), error) {
 		if s.analysis != nil {
 			s.analysis.stop()
 		}
+		s.semanticTokens.stop()
 		s.docs.closeAll()
 		cleanup()
 	}, nil
@@ -860,6 +868,7 @@ func (s *Server) shutdown(_ *glsp.Context) error {
 	if s.analysis != nil {
 		s.analysis.stop()
 	}
+	s.semanticTokens.stop()
 	s.docs.closeAll()
 	s.logger.Printf("shutdown")
 	return nil
@@ -868,6 +877,61 @@ func (s *Server) shutdown(_ *glsp.Context) error {
 func (s *Server) exit(_ *glsp.Context) error {
 	s.logger.Printf("exit")
 	return nil
+}
+
+func (s *Server) registerRequest(req *jsonrpc2.Request, glspCtx *glsp.Context, requestCtx context.Context, cancel context.CancelFunc) {
+	if s == nil || req == nil || glspCtx == nil {
+		return
+	}
+	s.requestMu.Lock()
+	if s.requestContexts == nil {
+		s.requestContexts = make(map[*glsp.Context]context.Context)
+	}
+	if s.requestCancels == nil {
+		s.requestCancels = make(map[jsonrpc2.ID]context.CancelFunc)
+	}
+	s.requestContexts[glspCtx] = requestCtx
+	if !req.Notif {
+		s.requestCancels[req.ID] = cancel
+	}
+	s.requestMu.Unlock()
+}
+
+func (s *Server) unregisterRequest(req *jsonrpc2.Request, glspCtx *glsp.Context) {
+	if s == nil {
+		return
+	}
+	s.requestMu.Lock()
+	delete(s.requestContexts, glspCtx)
+	if req != nil && !req.Notif {
+		delete(s.requestCancels, req.ID)
+	}
+	s.requestMu.Unlock()
+}
+
+func (s *Server) requestContext(glspCtx *glsp.Context) context.Context {
+	if s == nil || glspCtx == nil {
+		return context.Background()
+	}
+	s.requestMu.Lock()
+	requestCtx := s.requestContexts[glspCtx]
+	s.requestMu.Unlock()
+	if requestCtx == nil {
+		return context.Background()
+	}
+	return requestCtx
+}
+
+func (s *Server) cancelRequest(id jsonrpc2.ID) {
+	if s == nil {
+		return
+	}
+	s.requestMu.Lock()
+	cancel := s.requestCancels[id]
+	s.requestMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
@@ -1186,7 +1250,7 @@ func (s *Server) didChangeWatchedFiles(ctx *glsp.Context, params *protocol.DidCh
 	return nil
 }
 
-func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
+func (s *Server) documentSymbol(ctx *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
 	measurement := s.startPerformanceURI("textDocument/documentSymbol", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -1198,7 +1262,7 @@ func (s *Server) documentSymbol(_ *glsp.Context, params *protocol.DocumentSymbol
 		measurement.finish(0, nil)
 		return []protocol.DocumentSymbol{}, nil
 	}
-	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	release, wait, err := s.acquireAnalysisPermit(s.requestContext(ctx), analysisWorkInteractive)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1252,7 +1316,7 @@ func (s *Server) workspaceSymbol(_ *glsp.Context, params *protocol.WorkspaceSymb
 	return out, nil
 }
 
-func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+func (s *Server) definition(ctx *glsp.Context, params *protocol.DefinitionParams) (any, error) {
 	measurement := s.startPerformanceURI("textDocument/definition", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -1264,7 +1328,7 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		measurement.finish(0, nil)
 		return []protocol.Location{}, nil
 	}
-	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	release, wait, err := s.acquireAnalysisPermit(s.requestContext(ctx), analysisWorkInteractive)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1362,7 +1426,7 @@ func (s *Server) rename(_ *glsp.Context, params *protocol.RenameParams) (*protoc
 	return &protocol.WorkspaceEdit{Changes: changes}, nil
 }
 
-func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+func (s *Server) hover(ctx *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	measurement := s.startPerformanceURI("textDocument/hover", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -1386,7 +1450,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		measurement.finish(0, nil)
 		return nil, nil
 	}
-	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	release, wait, err := s.acquireAnalysisPermit(s.requestContext(ctx), analysisWorkInteractive)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1408,7 +1472,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}, nil
 }
 
-func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+func (s *Server) completion(ctx *glsp.Context, params *protocol.CompletionParams) (any, error) {
 	measurement := s.startPerformanceURI("textDocument/completion", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -1428,7 +1492,7 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		measurement.finish(0, nil)
 		return protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil
 	}
-	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	release, wait, err := s.acquireAnalysisPermit(s.requestContext(ctx), analysisWorkInteractive)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1596,7 +1660,7 @@ func (s *Server) codeActionForDocument(ctx context.Context, doc intel.Document, 
 	return out, nil
 }
 
-func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+func (s *Server) signatureHelp(ctx *glsp.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
 	measurement := s.startPerformanceURI("textDocument/signatureHelp", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -1608,7 +1672,7 @@ func (s *Server) signatureHelp(_ *glsp.Context, params *protocol.SignatureHelpPa
 		measurement.finish(0, nil)
 		return nil, nil
 	}
-	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	release, wait, err := s.acquireAnalysisPermit(s.requestContext(ctx), analysisWorkInteractive)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -1810,7 +1874,7 @@ func semanticTokenResponseSize(response any) int {
 	return len(encoded)
 }
 
-func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
+func (s *Server) codeLens(ctx *glsp.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
 	measurement := s.startPerformanceURI("textDocument/codeLens", string(params.TextDocument.URI))
 	doc, err := s.docs.getOrRead(string(params.TextDocument.URI))
 	if err != nil {
@@ -1822,7 +1886,7 @@ func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]p
 		measurement.finish(0, nil)
 		return []protocol.CodeLens{}, nil
 	}
-	release, wait, err := s.acquireAnalysisPermit(context.Background(), analysisWorkInteractive)
+	release, wait, err := s.acquireAnalysisPermit(s.requestContext(ctx), analysisWorkInteractive)
 	if err != nil {
 		measurement.finish(0, err)
 		return nil, err
@@ -4108,11 +4172,15 @@ func (stdioReadWriteCloser) Close() error                { return nil }
 
 type rpcHandler struct {
 	handler  glsp.Handler
+	server   *Server
 	custom   func(context.Context, string, []byte)
 	dispatch func(context.Context, *jsonrpc2.Conn, *jsonrpc2.Request) bool
 }
 
 func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if h.dispatch != nil && h.dispatch(ctx, conn, req) {
 		return
 	}
@@ -4137,6 +4205,36 @@ func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrp
 			_ = conn.Call(ctx, method, params, result)
 		},
 	}
+	if h.server != nil && interactiveAnalysisRequest(req.Method) {
+		requestCtx, cancel := context.WithCancel(ctx)
+		h.server.registerRequest(req, glspCtx, requestCtx, cancel)
+		go h.handle(ctx, cancel, conn, req, glspCtx)
+		return
+	}
+	h.handle(ctx, nil, conn, req, glspCtx)
+}
+
+func interactiveAnalysisRequest(method string) bool {
+	switch method {
+	case "textDocument/completion",
+		"textDocument/signatureHelp",
+		"textDocument/hover",
+		"textDocument/definition",
+		"textDocument/documentSymbol",
+		"textDocument/codeLens":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h rpcHandler) handle(ctx context.Context, requestCancel context.CancelFunc, conn *jsonrpc2.Conn, req *jsonrpc2.Request, glspCtx *glsp.Context) {
+	if h.server != nil && requestCancel != nil {
+		defer func() {
+			h.server.unregisterRequest(req, glspCtx)
+			requestCancel()
+		}()
+	}
 	result, validMethod, validParams, err := h.handler.Handle(glspCtx)
 	if !validMethod {
 		if !req.Notif {
@@ -4152,7 +4250,11 @@ func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrp
 	}
 	if err != nil {
 		if !req.Notif {
-			_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: jsonrpc2.CodeInternalError, Message: err.Error()})
+			code := int64(jsonrpc2.CodeInternalError)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				code = -32800 // LSP RequestCancelled
+			}
+			_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: code, Message: err.Error()})
 		}
 		return
 	}

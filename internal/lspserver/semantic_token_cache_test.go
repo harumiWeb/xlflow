@@ -201,6 +201,34 @@ func TestSemanticTokenCacheInvalidationCancelsProducer(t *testing.T) {
 	}
 }
 
+func TestSemanticTokenCacheStopCancelsProducer(t *testing.T) {
+	cache := newSemanticTokenCache()
+	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
+	started := make(chan struct{})
+	producerCanceled := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := cache.getContext(context.Background(), doc, cache.begin(), func(ctx context.Context) ([]protocol.UInteger, error) {
+			close(started)
+			<-ctx.Done()
+			close(producerCanceled)
+			return nil, ctx.Err()
+		})
+		done <- err
+	}()
+	<-started
+	cache.stop()
+	waitClosed(t, producerCanceled, "semantic token producer shutdown cancellation")
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("stopped producer error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopped semantic token producer did not return")
+	}
+}
+
 func TestSemanticTokenCacheRetainsHistoryOnlyForOpenDocuments(t *testing.T) {
 	cache := newSemanticTokenCache()
 	doc := intel.Document{URI: "file:///C:/work/Main.bas", Path: `C:\work\Main.bas`, Source: "Option Explicit\n", Version: 1}
