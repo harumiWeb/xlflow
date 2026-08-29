@@ -4920,6 +4920,10 @@ End Sub
 
 func TestSemanticTokensContextReturnsCanceledBeforeAnalysis(t *testing.T) {
 	analyzer := newTestAnalyzer(t)
+	analyzer.DocumentSymbolsFunc = func(Document, DocumentSymbolLoader) ([]Symbol, error) {
+		t.Fatal("document symbols should not be requested for a canceled semantic-token generation")
+		return nil, nil
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := analyzer.SemanticTokensContext(ctx, Document{
@@ -4950,6 +4954,23 @@ func TestWorkspaceSymbolsQueryKeepsLegacyProviderForNonContextCalls(t *testing.T
 	}
 	if !legacyCalled || contextCalled || len(symbols) != 1 || symbols[0].Name != "legacy" {
 		t.Fatalf("provider dispatch = (legacy=%t, context=%t, symbols=%+v)", legacyCalled, contextCalled, symbols)
+	}
+}
+
+func TestWorkspaceSymbolsContextReturnsCanceledAfterContextProvider(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	analyzer := Analyzer{
+		WorkspaceSymbolQueryContextFunc: func(context.Context, []Document, WorkspaceSymbolQuery) ([]Symbol, error) {
+			cancel()
+			return []Symbol{{Name: "late"}}, nil
+		},
+	}
+	symbols, err := analyzer.WorkspaceSymbolsContext(ctx, nil, "target")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WorkspaceSymbolsContext error = %v, want context.Canceled", err)
+	}
+	if len(symbols) != 1 || symbols[0].Name != "late" {
+		t.Fatalf("WorkspaceSymbolsContext symbols = %+v, want the provider result", symbols)
 	}
 }
 

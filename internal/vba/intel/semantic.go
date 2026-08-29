@@ -128,6 +128,9 @@ func (a Analyzer) SemanticTokensContext(ctx context.Context, doc Document, open 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	documentSymbols, documentSymbolsErr := a.DocumentSymbolsContext(ctx, doc)
 	if err := ctx.Err(); err != nil {
 		return nil, err

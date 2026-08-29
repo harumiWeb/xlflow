@@ -750,7 +750,11 @@ func (a Analyzer) WorkspaceSymbolsContext(ctx context.Context, open []Document, 
 		return nil, err
 	}
 	if a.WorkspaceSymbolQueryContextFunc != nil {
-		return a.WorkspaceSymbolQueryContextFunc(ctx, open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+		out, err := a.WorkspaceSymbolQueryContextFunc(ctx, open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})
+		if err != nil {
+			return nil, err
+		}
+		return out, ctx.Err()
 	}
 	if a.WorkspaceSymbolQueryFunc != nil {
 		out, err := a.WorkspaceSymbolQueryFunc(open, WorkspaceSymbolQuery{Text: query, Mode: WorkspaceSymbolQueryContains})

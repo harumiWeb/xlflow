@@ -132,6 +132,8 @@ func (c *semanticTokenCache) getContext(
 		}
 		return cachedSemanticTokens{}, false, errSemanticTokensSuperseded
 	}
+	// The shared producer outlives an individual caller; cache invalidation or
+	// producer completion, not waiter cancellation, cancels this context.
 	producerCtx, cancel := context.WithCancel(context.Background())
 	call := &semanticTokenCall{done: make(chan struct{}), generation: generation, revision: revision, signature: signature, cancel: cancel}
 	c.inflight[identity] = call
