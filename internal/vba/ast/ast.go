@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"sync"
+	"sync/atomic"
 
 	tree_sitter_vba "github.com/harumiWeb/tree-sitter-vba/bindings/go"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -56,7 +58,13 @@ type ParsedDocument struct {
 // supplied source is copied so callers cannot mutate the bytes backing a
 // shared parsed document after construction.
 func ParseDocument(path string, source []byte) (*ParsedDocument, error) {
-	return parseDocument(path, source, nil)
+	return ParseDocumentContext(context.Background(), path, source)
+}
+
+// ParseDocumentContext parses immutable source while allowing tree-sitter to
+// stop at a cooperative cancellation checkpoint.
+func ParseDocumentContext(ctx context.Context, path string, source []byte) (*ParsedDocument, error) {
+	return parseDocumentContext(ctx, path, source, nil)
 }
 
 // ParseDocumentIncremental parses source using an edited clone of previous's
@@ -73,7 +81,7 @@ func ParseDocumentIncremental(path string, source []byte, previous *ParsedDocume
 		return nil, err
 	}
 	defer oldTree.Close()
-	return parseDocument(path, source, oldTree)
+	return parseDocumentContext(context.Background(), path, source, oldTree)
 }
 
 // ParseDocumentIncrementalIfAvailable performs an incremental parse only when
@@ -88,19 +96,61 @@ func ParseDocumentIncrementalIfAvailable(path string, source, previousSource []b
 		return nil, err
 	}
 	defer oldTree.Close()
-	return parseDocument(path, source, oldTree)
+	return parseDocumentContext(context.Background(), path, source, oldTree)
 }
 
-func parseDocument(path string, source []byte, oldTree *tree_sitter.Tree) (*ParsedDocument, error) {
+func parseDocumentContext(ctx context.Context, path string, source []byte, oldTree *tree_sitter.Tree) (*ParsedDocument, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	parser, err := NewParser()
 	if err != nil {
 		return nil, err
 	}
 	defer parser.Close()
 	copySource := append([]byte(nil), source...)
+	// go-tree-sitter v0.25.0 leaks the cgo handle for a non-nil
+	// ParseOptions. Use the parser's cancellation flag with Parse (which passes
+	// nil options) until a released binding is available, and join the watcher
+	// before closing the parser so it cannot touch freed parser state.
+	var parseDone chan struct{}
+	var cancelDone chan struct{}
+	if ctx.Done() != nil {
+		cancellationFlag := new(uintptr)
+		var pinner runtime.Pinner
+		pinner.Pin(cancellationFlag)
+		//nolint:staticcheck // ParseWithOptions leaks non-nil ParseOptions handles in v0.25.0.
+		parser.parser.SetCancellationFlag(cancellationFlag)
+		parseDone = make(chan struct{})
+		cancelDone = make(chan struct{})
+		go func() {
+			defer close(cancelDone)
+			select {
+			case <-ctx.Done():
+				atomic.StoreUintptr(cancellationFlag, 1)
+			case <-parseDone:
+			}
+		}()
+		defer func() {
+			close(parseDone)
+			<-cancelDone
+			runtime.KeepAlive(cancellationFlag)
+			pinner.Unpin()
+		}()
+	}
 	tree := parser.parser.Parse(copySource, oldTree)
 	if tree == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, ErrIncrementalParseUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		tree.Close()
+		return nil, err
 	}
 	root := tree.RootNode()
 	if root == nil {

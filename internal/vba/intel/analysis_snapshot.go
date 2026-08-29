@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/harumiWeb/xlflow/internal/vba/analysisstats"
@@ -98,6 +99,7 @@ type AnalysisSnapshot struct {
 	parsedDocument        *ast.ParsedDocument
 	parsedErr             error
 	parseDocument         func(string, []byte) (*ast.ParsedDocument, error)
+	parseDocumentContext  func(context.Context, string, []byte) (*ast.ParsedDocument, error)
 	parseCount            atomic.Uint64
 	fullHashCount         atomic.Uint64
 	procedureIRBuildCount atomic.Uint64
@@ -131,18 +133,18 @@ func NewAnalysisSnapshot(doc Document) *AnalysisSnapshot {
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	lineStarts, lineEnds := buildSourceLineMap(source)
 	return &AnalysisSnapshot{
-		uri:           doc.URI,
-		path:          doc.Path,
-		version:       doc.Version,
-		moduleKind:    doc.ModuleKind,
-		source:        source,
-		sourceHash:    sha256.Sum256([]byte(source)),
-		lines:         strings.Split(normalized, "\n"),
-		lineStarts:    lineStarts,
-		lineEnds:      lineEnds,
-		parseDocument: ast.ParseDocument,
-		artifacts:     newProcedureArtifactStore(),
-		retireDone:    make(chan struct{}),
+		uri:                  doc.URI,
+		path:                 doc.Path,
+		version:              doc.Version,
+		moduleKind:           doc.ModuleKind,
+		source:               source,
+		sourceHash:           sha256.Sum256([]byte(source)),
+		lines:                strings.Split(normalized, "\n"),
+		lineStarts:           lineStarts,
+		lineEnds:             lineEnds,
+		parseDocumentContext: ast.ParseDocumentContext,
+		artifacts:            newProcedureArtifactStore(),
+		retireDone:           make(chan struct{}),
 	}
 }
 
@@ -753,26 +755,82 @@ func (s *AnalysisSnapshot) identifiers() [][]byteSpan {
 // most once for this document revision. Callers must not close the returned
 // document; the snapshot owns its lifecycle and retires it exactly once.
 func (s *AnalysisSnapshot) ParsedDocument() (*ast.ParsedDocument, error) {
+	return s.ParsedDocumentContext(context.Background())
+}
+
+// ParsedDocumentContext is the cancellable form of ParsedDocument. It avoids
+// holding an analysis permit while waiting for another goroutine to finish
+// constructing the snapshot's tree and propagates cancellation into
+// tree-sitter when this caller owns the parse.
+func (s *AnalysisSnapshot) ParsedDocumentContext(ctx context.Context) (*ast.ParsedDocument, error) {
 	if s == nil {
 		return nil, errAnalysisSnapshotRetired
 	}
-	s.parsedMu.Lock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := lockMutexContext(ctx, &s.parsedMu); err != nil {
+		return nil, err
+	}
 	defer s.parsedMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s.parsedDocument != nil || s.parsedErr != nil {
 		return s.parsedDocument, s.parsedErr
 	}
 	if s.retired.Load() {
 		return nil, errAnalysisSnapshotRetired
 	}
-	parse := s.parseDocument
-	if parse == nil {
-		parse = ast.ParseDocument
+	var parsed *ast.ParsedDocument
+	var err error
+	if s.parseDocument != nil {
+		parsed, err = s.parseDocument(s.path, []byte(s.source))
+	} else {
+		parse := s.parseDocumentContext
+		if parse == nil {
+			parse = ast.ParseDocumentContext
+		}
+		parsed, err = parse(ctx, s.path, []byte(s.source))
 	}
-	s.parsedDocument, s.parsedErr = parse(s.path, []byte(s.source))
-	if s.parsedDocument != nil {
+	if err != nil {
+		if isRetryableContextError(err) {
+			return nil, err
+		}
+		s.parsedErr = err
+		return nil, err
+	}
+	s.parsedDocument = parsed
+	if parsed != nil {
 		s.parseCount.Add(1)
 	}
-	return s.parsedDocument, s.parsedErr
+	if err := ctx.Err(); err != nil {
+		return s.parsedDocument, err
+	}
+	return s.parsedDocument, nil
+}
+
+func lockMutexContext(ctx context.Context, mu *sync.Mutex) error {
+	for {
+		if mu.TryLock() {
+			return nil
+		}
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		}
+	}
 }
 
 // ParsedDocumentIfReady returns the already-created parsed document without
@@ -878,12 +936,26 @@ func analysisSnapshotForDocument(doc Document) *AnalysisSnapshot {
 }
 
 func parsedDocumentForDocument(doc Document) (*ast.ParsedDocument, func(), error) {
+	return parsedDocumentForDocumentContext(context.Background(), doc)
+}
+
+func parsedDocumentForDocumentContext(ctx context.Context, doc Document) (*ast.ParsedDocument, func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, func() {}, err
+	}
 	if snapshot := analysisSnapshotForDocument(doc); snapshot != nil {
-		parsed, err := snapshot.ParsedDocument()
+		parsed, err := snapshot.ParsedDocumentContext(ctx)
 		return parsed, func() {}, err
 	}
-	parsed, err := ast.ParseDocument(doc.Path, []byte(doc.Source))
+	parsed, err := ast.ParseDocumentContext(ctx, doc.Path, []byte(doc.Source))
 	if err != nil {
+		return nil, func() {}, err
+	}
+	if err := ctx.Err(); err != nil {
+		parsed.Close()
 		return nil, func() {}, err
 	}
 	return parsed, parsed.Close, nil
