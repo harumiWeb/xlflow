@@ -1277,7 +1277,7 @@ func TestServerShutdownCancelsAndJoinsInteractiveRequests(t *testing.T) {
 	s.cancelInteractiveRequestsAndWait()
 	select {
 	case <-joined:
-	default:
+	case <-time.After(jsonrpcIntegrationTimeout):
 		t.Fatal("shutdown returned before interactive request joined")
 	}
 	if got := len(s.requestContexts); got != 0 {
