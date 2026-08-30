@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// SyncOptions controls the developer-only corpus materialisation operation.
+// SyncOptions controls the developer-only corpus materialization operation.
 // UpstreamCheckout is intended for offline, locally reviewed updates. When it
 // is empty, Sync fetches the exact commit recorded by the manifest.
 type SyncOptions struct {
@@ -22,7 +22,7 @@ type SyncOptions struct {
 	UpstreamCheckout string
 }
 
-// Sync validates the manifest, materialises every listed project in a private
+// Sync validates the manifest, materializes every listed project in a private
 // staging tree, and atomically replaces projects/third_party. It verifies each
 // staged project's source_counts contract before publication. It never edits
 // the manifest and does not perform network access when UpstreamCheckout is

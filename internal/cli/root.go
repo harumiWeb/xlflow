@@ -4831,7 +4831,7 @@ func (a *app) typeDBInitCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
-	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separated; use all for every known library present; default: excel)")
 	return cmd
 }
 
@@ -4848,7 +4848,7 @@ func (a *app) typeDBRefreshCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "override generated type database directory")
-	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separate; use all for every known library present; default: excel)")
+	cmd.Flags().StringSliceVar(&libraries, "library", []string{"excel"}, "TypeLib library to import (repeat or comma-separated; use all for every known library present; default: excel)")
 	cmd.Flags().BoolVar(&force, "force", false, "deprecated compatibility flag; refresh always regenerates")
 	return cmd
 }
@@ -4943,9 +4943,9 @@ unsaved workbooks or active work. Use with extreme caution.`,
 				}
 				if !confirmPrompt(os.Stdin, a.stderrWriter(), "This will forcibly terminate ALL Excel processes. Unsaved work will be lost. Continue? [y/N] ") {
 					env := output.New("process cleanup")
-					env.Error = &output.Error{Code: "process_cancelled", Message: "cleanup --all cancelled by user"}
+					env.Error = &output.Error{Code: "process_cancelled", Message: "cleanup --all canceled by user"}
 					env.Status = output.StatusFailed
-					env.Logs = []string{"cleanup --all cancelled"}
+					env.Logs = []string{"cleanup --all canceled"}
 					return a.write(env, output.ExitSuccess)
 				}
 			}

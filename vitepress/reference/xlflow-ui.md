@@ -113,7 +113,7 @@ Supported `--filedialog` kinds:
 File dialog values use these rules:
 
 - Repeat the same `kind:id=value` flag to supply multiple selected paths in order.
-- Use `@cancel` to represent a cancelled dialog.
+- Use `@cancel` to represent a canceled dialog.
 - `GetOpenFilename` and `FileDialogOpen` return a Variant string array when `MultiSelect=True`.
 - Non-multi-select wrappers return a single string or `False` on cancel.
 

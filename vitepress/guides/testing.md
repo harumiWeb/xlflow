@@ -17,4 +17,4 @@ xlflow analyze --json
 xlflow test --json
 ```
 
-Keep source-only checks before Excel-backed checks. Use `--session` for fast iteration and `--no-save` when the test is exploratory. After a behavior test, use `inspect` or `export-image` for the one workbook result a human would recognise; then `save --session` only when that result should persist.
+Keep source-only checks before Excel-backed checks. Use `--session` for fast iteration and `--no-save` when the test is exploratory. After a behavior test, use `inspect` or `export-image` for the one workbook result a human would recognize; then `save --session` only when that result should persist.

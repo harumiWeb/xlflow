@@ -1,5 +1,5 @@
 // Package corpus owns the pinned, third-party static-analysis corpus manifest
-// and the developer-only synchronisation operation used to materialise it.
+// and the developer-only synchronization operation used to materialize it.
 //
 // The package deliberately has no production CLI dependencies.  Callers that
 // want to update the vendored tree must invoke Sync explicitly; loading and

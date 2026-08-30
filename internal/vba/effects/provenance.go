@@ -39,7 +39,7 @@ func semanticApplicationTarget(target string) string {
 		return target
 	default:
 		// Keep the compact state bounded even if a future extractor accepts an
-		// unrecognised Application member. Its direct evidence remains available
+		// unrecognized Application member. Its direct evidence remains available
 		// to the lazy compatibility projection.
 		return ""
 	}

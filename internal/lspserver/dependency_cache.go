@@ -21,7 +21,7 @@ import (
 // dependencyCache stores immutable project products by their content
 // dependency key. Unlike revisionCache, adjacent workspace revisions may
 // share entries when the inputs that product actually reads are unchanged.
-// One build is shared per key and failed or cancelled builds are retryable.
+// One build is shared per key and failed or canceled builds are retryable.
 type dependencyCache[T any] struct {
 	mu         sync.Mutex
 	values     map[string]T

@@ -40,7 +40,7 @@ xlflow analyze --json
 
 These commands do not require Excel. A lint or preflight error should be fixed in source before `push` opens Excel.
 
-Choose a change you can recognise—for example, alter a constant or write a clear value to a result cell. This makes the later verification meaningful. Do not edit the same procedure in VBE and VS Code at the same time: if you do edit in VBE, stop and `pull` first.
+Choose a change you can recognize—for example, alter a constant or write a clear value to a result cell. This makes the later verification meaningful. Do not edit the same procedure in VBE and VS Code at the same time: if you do edit in VBE, stop and `pull` first.
 
 ## 4. Push, run, and verify
 

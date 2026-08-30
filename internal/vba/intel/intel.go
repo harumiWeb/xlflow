@@ -6940,20 +6940,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func DisplayPath(root, path string) string {
 	if root != "" {
 		if rel, err := filepath.Rel(root, path); err == nil {

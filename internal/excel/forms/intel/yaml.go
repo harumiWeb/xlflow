@@ -362,16 +362,3 @@ func quotedEnd(line string, start int) int {
 func linePrefix(line string, character int) string {
 	return line[:byteOffsetForUTF16(line, character)]
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
