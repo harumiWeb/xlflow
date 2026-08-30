@@ -26,9 +26,12 @@ jobs:
           set -euo pipefail
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            base_ref="origin/${{ github.base_ref }}"
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-            changed_files="$(git diff --name-only "$base_ref...HEAD")"
+            # Use the base recorded in this PR event. The checked-out HEAD is
+            # a synthetic merge commit, and the live base branch may advance
+            # while a fork PR is waiting for approval.
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            git fetch --no-tags origin "$base_sha"
+            changed_files="$(git diff --name-only "$base_sha...HEAD")"
           else
             before_sha="${{ github.event.before }}"
             if [[ -z "$before_sha" || "$before_sha" == "0000000000000000000000000000000000000000" ]]; then

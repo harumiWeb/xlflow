@@ -1260,6 +1260,37 @@ func TestJSONRPCInteractiveCancellationReleasesAnalysisWaiter(t *testing.T) {
 	}
 }
 
+func TestServerShutdownCancelsAndJoinsInteractiveRequests(t *testing.T) {
+	s := &Server{}
+	req := &jsonrpc2.Request{Method: "textDocument/hover", ID: jsonrpc2.ID{Num: 1}}
+	glspCtx := &glsp.Context{}
+	requestCtx, cancel := context.WithCancel(context.Background())
+	if !s.registerRequest(req, glspCtx, requestCtx, cancel) {
+		t.Fatal("interactive request was not registered")
+	}
+	joined := make(chan struct{})
+	go func() {
+		<-requestCtx.Done()
+		s.unregisterRequest(req, glspCtx)
+		close(joined)
+	}()
+	s.cancelInteractiveRequestsAndWait()
+	select {
+	case <-joined:
+	case <-time.After(jsonrpcIntegrationTimeout):
+		t.Fatal("shutdown returned before interactive request joined")
+	}
+	if got := len(s.requestContexts); got != 0 {
+		t.Fatalf("active request contexts after shutdown = %d, want 0", got)
+	}
+	newCtx, newCancel := context.WithCancel(context.Background())
+	if s.registerRequest(&jsonrpc2.Request{Method: "textDocument/hover", ID: jsonrpc2.ID{Num: 2}}, &glsp.Context{}, newCtx, newCancel) {
+		newCancel()
+		t.Fatal("shutdown accepted a new interactive request")
+	}
+	newCancel()
+}
+
 func TestCodeActionRequestsBoundedQueueAndAutomaticSupersession(t *testing.T) {
 	q := newCodeActionRequests()
 	defer q.stop()

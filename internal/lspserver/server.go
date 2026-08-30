@@ -127,9 +127,12 @@ type Server struct {
 	resolutionTypeLibSymbols   []procedureir.ResolverSymbol
 	// Interactive requests are dispatched separately so a $/cancelRequest can
 	// reach a request waiting for an analysis permit.
-	requestMu       sync.Mutex
-	requestContexts map[*glsp.Context]context.Context
-	requestCancels  map[jsonrpc2.ID]context.CancelFunc
+	requestMu             sync.Mutex
+	requestContexts       map[*glsp.Context]context.Context
+	requestCancels        map[jsonrpc2.ID]context.CancelFunc
+	requestCancelContexts map[*glsp.Context]context.CancelFunc
+	requestWait           sync.WaitGroup
+	requestStopping       bool
 }
 
 type projectConstantsResult struct {
@@ -270,6 +273,7 @@ func New(opts Options) (*Server, func(), error) {
 		semanticInvalidationPaths: make(map[string]struct{}),
 		requestContexts:           make(map[*glsp.Context]context.Context),
 		requestCancels:            make(map[jsonrpc2.ID]context.CancelFunc),
+		requestCancelContexts:     make(map[*glsp.Context]context.CancelFunc),
 		analysisScheduler:         newAnalysisScheduler(max(1, runtime.GOMAXPROCS(0)/2)),
 	}
 	if opts.startup != nil {
@@ -420,6 +424,7 @@ func New(opts Options) (*Server, func(), error) {
 	s.codeActions = newCodeActionRequests()
 	s.performance.startupEvent("serverConstructed")
 	return s, func() {
+		s.cancelInteractiveRequestsAndWait()
 		s.codeActions.stop()
 		s.stopDiagnostics()
 		if s.analysis != nil {
@@ -863,6 +868,7 @@ func codeLensConfigFromInitialize(params *protocol.InitializeParams) intel.CodeL
 }
 
 func (s *Server) shutdown(_ *glsp.Context) error {
+	s.cancelInteractiveRequestsAndWait()
 	s.codeActions.stop()
 	s.stopDiagnostics()
 	if s.analysis != nil {
@@ -879,22 +885,31 @@ func (s *Server) exit(_ *glsp.Context) error {
 	return nil
 }
 
-func (s *Server) registerRequest(req *jsonrpc2.Request, glspCtx *glsp.Context, requestCtx context.Context, cancel context.CancelFunc) {
+func (s *Server) registerRequest(req *jsonrpc2.Request, glspCtx *glsp.Context, requestCtx context.Context, cancel context.CancelFunc) bool {
 	if s == nil || req == nil || glspCtx == nil {
-		return
+		return false
 	}
 	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	if s.requestStopping {
+		return false
+	}
 	if s.requestContexts == nil {
 		s.requestContexts = make(map[*glsp.Context]context.Context)
 	}
 	if s.requestCancels == nil {
 		s.requestCancels = make(map[jsonrpc2.ID]context.CancelFunc)
 	}
+	if s.requestCancelContexts == nil {
+		s.requestCancelContexts = make(map[*glsp.Context]context.CancelFunc)
+	}
 	s.requestContexts[glspCtx] = requestCtx
+	s.requestCancelContexts[glspCtx] = cancel
 	if !req.Notif {
 		s.requestCancels[req.ID] = cancel
 	}
-	s.requestMu.Unlock()
+	s.requestWait.Add(1)
+	return true
 }
 
 func (s *Server) unregisterRequest(req *jsonrpc2.Request, glspCtx *glsp.Context) {
@@ -902,11 +917,16 @@ func (s *Server) unregisterRequest(req *jsonrpc2.Request, glspCtx *glsp.Context)
 		return
 	}
 	s.requestMu.Lock()
+	_, registered := s.requestContexts[glspCtx]
 	delete(s.requestContexts, glspCtx)
+	delete(s.requestCancelContexts, glspCtx)
 	if req != nil && !req.Notif {
 		delete(s.requestCancels, req.ID)
 	}
 	s.requestMu.Unlock()
+	if registered {
+		s.requestWait.Done()
+	}
 }
 
 func (s *Server) requestContext(glspCtx *glsp.Context) context.Context {
@@ -932,6 +952,25 @@ func (s *Server) cancelRequest(id jsonrpc2.ID) {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (s *Server) cancelInteractiveRequestsAndWait() {
+	if s == nil {
+		return
+	}
+	s.requestMu.Lock()
+	s.requestStopping = true
+	cancels := make([]context.CancelFunc, 0, len(s.requestCancelContexts))
+	for _, cancel := range s.requestCancelContexts {
+		if cancel != nil {
+			cancels = append(cancels, cancel)
+		}
+	}
+	s.requestMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	s.requestWait.Wait()
 }
 
 func (s *Server) didOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
@@ -4200,7 +4239,13 @@ func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrp
 	}
 	if h.server != nil && interactiveAnalysisRequest(req.Method) {
 		requestCtx, cancel := context.WithCancel(ctx)
-		h.server.registerRequest(req, glspCtx, requestCtx, cancel)
+		if !h.server.registerRequest(req, glspCtx, requestCtx, cancel) {
+			cancel()
+			if !req.Notif {
+				_ = conn.ReplyWithError(ctx, req.ID, &jsonrpc2.Error{Code: -32800, Message: context.Canceled.Error()})
+			}
+			return
+		}
 		go h.handle(ctx, cancel, conn, req, glspCtx)
 		return
 	}

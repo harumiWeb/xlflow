@@ -257,6 +257,44 @@ func TestAnalysisSnapshotParsedDocumentIfReadyDoesNotWaitForConstruction(t *test
 	snapshot.Retire()
 }
 
+func TestAnalysisSnapshotParsedDocumentContextCancelsParseWait(t *testing.T) {
+	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	snapshot.parseDocument = func(path string, source []byte) (*vbaast.ParsedDocument, error) {
+		close(started)
+		<-release
+		return vbaast.ParseDocument(path, source)
+	}
+	parseDone := make(chan error, 1)
+	go func() {
+		_, err := snapshot.ParsedDocument()
+		parseDone <- err
+	}()
+	<-started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := snapshot.ParsedDocumentContext(ctx)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled parse waiter = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("canceled parse waiter did not return")
+	}
+	close(release)
+	if err := <-parseDone; err != nil {
+		t.Fatal(err)
+	}
+	snapshot.RetireAndWait()
+}
+
 func TestAnalysisSnapshotRetireDoesNotWaitForParseConstruction(t *testing.T) {
 	snapshot := NewAnalysisSnapshot(Document{Path: "Main.bas", Source: "Sub Main()\nEnd Sub\n"})
 	started := make(chan struct{})
