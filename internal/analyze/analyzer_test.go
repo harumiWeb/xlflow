@@ -6056,6 +6056,178 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesIsArrayGuardToNestedArrayElement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Merge(ByRef arr() As Variant) As Variant
+  Dim i As Long
+  Dim newLength As Long
+  newLength = UBound(arr) - LBound(arr) + 1
+  For i = LBound(arr) To UBound(arr)
+    If IsArray(arr(i)) Then
+      newLength = newLength + UBound(arr(i)) - LBound(arr(i)) + 1
+    End If
+  Next
+  Merge = newLength
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			t.Fatalf("an IsArray(arr(i)) guard should suppress the nested bound access finding: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227DoesNotRestoreNestedArrayGuardAfterErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If IsArray(values(0)) Then
+    Erase values
+  End If
+  If UBound(values) > 0 Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 6 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an Erase after a nested IsArray guard must not be overwritten by the guard refinement: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotPromoteUnknownVariantElementGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Probe(ByVal value As Variant)
+  If IsArray(value("key")) Then
+    ReDim value(0 To -1)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an element-like access on an unknown Variant must not promote the Variant to an allocated array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesNestedArrayGuardThroughElseIf(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If False Then
+    Debug.Print "skip"
+  ElseIf IsArray(values(0)) Then
+    Debug.Print UBound(values(0))
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 6 {
+			t.Fatalf("an ElseIf IsArray(values(0)) guard should suppress the guarded body finding: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227PropagatesNestedArrayGuardThroughSingleLineIf(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If IsArray(values(0)) Then Debug.Print "ok"
+  If UBound(values) > 0 Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 4 {
+			t.Fatalf("a single-line nested IsArray guard should establish the outer array for following code: %+v", finding)
+		}
+	}
+}
+
+func TestAnalyzerVBA227PreservesSingleLineElseArrayMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Variant)
+  If IsArray(values(0)) Then Debug.Print "ok" Else Erase values
+  If UBound(values) > 0 Then Debug.Print "bad"
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 4 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("an Else-side Erase must keep the following outer-array bounds query conservative: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227ClearsEmptyStateAfterNestedArrayElementGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe()
+  Dim bytes() As Byte
+  bytes = vbNullString
+  If IsArray(bytes(0)) Then
+    Debug.Print "nested"
+  End If
+  Debug.Print bytes(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			t.Fatalf("a successful nested element evaluation should prove the outer Byte array is non-empty: %+v", finding)
+		}
+	}
+}
+
 func TestAnalyzerVBA227RecognizesVariantByteArrayTransfer(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

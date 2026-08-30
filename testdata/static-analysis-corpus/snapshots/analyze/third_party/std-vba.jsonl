@@ -28,7 +28,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/JSONLogic.cls","surface":"analyze","code":"VBA227","severity":"warning","line":254,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/JSONLogic.cls","surface":"analyze","code":"VBA227","severity":"warning","line":254,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/JSONLogic.cls","surface":"analyze","code":"VBA227","severity":"warning","line":255,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/JSONLogic.cls","surface":"analyze","code":"VBA227","severity":"warning","line":256,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/Pointers/stdPointer.cls","surface":"analyze","code":"VBA206","severity":"warning","line":107,"column":5}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA206","severity":"warning","line":34,"column":3}
 {"project":"third_party/std-vba","file":"src/WIP/STD_Runtimes_CLR.cls","surface":"analyze","code":"VBA101","severity":"warning","line":46,"column":0}

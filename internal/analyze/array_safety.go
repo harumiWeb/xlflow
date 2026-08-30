@@ -132,7 +132,7 @@ var (
 	arrayGuardReversedRe      = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	arrayGuardValueRe         = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
 	arrayGuardValueReversedRe = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*)\s*$`)
-	arrayIsArrayGuardRe       = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
+	arrayIsArrayGuardRe       = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
 	arrayByteArrayGuardRe     = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
 	arrayByteArrayReadRe      = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
 	arraySetupGuardRe         = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
@@ -536,7 +536,107 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	if redim, ok := inlineArrayRedimText(text); ok {
 		text = redim
 	}
-	return a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
+	if condition, body, ok := arrayIfThenParts(text); ok {
+		if argument, _, guard := arrayIsArrayGuardCondition(condition); guard && arrayElementBaseName(argument) != "" {
+			state, findings := a.arrayTransfer(file, proc, ctx, variables, state, condition, line, constants, capacityGuards)
+			guardedState := arrayElementGuardState(state, argument, variables)
+			thenState := cloneArrayState(guardedState)
+			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+			if thenBody != "" {
+				var bodyFindings []Finding
+				thenState, bodyFindings = a.arrayTransfer(file, proc, ctx, variables, thenState, thenBody, line, constants, capacityGuards)
+				findings = append(findings, bodyFindings...)
+			}
+			if hasElse {
+				elseState := cloneArrayState(guardedState)
+				var elseFindings []Finding
+				if elseBody != "" {
+					elseState, elseFindings = a.arrayTransfer(file, proc, ctx, variables, elseState, elseBody, line, constants, capacityGuards)
+				}
+				findings = append(findings, elseFindings...)
+				state = meetArrayState(thenState, elseState)
+			} else {
+				state = thenState
+			}
+			return state, findings
+		}
+	}
+	state, findings := a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
+	// Source-line CFG blocks can contain an If condition and its body. Apply
+	// the normal-path fact after the condition while the block is still being
+	// processed so a nested element access in the body does not repeat the
+	// condition's possible outer-array failure.
+	if argument, _, ok := arrayIsArrayGuardCondition(text); ok {
+		state = arrayElementGuardState(state, argument, variables)
+	}
+	return state, findings
+}
+
+func arrayIfThenParts(text string) (condition, body string, ok bool) {
+	text = strings.TrimSpace(text)
+	lower := strings.ToLower(text)
+	prefixLength := 0
+	switch {
+	case strings.HasPrefix(lower, "if "):
+		prefixLength = len("if ")
+	case strings.HasPrefix(lower, "elseif "):
+		prefixLength = len("elseif ")
+	default:
+		return "", "", false
+	}
+	rest := strings.TrimSpace(text[prefixLength:])
+	then := arrayTopLevelKeywordIndex(rest, "then")
+	if then < 0 {
+		return "", "", false
+	}
+	return strings.TrimSpace(text[:prefixLength] + rest[:then]), strings.TrimSpace(rest[then+len("then"):]), true
+}
+
+func arrayIfThenBodyParts(body string) (thenBody, elseBody string, hasElse bool) {
+	elseIndex := arrayTopLevelKeywordIndex(body, "else")
+	if elseIndex < 0 {
+		return strings.TrimSpace(body), "", false
+	}
+	return strings.TrimSpace(body[:elseIndex]), strings.TrimSpace(body[elseIndex+len("else"):]), true
+}
+
+func arrayTopLevelKeywordIndex(text, keyword string) int {
+	if keyword == "" {
+		return -1
+	}
+	depth := 0
+	inString := false
+	for i := 0; i <= len(text)-len(keyword); i++ {
+		switch text[i] {
+		case '"':
+			if inString && i+1 < len(text) && text[i+1] == '"' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		}
+		if inString || depth != 0 || !strings.EqualFold(text[i:i+len(keyword)], keyword) {
+			continue
+		}
+		if i > 0 && isIdentifierPart(text[i-1]) {
+			continue
+		}
+		end := i + len(keyword)
+		if end < len(text) && isIdentifierPart(text[end]) {
+			continue
+		}
+		return i
+	}
+	return -1
 }
 
 func arrayVBA227HasArrayFactoryAssignment(text string) bool {
@@ -1509,23 +1609,30 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 		return state
 	}
 	if argument, arrayBranch, ok := arrayIsArrayGuardCondition(statement.Condition.Text); ok {
-		if edge.Kind != arrayBranch {
-			return state
+		if name := directArrayArgumentName(argument); name != "" {
+			if edge.Kind != arrayBranch {
+				return state
+			}
+			variable, known := variables[name]
+			if !known || !variable.isVariant {
+				return state
+			}
+			value, known := state[name]
+			if !known {
+				return state
+			}
+			updated := cloneArrayState(state)
+			value.kind = arrayAllocated
+			value.knownArray = true
+			updated[name] = value
+			return updated
 		}
-		name := strings.ToLower(cleanIdentifier(argument))
-		variable, known := variables[name]
-		if !known || !variable.isVariant {
-			return state
-		}
-		value, known := state[name]
-		if !known {
-			return state
-		}
-		updated := cloneArrayState(state)
-		value.kind = arrayAllocated
-		value.knownArray = true
-		updated[name] = value
-		return updated
+
+		// Nested element guards are refined by arrayVBA227Transfer while the
+		// source-line block is still being processed. Refining here would apply
+		// the fact after later statements in the same block, potentially
+		// overwriting an Erase or unknown assignment before the next block.
+		return state
 	}
 	argument, allocatedBranch, ok := arrayAllocationGuardCondition(statement.Condition.Text, guards, state)
 	if !ok || edge.Kind != allocatedBranch {
@@ -1549,8 +1656,14 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 
 func arrayIsArrayGuardCondition(text string) (string, vbacfg.EdgeKind, bool) {
 	text = strings.TrimSpace(text)
-	if strings.HasPrefix(strings.ToLower(text), "if ") {
+	if condition, _, ok := arrayIfThenParts(text); ok {
+		text = condition
+	}
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "if ") {
 		text = strings.TrimSpace(text[3:])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		text = strings.TrimSpace(text[len("elseif "):])
 	}
 	if then := strings.LastIndex(strings.ToLower(text), " then"); then >= 0 && strings.TrimSpace(text[then+5:]) == "" {
 		text = strings.TrimSpace(text[:then])
@@ -1578,6 +1691,39 @@ func arrayIsArrayGuardCondition(text string) (string, vbacfg.EdgeKind, bool) {
 		return match[1], vbacfg.EdgeBranchTrue, true
 	}
 	return "", "", false
+}
+
+func arrayElementBaseName(text string) string {
+	text = strings.TrimSpace(text)
+	open := strings.IndexByte(text, '(')
+	if open <= 0 || matchingParen(text, open) != len(text)-1 {
+		return ""
+	}
+	if strings.TrimSpace(text[open+1:len(text)-1]) == "" {
+		return ""
+	}
+	return directArrayArgumentName(text[:open])
+}
+
+func arrayElementGuardState(state arrayFlowState, argument string, variables map[string]arrayVariable) arrayFlowState {
+	name := arrayElementBaseName(argument)
+	if name == "" {
+		return state
+	}
+	variable, known := variables[name]
+	if !known || !variable.isArray {
+		return state
+	}
+	value, known := state[name]
+	if !known {
+		return state
+	}
+	updated := cloneArrayState(state)
+	value.kind = arrayAllocated
+	value.knownArray = true
+	value.mayBeEmpty = false
+	updated[name] = value
+	return updated
 }
 
 // arrayVBA227Graph removes normal-flow edges after direct raises and after
