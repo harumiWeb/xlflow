@@ -119,37 +119,39 @@ type directArrayRedimClause struct {
 }
 
 var (
-	arrayRedimRe              = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
-	arrayRedimClauseRe        = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
-	arrayRedimTypeSuffixRe    = regexp.MustCompile(`(?i)^as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?$`)
-	arrayEraseRe              = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
-	arrayEraseNameRe          = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
-	arrayBoundCallRe          = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
-	arrayForBoundRe           = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
-	arrayForEachRe            = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
-	arrayIndexedSourceRe      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
-	arrayGuardCallRe          = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:(=|<>|>=|<=|>|<)\s*(-?\d+))?\s*$`)
-	arrayGuardReversedRe      = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
-	arrayGuardValueRe         = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
-	arrayGuardValueReversedRe = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*)\s*$`)
-	arrayIsArrayGuardRe       = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
-	arrayByteArrayGuardRe     = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
-	arrayByteArrayReadRe      = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
-	arraySetupGuardRe         = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
-	arrayOnErrorGotoRe        = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
-	arrayOnErrorResumeNextRe  = regexp.MustCompile(`(?i)^\s*on\s+error\s+resume\s+next\s*$`)
-	arrayOnErrorGotoZeroRe    = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+0\s*$`)
-	arrayErrNumberFailureRe   = regexp.MustCompile(`(?i)^\s*if\s+err\.number\s*<>\s*0\s+then\s*$`)
-	arrayCapacityProbeRe      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
-	arrayBoundsProbeRe        = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*-\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
-	arrayCheckedProbeExitRe   = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*(?:<=|=)\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
-	arrayCapacityIfRe         = regexp.MustCompile(`(?i)^\s*if\s+.+\s*>\s*([A-Za-z_]\w*)\s+then\s*$`)
-	arrayForZeroToCountRe     = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
-	arrayLabelRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
-	arrayCountComparisonRe    = regexp.MustCompile(`(?i)^\s*(.*?)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
-	arrayConditionAndRe       = regexp.MustCompile(`(?i)\s+and\s+`)
-	arraySelectCaseRe         = regexp.MustCompile(`(?i)^select\s+case\s+(.+)$`)
-	arrayPositiveCaseRe       = regexp.MustCompile(`(?i)^case\s+(-?\d+)\s*$`)
+	arrayRedimRe                      = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
+	arrayRedimClauseRe                = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
+	arrayRedimTypeSuffixRe            = regexp.MustCompile(`(?i)^as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?$`)
+	arrayEraseRe                      = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
+	arrayEraseNameRe                  = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
+	arrayBoundCallRe                  = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
+	arrayBoundOperatorRe              = regexp.MustCompile(`(?i)\b(?:mod|and|or|not)\b`)
+	arrayForBoundRe                   = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayForEachRe                    = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
+	arrayIndexedSourceRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
+	arrayGuardCallRe                  = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:(=|<>|>=|<=|>|<)\s*(-?\d+))?\s*$`)
+	arrayGuardReversedRe              = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
+	arrayGuardValueRe                 = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
+	arrayGuardValueReversedRe         = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*)\s*$`)
+	arrayIsArrayGuardRe               = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
+	arrayByteArrayGuardRe             = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
+	arrayByteArrayReadRe              = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
+	arraySetupGuardRe                 = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
+	arrayOnErrorGotoRe                = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
+	arrayOnErrorResumeNextRe          = regexp.MustCompile(`(?i)^\s*on\s+error\s+resume\s+next\s*$`)
+	arrayOnErrorResumeNextStatementRe = regexp.MustCompile(`(?i)(?:^|\bthen\s+)on\s+error\s+resume\s+next(?:\s+else\b.*)?$`)
+	arrayOnErrorGotoZeroRe            = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+0\s*$`)
+	arrayErrNumberFailureRe           = regexp.MustCompile(`(?i)^\s*if\s+err\.number\s*<>\s*0\s+then\s*$`)
+	arrayCapacityProbeRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
+	arrayBoundsProbeRe                = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*=\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*-\s*lbound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
+	arrayCheckedProbeExitRe           = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*(?:<=|=)\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
+	arrayCapacityIfRe                 = regexp.MustCompile(`(?i)^\s*if\s+.+\s*>\s*([A-Za-z_]\w*)\s+then\s*$`)
+	arrayForZeroToCountRe             = regexp.MustCompile(`(?i)^\s*for\s+[A-Za-z_]\w*\s*=\s*0\s+to\s+[A-Za-z_]\w*\s*-\s*1\s*$`)
+	arrayLabelRe                      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
+	arrayCountComparisonRe            = regexp.MustCompile(`(?i)^\s*(.*?)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
+	arrayConditionAndRe               = regexp.MustCompile(`(?i)\s+and\s+`)
+	arraySelectCaseRe                 = regexp.MustCompile(`(?i)^select\s+case\s+(.+)$`)
+	arrayPositiveCaseRe               = regexp.MustCompile(`(?i)^case\s+(-?\d+)\s*$`)
 )
 
 func (a Analyzer) arrayLifecycleFindings(file parsedFile, proc sourceProcedure, ctx analysisContext, moduleDecls map[string]sourceDeclaration) []Finding {
@@ -195,8 +197,10 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		return nil, nil
 	}
 	vba227Variables := variables
+	var vba227ResumeNextBefore []bool
 	if a.Config.Analyze.DetectArrayLifecycleSafety {
 		vba227Variables = arrayVBA227Variables(variables, file, proc)
+		vba227ResumeNextBefore = arrayVBA227ResumeNextPrefixes(file, proc)
 	}
 	comparisonFindings := a.arrayComparisonFindings(file, proc, variables)
 	comparisonFindings = append(comparisonFindings, a.arrayForEachFindings(file, proc, variables, ctx)...)
@@ -244,7 +248,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				}
 				if a.Config.Analyze.DetectArrayLifecycleSafety {
 					var lifecycleIssues []Finding
-					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards)
+					vba227State, lifecycleIssues = a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, vba227State, text, line, constants, capacityGuards, vba227ResumeNextBefore)
 					for _, finding := range lifecycleIssues {
 						if finding.Code != "VBA227" {
 							continue
@@ -323,7 +327,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				return arrayAllocationTransferIsReliable(statement, in, out)
 			},
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
-				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards)
+				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore)
 				for _, call := range arrayCallsAtLine(proc.Calls, line) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 				}
@@ -529,7 +533,7 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 	return findings
 }
 
-func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard) (arrayFlowState, []Finding) {
+func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool) (arrayFlowState, []Finding) {
 	if line >= 1 && line <= len(file.Lines) && vbaLineContinues(file.Lines[line-1]) && arrayVBA227HasArrayFactoryAssignment(text) {
 		text = arrayLogicalCodeLine(file.Lines, line)
 	}
@@ -560,6 +564,15 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 			}
 			return state, findings
 		}
+		// A normal multi-line If evaluates its condition before either branch
+		// can run. If a typed array's bounds query returns normally, the array
+		// is allocated on both the true and false paths. Keep this refinement
+		// narrow: ElseIf merging and inline bodies retain their existing CFG
+		// handling, and Resume Next may continue after a failed query.
+		if body == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(condition)), "if ") && arrayVBA227HasPureBoundsCondition(condition) && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+			state, findings := a.arrayTransfer(file, proc, ctx, variables, state, condition, line, constants, capacityGuards)
+			return arraySuccessfulBoundsState(state, condition, variables), findings
+		}
 	}
 	state, findings := a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
 	// Source-line CFG blocks can contain an If condition and its body. Apply
@@ -570,6 +583,88 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		state = arrayElementGuardState(state, argument, variables)
 	}
 	return state, findings
+}
+
+func arrayVBA227HasPureBoundsCondition(text string) bool {
+	hasLower, hasUpper := false, false
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		switch strings.ToLower(bound[1]) {
+		case "lbound":
+			hasLower = true
+		case "ubound":
+			hasUpper = true
+		}
+	}
+	if !hasLower || !hasUpper {
+		return false
+	}
+	condition := strings.TrimSpace(text)
+	if !strings.HasPrefix(strings.ToLower(condition), "if ") {
+		return false
+	}
+	condition = strings.TrimSpace(condition[len("if "):])
+	condition = arrayBoundCallRe.ReplaceAllString(condition, "")
+	condition = arrayBoundOperatorRe.ReplaceAllString(condition, "")
+	for _, char := range condition {
+		if isIdentifierStart(byte(char)) {
+			return false
+		}
+	}
+	return true
+}
+
+func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
+	// Keep dynamic Variant arrays conservative: the existing VBA227 contract
+	// treats caller-provided element-array shape as untrusted. An untyped
+	// Variant is also not marked isArray and remains conservative in the normal
+	// transfer path.
+	var updated arrayFlowState
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		variable, known := variables[name]
+		if !known || !variable.isArray || variable.isVariant {
+			continue
+		}
+		value, known := state[name]
+		if !known {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+// arrayVBA227ResumeNextPrefixes computes the conservative "may have seen
+// Resume Next" fact once per procedure. A reset is intentionally not modeled
+// here because the array worklist does not carry VBA's procedure-level error
+// mode and a reset may be reachable only on one branch.
+func arrayVBA227ResumeNextPrefixes(file parsedFile, proc sourceProcedure) []bool {
+	prefixes := make([]bool, len(file.Lines)+1)
+	mayHaveResumeNext := false
+	start := max(1, proc.StartLine)
+	end := min(len(file.Lines), proc.EndLine)
+	for line := start; line <= end; line++ {
+		prefixes[line] = mayHaveResumeNext
+		for _, statement := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+			if arrayOnErrorResumeNextStatementRe.MatchString(strings.TrimSpace(statement)) {
+				mayHaveResumeNext = true
+				break
+			}
+		}
+	}
+	return prefixes
+}
+
+func arrayVBA227ResumeNextBeforeLine(prefixes []bool, line int) bool {
+	return line >= 0 && line < len(prefixes) && prefixes[line]
 }
 
 func arrayIfThenParts(text string) (condition, body string, ok bool) {

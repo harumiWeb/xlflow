@@ -6228,6 +6228,146 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulBoundsThroughFollowingStatements(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single)
+  If (UBound(values) - LBound(values) + 1) Mod 2 <> 0 Then
+    Exit Sub
+  End If
+  Debug.Print UBound(values)
+  Debug.Print values(LBound(values))
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 3 {
+			initial = true
+		}
+		if finding.Line == 6 || finding.Line == 7 {
+			t.Fatalf("successful bounds evaluation should establish allocation for following statements: %+v", finding)
+		}
+	}
+	if !initial {
+		t.Fatalf("the first bounds query must remain diagnosed when the input array is unallocated: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustBoundsUnderResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single)
+  On Error Resume Next
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  On Error GoTo 0
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("a bounds query after an unhandled Resume Next failure must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustBoundsAcrossResumeNextBranches(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single, ByVal useResume As Boolean)
+  If useResume Then
+    On Error Resume Next
+  Else
+    On Error GoTo 0
+  End If
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 11 {
+			return
+		}
+	}
+	t.Fatalf("a branch-local Resume Next must keep the later bounds query diagnosed: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227RecognizesCompoundResumeNext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single)
+resume_path: On Error Resume Next: Debug.Print "probe"
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 7 {
+			return
+		}
+	}
+	t.Fatalf("a compound Resume Next statement must keep the later bounds query diagnosed: %+v", findingsByCode(findings, "VBA227"))
+}
+
+func TestAnalyzerVBA227RecognizesSingleLineResumeNextElse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Single, ByVal useResume As Boolean)
+  If useResume Then On Error Resume Next Else On Error GoTo 0
+  If UBound(values) - LBound(values) + 1 >= 0 Then
+    Debug.Print "maybe"
+  End If
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 7 {
+			return
+		}
+	}
+	t.Fatalf("a single-line If Else Resume Next must keep the later bounds query diagnosed: %+v", findingsByCode(findings, "VBA227"))
+}
+
 func TestAnalyzerVBA227RecognizesVariantByteArrayTransfer(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
