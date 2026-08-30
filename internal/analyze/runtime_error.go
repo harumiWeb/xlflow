@@ -141,11 +141,12 @@ func (a Analyzer) deterministicArrayRuntimeFindings(file parsedFile, proc source
 		return nil
 	}
 	constants := arrayIntegerConstants(file, proc, a.visibleConstantValues, a.visibleConstants)
+	base := arrayOptionBase(file)
 	state := arrayInitialState(variables)
 	findings := make([]Finding, 0)
 	seen := map[string]bool{}
 	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
-		for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants) {
+		for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants, proc, base) {
 			key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
 			if seen[key] {
 				continue
@@ -191,7 +192,7 @@ func arrayIndexOperationKey(name, failure string) string {
 	return "index:" + strings.ToLower(strings.TrimSpace(name)) + ":" + strings.ToLower(strings.TrimSpace(failure))
 }
 
-func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState, variables map[string]arrayVariable, constants map[string]int) []deterministicArrayRuntimeIssue {
+func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState, variables map[string]arrayVariable, constants map[string]int, proc sourceProcedure, base int) []deterministicArrayRuntimeIssue {
 	var issues []deterministicArrayRuntimeIssue
 	add := func(kind, operationKey string) {
 		issues = append(issues, deterministicArrayRuntimeIssue{line: line, kind: kind, operationKey: operationKey})
@@ -244,6 +245,9 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 		}
 		value := state[name]
 		if value.kind == arrayUnallocated && value.knownArray {
+			if arrayBlockProvesIndexedUseAfterRedim(text, use.name, variables, constants, proc, line, base) {
+				continue
+			}
 			add("array_unallocated", arrayIndexOperationKey(name, "unallocated"))
 			continue
 		}
@@ -269,6 +273,110 @@ func deterministicArrayRuntimeIssues(text string, line int, state arrayFlowState
 		}
 	}
 	return issues
+}
+
+// arrayBlockProvesIndexedUseAfterRedim handles the CFG representation of a
+// Select Case clause. The procedure IR may expose the select statement or a
+// Case body as one multi-line statement, so the runtime lane otherwise checks
+// each indexed use against the block's entry state before arrayTransfer sees
+// the earlier ReDim. Only straight-line Case bodies are accepted here; nested
+// control flow remains on the conservative entry-state path.
+func arrayBlockProvesIndexedUseAfterRedim(text string, target string, variables map[string]arrayVariable, constants map[string]int, proc sourceProcedure, startLine, base int) bool {
+	lines := normalizedSourceLines(text)
+	if len(lines) < 2 {
+		return false
+	}
+	target = strings.ToLower(strings.TrimSpace(target))
+	redimmed := false
+	sawUse := false
+	sawCaseLabel := false
+	selectCaseCount := 0
+	for offset, rawLine := range lines {
+		line := normalizedCodeLine(rawLine)
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" {
+			continue
+		}
+		caseLabel := strings.HasPrefix(lower, "case ")
+		if strings.HasPrefix(lower, "select case ") {
+			// A Select Case nested in a Case body needs its own path state. Do
+			// not let the last inner Case allocation prove an outer use.
+			if sawCaseLabel || selectCaseCount > 0 {
+				return false
+			}
+			selectCaseCount++
+		}
+		if caseLabel {
+			sawCaseLabel = true
+			redimmed = false
+		}
+		if lower == "end select" {
+			continue
+		}
+		if !caseLabel && runtimeArrayBlockHasNestedControlFlow(lower) {
+			return false
+		}
+		if redimmed && arrayBlockHasDirectArrayArgumentCall(proc, startLine+offset, target) {
+			return false
+		}
+		if match := arrayRedimRe.FindStringSubmatch(line); len(match) > 0 {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if !direct {
+					legacy := arrayRedimClauseRe.FindStringSubmatch(clause)
+					if len(legacy) == 0 {
+						continue
+					}
+					redim = directArrayRedimClause{name: legacy[1], dimensions: legacy[2]}
+				}
+				// ReDim Preserve can fail on an unallocated input, especially when
+				// On Error Resume Next keeps execution in the branch. Only a plain
+				// ReDim is a deterministic allocation boundary here.
+				if strings.TrimSpace(match[1]) == "" &&
+					!impossibleArrayBounds(parseArrayDimensionsWithConstants(redim.dimensions, base, constants)) &&
+					strings.EqualFold(redim.name, target) {
+					redimmed = true
+				}
+			}
+			continue
+		}
+		for _, use := range arrayIndexedUses(line, variables) {
+			if !strings.EqualFold(use.name, target) || len(use.args) == 0 {
+				continue
+			}
+			sawUse = true
+			if !redimmed {
+				return false
+			}
+		}
+	}
+	return sawCaseLabel && sawUse
+}
+
+func arrayBlockHasDirectArrayArgumentCall(proc sourceProcedure, line int, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	for call := range proc.Calls.All() {
+		if call.Range.StartLine != line {
+			continue
+		}
+		for _, argument := range arrayCallArgumentTexts(proc, call) {
+			if strings.EqualFold(directArrayArgumentName(argument), target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeArrayBlockHasNestedControlFlow(line string) bool {
+	for _, prefix := range []string{
+		"if ", "elseif ", "else", "end if", "for ", "next ", "do", "loop", "while ", "wend", "with ", "end with", "on error", "goto ", "exit ", "erase ",
+	} {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func suppressDeterministicArrayWarningDuplicates(findings []Finding) []Finding {

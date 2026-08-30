@@ -209,6 +209,203 @@ End Sub
 	}
 }
 
+func TestVBA249DoesNotReportReDimBeforeIndexedUseInSelectCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function AlignmentCenters(ByVal version As Long) As Variant
+  Dim centers() As Long
+  Select Case version
+    Case 1
+      AlignmentCenters = Empty
+    Case 2
+      ReDim centers(0 To 1)
+      centers(0) = 6
+      centers(1) = 18
+      AlignmentCenters = centers
+	    Case 3
+	      ReDim centers(0 To 1)
+	      centers(0) = 6
+	      centers(1) = 22
+	      AlignmentCenters = centers
+	    Case 4
+	      ReDim centers(0 To 1)
+	      centers(0) = 6
+	      centers(1) = 26
+	      AlignmentCenters = centers
+	    Case Else
+      Err.Raise vbObjectError + 1004
+  End Select
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA249"); len(got) != 0 {
+		t.Fatalf("indexed uses after branch-local ReDim are allocated: %+v", got)
+	}
+}
+
+func TestVBA249RetainsSelectCaseUseBeforeReDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function ReadValue(ByVal mode As Long) As Long
+  Dim values() As Long
+  Select Case mode
+    Case 1
+      ReadValue = values(0)
+    Case 2
+      ReDim values(0 To 1)
+      values(0) = 1
+      ReadValue = values(0)
+  End Select
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) == 0 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("unallocated Select Case access must remain deterministic: %+v", got)
+	}
+}
+
+func TestVBA249RetainsSelectCaseHeaderUseBeforeBranchReDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values() As Long
+  Select Case values(0)
+    Case 1
+      ReDim values(0 To 1)
+      values(0) = 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) == 0 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("Select Case header access must remain deterministic: %+v", got)
+	}
+}
+
+func TestVBA249DoesNotTreatReDimPreserveAsAllocationOfUnallocatedArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values() As Long
+  On Error Resume Next
+  Select Case 1
+    Case 1
+      ReDim Preserve values(0 To 1)
+      values(0) = 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) == 0 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("ReDim Preserve on an unallocated array must not establish allocation: %+v", got)
+	}
+}
+
+func TestVBA249RetainsIndexedUseAfterInvalidBranchReDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values() As Long
+  On Error Resume Next
+  Select Case 1
+    Case 1
+      ReDim values(1 To 0)
+      values(0) = 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) == 0 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("invalid ReDim bounds must not establish allocation: %+v", got)
+	}
+}
+
+func TestVBA249RetainsOuterUseAfterNestedSelectCaseMayNotMatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal mode As Long)
+  Dim values() As Long
+  Select Case mode
+    Case 1
+      Select Case mode
+        Case 2
+          ReDim values(0 To 1)
+          values(0) = 1
+      End Select
+      values(0) = 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) == 0 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("outer use after a non-matching nested Select Case must remain deterministic: %+v", got)
+	}
+}
+
+func TestVBA249RetainsUseAfterByRefArrayCallMayErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub ClearArray(ByRef values() As Long)
+  Erase values
+End Sub
+
+Public Sub Run()
+  Dim values() As Long
+  Select Case 1
+    Case 1
+      ReDim values(0 To 1)
+      Call ClearArray(values)
+      values(0) = 1
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA249")
+	if len(got) == 0 || got[0].RuntimeError == nil || got[0].RuntimeError.Kind != "array_unallocated" {
+		t.Fatalf("a ByRef array call may erase allocation before the indexed use: %+v", got)
+	}
+}
+
 func TestVBA249InvalidatesKnownValueAfterByRefMutation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
