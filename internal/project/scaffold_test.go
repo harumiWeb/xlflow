@@ -314,18 +314,21 @@ func TestInstallHelperModulesAnalyzeCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	helperRoot := filepath.Clean(filepath.Join(dir, "src", "modules", "Xlflow"))
-	findings, err := (analyze.Analyzer{
+	result, err := (analyze.Analyzer{
 		RootDir: dir,
 		Config:  config.Default(),
 		PathFilter: func(path string) bool {
 			return filepath.Clean(filepath.Dir(path)) == helperRoot
 		},
-	}).Run()
+	}).RunResult()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("installed helper modules should analyze cleanly (diagnostic code/file details): %+v", findings)
+	if len(result.Findings) != 0 {
+		t.Fatalf("installed helper modules should analyze cleanly (diagnostic code/file details): %+v", result.Findings)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("installed helper modules should analyze without warnings: %+v", result.Warnings)
 	}
 }
 
@@ -871,20 +874,23 @@ func TestNewScaffoldLintsWithoutIssuesOrWarnings(t *testing.T) {
 	}
 }
 
-func TestNewScaffoldAnalyzesWithoutFindings(t *testing.T) {
+func TestNewScaffoldAnalyzesWithoutFindingsOrWarnings(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := New(dir, "Book", fakeWorkbookCreator); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := (analyze.Analyzer{
+	result, err := (analyze.Analyzer{
 		RootDir: dir,
 		Config:  config.Default(),
-	}).Run()
+	}).RunResult()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("new scaffold should analyze cleanly (diagnostic code/file details): %+v", findings)
+	if len(result.Findings) != 0 {
+		t.Fatalf("new scaffold should analyze cleanly (diagnostic code/file details): %+v", result.Findings)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("new scaffold should analyze without warnings: %+v", result.Warnings)
 	}
 }
 
