@@ -15,7 +15,17 @@ All notable changes to xlflow will be documented in this file.
   `(Not array) = -1 Then Err.Raise` empty-array guard on a normal path.
 
 - Fixed false-positive `VBA227` element findings for Dictionary `Keys`/`Items`
-  snapshots guarded by `Count` or a successful `UBound(Keys)` query.
+  snapshots guarded by `Count`, a successful `UBound(Keys)` query, or a
+  source-proven non-empty `CreateLookupDict` member.
+
+- Fixed false-positive `VBA227` element findings after documented Variant array
+  property returns with a direct non-empty `ReDim`. The summary solver now
+  carries the VBE-confirmed Variant allocation only within documented return
+  inference and keeps `ReDim Preserve`-only empty-input paths conservative.
+
+- Refined `VBA227` for documented array returns that may be unallocated on empty
+  input but have a consistent known lower bound when allocated: retain the
+  possible `UBound` failure while suppressing only the guarded loop-body access.
 
 ## v0.31.1
 

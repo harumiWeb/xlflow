@@ -6047,6 +6047,90 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesInlineVariantArrayFactoryAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Tokenise(ByVal source As String) As Variant
+  Select Case Left(source, 1)
+    Case "{"
+      Dim vExpression: vExpression = Split(source, " ")
+      Dim iExpressionLen As Long: iExpressionLen = UBound(vExpression) - LBound(vExpression) + 1
+      Dim iArg As Long
+      For iArg = 1 To UBound(vExpression)
+        Dim vArg As Variant
+        vArg = vExpression(iArg)
+      Next
+  End Select
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an inline Variant assignment from Split should establish allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesSuccessfulUBoundForKnownLowerBoundReturnAccess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+'@returns Array<Long>
+Private Function Tokenise(ByVal source As String) As Long()
+  Dim values() As Long
+  If source <> "" Then
+    ReDim Preserve values(1 To 1)
+  End If
+  Tokenise = values
+End Function
+
+Public Sub Run(ByVal source As String)
+  Dim values() As Long: values = Tokenise(source)
+  Dim i As Long
+  For i = 1 To UBound(values)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" || got[0].Line != 14 || !strings.Contains(strings.ToLower(got[0].Message), "ubound") {
+		t.Fatalf("the possibly-unallocated return should retain only its UBound finding: all=%+v vba227=%+v", findings, got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsLoopBelowKnownArrayLowerBound(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim values(1 To 2) As Long
+  Dim i As Long
+  For i = 0 To UBound(values)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 || !strings.Contains(got[0].Message, "inconsistent lower bound") {
+		t.Fatalf("a loop starting below a known lower bound must remain diagnosed: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227TracksModuleArrayAfterSplitOnBothBranches(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -6841,6 +6925,70 @@ End Sub
 	}
 	if len(boundLoop) != 1 || boundLoop[0].Line != 37 {
 		t.Fatalf("a direct UBound should remain the only Dictionary snapshot warning: bound=%+v all=%+v", boundLoop, findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227RecognizesCreateLookupDictSnapshots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type TState
+  Lookups As Object
+End Type
+Private This As TState
+
+Private Function CreateLookupDict(ByVal values As Variant) As Object
+	  Dim result As Object
+	  Set result = CreateObject("Scripting.Dictionary")
+	  Set result("S2N") = CreateObject("Scripting.Dictionary")
+	  Set result("N2S") = CreateObject("Scripting.Dictionary")
+	  Set CreateLookupDict = result
+End Function
+
+Public Sub Run()
+	  Set This.Lookups = CreateObject("Scripting.Dictionary")
+	  Set This.Lookups("EWndStyles") = CreateLookupDict(Array("key", 1))
+	  Dim keys As Variant: keys = This.Lookups("EWndStyles").keys()
+	  Dim values As Variant: values = This.Lookups("EWndStyles").items()
+	  Dim i As Long
+	  For i = 0 To UBound(keys)
+    Debug.Print keys(i)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("keys and items from CreateLookupDict should be non-empty after UBound(keys): %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227UsesDocumentedVariantArrayPropertyReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+'@returns Variant<Array<Long>>
+Public Property Get Rect() As Variant
+  Dim result As Variant
+  ReDim result(0 To 3)
+  Rect = result
+End Property
+
+Public Sub Run()
+  Dim values() As Long
+  values = Rect
+  Debug.Print values(0)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a documented Variant array property should establish allocation for its caller: %+v", got)
 	}
 }
 

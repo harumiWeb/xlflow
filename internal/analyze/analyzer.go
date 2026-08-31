@@ -339,6 +339,7 @@ type analysisContext struct {
 	functionAmbiguous                    map[string]bool
 	arrayReturns                         map[string]arrayValue
 	arrayReturnsQualified                map[string]arrayValue
+	arrayAllowVariantRedim               bool
 	arrayAllocationGuards                map[string]bool
 	arraySafeBoundGuards                 map[string]bool
 	arrayByRefAllocations                arrayByRefAllocationSummaries

@@ -131,7 +131,8 @@ var (
 	arrayBoundCallRe                  = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
 	arrayBoundOperatorRe              = regexp.MustCompile(`(?i)\b(?:mod|and|or|not)\b`)
 	arrayForBoundRe                   = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
-	arrayReturnArrayDocRe             = regexp.MustCompile(`(?i)^@returns?\s+array(?:<|\b)`)
+	arrayForUBoundRe                  = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)`)
+	arrayReturnArrayDocRe             = regexp.MustCompile(`(?i)^@returns?\s+(?:(?:variant|object)\s*<)?array(?:<|\b)`)
 	arrayTypeNameExpressionRe         = regexp.MustCompile(`(?i)^typename\s*\(\s*([A-Za-z_]\w*)\s*\)$`)
 	arrayQuotedCaseRe                 = regexp.MustCompile(`^\s*"([^"]*)"\s*$`)
 	arrayEmptyGuardRe                 = regexp.MustCompile(`(?i)^\s*\(?\s*not\s+([A-Za-z_]\w*)\s*\)?\s*=\s*-1\s*$`)
@@ -567,6 +568,8 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	}
 	if redim, ok := inlineArrayRedimText(inlineText); ok {
 		text = redim
+	} else if assignment, ok := inlineArrayFactoryAssignmentText(inlineText); ok {
+		text = assignment
 	} else if assignment, ok := inlineArrayStrConvAssignmentText(inlineText); ok {
 		text = assignment
 	} else if assignment, ok := inlineArraySafeBoundAssignmentText(inlineText, ctx.arraySafeBoundGuards); ok {
@@ -700,6 +703,20 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 		variable, known := variables[name]
 		if name != "" && known && (variable.isArray || variable.isVariant) {
 			proven[name] = true
+		}
+		if match := arrayForUBoundRe.FindStringSubmatch(header); len(match) == 3 {
+			name := strings.ToLower(cleanIdentifier(match[2]))
+			variable, variableKnown := variables[name]
+			value, valueKnown := state[name]
+			start, startKnown := integerLiteral(match[1])
+			lower, lowerKnown := arrayValueKnownLowerBound(value)
+			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown && startKnown && lowerKnown && start >= lower {
+				// The For body is reachable only after UBound succeeded. When
+				// the returned array's lower bound is known, the loop start
+				// supplies the lower-side index proof without suppressing the
+				// UBound diagnostic itself.
+				proven[name] = true
+			}
 		}
 	}
 	if len(proven) == 0 {
@@ -953,6 +970,16 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 	return updated
 }
 
+func arrayValueKnownLowerBound(value arrayValue) (int, bool) {
+	for _, dimensions := range [][]arrayDimension{value.dimensions, value.preserveShape} {
+		if len(dimensions) == 0 || !dimensions[0].lower.known {
+			continue
+		}
+		return dimensions[0].lower.value, true
+	}
+	return 0, false
+}
+
 func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.Statement, variables map[string]arrayVariable, resumeNextBefore []bool) arrayFlowState {
 	if statement == nil || (statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf) {
 		return state
@@ -1116,6 +1143,29 @@ func arrayLogicalCodeLine(lines []string, line int) string {
 	return logical
 }
 
+func arrayLogicalSourceLine(lines []string, line int) string {
+	if line < 1 || line > len(lines) {
+		return ""
+	}
+	logical := ""
+	for index := line; index <= len(lines); index++ {
+		part := strings.TrimSpace(arraySourceOrderStripComment(lines[index-1]))
+		if strings.HasSuffix(part, "_") {
+			part = strings.TrimSpace(strings.TrimSuffix(part, "_"))
+		}
+		if part != "" {
+			if logical != "" {
+				logical += " "
+			}
+			logical += part
+		}
+		if !vbaLineContinues(lines[index-1]) {
+			break
+		}
+	}
+	return logical
+}
+
 func inlineArrayRedimText(text string) (string, bool) {
 	colon := strings.IndexByte(text, ':')
 	if colon < 0 {
@@ -1133,6 +1183,23 @@ func inlineArrayRedimText(text string) (string, bool) {
 		return "", false
 	}
 	return redim, true
+}
+
+func inlineArrayFactoryAssignmentText(text string) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	_, rhs, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed {
+		return "", false
+	}
+	switch arrayCallName(rhs) {
+	case "array", "split", "filter":
+		return remainder, true
+	default:
+		return "", false
+	}
 }
 
 func inlineArrayDeclarationRemainder(text string) (string, bool) {
@@ -1289,23 +1356,188 @@ func arrayDictionaryMemberParts(text string) (receiver, member string, ok bool) 
 
 func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure, line int, rhs string, variables map[string]arrayVariable) (arrayValue, bool) {
 	receiver, _, ok := arrayDictionaryMemberParts(rhs)
+	knownNonEmpty := false
+	if source := arrayLogicalSourceLine(file.Lines, line); source != "" {
+		if _, sourceRHS, indexed, assigned := arrayAssignment(source); assigned && !indexed {
+			knownNonEmpty = arrayDictionaryMemberKnownNonEmpty(file, line, sourceRHS)
+		}
+	}
+	if !knownNonEmpty {
+		knownNonEmpty = arrayDictionaryMemberKnownNonEmpty(file, line, rhs)
+	}
 	if !ok {
-		return arrayValue{}, false
+		if !knownNonEmpty {
+			return arrayValue{}, false
+		}
+		receiver, _, _, _ = arrayDictionarySnapshotParts(rhs)
 	}
 	if receiver == "" {
 		receiver = arrayWithReceiverAtLine(file, proc, line)
 	}
-	if receiver == "" || !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) {
+	if receiver == "" || !knownNonEmpty && !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) {
 		return arrayValue{}, false
 	}
 	source := canonicalArrayBoundExpression(receiver)
+	kind := arrayUnknown
+	if knownNonEmpty {
+		kind = arrayAllocated
+	}
 	return arrayValue{
-		kind:                  arrayUnknown,
+		kind:                  kind,
 		knownArray:            true,
-		mayBeEmpty:            true,
+		mayBeEmpty:            !knownNonEmpty,
 		origin:                arrayOriginLocal,
 		allocationCountSource: arrayDictionaryCountSourcePrefix + source,
 	}, true
+}
+
+// arrayDictionaryMemberKnownNonEmpty recognizes the outer dictionary returned
+// by a helper such as CreateLookupDict. The helper creates fixed members before
+// it consumes its input, so Keys and Items on that outer dictionary always
+// contain those members even when the input pair array is empty.
+func arrayDictionaryMemberKnownNonEmpty(file parsedFile, line int, rhs string) bool {
+	receiver, key, _, ok := arrayDictionarySnapshotParts(rhs)
+	if !ok {
+		return false
+	}
+	for procedure := range file.procedureView().All() {
+		if !strings.EqualFold(procedure.Name, "CreateLookupDict") {
+			continue
+		}
+		if arrayProcedureReturnsNonEmptyObjectMemberSet(file, procedure) &&
+			arrayDictionaryMemberAssignmentUsesHelper(file, line, receiver, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayDictionarySnapshotParts(text string) (receiver, key, member string, ok bool) {
+	canonical := canonicalArrayBoundExpression(text)
+	lower := strings.ToLower(canonical)
+	for _, candidate := range []string{"keys", "items"} {
+		suffix := "." + candidate + "()"
+		if !strings.HasSuffix(lower, suffix) {
+			continue
+		}
+		prefix := canonical[:len(canonical)-len(suffix)]
+		if len(prefix) == 0 || prefix[len(prefix)-1] != ')' {
+			continue
+		}
+		open := -1
+		for index := 0; index < len(prefix)-1; index++ {
+			if prefix[index] == '(' && matchingParen(prefix, index) == len(prefix)-1 {
+				open = index
+				break
+			}
+		}
+		if open <= 0 {
+			continue
+		}
+		return strings.TrimSpace(prefix[:open]), strings.TrimSpace(prefix[open+1 : len(prefix)-1]), candidate, true
+	}
+	return "", "", "", false
+}
+
+func arrayProcedureReturnsNonEmptyObjectMemberSet(file parsedFile, procedure sourceProcedure) bool {
+	returnedObject := ""
+	start := max(0, procedure.StartLine-1)
+	end := min(procedure.EndLine, len(file.Lines))
+	for line := start; line < end; line++ {
+		text := arrayLogicalSourceLine(file.Lines, line+1)
+		if text == "" {
+			continue
+		}
+		if lhs, rhs, assigned := arrayAssignmentSides(text); assigned && !strings.Contains(lhs, "(") && strings.EqualFold(cleanIdentifier(lhs), procedure.Name) {
+			returnedObject = cleanIdentifier(rhs)
+		}
+	}
+	if returnedObject == "" {
+		return false
+	}
+	members := map[string]bool{}
+	for line := start; line < end; line++ {
+		text := arrayLogicalSourceLine(file.Lines, line+1)
+		if text == "" {
+			continue
+		}
+		base, memberKey, memberRHS, assigned := arrayMemberAssignmentParts(text)
+		if !assigned || arrayCallName(memberRHS) != "createobject" {
+			continue
+		}
+		if returnedObject != "" && !strings.EqualFold(cleanIdentifier(base), returnedObject) {
+			continue
+		}
+		members[canonicalArrayBoundExpression(memberKey)] = true
+	}
+	return len(members) >= 2
+}
+
+func arrayDictionaryMemberAssignmentUsesHelper(file parsedFile, line int, receiver, key string) bool {
+	wantReceiver := canonicalArrayBoundExpression(receiver)
+	wantKey := canonicalArrayBoundExpression(key)
+	assignedByHelper := false
+	invalidBeforeSnapshot := false
+	for sourceLine := 1; sourceLine <= len(file.Lines); sourceLine++ {
+		text := arrayLogicalSourceLine(file.Lines, sourceLine)
+		base, memberKey, memberRHS, assigned := arrayMemberAssignmentParts(text)
+		if !assigned || canonicalArrayBoundExpression(base) != wantReceiver || canonicalArrayBoundExpression(memberKey) != wantKey {
+			continue
+		}
+		if arrayCallName(memberRHS) == "createlookupdict" {
+			// The initializing call may be in a different procedure that is
+			// textually later in the module.  Keep the summary module-wide, but
+			// let an earlier direct reassignment invalidate the fact for this
+			// snapshot.
+			assignedByHelper = true
+		} else if sourceLine < line {
+			invalidBeforeSnapshot = true
+		}
+	}
+	return assignedByHelper && !invalidBeforeSnapshot
+}
+
+func arrayMemberAssignmentParts(text string) (receiver, key, rhs string, ok bool) {
+	lhs, rhs, assigned := arrayAssignmentSides(text)
+	if !assigned {
+		return "", "", "", false
+	}
+	open := firstParenOutsideString(lhs)
+	if open <= 0 {
+		return "", "", "", false
+	}
+	close := matchingParen(lhs, open)
+	if close != len(lhs)-1 {
+		return "", "", "", false
+	}
+	return strings.TrimSpace(lhs[:open]), strings.TrimSpace(lhs[open+1 : close]), rhs, true
+}
+
+func arrayAssignmentSides(text string) (lhs, rhs string, ok bool) {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "set ") || strings.HasPrefix(lower, "let ") {
+		trimmed = strings.TrimSpace(trimmed[4:])
+	}
+	inString := false
+	for index := 0; index < len(trimmed); index++ {
+		switch trimmed[index] {
+		case '"':
+			if inString && index+1 < len(trimmed) && trimmed[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '=':
+			if inString || index > 0 && (trimmed[index-1] == '<' || trimmed[index-1] == '>' || trimmed[index-1] == '=') {
+				continue
+			}
+			lhs = strings.TrimSpace(trimmed[:index])
+			rhs = strings.TrimSpace(trimmed[index+1:])
+			return lhs, rhs, lhs != "" && rhs != ""
+		}
+	}
+	return "", "", false
 }
 
 func arrayWithReceiverAtLine(file parsedFile, proc sourceProcedure, line int) string {
@@ -9159,12 +9391,13 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 			old := state[name]
 			dimensions := parseArrayDimensionsWithConstants(redim.dimensions, base, constants)
-			// A Variant can be resized only after its array nature is proven by
-			// an assignment such as Array(...).  An unproven Variant remains
-			// unknown and must not be treated as a scalar ReDim misuse.
-			variantArray := variable.isVariant && old.knownArray
+			// Ordinary analysis keeps an unknown Variant conservative. During
+			// documented array-return inference, VBE-confirmed non-Preserve
+			// ReDim semantics allow the Variant to establish its array value.
+			preserve := strings.TrimSpace(match[1]) != ""
+			variantArray := variable.isVariant && (old.knownArray || ctx.arrayAllowVariantRedim && !preserve)
 			resizable := (variable.isArray || variantArray) && !variable.fixed
-			if variable.isVariant && !old.knownArray {
+			if variable.isVariant && !old.knownArray && (!ctx.arrayAllowVariantRedim || preserve) {
 				continue
 			}
 			if !resizable {
@@ -9334,7 +9567,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		if variable, ok := variables[name]; ok {
 			value := state[name]
 			if value.kind == arrayAllocated && value.knownArray && len(value.dimensions) > 0 && value.dimensions[0].lower.known {
-				if start, ok := integerLiteral(match[1]); ok && start != value.dimensions[0].lower.value {
+				if start, ok := integerLiteral(match[1]); ok && start < value.dimensions[0].lower.value {
 					add("VBA227", "The loop range assumes an inconsistent lower bound for "+variable.name+".", "The loop starts at a value different from the known lower bound of the array.", "Use LBound("+variable.name+") as the loop start.")
 				}
 			}
@@ -10130,8 +10363,11 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 	if value, ok := state[name]; ok && value.kind == arrayAllocated && value.knownArray {
 		return value, true
 	}
-	if value, ok := ctx.arrayReturns[name]; ok && value.kind == arrayAllocated && value.knownArray {
-		return value, true
+	if value, ok := ctx.arrayReturns[name]; ok {
+		_, hasLowerBound := arrayValueKnownLowerBound(value)
+		if value.knownArray || hasLowerBound {
+			return value, true
+		}
 	}
 	if name != "" && strings.Contains(rhs, "(") {
 		return arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}, true
@@ -10672,6 +10908,124 @@ func inferDocumentedArrayReturnSummaries(files []parsedFile) map[string]arrayVal
 	return returns
 }
 
+func inferDocumentedNonEmptyArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
+	returns := map[string]arrayValue{}
+	for _, file := range files {
+		for procedure := range file.procedureView().All() {
+			if procedure.ProcedureKind != procedureir.ProcedureFunction && procedure.ProcedureKind != procedureir.ProcedurePropertyGet || procedure.Name == "" {
+				continue
+			}
+			if !arrayProcedureDocumentsArray(file, procedure) || !arrayProcedureHasNonEmptyReturnAllocation(file, procedure) {
+				continue
+			}
+			returns[arrayProcedureKey(procedure)] = arrayValue{
+				kind:       arrayAllocated,
+				knownArray: true,
+				origin:     arrayOriginLocal,
+			}
+		}
+	}
+	return returns
+}
+
+// inferDocumentedArrayReturnLowerBoundSummaries records a weaker contract for
+// documented helpers that may return an unallocated array on an empty input,
+// but consistently allocate that array from a known lower bound. The caller
+// still receives a VBA227 for a direct UBound on the possibly-unallocated
+// result; the lower bound is used only after that query has successfully
+// reached a For body.
+func inferDocumentedArrayReturnLowerBoundSummaries(files []parsedFile) map[string]arrayValue {
+	returns := map[string]arrayValue{}
+	for _, file := range files {
+		for procedure := range file.procedureView().All() {
+			if procedure.ProcedureKind != procedureir.ProcedureFunction && procedure.ProcedureKind != procedureir.ProcedurePropertyGet || procedure.Name == "" {
+				continue
+			}
+			if !arrayProcedureDocumentsArray(file, procedure) || !arrayProcedureHasReturnAllocation(file, procedure) || arrayProcedureHasNonEmptyReturnAllocation(file, procedure) {
+				continue
+			}
+			name, ok := arrayProcedureReturnSource(file, procedure)
+			if !ok {
+				continue
+			}
+			lower, ok := arrayProcedureReturnLowerBound(file, procedure, name)
+			if !ok {
+				continue
+			}
+			shape := []arrayDimension{{lower: lower}}
+			returns[arrayProcedureKey(procedure)] = arrayValue{
+				// Keep this as an unknown allocation state. The lower bound is a
+				// separate proof used only after a successful UBound query; marking
+				// it as an unallocated known array would make the deterministic
+				// runtime lane report the same query and suppress the lifecycle
+				// diagnostic that the caller still needs to see.
+				kind:          arrayUnknown,
+				knownArray:    false,
+				dimensions:    shape,
+				preserveShape: shape,
+				origin:        arrayOriginLocal,
+			}
+		}
+	}
+	return returns
+}
+
+func arrayProcedureReturnSource(file parsedFile, proc sourceProcedure) (string, bool) {
+	name := ""
+	start := max(0, proc.StartLine-1)
+	end := min(proc.EndLine, len(file.Lines))
+	for _, rawLine := range file.Lines[start:end] {
+		lhs, rhs, indexed, assigned := arrayAssignment(strings.TrimSpace(normalizedCodeLine(rawLine)))
+		if !assigned || indexed || !strings.EqualFold(lhs, proc.Name) {
+			continue
+		}
+		source := directArrayArgumentName(rhs)
+		if source == "" || name != "" && !strings.EqualFold(name, source) {
+			return "", false
+		}
+		name = source
+	}
+	return name, name != ""
+}
+
+func arrayProcedureReturnLowerBound(file parsedFile, proc sourceProcedure, source string) (arrayBound, bool) {
+	var lower arrayBound
+	hasLower := false
+	start := max(0, proc.StartLine-1)
+	end := min(proc.EndLine, len(file.Lines))
+	for _, rawLine := range file.Lines[start:end] {
+		text := strings.TrimSpace(normalizedCodeLine(rawLine))
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if !direct || !strings.EqualFold(cleanIdentifier(redim.name), source) {
+					continue
+				}
+				dimensions := parseArrayDimensionsWithConstants(redim.dimensions, arrayOptionBase(file), arrayIntegerConstants(file, proc, nil, nil))
+				if len(dimensions) != 1 || !dimensions[0].lower.known {
+					return arrayBound{}, false
+				}
+				if hasLower && lower.value != dimensions[0].lower.value {
+					return arrayBound{}, false
+				}
+				lower = dimensions[0].lower
+				hasLower = true
+			}
+		}
+		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+			for _, target := range splitArgs(match[1]) {
+				if strings.EqualFold(cleanIdentifier(target), source) {
+					return arrayBound{}, false
+				}
+			}
+		}
+		if lhs, _, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), source) {
+			return arrayBound{}, false
+		}
+	}
+	return lower, hasLower
+}
+
 func arrayProcedureDocumentsArray(file parsedFile, proc sourceProcedure) bool {
 	start := max(0, proc.StartLine-1-5)
 	end := min(max(0, proc.StartLine-1), len(file.Lines))
@@ -10705,6 +11059,55 @@ func arrayProcedureHasReturnAllocation(file parsedFile, proc sourceProcedure) bo
 		}
 	}
 	return hasAllocation && hasReturn
+}
+
+// arrayProcedureHasNonEmptyReturnAllocation recognizes the stronger CFG-backed
+// contract needed when a documented array return is used by a bare caller.
+// A plain ReDim with fully known, non-empty bounds is different from a
+// ReDim Preserve inside a loop: the latter can leave the returned array
+// unallocated when the loop has no iterations. Every normal return path must
+// therefore assign the documented return value from a known non-empty array.
+func arrayProcedureHasNonEmptyReturnAllocation(file parsedFile, proc sourceProcedure) bool {
+	if proc.Graph == nil {
+		return false
+	}
+	variables := arrayVariables(file, proc, file.moduleDecls())
+	constants := arrayIntegerConstants(file, proc, nil, nil)
+	ctx := analysisContext{arrayAllowVariantRedim: true}
+	type returnCandidate struct {
+		value arrayValue
+		ok    bool
+	}
+	returnCandidates := map[int]returnCandidate{}
+	base := arrayOptionBase(file)
+	procedureHasErrorHandling := arrayProcedureHasErrorHandling(proc)
+	// An Err.Raise branch is not a normal return path. Keep exceptional edges
+	// available for procedures with active error handling, but remove the
+	// synthetic normal continuation so an error-only branch cannot make the
+	// return assignment look non-definite.
+	graph := proc.Graph.WithoutNormalErrRaiseContinuationView()
+	walkArrayCFGWithStopStats(&graph, file.Lines, arrayInitialState(variables), func(text string, line int, in arrayFlowState) arrayFlowState {
+		if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(lhs, proc.Name) {
+			value, known := arrayExpressionState(rhs, in, ctx)
+			returnCandidates[line] = returnCandidate{
+				value: value,
+				ok:    known && value.kind == arrayAllocated && value.knownArray && value.origin != arrayOriginRangeValue,
+			}
+		}
+		out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, constants, nil)
+		return out
+	}, nil, func(text string, _ int) bool {
+		return !procedureHasErrorHandling && arraySummaryStatementAlwaysFails(text, base, constants)
+	}, nil)
+	if len(returnCandidates) == 0 || !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true, WithoutNormalErrRaiseContinuation: true}) {
+		return false
+	}
+	for _, candidate := range returnCandidates {
+		if !candidate.ok || candidate.value.mayBeEmpty {
+			return false
+		}
+	}
+	return true
 }
 
 type arrayReturnSummarySet struct {
@@ -10780,7 +11183,10 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 				}
 			}
 		}
-		ctx := analysisContext{arrayReturns: arrayReturns}
+		ctx := analysisContext{
+			arrayReturns:           arrayReturns,
+			arrayAllowVariantRedim: arrayProcedureDocumentsArray(procedure.file, proc) && arrayProcedureHasReturnAllocation(procedure.file, proc),
+		}
 		returnCandidates := map[int]candidate{}
 		base := arrayOptionBase(procedure.file)
 		procedureHasErrorHandling := arrayProcedureHasErrorHandling(proc)
@@ -10850,6 +11256,12 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 	groups := make(map[string]map[string]candidate)
 	summaries := map[string]arrayValue{}
 	qualifiedSummaries := map[string]arrayValue{}
+	documentedSummaries := inferDocumentedArrayReturnSummaries(files)
+	documentedBareSummaries := inferDocumentedNonEmptyArrayReturnSummaries(files)
+	documentedLowerBoundSummaries := inferDocumentedArrayReturnLowerBoundSummaries(files)
+	for key, value := range documentedSummaries {
+		qualifiedSummaries[key] = value
+	}
 	queue := make([]int, len(procedures))
 	queued := make([]bool, len(procedures))
 	for index := range procedures {
@@ -10924,8 +11336,35 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 			}
 		}
 	}
-	for key, value := range inferDocumentedArrayReturnSummaries(files) {
-		qualifiedSummaries[key] = value
+	for key, value := range documentedSummaries {
+		if _, exists := qualifiedSummaries[key]; !exists {
+			qualifiedSummaries[key] = value
+		}
+	}
+	for key, value := range documentedBareSummaries {
+		name := key
+		if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+			name = name[dot+1:]
+		}
+		if !ambiguousReturnNames[name] {
+			if _, exists := summaries[name]; !exists {
+				summaries[name] = value
+			}
+		}
+	}
+	for key, value := range documentedLowerBoundSummaries {
+		name := key
+		if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+			name = name[dot+1:]
+		}
+		if !ambiguousReturnNames[name] {
+			// The lower-bound-only contract is deliberately more precise than
+			// an inferred allocated summary: it preserves the possible empty
+			// input path while still proving the loop's lower-side index bound.
+			// Prefer it for the bare lookup so a generic fixed-point result
+			// cannot erase the retained UBound diagnostic.
+			summaries[name] = value
+		}
 	}
 	return arrayReturnSummarySet{bare: summaries, qualified: qualifiedSummaries}
 }

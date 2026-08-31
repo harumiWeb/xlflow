@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "variant-redim-array",
+  "description": "Observe whether VBA accepts ReDim on an initially empty Variant used as an array.",
+  "modules": [
+    {
+      "name": "Main",
+      "kind": "standard",
+      "path": "Main.bas",
+      "entry": true
+    }
+  ],
+  "probe": {
+    "mode": "compile"
+  },
+  "vbe": {
+    "expected": "accepted",
+    "evidence_phase": "compile",
+    "diagnostic_meaning": "specification"
+  },
+  "analysis": {
+    "binding_status": "unbound",
+    "evidence_role": "language-observation",
+    "binding_note": "This fixture records the compile behavior of Variant ReDim before any analyzer rule is bound to it."
+  },
+  "provenance": {
+    "status": "asserted",
+    "verified_on": [
+      {
+        "excel_version": "16.0",
+        "excel_build": "17932",
+        "bitness": "x64",
+        "locale": "ja-JP",
+        "verified_at": "2026-08-31T19:06:12Z"
+      }
+    ]
+  }
+}

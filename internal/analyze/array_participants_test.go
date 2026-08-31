@@ -187,6 +187,17 @@ func TestInlineArrayQualifiedReturnAssignmentUsesTypeNameCase(t *testing.T) {
 	}
 }
 
+func TestArrayDictionaryMemberAssignmentUsesHelperStopsAtReassignment(t *testing.T) {
+	file := parsedFile{Lines: []string{
+		`Set This.Lookups("EWndStyles") = CreateLookupDict(Array("key", 1))`,
+		`Set This.Lookups("EWndStyles") = CreateObject("Scripting.Dictionary")`,
+		`Dim keys As Variant: keys = This.Lookups("EWndStyles").keys()`,
+	}}
+	if arrayDictionaryMemberAssignmentUsesHelper(file, 3, "This.Lookups", `"EWndStyles"`) {
+		t.Fatal("a later reassignment must invalidate the helper non-empty fact")
+	}
+}
+
 func TestInferDocumentedArrayReturnSummariesRequiresArrayImplementation(t *testing.T) {
 	proc := sourceProcedure{Module: "M", Name: "AsArray", ProcedureKind: procedureir.ProcedureFunction, StartLine: 2, EndLine: 5}
 	file := parsedFile{
@@ -206,6 +217,26 @@ func TestInferDocumentedArrayReturnSummariesRequiresArrayImplementation(t *testi
 	file.Lines[0] = "Public Function AsArray() As Variant"
 	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
 		t.Fatalf("undocumented or non-array return was recognized: %#v", got)
+	}
+}
+
+func TestInferDocumentedNonEmptyArrayReturnSummariesRejectsConditionalAllocation(t *testing.T) {
+	proc := sourceProcedure{Module: "M", Name: "MaybeValues", ProcedureKind: procedureir.ProcedureFunction, StartLine: 2, EndLine: 7}
+	file := parsedFile{
+		Lines: []string{
+			"' @returns Array<Long>",
+			"Private Function MaybeValues(ByVal enabled As Boolean) As Variant",
+			"    Dim values As Variant",
+			"    If enabled Then",
+			"        ReDim values(0 To 1)",
+			"    End If",
+			"    MaybeValues = values",
+			"End Function",
+		},
+		Procedures: []sourceProcedure{proc},
+	}
+	if got := inferDocumentedNonEmptyArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
+		t.Fatalf("conditional ReDim must not become a universal non-empty return contract: %#v", got)
 	}
 }
 

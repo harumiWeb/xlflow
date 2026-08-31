@@ -158,6 +158,20 @@ accepted branch and routes rejected inputs through a project-local procedure
 with no normal exit is summarized at its normal exits; the rejecting branch
 does not poison the allocation proof.
 
+For a documented array-returning `Function` or `Property Get`, a direct
+non-`Preserve` `ReDim` on a Variant with fully known, non-empty bounds may
+establish the returned array's non-empty state. This uses the VBE-confirmed
+behavior that an initially empty Variant can be resized into an array. The
+relaxation is limited to return-summary inference; ordinary unknown Variant
+analysis remains conservative, and a `ReDim Preserve`-only implementation does
+not prove that a returned array exists when its input can produce zero loop
+iterations.
+
+If such a documented return consistently allocates its source from a known lower
+bound, the caller may use that lower-bound fact only after a successful
+`UBound` query. A loop beginning at or above that bound therefore does not make
+its element access unsafe; the possibly-failing `UBound` diagnostic is retained.
+
 For a declared array, the established VBA emptiness guard
 `(Not values) = -1` followed on the same line by `Err.Raise` proves that the
 normal path has a non-empty allocation. This refinement is limited to a
@@ -171,6 +185,12 @@ proves the corresponding snapshot is non-empty when its receiver is known to
 be a Dictionary. A successful `UBound(Keys)` likewise proves the paired
 `Keys`/`Items` snapshots contain an element; the `UBound` query itself remains
 subject to the empty-Dictionary check.
+
+When source analysis proves that a local `CreateLookupDict`-style helper returns
+an outer Dictionary with at least two fixed `CreateObject` members, a matching
+`Keys` or `Items` snapshot is treated as allocated and non-empty. This summary
+is limited to the exact receiver/member assignment; ordinary or reassigned
+dictionaries remain conservative.
 
 The same allocation-probe contract also applies when the positive length is
 first assigned to a scalar local and that local is compared with zero or a
