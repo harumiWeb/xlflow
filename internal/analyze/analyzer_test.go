@@ -11634,6 +11634,39 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227UsesQualifiedDocumentedArrayReturnInTypeNameBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "stdEnumerator.cls", `Option Explicit
+'@returns Array<T> - The enumerator's data as an array
+Public Function AsArray() As Variant
+  Dim result() As Object
+  ReDim result(1 To 1)
+  AsArray = result
+End Function
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByVal vFibers As Variant)
+  Select Case TypeName(vFibers)
+    Case "stdEnumerator"
+      Dim queue() As Object: queue = vFibers.AsArray()
+      Dim i As Long
+      For i = 1 To 1
+        Debug.Print queue(i)
+      Next
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a documented qualified array return should make the TypeName branch safe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227ExcludesDefinitelyFailingArrayReturnPaths(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

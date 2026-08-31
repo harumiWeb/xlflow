@@ -129,6 +129,9 @@ var (
 	arrayBoundCallRe                  = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
 	arrayBoundOperatorRe              = regexp.MustCompile(`(?i)\b(?:mod|and|or|not)\b`)
 	arrayForBoundRe                   = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayReturnArrayDocRe             = regexp.MustCompile(`(?i)^@returns?\s+array(?:<|\b)`)
+	arrayTypeNameExpressionRe         = regexp.MustCompile(`(?i)^typename\s*\(\s*([A-Za-z_]\w*)\s*\)$`)
+	arrayQuotedCaseRe                 = regexp.MustCompile(`^\s*"([^"]*)"\s*$`)
 	arrayForScalarBoundRe             = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*[-+]?\d+\s+to\s+([A-Za-z_]\w*)\s*$`)
 	arrayForEachRe                    = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
 	arrayIndexedSourceRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
@@ -565,6 +568,8 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	} else if assignment, ok := inlineArraySafeBoundAssignmentText(inlineText, ctx.arraySafeBoundGuards); ok {
 		text = assignment
 	} else if assignment, ok := inlineArrayReturnAssignmentText(inlineText, ctx.arrayReturns); ok {
+		text = assignment
+	} else if assignment, ok := inlineArrayQualifiedReturnAssignmentText(file, proc, line, inlineText, ctx.arrayReturnsQualified); ok {
 		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
@@ -1082,6 +1087,104 @@ func inlineArrayReturnAssignmentText(text string, returns map[string]arrayValue)
 		return "", false
 	}
 	return remainder, true
+}
+
+func inlineArrayQualifiedReturnAssignmentText(file parsedFile, proc sourceProcedure, line int, text string, returns map[string]arrayValue) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	lhs, rhs, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed {
+		return "", false
+	}
+	receiver, member, ok := arrayMemberCallParts(rhs)
+	if !ok {
+		return "", false
+	}
+	typeName := arrayTypeNameCaseAtLine(file, proc, line, receiver)
+	if typeName == "" {
+		return "", false
+	}
+	value, known := returns[strings.ToLower(typeName+"."+member)]
+	if !known || value.kind != arrayAllocated || !value.knownArray {
+		return "", false
+	}
+	// The qualified summary proves only array allocation here. Replace the
+	// member call with a recognized array factory so the ordinary transfer can
+	// carry that fact without guessing the returned shape.
+	return lhs + " = Array()", true
+}
+
+func arrayMemberCallParts(text string) (receiver, member string, ok bool) {
+	trimmed := strings.TrimSpace(text)
+	if open := firstParenOutsideString(trimmed); open >= 0 {
+		close := matchingParen(trimmed, open)
+		if close < 0 || strings.TrimSpace(trimmed[close+1:]) != "" {
+			return "", "", false
+		}
+		trimmed = strings.TrimSpace(trimmed[:open])
+	}
+	dot := strings.LastIndexByte(trimmed, '.')
+	if dot <= 0 || dot >= len(trimmed)-1 {
+		return "", "", false
+	}
+	receiver = cleanIdentifier(strings.TrimSpace(trimmed[:dot]))
+	member = cleanIdentifier(strings.TrimSpace(trimmed[dot+1:]))
+	if !arrayEraseNameRe.MatchString(receiver) || !arrayEraseNameRe.MatchString(member) {
+		return "", "", false
+	}
+	return receiver, member, true
+}
+
+func arrayTypeNameCaseAtLine(file parsedFile, proc sourceProcedure, line int, receiver string) string {
+	if receiver == "" || line <= 0 || len(file.Lines) == 0 {
+		return ""
+	}
+	type frame struct {
+		receiver string
+		caseName string
+	}
+	frames := make([]frame, 0, 2)
+	start := max(1, proc.StartLine)
+	end := min(line, len(file.Lines))
+	for current := start; current <= end; current++ {
+		text := strings.Join(strings.Fields(gui.StripComment(file.Lines[current-1])), " ")
+		if text == "" {
+			continue
+		}
+		lower := strings.ToLower(text)
+		if strings.HasPrefix(lower, "select case ") {
+			expression := strings.TrimSpace(text[len("select case "):])
+			selectedReceiver := ""
+			if match := arrayTypeNameExpressionRe.FindStringSubmatch(expression); len(match) == 2 {
+				selectedReceiver = cleanIdentifier(match[1])
+			}
+			frames = append(frames, frame{receiver: selectedReceiver})
+			continue
+		}
+		if strings.HasPrefix(lower, "end select") {
+			if len(frames) > 0 {
+				frames = frames[:len(frames)-1]
+			}
+			continue
+		}
+		if !strings.HasPrefix(lower, "case ") || len(frames) == 0 {
+			continue
+		}
+		caseText := strings.TrimSpace(text[len("case "):])
+		if match := arrayQuotedCaseRe.FindStringSubmatch(caseText); len(match) == 2 {
+			frames[len(frames)-1].caseName = match[1]
+		} else {
+			frames[len(frames)-1].caseName = ""
+		}
+	}
+	for index := len(frames) - 1; index >= 0; index-- {
+		if strings.EqualFold(frames[index].receiver, receiver) {
+			return frames[index].caseName
+		}
+	}
+	return ""
 }
 
 func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable) []arrayResumeNextCapacityGuard {
@@ -10212,7 +10315,72 @@ func arrayReturnSummaryDuplicateNames(procedures []sourceProcedure) map[string]b
 	return duplicates
 }
 
+func inferDocumentedArrayReturnSummaries(files []parsedFile) map[string]arrayValue {
+	returns := map[string]arrayValue{}
+	for _, file := range files {
+		for procedure := range file.procedureView().All() {
+			if procedure.ProcedureKind != procedureir.ProcedureFunction && procedure.ProcedureKind != procedureir.ProcedurePropertyGet || procedure.Name == "" {
+				continue
+			}
+			if !arrayProcedureDocumentsArray(file, procedure) || !arrayProcedureHasReturnAllocation(file, procedure) {
+				continue
+			}
+			returns[arrayProcedureKey(procedure)] = arrayValue{
+				kind:       arrayAllocated,
+				knownArray: true,
+				mayBeEmpty: true,
+				origin:     arrayOriginLocal,
+			}
+		}
+	}
+	return returns
+}
+
+func arrayProcedureDocumentsArray(file parsedFile, proc sourceProcedure) bool {
+	start := max(0, proc.StartLine-1-5)
+	end := min(max(0, proc.StartLine-1), len(file.Lines))
+	for _, rawLine := range file.Lines[start:end] {
+		comment := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(comment, "'") {
+			continue
+		}
+		comment = strings.TrimSpace(comment[1:])
+		if arrayReturnArrayDocRe.MatchString(comment) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayProcedureHasReturnAllocation(file parsedFile, proc sourceProcedure) bool {
+	hasAllocation := false
+	hasReturn := false
+	start := max(0, proc.StartLine-1)
+	end := min(proc.EndLine, len(file.Lines))
+	for _, rawLine := range file.Lines[start:end] {
+		text := strings.TrimSpace(normalizedCodeLine(rawLine))
+		lower := strings.ToLower(text)
+		if strings.HasPrefix(lower, "redim ") {
+			hasAllocation = true
+		}
+		lhs, _, indexed, assigned := arrayAssignment(text)
+		if assigned && !indexed && strings.EqualFold(lhs, proc.Name) {
+			hasReturn = true
+		}
+	}
+	return hasAllocation && hasReturn
+}
+
+type arrayReturnSummarySet struct {
+	bare      map[string]arrayValue
+	qualified map[string]arrayValue
+}
+
 func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[string]bool, participantCtx analysisContext) map[string]arrayValue {
+	return inferArrayReturnSummarySet(files, arrayAllocationGuards, participantCtx).bare
+}
+
+func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[string]bool, participantCtx analysisContext) arrayReturnSummarySet {
 	type candidate struct {
 		value arrayValue
 		ok    bool
@@ -10345,6 +10513,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 	present := make(map[string]bool, len(procedures))
 	groups := make(map[string]map[string]candidate)
 	summaries := map[string]arrayValue{}
+	qualifiedSummaries := map[string]arrayValue{}
 	queue := make([]int, len(procedures))
 	queued := make([]bool, len(procedures))
 	for index := range procedures {
@@ -10356,6 +10525,13 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		queued[index] = false
 		procedure := procedures[index]
 		name := strings.ToLower(strings.TrimSpace(procedure.proc.Name))
+		key := arrayProcedureKey(procedure.proc)
+		value, hasContribution := evaluate(procedure, summaries)
+		if hasContribution && value.ok {
+			qualifiedSummaries[key] = value.value
+		} else {
+			delete(qualifiedSummaries, key)
+		}
 		if ambiguousReturnNames[name] {
 			// Summary lookups use bare names for compatibility with the existing
 			// expression resolver. A duplicate bare name is therefore permanently
@@ -10367,8 +10543,6 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		if head >= len(procedures) && participantCtx.arrayStats != nil {
 			participantCtx.arrayStats.addRevisit()
 		}
-		key := arrayProcedureKey(procedure.proc)
-		value, hasContribution := evaluate(procedure, summaries)
 		if present[key] == hasContribution && (!hasContribution || arrayValueEqual(contributions[key].value, value.value) && contributions[key].ok == value.ok) {
 			continue
 		}
@@ -10414,7 +10588,10 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 			}
 		}
 	}
-	return summaries
+	for key, value := range inferDocumentedArrayReturnSummaries(files) {
+		qualifiedSummaries[key] = value
+	}
+	return arrayReturnSummarySet{bare: summaries, qualified: qualifiedSummaries}
 }
 
 func arrayProcedureHasErrorHandling(proc sourceProcedure) bool {

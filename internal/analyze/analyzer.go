@@ -338,6 +338,7 @@ type analysisContext struct {
 	functionNamesSeen                    map[string]bool
 	functionAmbiguous                    map[string]bool
 	arrayReturns                         map[string]arrayValue
+	arrayReturnsQualified                map[string]arrayValue
 	arrayAllocationGuards                map[string]bool
 	arraySafeBoundGuards                 map[string]bool
 	arrayByRefAllocations                arrayByRefAllocationSummaries
@@ -2400,6 +2401,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		functionNamesSeen:                map[string]bool{},
 		functionAmbiguous:                map[string]bool{},
 		arrayReturns:                     map[string]arrayValue{},
+		arrayReturnsQualified:            map[string]arrayValue{},
 		arrayAllocationGuards:            map[string]bool{},
 		arraySafeBoundGuards:             map[string]bool{},
 		arrayByRefAllocations:            arrayByRefAllocationSummaries{},
@@ -2495,7 +2497,9 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
 		ctx.arraySkipModuleInvalidationEffects = true
-		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
+		returnSummaries := inferArrayReturnSummarySet(files, ctx.arrayAllocationGuards, ctx)
+		ctx.arrayReturns = returnSummaries.bare
+		ctx.arrayReturnsQualified = returnSummaries.qualified
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
 		ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)
 		ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)

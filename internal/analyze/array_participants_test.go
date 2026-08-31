@@ -172,6 +172,43 @@ func TestInlineArrayReturnAssignmentTextUsesArraySummary(t *testing.T) {
 	}
 }
 
+func TestInlineArrayQualifiedReturnAssignmentUsesTypeNameCase(t *testing.T) {
+	file := parsedFile{Lines: []string{
+		"Select Case TypeName(vFibers)",
+		"    Case \"stdEnumerator\"",
+		"        Dim queue() As Object: queue = vFibers.AsArray(vbObject)",
+	}}
+	proc := sourceProcedure{Module: "M", Name: "Run", StartLine: 1, EndLine: 3}
+	text, ok := inlineArrayQualifiedReturnAssignmentText(file, proc, 3, file.Lines[2], map[string]arrayValue{
+		"stdenumerator.asarray": {kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal},
+	})
+	if !ok || text != "queue = Array()" {
+		t.Fatalf("typed array-return member assignment was not normalized: text=%q ok=%v", text, ok)
+	}
+}
+
+func TestInferDocumentedArrayReturnSummariesRequiresArrayImplementation(t *testing.T) {
+	proc := sourceProcedure{Module: "M", Name: "AsArray", ProcedureKind: procedureir.ProcedureFunction, StartLine: 2, EndLine: 5}
+	file := parsedFile{
+		Lines: []string{
+			"' @returns Array<T>",
+			"Public Function AsArray() As Variant",
+			"    ReDim values(1 To 2)",
+			"    AsArray = values",
+			"End Function",
+		},
+		Procedures: []sourceProcedure{proc},
+	}
+	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); !got["m.asarray"].knownArray {
+		t.Fatalf("documented allocated array return was not recognized: %#v", got)
+	}
+	proc.StartLine = 1
+	file.Lines[0] = "Public Function AsArray() As Variant"
+	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
+		t.Fatalf("undocumented or non-array return was recognized: %#v", got)
+	}
+}
+
 func TestArrayCandidateKeyUsesProcedureKindForLineFallback(t *testing.T) {
 	procedure := sourceProcedure{
 		Module:        "M",
