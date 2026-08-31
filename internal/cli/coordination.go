@@ -344,7 +344,7 @@ func (a *app) acquireWorkbookCoordination(ctx context.Context, commandID coordin
 				return nil, nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyTimeoutCode, fmt.Sprintf("The workbook did not become available within %s.", a.waitTimeout), acquireErr)
 			}
 			if a.wait && errors.Is(acquireErr, context.Canceled) {
-				return nil, nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyCancelledCode, "Waiting for the workbook was cancelled.", acquireErr)
+				return nil, nil, a.writeWorkbookWaitFailure(descriptor, identity, coordination.WorkbookBusyCancelledCode, "Waiting for the workbook was canceled.", acquireErr)
 			}
 			if errors.As(acquireErr, &busy) {
 				return nil, nil, a.writeWorkbookBusyFailure(descriptor, busy)

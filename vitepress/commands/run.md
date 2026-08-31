@@ -97,7 +97,7 @@ For VBA-internal debugging, add `XlflowDebug.Log` in workbook code and inspect `
 If the macro uses `XlflowUI.MsgBox`, `XlflowUI.InputBox`, or `XlflowUI` file dialog wrappers, prefer `--msgbox`, `--inputbox`, and `--filedialog` to keep the run headless. Add `--ui-stream` when you want realtime terminal visibility into which dialog ids resolved from scripted responses versus workbook defaults.
 
 ::: tip
-Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `folder`. Repeat the same `kind:id=value` flag to simulate multi-select results, and use `@cancel` to simulate a cancelled dialog.
+Supported `--filedialog` kinds are `get-open`, `file-open`, `save-as`, and `folder`. Repeat the same `kind:id=value` flag to simulate multi-select results, and use `@cancel` to simulate a canceled dialog.
 :::
 :::
 

@@ -616,10 +616,3 @@ func writeParagraph(b *strings.Builder, text string) {
 	}
 	b.WriteString(text)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

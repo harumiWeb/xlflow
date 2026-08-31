@@ -28,7 +28,7 @@ type selectCaseSyntaxIssue struct {
 }
 
 // selectCaseSyntaxIssues identifies only high-confidence Select/Case ordering
-// errors.  It recognises statement boundaries lexically (including colon
+// errors.  It recognizes statement boundaries lexically (including colon
 // separated statements), while using the parser root as a recovery gate.  If
 // the tree contains any error or missing node, the construct is ambiguous and
 // the generic parser-recovery diagnostic remains the sole owner.

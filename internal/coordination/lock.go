@@ -46,7 +46,7 @@ type OwnerMetadata struct {
 
 // AcquireRequest identifies the workbook operation to coordinate. Wait=false
 // performs one authoritative acquisition attempt. Wait=true retries until the
-// context is cancelled.
+// context is canceled.
 type AcquireRequest struct {
 	Identity      WorkbookIdentity
 	Command       CommandID

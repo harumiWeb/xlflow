@@ -4,6 +4,13 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Removed ineffective `VBA227` inline suppressions from scaffolded `XlflowAssert`,
+  `XlflowUI`, and `XlflowDebug` helpers so `xlflow analyze` no longer reports
+  `unused_inline_suppression` warnings for new projects or installed helper modules.
+
+- Fixed false-positive `VBA249` array-unallocated findings for indexed uses that
+  follow a branch-local `ReDim` inside straight-line `Select Case` clauses.
+
 ## v0.31.1
 
 - Kept LSP completion, signature help, hover, and definition responsive while

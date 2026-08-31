@@ -2498,15 +2498,16 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arraySkipModuleInvalidationEffects = false
 		ctx.arrayModuleInvalidations = inferArrayModuleInvalidationSummaries(files, ctx)
 		ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)
-		// Entry-state inference establishes allocation facts at procedure
-		// boundaries. Module invalidation summaries are applied by the runtime
-		// findings walk after those facts are established; feeding them back into
-		// the entry fixed point would let a conservative helper summary erase a
-		// caller's allocation proof before the callee is analyzed.
+		// Module entry inference collects allocations established by callers. Do
+		// not feed the normal-return invalidation summaries back into that fixed
+		// point: a helper's invalidation is a post-call fact, while using it here
+		// would turn the caller/callee allocation proof into a circular pessimism.
+		// The ordinary VBA227 transfer and the ByRef entry pass remain
+		// invalidation-aware after this phase completes.
 		ctx.arraySkipModuleInvalidationEffects = true
 		ctx.arrayModuleEntryStates = inferArrayModuleEntryStates(a, files, ctx)
-		ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 		ctx.arraySkipModuleInvalidationEffects = false
+		ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
 	}
 	return ctx
 }

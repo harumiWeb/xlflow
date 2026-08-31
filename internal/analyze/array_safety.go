@@ -210,6 +210,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 	if initial == nil {
 		initial = arrayEntryStateForProcedure(file, proc, ctx, moduleDecls, variables)
 	}
+	runtimeBase := arrayOptionBase(file)
 	if proc.Graph == nil {
 		findings := append([]Finding(nil), comparisonFindings...)
 		if !baseLaneRequested && runtimeSink == nil {
@@ -263,7 +264,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				}
 			}
 			if runtimeSink != nil {
-				for _, issue := range deterministicArrayRuntimeIssues(text, line, runtimeState, variables, constants) {
+				for _, issue := range deterministicArrayRuntimeIssues(text, line, runtimeState, variables, constants, proc, runtimeBase) {
 					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
 					if runtimeSeen[key] {
 						continue
@@ -361,7 +362,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 		lanes = append(lanes, arrayCFGWorklistLane{
 			Graph: &baseView, Initial: runtimeState, Stats: ctx.arrayStats,
 			Visit: func(text string, line int, in arrayFlowState) arrayFlowState {
-				for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants) {
+				for _, issue := range deterministicArrayRuntimeIssues(text, line, in, variables, constants, proc, runtimeBase) {
 					key := strconv.Itoa(issue.line) + ":" + issue.kind + ":" + issue.operationKey
 					if runtimeSeen[key] {
 						continue
