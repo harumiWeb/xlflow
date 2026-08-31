@@ -71,6 +71,11 @@ their module kind. When a path is reachable through both production discovery
 and `tests`, the production entry takes precedence. Results are deduplicated
 and sorted deterministically by path before source is read.
 
+Filesystem reads and deduplication use absolute physical paths internally.
+Returned logical paths and path-filter inputs preserve the form implied by
+`RootDir`: absolute roots produce absolute paths, while relative or empty roots
+produce relative paths as in the existing batch analyzer contract.
+
 UserForm source selection follows the configured code-source mode. In sidecar
 mode an authoritative `forms/code/<Name>.bas` entry is classified as `form` and
 the matching exported `.frm` code is not loaded. A `.frm` remains eligible when
@@ -90,8 +95,8 @@ reporting unsupported kinds, duplicate identities, or other invalid inputs.
 Filesystem discovery and source loading remain adapter responsibilities. The
 existing `symbols.SourceFile` is a discovery descriptor containing a path and
 inferred kind; it is not a loaded source project. The filesystem adapter
-converts those descriptors into this model after reading source bytes. Issue
-#642 will add the common analysis entry point, while issue #644 owns
+converts those descriptors into this model after reading source bytes. Issue #642
+will add the common analysis entry point, while issue #644 owns
 filesystem-free diagnostic and suppression behavior.
 
 This contract does not introduce a virtual filesystem, change CLI or LSP wire

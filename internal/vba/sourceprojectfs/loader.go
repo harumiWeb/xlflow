@@ -20,7 +20,8 @@ import (
 // Options controls loading a source project from a configured filesystem
 // workspace. RootDir is the project root used to resolve configured source
 // directories and the legacy tests directory. PathFilter, when present, is
-// called with an absolute source path before the file is read.
+// called with the source's logical path before the file is read. Logical paths
+// preserve the absolute or relative form implied by RootDir.
 type Options struct {
 	RootDir    string
 	Config     config.Config
@@ -28,9 +29,10 @@ type Options struct {
 }
 
 type candidate struct {
-	path   string
-	kind   sourceproject.ModuleKind
-	isTest bool
+	physicalPath string
+	logicalPath  string
+	kind         sourceproject.ModuleKind
+	isTest       bool
 }
 
 // Load loads a source project using a background context.
@@ -46,6 +48,14 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
+		return sourceproject.SourceProject{}, err
+	}
+	rootDir := opts.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+	absoluteRoot, err := absoluteCleanPath(rootDir)
+	if err != nil {
 		return sourceproject.SourceProject{}, err
 	}
 
@@ -79,11 +89,12 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			path, err := absoluteCleanPath(file.Path)
+			physicalPath, err := absoluteCleanPath(file.Path)
 			if err != nil {
 				return err
 			}
-			key := dedupeKey(path)
+			logicalPath := logicalSourcePath(opts.RootDir, absoluteRoot, physicalPath)
+			key := dedupeKey(physicalPath)
 			if _, ok := seen[key]; ok {
 				// Production candidates are appended first, so they retain
 				// precedence if a configured root overlaps tests.
@@ -94,7 +105,12 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 				return err
 			}
 			seen[key] = struct{}{}
-			candidates = append(candidates, candidate{path: path, kind: kind, isTest: isTest && kind == sourceproject.ModuleKindStandard})
+			candidates = append(candidates, candidate{
+				physicalPath: physicalPath,
+				logicalPath:  logicalPath,
+				kind:         kind,
+				isTest:       isTest && kind == sourceproject.ModuleKindStandard,
+			})
 		}
 		return nil
 	}
@@ -105,10 +121,10 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 		return sourceproject.SourceProject{}, err
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].path == candidates[j].path {
+		if candidates[i].logicalPath == candidates[j].logicalPath {
 			return !candidates[i].isTest && candidates[j].isTest
 		}
-		return candidates[i].path < candidates[j].path
+		return candidates[i].logicalPath < candidates[j].logicalPath
 	})
 
 	selected := candidates[:0]
@@ -116,7 +132,7 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 		if err := ctx.Err(); err != nil {
 			return sourceproject.SourceProject{}, err
 		}
-		if opts.PathFilter != nil && !opts.PathFilter(file.path) {
+		if opts.PathFilter != nil && !opts.PathFilter(file.logicalPath) {
 			continue
 		}
 		selected = append(selected, file)
@@ -130,13 +146,13 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 			return sourceproject.SourceProject{}, err
 		}
 		finishRead := analysisstats.Measure(ctx, "file_read")
-		source, readErr := os.ReadFile(file.path)
+		source, readErr := os.ReadFile(file.physicalPath)
 		finishRead(len(source), readErr)
 		if readErr != nil {
 			return sourceproject.SourceProject{}, readErr
 		}
 		files = append(files, sourceproject.SourceFile{
-			Path:       file.path,
+			Path:       file.logicalPath,
 			Source:     source,
 			ModuleKind: file.kind,
 			IsTest:     file.isTest,
@@ -146,6 +162,16 @@ func LoadContext(ctx context.Context, opts Options) (project sourceproject.Sourc
 		return sourceproject.SourceProject{}, err
 	}
 	return sourceproject.SourceProject{Files: files}, nil
+}
+
+func logicalSourcePath(rootDir, absoluteRoot, physicalPath string) string {
+	relativePath, err := filepath.Rel(absoluteRoot, physicalPath)
+	if err != nil {
+		// A configured absolute source root may be on another Windows volume.
+		// filepath.WalkDir historically returned an absolute path in this case.
+		return physicalPath
+	}
+	return filepath.Clean(filepath.Join(rootDir, relativePath))
 }
 
 func absoluteCleanPath(path string) (string, error) {

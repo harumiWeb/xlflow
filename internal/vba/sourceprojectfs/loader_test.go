@@ -138,6 +138,58 @@ func TestLoadAppliesPathFilterBeforeReading(t *testing.T) {
 	}
 }
 
+func TestLoadPreservesRelativeLogicalPaths(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.MkdirTemp(cwd, ".sourceprojectfs-relative-root-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	relativeRoot, err := filepath.Rel(cwd, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeSource := filepath.Join(relativeRoot, "src", "modules", "Relative.bas")
+	writeSource(t, root, filepath.Join("src", "modules", "Relative.bas"), "relative")
+
+	var filteredPath string
+	project, err := Load(Options{
+		RootDir: relativeRoot,
+		Config:  config.Default(),
+		PathFilter: func(path string) bool {
+			filteredPath = path
+			return true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Files) != 1 || project.Files[0].Path != relativeSource {
+		t.Fatalf("relative project files = %+v, want logical path %q", project.Files, relativeSource)
+	}
+	if filteredPath != relativeSource {
+		t.Fatalf("path filter received %q, want logical path %q", filteredPath, relativeSource)
+	}
+}
+
+func TestLoadWithEmptyRootUsesWorkingDirectoryRelativeLogicalPaths(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	relativeSource := filepath.Join("src", "modules", "WorkingDirectory.bas")
+	writeSource(t, root, relativeSource, "working directory")
+
+	project, err := Load(Options{Config: config.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Files) != 1 || project.Files[0].Path != relativeSource {
+		t.Fatalf("empty-root project files = %+v, want logical path %q", project.Files, relativeSource)
+	}
+}
+
 func TestLoadDeduplicatesWithProductionPrecedenceAndSorts(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()

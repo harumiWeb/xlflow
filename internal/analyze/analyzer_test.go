@@ -5306,6 +5306,42 @@ End Sub
 	}
 }
 
+func TestAnalyzerByRefUsesProjectLocalSignaturesWithRelativeRoot(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(cwd, ".analyze-relative-byref-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	relativeRoot, err := filepath.Rel(cwd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeModule(t, dir, "Receiver.bas", `Option Explicit
+Public Sub ReplaceText(ByRef target As String)
+End Sub
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim count As Long
+  Receiver.ReplaceText count
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: relativeRoot, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA228")
+	wantFile := filepath.ToSlash(filepath.Join("src", "modules", "Main.bas"))
+	if len(got) != 1 || got[0].Line != 4 || got[0].File != wantFile || !strings.Contains(got[0].Message, "requires String") {
+		t.Fatalf("relative-root project-local ByRef finding = %+v", got)
+	}
+}
+
 func TestAnalyzerByRefPathFilterRetainsExcludedProjectCandidates(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -9608,6 +9644,39 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA216DetectsWorksheetCodenamesWithRelativeRoot(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(cwd, ".analyze-relative-vba216-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	relativeRoot, err := filepath.Rel(cwd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWorkbookModule(t, dir, "InputSheet.bas")
+	writeWorkbookModule(t, dir, "OutputSheet.bas")
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run()
+  Dim lastRow As Long
+  lastRow = InputSheet.Cells(OutputSheet.Rows.Count, 1).End(xlUp).Row
+End Sub
+`)
+
+	findings, err := Analyzer{RootDir: relativeRoot, Config: config.Default()}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA216")
+	if len(got) != 1 || got[0].Line != 4 {
+		t.Fatalf("relative-root worksheet-codename VBA216 findings = %+v", got)
+	}
+}
+
 func TestAnalyzerVBA216OnlyComparesProvableRootIdentities(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -9903,6 +9972,37 @@ End Sub
 	got := findingsByCode(findings, "VBA220")
 	if len(got) != 1 || !strings.Contains(got[0].Message, "same-event") {
 		t.Fatalf("UserForm control change should remain a same-event VBA220 hazard: %+v", got)
+	}
+}
+
+func TestAnalyzerWithEmptyRootResolvesSidecarUserFormControls(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private Sub NeedsString(ByRef target As String)
+End Sub
+
+Private Sub CustomInput_Change()
+  NeedsString CustomInput
+End Sub
+`)
+	designer := `VERSION 5.00
+Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Dialog
+   Begin MSForms.TextBox CustomInput
+   End
+End
+`
+	if err := os.WriteFile(filepath.Join(dir, "src", "forms", "Dialog.frm"), []byte(designer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := (Analyzer{Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA228")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "requires String") {
+		t.Fatalf("empty-root UserForm control should retain its designer type: %+v", got)
 	}
 }
 

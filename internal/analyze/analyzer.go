@@ -119,6 +119,7 @@ type Analyzer struct {
 	visibleConstants           map[string]bool
 	visibleConstantValues      map[string]constexpr.Value
 	byRefSymbolIndex           *intel.WorkspaceResolutionView
+	physicalRootDir            string
 	errorGuardAliases          map[string]bool
 	errorValueWrappers         map[string]bool
 	eventSafeProcedures        map[string]bool
@@ -651,15 +652,6 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	rootDir := a.RootDir
-	if rootDir == "" {
-		rootDir = "."
-	}
-	rootDir, err = filepath.Abs(rootDir)
-	if err != nil {
-		return Result{}, err
-	}
-	a.RootDir = filepath.Clean(rootDir)
 	project, err := sourceprojectfs.LoadContext(ctx, sourceprojectfs.Options{
 		RootDir:    a.RootDir,
 		Config:     a.Config,
@@ -668,6 +660,15 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	if err != nil {
 		return Result{}, err
 	}
+	physicalRootDir := a.RootDir
+	if physicalRootDir == "" {
+		physicalRootDir = "."
+	}
+	physicalRootDir, err = filepath.Abs(physicalRootDir)
+	if err != nil {
+		return Result{}, err
+	}
+	a.physicalRootDir = filepath.Clean(physicalRootDir)
 	files := make([]string, 0, len(project.Files))
 	// Compile-equivalent argument, Set, ByRef, and local-type findings are
 	// always enabled because they represent VBE compile rejections and cannot
@@ -1189,7 +1190,7 @@ func (a Analyzer) byRefArgumentDiagnosticsContext(ctx context.Context, file pars
 		return batchByRefDiagnostics{computed: true}
 	}
 	diagnostics := (intel.Analyzer{
-		RootDir:                    a.RootDir,
+		RootDir:                    a.intelRootDir(),
 		Config:                     a.Config,
 		DB:                         a.typeDB,
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
@@ -1241,7 +1242,7 @@ func (a Analyzer) compileEquivalentFindings(file parsedFile) ([]Finding, []Findi
 
 func (a Analyzer) compileEquivalentFindingsContext(ctx context.Context, file parsedFile, byRefDiagnostics batchByRefDiagnostics) ([]Finding, []Finding) {
 	intelAnalyzer := intel.Analyzer{
-		RootDir:                    a.RootDir,
+		RootDir:                    a.intelRootDir(),
 		Config:                     a.Config,
 		DB:                         a.typeDB,
 		TypeDBResolutionIncomplete: a.typeDBResolutionIncomplete,
@@ -1364,20 +1365,32 @@ func projectByRefSymbolIndex(ctx context.Context, rootDir string, cfg config.Con
 	}
 
 	var projectSymbols []intel.Symbol
+	physicalRootDir := rootDir
+	if physicalRootDir == "" {
+		physicalRootDir = "."
+	}
+	physicalRootDir, err := filepath.Abs(physicalRootDir)
+	if err != nil {
+		return nil, 0, err
+	}
+	physicalRootDir = filepath.Clean(physicalRootDir)
 	if pathFilter != nil {
-		var err error
-		projectSymbols, err = (intel.Analyzer{RootDir: rootDir, Config: cfg}).WorkspaceSymbolsContext(ctx, nil, "")
+		projectSymbols, err = (intel.Analyzer{RootDir: physicalRootDir, Config: cfg}).WorkspaceSymbolsContext(ctx, nil, "")
 		if err != nil {
 			return nil, 0, err
 		}
 	} else {
-		symbolAnalyzer := intel.Analyzer{RootDir: rootDir, Config: cfg}
+		symbolAnalyzer := intel.Analyzer{RootDir: physicalRootDir, Config: cfg}
 		seen := make(map[string]struct{}, len(parsedFiles))
 		for _, file := range parsedFiles {
 			if err := ctx.Err(); err != nil {
 				return nil, len(projectSymbols), err
 			}
-			_, included, err := symbols.SourceFileForPath(rootDir, cfg, file.Path)
+			classificationPath, err := filepath.Abs(file.Path)
+			if err != nil {
+				return nil, len(projectSymbols), err
+			}
+			_, included, err := symbols.SourceFileForPath(rootDir, cfg, classificationPath)
 			if err != nil {
 				return nil, len(projectSymbols), err
 			}
@@ -1433,6 +1446,13 @@ func projectByRefSourcePathKey(path string) (string, error) {
 	return key, nil
 }
 
+func (a Analyzer) intelRootDir() string {
+	if a.physicalRootDir != "" {
+		return a.physicalRootDir
+	}
+	return a.RootDir
+}
+
 func (a Analyzer) byRefWorkspaceSymbolQuery(_ []intel.Document, query intel.WorkspaceSymbolQuery) ([]intel.Symbol, error) {
 	if a.byRefSymbolIndex == nil || (query.Mode != intel.WorkspaceSymbolQueryExact && query.Mode != intel.WorkspaceSymbolQueryQualified) {
 		return nil, nil
@@ -1449,7 +1469,7 @@ func (a Analyzer) statefulExcelCallArgumentFindingsContext(ctx context.Context, 
 	if !a.Config.Analyze.DetectStatefulExcelCallArguments || a.typeDB == nil {
 		return nil, nil
 	}
-	diagnostics, err := (intel.Analyzer{RootDir: a.RootDir, Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnosticsContext(ctx, file.intelDocument())
+	diagnostics, err := (intel.Analyzer{RootDir: a.intelRootDir(), Config: a.Config, DB: a.typeDB}).StatefulExcelCallArgumentDiagnosticsContext(ctx, file.intelDocument())
 	if err != nil {
 		return nil, err
 	}
