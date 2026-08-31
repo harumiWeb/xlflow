@@ -29,6 +29,7 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/effects"
 	"github.com/harumiWeb/xlflow/internal/vba/intel"
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
+	"github.com/harumiWeb/xlflow/internal/vba/sourceprojectfs"
 	"github.com/harumiWeb/xlflow/internal/vba/symbols"
 	"github.com/harumiWeb/xlflow/internal/vbadb"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -650,12 +651,24 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	finishStage := analysisstats.Measure(ctx, "source_discovery")
-	files, err := a.files()
-	finishStage(len(files), err)
+	rootDir := a.RootDir
+	if rootDir == "" {
+		rootDir = "."
+	}
+	rootDir, err = filepath.Abs(rootDir)
 	if err != nil {
 		return Result{}, err
 	}
+	a.RootDir = filepath.Clean(rootDir)
+	project, err := sourceprojectfs.LoadContext(ctx, sourceprojectfs.Options{
+		RootDir:    a.RootDir,
+		Config:     a.Config,
+		PathFilter: a.PathFilter,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	files := make([]string, 0, len(project.Files))
 	// Compile-equivalent argument, Set, ByRef, and local-type findings are
 	// always enabled because they represent VBE compile rejections and cannot
 	// be disabled by the legacy VBA206 runtime-safety setting.
@@ -663,33 +676,23 @@ func (a Analyzer) RunResultContext(ctx context.Context) (result Result, err erro
 	needsTypedExcelAnalysis := a.Config.Analyze.DetectRangeFindNothingCheck || a.Config.Analyze.DetectStatefulExcelCallArguments || a.Config.Analyze.DetectExcelAPIFailureContracts || needsByRefAnalysis || a.Config.Analyze.DetectExcelCellAccessInLoops || a.Config.Analyze.DetectLoopInvariantExcelObjectResolution || a.Config.Analyze.DetectExpensiveFullRangeOperations || a.Config.Analyze.DetectValue2PerformanceOpportunities
 	needsDataFlowInputs := dataFlowInputsEnabled(a.Config.Analyze)
 	needsTypeDB := needsTypedExcelAnalysis || a.Config.Analyze.DetectPublicAPITypeSafety || needsDataFlowInputs
-	parsedFiles := make([]parsedFile, 0, len(files))
-	for _, file := range files {
+	parsedFiles := make([]parsedFile, 0, len(project.Files))
+	var finishStage func(int, error)
+	for _, sourceFile := range project.Files {
 		if err := ctx.Err(); err != nil {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
 		}
-		finishStage = analysisstats.Measure(ctx, "file_read")
-		source, err := os.ReadFile(file)
-		finishStage(len(source), err)
-		if err != nil {
-			closeParsedFiles(parsedFiles)
-			return Result{}, err
-		}
+		file := sourceFile.Path
+		source := sourceFile.Source
+		moduleKind := string(sourceFile.ModuleKind)
+		files = append(files, file)
 		finishStage = analysisstats.Measure(ctx, "parse")
 		parsed, err := vbaast.ParseDocument(file, source)
 		finishStage(1, err)
 		if err != nil {
 			closeParsedFiles(parsedFiles)
 			return Result{}, err
-		}
-		moduleKind := ""
-		if sourceFile, included, classifyErr := symbols.SourceFileForPath(a.RootDir, a.Config, file); classifyErr != nil {
-			parsed.Close()
-			closeParsedFiles(parsedFiles)
-			return Result{}, classifyErr
-		} else if included {
-			moduleKind = sourceFile.ModuleKind
 		}
 		finishStage = analysisstats.Measure(ctx, "procedure_ir")
 		ir, err := procedureir.BuildParsed(procedureir.BuildOptions{
@@ -2282,63 +2285,6 @@ func (a Analyzer) sourceRealtimeProcedureFindingsContext(ctx context.Context, fi
 		findings = append(findings, a.value2PerformanceFindings(file, proc)...)
 	}
 	return findings, ctx.Err()
-}
-
-func (a Analyzer) files() ([]string, error) {
-	dirs := []string{a.Config.Src.Modules, a.Config.Src.Classes, a.Config.Src.Forms, a.Config.Src.Workbook, "tests"}
-	var files []string
-	for _, dir := range dirs {
-		root := filepath.Join(a.RootDir, dir)
-		if _, err := os.Stat(root); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			switch strings.ToLower(filepath.Ext(path)) {
-			case ".bas", ".cls", ".frm":
-				if !a.shouldIncludeFile(path) {
-					return nil
-				}
-				files = append(files, path)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func (a Analyzer) shouldIncludeFile(path string) bool {
-	if a.PathFilter != nil && !a.PathFilter(path) {
-		return false
-	}
-	if !strings.EqualFold(filepath.Ext(path), ".frm") {
-		return true
-	}
-	if !strings.EqualFold(a.Config.UserForm.CodeSource, "sidecar") {
-		return true
-	}
-	formsRoot := filepath.Clean(filepath.Join(a.RootDir, a.Config.Src.Forms))
-	cleanPath := filepath.Clean(path)
-	if !isPathInsideRoot(cleanPath, formsRoot) {
-		return true
-	}
-	sidecarPath := filepath.Join(formsRoot, "code", strings.TrimSuffix(filepath.Base(cleanPath), filepath.Ext(cleanPath))+".bas")
-	if _, err := os.Stat(sidecarPath); err == nil {
-		return false
-	}
-	return true
 }
 
 func buildResolutionResolver(files []parsedFile, complete bool, typeDB *vbadb.DB) procedureir.Resolver {
@@ -5696,19 +5642,6 @@ func isVBAIdentifierRune(r rune) bool {
 		return true
 	}
 	return r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
-}
-
-func isPathInsideRoot(path, root string) bool {
-	path = filepath.Clean(path)
-	root = filepath.Clean(root)
-	if strings.EqualFold(path, root) {
-		return true
-	}
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
 }
 
 func sortFindings(findings []Finding) {

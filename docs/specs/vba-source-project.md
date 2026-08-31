@@ -56,6 +56,31 @@ source beyond a call boundary own any snapshotting they require.
 The model package does not import configuration, parser, LSP, Excel, COM, or
 OS-specific packages.
 
+## Filesystem Adapter
+
+`internal/vba/sourceprojectfs` is the filesystem-backed adapter for batch
+static analysis. It discovers configured module, class, form, and workbook
+roots through the canonical `symbols` discovery contract, also includes the
+legacy top-level `tests` tree, applies an optional path filter, reads the
+selected files, and returns a `SourceProject`.
+
+The adapter preserves source bytes exactly and uses the module kind assigned by
+canonical discovery. A standard module discovered through the legacy `tests`
+tree sets `IsTest`; class, form, and document semantics remain represented by
+their module kind. When a path is reachable through both production discovery
+and `tests`, the production entry takes precedence. Results are deduplicated
+and sorted deterministically by path before source is read.
+
+UserForm source selection follows the configured code-source mode. In sidecar
+mode an authoritative `forms/code/<Name>.bas` entry is classified as `form` and
+the matching exported `.frm` code is not loaded. A `.frm` remains eligible when
+there is no authoritative sidecar.
+
+The optional path filter runs before `os.ReadFile`, so excluded files are not
+loaded into the returned project. Missing configured roots and a missing
+legacy `tests` tree contribute no files; discovery, read, and cancellation
+errors are returned to the caller.
+
 ## Validation and Adapters
 
 The model is a passive value contract and performs no construction-time
@@ -64,9 +89,10 @@ reporting unsupported kinds, duplicate identities, or other invalid inputs.
 
 Filesystem discovery and source loading remain adapter responsibilities. The
 existing `symbols.SourceFile` is a discovery descriptor containing a path and
-inferred kind; it is not a loaded source project. Issue #641 will convert such
-descriptors into this model after reading source bytes. Issue #642 will add the
-common analysis entry point.
+inferred kind; it is not a loaded source project. The filesystem adapter
+converts those descriptors into this model after reading source bytes. Issue
+#642 will add the common analysis entry point, while issue #644 owns
+filesystem-free diagnostic and suppression behavior.
 
 This contract does not introduce a virtual filesystem, change CLI or LSP wire
 formats, refactor the analyzer, or provide browser/Wasm integration.

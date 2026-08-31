@@ -19,13 +19,15 @@ End Sub
 
 func TestAnalyzerAcceptsVBEAcceptedPropertyGetTerminatorRecovery(t *testing.T) {
 	cases := []struct {
-		name string
-		rel  string
+		name         string
+		rel          string
+		relativeRoot bool
 	}{
 		{name: "standard", rel: filepath.Join("src", "modules", "Probe.bas")},
 		{name: "class", rel: filepath.Join("src", "classes", "Probe.cls")},
 		{name: "workbook document", rel: filepath.Join("src", "workbook", "ThisWorkbook.bas")},
 		{name: "worksheet document", rel: filepath.Join("src", "workbook", "Sheet1.bas")},
+		{name: "worksheet document with relative root", rel: filepath.Join("src", "workbook", "Sheet1.bas"), relativeRoot: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,7 +40,22 @@ func TestAnalyzerAcceptsVBEAcceptedPropertyGetTerminatorRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			result, err := (Analyzer{RootDir: dir, Config: config.Default()}).RunResult()
+			rootDir := dir
+			if tc.relativeRoot {
+				cwd, cwdErr := os.Getwd()
+				if cwdErr != nil {
+					t.Fatal(cwdErr)
+				}
+				relativeRoot, relErr := filepath.Rel(cwd, dir)
+				if relErr != nil {
+					t.Fatal(relErr)
+				}
+				rootDir = relativeRoot
+				if filepath.IsAbs(rootDir) {
+					t.Fatalf("relative test root = %q, want relative path", rootDir)
+				}
+			}
+			result, err := (Analyzer{RootDir: rootDir, Config: config.Default()}).RunResult()
 			if err != nil {
 				var parseErr *ParseError
 				if errors.As(err, &parseErr) {
