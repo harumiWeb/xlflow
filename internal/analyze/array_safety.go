@@ -542,8 +542,14 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	if line >= 1 && line <= len(file.Lines) && vbaLineContinues(file.Lines[line-1]) && arrayVBA227HasArrayFactoryAssignment(text) {
 		text = arrayLogicalCodeLine(file.Lines, line)
 	}
-	if redim, ok := inlineArrayRedimText(text); ok {
+	inlineText := text
+	if line >= 1 && line <= len(file.Lines) {
+		inlineText = normalizedCodeLine(file.Lines[line-1])
+	}
+	if redim, ok := inlineArrayRedimText(inlineText); ok {
 		text = redim
+	} else if assignment, ok := inlineArrayStrConvAssignmentText(inlineText); ok {
+		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
 		if argument, _, guard := arrayIsArrayGuardCondition(condition); guard && arrayElementBaseName(argument) != "" {
@@ -789,6 +795,34 @@ func inlineArrayRedimText(text string) (string, bool) {
 		return "", false
 	}
 	return redim, true
+}
+
+func inlineArrayDeclarationRemainder(text string) (string, bool) {
+	colon := strings.IndexByte(text, ':')
+	if colon < 0 {
+		return "", false
+	}
+	prefix := strings.TrimSpace(strings.ToLower(text[:colon]))
+	if !strings.HasPrefix(prefix, "dim ") && !strings.HasPrefix(prefix, "static ") {
+		return "", false
+	}
+	remainder := strings.TrimSpace(text[colon+1:])
+	if remainder == "" {
+		return "", false
+	}
+	return remainder, true
+}
+
+func inlineArrayStrConvAssignmentText(text string) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	_, rhs, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed || !strings.EqualFold(arrayCallName(rhs), "strconv") {
+		return "", false
+	}
+	return remainder, true
 }
 
 func arrayResumeNextCapacityGuards(file parsedFile, proc sourceProcedure, variables map[string]arrayVariable) []arrayResumeNextCapacityGuard {
@@ -8588,7 +8622,12 @@ func arrayVBA227Variables(baseVariables map[string]arrayVariable, file parsedFil
 	base := arrayOptionBase(file)
 	for declaration := range proc.Declarations.All() {
 		key := strings.ToLower(strings.TrimSpace(declaration.Name))
-		if key == "" || !declaration.IsArray || declaration.ValueShape != procedureir.ValueShapeDynamicArray || !arrayDeclarationHasInlineRedim(file.Lines, declaration) {
+		if key == "" || !declaration.IsArray || declaration.ValueShape != procedureir.ValueShapeDynamicArray {
+			continue
+		}
+		inlineRedim := arrayDeclarationHasInlineRedim(file.Lines, declaration)
+		inlineStrConv := strings.EqualFold(strings.TrimSpace(declaration.Type), "Byte") && arrayDeclarationHasInlineStrConvAssignment(file.Lines, declaration)
+		if !inlineRedim && !inlineStrConv {
 			continue
 		}
 		overlays = append(overlays, declaration)
@@ -8637,6 +8676,21 @@ func arrayDeclarationHasInlineRedim(lines []string, declaration procedureir.Decl
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(text[colon+1:]), "redim ")
+}
+
+func arrayDeclarationHasInlineStrConvAssignment(lines []string, declaration procedureir.Declaration) bool {
+	line := declaration.Range.StartLine
+	if line < 1 || line > len(lines) {
+		return false
+	}
+	parts := splitRangeValueSourceStatements(normalizedCodeLine(lines[line-1]))
+	for _, part := range parts[1:] {
+		lhs, rhs, indexed, ok := arrayAssignment(part)
+		if ok && !indexed && strings.EqualFold(lhs, declaration.Name) && strings.EqualFold(arrayCallName(rhs), "strconv") {
+			return true
+		}
+	}
+	return false
 }
 
 func parameterArrayDimensions(bounds []procedureir.ArrayBound, base int) []arrayDimension {
@@ -9169,6 +9223,11 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 		shape := []arrayDimension{{}}
 		return arrayValue{kind: arrayAllocated, knownArray: true, dimensions: shape, preserveShape: shape, origin: arrayOriginLocal}, true
 	}
+	// Keep StrConv-to-Byte-array assignments in the type-aware transfer below;
+	// it can distinguish a known non-empty String from an unknown one.
+	if name == "strconv" {
+		return arrayValue{}, false
+	}
 	if arrayByteArrayReadRe.MatchString(rhs) {
 		return arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}, true
 	}
@@ -9230,6 +9289,24 @@ func byteArrayStringAssignment(file parsedFile, proc sourceProcedure, line int, 
 	if strings.EqualFold(rhs, "vbNullString") {
 		return allocated(true)
 	}
+	if strings.EqualFold(arrayCallName(rhs), "strconv") {
+		open := firstParenOutsideString(rhs)
+		close := matchingParen(rhs, open)
+		if open < 0 || close < 0 || strings.TrimSpace(rhs[close+1:]) != "" {
+			return arrayValue{}, false
+		}
+		arguments := splitArgs(rhs[open+1 : close])
+		if len(arguments) == 0 {
+			return arrayValue{}, false
+		}
+		if strings.EqualFold(strings.TrimSpace(arguments[0]), "vbNullString") {
+			return allocated(true)
+		}
+		if arrayStringExpressionKnownNonEmpty(file, proc, line, arguments[0], variables) {
+			return allocated(false)
+		}
+		return arrayValue{}, false
+	}
 	if strings.HasPrefix(rhs, `"`) {
 		if len(rhs) <= 1 || strings.HasPrefix(rhs, `""`) {
 			return arrayValue{}, false
@@ -9247,6 +9324,134 @@ func byteArrayStringAssignment(file parsedFile, proc sourceProcedure, line int, 
 		return arrayValue{}, false
 	}
 	return allocated(false)
+}
+
+func arrayStringExpressionKnownNonEmpty(file parsedFile, proc sourceProcedure, line int, expression string, variables map[string]arrayVariable) bool {
+	expression = strings.TrimSpace(expression)
+	if expression == "" || strings.EqualFold(expression, "vbNullString") {
+		return false
+	}
+	if arrayStringExpressionHasNonEmptyLiteral(expression) {
+		return true
+	}
+	name := cleanIdentifier(expression)
+	if name != expression {
+		return false
+	}
+	variable, ok := variables[strings.ToLower(name)]
+	if !ok || variable.isArray || variable.isVariant || !strings.EqualFold(strings.TrimSpace(variable.typ), "String") {
+		return false
+	}
+	if arrayStringIsKnownNonEmpty(file, proc, line, name) {
+		return true
+	}
+	return arrayStringVariableHasNonEmptyAssignment(file, proc, line, name)
+}
+
+func arrayStringExpressionHasNonEmptyLiteral(expression string) bool {
+	expression = strings.TrimSpace(expression)
+	for strings.HasPrefix(expression, "(") {
+		close := matchingParen(expression, 0)
+		if close != len(expression)-1 {
+			break
+		}
+		expression = strings.TrimSpace(expression[1:close])
+	}
+	for _, operand := range splitStringConcatenation(expression) {
+		if arrayStringLiteralHasValue(operand) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayStringVariableHasNonEmptyAssignment(file parsedFile, proc sourceProcedure, line int, source string) bool {
+	start := max(0, proc.StartLine-1)
+	end := min(len(file.Lines), line-1)
+	depth := 0
+	assigned := false
+	for index := start; index < end; index++ {
+		for _, statement := range splitRangeValueSourceStatements(strings.TrimSpace(normalizedCodeLine(file.Lines[index]))) {
+			text := strings.TrimSpace(statement)
+			if delta := arrayStringBlockBoundary(text); delta < 0 {
+				if depth > 0 {
+					depth--
+				}
+				continue
+			}
+			lhs, rhs, indexed, ok := arrayAssignment(text)
+			if ok && !indexed && strings.EqualFold(lhs, source) {
+				assigned = depth == 0 && arrayStringExpressionHasNonEmptyLiteral(rhs)
+			}
+			if delta := arrayStringBlockBoundary(text); delta > 0 {
+				depth++
+			}
+		}
+	}
+	return assigned
+}
+
+func splitStringConcatenation(expression string) []string {
+	var parts []string
+	start := 0
+	inString := false
+	depth := 0
+	for index := 0; index < len(expression); index++ {
+		switch expression[index] {
+		case '"':
+			if inString && index+1 < len(expression) && expression[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case '&':
+			if !inString && depth == 0 {
+				parts = append(parts, strings.TrimSpace(expression[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	return append(parts, strings.TrimSpace(expression[start:]))
+}
+
+func arrayStringLiteralHasValue(operand string) bool {
+	operand = strings.TrimSpace(operand)
+	if len(operand) < 2 || operand[0] != '"' || operand[len(operand)-1] != '"' {
+		return false
+	}
+	length := 0
+	for index := 1; index < len(operand)-1; index++ {
+		if operand[index] == '"' {
+			if index+1 < len(operand)-1 && operand[index+1] == '"' {
+				length++
+				index++
+				continue
+			}
+			return false
+		}
+		length++
+	}
+	return length > 0
+}
+
+func arrayStringBlockBoundary(text string) int {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case lower == "end if", lower == "end select", lower == "end with", lower == "loop", lower == "wend", strings.HasPrefix(lower, "next"):
+		return -1
+	case strings.HasPrefix(lower, "if ") && strings.HasSuffix(lower, " then"), strings.HasPrefix(lower, "for "), strings.HasPrefix(lower, "do "), lower == "do", strings.HasPrefix(lower, "select case "), strings.HasPrefix(lower, "with "), strings.HasPrefix(lower, "while "):
+		return 1
+	default:
+		return 0
+	}
 }
 
 func arrayStringIsKnownNonEmpty(file parsedFile, proc sourceProcedure, line int, source string) bool {

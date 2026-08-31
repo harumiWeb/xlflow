@@ -578,8 +578,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":204,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdExcelLibraries/stdXLEvents.cls","surface":"analyze","code":"VBA202","severity":"warning","line":227,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"analyze","code":"VBA227","severity":"warning","line":280,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"analyze","code":"VBA227","severity":"warning","line":293,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdHTTPServer.cls","surface":"analyze","code":"VBA227","severity":"warning","line":293,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA222","severity":"warning","line":8,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA237","severity":"warning","line":16,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdICallableScheduler.bas","surface":"analyze","code":"VBA202","severity":"warning","line":27,"column":0}

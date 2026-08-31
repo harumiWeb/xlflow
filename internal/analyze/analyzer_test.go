@@ -5847,6 +5847,68 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesStrConvStringAssignmentToByteArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Safe(ByVal text As String)
+  Dim payload As String
+  payload = "header" & text
+  Dim bytes() As Byte
+  bytes = StrConv(payload, vbFromUnicode)
+  Debug.Print bytes(0)
+  Debug.Print UBound(bytes)
+End Sub
+
+Private Sub SafeInline(ByVal text As String)
+  Dim payload As String
+  payload = "header" & text
+  Dim bytes() As Byte: bytes = StrConv(payload, vbFromUnicode)
+  Debug.Print bytes(0)
+  Debug.Print UBound(bytes)
+End Sub
+
+Private Sub Unsafe(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = StrConv(text, vbFromUnicode)
+  Debug.Print bytes(0)
+End Sub
+
+Private Sub UnknownBounds(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = StrConv(text, vbFromUnicode)
+  Debug.Print UBound(bytes)
+End Sub
+
+Private Sub Conditional(ByVal text As String, ByVal enabled As Boolean)
+  Dim payload As String
+  If enabled Then
+    payload = "header"
+  End If
+  Dim bytes() As Byte
+  bytes = StrConv(payload, vbFromUnicode)
+  Debug.Print bytes(0)
+End Sub
+
+Public Sub Run()
+  Safe vbNullString
+  SafeInline vbNullString
+  Unsafe vbNullString
+  UnknownBounds vbNullString
+  Conditional vbNullString, False
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 3 || got[0].Procedure != "Unsafe" || got[1].Procedure != "UnknownBounds" || got[2].Procedure != "Conditional" {
+		t.Fatalf("known non-empty StrConv should be safe while unknown or conditional transfers remain conservative: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesArrayReturnIntoByRefParameter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

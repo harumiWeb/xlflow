@@ -151,7 +151,9 @@ Byte-array assignment. Variant results
 from a binary stream `Read(-1)` expression and the `vbNullString`-to-Byte-array
 idiom are recognized as Byte-array transfers. The latter is a known empty
 array: `LBound` / `UBound` queries are valid, but element access remains a
-`VBA227` finding. A private `ByRef` output helper that fills the output on each
+`VBA227` finding. A `StrConv` result assigned to a Byte array is also
+recognized when its source is a statically proven non-empty String; unknown
+String sources remain conservative. A private `ByRef` output helper that fills the output on each
 accepted branch and routes rejected inputs through a project-local procedure
 with no normal exit is summarized at its normal exits; the rejecting branch
 does not poison the allocation proof.
