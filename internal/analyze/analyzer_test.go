@@ -6365,6 +6365,27 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulBoundsForVariantElementArray(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef args() As Variant)
+  Select Case UBound(args) - LBound(args) + 1
+    Case 1: Debug.Print args(0)
+  End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Line != 3 || got[1].Line != 3 {
+		t.Fatalf("a successful bounds query should establish allocation for a Variant element array: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotCarrySkippedElseIfBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

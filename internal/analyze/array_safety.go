@@ -660,15 +660,14 @@ func arrayVBA227HasSuccessfulBoundsExpression(text string) bool {
 }
 
 func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
-	// Keep dynamic Variant arrays conservative: the existing VBA227 contract
-	// treats caller-provided element-array shape as untrusted. An untyped
-	// Variant is also not marked isArray and remains conservative in the normal
-	// transfer path.
+	// An explicitly declared Variant element array is still a known array, so a
+	// successful bounds query establishes its allocation. An untyped Variant is
+	// not marked isArray and remains conservative in the normal transfer path.
 	var updated arrayFlowState
 	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
 		name := strings.ToLower(strings.TrimSpace(bound[2]))
 		variable, known := variables[name]
-		if !known || !variable.isArray || variable.isVariant {
+		if !known || !variable.isArray {
 			continue
 		}
 		value, known := state[name]
@@ -708,7 +707,7 @@ func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.
 	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(condition, -1) {
 		name := strings.ToLower(strings.TrimSpace(bound[2]))
 		variable, known := variables[name]
-		if !known || !variable.isArray || variable.isVariant {
+		if !known || !variable.isArray {
 			continue
 		}
 		value, known := updated[name]
