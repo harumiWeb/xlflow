@@ -6125,6 +6125,75 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesIsArrayAssignmentThroughByRefArrayCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef args() As Variant)
+  Debug.Print UBound(args)
+End Sub
+
+Public Sub Run(ByVal source As Variant)
+  If IsArray(source) Then
+    Dim args() As Variant
+    args = source
+    Consume args
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("an IsArray-guarded whole-array assignment should establish allocation at a ByRef callee: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227IgnoresArrayLikeStringLiterals(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe()
+  Dim data() As Byte
+  Call RaiseError("clipboard data (not an array access)")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("array-like text inside a string literal must not be treated as an indexed access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227TreatsBoundInsideIndexAsAllocationProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As Variant)
+  Dim data() As Byte
+  data = source
+  Debug.Print data(LBound(data))
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 {
+		t.Fatalf("the LBound query should remain the only possible failure before data(LBound(data)): %+v", got)
+	}
+	if !strings.Contains(strings.ToLower(got[0].Message), "lbound") {
+		t.Fatalf("the remaining finding should protect the LBound query, got: %+v", got[0])
+	}
+}
+
 func TestAnalyzerVBA227PropagatesIsArrayGuardToNestedArrayElement(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

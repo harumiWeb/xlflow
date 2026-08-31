@@ -540,6 +540,13 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 }
 
 func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool) (arrayFlowState, []Finding) {
+	transfer := func(input arrayFlowState, source string) (arrayFlowState, []Finding) {
+		output, findings := a.arrayTransfer(file, proc, ctx, variables, input, source, line, constants, capacityGuards)
+		if resumeNextBefore == nil || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+			return output, findings
+		}
+		return output, arrayVBA227FilterNestedBoundIndexFindings(findings, source, variables)
+	}
 	if line >= 1 && line <= len(file.Lines) && vbaLineContinues(file.Lines[line-1]) && arrayVBA227HasArrayFactoryAssignment(text) {
 		text = arrayLogicalCodeLine(file.Lines, line)
 	}
@@ -554,20 +561,20 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
 		if argument, _, guard := arrayIsArrayGuardCondition(condition); guard && arrayElementBaseName(argument) != "" {
-			state, findings := a.arrayTransfer(file, proc, ctx, variables, state, condition, line, constants, capacityGuards)
+			state, findings := transfer(state, condition)
 			guardedState := arrayElementGuardState(state, argument, variables)
 			thenState := cloneArrayState(guardedState)
 			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
 			if thenBody != "" {
 				var bodyFindings []Finding
-				thenState, bodyFindings = a.arrayTransfer(file, proc, ctx, variables, thenState, thenBody, line, constants, capacityGuards)
+				thenState, bodyFindings = transfer(thenState, thenBody)
 				findings = append(findings, bodyFindings...)
 			}
 			if hasElse {
 				elseState := cloneArrayState(guardedState)
 				var elseFindings []Finding
 				if elseBody != "" {
-					elseState, elseFindings = a.arrayTransfer(file, proc, ctx, variables, elseState, elseBody, line, constants, capacityGuards)
+					elseState, elseFindings = transfer(elseState, elseBody)
 				}
 				findings = append(findings, elseFindings...)
 				state = meetArrayState(thenState, elseState)
@@ -582,11 +589,11 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		// narrow: ElseIf merging and inline bodies retain their existing CFG
 		// handling, and Resume Next may continue after a failed query.
 		if body == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(condition)), "if ") && arrayVBA227HasPureBoundsCondition(condition) && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
-			state, findings := a.arrayTransfer(file, proc, ctx, variables, state, condition, line, constants, capacityGuards)
+			state, findings := transfer(state, condition)
 			return arraySuccessfulBoundsState(state, condition, variables), findings
 		}
 	}
-	state, findings := a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
+	state, findings := transfer(state, text)
 	if arrayVBA227HasSuccessfulBoundsExpression(text) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
@@ -600,6 +607,72 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		state = arrayElementGuardState(state, argument, variables)
 	}
 	return state, findings
+}
+
+// arrayVBA227FilterNestedBoundIndexFindings removes only the redundant
+// unallocated-index observation from an expression such as
+// data(LBound(data)). The bound query itself remains a finding: if it fails,
+// the indexed expression is never evaluated. Keep the proof conservative when
+// the same array has another indexed use on the source line, because the
+// normalized finding range cannot distinguish those uses.
+func arrayVBA227FilterNestedBoundIndexFindings(findings []Finding, text string, variables map[string]arrayVariable) []Finding {
+	indexedCounts := make(map[string]int)
+	proofCandidates := make(map[string]bool)
+	for _, use := range arrayIndexedUsesForSource(text, variables) {
+		if len(use.args) == 0 {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(use.name))
+		if name == "" {
+			continue
+		}
+		indexedCounts[name]++
+		variable, known := variables[name]
+		if known && variable.isArray && arrayUseHasSelfBoundsQuery(use) {
+			proofCandidates[name] = true
+		}
+	}
+	boundFailures := make(map[string]bool)
+	for _, finding := range findings {
+		if finding.Code != "VBA227" {
+			continue
+		}
+		for _, kind := range []string{"lbound", "ubound"} {
+			for name := range proofCandidates {
+				if finding.arrayOperationKey == arrayBoundOperationKey(kind, name, "unallocated") {
+					boundFailures[name] = true
+				}
+			}
+		}
+	}
+	proofKeys := make(map[string]bool)
+	for name := range proofCandidates {
+		if indexedCounts[name] == 1 && boundFailures[name] {
+			proofKeys[arrayIndexOperationKey(name, "unallocated")] = true
+		}
+	}
+	if len(proofKeys) == 0 {
+		return findings
+	}
+	filtered := findings[:0]
+	for _, finding := range findings {
+		if finding.Code == "VBA227" && proofKeys[finding.arrayOperationKey] {
+			continue
+		}
+		filtered = append(filtered, finding)
+	}
+	return filtered
+}
+
+func arrayUseHasSelfBoundsQuery(use arrayUse) bool {
+	for _, argument := range use.args {
+		for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(argument, -1) {
+			if strings.EqualFold(cleanIdentifier(bound[2]), use.name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func arrayVBA227HasPureBoundsCondition(text string) bool {
@@ -8480,7 +8553,7 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		}
 	}
 
-	for _, use := range arrayIndexedUses(text, variables) {
+	for _, use := range arrayIndexedUsesForSource(text, variables) {
 		// An empty subscript pair passes the whole array to a procedure; it is
 		// not an element access whose dimension or allocation should be checked
 		// at the call site. The callee owns any element-access diagnostics.
@@ -9221,6 +9294,16 @@ func arrayIndexedUses(text string, variables map[string]arrayVariable) []arrayUs
 		i = end
 	}
 	return uses
+}
+
+// arrayIndexedUsesForSource scans source-line CFG text after removing syntax
+// that cannot perform an array access. Recovered blocks may retain string
+// literals and comments, so feeding their raw text to the VBA227 lane would
+// mistake prose such as "clipboard data (" for an indexed use. Keep the
+// primitive scanner raw for runtime projections that have their own source
+// normalization contract.
+func arrayIndexedUsesForSource(text string, variables map[string]arrayVariable) []arrayUse {
+	return arrayIndexedUses(maskStringLiterals(gui.StripComment(text)), variables)
 }
 
 func matchingParen(text string, start int) int {
