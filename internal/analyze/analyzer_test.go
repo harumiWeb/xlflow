@@ -6207,8 +6207,7 @@ noValues:
 End Function
 
 Public Sub Run(ByRef values() As Long)
-  Dim ub As Long
-  ub = SafeUBoundValues(values)
+  Dim ub As Long: ub = SafeUBoundValues(values)
   If ub < 0 Then Exit Sub
   Debug.Print values(0)
 End Sub
@@ -6224,6 +6223,57 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("a nonnegative SafeUBound result should prove the later array access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesSafeUBoundIntoForBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeUBoundValues(ByRef values() As Long) As Long
+  On Error GoTo noValues
+  SafeUBoundValues = UBound(values)
+  Exit Function
+noValues:
+  SafeUBoundValues = -1
+End Function
+
+Public Sub Run(ByRef values() As Long)
+  Dim ub As Long
+  ub = SafeUBoundValues(values)
+  Dim i As Long
+  For i = 0 To ub
+    Debug.Print values(i)
+  Next
+End Sub
+
+Public Sub Direct(ByRef values() As Long)
+  Dim i As Long
+  For i = 0 To UBound(values)
+    Debug.Print values(i)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directBound := false
+	directBody := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Run" {
+			t.Fatalf("a safe-bound scalar should make the For body access safe: %+v", finding)
+		}
+		if finding.Procedure == "Direct" {
+			directBound = true
+			if strings.Contains(strings.ToLower(finding.Message), "is indexed before") {
+				directBody = true
+			}
+		}
+	}
+	if !directBound || !directBody {
+		t.Fatalf("a direct UBound loop must retain conservative evidence for an unallocated input array: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 

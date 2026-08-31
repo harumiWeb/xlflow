@@ -129,6 +129,7 @@ var (
 	arrayBoundCallRe                  = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
 	arrayBoundOperatorRe              = regexp.MustCompile(`(?i)\b(?:mod|and|or|not)\b`)
 	arrayForBoundRe                   = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayForScalarBoundRe             = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*[-+]?\d+\s+to\s+([A-Za-z_]\w*)\s*$`)
 	arrayForEachRe                    = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
 	arrayIndexedSourceRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
 	arrayGuardCallRe                  = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:(=|<>|>=|<=|>|<)\s*(-?\d+))?\s*$`)
@@ -354,6 +355,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
 				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, vba227Variables)
+				out = applyArrayForBoundState(out, block.Statement, edge, vba227Variables)
 				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
 			},
 		})
@@ -560,6 +562,8 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		text = redim
 	} else if assignment, ok := inlineArrayStrConvAssignmentText(inlineText); ok {
 		text = assignment
+	} else if assignment, ok := inlineArraySafeBoundAssignmentText(inlineText, ctx.arraySafeBoundGuards); ok {
+		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
 		if body != "" && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
@@ -620,6 +624,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	state, findings := transfer(state, text)
+	findings = arrayVBA227FilterForBodyIndexFindings(findings, proc, line, state, variables, resumeNextBefore)
 	if arrayVBA227HasSuccessfulBoundsExpression(text) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
@@ -633,6 +638,59 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		state = arrayElementGuardState(state, argument, variables)
 	}
 	return state, findings
+}
+
+// arrayVBA227FilterForBodyIndexFindings removes only the unallocated-index
+// observation for a loop body whose For bound necessarily succeeded before
+// the body could run. Source-line CFG blocks include a For header and its
+// nested body in one scan, so the edge refinement is applied too late for the
+// first body visit; this narrow filter preserves the bound finding itself.
+func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
+	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		return findings
+	}
+	proven := map[string]bool{}
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementFor || line <= statement.Range.StartLine || line >= statement.Range.EndLine {
+			continue
+		}
+		header := strings.TrimSpace(statement.Text)
+		if newline := strings.IndexAny(header, "\r\n"); newline >= 0 {
+			header = strings.TrimSpace(header[:newline])
+		}
+		header = strings.TrimSpace(normalizedCodeLine(header))
+		argument := ""
+		if match := arrayForScalarBoundRe.FindStringSubmatch(header); len(match) == 2 {
+			bound, known := state[strings.ToLower(cleanIdentifier(match[1]))]
+			if known {
+				argument = bound.safeBoundProbe
+			}
+		}
+		name := strings.ToLower(cleanIdentifier(argument))
+		variable, known := variables[name]
+		if name != "" && known && (variable.isArray || variable.isVariant) {
+			proven[name] = true
+		}
+	}
+	if len(proven) == 0 {
+		return findings
+	}
+	filtered := findings[:0]
+	for _, finding := range findings {
+		remove := false
+		if finding.Code == "VBA227" {
+			for name := range proven {
+				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") {
+					remove = true
+					break
+				}
+			}
+		}
+		if !remove {
+			filtered = append(filtered, finding)
+		}
+	}
+	return filtered
 }
 
 // arrayVBA227FilterNestedBoundIndexFindings removes only the redundant
@@ -991,6 +1049,18 @@ func inlineArrayStrConvAssignmentText(text string) (string, bool) {
 	}
 	_, rhs, indexed, assigned := arrayAssignment(remainder)
 	if !assigned || indexed || !strings.EqualFold(arrayCallName(rhs), "strconv") {
+		return "", false
+	}
+	return remainder, true
+}
+
+func inlineArraySafeBoundAssignmentText(text string, guards map[string]bool) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	_, rhs, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed || !guards[arrayCallName(rhs)] {
 		return "", false
 	}
 	return remainder, true
@@ -2008,7 +2078,7 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 	}
 	name := strings.ToLower(cleanIdentifier(argument))
 	variable, known := variables[name]
-	if !known || !variable.isArray {
+	if !known || !variable.isArray && !variable.isVariant {
 		return state
 	}
 	value, known := state[name]
@@ -2038,6 +2108,49 @@ func applyArraySafeBoundGuard(state arrayFlowState, statement *procedureir.State
 	if !ok {
 		return state
 	}
+	return updated
+}
+
+// applyArrayForBoundState refines the path that can enter a For body after a
+// scalar safe-bound helper has returned a nonnegative result. Its -1 sentinel
+// intentionally represents a zero-iteration loop, so no fact is propagated to
+// the loop-exit path. A direct UBound expression is left to the existing
+// bound diagnostic; for source-line CFG blocks, that finding is also the
+// conservative evidence for body accesses when the bound can fail.
+func applyArrayForBoundState(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeLoopBody {
+		return state
+	}
+	text := strings.TrimSpace(statement.Text)
+	if newline := strings.IndexAny(text, "\r\n"); newline >= 0 {
+		text = strings.TrimSpace(text[:newline])
+	}
+	text = strings.TrimSpace(normalizedCodeLine(text))
+	match := arrayForScalarBoundRe.FindStringSubmatch(text)
+	if len(match) != 2 {
+		return state
+	}
+	bound, known := state[strings.ToLower(cleanIdentifier(match[1]))]
+	if !known || bound.safeBoundProbe == "" {
+		return state
+	}
+	return arrayForBoundArrayState(state, bound.safeBoundProbe, variables)
+}
+
+func arrayForBoundArrayState(state arrayFlowState, argument string, variables map[string]arrayVariable) arrayFlowState {
+	name := strings.ToLower(cleanIdentifier(argument))
+	variable, known := variables[name]
+	if !known || !variable.isArray && !variable.isVariant {
+		return state
+	}
+	value, known := state[name]
+	if !known {
+		return state
+	}
+	updated := cloneArrayState(state)
+	value.kind = arrayAllocated
+	value.knownArray = true
+	updated[name] = value
 	return updated
 }
 
