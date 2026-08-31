@@ -564,6 +564,8 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		text = assignment
 	} else if assignment, ok := inlineArraySafeBoundAssignmentText(inlineText, ctx.arraySafeBoundGuards); ok {
 		text = assignment
+	} else if assignment, ok := inlineArrayReturnAssignmentText(inlineText, ctx.arrayReturns); ok {
+		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
 		if body != "" && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
@@ -1061,6 +1063,22 @@ func inlineArraySafeBoundAssignmentText(text string, guards map[string]bool) (st
 	}
 	_, rhs, indexed, assigned := arrayAssignment(remainder)
 	if !assigned || indexed || !guards[arrayCallName(rhs)] {
+		return "", false
+	}
+	return remainder, true
+}
+
+func inlineArrayReturnAssignmentText(text string, returns map[string]arrayValue) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	_, rhs, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed {
+		return "", false
+	}
+	value, known := returns[arrayCallName(rhs)]
+	if !known || value.kind != arrayAllocated || !value.knownArray {
 		return "", false
 	}
 	return remainder, true
@@ -10293,7 +10311,7 @@ func inferArrayReturnSummaries(files []parsedFile, arrayAllocationGuards map[str
 		valid := returns[0].ok
 		value := returns[0].value
 		for _, returned := range returns[1:] {
-			if !returned.ok || !arrayValueCompatible(value, returned.value) {
+			if !returned.ok || !arrayReturnValueCompatible(proc, value, returned.value) {
 				valid = false
 				break
 			}
@@ -10427,6 +10445,22 @@ func arraySummaryStatementAlwaysFails(text string, base int, constants map[strin
 
 func arrayValueEqual(left, right arrayValue) bool {
 	return arrayValueCompatible(left, right) && left.mayBeEmpty == right.mayBeEmpty
+}
+
+// arrayReturnValueCompatible keeps a return summary when every normal return
+// path produces an array with the same allocation provenance. Return branches
+// may legitimately produce different shapes (for example Array() for an
+// empty result and ReDim 1 To length for a non-empty result); that shape
+// mismatch must not erase the stronger fact that the returned value is an
+// array. Callers still receive no shape bounds from such a summary.
+func arrayReturnValueCompatible(proc sourceProcedure, left, right arrayValue) bool {
+	if arrayValueCompatible(left, right) {
+		return true
+	}
+	if proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return false
+	}
+	return left.kind == arrayAllocated && right.kind == arrayAllocated && left.knownArray && right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.safeBoundProbe == right.safeBoundProbe && left.allocationCountSource == right.allocationCountSource
 }
 
 func arrayValueCompatible(left, right arrayValue) bool {

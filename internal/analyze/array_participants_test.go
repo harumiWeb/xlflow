@@ -145,6 +145,33 @@ func TestArrayReturnSummaryDuplicateNamesRemainUnknown(t *testing.T) {
 	}
 }
 
+func TestArrayReturnValueCompatibleIgnoresShape(t *testing.T) {
+	left := arrayValue{
+		kind:       arrayAllocated,
+		knownArray: true,
+		origin:     arrayOriginLocal,
+		dimensions: []arrayDimension{{}},
+	}
+	right := arrayValue{
+		kind:       arrayAllocated,
+		knownArray: true,
+		origin:     arrayOriginLocal,
+		dimensions: []arrayDimension{{lower: arrayBound{known: true, value: 1}, upper: arrayBound{known: true, value: 2}}},
+	}
+	if !arrayReturnValueCompatible(sourceProcedure{ProcedureKind: procedureir.ProcedurePropertyGet}, left, right) {
+		t.Fatalf("array return values with different shapes should retain allocation compatibility: left=%#v right=%#v", left, right)
+	}
+}
+
+func TestInlineArrayReturnAssignmentTextUsesArraySummary(t *testing.T) {
+	text, ok := inlineArrayReturnAssignmentText("Dim values() As Variant: values = source.arr", map[string]arrayValue{
+		"arr": {kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal},
+	})
+	if !ok || text != "values = source.arr" {
+		t.Fatalf("known array-return member assignment was not extracted: text=%q ok=%v", text, ok)
+	}
+}
+
 func TestArrayCandidateKeyUsesProcedureKindForLineFallback(t *testing.T) {
 	procedure := sourceProcedure{
 		Module:        "M",
