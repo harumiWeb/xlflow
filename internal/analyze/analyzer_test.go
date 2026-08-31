@@ -6328,6 +6328,89 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulBoundsAfterLengthAssignment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) - LBound(values) + 1
+  Debug.Print values(LBound(values))
+End Sub
+
+Private Sub LoopProbe(ByRef values() As Byte)
+  Dim index As Long
+  For index = LBound(values) To UBound(values)
+    Debug.Print values(index)
+  Next
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	bounds := map[int]int{}
+	for _, finding := range got {
+		if finding.Line == 4 || finding.Line == 10 {
+			bounds[finding.Line]++
+		}
+		if finding.Line == 5 || finding.Line == 11 {
+			t.Fatalf("a successful length assignment should establish allocation for the following indexed access: %+v", finding)
+		}
+	}
+	if bounds[4] != 2 || bounds[10] != 2 {
+		t.Fatalf("the bounds queries themselves must remain diagnosed twice: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarrySkippedElseIfBounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte, ByVal skip As Boolean)
+  If skip Then
+    Debug.Print "skip"
+  ElseIf UBound(values) - LBound(values) + 1 > 0 Then
+    Debug.Print "checked"
+  End If
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 3 {
+		t.Fatalf("a skipped ElseIf must not prove the later access safe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesSuccessfulElseIfBoundsIntoBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte, ByVal skip As Boolean)
+  If skip Then
+    Debug.Print "skip"
+  ElseIf UBound(values) > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 5 {
+		t.Fatalf("a successful ElseIf bounds query should make its branch access safe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227DoesNotTrustBoundsUnderResumeNext(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

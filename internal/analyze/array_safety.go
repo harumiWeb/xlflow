@@ -350,6 +350,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 			},
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 				out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
+				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
 				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
 			},
@@ -586,6 +587,11 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	state, findings := a.arrayTransfer(file, proc, ctx, variables, state, text, line, constants, capacityGuards)
+	if arrayVBA227HasSuccessfulBoundsExpression(text) &&
+		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
+		!strings.Contains(strings.ToLower(text), "on error resume next") {
+		state = arraySuccessfulBoundsState(state, text, variables)
+	}
 	// Source-line CFG blocks can contain an If condition and its body. Apply
 	// the normal-path fact after the condition while the block is still being
 	// processed so a nested element access in the body does not repeat the
@@ -624,6 +630,35 @@ func arrayVBA227HasPureBoundsCondition(text string) bool {
 	return true
 }
 
+func arrayVBA227HasSuccessfulBoundsExpression(text string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(text))
+	// Conditional expressions do not dominate the following source line:
+	// an ElseIf condition can be skipped when an earlier branch is taken.
+	// Branch-specific allocation facts belong to the CFG edge transfer, not
+	// to this normal-path statement refinement.
+	if strings.HasPrefix(trimmed, "if ") || strings.HasPrefix(trimmed, "elseif ") || strings.HasPrefix(trimmed, "else if ") {
+		return false
+	}
+	seen := make(map[string]uint8)
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		if name == "" {
+			continue
+		}
+		if strings.EqualFold(bound[1], "lbound") {
+			seen[name] |= 1
+		} else {
+			seen[name] |= 2
+		}
+	}
+	for _, bounds := range seen {
+		if bounds == 3 {
+			return true
+		}
+	}
+	return false
+}
+
 func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
 	// Keep dynamic Variant arrays conservative: the existing VBA227 contract
 	// treats caller-provided element-array shape as untrusted. An untyped
@@ -649,6 +684,44 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 	}
 	if updated == nil {
 		return state
+	}
+	return updated
+}
+
+func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.Statement, variables map[string]arrayVariable, resumeNextBefore []bool) arrayFlowState {
+	if statement == nil || (statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf) {
+		return state
+	}
+	line := statement.Range.StartLine
+	if arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		return state
+	}
+	condition := statement.Text
+	if statement.Condition != nil && strings.TrimSpace(statement.Condition.Text) != "" {
+		condition = statement.Condition.Text
+	}
+	if strings.TrimSpace(condition) == "" {
+		return state
+	}
+	updated := state
+	cloned := false
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(condition, -1) {
+		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		variable, known := variables[name]
+		if !known || !variable.isArray || variable.isVariant {
+			continue
+		}
+		value, known := updated[name]
+		if !known {
+			continue
+		}
+		if !cloned {
+			updated = cloneArrayState(state)
+			cloned = true
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
 	}
 	return updated
 }
