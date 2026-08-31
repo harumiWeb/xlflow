@@ -9138,6 +9138,165 @@ End Sub`)
 	}
 }
 
+func TestAnalyzerVBA227PropagatesModuleReadyGuardToPublicConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Public Sub ReadRecord()
+  Dim result As Long
+  If Not readerReady Then Exit Sub
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub ReadRecordWithoutGuard()
+  Dim result As Long
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub Run()
+  OpenReader
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadRecordWithoutGuard" {
+		t.Fatalf("a module ready guard should prove the module array for a public consumer: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesModuleReadyGuardThroughByRefConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Private Sub Consume(ByRef items() As String)
+  items(0) = "record"
+End Sub
+
+Public Sub ReadRecord()
+  If Not readerReady Then Exit Sub
+  records = Split( _
+    "record", _
+    ",")
+  Consume records
+End Sub
+
+Public Sub Run()
+  OpenReader
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a module ready guard should prove a ByRef consumer argument: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustExternallySetModuleReadyGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Public Sub ReadRecord()
+  Dim result As Long
+  If Not readerReady Then Exit Sub
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub SpoofReady()
+  readerReady = True
+End Sub
+
+Public Sub Run()
+  SpoofReady
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadRecord" {
+		t.Fatalf("an externally writable ready guard must not prove the module array: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustReadyGuardAfterModuleArrayErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private readerReady As Boolean
+Private records() As String
+
+Private Sub OpenReader()
+  records = Split("record", ",")
+  readerReady = True
+End Sub
+
+Private Sub ClearReader()
+  Erase records
+End Sub
+
+Public Sub ReadRecord()
+  Dim result As Long
+  If Not readerReady Then Exit Sub
+  result = InStrB(1, records(0), ",")
+End Sub
+
+Public Sub Run()
+  OpenReader
+  ClearReader
+  ReadRecord
+End Sub`)
+
+	cfg := config.Default()
+	cfg.Analyze = analyzeConfigForRules("VBA227")
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ReadRecord" {
+		t.Fatalf("an erase without resetting the ready guard must remain reportable: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesIdempotentModuleSetupThroughByRefAllocator(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

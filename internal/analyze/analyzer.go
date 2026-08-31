@@ -348,6 +348,7 @@ type analysisContext struct {
 	arraySkipModuleInvalidationEffects   bool
 	arrayModuleConfigurations            map[string]arrayModuleConfigurationState
 	arrayModuleEntryStates               arrayModuleEntryStates
+	arrayModuleReadyGuards               arrayModuleReadyGuardStates
 	arrayPrivateTargets                  map[string]sourceProcedure
 	arrayParticipants                    map[string]bool
 	arrayParticipantKeys                 map[string]string
@@ -2406,6 +2407,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleInvalidations:         arrayModuleInvalidationSummaries{},
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
+		arrayModuleReadyGuards:           arrayModuleReadyGuardStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
 		arrayStats:                       &arrayInterproceduralStats{strategy: a.arrayStrategy},
 		arrayByRefEntryStates:            map[string]map[int]bool{},
@@ -2498,6 +2500,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arraySkipModuleInvalidationEffects = false
 		ctx.arrayModuleInvalidations = inferArrayModuleInvalidationSummaries(files, ctx)
 		ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)
+		ctx.arrayModuleReadyGuards = inferArrayModuleReadyGuardStates(files, ctx)
 		// Module entry inference collects allocations established by callers. Do
 		// not feed the normal-return invalidation summaries back into that fixed
 		// point: a helper's invalidation is a post-call fact, while using it here

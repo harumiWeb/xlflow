@@ -74,7 +74,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":898,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":901,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":923,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA227","severity":"warning","line":924,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":926,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":926,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA249","severity":"error","line":930,"column":0}
@@ -274,8 +273,6 @@
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":4103,"column":57}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":4103,"column":71}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA237","severity":"warning","line":4189,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA227","severity":"warning","line":4232,"column":0}
-{"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA227","severity":"warning","line":4239,"column":0}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":4259,"column":44}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":4259,"column":50}
 {"project":"third_party/std-vba","file":"src/WIP/stdCSV/CSVinterface.cls","surface":"analyze","code":"VBA206","severity":"warning","line":4262,"column":44}
