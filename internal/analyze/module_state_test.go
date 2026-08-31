@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/harumiWeb/xlflow/internal/config"
+	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
 func TestVBA240ReportsCrossEntryMutableCollectionAndMetrics(t *testing.T) {
@@ -67,6 +68,29 @@ End Sub
 	}
 	if !seenRun {
 		t.Fatalf("procedure metrics missing Main.Run: %#v", procedures)
+	}
+}
+
+func TestModuleStateResolveFieldPreservesRelativeCandidateIdentity(t *testing.T) {
+	rootDir := ".analyze-relative-vba240"
+	alpha := &moduleStateField{File: filepath.Join(rootDir, "src", "modules", "Alpha.bas"), Module: "Alpha", ModuleKind: "standard", Name: "sharedItems", Scope: procedureir.ScopeProject, Line: 2}
+	zulu := &moduleStateField{File: filepath.Join(rootDir, "src", "modules", "Zulu.bas"), Module: "Zulu", ModuleKind: "standard", Name: "sharedItems", Scope: procedureir.ScopeProject, Line: 2}
+	byName := map[string][]*moduleStateField{"shareditems": {alpha, zulu}}
+	access := procedureir.VariableAccess{
+		Name:  "sharedItems",
+		Scope: procedureir.ScopeProject,
+		Resolution: procedureir.SymbolResolution{
+			Scope: procedureir.ScopeProject,
+			Candidates: []procedureir.Candidate{{
+				File: zulu.File,
+				Line: zulu.Line,
+			}},
+		},
+	}
+
+	got := moduleStateResolveField(rootDir, access, moduleStateProcedure{File: "Main.bas", Module: "Main"}, nil, byName)
+	if got != zulu {
+		t.Fatalf("relative candidate resolved to %+v, want Zulu field %+v", got, zulu)
 	}
 }
 
