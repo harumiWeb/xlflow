@@ -9358,11 +9358,20 @@ func arrayStringExpressionHasNonEmptyLiteral(expression string) bool {
 		expression = strings.TrimSpace(expression[1:close])
 	}
 	for _, operand := range splitStringConcatenation(expression) {
-		if arrayStringLiteralHasValue(operand) {
+		if arrayStringLiteralHasValue(operand) || arrayStringNonEmptyConstant(operand) {
 			return true
 		}
 	}
 	return false
+}
+
+func arrayStringNonEmptyConstant(operand string) bool {
+	switch strings.ToLower(strings.TrimSpace(operand)) {
+	case "vbnullchar", "vbcrlf", "vbcr", "vblf", "vbtab", "vbverticaltab", "vbformfeed", "vbnewline":
+		return true
+	default:
+		return false
+	}
 }
 
 func arrayStringVariableHasNonEmptyAssignment(file parsedFile, proc sourceProcedure, line int, source string) bool {

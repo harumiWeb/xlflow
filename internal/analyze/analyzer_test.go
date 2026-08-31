@@ -5868,6 +5868,12 @@ Private Sub SafeInline(ByVal text As String)
   Debug.Print UBound(bytes)
 End Sub
 
+Private Sub SafeConstant(ByVal text As String)
+  Dim bytes() As Byte
+  bytes = StrConv(text & vbNullChar, vbFromUnicode)
+  Debug.Print bytes(0)
+End Sub
+
 Private Sub Unsafe(ByVal text As String)
   Dim bytes() As Byte
   bytes = StrConv(text, vbFromUnicode)
@@ -5893,6 +5899,7 @@ End Sub
 Public Sub Run()
   Safe vbNullString
   SafeInline vbNullString
+  SafeConstant vbNullString
   Unsafe vbNullString
   UnknownBounds vbNullString
   Conditional vbNullString, False
