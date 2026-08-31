@@ -132,6 +132,7 @@ var (
 	arrayReturnArrayDocRe             = regexp.MustCompile(`(?i)^@returns?\s+array(?:<|\b)`)
 	arrayTypeNameExpressionRe         = regexp.MustCompile(`(?i)^typename\s*\(\s*([A-Za-z_]\w*)\s*\)$`)
 	arrayQuotedCaseRe                 = regexp.MustCompile(`^\s*"([^"]*)"\s*$`)
+	arrayEmptyGuardRe                 = regexp.MustCompile(`(?i)^\s*\(?\s*not\s+([A-Za-z_]\w*)\s*\)?\s*=\s*-1\s*$`)
 	arrayForScalarBoundRe             = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*[-+]?\d+\s+to\s+([A-Za-z_]\w*)\s*$`)
 	arrayForEachRe                    = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
 	arrayIndexedSourceRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
@@ -573,6 +574,12 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
+		if body != "" && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) && !arrayProcedureHasErrorHandling(proc) && arrayVBA227StatementAlwaysRaises(body) {
+			if guardedState, safe := arrayNonEmptyGuardState(state, condition, variables); safe {
+				_, findings := transfer(state, condition)
+				return guardedState, findings
+			}
+		}
 		if body != "" && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 			if guardedState, safe := arraySafeBoundBranchState(state, condition, vbacfg.EdgeBranchTrue, ctx.arraySafeBoundGuards, variables); safe {
 				conditionState, findings := transfer(state, condition)
@@ -698,6 +705,42 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 		}
 	}
 	return filtered
+}
+
+func arrayVBA227StatementAlwaysRaises(text string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(text))
+	for _, prefix := range []string{"err.raise ", "err.raise(", "call err.raise ", "call err.raise("} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return trimmed == "err.raise" || trimmed == "call err.raise"
+}
+
+func arrayNonEmptyGuardState(state arrayFlowState, condition string, variables map[string]arrayVariable) (arrayFlowState, bool) {
+	condition = strings.TrimSpace(condition)
+	if strings.HasPrefix(strings.ToLower(condition), "if ") {
+		condition = strings.TrimSpace(condition[3:])
+	}
+	match := arrayEmptyGuardRe.FindStringSubmatch(condition)
+	if len(match) != 2 {
+		return state, false
+	}
+	name := strings.ToLower(cleanIdentifier(match[1]))
+	variable, known := variables[name]
+	if !known || !variable.isArray {
+		return state, false
+	}
+	value, known := state[name]
+	if !known {
+		return state, false
+	}
+	updated := cloneArrayState(state)
+	value.kind = arrayAllocated
+	value.knownArray = true
+	value.mayBeEmpty = false
+	updated[name] = value
+	return updated, true
 }
 
 // arrayVBA227FilterNestedBoundIndexFindings removes only the redundant

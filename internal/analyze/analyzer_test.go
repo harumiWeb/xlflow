@@ -6750,6 +6750,25 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesNotArrayEmptyGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub Run(ByRef values() As Byte)
+  If (Not values) = -1 Then Err.Raise 5
+  Debug.Print UBound(values) - LBound(values) + 1
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the Not-array empty guard should make normal-path bounds safe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227KeepsEmptyByteArrayElementAccessUnsafe(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

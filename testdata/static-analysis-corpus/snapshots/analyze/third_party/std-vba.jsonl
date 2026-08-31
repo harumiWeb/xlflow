@@ -1027,8 +1027,6 @@
 {"project":"third_party/std-vba","file":"src/stdHTTPAuthenticators.bas","surface":"analyze","code":"VBA202","severity":"warning","line":23,"column":0}
 {"project":"third_party/std-vba","file":"src/stdHTTPAuthenticators.bas","surface":"analyze","code":"VBA202","severity":"warning","line":40,"column":0}
 {"project":"third_party/std-vba","file":"src/stdHTTPAuthenticators.bas","surface":"analyze","code":"VBA202","severity":"warning","line":55,"column":0}
-{"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA227","severity":"warning","line":434,"column":0}
-{"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA227","severity":"warning","line":434,"column":0}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA206","severity":"warning","line":544,"column":32}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA224","severity":"warning","line":601,"column":0}
 {"project":"third_party/std-vba","file":"src/stdImage.cls","surface":"analyze","code":"VBA247","severity":"warning","line":603,"column":0}

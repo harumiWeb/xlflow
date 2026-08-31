@@ -11,6 +11,9 @@ All notable changes to xlflow will be documented in this file.
 - Fixed false-positive `VBA249` array-unallocated findings for indexed uses that
   follow a branch-local `ReDim` inside straight-line `Select Case` clauses.
 
+- Fixed false-positive `VBA227` bound findings after the established VBA
+  `(Not array) = -1 Then Err.Raise` empty-array guard on a normal path.
+
 ## v0.31.1
 
 - Kept LSP completion, signature help, hover, and definition responsive while

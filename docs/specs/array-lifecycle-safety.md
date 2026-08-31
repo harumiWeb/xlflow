@@ -158,6 +158,12 @@ accepted branch and routes rejected inputs through a project-local procedure
 with no normal exit is summarized at its normal exits; the rejecting branch
 does not poison the allocation proof.
 
+For a declared array, the established VBA emptiness guard
+`(Not values) = -1` followed on the same line by `Err.Raise` proves that the
+normal path has a non-empty allocation. This refinement is limited to a
+single-line raising guard without local error handling; `On Error` and
+`Resume Next` paths remain conservative.
+
 The same allocation-probe contract also applies when the positive length is
 first assigned to a scalar local and that local is compared with zero or a
 positive threshold. The proof remains path-sensitive; unrelated scalar
