@@ -333,21 +333,24 @@ var traceHelperDependencies = map[string]helperDependencyRule{
 }
 
 type analysisContext struct {
-	functionReturns                  map[string]string
-	functionShapes                   map[string]procedureir.ValueShapeKind
-	functionNamesSeen                map[string]bool
-	functionAmbiguous                map[string]bool
-	arrayReturns                     map[string]arrayValue
-	arrayAllocationGuards            map[string]bool
-	arrayByRefAllocations            arrayByRefAllocationSummaries
-	arrayByRefConditionalAllocations arrayByRefConditionalAllocations
-	arrayByRefLengthAllocations      arrayByRefLengthAllocations
-	arrayModuleAllocations           arrayModuleAllocationSummaries
-	arrayModuleConfigurations        map[string]arrayModuleConfigurationState
-	arrayModuleEntryStates           arrayModuleEntryStates
-	arrayPrivateTargets              map[string]sourceProcedure
-	arrayParticipants                map[string]bool
-	arrayParticipantKeys             map[string]string
+	functionReturns                      map[string]string
+	functionShapes                       map[string]procedureir.ValueShapeKind
+	functionNamesSeen                    map[string]bool
+	functionAmbiguous                    map[string]bool
+	arrayReturns                         map[string]arrayValue
+	arrayAllocationGuards                map[string]bool
+	arrayByRefAllocations                arrayByRefAllocationSummaries
+	arrayByRefConditionalAllocations     arrayByRefConditionalAllocations
+	arrayByRefLengthAllocations          arrayByRefLengthAllocations
+	arrayModuleAllocations               arrayModuleAllocationSummaries
+	arrayModuleInvalidations             arrayModuleInvalidationSummaries
+	arrayModuleInvalidationCacheWritable bool
+	arraySkipModuleInvalidationEffects   bool
+	arrayModuleConfigurations            map[string]arrayModuleConfigurationState
+	arrayModuleEntryStates               arrayModuleEntryStates
+	arrayPrivateTargets                  map[string]sourceProcedure
+	arrayParticipants                    map[string]bool
+	arrayParticipantKeys                 map[string]string
 	// arrayInterproceduralParticipants excludes complete procedures whose only
 	// evidence is an unknown array capability. Those procedures remain in the
 	// local participant plan for fail-open diagnostics, but cannot by themselves
@@ -2400,6 +2403,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayByRefConditionalAllocations: arrayByRefConditionalAllocations{},
 		arrayByRefLengthAllocations:      arrayByRefLengthAllocations{},
 		arrayModuleAllocations:           arrayModuleAllocationSummaries{},
+		arrayModuleInvalidations:         arrayModuleInvalidationSummaries{},
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
@@ -2485,14 +2489,24 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)
+		ctx.arraySkipModuleInvalidationEffects = true
 		ctx.arrayReturns = inferArrayReturnSummaries(files, ctx.arrayAllocationGuards, ctx)
 		ctx.arrayByRefAllocations = inferArrayByRefAllocationSummaries(files, ctx, ctx.arrayPrivateTargets)
 		ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)
 		ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)
 		ctx.arrayModuleAllocations = inferArrayModuleAllocationSummaries(files, ctx, ctx.arrayPrivateTargets, ctx.arrayByRefAllocations)
+		ctx.arraySkipModuleInvalidationEffects = false
+		ctx.arrayModuleInvalidations = inferArrayModuleInvalidationSummaries(files, ctx)
 		ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)
+		// Entry-state inference establishes allocation facts at procedure
+		// boundaries. Module invalidation summaries are applied by the runtime
+		// findings walk after those facts are established; feeding them back into
+		// the entry fixed point would let a conservative helper summary erase a
+		// caller's allocation proof before the callee is analyzed.
+		ctx.arraySkipModuleInvalidationEffects = true
 		ctx.arrayModuleEntryStates = inferArrayModuleEntryStates(a, files, ctx)
 		ctx.arrayByRefEntryStates, ctx.arrayByRefEntryConditions = inferArrayByRefEntryStates(a, files, ctx)
+		ctx.arraySkipModuleInvalidationEffects = false
 	}
 	return ctx
 }

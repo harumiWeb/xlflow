@@ -105,8 +105,8 @@ func TestCommittedDiagnosticReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reviews) != 1399 {
-		t.Fatalf("committed reviews = %d, want 1399", len(reviews))
+	if len(reviews) != 1413 {
+		t.Fatalf("committed reviews = %d, want 1413", len(reviews))
 	}
 	if err := ValidateReviewSources(repoRoot, corpusRoot, reviews); err != nil {
 		t.Fatal(err)
@@ -154,8 +154,8 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 1519 || metrics.TP != 715 || metrics.FP != 804 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=1519 TP=715 FP=804", metrics)
+	if metrics.Reviewed != 1539 || metrics.TP != 731 || metrics.FP != 808 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=1539 TP=731 FP=808", metrics)
 	}
 	// Guard the direction of the corpus review ledger, not only its exact size.
 	if precision := float64(metrics.TP) / float64(metrics.TP+metrics.FP); precision < 0.47 {

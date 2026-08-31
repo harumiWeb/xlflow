@@ -921,6 +921,48 @@ func splitRangeValueSourceStatements(text string) []string {
 	return out
 }
 
+type rangeValueSourceStatementSpan struct {
+	text       string
+	start, end int
+}
+
+func splitRangeValueSourceStatementsWithOffsets(text string) []rangeValueSourceStatementSpan {
+	var out []rangeValueSourceStatementSpan
+	start := 0
+	inString := false
+	depth := 0
+	appendSpan := func(end int) {
+		out = append(out, rangeValueSourceStatementSpan{
+			text: strings.TrimSpace(text[start:end]), start: start, end: end,
+		})
+	}
+	for index := 0; index < len(text); index++ {
+		switch text[index] {
+		case '"':
+			if inString && index+1 < len(text) && text[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString && depth > 0 {
+				depth--
+			}
+		case ':':
+			if !inString && depth == 0 {
+				appendSpan(index)
+				start = index + 1
+			}
+		}
+	}
+	appendSpan(len(text))
+	return out
+}
+
 func appendRangeValueFindings(findings []Finding, file parsedFile, proc sourceProcedure, statement procedureir.Statement, issues []rangeValueIssue, analyzer Analyzer) []Finding {
 	for _, issue := range issues {
 		findings = append(findings, analyzer.simpleFinding(file, proc, statement.Range.StartLine, "VBA226", "warning", issue.message, issue.reason, issue.suggestion))

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/harumiWeb/xlflow/internal/analyze/semanticstate"
+	"github.com/harumiWeb/xlflow/internal/gui"
 	"github.com/harumiWeb/xlflow/internal/lint"
 	vbacfg "github.com/harumiWeb/xlflow/internal/vba/cfg"
 	"github.com/harumiWeb/xlflow/internal/vba/constexpr"
@@ -298,6 +299,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out, issues := a.arrayTransfer(file, proc, ctx, variables, in, text, line, constants, capacityGuards)
 				for _, call := range arrayCallsAtLine(proc.Calls, line) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
 				}
 				for _, finding := range issues {
 					if finding.Code == "VBA227" {
@@ -330,6 +332,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out, issues := a.arrayVBA227Transfer(file, proc, ctx, vba227Variables, in, text, line, constants, capacityGuards, vba227ResumeNextBefore)
 				for _, call := range arrayCallsAtLine(proc.Calls, line) {
 					out = applyArrayModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
+					out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, vba227Variables, moduleDecls)
 				}
 				for _, finding := range issues {
 					if finding.Code != "VBA227" {
@@ -1095,6 +1098,55 @@ func walkArrayCFGWithSourceLinesReliableStats(graph *vbacfg.CFGView, lines []str
 	walkArrayCFGWorklistStatsWithReliable(graph, lines, initial, visit, edgeState, nil, true, stats, reliableExceptional)
 }
 
+type arrayCFGBlockVisit func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState
+
+// arrayCFGWorklistReachable follows the same edge set as the array worklist.
+// CFGView.IsReachable also expands unknown-flow sources for conservative
+// diagnostics, but those synthetic reachability results do not cause the
+// worklist to visit a disconnected nested statement block. The distinction is
+// needed when source-line recovery has to attribute a call to its container.
+func arrayCFGWorklistReachable(graph *vbacfg.CFGView) map[vbacfg.BlockID]bool {
+	reachable := map[vbacfg.BlockID]bool{}
+	if graph == nil {
+		return reachable
+	}
+	entry := graph.Entry()
+	reachable[entry] = true
+	queue := []vbacfg.BlockID{entry}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		graph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
+			if reachable[edge.To] {
+				return true
+			}
+			reachable[edge.To] = true
+			queue = append(queue, edge.To)
+			return true
+		})
+	}
+	return reachable
+}
+
+func arrayCFGBlockOwnsNestedStatements(block vbacfg.Block) bool {
+	if block.Statement == nil {
+		return false
+	}
+	switch block.Statement.Kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf, procedureir.StatementElse,
+		procedureir.StatementSelect, procedureir.StatementCase,
+		procedureir.StatementFor, procedureir.StatementForEach,
+		procedureir.StatementDo, procedureir.StatementWhile, procedureir.StatementWith:
+		return true
+	default:
+		return false
+	}
+}
+
+func walkArrayCFGWithSourceLinesReliableStatsAndBlock(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock arrayCFGBlockVisit, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool, stats *arrayInterproceduralStats) {
+	walkArrayCFGWorklistStatsWithReliableAndBlock(graph, lines, initial, visit, visitBlock, edgeState, nil, true, stats, reliableExceptional)
+}
+
 func walkArrayCFGWorklist(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
 	walkArrayCFGWorklistStats(graph, lines, initial, visit, edgeState, stop, sourceLines, nil)
 }
@@ -1104,6 +1156,10 @@ func walkArrayCFGWorklistStats(graph *vbacfg.CFGView, lines []string, initial ar
 }
 
 func walkArrayCFGWorklistStatsWithReliable(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool, stats *arrayInterproceduralStats, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool) {
+	walkArrayCFGWorklistStatsWithReliableAndBlock(graph, lines, initial, visit, nil, edgeState, stop, sourceLines, stats, reliableExceptional)
+}
+
+func walkArrayCFGWorklistStatsWithReliableAndBlock(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock arrayCFGBlockVisit, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool, stats *arrayInterproceduralStats, reliableExceptional func(statement *procedureir.Statement, in, out arrayFlowState) bool) {
 	strategy := arrayCFGStrategyAuto
 	if stats != nil {
 		strategy = stats.strategy
@@ -1112,7 +1168,7 @@ func walkArrayCFGWorklistStatsWithReliable(graph *vbacfg.CFGView, lines []string
 		if stats != nil {
 			stats.addLegacyWalk()
 		}
-		walkArrayCFGWorklistLegacy(graph, lines, initial, visit, edgeState, stop, sourceLines)
+		walkArrayCFGWorklistLegacyWithBlock(graph, lines, initial, visit, visitBlock, edgeState, stop, sourceLines)
 		return
 	}
 	// The Array adapter owns the policy-specific source-line, edge, and stop
@@ -1132,7 +1188,7 @@ func walkArrayCFGWorklistStatsWithReliable(graph *vbacfg.CFGView, lines []string
 			if stop == nil && !sourceLines && edgeState == nil && reliableExceptional == nil {
 				_ = walkArrayCFGCompact(context.Background(), graph, lines, initial, visit, nil, false)
 			} else {
-				_ = walkArrayCFGCompactAdvanced(context.Background(), graph, lines, initial, visit, edgeState, stop, reliableExceptional, sourceLines)
+				_ = walkArrayCFGCompactAdvancedWithBlock(context.Background(), graph, lines, initial, visit, visitBlock, edgeState, stop, reliableExceptional, sourceLines)
 			}
 			return
 		}
@@ -1150,10 +1206,14 @@ func walkArrayCFGWorklistStatsWithReliable(graph *vbacfg.CFGView, lines []string
 			stats.addFallbackReason(reason)
 		}
 	}
-	walkArrayCFGWorklistLegacy(graph, lines, initial, visit, edgeState, stop, sourceLines)
+	walkArrayCFGWorklistLegacyWithBlock(graph, lines, initial, visit, visitBlock, edgeState, stop, sourceLines)
 }
 
 func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
+	walkArrayCFGWorklistLegacyWithBlock(graph, lines, initial, visit, nil, edgeState, stop, sourceLines)
+}
+
+func walkArrayCFGWorklistLegacyWithBlock(graph *vbacfg.CFGView, lines []string, initial arrayFlowState, visit func(text string, line int, in arrayFlowState) arrayFlowState, visitBlock arrayCFGBlockVisit, edgeState func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState, stop func(text string, line int) bool, sourceLines bool) {
 	if graph == nil {
 		return
 	}
@@ -1180,6 +1240,12 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 		// Transfer functions mutate their input state, so give the current
 		// block its own copy once instead of cloning again in every transfer.
 		out := cloneArrayState(in)
+		visitLine := func(text string, line int, state arrayFlowState) arrayFlowState {
+			if visitBlock != nil {
+				return visitBlock(block, text, line, state)
+			}
+			return visit(text, line, state)
+		}
 		if block.Statement != nil {
 			if !sourceLines {
 				line := block.Statement.Range.StartLine
@@ -1193,7 +1259,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 				// The transfer callback owns the block-local copy.  Keeping the
 				// predecessor input untouched is required for exceptional and
 				// uncertain edges, which deliberately propagate `in` below.
-				out = visit(text, line, out)
+				out = visitLine(text, line, out)
 				if stop != nil && stop(text, line) {
 					continue
 				}
@@ -1214,7 +1280,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 					// branch-local allocation fact appear to be absent. The clause
 					// blocks below own the remaining physical lines.
 					text := normalizedCodeLine(lines[start-1])
-					out = visit(text, start, out)
+					out = visitLine(text, start, out)
 					stopped = stop != nil && stop(text, start)
 				} else if start == end && start >= 1 && start <= len(lines) {
 					// A single physical line can still have multiple logical CFG
@@ -1225,7 +1291,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 					if strings.TrimSpace(text) == "" {
 						text = normalizedCodeLine(lines[start-1])
 					}
-					out = visit(text, start, out)
+					out = visitLine(text, start, out)
 					stopped = stop != nil && stop(text, start)
 				} else if start >= 1 && end <= len(lines) {
 					// CFG blocks may contain an entire multi-line loop or conditional
@@ -1238,7 +1304,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 						if strings.TrimSpace(text) == "" {
 							continue
 						}
-						out = visit(text, line, out)
+						out = visitLine(text, line, out)
 						if stop != nil && stop(text, line) {
 							stopped = true
 							break
@@ -1249,7 +1315,7 @@ func walkArrayCFGWorklistLegacy(graph *vbacfg.CFGView, lines []string, initial a
 					if strings.TrimSpace(text) == "" && start >= 1 && start <= len(lines) {
 						text = normalizedCodeLine(lines[start-1])
 					}
-					out = visit(text, start, out)
+					out = visitLine(text, start, out)
 					stopped = stop != nil && stop(text, start)
 				}
 				if stopped {
@@ -2261,6 +2327,38 @@ var (
 
 type arrayModuleAllocationSummaries map[string]map[string]bool
 
+// arrayModuleInvalidationSummaries records module arrays that may be
+// unallocated or unknown when a project-local procedure returns normally.
+// The summary starts from an allocated module-array state, so a fixed-size
+// array and an Erase followed by a guaranteed ReDim remain allocated while a
+// reachable conditional Erase is retained as an invalidation.
+type arrayModuleInvalidationSummaries map[string]map[string]bool
+
+func inferArrayModuleInvalidationSummaries(files []parsedFile, ctx analysisContext) arrayModuleInvalidationSummaries {
+	summaries := arrayModuleInvalidationSummaries{}
+	ctx.arrayModuleInvalidations = summaries
+	ctx.arrayModuleInvalidationCacheWritable = true
+	for index := range files {
+		files[index].ensureModuleAnalysisFacts()
+	}
+	for _, file := range files {
+		moduleDecls := file.moduleDecls()
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
+			key := arrayProcedureKey(proc)
+			if key == "" {
+				continue
+			}
+			if _, cached := summaries[key]; cached {
+				continue
+			}
+			summaries[key] = arrayPrivateModuleArrayInvalidationsWithVisiting(file, proc, moduleDecls, ctx, map[string]bool{})
+		}
+	}
+	return summaries
+}
+
 type arrayProcedureDominators map[string]map[vbacfg.BlockID]bool
 
 type arrayModuleConfigurationState struct {
@@ -3058,10 +3156,6 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 	sort.SliceStable(procedures, func(i, j int) bool {
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})
-	dominators := arrayProcedureDominators{}
-	for _, procedure := range procedures {
-		dominators[arrayProcedureKey(procedure.proc)] = arrayProcedureNormalExitDominators(procedure.proc)
-	}
 	dependents := make(map[string][]int)
 	for index, procedure := range procedures {
 		for call := range procedure.proc.Calls.All() {
@@ -3094,7 +3188,7 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 		if ctx.arrayStats != nil && procedure.proc.Graph != nil {
 			ctx.arrayStats.addCFGWalk()
 		}
-		value := arrayByRefAllocationSummaryForProcedure(procedure.file, procedure.proc, targets, summaries, ctx, dominators[key])
+		value := arrayByRefAllocationSummaryForProcedure(procedure.file, procedure.proc, summaries, ctx)
 		old := arrayByRefAllocationSummaries{key: contributions[key]}
 		fresh := arrayByRefAllocationSummaries{key: value}
 		if arrayByRefAllocationSummariesEqual(old, fresh) {
@@ -3117,7 +3211,7 @@ func inferArrayByRefAllocationSummaries(files []parsedFile, ctx analysisContext,
 	return summaries
 }
 
-func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedure, targets map[string]sourceProcedure, summaries arrayByRefAllocationSummaries, ctx analysisContext, dominators map[vbacfg.BlockID]bool) map[int]bool {
+func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedure, summaries arrayByRefAllocationSummaries, ctx analysisContext) map[int]bool {
 	if proc.Graph == nil {
 		return nil
 	}
@@ -3130,62 +3224,10 @@ func arrayByRefAllocationSummaryForProcedure(file parsedFile, proc sourceProcedu
 	if len(parameters) == 0 {
 		return nil
 	}
-	allocated := map[int]bool{}
-	addAllocation := func(statementID int, name string) {
-		index, ok := parameters[strings.ToLower(cleanIdentifier(name))]
-		if !ok || arrayProcedureLineHasInlineConditional(file, statementLine(proc, statementID)) || !arrayProcedureBlockDominatesNormalExit(proc, statementID, dominators) {
-			return
-		}
-		allocated[index] = true
-	}
-	for statement := range proc.Statements.All() {
-		text := strings.TrimSpace(statement.Text)
-		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
-			for _, clause := range splitArgs(match[2]) {
-				redim, direct := parseDirectArrayRedimClause(clause)
-				if direct {
-					addAllocation(statement.ID, redim.name)
-				}
-			}
-		}
-		if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed {
-			if value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx); known && value.kind == arrayAllocated && value.knownArray {
-				addAllocation(statement.ID, lhs)
-			}
-		}
-	}
-	for call := range proc.Calls.All() {
-		if arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) || !arrayProcedureBlockDominatesNormalExit(proc, call.StatementID, dominators) {
-			continue
-		}
-		key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
-		if !ok {
-			continue
-		}
-		calleeParameters := summaries[key]
-		if len(calleeParameters) == 0 {
-			continue
-		}
-		arguments := arrayCallArgumentTexts(proc, call)
-		if len(call.Arguments.Named) > 0 || len(arguments) != call.Arguments.Count {
-			continue
-		}
-		for index := range calleeParameters {
-			if index >= len(arguments) || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
-				continue
-			}
-			if parameterIndex, ok := parameters[directArrayArgumentName(arguments[index])]; ok {
-				allocated[parameterIndex] = true
-			}
-		}
-	}
 	flowCtx := ctx
 	flowCtx.arrayByRefAllocations = summaries
 	moduleDecls := file.moduleDecls()
-	for index := range arrayByRefFlowAllocations(file, proc, flowCtx, moduleDecls) {
-		allocated[index] = true
-	}
-	return allocated
+	return arrayByRefFlowAllocations(file, proc, flowCtx, moduleDecls)
 }
 
 // arrayByRefFlowAllocations proves ByRef array outputs at normal procedure
@@ -3201,6 +3243,8 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 	variables := arrayVariables(file, proc, moduleDecls)
 	initial := arrayInitialState(variables)
 	graph := arrayVBA227Graph(proc, ctx)
+	moduleArrays := arrayModuleNamesForProcedure(file, proc, moduleDecls)
+	localGoSubAllocations := arrayLocalGoSubAllocationSummaries(proc, &graph, variables, ctx, arrayOptionBase(file), arrayIntegerConstants(file, proc, nil, nil), moduleArrays)
 	parameterNames := make([]string, 0, proc.Params.Len())
 	for _, parameter := range proc.Params.AllIndexed() {
 		if parameterIsByRefArray(parameter) {
@@ -3211,8 +3255,16 @@ func arrayByRefFlowAllocations(file parsedFile, proc sourceProcedure, ctx analys
 	hasNormalExit := false
 	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
 		out, _ := (Analyzer{}).arrayTransfer(file, proc, ctx, variables, in, text, line, nil, nil)
+		out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
 		for _, call := range arrayCallsAtLine(proc.Calls, line) {
 			out = applyArrayModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+			out = applyArrayUnknownModuleCallEffects(out, file, proc, call, ctx, variables, moduleDecls)
+			if arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) {
+				out = applyArrayConditionalByRefCallEffects(out, proc, call, ctx)
+			} else {
+				out = applyArrayByRefCallEffects(out, proc, call, ctx)
+			}
+			out = applyArrayLocalGoSubEffects(out, proc, call, localGoSubAllocations)
 		}
 		return out
 	}
@@ -3497,15 +3549,6 @@ func arrayFalseBranchRequiresBlock(graph vbacfg.Graph, guardBlock, requiredBlock
 	return reachedRequired
 }
 
-func statementLine(proc sourceProcedure, statementID int) int {
-	for statement := range proc.Statements.All() {
-		if statement.ID == statementID {
-			return statement.Range.StartLine
-		}
-	}
-	return 0
-}
-
 func arrayByRefAllocationSummariesEqual(left, right arrayByRefAllocationSummaries) bool {
 	if len(left) != len(right) {
 		return false
@@ -3579,7 +3622,8 @@ func mergeArrayNameSets(left, right map[string]bool) map[string]bool {
 }
 
 func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sourceProcedure, call procedureir.CallSite, ctx analysisContext, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration) arrayFlowState {
-	if arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) {
+	conditional := arrayProcedureLineHasInlineConditional(file, call.Range.StartLine)
+	if conditional && arrayProcedureLineInlineConditionIsFalse(file, call.Range.StartLine) {
 		return state
 	}
 	key, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
@@ -3618,19 +3662,21 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 		}
 		markArgument(name)
 	}
-	for name := range ctx.arrayModuleAllocations[key] {
-		markModule(name)
+	if !conditional {
+		for name := range ctx.arrayModuleAllocations[key] {
+			markModule(name)
+		}
 	}
-	arguments := arrayCallArgumentTexts(proc, call)
-	if len(call.Arguments.Named) == 0 && len(arguments) == call.Arguments.Count {
+	arguments, mapped := arrayCallFormalArguments(proc, target, call)
+	if mapped && !conditional {
 		for index := range ctx.arrayByRefAllocations[key] {
-			if index >= len(arguments) || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
+			if index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
 				continue
 			}
 			markArgument(arguments[index])
 		}
 		for outputIndex, countIndex := range ctx.arrayByRefConditionalAllocations[key] {
-			if outputIndex >= len(arguments) || countIndex < 0 || countIndex >= len(arguments) {
+			if outputIndex < 0 || outputIndex >= target.Params.Len() || countIndex < 0 || countIndex >= target.Params.Len() {
 				continue
 			}
 			outputName := directArrayArgumentName(arguments[outputIndex])
@@ -3677,11 +3723,720 @@ func applyArrayModuleCallEffects(state arrayFlowState, file parsedFile, proc sou
 			value.allocationCountSource = lengthSource
 			updated[name] = value
 		}
+		for name := range arrayConfigurationArraysForGuard(file, target, arguments, ctx.arrayModuleConfigurations[file.Path]) {
+			markModule(name)
+		}
 	}
-	for name := range arrayConfigurationArraysForGuard(file, target, arguments, ctx.arrayModuleConfigurations[file.Path]) {
-		markModule(name)
+	if !ctx.arraySkipModuleInvalidationEffects {
+		invalidated := arrayPrivateModuleArrayInvalidations(file, target, moduleDecls, ctx)
+		for name := range invalidated {
+			if declarations.shadowsModule(name) {
+				continue
+			}
+			if _, tracked := updated[name]; tracked {
+				updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+			}
+		}
 	}
 	return updated
+}
+
+// arrayPrivateModuleArrayInvalidations returns the normal-return invalidation
+// summary for a project-local helper. A precomputed summary is used by the
+// production context; focused compatibility callers compute the same summary
+// on demand.
+func arrayPrivateModuleArrayInvalidations(file parsedFile, target sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext) map[string]bool {
+	key := arrayProcedureKey(target)
+	if ctx.arrayModuleInvalidations != nil {
+		if summary, ok := ctx.arrayModuleInvalidations[key]; ok {
+			return summary
+		}
+	}
+	return arrayPrivateModuleArrayInvalidationsWithVisiting(file, target, moduleDecls, ctx, map[string]bool{})
+}
+
+// arrayPrivateModuleArrayInvalidationsWithVisiting identifies module arrays
+// that are not proven allocated at a target's normal exit. The summary starts
+// from allocated arrays so it models the effect on a caller that already has
+// a valid module-array allocation. Direct operations are evaluated through the
+// normal CFG, and resolved local calls are summarized recursively.
+func arrayPrivateModuleArrayInvalidationsWithVisiting(file parsedFile, target sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext, visiting map[string]bool) map[string]bool {
+	key := arrayProcedureKey(target)
+	if !strings.EqualFold(strings.TrimSpace(target.Module), strings.TrimSpace(file.Module)) {
+		return nil
+	}
+	names := arrayModuleNamesForProcedure(file, target, moduleDecls)
+	if len(names) == 0 {
+		if ctx.arrayModuleInvalidationCacheWritable && key != "" {
+			ctx.arrayModuleInvalidations[key] = nil
+		}
+		return nil
+	}
+	if visiting[key] {
+		// A recursive effect cycle has no finite normal-return proof. Keep all
+		// visible module arrays conservative rather than assuming the cycle is
+		// read-only.
+		return names
+	}
+	if ctx.arrayModuleInvalidations != nil {
+		if summary, ok := ctx.arrayModuleInvalidations[key]; ok {
+			return summary
+		}
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+
+	variables := arrayVariables(file, target, moduleDecls)
+	initial := arrayInitialState(variables)
+	for name := range names {
+		value := initial[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		initial[name] = value
+	}
+	if target.Graph == nil {
+		state := initial
+		constants := arrayIntegerConstants(file, target, nil, nil)
+		if target.Statements.Len() > 0 {
+			for statement := range target.Statements.All() {
+				line := statement.Range.StartLine
+				if line < 1 {
+					line = target.StartLine
+				}
+				text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+				if text == "" && line >= 1 && line <= len(file.Lines) {
+					text = normalizedCodeLine(file.Lines[line-1])
+				}
+				if text == "" {
+					continue
+				}
+				state = arrayModuleSummaryTransfer(file, target, ctx, variables, state, text, line, constants, moduleDecls, names, visiting)
+			}
+		} else {
+			for line := target.StartLine; line <= target.EndLine && line <= len(file.Lines); line++ {
+				state = arrayModuleSummaryTransfer(file, target, ctx, variables, state, normalizedCodeLine(file.Lines[line-1]), line, constants, moduleDecls, names, visiting)
+			}
+		}
+		result := arrayModuleInvalidationsFromState(names, state)
+		if ctx.arrayModuleInvalidationCacheWritable && key != "" {
+			ctx.arrayModuleInvalidations[key] = result
+		}
+		return result
+	}
+
+	graph := target.Graph.View(vbacfg.EdgeFilter{NormalOnly: true, WithoutNormalErrRaiseContinuation: true})
+	constants := arrayIntegerConstants(file, target, nil, nil)
+	var normalExit arrayFlowState
+	hasNormalExit := false
+	visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+		return arrayModuleSummaryTransfer(file, target, ctx, variables, in, text, line, constants, moduleDecls, names, visiting)
+	}
+	edgeState := func(_ vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		if edge.To != graph.NormalExit() {
+			return out
+		}
+		if !hasNormalExit {
+			normalExit = cloneArrayState(out)
+			hasNormalExit = true
+		} else {
+			normalExit = meetArrayState(normalExit, out)
+		}
+		return out
+	}
+	walkArrayCFGWithSourceLinesReliableStats(&graph, file.Lines, initial, visit, edgeState, nil, ctx.arrayStats)
+	if !hasNormalExit {
+		if ctx.arrayModuleInvalidationCacheWritable && key != "" {
+			ctx.arrayModuleInvalidations[key] = nil
+		}
+		return nil
+	}
+	result := arrayModuleInvalidationsFromState(names, normalExit)
+	if ctx.arrayModuleInvalidationCacheWritable && key != "" {
+		ctx.arrayModuleInvalidations[key] = result
+	}
+	return result
+}
+
+func arrayModuleInvalidationsFromState(names map[string]bool, state arrayFlowState) map[string]bool {
+	invalidated := map[string]bool{}
+	for name := range names {
+		value, known := state[name]
+		if !known || value.kind != arrayAllocated || !value.knownArray {
+			invalidated[name] = true
+		}
+	}
+	if len(invalidated) == 0 {
+		return nil
+	}
+	return invalidated
+}
+
+func arrayModuleSummaryTransfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, moduleDecls map[string]sourceDeclaration, moduleArrays map[string]bool, visiting map[string]bool) arrayFlowState {
+	if condition, body, ok := arrayIfThenParts(text); ok && strings.TrimSpace(body) != "" {
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		condition = strings.TrimSpace(condition)
+		lowerCondition := strings.ToLower(condition)
+		switch {
+		case strings.HasPrefix(lowerCondition, "if "):
+			condition = strings.TrimSpace(condition[len("if "):])
+		case strings.HasPrefix(lowerCondition, "elseif "):
+			condition = strings.TrimSpace(condition[len("elseif "):])
+		}
+		thenState := arrayModuleSummaryTransferParts(file, proc, ctx, variables, cloneArrayState(state), thenBody, line, constants, moduleDecls, moduleArrays, visiting)
+		elseState := cloneArrayState(state)
+		if hasElse {
+			elseState = arrayModuleSummaryTransferParts(file, proc, ctx, variables, elseState, elseBody, line, constants, moduleDecls, moduleArrays, visiting)
+		}
+		result := meetArrayState(thenState, elseState)
+		applyCalls := func(value arrayFlowState, conditionValue, conditionKnown bool) arrayFlowState {
+			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				if conditionKnown && !arrayInlineConditionalCallIsReachable(file, call, conditionValue, hasElse) {
+					continue
+				}
+				value = applyArrayModuleSummaryCallEffects(value, file, proc, call, ctx, variables, moduleDecls, moduleArrays, visiting)
+			}
+			return value
+		}
+		if value, known := arraySourceOrderConstantBoolean(condition, constants); known {
+			if value {
+				result = applyCalls(thenState, true, true)
+			} else if hasElse {
+				result = applyCalls(elseState, false, true)
+			} else {
+				result = state
+			}
+		} else if !hasElse {
+			result = applyCalls(meetArrayState(thenState, state), false, false)
+		} else {
+			result = applyCalls(result, false, false)
+		}
+		return result
+	}
+	state = arrayModuleSummaryTransferParts(file, proc, ctx, variables, state, text, line, constants, moduleDecls, moduleArrays, visiting)
+	callsAtLine := arrayCallsAtLine(proc.Calls, line)
+	for _, call := range callsAtLine {
+		state = applyArrayModuleSummaryCallEffects(state, file, proc, call, ctx, variables, moduleDecls, moduleArrays, visiting)
+	}
+	return state
+}
+
+func arrayModuleSummaryTransferParts(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, moduleDecls map[string]sourceDeclaration, moduleArrays map[string]bool, visiting map[string]bool) arrayFlowState {
+	for _, part := range splitRangeValueSourceStatements(text) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if condition, body, ok := arrayIfThenParts(part); ok && strings.TrimSpace(body) != "" {
+			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+			condition = strings.TrimSpace(condition)
+			lowerCondition := strings.ToLower(condition)
+			switch {
+			case strings.HasPrefix(lowerCondition, "if "):
+				condition = strings.TrimSpace(condition[len("if "):])
+			case strings.HasPrefix(lowerCondition, "elseif "):
+				condition = strings.TrimSpace(condition[len("elseif "):])
+			}
+			thenState := arrayModuleSummaryTransferParts(file, proc, ctx, variables, cloneArrayState(state), thenBody, line, constants, moduleDecls, moduleArrays, visiting)
+			elseState := cloneArrayState(state)
+			if hasElse {
+				elseState = arrayModuleSummaryTransferParts(file, proc, ctx, variables, elseState, elseBody, line, constants, moduleDecls, moduleArrays, visiting)
+			}
+			if value, known := arraySourceOrderConstantBoolean(condition, constants); known {
+				if value {
+					state = thenState
+				} else if hasElse {
+					state = elseState
+				}
+			} else if hasElse {
+				state = meetArrayState(thenState, elseState)
+			} else {
+				state = meetArrayState(thenState, state)
+			}
+			continue
+		}
+		state, _ = (Analyzer{}).arrayTransfer(file, proc, ctx, variables, state, part, line, constants, nil)
+	}
+	return state
+}
+
+func applyArrayModuleSummaryCallEffects(state arrayFlowState, file parsedFile, proc sourceProcedure, call procedureir.CallSite, ctx analysisContext, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration, moduleArrays map[string]bool, visiting map[string]bool) arrayFlowState {
+	if call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+		return state
+	}
+	// The procedure IR also represents an indexed array expression such as
+	// `result(index)` or `mZipWork(offset)` as a CallSite. Those expressions
+	// are handled by arrayTransfer; they are not procedure calls whose module
+	// effects belong in this summary. Without this guard, the resolver can
+	// reinterpret the expression as a source-local target and recursively
+	// invalidate every module array while summarizing an otherwise read-only
+	// indexed assignment.
+	if call.Callee.Receiver == nil {
+		name := strings.ToLower(cleanIdentifier(call.Callee.BaseName))
+		if variable, ok := variables[name]; ok && (variable.isArray || variable.isVariant) {
+			return state
+		}
+	}
+	key, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !resolved {
+		target, resolved = arraySourceModuleTargetForCall(file, call, ctx)
+		if !resolved {
+			return state
+		}
+		key = arrayProcedureKey(target)
+	}
+	if !strings.EqualFold(strings.TrimSpace(target.Module), strings.TrimSpace(file.Module)) {
+		return state
+	}
+	updated := cloneArrayState(state)
+	if !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) {
+		for name := range ctx.arrayModuleAllocations[key] {
+			name = strings.ToLower(cleanIdentifier(name))
+			if moduleArrays[name] {
+				value := updated[name]
+				value.kind = arrayAllocated
+				value.knownArray = true
+				updated[name] = value
+			}
+		}
+	}
+	for name := range arrayPrivateModuleArrayInvalidationsWithVisiting(file, target, moduleDecls, ctx, visiting) {
+		if moduleArrays[name] {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+	}
+	if !procedureHasByRefArrayParameter(target) {
+		return updated
+	}
+	bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+	if !mapped {
+		return updated
+	}
+	for _, binding := range bindings {
+		if binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(binding.parameterIndex)) {
+			continue
+		}
+		name := strings.ToLower(directArrayArgumentName(binding.text))
+		if !moduleArrays[name] {
+			continue
+		}
+		if ctx.arrayByRefAllocations[key][binding.parameterIndex] {
+			updated[name] = arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}
+			continue
+		}
+		if arrayByRefParameterMayInvalidate(target, binding.parameterIndex, ctx, map[string]bool{}) {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+	}
+	return updated
+}
+
+func arrayPrivateCallMayInvalidateModuleArray(file parsedFile, caller sourceProcedure, target sourceProcedure, call procedureir.CallSite, moduleDecls map[string]sourceDeclaration, ctx analysisContext) bool {
+	if len(arrayPrivateModuleArrayInvalidations(file, target, moduleDecls, ctx)) > 0 {
+		return true
+	}
+	if !procedureHasByRefArrayParameter(target) {
+		return false
+	}
+	bindings, mapped := arrayCallArgumentBindings(caller, target, call)
+	if !mapped {
+		return true
+	}
+	for _, binding := range bindings {
+		name := strings.ToLower(directArrayArgumentName(binding.text))
+		declaration, declared := moduleDecls[name]
+		if !declared || !declaration.Array || declaration.Parameter || binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(binding.parameterIndex)) {
+			continue
+		}
+		if arrayByRefParameterMayInvalidate(target, binding.parameterIndex, ctx, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyArrayUnknownModuleCallEffects is used by the recovered source-order
+// path, where a public call cannot be matched to a private module effect
+// summary. A source-local public target can still be inspected for direct
+// module-array effects, including when it receives no explicit array
+// argument. Calls that do not identify a source-local target are left alone:
+// treating every unresolved/external call as a mutation of every visible
+// module array turns unrelated object construction and host calls into false
+// positives.
+func applyArrayUnknownModuleCallEffects(state arrayFlowState, file parsedFile, proc sourceProcedure, call procedureir.CallSite, ctx analysisContext, variables map[string]arrayVariable, moduleDecls map[string]sourceDeclaration) arrayFlowState {
+	if call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+		return state
+	}
+	if ctx.arraySkipModuleInvalidationEffects {
+		return state
+	}
+	if arrayProcedureLineInlineConditionIsFalse(file, call.Range.StartLine) {
+		return state
+	}
+	if _, _, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call); resolved {
+		return state
+	}
+	target, ok := arraySourceModuleTargetForCall(file, call, ctx)
+	if !ok || !procedureUsesModuleArray(file, target, moduleDecls) {
+		return state
+	}
+	invalidated := arrayPrivateModuleArrayInvalidations(file, target, moduleDecls, ctx)
+	if len(invalidated) == 0 {
+		return state
+	}
+	declarations := newDeclarationScope(file, proc)
+	declarations.module = moduleDecls
+	updated := cloneArrayState(state)
+	for name := range invalidated {
+		if declarations.shadowsModule(name) {
+			continue
+		}
+		variable, known := variables[name]
+		if !known || !variable.isArray {
+			continue
+		}
+		if _, tracked := updated[name]; tracked {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+	}
+	return updated
+}
+
+// arraySourceModuleTargetForCall recovers a source-local target for the
+// source-order fallback. The project resolver may report a public target, but
+// it may also be incomplete for a recovered call. In the latter case a unique
+// same-module source procedure is sufficient evidence for inspecting that
+// procedure's module-array accesses; an absent target remains an external or
+// late-bound call and must not invalidate all module arrays.
+func arraySourceModuleTargetForCall(file parsedFile, call procedureir.CallSite, ctx analysisContext) (sourceProcedure, bool) {
+	procedures := file.procedureView()
+	if procedures.Len() == 0 {
+		return sourceProcedure{}, false
+	}
+	resolution := call.Resolution
+	if ctx.procedureResolver != nil {
+		resolution = ctx.procedureResolver.ResolveCall(call)
+	}
+	if resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1 {
+		qualifiedName := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].QualifiedName))
+		for index := 0; index < procedures.Len(); index++ {
+			target := procedures.valueAt(index)
+			if strings.EqualFold(arrayProcedureKey(target), qualifiedName) {
+				return target, true
+			}
+		}
+	}
+	// A receiver-bearing call that was not resolved to the exact source target
+	// belongs to another object or to a late-bound member. Do not reinterpret a
+	// same-module procedure with the same member name as its target.
+	if call.Callee.Receiver != nil {
+		return sourceProcedure{}, false
+	}
+
+	baseName := cleanIdentifier(strings.TrimPrefix(strings.TrimSpace(call.Callee.BaseName), "New "))
+	if baseName == "" {
+		baseName = cleanIdentifier(strings.TrimPrefix(strings.TrimSpace(call.Callee.Text), "New "))
+	}
+	callerModule := strings.TrimSpace(call.Caller.QualifiedName)
+	if dot := strings.IndexByte(callerModule, '.'); dot >= 0 {
+		callerModule = callerModule[:dot]
+	}
+	if callerModule == "" {
+		callerModule = strings.TrimSpace(call.Module)
+	}
+	if callerModule == "" {
+		callerModule = strings.TrimSpace(file.Module)
+	}
+	var match sourceProcedure
+	matched := 0
+	for index := 0; index < procedures.Len(); index++ {
+		candidate := procedures.valueAt(index)
+		if !strings.EqualFold(strings.TrimSpace(candidate.Name), baseName) ||
+			!strings.EqualFold(strings.TrimSpace(candidate.Module), callerModule) {
+			continue
+		}
+		visibility := strings.TrimSpace(candidate.Visibility)
+		if strings.EqualFold(visibility, "Private") || strings.EqualFold(visibility, "Friend") {
+			continue
+		}
+		match = candidate
+		matched++
+	}
+	if matched == 1 {
+		return match, true
+	}
+	return sourceProcedure{}, false
+}
+
+// applyArrayByRefCallEffects carries the invalidating side of a private
+// ByRef-array contract. The ordinary CFG walk records proven allocation
+// outputs, but the recovered source-order fallback also has to account for a
+// preceding helper that can Erase or otherwise replace the caller's array.
+// Read-only helpers preserve the caller's allocation state; helpers whose
+// parameter effect cannot be proven make it unknown.
+func applyArrayByRefCallEffects(state arrayFlowState, proc sourceProcedure, call procedureir.CallSite, ctx analysisContext) arrayFlowState {
+	key, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !ok {
+		return applyArrayUnknownByRefCallEffects(state, proc, call, ctx)
+	}
+	if !procedureHasByRefArrayParameter(target) {
+		return state
+	}
+	bindings, ok := arrayCallArgumentBindings(proc, target, call)
+	if !ok {
+		return state
+	}
+	// The compact CFG solver may revisit sibling branch blocks with a state map
+	// that shares storage with their predecessor. Keep this call's mutation
+	// isolated so an invalidating true branch cannot poison its false sibling.
+	updated := cloneArrayState(state)
+	apply := func(index int, argument string) {
+		if index < 0 || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
+			return
+		}
+		name := directArrayArgumentName(argument)
+		if name == "" {
+			return
+		}
+		if ctx.arrayByRefAllocations[key][index] {
+			value := updated[name]
+			value.kind = arrayAllocated
+			value.knownArray = true
+			updated[name] = value
+			return
+		}
+		// Conditional and paired-length output contracts carry a stronger
+		// caller-side fact than the generic invalidation scan. Their output may
+		// be unallocated for the zero-length case, but the existing count/length
+		// refinement will establish the successful branch without losing that
+		// relation to an unknown state here.
+		if _, conditional := ctx.arrayByRefConditionalAllocations[key][index]; conditional {
+			return
+		}
+		if _, pairedLength := ctx.arrayByRefLengthAllocations[key][index]; pairedLength {
+			return
+		}
+		if arrayByRefParameterMayInvalidate(target, index, ctx, map[string]bool{}) {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+	}
+	for _, binding := range bindings {
+		apply(binding.parameterIndex, binding.text)
+	}
+	return updated
+}
+
+func applyArrayUnknownByRefCallEffects(state arrayFlowState, proc sourceProcedure, call procedureir.CallSite, ctx analysisContext) arrayFlowState {
+	if call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+		return state
+	}
+	if _, _, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call); resolved {
+		return state
+	}
+	updated := cloneArrayState(state)
+	markUnknown := func(argument string) {
+		name := directArrayArgumentName(argument)
+		if name == "" {
+			return
+		}
+		if _, tracked := updated[name]; tracked {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+	}
+	for _, argument := range call.Arguments.Named {
+		markUnknown(argument.ValueText)
+	}
+	for _, argument := range arrayCallArgumentTexts(proc, call) {
+		markUnknown(argument)
+	}
+	return updated
+}
+
+// applyArrayConditionalByRefCallEffects joins the two possible outcomes of
+// an inline conditional call without treating the call's allocation summary
+// as unconditional. A helper that may invalidate its ByRef array makes the
+// joined state unknown; a helper that only allocates leaves the prior state,
+// which is the conservative meet of the conditional paths.
+func applyArrayConditionalByRefCallEffects(state arrayFlowState, proc sourceProcedure, call procedureir.CallSite, ctx analysisContext) arrayFlowState {
+	_, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !ok {
+		return applyArrayUnknownByRefCallEffects(state, proc, call, ctx)
+	}
+	if !procedureHasByRefArrayParameter(target) {
+		return state
+	}
+	bindings, ok := arrayCallArgumentBindings(proc, target, call)
+	if !ok {
+		return state
+	}
+	updated := cloneArrayState(state)
+	for _, binding := range bindings {
+		if binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(binding.parameterIndex)) {
+			continue
+		}
+		name := directArrayArgumentName(binding.text)
+		if name == "" {
+			continue
+		}
+		if arrayByRefParameterMayInvalidate(target, binding.parameterIndex, ctx, map[string]bool{}) {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+	}
+	return updated
+}
+
+// arrayByRefParameterMayInvalidate reports whether a private ByRef-array
+// parameter can lose its allocation while the procedure returns normally.
+// Element writes and reads preserve an allocated input; Erase, unknown whole
+// array replacement, and an unproven nested ByRef call do not. The recursion
+// guard keeps recursive helper cycles from being treated as an additional
+// mutation. Any direct mutation in the current cycle member is still found by
+// its own scan.
+func arrayByRefParameterMayInvalidate(proc sourceProcedure, parameterIndex int, ctx analysisContext, visiting map[string]bool) bool {
+	if parameterIndex < 0 || parameterIndex >= proc.Params.Len() || !parameterIsByRefArray(proc.Params.valueAt(parameterIndex)) {
+		return true
+	}
+	key := strings.ToLower(arrayProcedureKey(proc)) + "#" + strconv.Itoa(parameterIndex)
+	if visiting[key] {
+		return false
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+	name := strings.ToLower(cleanIdentifier(proc.Params.valueAt(parameterIndex).Name))
+	names := map[string]bool{name: true}
+	for statement := range proc.Statements.All() {
+		if !arrayByRefStatementReachable(proc, statement) {
+			continue
+		}
+		if statement.Recovered {
+			return true
+		}
+		for _, part := range splitRangeValueSourceStatements(statement.Text) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if arrayByRefParameterInlineMutation(part, names, ctx) {
+				return true
+			}
+		}
+		for _, nested := range arrayCallsAtLine(proc.Calls, statement.Range.StartLine) {
+			if arrayByRefCallIsReadOnly(nested) {
+				continue
+			}
+			if !arrayCallPassesDirectArrayArgument(proc, nested, name) {
+				continue
+			}
+			nestedKey, nestedTarget, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, nested)
+			if !resolved {
+				return true
+			}
+			bindings, mapped := arrayCallArgumentBindings(proc, nestedTarget, nested)
+			if !mapped {
+				return true
+			}
+			for _, binding := range bindings {
+				if directArrayArgumentName(binding.text) != name || binding.parameterIndex >= nestedTarget.Params.Len() || !parameterIsByRefArray(nestedTarget.Params.valueAt(binding.parameterIndex)) {
+					continue
+				}
+				if ctx.arrayByRefAllocations[nestedKey][binding.parameterIndex] {
+					continue
+				}
+				if arrayByRefParameterMayInvalidate(nestedTarget, binding.parameterIndex, ctx, visiting) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func arrayByRefCallIsReadOnly(call procedureir.CallSite) bool {
+	if call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+		return true
+	}
+	switch strings.ToLower(cleanIdentifier(call.Callee.BaseName)) {
+	case "lbound", "ubound":
+		return true
+	default:
+		return false
+	}
+}
+
+func arrayByRefStatementReachable(proc sourceProcedure, statement procedureir.Statement) bool {
+	if proc.Graph == nil {
+		return true
+	}
+	block, ok := proc.Graph.BlockForStatement(statement.ID)
+	if !ok {
+		return true
+	}
+	return proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).IsReachable(block.ID)
+}
+
+func arrayByRefParameterInlineMutation(text string, names map[string]bool, ctx analysisContext) bool {
+	if condition, body, ok := arrayIfThenParts(text); ok && strings.TrimSpace(body) != "" {
+		condition = strings.TrimSpace(condition)
+		lowerCondition := strings.ToLower(condition)
+		switch {
+		case strings.HasPrefix(lowerCondition, "if "):
+			condition = strings.TrimSpace(condition[len("if "):])
+		case strings.HasPrefix(lowerCondition, "elseif "):
+			condition = strings.TrimSpace(condition[len("elseif "):])
+		}
+		thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+		branches := []string{thenBody}
+		if hasElse {
+			branches = append(branches, elseBody)
+		}
+		if value, known := arraySourceOrderConstantBoolean(condition, nil); known {
+			if value {
+				branches = []string{thenBody}
+			} else if hasElse {
+				branches = []string{elseBody}
+			} else {
+				branches = nil
+			}
+		}
+		for _, branch := range branches {
+			for _, statement := range splitRangeValueSourceStatements(branch) {
+				if arrayByRefParameterInlineMutation(strings.TrimSpace(statement), names, ctx) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	text = strings.TrimSpace(text)
+	if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+		for _, target := range splitArgs(match[1]) {
+			if names[strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))] {
+				return true
+			}
+		}
+	}
+	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			name := strings.ToLower(cleanIdentifier(redim.name))
+			if !direct || !names[name] {
+				continue
+			}
+			// ReDim Preserve retains an already allocated input array. Its shape
+			// may change, but that is not an allocation invalidation at the
+			// caller boundary.
+			if strings.TrimSpace(match[1]) != "" {
+				continue
+			}
+			if !arrayStatementAllocatesName(text, name, ctx) {
+				return true
+			}
+		}
+	}
+	if lhs, _, indexed, ok := arrayAssignment(text); ok && !indexed {
+		name := strings.ToLower(cleanIdentifier(lhs))
+		return names[name] && !arrayStatementAllocatesName(text, name, ctx)
+	}
+	return false
 }
 
 func arrayConfigurationArraysForGuard(file parsedFile, target sourceProcedure, arguments []string, configurations arrayModuleConfigurationState) map[string]bool {
@@ -3962,7 +4717,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 			delete(moduleArrays, name)
 		}
 	}
-	idempotentSetupArrays := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls)
+	idempotentSetupArrays := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls, ctx)
 	allocated := map[string]bool{}
 	addDirectAllocation := func(statementID int, name string) {
 		name = strings.ToLower(cleanIdentifier(name))
@@ -4015,10 +4770,10 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 			}
 		}
 		if len(calleeByRefArrays) > 0 {
-			arguments := arrayCallArgumentTexts(proc, call)
-			if len(call.Arguments.Named) == 0 && len(arguments) == call.Arguments.Count {
+			arguments, mapped := arrayCallFormalArguments(proc, target, call)
+			if mapped {
 				for index := range calleeByRefArrays {
-					if index >= len(arguments) || index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
+					if index >= target.Params.Len() || !parameterIsByRefArray(target.Params.valueAt(index)) {
 						continue
 					}
 					name := strings.ToLower(directArrayArgumentName(arguments[index]))
@@ -4045,7 +4800,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 // True by this procedure, is not written elsewhere in the module, and is the
 // final executable statement.  These constraints keep an arbitrary Boolean
 // branch from becoming an allocation proof.
-func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) map[string]bool {
+func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, ctx analysisContext) map[string]bool {
 	if proc.StartLine < 1 || proc.EndLine < proc.StartLine || proc.StartLine > len(file.Lines) {
 		return nil
 	}
@@ -4071,6 +4826,7 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 	if len(guards) == 0 {
 		return nil
 	}
+	constants := arrayIntegerConstants(file, proc, nil, nil)
 
 	lastExecutable := -1
 	for index := start; index < end; index++ {
@@ -4118,6 +4874,9 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 				if moduleArrayOperationHasOtherWrite(facts, name, index) {
 					return
 				}
+				if !arrayModuleSetupReDimIsReliable(file, proc, guard.checkAt, index, setAt, guard.name, name, constants, ctx, moduleDecls) {
+					return
+				}
 				result[name] = true
 			})
 		}
@@ -4126,6 +4885,184 @@ func arrayModuleIdempotentSetupArrays(file parsedFile, proc sourceProcedure, mod
 		return nil
 	}
 	return result
+}
+
+func arrayModuleSetupReDimIsReliable(file parsedFile, proc sourceProcedure, guardLine, redimLine, setLine int, guardName, name string, constants map[string]int, ctx analysisContext, moduleDecls map[string]sourceDeclaration) bool {
+	if redimLine <= guardLine || redimLine >= setLine || redimLine < 0 || setLine >= len(file.Lines) {
+		return false
+	}
+	sourceLine := redimLine + 1
+	if sourceLine < 1 || sourceLine > len(file.Lines) || arraySummaryStatementAlwaysFails(normalizedCodeLine(file.Lines[redimLine]), arrayOptionBase(file), constants) {
+		return false
+	}
+	variables := arrayVariables(file, proc, moduleDecls)
+	// A call between the allocation and the ready flag can erase or replace the
+	// module array without leaving a direct operation fact in this procedure.
+	// A resolved private helper is admitted only when its direct and ByRef array
+	// effects are known not to invalidate this module's arrays; public,
+	// unresolved, and otherwise unmodelled calls remain conservative.
+	for call := range proc.Calls.All() {
+		line := call.Range.StartLine
+		if line >= sourceLine && line < setLine+1 {
+			if arrayCallIsIndexedArrayAccess(proc, call, variables) {
+				continue
+			}
+			if call.IsRaiseEvent {
+				return false
+			}
+			if call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+				continue
+			}
+			_, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+			if !resolved || arrayPrivateCallMayInvalidateModuleArray(file, proc, target, call, moduleDecls, ctx) {
+				return false
+			}
+		}
+	}
+
+	if proc.Graph == nil {
+		// Compatibility projections may not carry CFGs. Accept only a straight-
+		// line source interval in that case; any visible control construct makes
+		// the allocation conditional or permits an unmodelled bypass.
+		for line := guardLine + 1; line < setLine; line++ {
+			if line == redimLine {
+				continue
+			}
+			if arrayModuleSetupLineHasControlFlow(file.Lines[line]) {
+				return false
+			}
+		}
+		return true
+	}
+
+	findStatement := func(line int, match func(procedureir.Statement) bool) (procedureir.Statement, bool) {
+		var found procedureir.Statement
+		matched := false
+		for statement := range proc.Statements.All() {
+			if statement.Range.StartLine != line || !match(statement) {
+				continue
+			}
+			if matched {
+				return procedureir.Statement{}, false
+			}
+			found = statement
+			matched = true
+		}
+		return found, matched
+	}
+	guardStatement, guardOK := findStatement(guardLine+1, func(statement procedureir.Statement) bool {
+		return len(arraySetupGuardRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))) == 2
+	})
+	redimStatement, redimOK := findStatement(sourceLine, func(statement procedureir.Statement) bool {
+		match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(statement.Text)))
+		if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+			return false
+		}
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if direct && strings.EqualFold(cleanIdentifier(redim.name), cleanIdentifier(name)) {
+				return true
+			}
+		}
+		return false
+	})
+	readyStatement, readyOK := findStatement(setLine+1, func(statement procedureir.Statement) bool {
+		lhs, rhs, indexed, ok := arrayAssignment(normalizedCodeLine(statement.Text))
+		return ok && !indexed && strings.EqualFold(cleanIdentifier(lhs), cleanIdentifier(guardName)) && strings.EqualFold(strings.TrimSpace(rhs), "true")
+	})
+	if !guardOK || !redimOK || !readyOK {
+		return false
+	}
+	guardBlock, guardBlockOK := proc.Graph.BlockForStatement(guardStatement.ID)
+	redimBlock, redimBlockOK := proc.Graph.BlockForStatement(redimStatement.ID)
+	readyBlock, readyBlockOK := proc.Graph.BlockForStatement(readyStatement.ID)
+	if !guardBlockOK || !redimBlockOK || !readyBlockOK {
+		return false
+	}
+	normalGraph := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true})
+	if !normalGraph.IsReachable(redimBlock.ID) || !normalGraph.IsReachable(readyBlock.ID) {
+		return false
+	}
+	dominatesReady := false
+	for _, dominator := range normalGraph.DominatorsOf(readyBlock.ID) {
+		if dominator == redimBlock.ID {
+			dominatesReady = true
+			break
+		}
+	}
+	if !dominatesReady || !arrayFalseBranchRequiresBlock(*proc.Graph, guardBlock.ID, redimBlock.ID) {
+		return false
+	}
+	return arrayModuleSetupReachesNormalExit(normalGraph, readyBlock.ID)
+}
+
+// arrayCallIsIndexedArrayAccess filters the procedure IR's expression-call
+// projection from actual procedure invocations. The VBA tree-sitter grammar
+// represents an indexed array expression such as mPow2(index) as a CallSite;
+// an unresolved array expression must not make an otherwise straight-line
+// setup helper look like it contains an unknown side effect.
+func arrayCallIsIndexedArrayAccess(proc sourceProcedure, call procedureir.CallSite, variables map[string]arrayVariable) bool {
+	name := strings.ToLower(cleanIdentifier(call.Callee.BaseName))
+	if name == "" || strings.Contains(name, ".") || call.StatementID <= 0 {
+		return false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.ID != call.StatementID {
+			continue
+		}
+		for _, use := range arrayIndexedUses(statement.Text, variables) {
+			if strings.EqualFold(cleanIdentifier(use.name), name) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+func arrayModuleSetupLineHasControlFlow(line string) bool {
+	code := strings.TrimSpace(normalizedCodeLine(line))
+	if code == "" {
+		return false
+	}
+	lower := strings.ToLower(code)
+	for _, prefix := range []string{
+		"if ", "elseif ", "else", "end if", "for ", "for each ", "next", "do", "loop", "while ", "wend",
+		"select ", "case ", "goto ", "on error ", "with ", "end with", "exit ",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return strings.HasSuffix(code, ":")
+}
+
+func arrayModuleSetupReachesNormalExit(graph vbacfg.CFGView, from vbacfg.BlockID) bool {
+	if from == graph.NormalExit() {
+		return true
+	}
+	seen := map[vbacfg.BlockID]bool{from: true}
+	queue := []vbacfg.BlockID{from}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		found := false
+		graph.ForEachOutgoing(current, func(edge vbacfg.Edge) bool {
+			if edge.To == graph.NormalExit() {
+				found = true
+				return false
+			}
+			if !seen[edge.To] {
+				seen[edge.To] = true
+				queue = append(queue, edge.To)
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 func moduleArrayOperationHasOtherWrite(facts *moduleAnalysisFacts, name string, setupLine int) bool {
@@ -4149,6 +5086,66 @@ func arrayProcedureLineHasInlineConditional(file parsedFile, line int) bool {
 	}
 	text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(file.Lines[line-1])))
 	return strings.HasPrefix(text, "if ") && strings.Contains(text, " then ")
+}
+
+func arrayProcedureLineInlineConditionIsFalse(file parsedFile, line int) bool {
+	if !arrayProcedureLineHasInlineConditional(file, line) {
+		return false
+	}
+	condition, body, ok := arrayIfThenParts(normalizedCodeLine(file.Lines[line-1]))
+	if !ok || strings.TrimSpace(body) == "" {
+		return false
+	}
+	condition = strings.TrimSpace(condition)
+	lowerCondition := strings.ToLower(condition)
+	if strings.HasPrefix(lowerCondition, "if ") {
+		condition = strings.TrimSpace(condition[len("if "):])
+	}
+	value, known := arraySourceOrderConstantBoolean(condition, nil)
+	return known && !value
+}
+
+func arrayInlineConditionalCallIsReachable(file parsedFile, call procedureir.CallSite, conditionValue, hasElse bool) bool {
+	if conditionValue && !hasElse {
+		return true
+	}
+	line := call.Range.StartLine
+	if line < 1 || line > len(file.Lines) || call.Range.StartColumn <= 0 {
+		return conditionValue || hasElse
+	}
+	raw := gui.StripComment(file.Lines[line-1])
+	trimmed := strings.TrimSpace(raw)
+	leading := len(raw) - len(strings.TrimLeft(raw, " \t"))
+	_, body, ok := arrayIfThenParts(trimmed)
+	if !ok || strings.TrimSpace(body) == "" {
+		return true
+	}
+	prefixLength := 0
+	switch {
+	case strings.HasPrefix(strings.ToLower(trimmed), "if "):
+		prefixLength = len("if ")
+	case strings.HasPrefix(strings.ToLower(trimmed), "elseif "):
+		prefixLength = len("elseif ")
+	default:
+		return true
+	}
+	rest := strings.TrimSpace(trimmed[prefixLength:])
+	thenIndex := arrayTopLevelKeywordIndex(rest, "then")
+	if thenIndex < 0 {
+		return true
+	}
+	bodyStart := leading + prefixLength + (len(trimmed[prefixLength:]) - len(rest)) + thenIndex + len("then")
+	elseIndex := arrayTopLevelKeywordIndex(body, "else")
+	if elseIndex < 0 {
+		return conditionValue
+	}
+	elseStart := bodyStart + elseIndex
+	callColumn := call.Range.StartColumn - 1
+	if callColumn < bodyStart {
+		return true
+	}
+	inThen := callColumn < elseStart
+	return inThen == conditionValue
 }
 
 func arrayProcedureNormalExitDominators(proc sourceProcedure) map[vbacfg.BlockID]bool {
@@ -4388,6 +5385,7 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 			out, _ := a.arrayTransfer(procedure.file, procedure.proc, ctx, variables, in, text, line, nil, nil)
 			for _, call := range arrayCallsAtLine(procedure.proc.Calls, line) {
 				out = applyArrayModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
+				out = applyArrayUnknownModuleCallEffects(out, procedure.file, procedure.proc, call, ctx, variables, procedure.moduleDecls)
 			}
 			return out
 		}
@@ -4579,6 +5577,396 @@ type arrayByRefCallCandidate struct {
 	call   procedureir.CallSite
 }
 
+type arrayLocalGoSubSummary struct {
+	guaranteedAllocated map[string]bool
+	unknown             map[string]bool
+}
+
+type arrayLocalGoSubAllocations map[string]arrayLocalGoSubSummary
+
+func arrayLocalGoSubAllocationSummaries(proc sourceProcedure, graph *vbacfg.CFGView, variables map[string]arrayVariable, ctx analysisContext, base int, constants map[string]int, moduleArrays map[string]bool) arrayLocalGoSubAllocations {
+	statements := make([]procedureir.Statement, 0, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
+		statements = append(statements, statement)
+	}
+	sort.SliceStable(statements, func(i, j int) bool {
+		if statements[i].Range.StartLine != statements[j].Range.StartLine {
+			return statements[i].Range.StartLine < statements[j].Range.StartLine
+		}
+		return statements[i].ID < statements[j].ID
+	})
+	summaries := arrayLocalGoSubAllocations{}
+	if graph == nil {
+		return summaries
+	}
+	for index, label := range statements {
+		if label.Kind != procedureir.StatementLabel {
+			continue
+		}
+		labelName := arrayLocalGoSubLabelName(label)
+		if labelName == "" {
+			continue
+		}
+		end := len(statements)
+		for cursor := index + 1; cursor < len(statements); cursor++ {
+			if arrayLocalGoSubIsReturn(statements[cursor]) {
+				end = cursor
+				break
+			}
+		}
+		if end == len(statements) {
+			continue
+		}
+		summary := arrayLocalGoSubSummary{
+			guaranteedAllocated: map[string]bool{},
+			unknown:             map[string]bool{},
+		}
+		for name, variable := range variables {
+			if variable.isArray && arrayLocalGoSubAllocationInvariant(proc, graph, statements, index, end, name, ctx, base, constants, moduleArrays) {
+				summary.guaranteedAllocated[name] = true
+			} else if variable.isArray && !variable.fixed && arrayLocalGoSubMayMutateName(proc, graph, statements, index, end, name, ctx, moduleArrays) {
+				summary.unknown[name] = true
+			}
+		}
+		summaries[labelName] = summary
+	}
+	return summaries
+}
+
+func arrayLocalGoSubAllocationInvariant(proc sourceProcedure, graph *vbacfg.CFGView, statements []procedureir.Statement, labelIndex, end int, name string, ctx analysisContext, base int, constants map[string]int, moduleArrays map[string]bool) bool {
+	if graph == nil || labelIndex < 0 || labelIndex >= end || end > len(statements) {
+		return false
+	}
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	allowed := map[vbacfg.BlockID]procedureir.Statement{}
+	var labelBlock vbacfg.Block
+	labelFound := false
+	for index := labelIndex; index < end; index++ {
+		block, ok := graph.BlockForStatement(statements[index].ID)
+		if !ok {
+			return false
+		}
+		allowed[block.ID] = statements[index]
+		if index == labelIndex {
+			labelBlock = block
+			labelFound = true
+		}
+	}
+	if !labelFound {
+		return false
+	}
+	returnBlock, returnOK := graph.BlockForStatement(statements[end].ID)
+	if !returnOK {
+		return false
+	}
+
+	type stateAtBlock struct {
+		id        vbacfg.BlockID
+		allocated bool
+	}
+	seenStates := map[vbacfg.BlockID]map[bool]bool{labelBlock.ID: {false: true}}
+	queue := []stateAtBlock{{id: labelBlock.ID}}
+	for len(queue) > 0 {
+		currentState := queue[0]
+		queue = queue[1:]
+		currentID := currentState.id
+		if _, ok := graph.BlockByID(currentID); !ok {
+			return false
+		}
+		failed := false
+		graph.ForEachOutgoing(currentID, func(edge vbacfg.Edge) bool {
+			target, targetOK := graph.BlockByID(edge.To)
+			if !targetOK {
+				failed = true
+				return true
+			}
+			// An unknown edge can leave the GoSub body through a dynamic or
+			// recovered transfer. It is not evidence of a successful Return,
+			// even when the predecessor happens to be allocated.
+			if edge.Kind == vbacfg.EdgeUnknown || target.Kind == vbacfg.BlockUnknownExit {
+				failed = true
+				return true
+			}
+			statement, inside := allowed[target.ID]
+			if !inside {
+				// The first Return is deliberately outside the allowed body. Any
+				// other statement target leaves the GoSub body without returning to
+				// its caller, so it cannot be treated as a successful summary.
+				if target.ID != returnBlock.ID && !arrayLocalGoSubIsTerminalBlock(target) {
+					failed = true
+					return true
+				}
+				if !currentState.allocated {
+					failed = true
+				}
+				// Keep visiting sibling edges. A terminal edge is safe only when
+				// every other edge from this block also preserves the summary.
+				return true
+			}
+			nextAllocated := arrayLocalGoSubStateAfterStatement(statement.Text, name, currentState.allocated, ctx, base, constants)
+			unknownCall, guaranteedCall := arrayLocalGoSubArrayCallEffect(proc, statement, name, ctx, moduleArrays)
+			if unknownCall {
+				nextAllocated = false
+			} else if guaranteedCall {
+				nextAllocated = true
+			}
+			if !seenStates[target.ID][nextAllocated] {
+				if seenStates[target.ID] == nil {
+					seenStates[target.ID] = map[bool]bool{}
+				}
+				seenStates[target.ID][nextAllocated] = true
+				queue = append(queue, stateAtBlock{id: target.ID, allocated: nextAllocated})
+			}
+			return true
+		})
+		if failed {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayLocalGoSubStateAfterStatement(text, name string, allocated bool, ctx analysisContext, base int, constants map[string]int) bool {
+	names := map[string]bool{name: true}
+	for _, statement := range splitRangeValueSourceStatements(text) {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		if arrayLocalGoSubAllocationIsReliable(statement, name, ctx, base, constants) {
+			allocated = true
+			continue
+		}
+		if arrayLocalGoSubPreserveKeepsAllocation(statement, name, allocated, base, constants) {
+			continue
+		}
+		if arraySourceOrderInlineArrayMutation(statement, names, ctx) || arraySourceOrderMutatesArrayStatement(statement, names, ctx) {
+			allocated = false
+		}
+	}
+	return allocated
+}
+
+func arrayLocalGoSubPreserveKeepsAllocation(text, name string, allocated bool, base int, constants map[string]int) bool {
+	if !allocated {
+		return false
+	}
+	match := arrayRedimRe.FindStringSubmatch(text)
+	if len(match) == 0 || strings.TrimSpace(match[1]) == "" {
+		return false
+	}
+	for _, clause := range splitArgs(match[2]) {
+		redim, direct := parseDirectArrayRedimClause(clause)
+		if direct && strings.EqualFold(cleanIdentifier(redim.name), name) && !arraySummaryStatementAlwaysFails(text, base, constants) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayLocalGoSubMayMutateName(proc sourceProcedure, graph *vbacfg.CFGView, statements []procedureir.Statement, labelIndex, end int, name string, ctx analysisContext, moduleArrays map[string]bool) bool {
+	if graph == nil || labelIndex < 0 || labelIndex >= end || end > len(statements) {
+		return true
+	}
+	for index := labelIndex; index < end; index++ {
+		statement := statements[index]
+		for _, part := range splitRangeValueSourceStatements(statement.Text) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if arrayStatementAllocatesName(part, name, ctx) || arraySourceOrderInlineArrayMutation(part, map[string]bool{name: true}, ctx) || arraySourceOrderMutatesArrayStatement(part, map[string]bool{name: true}, ctx) {
+				return true
+			}
+		}
+		unknownCall, _ := arrayLocalGoSubArrayCallEffect(proc, statement, name, ctx, moduleArrays)
+		if unknownCall {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayLocalGoSubArrayCallEffect keeps a local GoSub summary fail-closed at
+// calls that pass the tracked array directly. Only an already-proven private
+// ByRef allocation contract is allowed to establish the post-call state;
+// builtin-like calls are treated as non-mutating, while every other call may
+// erase or otherwise invalidate the array behind the analyzer's view.
+func arrayLocalGoSubArrayCallEffect(proc sourceProcedure, statement procedureir.Statement, name string, ctx analysisContext, moduleArrays map[string]bool) (unknown, guaranteedAllocated bool) {
+	name = strings.ToLower(cleanIdentifier(name))
+	for call := range proc.Calls.All() {
+		if call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+			continue
+		}
+		if call.StatementID != statement.ID && (call.StatementID != 0 || call.Range.StartLine != statement.Range.StartLine) {
+			continue
+		}
+		arguments := arrayCallArgumentTexts(proc, call)
+		relevantArgument := false
+		key, target, resolved := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+		if resolved {
+			bindings, mapped := arrayCallArgumentBindings(proc, target, call)
+			if mapped {
+				for _, binding := range bindings {
+					if directArrayArgumentName(binding.text) != name {
+						continue
+					}
+					if binding.parameterIndex >= 0 && binding.parameterIndex < target.Params.Len() && target.Params.valueAt(binding.parameterIndex).ParamArray {
+						continue
+					}
+					relevantArgument = true
+					if binding.parameterIndex < target.Params.Len() && parameterIsByRefArray(target.Params.valueAt(binding.parameterIndex)) && ctx.arrayByRefAllocations[key][binding.parameterIndex] {
+						guaranteedAllocated = true
+						continue
+					}
+					unknown = true
+				}
+			} else if call.Arguments.Count > 0 {
+				// A resolved call with an incomplete argument projection cannot
+				// prove which formal parameter receives the tracked array.
+				unknown = true
+			}
+		} else {
+			// Keep unresolved calls conservative by checking the raw actual
+			// expressions. Named arguments are handled here only because there
+			// is no resolved formal signature to bind them to.
+			for _, argument := range call.Arguments.Named {
+				if directArrayArgumentName(argument.ValueText) == name {
+					relevantArgument = true
+					unknown = true
+				}
+			}
+			for _, argument := range arguments {
+				if directArrayArgumentName(argument) == name {
+					relevantArgument = true
+					unknown = true
+				}
+			}
+		}
+		if call.Arguments.Count > 0 && len(arguments) != call.Arguments.Count {
+			// An incomplete argument projection cannot prove that this call did
+			// not receive the tracked array by reference.
+			unknown = true
+		}
+		if !relevantArgument && moduleArrays[name] {
+			if arrayLocalGoSubCallHasProvenModuleContract(ctx, call, name) {
+				guaranteedAllocated = true
+			} else {
+				unknown = true
+			}
+		}
+	}
+	return unknown, guaranteedAllocated
+}
+
+func arrayLocalGoSubCallHasProvenModuleContract(ctx analysisContext, call procedureir.CallSite, name string) bool {
+	key, _, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, call)
+	if !ok {
+		return false
+	}
+	return ctx.arrayModuleAllocations[key][strings.ToLower(cleanIdentifier(name))]
+}
+
+func arrayLocalGoSubIsTerminalBlock(block vbacfg.Block) bool {
+	switch block.Kind {
+	case vbacfg.BlockNormalExit, vbacfg.BlockExceptionalExit, vbacfg.BlockTerminationExit, vbacfg.BlockUnknownExit:
+		return true
+	default:
+		return false
+	}
+}
+
+func arrayLocalGoSubAllocationIsReliable(text, name string, ctx analysisContext, base int, constants map[string]int) bool {
+	if !arrayStatementAllocatesName(text, name, ctx) {
+		return false
+	}
+	return !arraySummaryStatementAlwaysFails(text, base, constants)
+}
+
+func arrayLocalGoSubLabelName(statement procedureir.Statement) string {
+	label := statement.Label
+	if label == "" {
+		label = statement.Text
+	}
+	return strings.ToLower(strings.TrimSpace(strings.TrimSuffix(label, ":")))
+}
+
+func arrayLocalGoSubIsReturn(statement procedureir.Statement) bool {
+	return strings.EqualFold(strings.TrimSpace(statement.Text), "return")
+}
+
+func arrayLocalGoSubTarget(proc sourceProcedure, call procedureir.CallSite) string {
+	statement, ok := arrayProcedureStatementByID(proc, call.StatementID)
+	if !ok || !strings.EqualFold(call.Callee.BaseName, "gosub") {
+		return ""
+	}
+	text := strings.TrimSpace(statement.Text)
+	if len(text) < len("gosub") || !strings.EqualFold(text[:len("gosub")], "gosub") {
+		return ""
+	}
+	fields := strings.Fields(strings.TrimSpace(text[len("gosub"):]))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(strings.TrimSuffix(fields[0], ":")))
+}
+
+func applyArrayLocalGoSubEffects(state arrayFlowState, proc sourceProcedure, call procedureir.CallSite, summaries arrayLocalGoSubAllocations) arrayFlowState {
+	target := arrayLocalGoSubTarget(proc, call)
+	if target == "" {
+		return state
+	}
+	return applyArrayLocalGoSubSummary(state, target, summaries)
+}
+
+func applyArrayLocalGoSubSummary(state arrayFlowState, target string, summaries arrayLocalGoSubAllocations) arrayFlowState {
+	summary, known := summaries[target]
+	if !known {
+		// A local GoSub can mutate caller/module arrays without carrying an
+		// explicit array argument. An absent summary therefore means unknown
+		// state, not "no effect"; retaining allocated here would suppress
+		// VBA227 after cleanup or another unmodelled side effect.
+		updated := cloneArrayState(state)
+		for name := range updated {
+			updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+		}
+		return updated
+	}
+	updated := cloneArrayState(state)
+	for name := range summary.unknown {
+		updated[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}
+	}
+	for name := range summary.guaranteedAllocated {
+		value := updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	return updated
+}
+
+func applyArrayLocalGoSubStatementEffects(state arrayFlowState, text string, summaries arrayLocalGoSubAllocations) arrayFlowState {
+	for _, statement := range splitRangeValueSourceStatements(text) {
+		target, ok := arrayLocalGoSubTargetFromStatementText(statement)
+		if !ok {
+			continue
+		}
+		state = applyArrayLocalGoSubSummary(state, target, summaries)
+	}
+	return state
+}
+
+func arrayLocalGoSubTargetFromStatementText(text string) (string, bool) {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) < 2 || !strings.EqualFold(fields[0], "gosub") {
+		return "", false
+	}
+	return strings.ToLower(strings.TrimSpace(strings.TrimSuffix(fields[1], ":"))), true
+}
+
 func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisContext) (map[string]map[int]bool, map[string]map[int]string) {
 	targets := ctx.arrayPrivateTargets
 	if len(targets) == 0 {
@@ -4639,9 +6027,36 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		initial = applyArrayByRefEntryStates(initial, proc, variables, entries, conditions)
 		initial = applyArrayModuleEntryState(initial, file, proc, variables, moduleDecls, ctx.arrayModuleEntryStates, ctx.arrayParticipantKeys)
 		initial = applyArrayInternalStorageConfiguration(initial, file, proc, variables, moduleDecls, ctx.arrayModuleConfigurations[file.Path])
-		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+		var baseView vbacfg.CFGView
+		var summaryGraph *vbacfg.CFGView
+		var worklistReachable map[vbacfg.BlockID]bool
+		worklistReachableLines := map[int]bool{}
+		if proc.Graph != nil {
+			baseView = proc.Graph.View(vbacfg.EdgeFilter{})
+			summaryGraph = &baseView
+			worklistReachable = arrayCFGWorklistReachable(&baseView)
+			for statement := range proc.Statements.All() {
+				line := statement.Range.StartLine
+				owner, ownerOK := baseView.BlockForStatement(statement.ID)
+				if line > 0 && ownerOK && worklistReachable[owner.ID] {
+					worklistReachableLines[line] = true
+				}
+			}
+		}
+		moduleArrays := arrayModuleNamesForProcedure(file, proc, moduleDecls)
+		localGoSubAllocations := arrayLocalGoSubAllocationSummaries(proc, summaryGraph, variables, localCtx, arrayOptionBase(file), constants, moduleArrays)
+		visitForBlock := func(text string, line int, in arrayFlowState, ownerStatementID int, filterNestedCalls, skipNestedState bool) arrayFlowState {
+			if skipNestedState {
+				return in
+			}
 			var eligible []arrayByRefCallCandidate
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				if filterNestedCalls && ownerStatementID > 0 && call.StatementID != ownerStatementID {
+					owner, ownerOK := baseView.BlockForStatement(call.StatementID)
+					if ownerOK && worklistReachable[owner.ID] {
+						continue
+					}
+				}
 				key, target, ok := arrayPrivateTargetForCall(localCtx, targets, call)
 				if !ok || !procedureHasByRefArrayParameter(target) || !arrayProcedureIsParticipant(localCtx, target) {
 					continue
@@ -4649,37 +6064,77 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				eligible = append(eligible, arrayByRefCallCandidate{key: key, target: target, call: call})
 			}
 			if len(eligible) > 0 {
-				targetKey := eligible[0].key
-				sameTarget := true
+				allSameTarget := true
 				for _, entry := range eligible[1:] {
-					if entry.key != targetKey {
-						sameTarget = false
+					if entry.key != eligible[0].key {
+						allSameTarget = false
 						break
 					}
 				}
-				if sameTarget {
-					for _, entry := range eligible {
-						arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, localCtx)
+				// Record and apply each call in source order. This matters when
+				// one physical line invokes the same ByRef helper repeatedly: the
+				// second call must see an Erase or other invalidation from the
+				// first call rather than the original pre-line state.
+				recordState := cloneArrayState(in)
+				for _, entry := range eligible {
+					record := allSameTarget
+					if !record {
+						// Nested calls on one source line are normally kept
+						// conservative because the pre-line state cannot describe
+						// mutations from an earlier, different helper. An outer
+						// ByRef call whose array argument is a proven allocated
+						// expression is independent of that ordering, however.
+						allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, proc, entry.call, recordState, localCtx)
+						record = allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible))
 					}
-				} else {
-					// Nested calls on one source line are normally kept
-					// conservative because the pre-line state cannot describe
-					// mutations from an earlier, different helper. An outer
-					// ByRef call whose array argument is a proven allocated
-					// expression is independent of that ordering, however.
-					for _, entry := range eligible {
-						allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, proc, entry.call, in, localCtx)
-						if allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible)) {
-							arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, in, localCtx)
-						}
+					if record {
+						arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, recordState, localCtx)
 					}
+					recordState = applyArrayModuleCallEffects(recordState, file, proc, entry.call, localCtx, variables, moduleDecls)
+					if arrayProcedureLineHasInlineConditional(file, entry.call.Range.StartLine) {
+						recordState = applyArrayConditionalByRefCallEffects(recordState, proc, entry.call, localCtx)
+					} else {
+						recordState = applyArrayByRefCallEffects(recordState, proc, entry.call, localCtx)
+					}
+					recordState = applyArrayLocalGoSubEffects(recordState, proc, entry.call, localGoSubAllocations)
 				}
 			}
 			out, _ := a.arrayTransfer(file, proc, localCtx, variables, in, text, line, constants, nil)
+			out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
+				if filterNestedCalls && ownerStatementID > 0 && call.StatementID != ownerStatementID {
+					// This callback is visiting the container statement's source
+					// range. Nested calls are visited again by their own CFG block
+					// (or by the source-order fallback when that block is recovered),
+					// so applying their post-call effect here would leak one branch
+					// into its siblings.
+					continue
+				}
 				out = applyArrayModuleCallEffects(out, file, proc, call, localCtx, variables, moduleDecls)
+				out = applyArrayUnknownModuleCallEffects(out, file, proc, call, localCtx, variables, moduleDecls)
+				if arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) {
+					out = applyArrayConditionalByRefCallEffects(out, proc, call, localCtx)
+				} else {
+					out = applyArrayByRefCallEffects(out, proc, call, localCtx)
+				}
+				out = applyArrayLocalGoSubEffects(out, proc, call, localGoSubAllocations)
 			}
 			return out
+		}
+		visit := func(text string, line int, in arrayFlowState) arrayFlowState {
+			return visitForBlock(text, line, in, 0, false, false)
+		}
+		visitBlock := func(block vbacfg.Block, text string, line int, in arrayFlowState) arrayFlowState {
+			filterNestedCalls := arrayCFGBlockOwnsNestedStatements(block)
+			skipNestedState := false
+			if filterNestedCalls && block.Statement != nil {
+				start := block.Statement.Range.StartLine
+				if start == 0 {
+					start = block.Range.StartLine
+				}
+				skipNestedState = line > start && worklistReachableLines[line]
+			}
+			return visitForBlock(text, line, in, block.StatementID, filterNestedCalls, skipNestedState)
 		}
 		if proc.Graph == nil {
 			state := initial
@@ -4688,15 +6143,38 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			}
 			return evidence
 		}
+		fallbackFacts := buildArraySourceOrderFallbackFacts(file, proc, &baseView, variables, localCtx, constants)
+		fallbackFacts.unknownFlow = len(proc.Graph.UnknownFlowSources) > 0
 		if ctx.arrayStats != nil {
 			ctx.arrayStats.addCFGWalk()
 		}
-		baseView := proc.Graph.View(vbacfg.EdgeFilter{})
-		walkArrayCFGWithEdgesStats(&baseView, file.Lines, initial, visit, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
+		walkArrayCFGWithSourceLinesReliableStatsAndBlock(&baseView, file.Lines, initial, visit, visitBlock, func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 			out = applyArrayConditionalAllocationBranch(out, &baseView, block, edge)
 			out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, variables)
 			return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], variables, file, proc, moduleDecls)
-		}, ctx.arrayStats)
+		}, nil, ctx.arrayStats)
+		// A recovered source construct can make a call block unreachable in the
+		// CFG even though the call is valid VBA source.  The parser currently
+		// represents some colon-separated single-line statements this way.  For
+		// that narrow boundary, retain a call-site allocation proof from the
+		// lexical source order; only direct array arguments with an allocation
+		// invariant across all reachable branch alternatives are admitted.
+		for call := range proc.Calls.All() {
+			block, ok := proc.Graph.BlockForStatement(call.StatementID)
+			if !ok || worklistReachable[block.ID] {
+				continue
+			}
+			if !arrayByRefSourceOrderFallbackApplies(file, proc, &baseView, fallbackFacts, call) {
+				continue
+			}
+			key, target, ok := arrayPrivateTargetForCall(ctx, targets, call)
+			if !ok || !procedureHasByRefArrayParameter(target) || !arrayProcedureIsParticipant(ctx, target) {
+				continue
+			}
+			if state, proven := a.arrayByRefCallSourceOrderProof(file, fallbackFacts, localGoSubAllocations, proc, target, call, initial, ctx, variables, constants); proven {
+				arrayRecordByRefCall(evidence, key, target, proc, call, state, ctx)
+			}
+		}
 		return evidence
 	}
 
@@ -4966,18 +6444,22 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 	if strings.EqualFold(targetKey, arrayProcedureKey(caller)) {
 		return
 	}
-	arguments := arrayCallArgumentTexts(caller, call)
-	if len(call.Arguments.Named) > 0 || len(arguments) != call.Arguments.Count {
+	bindings, ok := arrayCallArgumentBindings(caller, target, call)
+	if !ok {
 		return
 	}
+	arguments := make([]string, target.Params.Len())
+	bound := make(map[int]bool, len(bindings))
+	for _, binding := range bindings {
+		arguments[binding.parameterIndex] = binding.text
+		bound[binding.parameterIndex] = true
+	}
 	for index, parameter := range target.Params.AllIndexed() {
-		if !parameterIsByRefArray(parameter) {
+		if !parameterIsByRefArray(parameter) || !bound[index] {
 			continue
 		}
 		name := ""
-		if index < len(arguments) {
-			name = directArrayArgumentName(arguments[index])
-		}
+		name = directArrayArgumentName(arguments[index])
 		value, known := state[name]
 		allocated := known && value.kind == arrayAllocated && value.knownArray
 		if !allocated && index < len(arguments) {
@@ -5033,20 +6515,964 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 	}
 }
 
+type arraySourceOrderAllocation struct {
+	line     int
+	parentID int
+}
+
+type arraySourceOrderFallbackFacts struct {
+	conditionalTransferLines   []int
+	unconditionalTransferLines []int
+	definiteExitLines          []int
+	unknownFlow                bool
+	parents                    map[int]procedureir.Statement
+	allocations                map[string][]arraySourceOrderAllocation
+	bypassTargetMin            map[int]int
+	branchGroups               map[int]map[int]bool
+	branchTransferBypass       map[int]map[string]int
+	ambiguousTransferLines     map[int]bool
+}
+
+// buildArraySourceOrderFallbackFacts materializes the source-order facts once
+// per caller. The fallback is only used for recovered CFG boundaries, but a
+// caller can contain many such calls; keeping the statement and CFG scans out
+// of the per-call proof avoids multiplying the recovery cost by call count.
+func buildArraySourceOrderFallbackFacts(file parsedFile, proc sourceProcedure, graph *vbacfg.CFGView, variables map[string]arrayVariable, ctx analysisContext, constants map[string]int) arraySourceOrderFallbackFacts {
+	facts := arraySourceOrderFallbackFacts{
+		parents:                make(map[int]procedureir.Statement, proc.Statements.Len()),
+		allocations:            map[string][]arraySourceOrderAllocation{},
+		bypassTargetMin:        map[int]int{},
+		branchGroups:           map[int]map[int]bool{},
+		branchTransferBypass:   map[int]map[string]int{},
+		ambiguousTransferLines: map[int]bool{},
+	}
+	if graph == nil {
+		return facts
+	}
+	worklistReachable := arrayCFGWorklistReachable(graph)
+	statements := make([]procedureir.Statement, 0, proc.Statements.Len())
+	statementsByLine := map[int][]procedureir.Statement{}
+	for statement := range proc.Statements.All() {
+		statements = append(statements, statement)
+		facts.parents[statement.ID] = statement
+		line := statement.Range.StartLine
+		if line > 0 {
+			statementsByLine[line] = append(statementsByLine[line], statement)
+		}
+	}
+	for _, statement := range statements {
+		if statement.Kind != procedureir.StatementIf {
+			continue
+		}
+		// A nested multi-line If owns an independent branch group even though
+		// the IR links it to its containing If through ParentID. Register every
+		// If root so allocations in all nested branches participate in the
+		// source-order proof.
+		facts.branchGroups[statement.ID] = map[int]bool{statement.ID: true}
+	}
+	hasElse := map[int]bool{}
+	for _, statement := range statements {
+		switch statement.Kind {
+		case procedureir.StatementElseIf:
+			if root, ok := arraySourceOrderIfRoot(facts.parents, statement.ID); ok {
+				if branches := facts.branchGroups[root]; branches != nil {
+					branches[statement.ID] = true
+				}
+			}
+		case procedureir.StatementElse:
+			if branches := facts.branchGroups[statement.ParentID]; branches != nil {
+				branches[statement.ID] = true
+				hasElse[statement.ParentID] = true
+			}
+		}
+	}
+	for root, branches := range facts.branchGroups {
+		if !hasElse[root] {
+			// An If/ElseIf chain without a final Else has an implicit path
+			// that executes none of its branch bodies.
+			branches[0] = true
+		}
+	}
+
+	conditionalTransferLines := map[int]bool{}
+	unconditionalTransferLines := map[int]bool{}
+	definiteExitLines := map[int]bool{}
+	for _, statement := range statements {
+		line := statement.Range.StartLine
+		if line <= proc.StartLine {
+			continue
+		}
+		if statement.Kind == procedureir.StatementIf && statement.SyntaxKind == "single_line_if_statement" {
+			if line >= 1 && line <= len(file.Lines) && arraySourceOrderInlineConditionalDefinitelyTerminates(normalizedCodeLine(file.Lines[line-1]), constants) {
+				if block, ok := graph.BlockForStatement(statement.ID); ok && worklistReachable[block.ID] {
+					definiteExitLines[line] = true
+				}
+			}
+			for _, candidate := range statementsByLine[line] {
+				if !arraySourceOrderProcedureTransfer(candidate) || !arraySourceOrderInlineConditionalTransfer(candidate, file.Lines) {
+					continue
+				}
+				block, ok := graph.BlockForStatement(candidate.ID)
+				if ok && worklistReachable[block.ID] {
+					conditionalTransferLines[line] = true
+					break
+				}
+			}
+		}
+		if arraySourceOrderProcedureTransfer(statement) && !arraySourceOrderInlineConditionalTransfer(statement, file.Lines) {
+			unconditionalTransferLines[line] = true
+		}
+	}
+	for line := range conditionalTransferLines {
+		facts.conditionalTransferLines = append(facts.conditionalTransferLines, line)
+	}
+	for line := range unconditionalTransferLines {
+		facts.unconditionalTransferLines = append(facts.unconditionalTransferLines, line)
+	}
+	for line := range definiteExitLines {
+		facts.definiteExitLines = append(facts.definiteExitLines, line)
+	}
+	sort.Ints(facts.conditionalTransferLines)
+	sort.Ints(facts.unconditionalTransferLines)
+	sort.Ints(facts.definiteExitLines)
+
+	allocationLines := map[int]bool{}
+	for _, statement := range statements {
+		line := statement.Range.StartLine
+		if line < 1 {
+			continue
+		}
+		block, ok := graph.BlockForStatement(statement.ID)
+		if !ok || !worklistReachable[block.ID] {
+			continue
+		}
+		for name, variable := range variables {
+			if !variable.isArray || !arrayStatementAllocatesName(statement.Text, name, ctx) {
+				continue
+			}
+			name = strings.ToLower(cleanIdentifier(name))
+			facts.allocations[name] = append(facts.allocations[name], arraySourceOrderAllocation{line: line, parentID: statement.ParentID})
+			allocationLines[line] = true
+		}
+	}
+	orderedAllocationLines := make([]int, 0, len(allocationLines))
+	for line := range allocationLines {
+		orderedAllocationLines = append(orderedAllocationLines, line)
+	}
+	sort.Ints(orderedAllocationLines)
+	branchAllocationLines := map[int]map[int]map[string][]int{}
+	for name, allocations := range facts.allocations {
+		for _, allocation := range allocations {
+			root, branch, ok := facts.branchForAllocation(allocation.parentID)
+			if !ok {
+				continue
+			}
+			branches := branchAllocationLines[root]
+			if branches == nil {
+				branches = map[int]map[string][]int{}
+			}
+			names := branches[branch]
+			if names == nil {
+				names = map[string][]int{}
+			}
+			names[name] = append(names[name], allocation.line)
+			branches[branch] = names
+			branchAllocationLines[root] = branches
+		}
+	}
+	for _, branches := range branchAllocationLines {
+		for _, names := range branches {
+			for name := range names {
+				sort.Ints(names[name])
+			}
+		}
+	}
+	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		segments := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
+		hasTransfer := false
+		hasAllocation := false
+		for _, segment := range segments {
+			if arraySourceOrderTextHasProcedureTransfer(segment.text) {
+				hasTransfer = true
+			}
+			for name, variable := range variables {
+				if variable.isArray && arrayStatementAllocatesName(segment.text, name, ctx) {
+					hasAllocation = true
+					break
+				}
+			}
+			if hasTransfer && hasAllocation {
+				facts.ambiguousTransferLines[line] = true
+				break
+			}
+		}
+	}
+
+	// A source block with an edge over an allocation proves that the allocation
+	// is not unconditional for calls at or after the edge target. Compute the
+	// earliest such target for every candidate allocation in one graph pass;
+	// individual calls then use a constant-time threshold check.
+	graph.ForEachBlock(func(block vbacfg.Block) bool {
+		if block.Kind != vbacfg.BlockStatement || !worklistReachable[block.ID] {
+			return true
+		}
+		sourceLine := block.Range.StartLine
+		if sourceLine <= proc.StartLine {
+			return true
+		}
+		graph.ForEachOutgoing(block.ID, func(edge vbacfg.Edge) bool {
+			target, ok := graph.BlockByID(edge.To)
+			if !ok || target.Kind != vbacfg.BlockStatement {
+				if block.Statement != nil && arraySourceOrderProcedureTransfer(*block.Statement) {
+					facts.recordBranchTransferBypass(block, target, sourceLine, branchAllocationLines)
+				}
+				return true
+			}
+			targetLine := target.Range.StartLine
+			for _, allocationLine := range orderedAllocationLines {
+				if allocationLine <= sourceLine {
+					continue
+				}
+				if allocationLine >= targetLine {
+					break
+				}
+				if current, exists := facts.bypassTargetMin[allocationLine]; !exists || targetLine < current {
+					facts.bypassTargetMin[allocationLine] = targetLine
+				}
+			}
+			if block.Statement != nil && arraySourceOrderProcedureTransfer(*block.Statement) {
+				facts.recordBranchTransferBypass(block, target, sourceLine, branchAllocationLines)
+			}
+			return true
+		})
+		return true
+	})
+	return facts
+}
+
+func (facts arraySourceOrderFallbackFacts) hasConditionalTransferBefore(line int) bool {
+	index := sort.SearchInts(facts.conditionalTransferLines, line)
+	return index > 0
+}
+
+func (facts arraySourceOrderFallbackFacts) hasDefiniteExitBefore(line int) bool {
+	index := sort.SearchInts(facts.definiteExitLines, line)
+	return index > 0
+}
+
+func (facts arraySourceOrderFallbackFacts) hasUnconditionalTransfer(afterLine, beforeLine int) bool {
+	index := sort.Search(len(facts.unconditionalTransferLines), func(index int) bool {
+		return facts.unconditionalTransferLines[index] > afterLine
+	})
+	return index < len(facts.unconditionalTransferLines) && facts.unconditionalTransferLines[index] < beforeLine
+}
+
+func (facts arraySourceOrderFallbackFacts) allocationDominatesCall(allocationLine, callLine int) bool {
+	targetLine, bypassed := facts.bypassTargetMin[allocationLine]
+	return !bypassed || targetLine > callLine
+}
+
+func (facts arraySourceOrderFallbackFacts) hasAmbiguousTransferBefore(line int) bool {
+	for transferLine := range facts.ambiguousTransferLines {
+		if transferLine < line {
+			return true
+		}
+	}
+	return false
+}
+
+func (facts arraySourceOrderFallbackFacts) allocationInvariant(name string, beforeLine int) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	if name == "" {
+		return false
+	}
+	if facts.hasAmbiguousTransferBefore(beforeLine) {
+		return false
+	}
+	unconditional := false
+	branchAllocations := map[int]map[int]bool{}
+	for _, allocation := range facts.allocations[name] {
+		if allocation.line < 1 || allocation.line >= beforeLine || facts.hasUnconditionalTransfer(allocation.line, beforeLine) {
+			continue
+		}
+		if allocation.parentID == 0 {
+			if facts.allocationDominatesCall(allocation.line, beforeLine) {
+				unconditional = true
+			}
+			continue
+		}
+		root, branch, ok := facts.branchForAllocation(allocation.parentID)
+		if !ok {
+			continue
+		}
+		branches := branchAllocations[root]
+		if branches == nil {
+			branches = map[int]bool{}
+		}
+		branches[branch] = true
+		branchAllocations[root] = branches
+	}
+	if unconditional {
+		return true
+	}
+	for root := range facts.branchGroups {
+		if facts.branchTransferBypassBefore(root, name, beforeLine) {
+			return false
+		}
+	}
+	requiredGroup := false
+	for root, expected := range facts.branchGroups {
+		observed := branchAllocations[root]
+		if len(observed) == 0 {
+			continue
+		}
+		requiredGroup = true
+		for branch := range expected {
+			if !observed[branch] {
+				return false
+			}
+		}
+	}
+	return requiredGroup
+}
+
+func arraySourceOrderIfRoot(parents map[int]procedureir.Statement, statementID int) (int, bool) {
+	seen := map[int]bool{}
+	for statementID > 0 && !seen[statementID] {
+		seen[statementID] = true
+		statement, ok := parents[statementID]
+		if !ok {
+			return 0, false
+		}
+		switch statement.Kind {
+		case procedureir.StatementIf:
+			return statement.ID, true
+		case procedureir.StatementElseIf:
+			statementID = statement.ParentID
+		default:
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+func (facts arraySourceOrderFallbackFacts) branchForAllocation(parentID int) (int, int, bool) {
+	parent, ok := facts.parents[parentID]
+	if !ok {
+		return 0, 0, false
+	}
+	switch parent.Kind {
+	case procedureir.StatementIf, procedureir.StatementElseIf:
+		root, ok := arraySourceOrderIfRoot(facts.parents, parent.ID)
+		return root, parent.ID, ok
+	case procedureir.StatementElse:
+		root, ok := arraySourceOrderIfRoot(facts.parents, parent.ParentID)
+		return root, parent.ID, ok
+	default:
+		return 0, 0, false
+	}
+}
+
+func (facts arraySourceOrderFallbackFacts) branchForStatement(statementID int) (int, int, bool) {
+	seen := map[int]bool{}
+	statement, ok := facts.parents[statementID]
+	if !ok {
+		return 0, 0, false
+	}
+	parentID := statement.ParentID
+	for parentID > 0 && !seen[parentID] {
+		seen[parentID] = true
+		root, branch, branchOK := facts.branchForAllocation(parentID)
+		if branchOK && facts.branchGroups[root] != nil {
+			return root, branch, true
+		}
+		parent, parentOK := facts.parents[parentID]
+		if !parentOK {
+			break
+		}
+		parentID = parent.ParentID
+	}
+	return 0, 0, false
+}
+
+func (facts *arraySourceOrderFallbackFacts) recordBranchTransferBypass(block, target vbacfg.Block, sourceLine int, branchAllocationLines map[int]map[int]map[string][]int) {
+	if block.Statement == nil || !arraySourceOrderProcedureTransfer(*block.Statement) {
+		return
+	}
+	targetLine := target.Range.StartLine
+	if target.Statement != nil && target.Statement.Range.StartLine > 0 {
+		targetLine = target.Statement.Range.StartLine
+	}
+	sourceRoot, sourceBranch, sourceInBranch := facts.branchForStatement(block.Statement.ID)
+	for root := range facts.branchGroups {
+		rootStatement := facts.parents[root]
+		if sourceLine > rootStatement.Range.EndLine {
+			continue
+		}
+		targetAfterGroup := target.Kind != vbacfg.BlockStatement || targetLine <= 0 || targetLine > rootStatement.Range.EndLine
+		if !targetAfterGroup {
+			continue
+		}
+		if sourceLine < rootStatement.Range.StartLine || !sourceInBranch || sourceRoot != root {
+			for _, names := range branchAllocationLines[root] {
+				for name := range names {
+					facts.saveBranchTransferBypass(root, name, sourceLine)
+				}
+			}
+			continue
+		}
+		for name, lines := range branchAllocationLines[root][sourceBranch] {
+			if len(lines) == 0 || lines[0] >= sourceLine {
+				facts.saveBranchTransferBypass(root, name, sourceLine)
+			}
+		}
+	}
+}
+
+func (facts *arraySourceOrderFallbackFacts) saveBranchTransferBypass(root int, name string, line int) {
+	byName := facts.branchTransferBypass[root]
+	if byName == nil {
+		byName = map[string]int{}
+		facts.branchTransferBypass[root] = byName
+	}
+	if previous, exists := byName[name]; !exists || line < previous {
+		byName[name] = line
+	}
+}
+
+func (facts arraySourceOrderFallbackFacts) branchTransferBypassBefore(root int, name string, beforeLine int) bool {
+	line, ok := facts.branchTransferBypass[root][name]
+	return ok && line < beforeLine
+}
+
+func arrayByRefSourceOrderFallbackApplies(file parsedFile, proc sourceProcedure, graph *vbacfg.CFGView, facts arraySourceOrderFallbackFacts, call procedureir.CallSite) bool {
+	if graph == nil || facts.unknownFlow || call.Range.StartLine <= proc.StartLine || !arraySourceOrderCallLineIsSingleStatement(file.Lines, call.Range.StartLine) {
+		return false
+	}
+	if facts.hasDefiniteExitBefore(call.Range.StartLine) {
+		return false
+	}
+	return facts.hasConditionalTransferBefore(call.Range.StartLine)
+}
+
+func arraySourceOrderCallLineIsSingleStatement(lines []string, line int) bool {
+	if line < 1 || line > len(lines) {
+		return false
+	}
+	// The source-order fallback intentionally does not interpret statement
+	// order within a colon-separated line.  Rejecting those calls keeps a
+	// preceding Erase/assignment from being skipped when the recovered CFG
+	// maps the whole line to one statement.
+	code := strings.TrimSpace(normalizedCodeLine(arraySourceOrderStripComment(lines[line-1])))
+	// VBA permits a Rem comment after a statement separator. The separator is
+	// part of the comment boundary, not a second executable statement, so do
+	// not let colons inside that comment disable the fallback.
+	if strings.HasSuffix(code, ":") {
+		code = strings.TrimSpace(strings.TrimSuffix(code, ":"))
+	}
+	return !arraySourceOrderHasStatementSeparator(code)
+}
+
+func arraySourceOrderHasStatementSeparator(code string) bool {
+	inString := false
+	for index := 0; index < len(code); index++ {
+		switch code[index] {
+		case '"':
+			if inString && index+1 < len(code) && code[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case ':':
+			if inString {
+				continue
+			}
+			next := index + 1
+			for next < len(code) && (code[next] == ' ' || code[next] == '\t') {
+				next++
+			}
+			if next < len(code) && code[next] == '=' {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func arraySourceOrderTextHasProcedureTransfer(text string) bool {
+	text = strings.TrimSpace(text)
+	if _, body, ok := arrayIfThenParts(text); ok {
+		for _, part := range splitRangeValueSourceStatements(body) {
+			if arraySourceOrderTextHasProcedureTransfer(part) {
+				return true
+			}
+		}
+		return false
+	}
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "goto ") {
+		return true
+	}
+	if lower == "end" || lower == "end sub" || lower == "end function" || lower == "end property" {
+		return true
+	}
+	for _, prefix := range []string{"exit sub", "exit function", "exit property"} {
+		if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func arraySourceOrderProcedureTransfer(statement procedureir.Statement) bool {
+	switch statement.Kind {
+	case procedureir.StatementGoTo:
+		_, isGoSub := arrayLocalGoSubTargetFromStatementText(statement.Text)
+		return !isGoSub
+	case procedureir.StatementEnd:
+		return true
+	case procedureir.StatementExit:
+		if statement.Control == nil {
+			lower := strings.ToLower(strings.TrimSpace(statement.Text))
+			return strings.HasPrefix(lower, "exit sub") || strings.HasPrefix(lower, "exit function") || strings.HasPrefix(lower, "exit property")
+		}
+		switch statement.Control.Transfer {
+		case procedureir.TransferExitSub, procedureir.TransferExitFunction, procedureir.TransferExitProperty, procedureir.TransferTerminate:
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func arraySourceOrderInlineConditionalTransfer(statement procedureir.Statement, lines []string) bool {
+	line := statement.Range.StartLine
+	if line < 1 || line > len(lines) {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(normalizedCodeLine(lines[line-1])))
+	if !strings.HasPrefix(text, "if ") {
+		return false
+	}
+	then := strings.Index(text, " then")
+	if then < 0 {
+		return false
+	}
+	suffix := strings.TrimSpace(text[then+len(" then"):])
+	if suffix == "" {
+		return false
+	}
+	switch statement.Kind {
+	case procedureir.StatementGoTo:
+		return strings.Contains(suffix, "goto ")
+	case procedureir.StatementEnd:
+		return strings.HasPrefix(suffix, "end")
+	case procedureir.StatementExit:
+		return strings.Contains(suffix, "exit sub") || strings.Contains(suffix, "exit function") || strings.Contains(suffix, "exit property")
+	default:
+		return false
+	}
+}
+
+func arraySourceOrderInlineConditionalDefinitelyTerminates(text string, constants map[string]int) bool {
+	condition, body, ok := arrayIfThenParts(text)
+	if !ok || strings.TrimSpace(body) == "" {
+		return false
+	}
+	condition = strings.TrimSpace(condition)
+	lowerCondition := strings.ToLower(condition)
+	switch {
+	case strings.HasPrefix(lowerCondition, "if "):
+		condition = strings.TrimSpace(condition[len("if "):])
+	case strings.HasPrefix(lowerCondition, "elseif "):
+		condition = strings.TrimSpace(condition[len("elseif "):])
+	default:
+		return false
+	}
+	value, known := arraySourceOrderConstantBoolean(condition, constants)
+	if !known {
+		return false
+	}
+	thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+	selected := thenBody
+	if !value {
+		if !hasElse {
+			return false
+		}
+		selected = elseBody
+	}
+	return arraySourceOrderInlineBodyDefinitelyTerminates(selected, constants)
+}
+
+func arraySourceOrderInlineBodyDefinitelyTerminates(text string, constants map[string]int) bool {
+	for _, statement := range splitRangeValueSourceStatements(text) {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		if arraySourceOrderProcedureExitStatementText(statement) || arraySourceOrderInlineConditionalDefinitelyTerminates(statement, constants) {
+			return true
+		}
+	}
+	return false
+}
+
+func arraySourceOrderProcedureExitStatementText(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	for _, prefix := range []string{"exit sub", "exit function", "exit property"} {
+		if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
+			return true
+		}
+	}
+	switch lower {
+	case "end", "end sub", "end function", "end property":
+		return true
+	default:
+		return false
+	}
+}
+
+func arraySourceOrderConstantBoolean(expression string, constants map[string]int) (bool, bool) {
+	values := make(map[string]constexpr.Value, len(constants))
+	for name, value := range constants {
+		values[name] = constexpr.Value{Kind: constexpr.ValueLongLong, Integer: int64(value)}
+	}
+	result := constexpr.Evaluate(expression, constexpr.NewValues(values))
+	if result.Kind != constexpr.Known || result.Typed.Kind != constexpr.ValueBoolean {
+		return false, false
+	}
+	return result.Typed.Boolean, true
+}
+
+func arraySourceOrderInlineArrayMutation(text string, names map[string]bool, ctx analysisContext) bool {
+	condition, body, ok := arrayIfThenParts(text)
+	if !ok || strings.TrimSpace(body) == "" {
+		return false
+	}
+	condition = strings.TrimSpace(condition)
+	lowerCondition := strings.ToLower(condition)
+	switch {
+	case strings.HasPrefix(lowerCondition, "if "):
+		condition = strings.TrimSpace(condition[len("if "):])
+	case strings.HasPrefix(lowerCondition, "elseif "):
+		condition = strings.TrimSpace(condition[len("elseif "):])
+	}
+	thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+	branches := []string{thenBody}
+	if hasElse {
+		branches = append(branches, elseBody)
+	}
+	if value, known := arraySourceOrderConstantBoolean(condition, nil); known {
+		if value {
+			branches = []string{thenBody}
+		} else if hasElse {
+			branches = []string{elseBody}
+		} else {
+			branches = nil
+		}
+	}
+	for _, branch := range branches {
+		for _, statement := range splitRangeValueSourceStatements(branch) {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			if arraySourceOrderInlineArrayMutation(statement, names, ctx) {
+				return true
+			}
+			if arraySourceOrderMutatesArrayStatement(statement, names, ctx) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arraySourceOrderMutatesArrayStatement(text string, names map[string]bool, ctx analysisContext) bool {
+	text = strings.TrimSpace(text)
+	if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+		for _, target := range splitArgs(match[1]) {
+			if names[strings.ToLower(cleanIdentifier(strings.TrimSpace(target)))] {
+				return true
+			}
+		}
+	}
+	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+		if strings.TrimSpace(match[1]) != "" {
+			// ReDim Preserve keeps an allocated input array allocated. The
+			// source-order state solver handles the separate requirement that
+			// the input must already be allocated.
+			return false
+		}
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			name := strings.ToLower(cleanIdentifier(redim.name))
+			if direct && names[name] && !arrayStatementAllocatesName(text, name, ctx) {
+				return true
+			}
+		}
+	}
+	if lhs, _, indexed, ok := arrayAssignment(text); ok && !indexed {
+		name := strings.ToLower(cleanIdentifier(lhs))
+		return names[name] && !arrayStatementAllocatesName(text, name, ctx)
+	}
+	return false
+}
+
+// arraySourceOrderStripComment removes VBA apostrophe and Rem comments while
+// preserving the byte offsets before the comment. The latter matters because
+// recovered CallSite ranges are mapped back to colon-separated source
+// segments below.
+func arraySourceOrderStripComment(line string) string {
+	inString := false
+	for index := 0; index < len(line); index++ {
+		switch line[index] {
+		case '"':
+			if inString && index+1 < len(line) && line[index+1] == '"' {
+				index++
+				continue
+			}
+			inString = !inString
+		case '\'':
+			if !inString {
+				return line[:index]
+			}
+		default:
+			if !inString && arraySourceOrderRemCommentAt(line, index) {
+				return line[:index]
+			}
+		}
+	}
+	return line
+}
+
+func arraySourceOrderRemCommentAt(line string, index int) bool {
+	if index+3 > len(line) || !strings.EqualFold(line[index:index+3], "Rem") {
+		return false
+	}
+	if index > 0 {
+		previous := index - 1
+		for previous >= 0 {
+			switch line[previous] {
+			case ' ', '\t', '\r', '\n':
+				previous--
+				continue
+			}
+			break
+		}
+		if previous >= 0 && line[previous] != ':' {
+			return false
+		}
+	}
+	if index+3 < len(line) {
+		next := line[index+3]
+		if next != ':' && next != ' ' && next != '\t' && next != '\r' && next != '\n' {
+			return false
+		}
+	}
+	return true
+}
+
+func arraySourceOrderLineStartByte(source []byte, line int) int {
+	if line <= 1 {
+		return 0
+	}
+	current := 1
+	for index, value := range source {
+		if value != '\n' {
+			continue
+		}
+		current++
+		if current == line {
+			return index + 1
+		}
+	}
+	return -1
+}
+
+func arraySourceOrderCallsBySegment(file parsedFile, line int, calls []procedureir.CallSite) ([][]procedureir.CallSite, []procedureir.CallSite) {
+	if line < 1 || line > len(file.Lines) {
+		return nil, calls
+	}
+	segments := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
+	if len(segments) == 0 {
+		return nil, calls
+	}
+	bySegment := make([][]procedureir.CallSite, len(segments))
+	unassigned := make([]procedureir.CallSite, 0)
+	lineStart := arraySourceOrderLineStartByte(file.Source, line)
+	for _, call := range calls {
+		segmentIndex := -1
+		if lineStart >= 0 {
+			relative := call.Range.StartByte - lineStart
+			for index, segment := range segments {
+				if relative >= segment.start && (relative < segment.end || index == len(segments)-1 && relative <= segment.end) {
+					segmentIndex = index
+					break
+				}
+			}
+		}
+		if segmentIndex < 0 {
+			unassigned = append(unassigned, call)
+			continue
+		}
+		bySegment[segmentIndex] = append(bySegment[segmentIndex], call)
+	}
+	return bySegment, unassigned
+}
+
+func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySourceOrderFallbackFacts, localGoSubAllocations arrayLocalGoSubAllocations, caller, target sourceProcedure, call procedureir.CallSite, initial arrayFlowState, ctx analysisContext, variables map[string]arrayVariable, constants map[string]int) (arrayFlowState, bool) {
+	bindings, ok := arrayCallArgumentBindings(caller, target, call)
+	if !ok {
+		return nil, false
+	}
+	arguments := make([]string, target.Params.Len())
+	bound := make(map[int]bool, len(bindings))
+	for _, binding := range bindings {
+		arguments[binding.parameterIndex] = binding.text
+		bound[binding.parameterIndex] = true
+	}
+	for index, parameter := range target.Params.AllIndexed() {
+		if !parameterIsByRefArray(parameter) || !bound[index] {
+			continue
+		}
+		if directArrayArgumentName(arguments[index]) == "" {
+			return nil, false
+		}
+	}
+	arrayNames := map[string]bool{}
+	initiallyAllocated := map[string]bool{}
+	for index, parameter := range target.Params.AllIndexed() {
+		if parameterIsByRefArray(parameter) && index < len(arguments) {
+			name := strings.ToLower(cleanIdentifier(directArrayArgumentName(arguments[index])))
+			arrayNames[name] = true
+			value, known := initial[name]
+			initiallyAllocated[name] = known && value.kind == arrayAllocated && value.knownArray
+		}
+	}
+	if call.Range.StartLine <= caller.StartLine || !arraySourceOrderCallLineIsSingleStatement(file.Lines, call.Range.StartLine) {
+		return nil, false
+	}
+	state := cloneArrayState(initial)
+	// Recovered CFG blocks can coalesce a colon-separated physical line. Apply
+	// each logical segment in source order so Erase or another mutation before a
+	// later call cannot be hidden by passing the whole physical line to transfer.
+	for line := caller.StartLine; line < call.Range.StartLine && line <= len(file.Lines); line++ {
+		segments := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
+		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller.Calls, line))
+		if len(unassignedCalls) > 0 && len(segments) > 1 {
+			// A call without a trustworthy source offset cannot be placed among
+			// colon-separated statements. Continuing would apply its side effect
+			// after the whole line and could silently reverse an allocation and a
+			// later Erase. The fallback is intentionally fail-closed here.
+			return nil, false
+		}
+		for segmentIndex, segment := range segments {
+			statement := normalizedCodeLine(segment.text)
+			if strings.TrimSpace(statement) == "" {
+				continue
+			}
+			if arraySourceOrderPreserveNeedsAllocatedInput(statement, arrayNames, state) {
+				// A successful ReDim Preserve requires an already allocated
+				// dynamic array. The source-order fallback has no exceptional
+				// edge on which an On Error Resume Next failure could continue,
+				// so an unallocated input cannot be used as an allocation proof.
+				return nil, false
+			}
+			// Ordinary ReDim and array-factory assignments intentionally continue
+			// through arrayTransfer below. Only an inline conditional mutation is
+			// rejected because its branch state is not modeled by this fallback.
+			if arraySourceOrderInlineArrayMutation(statement, arrayNames, ctx) {
+				return nil, false
+			}
+			state, _ = a.arrayTransfer(file, caller, ctx, variables, state, statement, line, constants, nil)
+			state = applyArrayLocalGoSubStatementEffects(state, statement, localGoSubAllocations)
+			for _, previous := range callsBySegment[segmentIndex] {
+				state = applyArrayModuleCallEffects(state, file, caller, previous, ctx, variables, file.moduleDecls())
+				state = applyArrayUnknownModuleCallEffects(state, file, caller, previous, ctx, variables, file.moduleDecls())
+				if arrayProcedureLineHasInlineConditional(file, previous.Range.StartLine) {
+					state = applyArrayConditionalByRefCallEffects(state, caller, previous, ctx)
+				} else {
+					state = applyArrayByRefCallEffects(state, caller, previous, ctx)
+				}
+			}
+		}
+		for _, previous := range unassignedCalls {
+			state = applyArrayModuleCallEffects(state, file, caller, previous, ctx, variables, file.moduleDecls())
+			state = applyArrayUnknownModuleCallEffects(state, file, caller, previous, ctx, variables, file.moduleDecls())
+			if arrayProcedureLineHasInlineConditional(file, previous.Range.StartLine) {
+				state = applyArrayConditionalByRefCallEffects(state, caller, previous, ctx)
+			} else {
+				state = applyArrayByRefCallEffects(state, caller, previous, ctx)
+			}
+		}
+	}
+	for index, parameter := range target.Params.AllIndexed() {
+		if !parameterIsByRefArray(parameter) || !bound[index] {
+			continue
+		}
+		name := directArrayArgumentName(arguments[index])
+		value, known := state[name]
+		if !known || value.kind != arrayAllocated || !value.knownArray || (!facts.allocationInvariant(name, call.Range.StartLine) && !initiallyAllocated[name]) {
+			return nil, false
+		}
+	}
+	return state, true
+}
+
+func arraySourceOrderPreserveNeedsAllocatedInput(text string, names map[string]bool, state arrayFlowState) bool {
+	match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(text))
+	if len(match) == 0 || strings.TrimSpace(match[1]) == "" {
+		return false
+	}
+	for _, clause := range splitArgs(match[2]) {
+		redim, direct := parseDirectArrayRedimClause(clause)
+		name := strings.ToLower(cleanIdentifier(redim.name))
+		if !direct || name == "" || !names[name] {
+			continue
+		}
+		value, known := state[name]
+		if !known || value.kind != arrayAllocated || !value.knownArray {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayStatementAllocatesName(text, name string, ctx analysisContext) bool {
+	if match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) > 0 && strings.TrimSpace(match[1]) == "" {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if direct && strings.EqualFold(cleanIdentifier(redim.name), name) {
+				return true
+			}
+		}
+	}
+	if lhs, rhs, indexed, ok := arrayAssignment(text); ok && !indexed && strings.EqualFold(cleanIdentifier(lhs), name) {
+		value, known := arrayExpressionState(rhs, arrayFlowState{}, ctx)
+		return known && value.kind == arrayAllocated && value.knownArray
+	}
+	return false
+}
+
 func arrayByRefCallHasProvenArrayArguments(target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState, ctx analysisContext) (bool, bool) {
-	arguments := arrayCallArgumentTexts(caller, call)
-	if len(call.Arguments.Named) > 0 || len(arguments) != call.Arguments.Count {
+	bindings, ok := arrayCallArgumentBindings(caller, target, call)
+	if !ok {
 		return false, false
 	}
 	foundExpression := false
-	for index, parameter := range target.Params.AllIndexed() {
+	for _, binding := range bindings {
+		if binding.parameterIndex < 0 || binding.parameterIndex >= target.Params.Len() {
+			return false, false
+		}
+		parameter := target.Params.valueAt(binding.parameterIndex)
 		if !parameterIsByRefArray(parameter) {
 			continue
 		}
-		if index >= len(arguments) {
-			return false, false
-		}
-		argument := arguments[index]
+		argument := binding.text
 		if name := directArrayArgumentName(argument); name != "" {
 			value, known := state[name]
 			if !known || value.kind != arrayAllocated || !value.knownArray {
@@ -5228,6 +7654,126 @@ func arrayCallArgumentTexts(proc sourceProcedure, call procedureir.CallSite) []s
 	return texts
 }
 
+type arrayCallArgumentBinding struct {
+	parameterIndex int
+	text           string
+}
+
+// arrayCallArgumentBindings maps actual arguments to formal parameters while
+// retaining VBA's source order for positional arguments. Named arguments are
+// identified by their expression IDs, so a positional argument before a named
+// argument is not mistaken for the named formal slot.
+func arrayCallArgumentBindings(caller sourceProcedure, target sourceProcedure, call procedureir.CallSite) ([]arrayCallArgumentBinding, bool) {
+	if call.Arguments.Count == 0 {
+		return nil, true
+	}
+	if len(call.Arguments.ExpressionIDs) == 0 {
+		if len(call.Arguments.Named) != call.Arguments.Count {
+			return nil, false
+		}
+		bindings := make([]arrayCallArgumentBinding, 0, len(call.Arguments.Named))
+		used := map[int]bool{}
+		for _, named := range call.Arguments.Named {
+			index, ok := arrayFormalParameterIndex(target, named.Name)
+			if !ok || used[index] {
+				return nil, false
+			}
+			used[index] = true
+			bindings = append(bindings, arrayCallArgumentBinding{parameterIndex: index, text: strings.TrimSpace(named.ValueText)})
+		}
+		return bindings, true
+	}
+	texts := arrayCallArgumentTexts(caller, call)
+	if len(texts) != call.Arguments.Count || len(call.Arguments.ExpressionIDs) != len(texts) {
+		return nil, false
+	}
+	namedByExpressionID := make(map[int]int, len(call.Arguments.Named))
+	for _, named := range call.Arguments.Named {
+		if named.ExpressionID == 0 {
+			return nil, false
+		}
+		index, ok := arrayFormalParameterIndex(target, named.Name)
+		if !ok {
+			return nil, false
+		}
+		if _, exists := namedByExpressionID[named.ExpressionID]; exists {
+			return nil, false
+		}
+		namedByExpressionID[named.ExpressionID] = index
+	}
+	bindings := make([]arrayCallArgumentBinding, 0, len(texts))
+	used := map[int]bool{}
+	nextPositional := 0
+	for actualIndex, text := range texts {
+		formalIndex, named := namedByExpressionID[call.Arguments.ExpressionIDs[actualIndex]]
+		if !named {
+			for nextPositional < target.Params.Len() && used[nextPositional] {
+				nextPositional++
+			}
+			if nextPositional < target.Params.Len() {
+				formalIndex = nextPositional
+				nextPositional++
+			} else {
+				last := target.Params.Len() - 1
+				if last < 0 || !target.Params.valueAt(last).ParamArray {
+					return nil, false
+				}
+				// Every extra positional argument belongs to the trailing
+				// ParamArray formal. Keep one binding per actual so a direct
+				// array argument among the extras still participates in the
+				// ByRef effect analysis.
+				formalIndex = last
+			}
+		}
+		if used[formalIndex] && (formalIndex < 0 || formalIndex >= target.Params.Len() || !target.Params.valueAt(formalIndex).ParamArray) {
+			return nil, false
+		}
+		used[formalIndex] = true
+		bindings = append(bindings, arrayCallArgumentBinding{parameterIndex: formalIndex, text: text})
+	}
+	return bindings, true
+}
+
+func arrayCallFormalArguments(caller sourceProcedure, target sourceProcedure, call procedureir.CallSite) ([]string, bool) {
+	bindings, ok := arrayCallArgumentBindings(caller, target, call)
+	if !ok {
+		return nil, false
+	}
+	arguments := make([]string, target.Params.Len())
+	for _, binding := range bindings {
+		if binding.parameterIndex < 0 || binding.parameterIndex >= len(arguments) {
+			return nil, false
+		}
+		arguments[binding.parameterIndex] = binding.text
+	}
+	return arguments, true
+}
+
+func arrayFormalParameterIndex(target sourceProcedure, name string) (int, bool) {
+	name = strings.TrimSpace(name)
+	for index, parameter := range target.Params.AllIndexed() {
+		if strings.EqualFold(strings.TrimSpace(parameter.Name), name) {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func arrayCallPassesDirectArrayArgument(proc sourceProcedure, call procedureir.CallSite, name string) bool {
+	name = strings.ToLower(cleanIdentifier(name))
+	for _, argument := range call.Arguments.Named {
+		if directArrayArgumentName(argument.ValueText) == name {
+			return true
+		}
+	}
+	for _, argument := range arrayCallArgumentTexts(proc, call) {
+		if directArrayArgumentName(argument) == name {
+			return true
+		}
+	}
+	return false
+}
+
 func directArrayArgumentName(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" || !isIdentifierStart(text[0]) {
@@ -5242,7 +7788,9 @@ func directArrayArgumentName(text string) string {
 }
 
 func parameterIsByRefArray(parameter parameterInfo) bool {
-	return parameterIsArray(parameter) && !strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal")
+	// ParamArray materializes a new Variant array in the callee. Its actual
+	// arguments are elements of that array, not aliases to caller arrays.
+	return !parameter.ParamArray && parameterIsArray(parameter) && !strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal")
 }
 
 func parameterIsByRefScalar(parameter parameterInfo) bool {
