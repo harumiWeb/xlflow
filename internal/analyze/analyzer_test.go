@@ -6194,6 +6194,39 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesSafeUBoundGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function SafeUBoundValues(ByRef values() As Long) As Long
+  On Error GoTo noValues
+  SafeUBoundValues = UBound(values)
+  Exit Function
+noValues:
+  SafeUBoundValues = -1
+End Function
+
+Public Sub Run(ByRef values() As Long)
+  Dim ub As Long
+  ub = SafeUBoundValues(values)
+  If ub < 0 Then Exit Sub
+  Debug.Print values(0)
+End Sub
+
+Public Sub Direct(ByRef values() As Long)
+  If SafeUBoundValues(values) >= 0 Then Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a nonnegative SafeUBound result should prove the later array access safe: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesIsArrayGuardToNestedArrayElement(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

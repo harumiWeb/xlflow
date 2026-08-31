@@ -339,6 +339,7 @@ type analysisContext struct {
 	functionAmbiguous                    map[string]bool
 	arrayReturns                         map[string]arrayValue
 	arrayAllocationGuards                map[string]bool
+	arraySafeBoundGuards                 map[string]bool
 	arrayByRefAllocations                arrayByRefAllocationSummaries
 	arrayByRefConditionalAllocations     arrayByRefConditionalAllocations
 	arrayByRefLengthAllocations          arrayByRefLengthAllocations
@@ -2400,6 +2401,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		functionAmbiguous:                map[string]bool{},
 		arrayReturns:                     map[string]arrayValue{},
 		arrayAllocationGuards:            map[string]bool{},
+		arraySafeBoundGuards:             map[string]bool{},
 		arrayByRefAllocations:            arrayByRefAllocationSummaries{},
 		arrayByRefConditionalAllocations: arrayByRefConditionalAllocations{},
 		arrayByRefLengthAllocations:      arrayByRefLengthAllocations{},
@@ -2488,6 +2490,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	// open through buildProcedureAnalysisPlan.
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
+		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
 		materializeArrayParticipantPlans(files, a.Config.Analyze, ctx.arrayParticipants, ctx.arrayParticipantKeys)

@@ -87,6 +87,7 @@ type arrayValue struct {
 	preserveShape   []arrayDimension
 	origin          arrayOrigin
 	allocationProbe string
+	safeBoundProbe  string
 	// allocationCountSource records a narrow conditional allocation contract:
 	// the array is allocated when the named scalar is positive, or when the
 	// named collection's Count is positive. The fact is refined only on a
@@ -352,6 +353,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
+				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, vba227Variables)
 				return applyArrayModuleConfigurationBranch(out, block.Statement, edge, ctx.arrayModuleConfigurations[file.Path], vba227Variables, file, proc, moduleDecls)
 			},
 		})
@@ -560,6 +562,30 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
+		if body != "" && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+			if guardedState, safe := arraySafeBoundBranchState(state, condition, vbacfg.EdgeBranchTrue, ctx.arraySafeBoundGuards, variables); safe {
+				conditionState, findings := transfer(state, condition)
+				thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+				thenState := guardedState
+				if thenBody != "" {
+					var thenFindings []Finding
+					thenState, thenFindings = transfer(thenState, thenBody)
+					findings = append(findings, thenFindings...)
+				}
+				elseState := conditionState
+				if hasElse && elseBody != "" {
+					var elseFindings []Finding
+					elseState, elseFindings = transfer(elseState, elseBody)
+					findings = append(findings, elseFindings...)
+				}
+				if hasElse {
+					state = meetArrayState(thenState, elseState)
+				} else {
+					state = meetArrayState(thenState, conditionState)
+				}
+				return state, findings
+			}
+		}
 		if argument, _, guard := arrayIsArrayGuardCondition(condition); guard && arrayElementBaseName(argument) != "" {
 			state, findings := transfer(state, condition)
 			guardedState := arrayElementGuardState(state, argument, variables)
@@ -1996,6 +2022,111 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 	return updated
 }
 
+// applyArraySafeBoundGuard refines the branch where a helper that returns an
+// upper bound (or -1 after a caught bounds failure) proves that its array is
+// allocated and has a nonnegative upper bound. This is separate from the
+// positive-length helper contract because zero is a successful upper-bound
+// result, not its failure sentinel.
+func applyArraySafeBoundGuard(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, guards map[string]bool, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue && edge.Kind != vbacfg.EdgeBranchFalse {
+		return state
+	}
+	if statement.Condition == nil {
+		return state
+	}
+	updated, ok := arraySafeBoundBranchState(state, statement.Condition.Text, edge.Kind, guards, variables)
+	if !ok {
+		return state
+	}
+	return updated
+}
+
+func arraySafeBoundBranchState(state arrayFlowState, text string, branch vbacfg.EdgeKind, guards map[string]bool, variables map[string]arrayVariable) (arrayFlowState, bool) {
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(text), "if ") {
+		text = strings.TrimSpace(text[3:])
+	}
+	if then := strings.LastIndex(strings.ToLower(text), " then"); then >= 0 && strings.TrimSpace(text[then+5:]) == "" {
+		text = strings.TrimSpace(text[:then])
+	}
+	for len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+	functionName, argument, operator, literal, reversed, ok := parseArrayAllocationGuard(text)
+	if ok {
+		functionName = strings.ToLower(lastName(functionName))
+		if !guards[functionName] {
+			return state, false
+		}
+	} else {
+		argument, operator, literal, reversed, ok = parseArraySafeBoundProbeVariable(text, state)
+		if !ok {
+			return state, false
+		}
+	}
+	value, err := strconv.Atoi(literal)
+	if err != nil {
+		return state, false
+	}
+	allocatedBranch, ok := safeBoundNonnegativeBranch(operator, value, reversed)
+	if !ok || branch != allocatedBranch {
+		return state, false
+	}
+	name := strings.ToLower(cleanIdentifier(argument))
+	variable, known := variables[name]
+	if !known || !variable.isArray {
+		return state, false
+	}
+	current, known := state[name]
+	if !known {
+		return state, false
+	}
+	updated := cloneArrayState(state)
+	current.kind = arrayAllocated
+	current.knownArray = true
+	current.mayBeEmpty = false
+	updated[name] = current
+	return updated, true
+}
+
+func safeBoundNonnegativeBranch(operator string, value int, reversed bool) (vbacfg.EdgeKind, bool) {
+	if reversed {
+		switch operator {
+		case ">":
+			operator = "<"
+		case ">=":
+			operator = "<="
+		case "<":
+			operator = ">"
+		case "<=":
+			operator = ">="
+		}
+	}
+	switch operator {
+	case "=":
+		if value >= 0 {
+			return vbacfg.EdgeBranchTrue, true
+		}
+	case ">":
+		if value >= -1 {
+			return vbacfg.EdgeBranchTrue, true
+		}
+	case ">=":
+		if value >= 0 {
+			return vbacfg.EdgeBranchTrue, true
+		}
+	case "<":
+		if value >= 0 {
+			return vbacfg.EdgeBranchFalse, true
+		}
+	case "<=":
+		if value >= -1 {
+			return vbacfg.EdgeBranchFalse, true
+		}
+	}
+	return "", false
+}
+
 func arrayIsArrayGuardCondition(text string) (string, vbacfg.EdgeKind, bool) {
 	text = strings.TrimSpace(text)
 	if condition, _, ok := arrayIfThenParts(text); ok {
@@ -2196,7 +2327,36 @@ func parseArrayAllocationProbeVariable(text string, state arrayFlowState) (argum
 	return "", "", "", false, false
 }
 
+func parseArraySafeBoundProbeVariable(text string, state arrayFlowState) (argument, operator, literal string, reversed, ok bool) {
+	if match := arrayGuardValueRe.FindStringSubmatch(text); len(match) == 4 {
+		value, exists := state[strings.ToLower(cleanIdentifier(match[1]))]
+		if !exists || value.safeBoundProbe == "" {
+			return "", "", "", false, false
+		}
+		return value.safeBoundProbe, match[2], match[3], false, true
+	}
+	if match := arrayGuardValueReversedRe.FindStringSubmatch(text); len(match) == 4 {
+		value, exists := state[strings.ToLower(cleanIdentifier(match[3]))]
+		if !exists || value.safeBoundProbe == "" {
+			return "", "", "", false, false
+		}
+		return value.safeBoundProbe, match[2], match[1], true, true
+	}
+	return "", "", "", false, false
+}
+
 func arrayAllocationProbeArgument(text string, guards map[string]bool) (string, bool) {
+	functionName, argument, operator, literal, _, ok := parseArrayAllocationGuard(text)
+	if !ok || operator != "" || literal != "" {
+		return "", false
+	}
+	if _, ok := guards[strings.ToLower(lastName(functionName))]; !ok {
+		return "", false
+	}
+	return strings.ToLower(cleanIdentifier(argument)), true
+}
+
+func arraySafeBoundProbeArgument(text string, guards map[string]bool) (string, bool) {
 	functionName, argument, operator, literal, _, ok := parseArrayAllocationGuard(text)
 	if !ok || operator != "" || literal != "" {
 		return "", false
@@ -2271,6 +2431,11 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	} else {
 		out.allocationProbe = left.allocationProbe
 	}
+	if left.safeBoundProbe != right.safeBoundProbe {
+		out.safeBoundProbe = ""
+	} else {
+		out.safeBoundProbe = left.safeBoundProbe
+	}
 	if left.allocationCountSource != right.allocationCountSource {
 		out.allocationCountSource = ""
 	}
@@ -2314,7 +2479,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.allocationCountSource != r.allocationCountSource || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}
@@ -8399,6 +8564,9 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	if ctx.arrayAllocationGuards[strings.ToLower(proc.Name)] {
 		allocationProbeParameter, _ = arrayAllocationGuardParameter(proc)
 	}
+	if allocationProbeParameter == "" && ctx.arraySafeBoundGuards[strings.ToLower(proc.Name)] {
+		allocationProbeParameter, _ = arraySafeBoundGuardParameter(proc)
+	}
 	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
 		base := arrayOptionBase(file)
 		for _, clause := range splitArgs(match[2]) {
@@ -8612,8 +8780,11 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 		if variable, exists := variables[name]; exists && !variable.isArray && !variable.isVariant {
 			if argument, probe := arrayAllocationProbeArgument(rhs, ctx.arrayAllocationGuards); probe {
 				state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginLocal, allocationProbe: argument}
-			} else if value, tracked := state[name]; tracked && value.allocationProbe != "" {
+			} else if argument, probe := arraySafeBoundProbeArgument(rhs, ctx.arraySafeBoundGuards); probe {
+				state[name] = arrayValue{kind: arrayUnknown, origin: arrayOriginLocal, safeBoundProbe: argument}
+			} else if value, tracked := state[name]; tracked && (value.allocationProbe != "" || value.safeBoundProbe != "") {
 				value.allocationProbe = ""
+				value.safeBoundProbe = ""
 				state[name] = value
 			}
 		}
@@ -9729,6 +9900,94 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 		guards[name] = true
 	}
 	return guards
+}
+
+// inferArraySafeBoundGuards recognizes helpers that return UBound(array) on
+// their normal path and a negative sentinel after catching an unallocated
+// array. A nonnegative result therefore proves both that UBound succeeded and
+// that the array has an index at zero or above.
+func inferArraySafeBoundGuards(files []parsedFile) map[string]bool {
+	candidates := map[string][]string{}
+	procedureNames := map[string]int{}
+	for _, file := range files {
+		procedures := file.procedureView()
+		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
+			proc := procedures.valueAt(procedureIndex)
+			name := strings.ToLower(proc.Name)
+			if name != "" {
+				procedureNames[name]++
+			}
+			parameter, ok := arraySafeBoundGuardParameter(proc)
+			if !ok {
+				continue
+			}
+			candidates[name] = append(candidates[name], parameter)
+		}
+	}
+	guards := map[string]bool{}
+	for name, parameters := range candidates {
+		if name == "" || procedureNames[name] != 1 || len(parameters) != 1 {
+			continue
+		}
+		guards[name] = true
+	}
+	return guards
+}
+
+func arraySafeBoundGuardParameter(proc sourceProcedure) (string, bool) {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return "", false
+	}
+	if !arrayKnownScalarType(proc.ReturnType) || isObjectType(proc.ReturnType) || proc.Params.Len() != 1 {
+		return "", false
+	}
+	parameter := proc.Params.valueAt(0)
+	variantParameter := strings.EqualFold(cleanIdentifier(strings.TrimSpace(parameter.Type)), "variant")
+	if parameter.Name == "" || (!parameterIsArray(parameter) && !variantParameter) || proc.Name == "" {
+		return "", false
+	}
+
+	errorLabel := ""
+	recovery := false
+	hasRecovery := false
+	foundRecoveryLabel := false
+	normalReturns := 0
+	recoveryNegativeReturns := 0
+	invalidReturn := false
+	for statement := range proc.Statements.All() {
+		text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+		if match := arrayOnErrorGotoRe.FindStringSubmatch(text); len(match) == 2 {
+			errorLabel = strings.ToLower(match[1])
+			hasRecovery = true
+		}
+		if match := arrayLabelRe.FindStringSubmatch(text); len(match) == 2 {
+			recovery = errorLabel != "" && strings.EqualFold(match[1], errorLabel)
+			if recovery {
+				foundRecoveryLabel = true
+			}
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed || !strings.EqualFold(lhs, proc.Name) {
+			continue
+		}
+		switch {
+		case arrayUpperBoundExpressionMatches(rhs, parameter.Name):
+			normalReturns++
+		case recovery && strings.TrimSpace(rhs) == "-1":
+			recoveryNegativeReturns++
+		default:
+			invalidReturn = true
+		}
+	}
+	if !hasRecovery || !foundRecoveryLabel || normalReturns != 1 || recoveryNegativeReturns != 1 || invalidReturn {
+		return "", false
+	}
+	return strings.ToLower(parameter.Name), true
+}
+
+func arrayUpperBoundExpressionMatches(rhs, parameter string) bool {
+	compact := strings.Join(strings.Fields(strings.ToLower(rhs)), "")
+	return compact == "ubound("+strings.ToLower(parameter)+")"
 }
 
 func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {

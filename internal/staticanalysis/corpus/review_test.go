@@ -154,8 +154,8 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 1682 || metrics.TP != 729 || metrics.FP != 953 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=1682 TP=729 FP=953", metrics)
+	if metrics.Reviewed != 1694 || metrics.TP != 729 || metrics.FP != 965 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=1694 TP=729 FP=965", metrics)
 	}
 	// Guard the direction of the corpus review ledger, not only its exact size.
 	if precision := float64(metrics.TP) / float64(metrics.TP+metrics.FP); precision < 0.43 {
