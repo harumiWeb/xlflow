@@ -6769,6 +6769,81 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesDictionarySnapshotCountGuards(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CountLoop(ByVal data As Variant)
+  Dim keys() As String
+  Dim values() As String
+  Dim i As Long
+  Select Case TypeName(data)
+    Case "Dictionary"
+      With data
+        keys = .Keys
+        values = .Items
+      End With
+      For i = 1 To data.Count
+        Debug.Print keys(i - 1)
+        Debug.Print values(i - 1)
+      Next
+  End Select
+End Sub
+
+Public Sub NonDictionary(ByVal data As Variant)
+  Dim keys() As String
+  Dim i As Long
+  keys = data.Keys
+  For i = 1 To data.Count
+    Debug.Print keys(i - 1)
+  Next
+End Sub
+
+Public Sub BoundLoop(ByVal data As Variant)
+  Select Case TypeName(data)
+    Case "Dictionary"
+      With data
+        Dim keys() As String
+        keys = .Keys
+        Dim values() As String
+        values = .Items
+        Dim i As Long, upper As Long
+        upper = UBound(keys)
+        For i = 0 To upper
+          Debug.Print keys(i)
+          Debug.Print values(i)
+        Next
+      End With
+End Select
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var countLoop, nonDictionary, boundLoop []Finding
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Procedure {
+		case "CountLoop":
+			countLoop = append(countLoop, finding)
+		case "NonDictionary":
+			nonDictionary = append(nonDictionary, finding)
+		case "BoundLoop":
+			boundLoop = append(boundLoop, finding)
+		}
+	}
+	if len(countLoop) != 0 {
+		t.Fatalf("a positive Dictionary.Count loop should prove Keys/Items are non-empty: %+v", countLoop)
+	}
+	if len(nonDictionary) != 1 {
+		t.Fatalf("an unproven Keys receiver must remain unsafe: %+v", nonDictionary)
+	}
+	if len(boundLoop) != 1 || boundLoop[0].Line != 37 {
+		t.Fatalf("a direct UBound should remain the only Dictionary snapshot warning: bound=%+v all=%+v", boundLoop, findingsByCode(findings, "VBA227"))
+	}
+}
+
 func TestAnalyzerVBA227KeepsEmptyByteArrayElementAccessUnsafe(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

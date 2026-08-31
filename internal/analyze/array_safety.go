@@ -97,6 +97,8 @@ type arrayValue struct {
 
 type arrayFlowState map[string]arrayValue
 
+const arrayDictionaryCountSourcePrefix = "dictionary:"
+
 // arrayResumeNextCapacityGuard describes the narrow growable-buffer idiom
 // where an unallocated array is probed with UBound under Resume Next, a
 // capacity fallback ReDim Preserve allocates it when data is present, and a
@@ -134,6 +136,7 @@ var (
 	arrayQuotedCaseRe                 = regexp.MustCompile(`^\s*"([^"]*)"\s*$`)
 	arrayEmptyGuardRe                 = regexp.MustCompile(`(?i)^\s*\(?\s*not\s+([A-Za-z_]\w*)\s*\)?\s*=\s*-1\s*$`)
 	arrayForScalarBoundRe             = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*[-+]?\d+\s+to\s+([A-Za-z_]\w*)\s*$`)
+	arrayForCountRe                   = regexp.MustCompile(`(?i)^\s*for\s+([A-Za-z_]\w*)\s*=\s*(0|1)\s+to\s+([A-Za-z_]\w*)\s*\.\s*count(\s*-\s*1)?\s*$`)
 	arrayForEachRe                    = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
 	arrayIndexedSourceRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
 	arrayGuardCallRe                  = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:(=|<>|>=|<=|>|<)\s*(-?\d+))?\s*$`)
@@ -568,6 +571,8 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		text = assignment
 	} else if assignment, ok := inlineArraySafeBoundAssignmentText(inlineText, ctx.arraySafeBoundGuards); ok {
 		text = assignment
+	} else if assignment, ok := inlineArrayDictionaryAssignmentText(inlineText); ok {
+		text = assignment
 	} else if assignment, ok := inlineArrayReturnAssignmentText(inlineText, ctx.arrayReturns); ok {
 		text = assignment
 	} else if assignment, ok := inlineArrayQualifiedReturnAssignmentText(file, proc, line, inlineText, ctx.arrayReturnsQualified); ok {
@@ -639,7 +644,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	}
 	state, findings := transfer(state, text)
 	findings = arrayVBA227FilterForBodyIndexFindings(findings, proc, line, state, variables, resumeNextBefore)
-	if arrayVBA227HasSuccessfulBoundsExpression(text) &&
+	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
 		state = arraySuccessfulBoundsState(state, text, variables)
@@ -674,6 +679,17 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 		}
 		header = strings.TrimSpace(normalizedCodeLine(header))
 		argument := ""
+		if _, _, countSource, _, ok := arrayForCountHeader(header); ok {
+			for name, value := range state {
+				if value.allocationCountSource == "" || !arrayCountExpressionMatches(countSource, value.allocationCountSource) {
+					continue
+				}
+				variable, known := variables[name]
+				if known && (variable.isArray || variable.isVariant) {
+					proven[name] = true
+				}
+			}
+		}
 		if match := arrayForScalarBoundRe.FindStringSubmatch(header); len(match) == 2 {
 			bound, known := state[strings.ToLower(cleanIdentifier(match[1]))]
 			if known {
@@ -866,13 +882,37 @@ func arrayVBA227HasSuccessfulBoundsExpression(text string) bool {
 	return false
 }
 
+func arrayVBA227HasDictionaryBoundsExpression(text string, state arrayFlowState) bool {
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		if !strings.EqualFold(bound[1], "ubound") {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		value, known := state[name]
+		if known {
+			if _, dictionary := arrayDictionaryCountSource(value.allocationCountSource); dictionary {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
 	// An explicitly declared Variant element array is still a known array, so a
 	// successful bounds query establishes its allocation. An untyped Variant is
 	// not marked isArray and remains conservative in the normal transfer path.
 	var updated arrayFlowState
+	dictionarySources := map[string]bool{}
 	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
 		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		if strings.EqualFold(bound[1], "ubound") {
+			if value, known := state[name]; known {
+				if source, ok := arrayDictionaryCountSource(value.allocationCountSource); ok {
+					dictionarySources[source] = true
+				}
+			}
+		}
 		variable, known := variables[name]
 		if !known || !variable.isArray {
 			continue
@@ -886,6 +926,25 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 		}
 		value.kind = arrayAllocated
 		value.knownArray = true
+		updated[name] = value
+	}
+	for name, value := range state {
+		source, ok := arrayDictionaryCountSource(value.allocationCountSource)
+		if !ok || !dictionarySources[source] {
+			continue
+		}
+		variable, known := variables[name]
+		if !known || !variable.isArray && !variable.isVariant {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value = updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeEmpty = false
+		value.allocationCountSource = ""
 		updated[name] = value
 	}
 	if updated == nil {
@@ -929,7 +988,7 @@ func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.
 		value.knownArray = true
 		updated[name] = value
 	}
-	return updated
+	return arraySuccessfulBoundsState(updated, condition, variables)
 }
 
 // arrayVBA227ResumeNextPrefixes computes the conservative "may have seen
@@ -1116,6 +1175,22 @@ func inlineArraySafeBoundAssignmentText(text string, guards map[string]bool) (st
 	return remainder, true
 }
 
+func inlineArrayDictionaryAssignmentText(text string) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	_, rhs, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed {
+		return "", false
+	}
+	_, _, ok = arrayDictionaryMemberParts(rhs)
+	if !ok {
+		return "", false
+	}
+	return remainder, true
+}
+
 func inlineArrayReturnAssignmentText(text string, returns map[string]arrayValue) (string, bool) {
 	remainder, ok := inlineArrayDeclarationRemainder(text)
 	if !ok {
@@ -1178,6 +1253,156 @@ func arrayMemberCallParts(text string) (receiver, member string, ok bool) {
 		return "", "", false
 	}
 	return receiver, member, true
+}
+
+func arrayDictionaryMemberParts(text string) (receiver, member string, ok bool) {
+	trimmed := strings.TrimSpace(text)
+	if open := firstParenOutsideString(trimmed); open >= 0 {
+		close := matchingParen(trimmed, open)
+		if close < 0 || strings.TrimSpace(trimmed[close+1:]) != "" {
+			return "", "", false
+		}
+		trimmed = strings.TrimSpace(trimmed[:open])
+	}
+	dot := strings.LastIndexByte(trimmed, '.')
+	if dot < 0 || dot >= len(trimmed)-1 {
+		return "", "", false
+	}
+	receiver = strings.TrimSpace(trimmed[:dot])
+	member = strings.ToLower(cleanIdentifier(strings.TrimSpace(trimmed[dot+1:])))
+	if member != "keys" && member != "items" {
+		return "", "", false
+	}
+	if receiver == "" {
+		if !strings.HasPrefix(trimmed, ".") {
+			return "", "", false
+		}
+		return "", member, true
+	}
+	for _, part := range strings.Split(receiver, ".") {
+		if !arrayEraseNameRe.MatchString(strings.TrimSpace(part)) {
+			return "", "", false
+		}
+	}
+	return receiver, member, true
+}
+
+func arrayDictionaryMemberExpressionState(file parsedFile, proc sourceProcedure, line int, rhs string, variables map[string]arrayVariable) (arrayValue, bool) {
+	receiver, _, ok := arrayDictionaryMemberParts(rhs)
+	if !ok {
+		return arrayValue{}, false
+	}
+	if receiver == "" {
+		receiver = arrayWithReceiverAtLine(file, proc, line)
+	}
+	if receiver == "" || !arrayDictionaryReceiverProven(file, proc, line, receiver, variables) {
+		return arrayValue{}, false
+	}
+	source := canonicalArrayBoundExpression(receiver)
+	return arrayValue{
+		kind:                  arrayUnknown,
+		knownArray:            true,
+		mayBeEmpty:            true,
+		origin:                arrayOriginLocal,
+		allocationCountSource: arrayDictionaryCountSourcePrefix + source,
+	}, true
+}
+
+func arrayWithReceiverAtLine(file parsedFile, proc sourceProcedure, line int) string {
+	stack := make([]string, 0, 2)
+	start := max(1, proc.StartLine)
+	end := min(line-1, len(file.Lines))
+	for current := start; current <= end; current++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[current-1]))
+		if text == "" {
+			continue
+		}
+		lower := strings.ToLower(text)
+		if lower == "end with" {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			continue
+		}
+		if strings.HasPrefix(lower, "with ") {
+			receiver := strings.TrimSpace(text[len("with "):])
+			if receiver != "" {
+				stack = append(stack, receiver)
+			}
+		}
+	}
+	if len(stack) == 0 {
+		return ""
+	}
+	return stack[len(stack)-1]
+}
+
+func arrayDictionaryReceiverProven(file parsedFile, proc sourceProcedure, line int, receiver string, variables map[string]arrayVariable) bool {
+	receiver = strings.TrimSpace(receiver)
+	if receiver == "" {
+		return false
+	}
+	if variable, known := variables[strings.ToLower(cleanIdentifier(receiver))]; known && isDictionaryType(variable.typ) {
+		return true
+	}
+	if strings.EqualFold(arrayTypeNameCaseAtLine(file, proc, line, receiver), "Dictionary") {
+		return true
+	}
+	if !strings.EqualFold(receiver, "This.children") || !strings.EqualFold(arraySelectCaseValueAtLine(file, proc, line, "This.iType"), "eJSONObject") {
+		return false
+	}
+	for _, rawLine := range file.Lines {
+		text := canonicalArrayBoundExpression(gui.StripComment(rawLine))
+		if strings.Contains(text, "setthis.children=createdictionary") {
+			return true
+		}
+	}
+	return false
+}
+
+func arraySelectCaseValueAtLine(file parsedFile, proc sourceProcedure, line int, expression string) string {
+	type frame struct {
+		expression string
+		caseValue  string
+	}
+	frames := make([]frame, 0, 2)
+	want := canonicalArrayBoundExpression(expression)
+	start := max(1, proc.StartLine)
+	end := min(line, len(file.Lines))
+	for current := start; current <= end; current++ {
+		text := strings.Join(strings.Fields(gui.StripComment(file.Lines[current-1])), " ")
+		if text == "" {
+			continue
+		}
+		lower := strings.ToLower(text)
+		if strings.HasPrefix(lower, "select case ") {
+			frames = append(frames, frame{expression: canonicalArrayBoundExpression(text[len("select case "):])})
+			continue
+		}
+		if lower == "end select" {
+			if len(frames) > 0 {
+				frames = frames[:len(frames)-1]
+			}
+			continue
+		}
+		if !strings.HasPrefix(lower, "case ") || len(frames) == 0 {
+			continue
+		}
+		caseText := strings.TrimSpace(text[len("case "):])
+		if comma := strings.IndexByte(caseText, ','); comma >= 0 {
+			caseText = strings.TrimSpace(caseText[:comma])
+		}
+		if strings.EqualFold(caseText, "else") {
+			caseText = ""
+		}
+		frames[len(frames)-1].caseValue = caseText
+	}
+	for index := len(frames) - 1; index >= 0; index-- {
+		if frames[index].expression == want {
+			return frames[index].caseValue
+		}
+	}
+	return ""
 }
 
 func arrayTypeNameCaseAtLine(file parsedFile, proc sourceProcedure, line int, receiver string) string {
@@ -2065,8 +2290,28 @@ func arrayCountExpressionMatches(expression, source string) bool {
 		return false
 	}
 	expression = canonicalArrayBoundExpression(expression)
-	source = canonicalArrayBoundExpression(source)
+	source = canonicalArrayBoundExpression(arrayCountSourceExpression(source))
 	return expression == source || expression == source+".count"
+}
+
+func arrayCountSourceExpression(source string) string {
+	source = strings.TrimSpace(source)
+	if strings.HasPrefix(strings.ToLower(source), arrayDictionaryCountSourcePrefix) {
+		return strings.TrimSpace(source[len(arrayDictionaryCountSourcePrefix):])
+	}
+	return source
+}
+
+func arrayDictionaryCountSource(source string) (string, bool) {
+	source = strings.TrimSpace(source)
+	if !strings.HasPrefix(strings.ToLower(source), arrayDictionaryCountSourcePrefix) {
+		return "", false
+	}
+	expression := strings.TrimSpace(source[len(arrayDictionaryCountSourcePrefix):])
+	if expression == "" {
+		return "", false
+	}
+	return canonicalArrayBoundExpression(expression), true
 }
 
 func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.CFGView, block vbacfg.Block, edge vbacfg.Edge) arrayFlowState {
@@ -2290,6 +2535,11 @@ func applyArrayForBoundState(state arrayFlowState, statement *procedureir.Statem
 		text = strings.TrimSpace(text[:newline])
 	}
 	text = strings.TrimSpace(normalizedCodeLine(text))
+	if _, _, countSource, _, ok := arrayForCountHeader(text); ok {
+		if updated, changed := arrayForCountArrayState(state, countSource, variables); changed {
+			return updated
+		}
+	}
 	match := arrayForScalarBoundRe.FindStringSubmatch(text)
 	if len(match) != 2 {
 		return state
@@ -2299,6 +2549,45 @@ func applyArrayForBoundState(state arrayFlowState, statement *procedureir.Statem
 		return state
 	}
 	return arrayForBoundArrayState(state, bound.safeBoundProbe, variables)
+}
+
+func arrayForCountHeader(text string) (loopVariable, start, countSource string, hasMinusOne bool, ok bool) {
+	match := arrayForCountRe.FindStringSubmatch(strings.TrimSpace(text))
+	if len(match) != 5 {
+		return "", "", "", false, false
+	}
+	if match[2] == "0" && strings.TrimSpace(match[4]) == "" {
+		// `For i = 0 To items.Count` also enters when i == Count, so it
+		// does not prove that an indexed access in the body is in range.
+		return "", "", "", false, false
+	}
+	return match[1], match[2], match[3], strings.TrimSpace(match[4]) != "", true
+}
+
+func arrayForCountArrayState(state arrayFlowState, countSource string, variables map[string]arrayVariable) (arrayFlowState, bool) {
+	var updated arrayFlowState
+	for name, value := range state {
+		if value.allocationCountSource == "" || !arrayCountExpressionMatches(countSource, value.allocationCountSource) {
+			continue
+		}
+		variable, known := variables[name]
+		if !known || !variable.isArray && !variable.isVariant {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value = updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeEmpty = false
+		value.allocationCountSource = ""
+		updated[name] = value
+	}
+	if updated == nil {
+		return state, false
+	}
+	return updated, true
 }
 
 func arrayForBoundArrayState(state arrayFlowState, argument string, variables map[string]arrayVariable) arrayFlowState {
@@ -9080,7 +9369,11 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 			}
 		}
 		if !indexed {
-			if value, known := arrayExpressionState(rhs, state, ctx); known {
+			if value, known := arrayDictionaryMemberExpressionState(file, proc, line, rhs, variables); known {
+				if variable, exists := variables[name]; exists && (variable.isArray || variable.isVariant) {
+					state[name] = value
+				}
+			} else if value, known := arrayExpressionState(rhs, state, ctx); known {
 				if value.mayBeEmpty && arrayExpressionKnownNonEmpty(file, proc, line, rhs, variables) {
 					value.mayBeEmpty = false
 				}

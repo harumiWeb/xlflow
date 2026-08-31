@@ -14,6 +14,9 @@ All notable changes to xlflow will be documented in this file.
 - Fixed false-positive `VBA227` bound findings after the established VBA
   `(Not array) = -1 Then Err.Raise` empty-array guard on a normal path.
 
+- Fixed false-positive `VBA227` element findings for Dictionary `Keys`/`Items`
+  snapshots guarded by `Count` or a successful `UBound(Keys)` query.
+
 ## v0.31.1
 
 - Kept LSP completion, signature help, hover, and definition responsive while

@@ -164,6 +164,14 @@ normal path has a non-empty allocation. This refinement is limited to a
 single-line raising guard without local error handling; `On Error` and
 `Resume Next` paths remain conservative.
 
+Dictionary `Keys` and `Items` materializations are tracked as paired,
+zero-based snapshots tied to the source dictionary's `Count`. A
+`For i = 1 To dictionary.Count` or `For i = 0 To dictionary.Count - 1` body
+proves the corresponding snapshot is non-empty when its receiver is known to
+be a Dictionary. A successful `UBound(Keys)` likewise proves the paired
+`Keys`/`Items` snapshots contain an element; the `UBound` query itself remains
+subject to the empty-Dictionary check.
+
 The same allocation-probe contract also applies when the positive length is
 first assigned to a scalar local and that local is compared with zero or a
 positive threshold. The proof remains path-sensitive; unrelated scalar
