@@ -12208,6 +12208,74 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesModuleCapacityReDimGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private buffer() As Byte
+Private bufferSize As Long
+
+Private Function Encode(ByVal text As String) As Byte()
+	Dim need As Long
+	Dim result() As Byte
+	If Len(text) = 0 Then Exit Function
+	need = Len(text) * 4
+  If need > bufferSize Then
+    ReDim buffer(0 To need - 1)
+    bufferSize = need
+  End If
+  buffer(0) = 1
+  ReDim result(0 To 0)
+  result(0) = buffer(0)
+  Encode = result
+End Function
+
+Public Sub Run()
+  Dim result() As Byte
+  result = Encode("text")
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a module buffer guarded by its recorded capacity should be allocated: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RejectsModuleCapacityReDimWithoutPositiveInputGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private buffer() As Byte
+Private bufferSize As Long
+
+Private Function Encode(ByVal text As String) As Byte()
+  Dim need As Long
+  Dim result() As Byte
+  need = Len(text) * 4
+  If need > bufferSize Then
+    ReDim buffer(0 To need - 1)
+    bufferSize = need
+  End If
+  buffer(0) = 1
+  ReDim result(0 To 0)
+  result(0) = buffer(0)
+  Encode = result
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a capacity guard without a proof that the requested length is positive must remain diagnosed")
+	}
+}
+
 func TestAnalyzerVBA227RecognizesImplicitZeroArrayLengthGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
