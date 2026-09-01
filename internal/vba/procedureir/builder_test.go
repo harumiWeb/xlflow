@@ -987,6 +987,32 @@ End Sub
 	}
 }
 
+func TestPrintOutputListPositionsAreNotArguments(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
+	Debug.Print first; second("value"), third;
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 1 || len(doc.Procedures[0].Calls) != 2 {
+		t.Fatalf("Debug.Print call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[0].Calls[0]
+	if call.Arguments.Count != 3 || len(call.Arguments.ExpressionIDs) != 3 {
+		t.Fatalf("output positions must not become argument slots: %+v", call.Arguments)
+	}
+	for _, expressionID := range call.Arguments.ExpressionIDs {
+		if expressionID == 0 {
+			t.Fatalf("output expression lacks canonical expression link: %+v", call.Arguments)
+		}
+	}
+	if nested := doc.Procedures[0].Calls[1]; !strings.EqualFold(nested.Callee.BaseName, "second") {
+		t.Fatalf("nested output expression call was not captured: %+v", nested)
+	}
+}
+
 func TestFunctionAndPropertyGetNamesResolveAsLocalReturnSlots(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, []byte(`Public Function Compute(ByVal input As Long) As Long

@@ -154,6 +154,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `changes_controls`
 - `changes_selection`
 - `changes_workbook`
+- `char_position`
 - `check_dialog`
 - `check_failed`
 - `classes_dir`
@@ -790,6 +791,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `original_workbook_path`
 - `output_file_exists`
 - `output_file_missing`
+- `output_list`
 - `output_missing`
 - `output_path`
 - `p1_compiled`
