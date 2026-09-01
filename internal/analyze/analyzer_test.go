@@ -6684,6 +6684,32 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesUBoundLengthIntoZeroBasedLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim i As Long
+  values = StrConv(source, vbFromUnicode)
+  length = UBound(values) + 1
+  For i = 0 To length - 1
+    Debug.Print values(i)
+  Next i
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Line != 7 {
+		t.Fatalf("only the UBound safety finding should remain; the loop-body access is safe after a successful bound query: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulUBoundIntoWhileBody(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

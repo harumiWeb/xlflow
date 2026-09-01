@@ -161,14 +161,18 @@ type directArrayRedimClause struct {
 }
 
 var (
-	arrayRedimRe                      = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
-	arrayRedimClauseRe                = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
-	arrayRedimTypeSuffixRe            = regexp.MustCompile(`(?i)^as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?$`)
-	arrayEraseRe                      = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
-	arrayEraseNameRe                  = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
-	arrayBoundCallRe                  = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
-	arrayForBoundRe                   = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
-	arrayForUBoundRe                  = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)`)
+	arrayRedimRe           = regexp.MustCompile(`(?i)^\s*redim\s+(preserve\s+)?(.+)$`)
+	arrayRedimClauseRe     = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?)?\s*$`)
+	arrayRedimTypeSuffixRe = regexp.MustCompile(`(?i)^as\s+[A-Za-z_][\w.]*(?:\s*\(\s*\))?$`)
+	arrayEraseRe           = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
+	arrayEraseNameRe       = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
+	arrayBoundCallRe       = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
+	arrayForBoundRe        = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
+	arrayForUBoundRe       = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)`)
+	// A loop with this shape is safe for a zero-based Byte array when its
+	// length was obtained from a successful UBound(array) + 1 expression.
+	arrayForZeroBasedLengthRe         = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*0\s+to\s+([A-Za-z_]\w*)\s*-\s*1\s*$`)
+	arrayUBoundPlusOneRe              = regexp.MustCompile(`(?i)^\s*ubound\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*1\s*$`)
 	arrayReturnArrayDocRe             = regexp.MustCompile(`(?i)^@returns?\s+(?:(?:variant|object)\s*<)?array(?:<|\b)`)
 	arrayTypeNameExpressionRe         = regexp.MustCompile(`(?i)^typename\s*\(\s*([A-Za-z_]\w*)\s*\)$`)
 	arrayQuotedCaseRe                 = regexp.MustCompile(`^\s*"([^"]*)"\s*$`)
@@ -705,7 +709,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	state, findings := transfer(state, text)
-	findings = arrayVBA227FilterForBodyIndexFindings(findings, proc, line, state, variables, resumeNextBefore)
+	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, resumeNextBefore)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
@@ -804,13 +808,155 @@ func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, lin
 	return arrayName, true
 }
 
+// arrayVBA227DerivedZeroBasedLoopArray recognizes the narrow StrConv-to-Byte
+// array protocol used by VBA networking code. UBound(array) + 1 can still
+// raise, so the bound finding remains; once that assignment succeeds, the
+// zero-based loop body cannot index an empty or unallocated result.
+func arrayVBA227DerivedZeroBasedLoopArray(file parsedFile, proc sourceProcedure, loop procedureir.Statement, variables map[string]arrayVariable) (string, bool) {
+	header := strings.TrimSpace(loop.Text)
+	if newline := strings.IndexAny(header, "\r\n"); newline >= 0 {
+		header = strings.TrimSpace(header[:newline])
+	}
+	header = strings.TrimSpace(normalizedCodeLine(header))
+	match := arrayForZeroBasedLengthRe.FindStringSubmatch(header)
+	if len(match) != 2 {
+		return "", false
+	}
+	lengthName := strings.ToLower(cleanIdentifier(match[1]))
+	lengthLine := 0
+	arrayName := ""
+	for line := loop.Range.StartLine - 1; line >= proc.StartLine && line <= len(file.Lines); line-- {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), lengthName) {
+				continue
+			}
+			var ok bool
+			arrayName, ok = arrayVBA227UBoundLengthSource(rhs)
+			if !ok {
+				return "", false
+			}
+			lengthLine = line
+			break
+		}
+		if lengthLine != 0 {
+			break
+		}
+	}
+	if lengthLine == 0 || arrayName == "" || !arrayVBA227StatementLineDominates(proc, lengthLine, loop) {
+		return "", false
+	}
+	variable, knownVariable := variables[arrayName]
+	if !knownVariable || !variable.isArray || !isByteArrayVariable(variable) {
+		return "", false
+	}
+	if !arrayVBA227HasZeroBasedStrConvAssignment(file, proc, arrayName, lengthLine) {
+		return "", false
+	}
+	for line := lengthLine + 1; line < loop.Range.StartLine && line <= len(file.Lines); line++ {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+			if arrayVBA227MutatesArray(source, arrayName) {
+				return "", false
+			}
+		}
+	}
+	return arrayName, true
+}
+
+func arrayVBA227UBoundLengthSource(rhs string) (string, bool) {
+	rhs = strings.TrimSpace(rhs)
+	if strings.EqualFold(arrayCallName(rhs), "cbyte") {
+		arguments, ok := arraySimpleCallArguments(rhs)
+		if !ok || len(arguments) != 1 {
+			return "", false
+		}
+		rhs = strings.TrimSpace(arguments[0])
+	}
+	match := arrayUBoundPlusOneRe.FindStringSubmatch(rhs)
+	if len(match) != 2 {
+		return "", false
+	}
+	return strings.ToLower(cleanIdentifier(match[1])), true
+}
+
+func arrayVBA227HasZeroBasedStrConvAssignment(file parsedFile, proc sourceProcedure, arrayName string, beforeLine int) bool {
+	target := procedureStatementAtLine(proc, beforeLine)
+	if target.ID <= 0 {
+		return false
+	}
+	for line := beforeLine; line >= proc.StartLine && line <= len(file.Lines); line-- {
+		for _, source := range splitRangeValueSourceStatements(normalizedCodeLine(file.Lines[line-1])) {
+			lhs, rhs, indexed, assigned := arrayAssignment(source)
+			if !assigned || !strings.EqualFold(cleanIdentifier(lhs), arrayName) {
+				continue
+			}
+			if indexed {
+				continue
+			}
+			return strings.EqualFold(arrayCallName(rhs), "strconv") && arrayVBA227StatementLineDominates(proc, line, target)
+		}
+	}
+	return false
+}
+
+func arrayVBA227MutatesArray(text, arrayName string) bool {
+	if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if !direct {
+				legacy := arrayRedimClauseRe.FindStringSubmatch(clause)
+				if len(legacy) == 0 {
+					continue
+				}
+				redim = directArrayRedimClause{name: legacy[1]}
+			}
+			if strings.EqualFold(cleanIdentifier(redim.name), arrayName) {
+				return true
+			}
+		}
+	}
+	if match := arrayEraseRe.FindStringSubmatch(text); len(match) > 0 {
+		for _, target := range splitArgs(match[1]) {
+			if strings.EqualFold(cleanIdentifier(target), arrayName) {
+				return true
+			}
+		}
+	}
+	lhs, _, indexed, assigned := arrayAssignment(text)
+	return assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), arrayName)
+}
+
+func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target procedureir.Statement) bool {
+	if proc.Graph == nil || line <= 0 || target.ID <= 0 {
+		return false
+	}
+	source := procedureStatementAtLine(proc, line)
+	if source.ID <= 0 || source.ID == target.ID {
+		return false
+	}
+	sourceBlock, sourceOK := proc.Graph.BlockForStatement(source.ID)
+	targetBlock, targetOK := proc.Graph.BlockForStatement(target.ID)
+	if !sourceOK || !targetOK {
+		return false
+	}
+	if sourceBlock.ID == targetBlock.ID {
+		return source.Range.StartLine < target.Range.StartLine
+	}
+	for _, dominator := range proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[targetBlock.ID] {
+		if dominator == sourceBlock.ID {
+			return true
+		}
+	}
+	return false
+}
+
 // arrayVBA227FilterForBodyIndexFindings removes only the unallocated/empty
 // index observations for a loop body whose For bound necessarily succeeded
 // before the body could run. Source-line CFG blocks include a For header and
 // its nested body in one scan, so the edge refinement is applied too late for
 // the first body visit; this narrow filter preserves the bound finding itself
 // and any known lower/upper-bound violation.
-func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
+func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
 	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
 	}
@@ -819,6 +965,10 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 	for statement := range proc.Statements.All() {
 		if statement.Kind != procedureir.StatementFor || line <= statement.Range.StartLine || line >= statement.Range.EndLine {
 			continue
+		}
+		if name, ok := arrayVBA227DerivedZeroBasedLoopArray(file, proc, statement, variables); ok {
+			proven[name] = true
+			provenNonEmpty[name] = true
 		}
 		header := strings.TrimSpace(statement.Text)
 		if newline := strings.IndexAny(header, "\r\n"); newline >= 0 {
