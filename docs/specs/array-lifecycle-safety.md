@@ -396,6 +396,20 @@ without local error handling is excluded from normal-return evidence. Mixed
 return kinds, missing assignments, recursive or ambiguous chains, and external
 calls remain unknown.
 
+A unique project-local typed array `Function` or `Property Get` may also be
+summarized when it returns a direct typed member of a Static UDT-like accessor
+whose SAFEARRAY descriptor is populated from scalar parameters. The summary
+requires one `If Not accessor.isSet Then InitMemoryAccessor accessor` guard, a
+resolved ByRef initializer that assigns the passed `.isSet` field to `True`,
+the descriptor data pointer, element size, lower bound, and element count to
+be initialized before the return on every normal path, and a definitely
+assigned function result. Named and omitted optional arguments are bound to
+their formal parameters; known string literals, `vbNullString`, and
+`StrConv`-wrapped known literals recover the returned one-dimensional shape.
+Unknown source lengths retain only the allocation proof, while incomplete
+descriptor setup, invalid arguments, ambiguous helpers, and mixed return paths
+remain conservative.
+
 A unique project-local scalar `Function` or `Property Get` with one array or
 `Variant` parameter may also be recognized as an allocation probe when its
 normal return is exactly `UBound(parameter) - LBound(parameter) + 1` or

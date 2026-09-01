@@ -12393,6 +12393,135 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227CarriesDescriptorBackedArrayReturnShape(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ACCESSOR
+  isSet As Boolean
+End Type
+
+Private Sub InitMemoryAccessor(ByRef target As ACCESSOR)
+  target.isSet = True
+End Sub
+
+Private Function StringToIntegers(ByRef s As String, Optional ByVal startIndex As Long = 1, Optional ByVal outLength As Long = -1, Optional ByVal outLowBound As Long = 0) As Integer()
+  Static ma As ACCESSOR: If Not ma.isSet Then InitMemoryAccessor ma
+  If startIndex < 1 Then Err.Raise 9
+  If outLength < -1 Then Err.Raise 5
+  If outLength = -1 Or startIndex + outLength - 1 > Len(s) Then
+    outLength = Len(s) - startIndex + 1
+    If outLength < 0 Then outLength = 0
+  End If
+  ma.sa.pvData = StrPtr(s) + (startIndex - 1) * INT_SIZE
+  ma.sa.cbElements = INT_SIZE
+  ma.sa.rgsabound0.lLbound = outLowBound
+  ma.sa.rgsabound0.cElements = outLength
+  StringToIntegers = ma.ac.dInt
+  ma.sa.rgsabound0.cElements = 0
+  ma.sa.pvData = NULL_PTR
+End Function
+
+Public Sub Run()
+  Dim values() As Integer
+  values = StringToIntegers("ABC", 2, , 5)
+  Debug.Print values(5)
+  Debug.Print values(6)
+  Debug.Print values(7)
+  values = StringToIntegers("ABC", outLowBound:=5)
+  Debug.Print values(5)
+  Debug.Print values(6)
+  values = StringToIntegers(vbNullString, 1, 0, 5)
+  Debug.Print LBound(values)
+  Debug.Print UBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || !strings.Contains(strings.ToLower(got[0].Message), "outside its known bounds") {
+		t.Fatalf("descriptor-backed array returns should carry known bounds while retaining an out-of-range access: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustIncompleteDescriptorBackedArrayReturn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ACCESSOR
+  isSet As Boolean
+End Type
+
+Private Sub InitMemoryAccessor(ByRef target As ACCESSOR)
+  target.isSet = True
+End Sub
+
+Private Function Broken(ByRef s As String, Optional ByVal outLowBound As Long = 0) As Integer()
+  Static ma As ACCESSOR: If Not ma.isSet Then InitMemoryAccessor ma
+  ma.sa.pvData = StrPtr(s)
+  ma.sa.cbElements = INT_SIZE
+  ma.sa.rgsabound0.lLbound = outLowBound
+  Broken = ma.ac.dInt
+End Function
+
+Public Sub Run()
+  Dim values() As Integer
+  values = Broken("ABC")
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("an incomplete descriptor setup must remain conservative: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustDescriptorReturnWithoutReadyHelperProof(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ACCESSOR
+  isSet As Boolean
+End Type
+
+Private Sub InitMemoryAccessor(ByRef target As ACCESSOR)
+  target.isSet = False
+End Sub
+
+Private Function Broken(ByRef s As String, Optional ByVal outLowBound As Long = 0) As Integer()
+  Static ma As ACCESSOR: If Not ma.isSet Then InitMemoryAccessor ma
+  ma.sa.pvData = StrPtr(s)
+  ma.sa.cbElements = INT_SIZE
+  ma.sa.rgsabound0.lLbound = outLowBound
+  ma.sa.rgsabound0.cElements = Len(s)
+  Broken = ma.ac.dInt
+End Function
+
+Public Sub Run()
+  Dim values() As Integer
+  values = Broken("ABC")
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Run" {
+		t.Fatalf("a ready helper that does not set the flag must remain conservative: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesArrayLengthGuardThroughPrivateByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

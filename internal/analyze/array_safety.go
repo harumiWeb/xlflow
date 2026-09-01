@@ -109,7 +109,15 @@ type arrayValue struct {
 	// nonEmptySource records the caller-side array whose non-empty state makes
 	// this returned array non-empty. It is consumed by a matching StrPtr guard.
 	nonEmptySource string
-	boundsProof    arrayBoundsProof
+	// returnDescriptor* records a narrow typed-array return whose SAFEARRAY
+	// descriptor is populated from scalar function parameters. The metadata is
+	// consumed at the caller so known arguments can recover the returned shape;
+	// unknown arguments retain only the allocation proof.
+	returnDescriptorSourceParameter string
+	returnDescriptorStartParameter  string
+	returnDescriptorLengthParameter string
+	returnDescriptorLowerParameter  string
+	boundsProof                     arrayBoundsProof
 }
 
 type arrayFlowState map[string]arrayValue
@@ -3657,18 +3665,22 @@ func meetArrayState(left, right arrayFlowState) arrayFlowState {
 
 func meetArrayValue(left, right arrayValue) arrayValue {
 	out := arrayValue{
-		kind:                          left.kind,
-		knownArray:                    left.knownArray,
-		mayBeEmpty:                    left.mayBeEmpty,
-		origin:                        left.origin,
-		dimensions:                    append([]arrayDimension(nil), left.dimensions...),
-		preserveShape:                 append([]arrayDimension(nil), left.preserveShape...),
-		allocationCountSource:         left.allocationCountSource,
-		conditionalAllocationSource:   left.conditionalAllocationSource,
-		returnNonEmptyArrayParameter:  left.returnNonEmptyArrayParameter,
-		returnPositiveScalarParameter: left.returnPositiveScalarParameter,
-		nonEmptySource:                left.nonEmptySource,
-		boundsProof:                   left.boundsProof,
+		kind:                            left.kind,
+		knownArray:                      left.knownArray,
+		mayBeEmpty:                      left.mayBeEmpty,
+		origin:                          left.origin,
+		dimensions:                      append([]arrayDimension(nil), left.dimensions...),
+		preserveShape:                   append([]arrayDimension(nil), left.preserveShape...),
+		allocationCountSource:           left.allocationCountSource,
+		conditionalAllocationSource:     left.conditionalAllocationSource,
+		returnNonEmptyArrayParameter:    left.returnNonEmptyArrayParameter,
+		returnPositiveScalarParameter:   left.returnPositiveScalarParameter,
+		nonEmptySource:                  left.nonEmptySource,
+		returnDescriptorSourceParameter: left.returnDescriptorSourceParameter,
+		returnDescriptorStartParameter:  left.returnDescriptorStartParameter,
+		returnDescriptorLengthParameter: left.returnDescriptorLengthParameter,
+		returnDescriptorLowerParameter:  left.returnDescriptorLowerParameter,
+		boundsProof:                     left.boundsProof,
 	}
 	if left.kind != right.kind {
 		out.kind = arrayUnknown
@@ -3693,6 +3705,15 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	}
 	if left.nonEmptySource != right.nonEmptySource {
 		out.nonEmptySource = ""
+	}
+	if left.returnDescriptorSourceParameter != right.returnDescriptorSourceParameter ||
+		left.returnDescriptorStartParameter != right.returnDescriptorStartParameter ||
+		left.returnDescriptorLengthParameter != right.returnDescriptorLengthParameter ||
+		left.returnDescriptorLowerParameter != right.returnDescriptorLowerParameter {
+		out.returnDescriptorSourceParameter = ""
+		out.returnDescriptorStartParameter = ""
+		out.returnDescriptorLengthParameter = ""
+		out.returnDescriptorLowerParameter = ""
 	}
 	out.mayBeEmpty = left.mayBeEmpty || right.mayBeEmpty
 	if left.origin != right.origin {
@@ -3758,7 +3779,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}
@@ -12030,7 +12051,7 @@ func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, ctx an
 		return state
 	}
 	summary, ok := ctx.arrayReturns[callee]
-	if !ok || summary.returnNonEmptyArrayParameter == "" && summary.returnPositiveScalarParameter == "" {
+	if !ok || summary.returnNonEmptyArrayParameter == "" && summary.returnPositiveScalarParameter == "" && summary.returnDescriptorSourceParameter == "" {
 		return state
 	}
 	target := strings.ToLower(cleanIdentifier(lhs))
@@ -12039,11 +12060,11 @@ func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, ctx an
 	if !knownVariable || !knownValue || !variable.isArray && !variable.isVariant {
 		return state
 	}
-	arguments, ok := arraySimpleCallArguments(rhs)
+	signature, ok := ctx.procedures[callee]
 	if !ok {
 		return state
 	}
-	signature, ok := ctx.procedures[callee]
+	arguments, ok := arrayReturnCallArguments(rhs, signature)
 	if !ok {
 		return state
 	}
@@ -12074,6 +12095,14 @@ func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, ctx an
 			}
 		}
 	}
+	if summary.returnDescriptorSourceParameter != "" {
+		updated = arrayDescriptorReturnCallValue(updated, summary, arguments, signature, constants)
+		updated.returnDescriptorSourceParameter = ""
+		updated.returnDescriptorStartParameter = ""
+		updated.returnDescriptorLengthParameter = ""
+		updated.returnDescriptorLowerParameter = ""
+		changed = true
+	}
 	if !changed {
 		return state
 	}
@@ -12093,6 +12122,151 @@ func arraySimpleCallArguments(text string) ([]string, bool) {
 		return nil, false
 	}
 	return splitArgs(text[open+1 : close]), true
+}
+
+var arrayNamedArgumentRe = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:=\s*(.*?)\s*$`)
+
+// arrayReturnCallArguments maps positional and named actuals to a procedure
+// signature and fills omitted optional arguments with their declared defaults.
+// Return summaries need this small binding layer because a call such as
+// StringToIntegers("ABC", outLowBound:=5) cannot be interpreted by position.
+func arrayReturnCallArguments(text string, signature procedureSignature) ([]string, bool) {
+	raw, ok := arraySimpleCallArguments(text)
+	if !ok {
+		return nil, false
+	}
+	arguments := make([]string, signature.Params.Len())
+	assigned := make([]bool, len(arguments))
+	nextPositional := 0
+	for _, rawArgument := range raw {
+		argument := strings.TrimSpace(rawArgument)
+		if match := arrayNamedArgumentRe.FindStringSubmatch(argument); len(match) == 3 {
+			index, found := arrayFormalParameterIndexFromSignature(signature, match[1])
+			if !found || assigned[index] {
+				return nil, false
+			}
+			arguments[index] = strings.TrimSpace(match[2])
+			assigned[index] = true
+			continue
+		}
+		for nextPositional < len(assigned) && assigned[nextPositional] {
+			nextPositional++
+		}
+		if nextPositional >= len(arguments) {
+			return nil, false
+		}
+		if argument == "" {
+			nextPositional++
+			continue
+		}
+		arguments[nextPositional] = argument
+		assigned[nextPositional] = true
+		nextPositional++
+	}
+	for index, parameter := range signature.Params.AllIndexed() {
+		if assigned[index] {
+			continue
+		}
+		if !parameter.Optional {
+			return nil, false
+		}
+		if parameter.HasDefault {
+			arguments[index] = parameter.Default
+		}
+	}
+	return arguments, true
+}
+
+func arrayDescriptorReturnCallValue(value, summary arrayValue, arguments []string, signature procedureSignature, constants map[string]int) arrayValue {
+	argument := func(formal string) (string, bool) {
+		index, ok := arrayFormalParameterIndexFromSignature(signature, formal)
+		if !ok || index >= len(arguments) {
+			return "", false
+		}
+		return strings.TrimSpace(arguments[index]), true
+	}
+	source, sourceOK := argument(summary.returnDescriptorSourceParameter)
+	startText, startOK := argument(summary.returnDescriptorStartParameter)
+	lengthText, lengthOK := argument(summary.returnDescriptorLengthParameter)
+	lowerText, lowerOK := argument(summary.returnDescriptorLowerParameter)
+	if !sourceOK || !startOK || !lengthOK || !lowerOK {
+		return value
+	}
+	start, startErr := constantIntegerExpression(startText, constants)
+	length, lengthErr := constantIntegerExpression(lengthText, constants)
+	lower, lowerErr := constantIntegerExpression(lowerText, constants)
+	if startErr != nil || lengthErr != nil || lowerErr != nil || start < 1 || length < -1 {
+		return value
+	}
+
+	count, countKnown := 0, false
+	if length == 0 {
+		count, countKnown = 0, true
+	} else if sourceLength, known := arrayStringExpressionKnownLength(source); known {
+		count = length
+		if length == -1 || start+length-1 > sourceLength {
+			count = sourceLength - start + 1
+			if count < 0 {
+				count = 0
+			}
+		}
+		countKnown = true
+	}
+	dimension := arrayDimension{lower: arrayBound{known: true, value: lower}}
+	if countKnown {
+		dimension.upper = arrayBound{known: true, value: lower + count - 1}
+		value.mayBeEmpty = count == 0
+	} else {
+		// A descriptor-backed return always has a valid SAFEARRAY descriptor,
+		// but an unknown input length may still produce zero elements.
+		value.mayBeEmpty = true
+	}
+	value.dimensions = []arrayDimension{dimension}
+	value.preserveShape = append([]arrayDimension(nil), value.dimensions...)
+	return value
+}
+
+func arrayStringExpressionKnownLength(expression string) (int, bool) {
+	expression = strings.TrimSpace(expression)
+	if strings.EqualFold(expression, "vbNullString") {
+		return 0, true
+	}
+	if length, ok := arrayStringLiteralLength(expression); ok {
+		return length, true
+	}
+	if !strings.EqualFold(arrayCallName(expression), "strconv") {
+		return 0, false
+	}
+	open := firstParenOutsideString(expression)
+	close := matchingParen(expression, open)
+	if open < 0 || close < 0 || strings.TrimSpace(expression[close+1:]) != "" {
+		return 0, false
+	}
+	arguments := splitArgs(expression[open+1 : close])
+	if len(arguments) == 0 {
+		return 0, false
+	}
+	return arrayStringExpressionKnownLength(arguments[0])
+}
+
+func arrayStringLiteralLength(expression string) (int, bool) {
+	if len(expression) < 2 || expression[0] != '"' || expression[len(expression)-1] != '"' {
+		return 0, false
+	}
+	length := 0
+	for index := 1; index < len(expression)-1; index++ {
+		if expression[index] >= 0x80 {
+			return 0, false
+		}
+		if expression[index] == '"' {
+			if index+1 >= len(expression)-1 || expression[index+1] != '"' {
+				return 0, false
+			}
+			index++
+		}
+		length++
+	}
+	return length, true
 }
 
 func arrayFormalParameterIndexFromSignature(signature procedureSignature, name string) (int, bool) {
@@ -12869,6 +13043,172 @@ func arrayProcedureHasReturnAllocation(file parsedFile, proc sourceProcedure) bo
 	return hasAllocation && hasReturn
 }
 
+// arrayDescriptorArrayReturnSummary recognizes a typed array Function that
+// returns a view backed by a persistent SAFEARRAY descriptor. The contract is
+// intentionally structural: a Static UDT-like accessor is initialized behind
+// its readiness flag, the descriptor data/count/lower-bound fields come from
+// scalar parameters, and the direct array member is returned on every normal
+// path. Unknown call arguments retain a possible-empty allocation; known
+// literal arguments can recover the returned one-dimensional shape later.
+func arrayDescriptorArrayReturnSummary(file parsedFile, proc sourceProcedure, ctx analysisContext) (arrayValue, bool) {
+	if proc.Graph == nil || proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return arrayValue{}, false
+	}
+	if proc.ReturnValueShape != procedureir.ValueShapeDynamicArray && !strings.Contains(strings.ReplaceAll(proc.ReturnType, " ", ""), "()") {
+		return arrayValue{}, false
+	}
+	root, returnLine, ok := arrayDescriptorReturnSource(file, proc)
+	if !ok {
+		return arrayValue{}, false
+	}
+	variables := arrayVariables(file, proc, file.moduleDecls())
+	ready, known := variables[strings.ToLower(root)]
+	if !known || !ready.static || ready.isArray || ready.isVariant || ready.isObject || ready.knownScalar {
+		return arrayValue{}, false
+	}
+	if !arrayDescriptorReadyInitialized(file, proc, root, ctx) {
+		return arrayValue{}, false
+	}
+	source, start, length, lower, setupLines, ok := arrayDescriptorReturnSetup(file, proc, root)
+	if !ok || !arrayDescriptorParameter(proc, source, "String") || !arrayDescriptorParameter(proc, start, "") || !arrayDescriptorParameter(proc, length, "") || !arrayDescriptorParameter(proc, lower, "") {
+		return arrayValue{}, false
+	}
+	for _, line := range setupLines {
+		if line >= returnLine || !arrayDescriptorLineDominatesNormalExit(proc, line) {
+			return arrayValue{}, false
+		}
+	}
+	if !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true}) {
+		return arrayValue{}, false
+	}
+	return arrayValue{
+		kind:                            arrayAllocated,
+		knownArray:                      true,
+		mayBeEmpty:                      true,
+		origin:                          arrayOriginLocal,
+		returnDescriptorSourceParameter: strings.ToLower(source),
+		returnDescriptorStartParameter:  strings.ToLower(start),
+		returnDescriptorLengthParameter: strings.ToLower(length),
+		returnDescriptorLowerParameter:  strings.ToLower(lower),
+	}, true
+}
+
+func arrayDescriptorReturnSource(file parsedFile, proc sourceProcedure) (string, int, bool) {
+	root := ""
+	returnLine := 0
+	for line := max(0, proc.StartLine-1); line < min(proc.EndLine, len(file.Lines)); line++ {
+		lhs, rhs, indexed, assigned := arrayAssignment(strings.TrimSpace(normalizedCodeLine(file.Lines[line])))
+		if !assigned || indexed || !strings.EqualFold(lhs, proc.Name) {
+			continue
+		}
+		if returnLine != 0 {
+			return "", 0, false
+		}
+		receiver, member, ok := arrayQualifiedMemberParts(rhs)
+		if !ok || receiver == "" {
+			return "", 0, false
+		}
+		parts := append(strings.Split(receiver, "."), member)
+		if len(parts) != 3 || !strings.EqualFold(parts[1], "ac") || !strings.HasPrefix(strings.ToLower(parts[2]), "d") {
+			return "", 0, false
+		}
+		root = parts[0]
+		returnLine = line + 1
+	}
+	return root, returnLine, root != "" && returnLine != 0
+}
+
+func arrayDescriptorReadyInitialized(file parsedFile, proc sourceProcedure, root string, ctx analysisContext) bool {
+	pattern := regexp.MustCompile(`(?i)(?:^|:)\s*if\s+not\s+` + regexp.QuoteMeta(root) + `\s*\.\s*isset\s+then\s+initmemoryaccessor\s+` + regexp.QuoteMeta(root) + `\s*$`)
+	guardLine := -1
+	for line := max(0, proc.StartLine-1); line < min(proc.EndLine, len(file.Lines)); line++ {
+		if pattern.MatchString(strings.TrimSpace(normalizedCodeLine(file.Lines[line]))) {
+			if guardLine >= 0 {
+				return false
+			}
+			guardLine = line
+		}
+	}
+	if guardLine < 0 {
+		return false
+	}
+	initializerFound := false
+	for call := range proc.Calls.All() {
+		if call.Range.StartLine-1 != guardLine {
+			continue
+		}
+		if initializerFound {
+			return false
+		}
+		helper, parameter, resolved := arrayStaticReadyInitializer(file, proc, call, root, ctx)
+		if !resolved || helper.StartByte == proc.StartByte || !arrayStaticHelperSetsReadyFlag(file, helper, parameter) {
+			return false
+		}
+		initializerFound = true
+	}
+	return initializerFound
+}
+
+func arrayDescriptorReturnSetup(file parsedFile, proc sourceProcedure, root string) (string, string, string, string, []int, bool) {
+	prefix := regexp.QuoteMeta(root)
+	pvRe := regexp.MustCompile(`(?i)^\s*` + prefix + `\s*\.\s*sa\s*\.\s*pvdata\s*=\s*strptr\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\+\s*\(\s*([A-Za-z_]\w*)\s*-\s*1\s*\)\s*\*\s*[A-Za-z_]\w*\s*$`)
+	cbRe := regexp.MustCompile(`(?i)^\s*` + prefix + `\s*\.\s*sa\s*\.\s*cbelements\s*=\s*\S.*$`)
+	lowerRe := regexp.MustCompile(`(?i)^\s*` + prefix + `\s*\.\s*sa\s*\.\s*rgsabound0\s*\.\s*llbound\s*=\s*([A-Za-z_]\w*)\s*$`)
+	countRe := regexp.MustCompile(`(?i)^\s*` + prefix + `\s*\.\s*sa\s*\.\s*rgsabound0\s*\.\s*celements\s*=\s*([A-Za-z_]\w*)\s*$`)
+	source, start, length, lower := "", "", "", ""
+	pvCount, cbCount, lowerCount, countCount := 0, 0, 0, 0
+	lines := make([]int, 0, 4)
+	for line := max(0, proc.StartLine-1); line < min(proc.EndLine, len(file.Lines)); line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line]))
+		if match := pvRe.FindStringSubmatch(text); len(match) == 3 {
+			pvCount++
+			source, start = match[1], match[2]
+			lines = append(lines, line+1)
+		}
+		if cbRe.MatchString(text) {
+			cbCount++
+			lines = append(lines, line+1)
+		}
+		if match := lowerRe.FindStringSubmatch(text); len(match) == 2 {
+			lowerCount++
+			lower = match[1]
+			lines = append(lines, line+1)
+		}
+		if match := countRe.FindStringSubmatch(text); len(match) == 2 {
+			countCount++
+			length = match[1]
+			lines = append(lines, line+1)
+		}
+	}
+	if pvCount != 1 || cbCount != 1 || lowerCount != 1 || countCount != 1 {
+		return "", "", "", "", nil, false
+	}
+	return source, start, length, lower, lines, true
+}
+
+func arrayDescriptorParameter(proc sourceProcedure, name, typeName string) bool {
+	for parameter := range proc.Params.All() {
+		if !strings.EqualFold(strings.TrimSpace(parameter.Name), strings.TrimSpace(name)) {
+			continue
+		}
+		if parameter.IsArray || parameter.ValueShape == procedureir.ValueShapeFixedArray || parameter.ValueShape == procedureir.ValueShapeDynamicArray {
+			return false
+		}
+		return typeName == "" || strings.EqualFold(strings.TrimSpace(parameter.Type), typeName)
+	}
+	return false
+}
+
+func arrayDescriptorLineDominatesNormalExit(proc sourceProcedure, line int) bool {
+	dominators := arrayProcedureNormalExitDominators(proc)
+	for statement := range proc.Statements.All() {
+		if statement.Range.StartLine == line && arrayProcedureBlockDominatesNormalExit(proc, statement.ID, dominators) {
+			return true
+		}
+	}
+	return false
+}
+
 // arrayConditionalReturnSummary recognizes a small, path-sensitive family of
 // array factories. The returned array is intentionally kept conditional: the
 // caller must prove either that the scalar length is positive or that the
@@ -13215,6 +13555,7 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 			return !procedureHasErrorHandling && arraySummaryStatementAlwaysFails(text, base, procedure.constants)
 		}, participantCtx.arrayStats)
 		conditionalValue, hasConditional := arrayConditionalReturnSummary(procedure.file, proc)
+		descriptorValue, hasDescriptor := arrayDescriptorArrayReturnSummary(procedure.file, proc, participantCtx)
 		returnLines := make([]int, 0, len(returnCandidates))
 		for line := range returnCandidates {
 			returnLines = append(returnLines, line)
@@ -13227,6 +13568,9 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		if len(returns) == 0 || !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true}) {
 			if hasConditional {
 				return candidate{value: conditionalValue, ok: true}, true
+			}
+			if hasDescriptor {
+				return candidate{value: descriptorValue, ok: true}, true
 			}
 			return candidate{}, false
 		}
@@ -13241,6 +13585,9 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		}
 		if !valid && hasConditional {
 			return candidate{value: conditionalValue, ok: true}, true
+		}
+		if !valid && hasDescriptor {
+			return candidate{value: descriptorValue, ok: true}, true
 		}
 		return candidate{value: value, ok: valid}, true
 	}
@@ -13427,9 +13774,9 @@ func arrayReturnValueCompatible(proc sourceProcedure, left, right arrayValue) bo
 	if proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 		return false
 	}
-	return left.kind == arrayAllocated && right.kind == arrayAllocated && left.knownArray && right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.safeBoundProbe == right.safeBoundProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource
+	return left.kind == arrayAllocated && right.kind == arrayAllocated && left.knownArray && right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.safeBoundProbe == right.safeBoundProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && left.returnDescriptorSourceParameter == right.returnDescriptorSourceParameter && left.returnDescriptorStartParameter == right.returnDescriptorStartParameter && left.returnDescriptorLengthParameter == right.returnDescriptorLengthParameter && left.returnDescriptorLowerParameter == right.returnDescriptorLowerParameter
 }
 
 func arrayValueCompatible(left, right arrayValue) bool {
-	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
+	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && left.returnDescriptorSourceParameter == right.returnDescriptorSourceParameter && left.returnDescriptorStartParameter == right.returnDescriptorStartParameter && left.returnDescriptorLengthParameter == right.returnDescriptorLengthParameter && left.returnDescriptorLowerParameter == right.returnDescriptorLowerParameter && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
 }
