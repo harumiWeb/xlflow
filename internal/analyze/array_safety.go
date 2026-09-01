@@ -3640,7 +3640,35 @@ func applyArrayAllocationFlagBranch(state arrayFlowState, statement *procedureir
 	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue || statement.Condition == nil {
 		return state
 	}
-	condition := statement.Condition.Text
+	flags := arrayVBA227AllocationFlagNames(statement.Condition.Text, variables)
+	if len(flags) == 0 {
+		return state
+	}
+	flagSet := make(map[string]bool, len(flags))
+	for _, flag := range flags {
+		flagSet[flag] = true
+	}
+	var updated arrayFlowState
+	for name, value := range state {
+		if !flagSet[value.allocationFlagSource] {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeEmpty = false
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+func arrayVBA227AllocationFlagNames(text string, variables map[string]arrayVariable) []string {
+	condition := text
 	if parsed, _, ok := arrayIfThenParts(condition); ok {
 		condition = parsed
 	}
@@ -3657,31 +3685,34 @@ func applyArrayAllocationFlagBranch(state arrayFlowState, statement *procedureir
 	for len(condition) >= 2 && condition[0] == '(' && condition[len(condition)-1] == ')' {
 		condition = strings.TrimSpace(condition[1 : len(condition)-1])
 	}
-	if !arrayEraseNameRe.MatchString(condition) {
-		return state
+	terms := []string{condition}
+	for index := 0; index < len(terms); index++ {
+		term := terms[index]
+		if split := arrayTopLevelKeywordIndex(term, "and"); split >= 0 {
+			terms[index] = strings.TrimSpace(term[:split])
+			terms = append(terms, strings.TrimSpace(term[split+len("and"):]))
+		}
 	}
-	flag := strings.ToLower(cleanIdentifier(condition))
-	variable, known := variables[flag]
-	if !known || variable.isArray || variable.isVariant || variable.isObject || !strings.EqualFold(strings.TrimSpace(variable.typ), "Boolean") {
-		return state
-	}
-	var updated arrayFlowState
-	for name, value := range state {
-		if value.allocationFlagSource != flag {
+	flags := make([]string, 0, len(terms))
+	seen := map[string]bool{}
+	for _, term := range terms {
+		term = strings.TrimSpace(term)
+		for len(term) >= 2 && term[0] == '(' && term[len(term)-1] == ')' {
+			term = strings.TrimSpace(term[1 : len(term)-1])
+		}
+		lowerTerm := strings.ToLower(term)
+		if strings.HasPrefix(lowerTerm, "not ") || !arrayEraseNameRe.MatchString(term) {
 			continue
 		}
-		if updated == nil {
-			updated = cloneArrayState(state)
+		flag := strings.ToLower(cleanIdentifier(term))
+		variable, known := variables[flag]
+		if !known || variable.isArray || variable.isVariant || variable.isObject || !strings.EqualFold(strings.TrimSpace(variable.typ), "Boolean") || seen[flag] {
+			continue
 		}
-		value.kind = arrayAllocated
-		value.knownArray = true
-		value.mayBeEmpty = false
-		updated[name] = value
+		seen[flag] = true
+		flags = append(flags, flag)
 	}
-	if updated == nil {
-		return state
-	}
-	return updated
+	return flags
 }
 
 // applyArraySafeBoundGuard refines the branch where a helper that returns an

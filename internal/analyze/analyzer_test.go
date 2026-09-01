@@ -7029,6 +7029,39 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesAllocationThroughRepeatedLocalReadyFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CopyAddress(ByVal first As Boolean, ByVal second As Boolean)
+  Dim found As Boolean
+  Dim values() As Byte
+  If first Then
+    ReDim values(0 To 1)
+    found = True
+  End If
+  If Not found And second Then
+    ReDim values(0 To 1)
+    found = True
+  End If
+  If found Then
+    Debug.Print values(0)
+  End If
+  If Not first And found Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("repeated ready-flag allocations should prove the array on either path: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesStrPtrArrayGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
