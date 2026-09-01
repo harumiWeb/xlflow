@@ -5941,6 +5941,34 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesStrConvStringReassignmentInsideConditional(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Safe(ByVal retry As Boolean)
+  Dim connection As Object
+  Dim request As String
+  Dim bytes() As Byte
+  With connection
+    request = "header"
+    If retry Then
+      request = "retry"
+      bytes = StrConv(request, vbFromUnicode)
+      Debug.Print bytes(0), UBound(bytes)
+    End If
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a non-empty String reassigned inside a conditional should prove the converted Byte array: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesArrayReturnIntoByRefParameter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -13079,7 +13079,7 @@ func arrayStringVariableHasNonEmptyAssignment(file parsedFile, proc sourceProced
 	start := max(0, proc.StartLine-1)
 	end := min(len(file.Lines), line-1)
 	depth := 0
-	assigned := false
+	knownNonEmpty := false
 	for index := start; index < end; index++ {
 		for _, statement := range splitRangeValueSourceStatements(strings.TrimSpace(normalizedCodeLine(file.Lines[index]))) {
 			text := strings.TrimSpace(statement)
@@ -13091,14 +13091,22 @@ func arrayStringVariableHasNonEmptyAssignment(file parsedFile, proc sourceProced
 			}
 			lhs, rhs, indexed, ok := arrayAssignment(text)
 			if ok && !indexed && strings.EqualFold(lhs, source) {
-				assigned = depth == 0 && arrayStringExpressionHasNonEmptyLiteral(rhs)
+				if nonEmpty := arrayStringExpressionHasNonEmptyLiteral(rhs); depth == 0 {
+					knownNonEmpty = nonEmpty
+				} else if !nonEmpty {
+					// A conditional non-empty assignment preserves an already
+					// proven value: the branch either keeps the old value or
+					// replaces it with another non-empty value. Any other
+					// conditional assignment invalidates the proof.
+					knownNonEmpty = false
+				}
 			}
 			if delta := arrayStringBlockBoundary(text); delta > 0 {
 				depth++
 			}
 		}
 	}
-	return assigned
+	return knownNonEmpty
 }
 
 func splitStringConcatenation(expression string) []string {
