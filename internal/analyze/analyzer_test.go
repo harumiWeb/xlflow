@@ -6654,6 +6654,36 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulUBoundAfterLengthLimitCheckInsideWith(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Const MaxLength As Long = 100
+Private Sub Probe(ByVal source As String)
+  Dim connection As Object
+  Dim values() As Byte
+  With connection
+    values = StrConv(source, vbFromUnicode)
+    If UBound(values) + 1 > MaxLength Then
+      SetError "too long"
+      Exit Sub
+    End If
+    Debug.Print UBound(values)
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 12 {
+			t.Fatalf("a successful UBound length check inside With should make the following UBound safe: %+v", findingsByCode(findings, "VBA227"))
+		}
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulUBoundIntoWhileBody(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

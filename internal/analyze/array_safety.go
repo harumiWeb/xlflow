@@ -167,7 +167,6 @@ var (
 	arrayEraseRe                      = regexp.MustCompile(`(?i)^\s*erase\s+(.+)$`)
 	arrayEraseNameRe                  = regexp.MustCompile(`(?i)^[A-Za-z_]\w*$`)
 	arrayBoundCallRe                  = regexp.MustCompile(`(?i)\b(lbound|ubound)\s*\(\s*([^,)]*)\s*(?:,\s*([^)]*))?\)`)
-	arrayBoundOperatorRe              = regexp.MustCompile(`(?i)\b(?:mod|and|or|not)\b`)
 	arrayForBoundRe                   = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+(?:lbound|ubound)\s*\(\s*([A-Za-z_]\w*)`)
 	arrayForUBoundRe                  = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*([-+]?\d+)\s+to\s+ubound\s*\(\s*([A-Za-z_]\w*)`)
 	arrayReturnArrayDocRe             = regexp.MustCompile(`(?i)^@returns?\s+(?:(?:variant|object)\s*<)?array(?:<|\b)`)
@@ -700,7 +699,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		// is allocated on both the true and false paths. Keep this refinement
 		// narrow: ElseIf merging and inline bodies retain their existing CFG
 		// handling, and Resume Next may continue after a failed query.
-		if body == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(condition)), "if ") && arrayVBA227HasPureBoundsCondition(condition) && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		if body == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(condition)), "if ") && arrayVBA227HasBoundsCondition(condition) && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 			state, findings := transfer(state, condition)
 			return arraySuccessfulBoundsState(state, condition, variables, arrayVBA227LoopBodyEndLine(proc, line)), findings
 		}
@@ -991,32 +990,8 @@ func arrayUseHasSelfBoundsQuery(use arrayUse) bool {
 	return false
 }
 
-func arrayVBA227HasPureBoundsCondition(text string) bool {
-	hasLower, hasUpper := false, false
-	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
-		switch strings.ToLower(bound[1]) {
-		case "lbound":
-			hasLower = true
-		case "ubound":
-			hasUpper = true
-		}
-	}
-	if !hasLower || !hasUpper {
-		return false
-	}
-	condition := strings.TrimSpace(text)
-	if !strings.HasPrefix(strings.ToLower(condition), "if ") {
-		return false
-	}
-	condition = strings.TrimSpace(condition[len("if "):])
-	condition = arrayBoundCallRe.ReplaceAllString(condition, "")
-	condition = arrayBoundOperatorRe.ReplaceAllString(condition, "")
-	for _, char := range condition {
-		if isIdentifierStart(byte(char)) {
-			return false
-		}
-	}
-	return true
+func arrayVBA227HasBoundsCondition(text string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "if ") && arrayBoundCallRe.MatchString(text)
 }
 
 func arrayVBA227HasSuccessfulBoundsExpression(text string) bool {
