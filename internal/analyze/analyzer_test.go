@@ -6710,6 +6710,38 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesPositiveLengthAllocationIntoSeparatedZeroElseBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef input() As Byte)
+  Dim recvLen As Long
+  Dim recvBuffer() As Byte
+  recvLen = UBound(input) - LBound(input) + 1
+  If recvLen > 0 Then
+    ReDim recvBuffer(0 To recvLen - 1)
+  End If
+  If recvLen = 0 Then
+    Debug.Print "empty"
+  Else
+    Debug.Print recvBuffer(0)
+  End If
+End Sub
+`)
+
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, finding := range findingsByCode(findings, "VBA227") {
+			if finding.Line == 12 {
+				t.Fatalf("a positive length branch with a matching zero/else guard should prove recvBuffer allocation: %+v", findingsByCode(findings, "VBA227"))
+			}
+		}
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulUBoundIntoWhileBody(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

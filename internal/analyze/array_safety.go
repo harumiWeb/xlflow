@@ -412,7 +412,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 			},
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 				out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
-				out = applyArrayVBA227ConditionalReDimBranch(out, block.Statement, edge, vba227Variables)
+				out = applyArrayVBA227ConditionalReDimBranch(out, proc, block.Statement, edge, vba227Variables)
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
 				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, ctx, vba227Variables, moduleDecls)
 				out = applyArrayNotEmptyGuardBranch(out, block.Statement, edge, proc, vba227Variables)
@@ -1241,7 +1241,10 @@ func arrayVBA227ConditionalReDimGuard(proc sourceProcedure, line int, variables 
 		if parent.Kind != procedureir.StatementIf && parent.Kind != procedureir.StatementElseIf {
 			return "", false
 		}
-		return arrayVBA227ScalarConditionSource(parent, variables)
+		if guard, ok := arrayVBA227ScalarConditionSource(parent, variables); ok {
+			return guard, true
+		}
+		return arrayVBA227PositiveScalarConditionSource(parent, variables)
 	}
 	return "", false
 }
@@ -1466,6 +1469,24 @@ func arrayVBA227ScalarConditionSource(statement procedureir.Statement, variables
 	return "", false
 }
 
+func arrayVBA227PositiveScalarConditionSource(statement procedureir.Statement, variables map[string]arrayVariable) (string, bool) {
+	condition := statement.Text
+	if statement.Condition != nil && strings.TrimSpace(statement.Condition.Text) != "" {
+		condition = statement.Condition.Text
+	}
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	lhs, operator, literal, ok := arrayCountComparison(condition)
+	if !ok {
+		return "", false
+	}
+	if _, positive := arrayVBA227PositiveLengthCondition(condition); !positive {
+		return "", false
+	}
+	return arrayVBA227NormalizeScalarCondition(lhs, operator, literal, variables)
+}
+
 func arrayVBA227NormalizeScalarCondition(lhs, operator, rhs string, variables map[string]arrayVariable) (string, bool) {
 	lhs = strings.ToLower(cleanIdentifier(lhs))
 	rhs = strings.ToLower(strings.TrimSpace(rhs))
@@ -1479,8 +1500,8 @@ func arrayVBA227NormalizeScalarCondition(lhs, operator, rhs string, variables ma
 	return lhs + operator + rhs, true
 }
 
-func applyArrayVBA227ConditionalReDimBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, variables map[string]arrayVariable) arrayFlowState {
-	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue || statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf {
+func applyArrayVBA227ConditionalReDimBranch(state arrayFlowState, proc sourceProcedure, statement *procedureir.Statement, edge vbacfg.Edge, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf {
 		return state
 	}
 	condition, ok := arrayVBA227ScalarConditionSource(*statement, variables)
@@ -1489,7 +1510,7 @@ func applyArrayVBA227ConditionalReDimBranch(state arrayFlowState, statement *pro
 	}
 	var updated arrayFlowState
 	for name, value := range state {
-		if value.conditionalAllocationSource != condition {
+		if !arrayVBA227ConditionalReDimBranchMatches(proc, statement, edge, value.conditionalAllocationSource, condition) {
 			continue
 		}
 		if updated == nil {
@@ -1503,6 +1524,73 @@ func applyArrayVBA227ConditionalReDimBranch(state arrayFlowState, statement *pro
 		return state
 	}
 	return updated
+}
+
+func arrayVBA227ConditionalReDimBranchMatches(proc sourceProcedure, statement *procedureir.Statement, edge vbacfg.Edge, allocationCondition, branchCondition string) bool {
+	if edge.Kind == vbacfg.EdgeBranchTrue && allocationCondition == branchCondition {
+		return true
+	}
+	if edge.Kind != vbacfg.EdgeBranchFalse {
+		return false
+	}
+	positiveName, positive := arrayVBA227PositiveLengthCondition(allocationCondition)
+	zeroName, zero := arrayVBA227ZeroLengthCondition(branchCondition)
+	return positive && zero && positiveName == zeroName && arrayVBA227HasBoundsLengthAssignment(proc, statement, positiveName)
+}
+
+func arrayVBA227PositiveLengthCondition(condition string) (string, bool) {
+	lhs, operator, literal, ok := arrayCountComparison(condition)
+	if !ok {
+		return "", false
+	}
+	value, err := strconv.Atoi(literal)
+	if err != nil {
+		return "", false
+	}
+	switch operator {
+	case ">":
+		if value != 0 {
+			return "", false
+		}
+	case ">=":
+		if value != 1 {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	name := strings.ToLower(cleanIdentifier(lhs))
+	return name, name != ""
+}
+
+func arrayVBA227ZeroLengthCondition(condition string) (string, bool) {
+	lhs, operator, literal, ok := arrayCountComparison(condition)
+	if !ok || operator != "=" || literal != "0" {
+		return "", false
+	}
+	name := strings.ToLower(cleanIdentifier(lhs))
+	return name, name != ""
+}
+
+func arrayVBA227HasBoundsLengthAssignment(proc sourceProcedure, target *procedureir.Statement, name string) bool {
+	if target == nil || name == "" {
+		return false
+	}
+	for candidate := range proc.Statements.All() {
+		if candidate.Kind != procedureir.StatementAssignment || candidate.Range.StartLine >= target.Range.StartLine {
+			continue
+		}
+		text := strings.TrimSpace(candidate.Text)
+		if newline := strings.IndexAny(text, "\r\n"); newline >= 0 {
+			text = strings.TrimSpace(text[:newline])
+		}
+		match := arrayBoundsProbeRe.FindStringSubmatch(text)
+		if len(match) != 4 || !strings.EqualFold(match[1], name) || !strings.EqualFold(match[2], match[3]) {
+			continue
+		}
+		return arrayVBA227StatementLineDominates(proc, candidate.Range.StartLine, *target)
+	}
+	return false
 }
 
 func arrayVBA227HasDictionaryBoundsExpression(text string, state arrayFlowState) bool {
