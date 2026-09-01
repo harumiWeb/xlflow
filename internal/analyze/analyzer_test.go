@@ -6855,6 +6855,14 @@ Private Sub ConsumeContinuation(ByRef payload() As Byte, ByVal payloadLen As Lon
   End With
 End Sub
 
+Private Sub ConsumeThreshold(ByRef payload() As Byte, ByVal payloadLen As Long)
+  With m_State
+    If payloadLen >= 2 Then
+      Debug.Print .marker, payload(1)
+    End If
+  End With
+End Sub
+
 Private Sub Dispatch(ByVal opcode As Long, ByVal payloadLen As Long)
   Dim payload() As Byte
   If payloadLen > 0 Then
@@ -6869,6 +6877,8 @@ Private Sub Dispatch(ByVal opcode As Long, ByVal payloadLen As Long)
 			    ConsumeBinary payload, payloadLen, False
 			  Case 0
 			    ConsumeContinuation payload, payloadLen, True
+			  Case 3
+			    ConsumeThreshold payload, payloadLen
 			End Select
 End Sub
 
@@ -6876,6 +6886,7 @@ Public Sub Run()
   Dispatch 1, 1
   Dispatch 2, 1
   Dispatch 0, 1
+  Dispatch 3, 2
 End Sub
 `)
 
@@ -6884,7 +6895,7 @@ End Sub
 				t.Fatal(err)
 			}
 			for _, finding := range findingsByCode(findings, "VBA227") {
-				if finding.Procedure == "ConsumeText" || finding.Procedure == "ConsumeBinary" || finding.Procedure == "ConsumeContinuation" {
+				if finding.Procedure == "ConsumeText" || finding.Procedure == "ConsumeBinary" || finding.Procedure == "ConsumeContinuation" || finding.Procedure == "ConsumeThreshold" {
 					t.Fatalf("matching positive-length allocation should cross a Select Case ByRef boundary: %+v", finding)
 				}
 			}

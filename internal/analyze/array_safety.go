@@ -1068,11 +1068,7 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, proc sour
 			inAlternative = true
 		case procedureir.StatementElseIf:
 			if !inAlternative {
-				if condition, ok := arrayVBA227PositiveScalarConditionSource(parent, variables); ok {
-					lengthName, positive := arrayVBA227PositiveLengthCondition(condition)
-					if !positive {
-						break
-					}
+				if lengthName, positive := arrayVBA227PositiveGuardConditionSource(parent, variables); positive {
 					for name, value := range state {
 						if value.allocationCountSource != "" && arrayCountExpressionMatches(lengthName, value.allocationCountSource) {
 							proven[name] = true
@@ -1083,11 +1079,7 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, proc sour
 			inAlternative = true
 		case procedureir.StatementIf:
 			if !inAlternative {
-				if condition, ok := arrayVBA227PositiveScalarConditionSource(parent, variables); ok {
-					lengthName, positive := arrayVBA227PositiveLengthCondition(condition)
-					if !positive {
-						break
-					}
+				if lengthName, positive := arrayVBA227PositiveGuardConditionSource(parent, variables); positive {
 					for name, value := range state {
 						if value.allocationCountSource != "" && arrayCountExpressionMatches(lengthName, value.allocationCountSource) {
 							proven[name] = true
@@ -1566,6 +1558,45 @@ func arrayVBA227PositiveScalarConditionSource(statement procedureir.Statement, v
 		return "", false
 	}
 	return arrayVBA227NormalizeScalarCondition(lhs, operator, literal, variables)
+}
+
+func arrayVBA227PositiveGuardConditionSource(statement procedureir.Statement, variables map[string]arrayVariable) (string, bool) {
+	condition := statement.Text
+	if statement.Condition != nil && strings.TrimSpace(statement.Condition.Text) != "" {
+		condition = statement.Condition.Text
+	}
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	lhs, operator, literal, ok := arrayCountComparison(condition)
+	if !ok {
+		return "", false
+	}
+	value, err := strconv.Atoi(literal)
+	if err != nil {
+		return "", false
+	}
+	switch operator {
+	case ">":
+		if value < 0 {
+			return "", false
+		}
+	case ">=":
+		if value < 1 {
+			return "", false
+		}
+	case "=":
+		if value <= 0 {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	if _, ok := arrayVBA227NormalizeScalarCondition(lhs, operator, literal, variables); !ok {
+		return "", false
+	}
+	name := strings.ToLower(cleanIdentifier(lhs))
+	return name, name != ""
 }
 
 func arrayVBA227NormalizeScalarCondition(lhs, operator, rhs string, variables map[string]arrayVariable) (string, bool) {
