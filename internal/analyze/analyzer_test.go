@@ -7537,6 +7537,92 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesDescriptorBackedBoundArrayWithoutExplicitCount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type BoundAccessor
+  rgsabound() As BoundInfo
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As BoundInfo)
+  Debug.Print values(0).cElements
+End Sub
+
+Private Sub Forward(ByRef bounds As BoundAccessor)
+  Consume bounds.rgsabound
+End Sub
+
+Public Sub Run(ByVal count As Long)
+  Dim bounds As BoundAccessor
+  bounds.sa.pvData = 1
+  bounds.sa.rgsabound0.cElements = count
+  If count >= 1 Then
+    Forward bounds
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a descriptor-backed bound array forwarded without a separate count should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryDescriptorBackedBoundArrayWithoutSetup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type BoundAccessor
+  rgsabound() As BoundInfo
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As BoundInfo)
+  Debug.Print values(0).cElements
+End Sub
+
+Private Sub Forward(ByRef bounds As BoundAccessor)
+  Consume bounds.rgsabound
+End Sub
+
+Public Sub Run()
+  Dim bounds As BoundAccessor
+  Forward bounds
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 1 || got[0].Procedure != "Consume" {
+		t.Fatalf("an uninitialized descriptor-backed bound array must remain conservative: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesQualifiedDictionarySnapshotsThroughPrivateByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

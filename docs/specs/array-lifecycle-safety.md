@@ -205,6 +205,14 @@ an allocated one-dimensional array. The helper must have the complete probe
 shape, including its recovery label and return assignment; an arbitrary
 `expression - 1` helper is not an allocation proof.
 
+A `SAFEARRAY` accessor's `rgsabound()` member may be passed through a private
+ByRef helper chain without a separate count argument when the descriptor data
+pointer and bound-array count are initialized by an observed caller, and the
+immediate helper reaches the call only after a successful `ReDim ... (0 To ub)`
+where `ub` is that descriptor count minus one. This is the narrow normal-path
+contract for descriptor projections; missing descriptor setup, an unresolved or
+public caller, and arbitrary `ReDim` shapes remain conservative.
+
 At a join, allocation and dimensions are retained only when all incoming paths
 agree. Exceptional and uncertain CFG edges use the pre-statement state. This
 means an indexed access after an allocation on only one branch remains a

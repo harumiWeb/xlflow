@@ -8525,7 +8525,7 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 		name = directArrayArgumentName(arguments[index])
 		value, known := state[name]
 		allocated := known && value.kind == arrayAllocated && value.knownArray
-		if !allocated && arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index]) {
+		if !allocated && arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index], ctx) {
 			value = arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}
 			known = true
 			allocated = true
@@ -9408,7 +9408,7 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 		if !parameterIsByRefArray(parameter) || !bound[index] {
 			continue
 		}
-		if directArrayArgumentName(arguments[index]) == "" && !arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index]) {
+		if directArrayArgumentName(arguments[index]) == "" && !arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index], ctx) {
 			return nil, false
 		}
 	}
@@ -9485,7 +9485,7 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 		}
 		name := directArrayArgumentName(arguments[index])
 		if name == "" {
-			if !arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index]) {
+			if !arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index], ctx) {
 				return nil, false
 			}
 			continue
@@ -9555,7 +9555,7 @@ func arrayByRefCallHasProvenArrayArguments(file parsedFile, target, caller sourc
 			}
 			continue
 		}
-		if arrayQualifiedArgumentProvenAllocated(file, caller, call, argument) {
+		if arrayQualifiedArgumentProvenAllocated(file, caller, call, argument, ctx) {
 			foundExpression = true
 			continue
 		}
@@ -9905,12 +9905,12 @@ func directArrayArgumentName(text string) string {
 // the member. The additional proofs are limited to normal-path ReDim,
 // descriptor-backed array setup, and dictionary snapshots whose non-empty
 // range is established by the same caller.
-func arrayQualifiedArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string) bool {
+func arrayQualifiedArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string, ctx analysisContext) bool {
 	want := arrayQualifiedArgumentTarget(file, caller, call.Range.StartLine, argument)
 	if want == "" || caller.Graph == nil {
 		return false
 	}
-	if arrayQualifiedDescriptorArgumentProvenAllocated(file, caller, call, argument) ||
+	if arrayQualifiedDescriptorArgumentProvenAllocated(file, caller, call, argument, ctx) ||
 		arrayQualifiedDictionarySnapshotProvenAllocated(file, caller, call, argument) {
 		return true
 	}
@@ -9932,8 +9932,13 @@ func arrayQualifiedArgumentProvenAllocated(file parsedFile, caller sourceProcedu
 // pattern used when a VBA SAFEARRAY descriptor is projected onto a typed array
 // member. The array itself is not visible to the source-level analyzer, but a
 // dominating data pointer and element-count write, followed by a positive
-// count guard, establish the same normal-path contract as ReDim.
-func arrayQualifiedDescriptorArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string) bool {
+// count guard, establish the same normal-path contract as ReDim. A projected
+// `rgsabound()` array has one additional form: its caller can establish a
+// successful `ReDim ... (0 To ub)` from the descriptor dimension count before
+// passing the accessor through another private helper. That normal-path fact
+// proves the descriptor count is positive without requiring a duplicated scalar
+// count argument at every helper boundary.
+func arrayQualifiedDescriptorArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string, ctx analysisContext) bool {
 	receiver, member, ok := arrayQualifiedMemberParts(argument)
 	if !ok || !strings.EqualFold(member, "arr") && !strings.EqualFold(member, "rgsabound") {
 		return false
@@ -9946,39 +9951,191 @@ func arrayQualifiedDescriptorArgumentProvenAllocated(file parsedFile, caller sou
 	}
 	arguments := arrayCallArgumentTexts(caller, call)
 	if len(arguments) < 2 {
-		return false
+		if !strings.EqualFold(member, "rgsabound") {
+			return false
+		}
+		normalPathNonEmpty := arrayQualifiedDescriptorHasSuccessfulShapeUse(file, caller, call, receiver)
+		return arrayQualifiedDescriptorReceiverInitialized(file, caller, call, receiver, ctx, !normalPathNonEmpty, map[string]bool{})
 	}
 	count := canonicalArrayBoundExpression(arguments[1])
-	if count == "" || !arrayQualifiedDescriptorCountPositive(file, caller, call, arguments[1]) {
+	if count != "" && arrayQualifiedDescriptorCountPositive(file, caller, call, arguments[1]) {
+		wantReceiver := canonicalArrayBoundExpression(receiver)
+		wantData := wantReceiver + ".sa.pvdata"
+		wantBounds := wantReceiver + ".sa.rgsabound0.celements"
+		hasData := false
+		hasBounds := false
+		for statement := range caller.Statements.All() {
+			line := statement.Range.StartLine
+			if line <= caller.StartLine || line >= call.Range.StartLine || !arrayStatementDominatesCall(caller, statement.ID, line, call) {
+				continue
+			}
+			text := strings.TrimSpace(statement.Text)
+			if text == "" {
+				text = arrayLogicalSourceLine(file.Lines, line)
+			}
+			lhs, rhs, indexed, assigned := arrayAssignment(text)
+			if !assigned || indexed {
+				continue
+			}
+			target := canonicalArrayBoundExpression(lhs)
+			switch target {
+			case wantData:
+				hasData = strings.TrimSpace(rhs) != ""
+			case wantBounds:
+				hasBounds = canonicalArrayBoundExpression(rhs) == count
+			}
+		}
+		if hasData && hasBounds {
+			return true
+		}
+	}
+	if !strings.EqualFold(member, "rgsabound") || !arrayQualifiedDescriptorHasSuccessfulShapeUse(file, caller, call, receiver) {
 		return false
 	}
+	return arrayQualifiedDescriptorReceiverInitialized(file, caller, call, receiver, ctx, false, map[string]bool{})
+}
+
+func arrayQualifiedDescriptorReceiverInitialized(file parsedFile, proc sourceProcedure, call procedureir.CallSite, receiver string, ctx analysisContext, requirePositive bool, visiting map[string]bool) bool {
+	receiver = strings.ToLower(cleanIdentifier(strings.TrimSpace(receiver)))
+	if receiver == "" {
+		return false
+	}
+	parameterIndex, isParameter := arrayProcedureParameterIndex(proc, receiver)
+	if !isParameter {
+		return arrayQualifiedDescriptorLocalInitialized(file, proc, call, receiver, requirePositive)
+	}
+	visitKey := arrayProcedureKey(proc) + ":" + receiver
+	if visiting[visitKey] {
+		return false
+	}
+	visiting[visitKey] = true
+	defer delete(visiting, visitKey)
+
+	foundCaller := false
+	for _, candidate := range file.Procedures {
+		for nested := range candidate.Calls.All() {
+			targetKey, target, ok := arrayPrivateTargetForCall(ctx, ctx.arrayPrivateTargets, nested)
+			if !ok || targetKey != arrayProcedureKey(proc) {
+				continue
+			}
+			bindings, bound := arrayCallArgumentBindings(candidate, target, nested)
+			if !bound {
+				return false
+			}
+			actual := ""
+			for _, binding := range bindings {
+				if binding.parameterIndex == parameterIndex {
+					actual = strings.TrimSpace(binding.text)
+					break
+				}
+			}
+			if directArrayArgumentName(actual) == "" {
+				return false
+			}
+			foundCaller = true
+			if _, isParameter := arrayProcedureParameterIndex(candidate, actual); isParameter {
+				if !arrayQualifiedDescriptorReceiverInitialized(file, candidate, nested, actual, ctx, requirePositive, visiting) {
+					return false
+				}
+				continue
+			}
+			if !arrayQualifiedDescriptorLocalInitialized(file, candidate, nested, actual, requirePositive) {
+				return false
+			}
+		}
+	}
+	return foundCaller
+}
+
+func arrayQualifiedDescriptorLocalInitialized(file parsedFile, proc sourceProcedure, call procedureir.CallSite, receiver string, requirePositive bool) bool {
 	wantReceiver := canonicalArrayBoundExpression(receiver)
 	wantData := wantReceiver + ".sa.pvdata"
 	wantBounds := wantReceiver + ".sa.rgsabound0.celements"
 	hasData := false
-	hasBounds := false
-	for statement := range caller.Statements.All() {
+	count := ""
+	for statement := range proc.Statements.All() {
 		line := statement.Range.StartLine
-		if line <= caller.StartLine || line >= call.Range.StartLine || !arrayStatementDominatesCall(caller, statement.ID, line, call) {
+		if line <= proc.StartLine || line >= call.Range.StartLine || !arrayStatementDominatesCall(proc, statement.ID, line, call) {
 			continue
 		}
-		text := strings.TrimSpace(statement.Text)
-		if text == "" {
-			text = arrayLogicalSourceLine(file.Lines, line)
-		}
-		lhs, rhs, indexed, assigned := arrayAssignment(text)
-		if !assigned || indexed {
-			continue
-		}
-		target := canonicalArrayBoundExpression(lhs)
-		switch target {
-		case wantData:
-			hasData = strings.TrimSpace(rhs) != ""
-		case wantBounds:
-			hasBounds = canonicalArrayBoundExpression(rhs) == count
+		for _, text := range arrayQualifiedDescriptorStatementTexts(file, statement) {
+			lhs, rhs, indexed, assigned := arrayAssignment(text)
+			if !assigned || indexed {
+				continue
+			}
+			switch canonicalArrayBoundExpression(lhs) {
+			case wantData:
+				canonical := canonicalArrayBoundExpression(rhs)
+				hasData = canonical != "" && canonical != "0" && canonical != "nullptr"
+			case wantBounds:
+				count = canonicalArrayBoundExpression(rhs)
+			}
 		}
 	}
-	return hasData && hasBounds
+	if !hasData || count == "" {
+		return false
+	}
+	if !requirePositive {
+		return true
+	}
+	if value, err := strconv.Atoi(count); err == nil {
+		return value > 0
+	}
+	return arrayQualifiedDescriptorCountPositive(file, proc, call, count)
+}
+
+func arrayQualifiedDescriptorStatementTexts(file parsedFile, statement procedureir.Statement) []string {
+	texts := make([]string, 0, 4)
+	seen := map[string]bool{}
+	add := func(source string) {
+		for _, segment := range splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(source)) {
+			text := strings.TrimSpace(segment.text)
+			if text != "" && !seen[text] {
+				seen[text] = true
+				texts = append(texts, text)
+			}
+		}
+	}
+	add(statement.Text)
+	if statement.Range.StartLine >= 1 && statement.Range.StartLine <= len(file.Lines) {
+		add(arrayLogicalSourceLine(file.Lines, statement.Range.StartLine))
+	}
+	return texts
+}
+
+func arrayQualifiedDescriptorHasSuccessfulShapeUse(file parsedFile, proc sourceProcedure, call procedureir.CallSite, receiver string) bool {
+	wantCount := canonicalArrayBoundExpression(receiver + ".sa.rgsabound0.cElements")
+	upperNames := map[string]int{}
+	for statement := range proc.Statements.All() {
+		line := statement.Range.StartLine
+		if line <= proc.StartLine || line >= call.Range.StartLine || !arrayStatementDominatesCall(proc, statement.ID, line, call) {
+			continue
+		}
+		for _, text := range arrayQualifiedDescriptorStatementTexts(file, statement) {
+			if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed && canonicalArrayBoundExpression(rhs) == wantCount+"-1" {
+				upperNames[strings.ToLower(cleanIdentifier(lhs))] = line
+			}
+			match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(text))
+			if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+				continue
+			}
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if !direct || redim.name == "" {
+					continue
+				}
+				dimensions := canonicalArrayBoundExpression(redim.dimensions)
+				if !strings.HasPrefix(dimensions, "0to") {
+					continue
+				}
+				upper := strings.TrimPrefix(dimensions, "0to")
+				if assignmentLine, ok := upperNames[strings.ToLower(cleanIdentifier(upper))]; ok && assignmentLine < line {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // arrayQualifiedDescriptorCountPositive proves that the count used to build a
