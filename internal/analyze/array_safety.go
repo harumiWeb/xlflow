@@ -93,9 +93,35 @@ type arrayValue struct {
 	// named collection's Count is positive. The fact is refined only on a
 	// matching control-flow branch; it is never treated as unconditional.
 	allocationCountSource string
+	// conditionalAllocationSource records that a direct ReDim occurred under
+	// the true body of a simple scalar comparison. The fact survives the merge
+	// with the branch that skipped the ReDim and is consumed only by a later
+	// matching true branch.
+	conditionalAllocationSource string
+	// returnNonEmptyArrayParameter is set only on an interprocedural return
+	// summary. It names the callee's ByRef array parameter whose non-empty value
+	// makes the returned array allocation definite.
+	returnNonEmptyArrayParameter string
+	// returnPositiveScalarParameter is set only on an interprocedural return
+	// summary. It names the callee's scalar parameter whose positive value makes
+	// the returned array allocation definite.
+	returnPositiveScalarParameter string
+	// nonEmptySource records the caller-side array whose non-empty state makes
+	// this returned array non-empty. It is consumed by a matching StrPtr guard.
+	nonEmptySource string
+	boundsProof    arrayBoundsProof
 }
 
 type arrayFlowState map[string]arrayValue
+
+type arrayBoundsProof struct {
+	loopEndLine                      int
+	priorKind                        arrayAllocation
+	priorKnownArray                  bool
+	priorMayBeEmpty                  bool
+	priorAllocationCount             string
+	priorConditionalAllocationSource string
+}
 
 const arrayDictionaryCountSourcePrefix = "dictionary:"
 
@@ -146,6 +172,7 @@ var (
 	arrayGuardValueReversedRe         = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>|>=|<=|>|<)\s*([A-Za-z_]\w*)\s*$`)
 	arrayIsArrayGuardRe               = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
 	arrayByteArrayGuardRe             = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
+	arrayStrPtrGuardRe                = regexp.MustCompile(`(?i)^\s*strptr\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(=|<>)\s*0\s*$`)
 	arrayByteArrayReadRe              = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
 	arraySetupGuardRe                 = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
 	arrayModuleReadyGuardRe           = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s+then\s+exit\s+(?:sub|function|property)\s*$`)
@@ -162,6 +189,9 @@ var (
 	arrayLabelRe                      = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*:\s*$`)
 	arrayCountComparisonRe            = regexp.MustCompile(`(?i)^\s*(.*?)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)\s*$`)
 	arrayConditionAndRe               = regexp.MustCompile(`(?i)\s+and\s+`)
+	arrayConditionOrRe                = regexp.MustCompile(`(?i)\s+or\s+`)
+	arrayScalarConditionRe            = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*(=|<>)\s*([A-Za-z_]\w*|-?\d+)\s*$`)
+	arrayScalarConditionReversedRe    = regexp.MustCompile(`(?i)^\s*(-?\d+)\s*(=|<>)\s*([A-Za-z_]\w*)\s*$`)
 	arraySelectCaseRe                 = regexp.MustCompile(`(?i)^select\s+case\s+(.+)$`)
 	arrayPositiveCaseRe               = regexp.MustCompile(`(?i)^case\s+(-?\d+)\s*$`)
 )
@@ -360,7 +390,8 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 			},
 			EdgeState: func(block vbacfg.Block, edge vbacfg.Edge, out arrayFlowState) arrayFlowState {
 				out = applyArrayConditionalAllocationBranch(out, &vba227Graph, block, edge)
-				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore)
+				out = applyArrayVBA227ConditionalReDimBranch(out, block.Statement, edge, vba227Variables)
+				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
 				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, vba227Variables)
 				out = applyArrayForBoundState(out, block.Statement, edge, vba227Variables)
@@ -552,8 +583,12 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 }
 
 func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool) (arrayFlowState, []Finding) {
+	state = arrayVBA227ClearLoopBodyBounds(state, line)
+	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
 	transfer := func(input arrayFlowState, source string) (arrayFlowState, []Finding) {
 		output, findings := a.arrayTransfer(file, proc, ctx, variables, input, source, line, constants, capacityGuards)
+		output = arrayVBA227AttachConditionalReDimState(output, proc, source, line, variables)
+		output = arrayVBA227AttachReturnProvenance(output, source, ctx, variables, constants)
 		if resumeNextBefore == nil || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 			return output, findings
 		}
@@ -579,6 +614,8 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	} else if assignment, ok := inlineArrayReturnAssignmentText(inlineText, ctx.arrayReturns); ok {
 		text = assignment
 	} else if assignment, ok := inlineArrayQualifiedReturnAssignmentText(file, proc, line, inlineText, ctx.arrayReturnsQualified); ok {
+		text = assignment
+	} else if assignment, ok := inlineArrayAssignmentText(inlineText); ok {
 		text = assignment
 	}
 	if condition, body, ok := arrayIfThenParts(text); ok {
@@ -642,7 +679,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		// handling, and Resume Next may continue after a failed query.
 		if body == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(condition)), "if ") && arrayVBA227HasPureBoundsCondition(condition) && !arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 			state, findings := transfer(state, condition)
-			return arraySuccessfulBoundsState(state, condition, variables), findings
+			return arraySuccessfulBoundsState(state, condition, variables, arrayVBA227LoopBodyEndLine(proc, line)), findings
 		}
 	}
 	state, findings := transfer(state, text)
@@ -650,7 +687,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
 		!strings.Contains(strings.ToLower(text), "on error resume next") {
-		state = arraySuccessfulBoundsState(state, text, variables)
+		state = arraySuccessfulBoundsState(state, text, variables, arrayVBA227LoopBodyEndLine(proc, line))
 	}
 	// Source-line CFG blocks can contain an If condition and its body. Apply
 	// the normal-path fact after the condition while the block is still being
@@ -662,16 +699,18 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	return state, findings
 }
 
-// arrayVBA227FilterForBodyIndexFindings removes only the unallocated-index
-// observation for a loop body whose For bound necessarily succeeded before
-// the body could run. Source-line CFG blocks include a For header and its
-// nested body in one scan, so the edge refinement is applied too late for the
-// first body visit; this narrow filter preserves the bound finding itself.
+// arrayVBA227FilterForBodyIndexFindings removes only the unallocated/empty
+// index observations for a loop body whose For bound necessarily succeeded
+// before the body could run. Source-line CFG blocks include a For header and
+// its nested body in one scan, so the edge refinement is applied too late for
+// the first body visit; this narrow filter preserves the bound finding itself
+// and any known lower/upper-bound violation.
 func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
 	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 		return findings
 	}
 	proven := map[string]bool{}
+	provenNonEmpty := map[string]bool{}
 	for statement := range proc.Statements.All() {
 		if statement.Kind != procedureir.StatementFor || line <= statement.Range.StartLine || line >= statement.Range.EndLine {
 			continue
@@ -690,6 +729,7 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 				variable, known := variables[name]
 				if known && (variable.isArray || variable.isVariant) {
 					proven[name] = true
+					provenNonEmpty[name] = true
 				}
 			}
 		}
@@ -703,23 +743,25 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 		variable, known := variables[name]
 		if name != "" && known && (variable.isArray || variable.isVariant) {
 			proven[name] = true
+			provenNonEmpty[name] = true
 		}
 		if match := arrayForUBoundRe.FindStringSubmatch(header); len(match) == 3 {
 			name := strings.ToLower(cleanIdentifier(match[2]))
 			variable, variableKnown := variables[name]
-			value, valueKnown := state[name]
+			_, valueKnown := state[name]
 			start, startKnown := integerLiteral(match[1])
-			lower, lowerKnown := arrayValueKnownLowerBound(value)
-			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown && startKnown && lowerKnown && start >= lower {
+			if variableKnown && (variable.isArray || variable.isVariant) && valueKnown && startKnown && start >= 0 {
 				// The For body is reachable only after UBound succeeded. When
-				// the returned array's lower bound is known, the loop start
-				// supplies the lower-side index proof without suppressing the
-				// UBound diagnostic itself.
+				// the loop starts at a nonnegative index, an empty array cannot
+				// reach the body (its upper bound is below the start). The known
+				// lower bound, when available, additionally proves the index is
+				// not below the array's lower bound.
 				proven[name] = true
+				provenNonEmpty[name] = true
 			}
 		}
 	}
-	if len(proven) == 0 {
+	if len(proven) == 0 && len(provenNonEmpty) == 0 {
 		return findings
 	}
 	filtered := findings[:0]
@@ -727,7 +769,8 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, proc sourceProced
 		remove := false
 		if finding.Code == "VBA227" {
 			for name := range proven {
-				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") {
+				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") ||
+					provenNonEmpty[name] && finding.arrayOperationKey == arrayIndexOperationKey(name, "empty") {
 					remove = true
 					break
 				}
@@ -892,11 +935,233 @@ func arrayVBA227HasSuccessfulBoundsExpression(text string) bool {
 		}
 	}
 	for _, bounds := range seen {
-		if bounds == 3 {
+		if bounds != 0 {
 			return true
 		}
 	}
 	return false
+}
+
+func arrayVBA227LoopBodyEndLine(proc sourceProcedure, line int) int {
+	if line <= 0 {
+		return 0
+	}
+	endLine := 0
+	for statement := range proc.Statements.All() {
+		switch statement.Kind {
+		case procedureir.StatementFor, procedureir.StatementForEach, procedureir.StatementDo, procedureir.StatementWhile:
+		default:
+			continue
+		}
+		if line > statement.Range.StartLine && line < statement.Range.EndLine &&
+			(endLine == 0 || statement.Range.EndLine < endLine) {
+			endLine = statement.Range.EndLine
+		}
+	}
+	return endLine
+}
+
+func arrayVBA227AttachConditionalReDimState(state arrayFlowState, proc sourceProcedure, text string, line int, variables map[string]arrayVariable) arrayFlowState {
+	match := arrayRedimRe.FindStringSubmatch(text)
+	if len(state) == 0 || line <= 0 || len(match) == 0 {
+		return state
+	}
+	guard, ok := arrayVBA227ConditionalReDimGuard(proc, line, variables)
+	if !ok {
+		return state
+	}
+	var updated arrayFlowState
+	for _, clause := range splitArgs(match[2]) {
+		redim, direct := parseDirectArrayRedimClause(clause)
+		if !direct {
+			legacy := arrayRedimClauseRe.FindStringSubmatch(clause)
+			if len(legacy) == 0 {
+				continue
+			}
+			redim = directArrayRedimClause{name: legacy[1], dimensions: legacy[2]}
+		}
+		name := strings.ToLower(cleanIdentifier(redim.name))
+		variable, knownVariable := variables[name]
+		value, knownValue := state[name]
+		if !knownVariable || !variable.isArray || !knownValue || value.kind != arrayAllocated || !value.knownArray {
+			continue
+		}
+		if value.conditionalAllocationSource != "" && value.conditionalAllocationSource != guard {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.conditionalAllocationSource = guard
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+func arrayVBA227ConditionalReDimGuard(proc sourceProcedure, line int, variables map[string]arrayVariable) (string, bool) {
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementReDim || statement.Range.StartLine != line {
+			continue
+		}
+		parent := procedureStatementByID(proc, statement.ParentID)
+		if parent.Kind != procedureir.StatementIf && parent.Kind != procedureir.StatementElseIf {
+			return "", false
+		}
+		return arrayVBA227ScalarConditionSource(parent, variables)
+	}
+	return "", false
+}
+
+// arrayVBA227ClearConditionalAllocationGuards forgets a conditional ReDim fact
+// when the scalar that controls it is assigned outside a matching guard. A
+// later equality check is only useful if the value being checked is still the
+// value that controlled the allocation; retaining the fact across an
+// unrelated assignment would turn a path-sensitive proof into an unsound one.
+func arrayVBA227ClearConditionalAllocationGuards(state arrayFlowState, proc sourceProcedure, text string, line int, variables map[string]arrayVariable) arrayFlowState {
+	assigned, _, indexed, ok := arrayAssignment(text)
+	if !ok || indexed {
+		return state
+	}
+	assignedName := strings.ToLower(cleanIdentifier(assigned))
+	if assignedName == "" {
+		return state
+	}
+	var updated arrayFlowState
+	for name, value := range state {
+		condition := value.conditionalAllocationSource
+		if condition == "" || arrayVBA227ScalarConditionLHS(condition) != assignedName {
+			continue
+		}
+		if arrayVBA227LineWithinMatchingGuard(proc, line, condition, variables) {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.conditionalAllocationSource = ""
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+func arrayVBA227LineWithinMatchingGuard(proc sourceProcedure, line int, condition string, variables map[string]arrayVariable) bool {
+	statement := procedureStatementAtLine(proc, line)
+	visited := map[int]bool{}
+	for statement.ParentID != 0 && !visited[statement.ParentID] {
+		visited[statement.ParentID] = true
+		parent := procedureStatementByID(proc, statement.ParentID)
+		if parent.ID == 0 {
+			break
+		}
+		if parent.Kind == procedureir.StatementIf || parent.Kind == procedureir.StatementElseIf {
+			if parentCondition, ok := arrayVBA227ScalarConditionSource(parent, variables); ok && parentCondition == condition {
+				return true
+			}
+		}
+		statement = parent
+	}
+	return false
+}
+
+func arrayVBA227ScalarConditionLHS(condition string) string {
+	if match := arrayScalarConditionRe.FindStringSubmatch(condition); len(match) == 4 {
+		return strings.ToLower(cleanIdentifier(match[1]))
+	}
+	if match := arrayScalarConditionReversedRe.FindStringSubmatch(condition); len(match) == 4 {
+		return strings.ToLower(cleanIdentifier(match[3]))
+	}
+	return ""
+}
+
+func procedureStatementAtLine(proc sourceProcedure, line int) procedureir.Statement {
+	var best procedureir.Statement
+	for statement := range proc.Statements.All() {
+		if line < statement.Range.StartLine || line > statement.Range.EndLine {
+			continue
+		}
+		if best.ID == 0 || statement.Range.StartLine > best.Range.StartLine || statement.Range.EndLine < best.Range.EndLine {
+			best = statement
+		}
+	}
+	return best
+}
+
+func arrayVBA227ScalarConditionSource(statement procedureir.Statement, variables map[string]arrayVariable) (string, bool) {
+	condition := statement.Text
+	if statement.Condition != nil && strings.TrimSpace(statement.Condition.Text) != "" {
+		condition = statement.Condition.Text
+	}
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	condition = strings.TrimSpace(condition)
+	lower := strings.ToLower(condition)
+	if strings.HasPrefix(lower, "if ") {
+		condition = strings.TrimSpace(condition[3:])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		condition = strings.TrimSpace(condition[len("elseif "):])
+	}
+	if then := strings.LastIndex(strings.ToLower(condition), " then"); then >= 0 && strings.TrimSpace(condition[then+5:]) == "" {
+		condition = strings.TrimSpace(condition[:then])
+	}
+	for len(condition) >= 2 && condition[0] == '(' && condition[len(condition)-1] == ')' {
+		condition = strings.TrimSpace(condition[1 : len(condition)-1])
+	}
+	if arrayConditionAndRe.MatchString(condition) || arrayConditionOrRe.MatchString(condition) {
+		return "", false
+	}
+	if match := arrayScalarConditionRe.FindStringSubmatch(condition); len(match) == 4 {
+		return arrayVBA227NormalizeScalarCondition(match[1], match[2], match[3], variables)
+	}
+	if match := arrayScalarConditionReversedRe.FindStringSubmatch(condition); len(match) == 4 {
+		return arrayVBA227NormalizeScalarCondition(match[3], match[2], match[1], variables)
+	}
+	return "", false
+}
+
+func arrayVBA227NormalizeScalarCondition(lhs, operator, rhs string, variables map[string]arrayVariable) (string, bool) {
+	lhs = strings.ToLower(cleanIdentifier(lhs))
+	rhs = strings.ToLower(strings.TrimSpace(rhs))
+	variable, known := variables[lhs]
+	if !known || variable.isArray || variable.isVariant || variable.isObject {
+		return "", false
+	}
+	if rhsVariable, known := variables[rhs]; known && (rhsVariable.isArray || rhsVariable.isVariant || rhsVariable.isObject) {
+		return "", false
+	}
+	return lhs + operator + rhs, true
+}
+
+func applyArrayVBA227ConditionalReDimBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue || statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf {
+		return state
+	}
+	condition, ok := arrayVBA227ScalarConditionSource(*statement, variables)
+	if !ok {
+		return state
+	}
+	var updated arrayFlowState
+	for name, value := range state {
+		if value.conditionalAllocationSource != condition {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
 }
 
 func arrayVBA227HasDictionaryBoundsExpression(text string, state arrayFlowState) bool {
@@ -915,7 +1180,7 @@ func arrayVBA227HasDictionaryBoundsExpression(text string, state arrayFlowState)
 	return false
 }
 
-func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
+func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map[string]arrayVariable, loopEndLine int) arrayFlowState {
 	// An explicitly declared Variant element array is still a known array, so a
 	// successful bounds query establishes its allocation. An untyped Variant is
 	// not marked isArray and remains conservative in the normal transfer path.
@@ -941,6 +1206,7 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 		if updated == nil {
 			updated = cloneArrayState(state)
 		}
+		value = arrayVBA227RecordBoundsProof(value, loopEndLine)
 		value.kind = arrayAllocated
 		value.knownArray = true
 		updated[name] = value
@@ -958,10 +1224,52 @@ func arraySuccessfulBoundsState(state arrayFlowState, text string, variables map
 			updated = cloneArrayState(state)
 		}
 		value = updated[name]
+		value = arrayVBA227RecordBoundsProof(value, loopEndLine)
 		value.kind = arrayAllocated
 		value.knownArray = true
 		value.mayBeEmpty = false
 		value.allocationCountSource = ""
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+func arrayVBA227RecordBoundsProof(value arrayValue, loopEndLine int) arrayValue {
+	if loopEndLine == 0 || value.boundsProof.loopEndLine != 0 || value.kind == arrayAllocated && value.knownArray {
+		return value
+	}
+	value.boundsProof = arrayBoundsProof{
+		loopEndLine:                      loopEndLine,
+		priorKind:                        value.kind,
+		priorKnownArray:                  value.knownArray,
+		priorMayBeEmpty:                  value.mayBeEmpty,
+		priorAllocationCount:             value.allocationCountSource,
+		priorConditionalAllocationSource: value.conditionalAllocationSource,
+	}
+	return value
+}
+
+func arrayVBA227ClearLoopBodyBounds(state arrayFlowState, line int) arrayFlowState {
+	if line <= 0 {
+		return state
+	}
+	var updated arrayFlowState
+	for name, value := range state {
+		if value.boundsProof.loopEndLine != line {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.kind = value.boundsProof.priorKind
+		value.knownArray = value.boundsProof.priorKnownArray
+		value.mayBeEmpty = value.boundsProof.priorMayBeEmpty
+		value.allocationCountSource = value.boundsProof.priorAllocationCount
+		value.conditionalAllocationSource = value.boundsProof.priorConditionalAllocationSource
+		value.boundsProof = arrayBoundsProof{}
 		updated[name] = value
 	}
 	if updated == nil {
@@ -980,7 +1288,7 @@ func arrayValueKnownLowerBound(value arrayValue) (int, bool) {
 	return 0, false
 }
 
-func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.Statement, variables map[string]arrayVariable, resumeNextBefore []bool) arrayFlowState {
+func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.Statement, variables map[string]arrayVariable, resumeNextBefore []bool, proc sourceProcedure) arrayFlowState {
 	if statement == nil || (statement.Kind != procedureir.StatementIf && statement.Kind != procedureir.StatementElseIf) {
 		return state
 	}
@@ -1011,11 +1319,12 @@ func arraySuccessfulConditionState(state arrayFlowState, statement *procedureir.
 			updated = cloneArrayState(state)
 			cloned = true
 		}
+		value = arrayVBA227RecordBoundsProof(value, arrayVBA227LoopBodyEndLine(proc, line))
 		value.kind = arrayAllocated
 		value.knownArray = true
 		updated[name] = value
 	}
-	return arraySuccessfulBoundsState(updated, condition, variables)
+	return arraySuccessfulBoundsState(updated, condition, variables, arrayVBA227LoopBodyEndLine(proc, line))
 }
 
 // arrayVBA227ResumeNextPrefixes computes the conservative "may have seen
@@ -1213,6 +1522,18 @@ func inlineArrayDeclarationRemainder(text string) (string, bool) {
 	}
 	remainder := strings.TrimSpace(text[colon+1:])
 	if remainder == "" {
+		return "", false
+	}
+	return remainder, true
+}
+
+func inlineArrayAssignmentText(text string) (string, bool) {
+	remainder, ok := inlineArrayDeclarationRemainder(text)
+	if !ok {
+		return "", false
+	}
+	_, _, indexed, assigned := arrayAssignment(remainder)
+	if !assigned || indexed {
 		return "", false
 	}
 	return remainder, true
@@ -2171,12 +2492,12 @@ func walkArrayCFGWorklistLegacyWithBlock(graph *vbacfg.CFGView, lines []string, 
 					end = start
 				}
 				stopped := false
-				if block.Statement.Kind == procedureir.StatementSelect && start >= 1 && start <= len(lines) {
-					// Select Case owns separate CFG blocks for each Case clause.
-					// Visiting the whole source range here would scan every clause
-					// once before its case-specific edge state is applied, making a
-					// branch-local allocation fact appear to be absent. The clause
-					// blocks below own the remaining physical lines.
+				if (block.Statement.Kind == procedureir.StatementSelect || block.Statement.Kind == procedureir.StatementCase) && start >= 1 && start <= len(lines) {
+					// Select Case and Case own separate CFG blocks for each branch.
+					// Visiting a Case's whole source range here would scan nested
+					// statements once before their branch edge facts are applied,
+					// making a branch-local allocation fact appear to be absent.
+					// The nested blocks below own the remaining physical lines.
 					text := normalizedCodeLine(lines[start-1])
 					out = visitLine(text, start, out)
 					stopped = stop != nil && stop(text, start)
@@ -2422,9 +2743,10 @@ func walkArrayCFGCombined(ctx context.Context, lines []string, lanes []arrayCFGW
 					if end < start {
 						end = start
 					}
-					if block.Statement.Kind == procedureir.StatementSelect && start >= 1 && start <= len(lines) {
-						// Select Case owns separate CFG blocks for each Case clause;
-						// do not scan all clause lines before applying the edge fact.
+					if (block.Statement.Kind == procedureir.StatementSelect || block.Statement.Kind == procedureir.StatementCase) && start >= 1 && start <= len(lines) {
+						// Select Case and Case own separate CFG blocks for each
+						// branch; do not scan all clause lines before applying the
+						// edge fact.
 						text := normalizedCodeLine(lines[start-1])
 						out = lane.Visit(text, start, out)
 						stopped = lane.Stop != nil && lane.Stop(text, start)
@@ -2687,6 +3009,9 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 	if statement.Condition == nil {
 		return state
 	}
+	if updated, ok := arrayStrPtrGuardState(state, statement.Condition.Text, edge.Kind, variables); ok {
+		return arrayVBA227PropagateNonEmptyReturnInputs(updated, statement.Condition.Text, variables)
+	}
 	if argument, arrayBranch, ok := arrayIsArrayGuardCondition(statement.Condition.Text); ok {
 		if name := directArrayArgumentName(argument); name != "" {
 			if edge.Kind != arrayBranch {
@@ -2729,6 +3054,7 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 	updated := cloneArrayState(state)
 	value.kind = arrayAllocated
 	value.knownArray = true
+	value.mayBeEmpty = false
 	updated[name] = value
 	return updated
 }
@@ -2962,6 +3288,127 @@ func arrayIsArrayGuardCondition(text string) (string, vbacfg.EdgeKind, bool) {
 		return match[1], vbacfg.EdgeBranchTrue, true
 	}
 	return "", "", false
+}
+
+func arrayStrPtrGuardParts(text string, variables map[string]arrayVariable) ([]string, string, bool) {
+	text = strings.TrimSpace(text)
+	if condition, _, ok := arrayIfThenParts(text); ok {
+		text = condition
+	}
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "if ") {
+		text = strings.TrimSpace(text[3:])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		text = strings.TrimSpace(text[len("elseif "):])
+	}
+	if then := strings.LastIndex(strings.ToLower(text), " then"); then >= 0 && strings.TrimSpace(text[then+5:]) == "" {
+		text = strings.TrimSpace(text[:then])
+	}
+	for len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+	if arrayConditionAndRe.MatchString(text) {
+		return nil, "", false
+	}
+	parts := arrayConditionOrRe.Split(text, -1)
+	if len(parts) == 0 {
+		return nil, "", false
+	}
+	names := make([]string, 0, len(parts))
+	singleOperator := ""
+	for _, part := range parts {
+		match := arrayStrPtrGuardRe.FindStringSubmatch(strings.TrimSpace(part))
+		if len(match) != 3 {
+			return nil, "", false
+		}
+		if len(parts) > 1 && match[2] != "=" {
+			return nil, "", false
+		}
+		if len(parts) == 1 {
+			singleOperator = match[2]
+		}
+		name := strings.ToLower(cleanIdentifier(match[1]))
+		variable, knownVariable := variables[name]
+		if !knownVariable || !isByteArrayVariable(variable) {
+			return nil, "", false
+		}
+		names = append(names, name)
+	}
+	return names, singleOperator, true
+}
+
+// arrayStrPtrGuardState recognizes the established VBA Byte-array idiom
+// `If StrPtr(values) = 0 Then ...`: the false branch is reached only when the
+// array has a usable element. A compound zero-pointer guard joined by Or has
+// the same property for every operand on its false branch. Keep this limited
+// to declared arrays; StrPtr on arbitrary Variants or scalar expressions does
+// not establish an array contract for this rule.
+func arrayStrPtrGuardState(state arrayFlowState, text string, branch vbacfg.EdgeKind, variables map[string]arrayVariable) (arrayFlowState, bool) {
+	names, singleOperator, ok := arrayStrPtrGuardParts(text, variables)
+	if !ok {
+		return state, false
+	}
+	for _, name := range names {
+		if _, knownValue := state[name]; !knownValue {
+			return state, false
+		}
+	}
+	if len(names) > 1 {
+		if branch != vbacfg.EdgeBranchFalse {
+			return state, false
+		}
+	} else {
+		requiredBranch := vbacfg.EdgeBranchFalse
+		if singleOperator == "<>" {
+			requiredBranch = vbacfg.EdgeBranchTrue
+		}
+		if branch != requiredBranch {
+			return state, false
+		}
+	}
+	updated := cloneArrayState(state)
+	for _, name := range names {
+		value := updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeEmpty = false
+		updated[name] = value
+	}
+	return updated, true
+}
+
+// arrayVBA227PropagateNonEmptyReturnInputs transfers a caller-side input-array
+// fact through a returned Byte-array value. The transfer is intentionally
+// driven by the StrPtr branch that already proved the returned value non-empty;
+// a bare return summary never establishes the input fact by itself.
+func arrayVBA227PropagateNonEmptyReturnInputs(state arrayFlowState, text string, variables map[string]arrayVariable) arrayFlowState {
+	names, _, ok := arrayStrPtrGuardParts(text, variables)
+	if !ok {
+		return state
+	}
+	updated := cloneArrayState(state)
+	changed := false
+	for _, name := range names {
+		value, known := updated[name]
+		if !known || value.nonEmptySource == "" {
+			continue
+		}
+		source := strings.ToLower(cleanIdentifier(value.nonEmptySource))
+		variable, knownVariable := variables[source]
+		sourceValue, knownSource := updated[source]
+		if !knownVariable || !variable.isArray || !knownSource {
+			continue
+		}
+		sourceValue.kind = arrayAllocated
+		sourceValue.knownArray = true
+		sourceValue.mayBeEmpty = false
+		updated[source] = sourceValue
+		changed = true
+	}
+	if !changed {
+		return state
+	}
+	return updated
 }
 
 func arrayElementBaseName(text string) string {
@@ -3202,19 +3649,42 @@ func meetArrayState(left, right arrayFlowState) arrayFlowState {
 
 func meetArrayValue(left, right arrayValue) arrayValue {
 	out := arrayValue{
-		kind:                  left.kind,
-		knownArray:            left.knownArray,
-		mayBeEmpty:            left.mayBeEmpty,
-		origin:                left.origin,
-		dimensions:            append([]arrayDimension(nil), left.dimensions...),
-		preserveShape:         append([]arrayDimension(nil), left.preserveShape...),
-		allocationCountSource: left.allocationCountSource,
+		kind:                          left.kind,
+		knownArray:                    left.knownArray,
+		mayBeEmpty:                    left.mayBeEmpty,
+		origin:                        left.origin,
+		dimensions:                    append([]arrayDimension(nil), left.dimensions...),
+		preserveShape:                 append([]arrayDimension(nil), left.preserveShape...),
+		allocationCountSource:         left.allocationCountSource,
+		conditionalAllocationSource:   left.conditionalAllocationSource,
+		returnNonEmptyArrayParameter:  left.returnNonEmptyArrayParameter,
+		returnPositiveScalarParameter: left.returnPositiveScalarParameter,
+		nonEmptySource:                left.nonEmptySource,
+		boundsProof:                   left.boundsProof,
 	}
 	if left.kind != right.kind {
 		out.kind = arrayUnknown
 	}
 	if left.knownArray != right.knownArray {
 		out.knownArray = false
+	}
+	if left.conditionalAllocationSource != right.conditionalAllocationSource {
+		if left.conditionalAllocationSource == "" {
+			out.conditionalAllocationSource = right.conditionalAllocationSource
+		} else if right.conditionalAllocationSource == "" {
+			out.conditionalAllocationSource = left.conditionalAllocationSource
+		} else {
+			out.conditionalAllocationSource = ""
+		}
+	}
+	if left.returnNonEmptyArrayParameter != right.returnNonEmptyArrayParameter {
+		out.returnNonEmptyArrayParameter = ""
+	}
+	if left.returnPositiveScalarParameter != right.returnPositiveScalarParameter {
+		out.returnPositiveScalarParameter = ""
+	}
+	if left.nonEmptySource != right.nonEmptySource {
+		out.nonEmptySource = ""
 	}
 	out.mayBeEmpty = left.mayBeEmpty || right.mayBeEmpty
 	if left.origin != right.origin {
@@ -3236,6 +3706,9 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 	}
 	if left.allocationCountSource != right.allocationCountSource {
 		out.allocationCountSource = ""
+	}
+	if left.boundsProof != right.boundsProof {
+		out.boundsProof = arrayBoundsProof{}
 	}
 	return out
 }
@@ -3277,7 +3750,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}
@@ -9334,6 +9807,9 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 	if state == nil {
 		state = arrayFlowState{}
 	}
+	if assignment, ok := inlineArrayAssignmentText(text); ok {
+		text = assignment
+	}
 	var findings []Finding
 	addWithKey := func(operationKey, code, message, reason, suggestion string) {
 		if code == "VBA227" && !a.Config.Analyze.DetectArrayLifecycleSafety {
@@ -9617,7 +10093,15 @@ func (a Analyzer) arrayTransfer(file parsedFile, proc sourceProcedure, ctx analy
 				if value, assigned := byteArrayStringAssignment(file, proc, line, variable, rhs, variables); assigned {
 					state[name] = value
 				} else if variable.isArray || variable.isVariant {
-					state[name] = arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginUnknown}
+					value := arrayValue{kind: arrayUnknown, knownArray: false, origin: arrayOriginUnknown}
+					// An arbitrary source assigned to a Byte array may be a
+					// zero-length byte array. Keep that possibility so a later
+					// successful bounds query can prove allocation without
+					// incorrectly proving that an element exists.
+					if isByteArrayVariable(variable) {
+						value.mayBeEmpty = true
+					}
+					state[name] = value
 				}
 			}
 		}
@@ -9730,6 +10214,18 @@ func newArrayVariable(file parsedFile, decl sourceDeclaration, base int) arrayVa
 	return variable
 }
 
+func isByteArrayVariable(variable arrayVariable) bool {
+	return variable.isArray && isByteArrayTypeName(variable.typ)
+}
+
+func isByteArrayTypeName(typeName string) bool {
+	typeName = strings.TrimSpace(typeName)
+	if colon := strings.IndexByte(typeName, ':'); colon >= 0 {
+		typeName = strings.TrimSpace(typeName[:colon])
+	}
+	return strings.EqualFold(typeName, "Byte")
+}
+
 // arrayVBA227Variables overlays the narrow declaration facts needed by the
 // source-line VBA227 pass. The legacy declaration scanner is intentionally
 // retained for the historical array rules, but it can span a colon-separated
@@ -9745,7 +10241,7 @@ func arrayVBA227Variables(baseVariables map[string]arrayVariable, file parsedFil
 			continue
 		}
 		inlineRedim := arrayDeclarationHasInlineRedim(file.Lines, declaration)
-		inlineStrConv := strings.EqualFold(strings.TrimSpace(declaration.Type), "Byte") && arrayDeclarationHasInlineStrConvAssignment(file.Lines, declaration)
+		inlineStrConv := isByteArrayTypeName(declaration.Type) && arrayDeclarationHasInlineStrConvAssignment(file.Lines, declaration)
 		if !inlineRedim && !inlineStrConv {
 			continue
 		}
@@ -10376,6 +10872,94 @@ func arrayExpressionState(rhs string, state arrayFlowState, ctx analysisContext)
 		return arrayValue{kind: arrayUnknown, origin: arrayOriginUnknown}, true
 	}
 	return arrayValue{}, false
+}
+
+// arrayVBA227AttachReturnProvenance consumes the narrow conditional facts in
+// an array-return summary at the call site. The summary records a formal
+// parameter; this step maps it to the actual argument and keeps the fact
+// path-sensitive until the caller proves the corresponding condition.
+func arrayVBA227AttachReturnProvenance(state arrayFlowState, text string, ctx analysisContext, variables map[string]arrayVariable, constants map[string]int) arrayFlowState {
+	lhs, rhs, indexed, ok := arrayAssignment(text)
+	if !ok || indexed {
+		return state
+	}
+	callee := arrayCallName(rhs)
+	if callee == "" || ctx.functionAmbiguous[callee] {
+		return state
+	}
+	summary, ok := ctx.arrayReturns[callee]
+	if !ok || summary.returnNonEmptyArrayParameter == "" && summary.returnPositiveScalarParameter == "" {
+		return state
+	}
+	target := strings.ToLower(cleanIdentifier(lhs))
+	variable, knownVariable := variables[target]
+	value, knownValue := state[target]
+	if !knownVariable || !knownValue || !variable.isArray && !variable.isVariant {
+		return state
+	}
+	arguments, ok := arraySimpleCallArguments(rhs)
+	if !ok {
+		return state
+	}
+	signature, ok := ctx.procedures[callee]
+	if !ok {
+		return state
+	}
+	updated := value
+	changed := false
+	if formal := summary.returnPositiveScalarParameter; formal != "" {
+		if index, found := arrayFormalParameterIndexFromSignature(signature, formal); found && index < len(arguments) {
+			if length, err := constantIntegerExpression(strings.TrimSpace(arguments[index]), constants); err == nil && length > 0 {
+				updated.kind = arrayAllocated
+				updated.knownArray = true
+				updated.mayBeEmpty = false
+				updated.returnPositiveScalarParameter = ""
+				updated.returnNonEmptyArrayParameter = ""
+				changed = true
+			}
+		}
+	}
+	if formal := summary.returnNonEmptyArrayParameter; formal != "" {
+		if index, found := arrayFormalParameterIndexFromSignature(signature, formal); found && index < len(arguments) {
+			if source := directArrayArgumentName(arguments[index]); source != "" {
+				sourceVariable, sourceKnown := variables[source]
+				if sourceKnown && sourceVariable.isArray {
+					updated.nonEmptySource = source
+					updated.returnNonEmptyArrayParameter = ""
+					updated.returnPositiveScalarParameter = ""
+					changed = true
+				}
+			}
+		}
+	}
+	if !changed {
+		return state
+	}
+	updatedState := cloneArrayState(state)
+	updatedState[target] = updated
+	return updatedState
+}
+
+func arraySimpleCallArguments(text string) ([]string, bool) {
+	text = strings.TrimSpace(text)
+	open := firstParenOutsideString(text)
+	if open < 0 {
+		return nil, false
+	}
+	close := matchingParen(text, open)
+	if close < 0 || strings.TrimSpace(text[close+1:]) != "" {
+		return nil, false
+	}
+	return splitArgs(text[open+1 : close]), true
+}
+
+func arrayFormalParameterIndexFromSignature(signature procedureSignature, name string) (int, bool) {
+	for index, parameter := range signature.Params.AllIndexed() {
+		if strings.EqualFold(strings.TrimSpace(parameter.Name), strings.TrimSpace(name)) {
+			return index, true
+		}
+	}
+	return 0, false
 }
 
 var (
@@ -11061,6 +11645,206 @@ func arrayProcedureHasReturnAllocation(file parsedFile, proc sourceProcedure) bo
 	return hasAllocation && hasReturn
 }
 
+// arrayConditionalReturnSummary recognizes a small, path-sensitive family of
+// array factories. The returned array is intentionally kept conditional: the
+// caller must prove either that the scalar length is positive or that the
+// input Byte array is non-empty before this fact becomes an allocation proof.
+// Requiring one direct return source, one guarded ReDim, and a definitely
+// assigned function result keeps this summary fail-open for general helper
+// functions and error paths.
+func arrayConditionalReturnSummary(file parsedFile, proc sourceProcedure) (arrayValue, bool) {
+	if proc.Graph == nil || proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return arrayValue{}, false
+	}
+	source, ok := arrayProcedureReturnSource(file, proc)
+	if !ok {
+		return arrayValue{}, false
+	}
+	source = strings.ToLower(cleanIdentifier(source))
+	variables := arrayVariables(file, proc, file.moduleDecls())
+	returnedVariable, ok := variables[source]
+	if !ok || !returnedVariable.isArray || returnedVariable.fixed || returnedVariable.parameter {
+		return arrayValue{}, false
+	}
+	if !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true}) {
+		return arrayValue{}, false
+	}
+
+	returnLines := make([]int, 0, 1)
+	foundConditionalOutput := false
+	redimLine := 0
+	returnNonEmptyArrayParameter := ""
+	returnPositiveScalarParameter := ""
+	for statement := range proc.Statements.All() {
+		text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+		if lhs, _, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), proc.Name) {
+			returnLines = append(returnLines, statement.Range.StartLine)
+			continue
+		}
+		if statement.Kind != procedureir.StatementReDim {
+			if lhs, _, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), source) {
+				condition, branch, guarded := arrayConditionalReturnGuard(proc, statement)
+				input, proven := arrayConditionalReturnStrPtrInput(condition, branch, variables)
+				if !guarded || !proven || returnPositiveScalarParameter != "" || returnNonEmptyArrayParameter != "" && !strings.EqualFold(returnNonEmptyArrayParameter, input) {
+					return arrayValue{}, false
+				}
+				returnNonEmptyArrayParameter = input
+				foundConditionalOutput = true
+			}
+			if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 {
+				for _, target := range splitArgs(match[1]) {
+					if strings.EqualFold(cleanIdentifier(target), source) {
+						return arrayValue{}, false
+					}
+				}
+			}
+			continue
+		}
+		match := arrayRedimRe.FindStringSubmatch(text)
+		if len(match) == 0 {
+			continue
+		}
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if !direct || !strings.EqualFold(cleanIdentifier(redim.name), source) {
+				continue
+			}
+			if strings.TrimSpace(match[1]) != "" {
+				return arrayValue{}, false
+			}
+			condition, branch, guarded := arrayConditionalReturnGuard(proc, statement)
+			if !guarded {
+				return arrayValue{}, false
+			}
+			if input, proven := arrayConditionalReturnStrPtrInput(condition, branch, variables); proven {
+				if returnPositiveScalarParameter != "" || returnNonEmptyArrayParameter != "" && !strings.EqualFold(returnNonEmptyArrayParameter, input) {
+					return arrayValue{}, false
+				}
+				returnNonEmptyArrayParameter = input
+			} else if scalar, proven := arrayConditionalReturnPositiveScalar(condition, branch, redim.dimensions, variables); proven {
+				if returnNonEmptyArrayParameter != "" || returnPositiveScalarParameter != "" && !strings.EqualFold(returnPositiveScalarParameter, scalar) {
+					return arrayValue{}, false
+				}
+				returnPositiveScalarParameter = scalar
+			} else {
+				return arrayValue{}, false
+			}
+			foundConditionalOutput = true
+			if redimLine == 0 || statement.Range.StartLine < redimLine {
+				redimLine = statement.Range.StartLine
+			}
+		}
+	}
+	if len(returnLines) != 1 || !foundConditionalOutput || redimLine > returnLines[0] {
+		return arrayValue{}, false
+	}
+	return arrayValue{
+		kind:                          arrayUnknown,
+		knownArray:                    true,
+		mayBeEmpty:                    true,
+		origin:                        arrayOriginLocal,
+		returnNonEmptyArrayParameter:  returnNonEmptyArrayParameter,
+		returnPositiveScalarParameter: returnPositiveScalarParameter,
+	}, true
+}
+
+func arrayConditionalReturnGuard(proc sourceProcedure, statement procedureir.Statement) (string, vbacfg.EdgeKind, bool) {
+	current := statement
+	visited := map[int]bool{}
+	for current.ParentID != 0 && !visited[current.ParentID] {
+		visited[current.ParentID] = true
+		parent := procedureStatementByID(proc, current.ParentID)
+		if parent.ID == 0 {
+			return "", "", false
+		}
+		switch parent.Kind {
+		case procedureir.StatementIf, procedureir.StatementElseIf:
+			return arrayConditionalReturnCondition(parent), vbacfg.EdgeBranchTrue, true
+		case procedureir.StatementElse:
+			branch := procedureStatementByID(proc, parent.ParentID)
+			if branch.Kind != procedureir.StatementIf && branch.Kind != procedureir.StatementElseIf {
+				return "", "", false
+			}
+			return arrayConditionalReturnCondition(branch), vbacfg.EdgeBranchFalse, true
+		}
+		current = parent
+	}
+	return "", "", false
+}
+
+func arrayConditionalReturnCondition(statement procedureir.Statement) string {
+	condition := statement.Text
+	if statement.Condition != nil && strings.TrimSpace(statement.Condition.Text) != "" {
+		condition = statement.Condition.Text
+	}
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	condition = strings.TrimSpace(condition)
+	lower := strings.ToLower(condition)
+	if strings.HasPrefix(lower, "if ") {
+		condition = strings.TrimSpace(condition[3:])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		condition = strings.TrimSpace(condition[len("elseif "):])
+	}
+	if then := strings.LastIndex(strings.ToLower(condition), " then"); then >= 0 && strings.TrimSpace(condition[then+5:]) == "" {
+		condition = strings.TrimSpace(condition[:then])
+	}
+	for len(condition) >= 2 && condition[0] == '(' && condition[len(condition)-1] == ')' {
+		condition = strings.TrimSpace(condition[1 : len(condition)-1])
+	}
+	return condition
+}
+
+func arrayConditionalReturnStrPtrInput(condition string, branch vbacfg.EdgeKind, variables map[string]arrayVariable) (string, bool) {
+	match := arrayStrPtrGuardRe.FindStringSubmatch(strings.TrimSpace(condition))
+	if len(match) != 3 {
+		return "", false
+	}
+	name := strings.ToLower(cleanIdentifier(match[1]))
+	variable, known := variables[name]
+	if !known || !variable.parameter || !parameterIsByRefArrayForVariable(variable) || !isByteArrayVariable(variable) {
+		return "", false
+	}
+	required := vbacfg.EdgeBranchFalse
+	if match[2] == "<>" {
+		required = vbacfg.EdgeBranchTrue
+	}
+	return name, branch == required
+}
+
+func parameterIsByRefArrayForVariable(variable arrayVariable) bool {
+	return variable.parameter && variable.isArray && !variable.paramArray
+}
+
+func arrayConditionalReturnPositiveScalar(condition string, branch vbacfg.EdgeKind, dimensions string, variables map[string]arrayVariable) (string, bool) {
+	lhs, operator, literal, ok := arrayCountComparison(condition)
+	if !ok {
+		return "", false
+	}
+	name := strings.ToLower(cleanIdentifier(lhs))
+	variable, known := variables[name]
+	if !known || !variable.parameter || variable.isArray || variable.isVariant || variable.isObject {
+		return "", false
+	}
+	positiveBranch, ok := positiveArrayCountBranch(operator, literal)
+	if !ok || branch != positiveBranch || !arrayRedimUsesPositiveScalar(dimensions, name) {
+		return "", false
+	}
+	return name, true
+}
+
+func arrayRedimUsesPositiveScalar(dimensions, parameter string) bool {
+	wanted := strings.ToLower(cleanIdentifier(parameter)) + "-1"
+	for _, dimension := range splitArgs(dimensions) {
+		compact := strings.ToLower(canonicalArrayBoundExpression(dimension))
+		if strings.HasPrefix(compact, "0to") && strings.TrimPrefix(compact, "0to") == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 // arrayProcedureHasNonEmptyReturnAllocation recognizes the stronger CFG-backed
 // contract needed when a documented array return is used by a bare caller.
 // A plain ReDim with fully known, non-empty bounds is different from a
@@ -11206,6 +11990,7 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 		}, func(text string, _ int) bool {
 			return !procedureHasErrorHandling && arraySummaryStatementAlwaysFails(text, base, procedure.constants)
 		}, participantCtx.arrayStats)
+		conditionalValue, hasConditional := arrayConditionalReturnSummary(procedure.file, proc)
 		returnLines := make([]int, 0, len(returnCandidates))
 		for line := range returnCandidates {
 			returnLines = append(returnLines, line)
@@ -11216,6 +12001,9 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 			returns = append(returns, returnCandidates[line])
 		}
 		if len(returns) == 0 || !proc.Graph.IsDefinitelyAssigned(proc.Graph.NormalExit, vbacfg.Variable{Scope: procedureir.ScopeLocal, Name: proc.Name}, vbacfg.EdgeFilter{NormalOnly: true}) {
+			if hasConditional {
+				return candidate{value: conditionalValue, ok: true}, true
+			}
 			return candidate{}, false
 		}
 		valid := returns[0].ok
@@ -11226,6 +12014,9 @@ func inferArrayReturnSummarySet(files []parsedFile, arrayAllocationGuards map[st
 				break
 			}
 			value = meetArrayValue(value, returned.value)
+		}
+		if !valid && hasConditional {
+			return candidate{value: conditionalValue, ok: true}, true
 		}
 		return candidate{value: value, ok: valid}, true
 	}
@@ -11412,9 +12203,9 @@ func arrayReturnValueCompatible(proc sourceProcedure, left, right arrayValue) bo
 	if proc.ProcedureKind != procedureir.ProcedurePropertyGet {
 		return false
 	}
-	return left.kind == arrayAllocated && right.kind == arrayAllocated && left.knownArray && right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.safeBoundProbe == right.safeBoundProbe && left.allocationCountSource == right.allocationCountSource
+	return left.kind == arrayAllocated && right.kind == arrayAllocated && left.knownArray && right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.safeBoundProbe == right.safeBoundProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource
 }
 
 func arrayValueCompatible(left, right arrayValue) bool {
-	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
+	return left.kind == right.kind && left.knownArray == right.knownArray && left.origin == right.origin && left.allocationProbe == right.allocationProbe && left.allocationCountSource == right.allocationCountSource && left.returnNonEmptyArrayParameter == right.returnNonEmptyArrayParameter && left.returnPositiveScalarParameter == right.returnPositiveScalarParameter && left.nonEmptySource == right.nonEmptySource && arrayDimensionsEqual(left.dimensions, right.dimensions) && arrayDimensionsEqual(left.preserveShape, right.preserveShape)
 }

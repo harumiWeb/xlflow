@@ -470,7 +470,7 @@ func arrayCompactVisitBlockWithStop(lines []string, block vbacfg.Block, visitIn 
 		end = start
 	}
 	out := in
-	if block.Statement.Kind == procedureir.StatementSelect && start >= 1 && start <= len(lines) {
+	if (block.Statement.Kind == procedureir.StatementSelect || block.Statement.Kind == procedureir.StatementCase) && start >= 1 && start <= len(lines) {
 		text := normalizedCodeLine(lines[start-1])
 		out = visitLine(text, start, out)
 		return out, stop != nil && stop(text, start)
