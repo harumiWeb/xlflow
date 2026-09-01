@@ -7650,6 +7650,170 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSafeArrayLengthIntoZeroBasedLoop(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function StringToUtf8(ByVal text As String) As Byte()
+  Dim result() As Byte
+  If Len(text) > 0 Then
+    ReDim result(0 To Len(text) - 1)
+  End If
+  StringToUtf8 = result
+End Function
+
+Private Sub Guarded()
+  Dim values() As Byte
+  Dim length As Long
+  Dim i As Long
+  Dim text As String
+  values = StrConv(text, vbFromUnicode)
+  length = SafeArrayLen(values)
+  For i = 0 To length - 1
+    Debug.Print values(i)
+  Next
+  Debug.Print values(0)
+End Sub
+
+Private Sub InlineGuard()
+  Dim values() As Byte
+  Dim length As Long
+  Dim text As String
+  values = StrConv(text, vbFromUnicode)
+  length = SafeArrayLen(values)
+  If length > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub FactoryGuard(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim i As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  For i = 0 To length - 1
+    Debug.Print values(i)
+  Next
+End Sub
+
+Private Sub DoWhileGuard(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim offset As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  offset = 0
+  Do While offset < length
+    Debug.Print values(offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub DoWhileUnsafe(ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  Dim offset As Long
+  values = StringToUtf8(text)
+  length = SafeArrayLen(values)
+  offset = -1
+  Do While offset < length
+    Debug.Print values(offset)
+    offset = offset + 1
+  Loop
+End Sub
+
+Private Sub SplitGuard(ByVal enabled As Boolean, ByVal text As String)
+  Dim values() As Byte
+  Dim length As Long
+  If enabled Then
+    values = StringToUtf8(text)
+    length = SafeArrayLen(values)
+  Else
+    length = 0
+  End If
+  If length > 0 Then Debug.Print values(0)
+End Sub
+
+Private Sub ConditionalRedimGuard(ByVal enabled As Boolean)
+  Dim values() As Byte
+  Dim length As Long
+  If enabled Then
+    ReDim values(0 To 4)
+    length = 5
+  Else
+    length = 0
+  End If
+  If length > 0 Then Debug.Print values(0)
+End Sub
+
+Public Sub Run()
+  Guarded
+End Sub
+
+Private Sub Unsafe()
+  Dim other() As Byte
+		Debug.Print other(0)
+End Sub
+`)
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenUnsafe := false
+	seenDoWhileUnsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			if finding.Line == 39 {
+				seenUnsafe = true
+				continue
+			}
+			t.Fatalf("a positive SafeArrayLen loop bound should prove a zero-based array access: %+v", finding)
+		}
+		if finding.Procedure == "InlineGuard" {
+			t.Fatalf("a positive SafeArrayLen inline guard should prove a zero-based array access: %+v", finding)
+		}
+		if finding.Procedure == "FactoryGuard" {
+			t.Fatalf("a positive SafeArrayLen result from a zero-based factory should prove loop access: %+v", finding)
+		}
+		if finding.Procedure == "DoWhileGuard" {
+			t.Fatalf("a positive SafeArrayLen Do While guard should prove a zero-based array access: %+v", finding)
+		}
+		if finding.Procedure == "DoWhileUnsafe" {
+			seenDoWhileUnsafe = true
+		}
+		if finding.Procedure == "SplitGuard" {
+			t.Fatalf("a positive SafeArrayLen guard after a zero fallback should prove the selected array: %+v", finding)
+		}
+		if finding.Procedure == "ConditionalRedimGuard" {
+			t.Fatalf("a positive conditional ReDim length should prove the selected array: %+v", finding)
+		}
+	}
+	if !seenUnsafe {
+		t.Fatalf("an unguarded access after the loop should remain diagnosed: all=%+v vba227=%+v", findings, findingsByCode(findings, "VBA227"))
+	}
+	if !seenDoWhileUnsafe {
+		t.Fatalf("a Do While loop with a negative index must remain diagnosed: all=%+v vba227=%+v", findings, findingsByCode(findings, "VBA227"))
+	}
+}
+
 func TestAnalyzerVBA227DoesNotDuplicateNestedByRefCallOwnership(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

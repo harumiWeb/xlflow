@@ -341,6 +341,7 @@ type analysisContext struct {
 	arrayReturnsQualified                map[string]arrayValue
 	arrayAllowVariantRedim               bool
 	arrayAllocationGuards                map[string]bool
+	arraySafeArrayLengthGuards           map[string]bool
 	arraySafeBoundGuards                 map[string]bool
 	arrayByRefAllocations                arrayByRefAllocationSummaries
 	arrayByRefConditionalAllocations     arrayByRefConditionalAllocations
@@ -2404,6 +2405,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayReturns:                     map[string]arrayValue{},
 		arrayReturnsQualified:            map[string]arrayValue{},
 		arrayAllocationGuards:            map[string]bool{},
+		arraySafeArrayLengthGuards:       map[string]bool{},
 		arraySafeBoundGuards:             map[string]bool{},
 		arrayByRefAllocations:            arrayByRefAllocationSummaries{},
 		arrayByRefConditionalAllocations: arrayByRefConditionalAllocations{},
@@ -2493,6 +2495,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 	// open through buildProcedureAnalysisPlan.
 	if capabilityPlan.requires(projectCapabilityArrayInterprocedural) {
 		ctx.arrayAllocationGuards = inferArrayAllocationGuards(files)
+		ctx.arraySafeArrayLengthGuards = inferArraySafeArrayLengthGuards(files)
 		ctx.arraySafeBoundGuards = inferArraySafeBoundGuards(files)
 		ctx.arrayPrivateTargets = arrayPrivateProcedureTargets(files)
 		ctx.arrayParticipants, ctx.arrayInterproceduralParticipants, ctx.arrayParticipantKeys = buildArrayParticipantSets(files, ctx)
