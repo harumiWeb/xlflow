@@ -10585,11 +10585,12 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 				condition = arrayConditionalEntrySource(target, arguments, index, value.allocationCountSource)
 			}
 		}
-		if known && !allocated && condition == "" && arrayByRefCallArrayVacuouslyUnused(target, index, arguments) {
-			// A call may intentionally pass an unallocated optional array to a
-			// helper whose only uses are behind a false literal guard. It must not
-			// poison the conditional-entry evidence collected from calls that do
-			// reach those uses.
+		if !allocated && condition == "" && arrayByRefCallArrayVacuouslyUnused(target, index, arguments) {
+			// A call may intentionally pass an unallocated optional array (including
+			// an array-return expression with no local state entry) to a helper whose
+			// only uses are behind a false literal guard. It must not poison the
+			// conditional-entry evidence collected from calls that do reach those
+			// uses.
 			continue
 		}
 		parameters := evidence[targetKey]

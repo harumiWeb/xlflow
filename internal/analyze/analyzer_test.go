@@ -6762,6 +6762,12 @@ Private Sub ConsumeMismatch(ByRef payload() As Byte, ByVal payloadLen As Long)
   End If
 End Sub
 
+Private Sub ConsumeExpressionMismatch(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    Debug.Print payload(0)
+  End If
+End Sub
+
 Private Sub Dispatch(ByVal payloadLen As Long)
   Dim payload() As Byte
   If payloadLen > 0 Then
@@ -6770,6 +6776,19 @@ Private Sub Dispatch(ByVal payloadLen As Long)
     Erase payload
   End If
   Consume payload, payloadLen
+End Sub
+
+Private Sub DispatchZero()
+  Consume NullByteArray(), 0
+End Sub
+
+Private Function NullByteArray() As Byte()
+  Dim payload() As Byte
+  NullByteArray = payload
+End Function
+
+Private Sub DispatchExpressionMismatch()
+  ConsumeExpressionMismatch NullByteArray(), 1
 End Sub
 
 Private Sub DispatchMismatch(ByVal payloadLen As Long)
@@ -6786,7 +6805,9 @@ End Sub
 
 Public Sub Run()
   Dispatch 1
+  DispatchZero
   DispatchMismatch 1
+  DispatchExpressionMismatch
 End Sub
 `)
 
@@ -6808,6 +6829,16 @@ End Sub
 			}
 			if !foundMismatch {
 				t.Fatalf("a different caller-side length condition must remain conservative: %+v", findingsByCode(findings, "VBA227"))
+			}
+			foundExpressionMismatch := false
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "ConsumeExpressionMismatch" {
+					foundExpressionMismatch = true
+					break
+				}
+			}
+			if !foundExpressionMismatch {
+				t.Fatalf("an unallocated array-return expression with a positive length must remain conservative: %+v", findingsByCode(findings, "VBA227"))
 			}
 		})
 	}
