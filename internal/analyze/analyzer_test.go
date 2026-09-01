@@ -6985,6 +6985,65 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227UsesSafeArrayPointerLengthGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  Dim lo As Long
+  Dim hi As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  lo = LBound(values)
+  hi = UBound(values)
+  If hi >= lo Then
+    SafeArrayLen = hi - lo + 1
+  End If
+End Function
+
+Private Function UnprovenLength(ByRef values() As Byte) As Long
+  UnprovenLength = 1
+End Function
+
+Private Sub Guarded(ByRef values() As Byte)
+  Dim length As Long
+  length = SafeArrayLen(values)
+  If length > 0 Then
+    values(0) = 1
+  End If
+End Sub
+
+Private Sub Unproven(ByRef values() As Byte)
+  Dim length As Long
+  length = UnprovenLength(values)
+  If length > 0 Then
+    values(0) = 1
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			t.Fatalf("a positive SafeArrayLen result should prove a non-empty array: %+v", finding)
+		}
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "Unproven" {
+		t.Fatalf("an unrelated positive helper must not establish array allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCompoundStrPtrArrayGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

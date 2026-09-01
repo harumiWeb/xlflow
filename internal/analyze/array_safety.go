@@ -12679,6 +12679,9 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 			}
 			parameter, ok := arrayAllocationGuardParameter(proc)
 			if !ok {
+				parameter, ok = arraySafeArrayPointerLengthGuardParameter(file, proc)
+			}
+			if !ok {
 				parameter, ok = arrayDimensionCountGuardParameter(proc)
 			}
 			if !ok {
@@ -12844,6 +12847,79 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(parameter.Name), true
+}
+
+// arraySafeArrayPointerLengthGuardParameter recognizes a scalar helper that
+// returns the length of a Byte array after the low-level SAFEARRAY descriptor
+// guard. Unlike the ordinary On Error-based allocation probe, this form uses
+// the function's default zero return on either early-exit path. Require the
+// returned expression to be derived from preceding LBound and UBound
+// assignments so an arbitrary pointer check cannot become an allocation
+// contract.
+func arraySafeArrayPointerLengthGuardParameter(file parsedFile, proc sourceProcedure) (string, bool) {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return "", false
+	}
+	if !arrayKnownScalarType(proc.ReturnType) || isObjectType(proc.ReturnType) || proc.Params.Len() != 1 {
+		return "", false
+	}
+	parameter := proc.Params.valueAt(0)
+	if parameter.Name == "" || !parameterIsArray(parameter) || proc.Name == "" {
+		return "", false
+	}
+	variables := arrayVariables(file, proc, file.moduleDecls())
+	parameterName := strings.ToLower(cleanIdentifier(parameter.Name))
+	variable, known := variables[parameterName]
+	if !known || !variable.isArray || !isByteArrayVariable(variable) {
+		return "", false
+	}
+	guardLine := 0
+	for line := proc.StartLine; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		if target, ok := arraySafeArrayPointerGuardTarget(file, proc, line, file.Lines[line-1], variables); ok && target == parameterName {
+			guardLine = line
+			break
+		}
+	}
+	if guardLine == 0 {
+		return "", false
+	}
+	lowerName := ""
+	upperName := ""
+	returnCount := 0
+	invalidReturn := false
+	for line := guardLine + 1; line <= proc.EndLine && line <= len(file.Lines); line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
+			continue
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed {
+			continue
+		}
+		compact := strings.Join(strings.Fields(strings.ToLower(rhs)), "")
+		switch {
+		case compact == "lbound("+parameterName+")":
+			if lowerName != "" {
+				return "", false
+			}
+			lowerName = strings.ToLower(cleanIdentifier(lhs))
+		case compact == "ubound("+parameterName+")":
+			if upperName != "" {
+				return "", false
+			}
+			upperName = strings.ToLower(cleanIdentifier(lhs))
+		case strings.EqualFold(cleanIdentifier(lhs), proc.Name):
+			returnCount++
+			expected := upperName + "-" + lowerName + "+1"
+			if lowerName == "" || upperName == "" || compact != expected {
+				invalidReturn = true
+			}
+		}
+	}
+	if lowerName == "" || upperName == "" || returnCount != 1 || invalidReturn {
+		return "", false
+	}
+	return parameterName, true
 }
 
 // arrayDimensionCountGuardParameter recognizes the helper shape used by
