@@ -197,6 +197,14 @@ first assigned to a scalar local and that local is compared with zero or a
 positive threshold. The proof remains path-sensitive; unrelated scalar
 assignments do not establish allocation.
 
+A project-local scalar helper that probes successive `LBound(value, dimension)`
+calls under `On Error GoTo`, then returns `dimension - 1`, is also recognized as
+a dimension-count probe. Its zero result represents an unallocated input; a
+caller branch that proves the result is one may therefore rely on the input as
+an allocated one-dimensional array. The helper must have the complete probe
+shape, including its recovery label and return assignment; an arbitrary
+`expression - 1` helper is not an allocation proof.
+
 At a join, allocation and dimensions are retained only when all incoming paths
 agree. Exceptional and uncertain CFG edges use the pre-statement state. This
 means an indexed access after an allocation on only one branch remains a

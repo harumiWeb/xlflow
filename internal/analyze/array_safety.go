@@ -164,6 +164,7 @@ var (
 	arrayEmptyGuardRe                 = regexp.MustCompile(`(?i)^\s*\(?\s*not\s+([A-Za-z_]\w*)\s*\)?\s*=\s*-1\s*$`)
 	arrayForScalarBoundRe             = regexp.MustCompile(`(?i)^\s*for\s+\w+\s*=\s*[-+]?\d+\s+to\s+([A-Za-z_]\w*)\s*$`)
 	arrayForCountRe                   = regexp.MustCompile(`(?i)^\s*for\s+([A-Za-z_]\w*)\s*=\s*(0|1)\s+to\s+([A-Za-z_]\w*)\s*\.\s*count(\s*-\s*1)?\s*$`)
+	arrayDimensionCountLoopRe         = regexp.MustCompile(`(?i)^\s*for\s+([A-Za-z_]\w*)\s*=\s*1\s+to\s+[A-Za-z_]\w*\s*$`)
 	arrayForEachRe                    = regexp.MustCompile(`(?i)^\s*for\s+each\s+[A-Za-z_]\w*\s+in\s+([^\r\n]+)`)
 	arrayIndexedSourceRe              = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*)\s*\(`)
 	arrayGuardCallRe                  = regexp.MustCompile(`(?i)^\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(?:(=|<>|>=|<=|>|<)\s*(-?\d+))?\s*$`)
@@ -3531,6 +3532,12 @@ func arrayAllocationGuardCondition(text string, guards map[string]bool, state ar
 		return argument, vbacfg.EdgeBranchFalse, true
 	case operator == "<>" && value == 0:
 		return argument, vbacfg.EdgeBranchTrue, true
+	case operator == "<>" && value == 1:
+		// A dimension-count probe returns zero for an unallocated value and
+		// one for a one-dimensional array. Its `<> 1` rejection branch is
+		// therefore safe to leave only on the false edge, just like the
+		// ordinary positive-length probe's zero check.
+		return argument, vbacfg.EdgeBranchFalse, true
 	case operator == ">" && value >= 0:
 		return argument, vbacfg.EdgeBranchTrue, true
 	case operator == ">=" && value >= 1:
@@ -9928,7 +9935,7 @@ func arrayQualifiedArgumentProvenAllocated(file parsedFile, caller sourceProcedu
 // count guard, establish the same normal-path contract as ReDim.
 func arrayQualifiedDescriptorArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string) bool {
 	receiver, member, ok := arrayQualifiedMemberParts(argument)
-	if !ok || !strings.EqualFold(member, "arr") {
+	if !ok || !strings.EqualFold(member, "arr") && !strings.EqualFold(member, "rgsabound") {
 		return false
 	}
 	if receiver == "" {
@@ -11897,6 +11904,7 @@ func firstParenOutsideString(text string) int {
 func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 	candidates := map[string][]string{}
 	procedureNames := map[string]int{}
+	recognizedNames := map[string]int{}
 	for _, file := range files {
 		procedures := file.procedureView()
 		for procedureIndex := 0; procedureIndex < procedures.Len(); procedureIndex++ {
@@ -11907,14 +11915,22 @@ func inferArrayAllocationGuards(files []parsedFile) map[string]bool {
 			}
 			parameter, ok := arrayAllocationGuardParameter(proc)
 			if !ok {
+				parameter, ok = arrayDimensionCountGuardParameter(proc)
+			}
+			if !ok {
 				continue
 			}
 			candidates[name] = append(candidates[name], parameter)
+			recognizedNames[name]++
 		}
 	}
 	guards := map[string]bool{}
-	for name, parameters := range candidates {
-		if name == "" || procedureNames[name] != 1 || len(parameters) != 1 {
+	for name := range candidates {
+		// Private procedures are module-scoped, so the same helper name can
+		// legitimately occur in multiple modules. Keep a bare-name guard only
+		// when every procedure with that name has the same narrow guard shape;
+		// an unrelated duplicate remains conservative.
+		if name == "" || recognizedNames[name] != procedureNames[name] {
 			continue
 		}
 		guards[name] = true
@@ -12064,6 +12080,79 @@ func arrayAllocationGuardParameter(proc sourceProcedure) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(parameter.Name), true
+}
+
+// arrayDimensionCountGuardParameter recognizes the helper shape used by
+// GetArrayDimsCount: it probes successive LBound dimensions under an error
+// handler and returns the last successful dimension number minus one. The
+// result is zero when the first probe fails, so a caller branch that proves
+// the result is one has also proved that its input is an allocated 1D array.
+// Keep this separate from the ordinary length probe so an arbitrary scalar
+// helper returning `someValue - 1` cannot become an allocation contract.
+func arrayDimensionCountGuardParameter(proc sourceProcedure) (string, bool) {
+	if proc.ProcedureKind != procedureir.ProcedureFunction && proc.ProcedureKind != procedureir.ProcedurePropertyGet {
+		return "", false
+	}
+	if !arrayKnownScalarType(proc.ReturnType) || isObjectType(proc.ReturnType) || proc.Params.Len() != 1 {
+		return "", false
+	}
+	parameter := proc.Params.valueAt(0)
+	variantParameter := strings.EqualFold(cleanIdentifier(strings.TrimSpace(parameter.Type)), "variant")
+	if parameter.Name == "" || (!parameterIsArray(parameter) && !variantParameter) || proc.Name == "" {
+		return "", false
+	}
+
+	errorLabel := ""
+	recovery := false
+	foundRecoveryLabel := false
+	loopVariable := ""
+	hasDimensionProbe := false
+	countReturns := 0
+	invalidReturn := false
+	for statement := range proc.Statements.All() {
+		rawText := strings.TrimSpace(statement.Text)
+		text := strings.TrimSpace(normalizedCodeLine(statement.Text))
+		if match := arrayOnErrorGotoRe.FindStringSubmatch(text); len(match) == 2 {
+			errorLabel = strings.ToLower(match[1])
+		}
+		if match := arrayLabelRe.FindStringSubmatch(text); len(match) == 2 {
+			recovery = errorLabel != "" && strings.EqualFold(match[1], errorLabel)
+			if recovery {
+				foundRecoveryLabel = true
+			}
+		}
+		loopText := rawText
+		if newline := strings.IndexAny(loopText, "\r\n"); newline >= 0 {
+			loopText = strings.TrimSpace(loopText[:newline])
+		}
+		if match := arrayDimensionCountLoopRe.FindStringSubmatch(loopText); len(match) == 2 {
+			loopVariable = strings.ToLower(cleanIdentifier(match[1]))
+		}
+		for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+			if !strings.EqualFold(bound[1], "lbound") || !strings.EqualFold(cleanIdentifier(bound[2]), parameter.Name) || loopVariable == "" || !strings.EqualFold(cleanIdentifier(bound[3]), loopVariable) {
+				continue
+			}
+			hasDimensionProbe = true
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed || !strings.EqualFold(lhs, proc.Name) {
+			continue
+		}
+		if recovery && arrayDimensionCountExpressionMatches(rhs, loopVariable) {
+			countReturns++
+		} else {
+			invalidReturn = true
+		}
+	}
+	if errorLabel == "" || !foundRecoveryLabel || loopVariable == "" || !hasDimensionProbe || countReturns != 1 || invalidReturn {
+		return "", false
+	}
+	return strings.ToLower(parameter.Name), true
+}
+
+func arrayDimensionCountExpressionMatches(rhs, dimension string) bool {
+	compact := strings.Join(strings.Fields(strings.ToLower(rhs)), "")
+	return compact == strings.ToLower(dimension)+"-1"
 }
 
 func parameterIsArray(parameter parameterInfo) bool {

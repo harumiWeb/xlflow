@@ -7496,6 +7496,47 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesDescriptorBackedBoundArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type BoundAccessor
+  rgsabound() As BoundInfo
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As BoundInfo, ByVal count As Long)
+  Debug.Print values(0).cElements
+End Sub
+
+Public Sub Run(ByVal count As Long)
+  Dim bounds As BoundAccessor
+  bounds.sa.pvData = 1
+  bounds.sa.rgsabound0.cElements = count
+  If count >= 1 Then
+    Consume bounds.rgsabound, count
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a descriptor-backed bound array with a positive element count should prove the ByRef array allocation: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesQualifiedDictionarySnapshotsThroughPrivateByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -11962,6 +12003,53 @@ End Sub
 	}
 	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
 		t.Fatalf("an allocation probe with an implicit zero recovery return should establish allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227RecognizesArrayDimensionCountGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function DimensionCount(ByRef values() As Long) As Long
+  Const MAX_DIMENSION As Long = 60
+  Dim dimension As Long
+  Dim tempBound As Long
+  On Error GoTo FinalDimension
+  For dimension = 1 To MAX_DIMENSION
+    tempBound = LBound(values, dimension)
+  Next dimension
+FinalDimension:
+  DimensionCount = dimension - 1
+End Function
+
+Private Sub Guarded(ByRef values() As Long)
+  If DimensionCount(values) <> 1 Then Exit Sub
+  Debug.Print LBound(values)
+End Sub
+
+Private Sub Unguarded(ByRef values() As Long)
+  Debug.Print LBound(values)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Guarded" {
+			t.Fatalf("a successful dimension-count probe should establish the 1D array allocation: %+v", finding)
+		}
+	}
+	seenUnsafe := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Unguarded" {
+			seenUnsafe = true
+			break
+		}
+	}
+	if !seenUnsafe {
+		t.Fatalf("an unguarded LBound must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
 	}
 }
 
