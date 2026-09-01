@@ -5916,6 +5916,31 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesStrConvStringAssignmentInsideWith(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Safe()
+  Dim connection As Object
+  Dim source As String
+  Dim bytes() As Byte
+  With connection
+    source = "header"
+  End With
+  bytes = StrConv(source, vbFromUnicode)
+  Debug.Print bytes(0), UBound(bytes)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a non-empty String assigned inside With should prove the converted Byte array: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227PropagatesArrayReturnIntoByRefParameter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

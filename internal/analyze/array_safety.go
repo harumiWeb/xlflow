@@ -13152,12 +13152,15 @@ func arrayStringLiteralHasValue(operand string) bool {
 	return length > 0
 }
 
+// arrayStringBlockBoundary tracks only constructs that can make a String
+// assignment conditional. A With block changes name resolution, not whether
+// its body executes, so it must not hide an unconditional non-empty value.
 func arrayStringBlockBoundary(text string) int {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	switch {
-	case lower == "end if", lower == "end select", lower == "end with", lower == "loop", lower == "wend", strings.HasPrefix(lower, "next"):
+	case lower == "end if", lower == "end select", lower == "loop", lower == "wend", strings.HasPrefix(lower, "next"):
 		return -1
-	case strings.HasPrefix(lower, "if ") && strings.HasSuffix(lower, " then"), strings.HasPrefix(lower, "for "), strings.HasPrefix(lower, "do "), lower == "do", strings.HasPrefix(lower, "select case "), strings.HasPrefix(lower, "with "), strings.HasPrefix(lower, "while "):
+	case strings.HasPrefix(lower, "if ") && strings.HasSuffix(lower, " then"), strings.HasPrefix(lower, "for "), strings.HasPrefix(lower, "do "), lower == "do", strings.HasPrefix(lower, "select case "), strings.HasPrefix(lower, "while "):
 		return 1
 	default:
 		return 0
