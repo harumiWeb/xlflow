@@ -93,7 +93,7 @@
 {"project":"third_party/vba-web","file":"examples/gmail/Gmail.bas","surface":"analyze","code":"VBA206","severity":"warning","line":69,"column":27}
 {"project":"third_party/vba-web","file":"examples/linkedin/LinkedInSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":15,"column":5}
 {"project":"third_party/vba-web","file":"examples/maps/Maps.bas","surface":"analyze","code":"VBA202","severity":"warning","line":37,"column":0}
-{"project":"third_party/vba-web","file":"examples/maps/Maps.bas","surface":"analyze","code":"VBA202","severity":"warning","line":51,"column":0}
+{"project":"third_party/vba-web","file":"examples/maps/Maps.bas","surface":"analyze","code":"VBA202","severity":"warning","line":52,"column":0}
 {"project":"third_party/vba-web","file":"examples/maps/MapsSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":16,"column":5}
 {"project":"third_party/vba-web","file":"examples/maps/MapsSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":16,"column":51}
 {"project":"third_party/vba-web","file":"examples/maps/MapsSheet.cls","surface":"analyze","code":"VBA206","severity":"warning","line":16,"column":51}

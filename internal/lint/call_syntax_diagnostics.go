@@ -356,7 +356,7 @@ func (w *callSyntaxWalker) bareFunctionIdentifier(node *tree_sitter.Node) {
 		return
 	}
 	parent := node.Parent()
-	if parent == nil || parent.Kind() != "unparenthesized_argument_list" {
+	if parent == nil || (parent.Kind() != "unparenthesized_argument_list" && parent.Kind() != "output_list") {
 		return
 	}
 	if !looksLikeBareFunctionArguments(sourceTailAfter(w.source, int(node.EndByte()))) {
