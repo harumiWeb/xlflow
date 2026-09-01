@@ -213,6 +213,15 @@ where `ub` is that descriptor count minus one. This is the narrow normal-path
 contract for descriptor projections; missing descriptor setup, an unresolved or
 public caller, and arbitrary `ReDim` shapes remain conservative.
 
+A procedure-local `Static` dynamic array may be carried as allocated at entry
+when the same procedure has exactly one `If Not state.isSet Then` setup block,
+`state` is a Static UDT-like readiness value, a resolved ByRef helper sets the
+passed `.isSet` field on every normal return, and the block performs a direct
+non-`Preserve` `ReDim` before any array use. The proof also requires that no
+indexed/bounds access, whole-array replacement, or `Erase` precedes setup and
+that the target is not resized again. This models reusable backing buffers such
+as `fakeSafeArray()` while keeping arbitrary Static arrays conservative.
+
 At a join, allocation and dimensions are retained only when all incoming paths
 agree. Exceptional and uncertain CFG edges use the pre-statement state. This
 means an indexed access after an allocation on only one branch remains a

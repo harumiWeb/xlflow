@@ -12302,6 +12302,79 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesStaticArrayThroughOneTimeInitializer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ReadyState
+  isSet As Boolean
+End Type
+
+Private Sub InitReady(ByRef state As ReadyState)
+  If state.isSet Then Exit Sub
+  state.isSet = True
+End Sub
+
+Public Function Build(ByVal index As Long) As Long
+  Static values() As Long
+  Static state As ReadyState
+  If Not state.isSet Then
+    InitReady state
+    ReDim values(0 To 3)
+  End If
+  values(index) = 1
+  Build = values(0)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a static array initialized behind a resolved ByRef readiness helper must be carried to later uses: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryStaticArrayWithoutReadyFlagContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type ReadyState
+  isSet As Boolean
+End Type
+
+Private Sub InitReady(ByRef state As ReadyState)
+  state.isSet = False
+End Sub
+
+Public Function Build() As Long
+  Static values() As Long
+  Static state As ReadyState
+  If Not state.isSet Then
+    InitReady state
+    ReDim values(0 To 3)
+  End If
+  Build = values(0)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Build" {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatalf("a static array without the readiness helper contract must remain conservative: %+v", findings)
+	}
+}
+
 func TestAnalyzerVBA227UsesArrayFunctionReturnShape(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

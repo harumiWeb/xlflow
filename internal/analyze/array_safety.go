@@ -176,6 +176,7 @@ var (
 	arrayStrPtrGuardRe                = regexp.MustCompile(`(?i)^\s*strptr\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(=|<>)\s*0\s*$`)
 	arrayByteArrayReadRe              = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
 	arraySetupGuardRe                 = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
+	arrayStaticReadyGuardRe           = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s*\.\s*isset\s+then\s*$`)
 	arrayModuleReadyGuardRe           = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s+then\s+exit\s+(?:sub|function|property)\s*$`)
 	arrayOnErrorGotoRe                = regexp.MustCompile(`(?i)^\s*on\s+error\s+goto\s+([A-Za-z_]\w*)\s*$`)
 	arrayOnErrorResumeNextRe          = regexp.MustCompile(`(?i)^\s*on\s+error\s+resume\s+next\s*$`)
@@ -3817,6 +3818,353 @@ func arrayInitialState(variables map[string]arrayVariable) arrayFlowState {
 		state[name] = value
 	}
 	return state
+}
+
+// applyArrayStaticInitializationState recognizes the narrow one-time setup
+// idiom used by procedures that keep a reusable backing array in a Static
+// local. The static readiness flag is passed to a resolved ByRef helper that
+// sets its flag field on every normal return, and the first call then performs
+// a successful direct ReDim before any array use. This lets the entry state
+// carry the normal-call invariant without treating arbitrary Static arrays as
+// allocated.
+func applyArrayStaticInitializationState(state arrayFlowState, file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable) arrayFlowState {
+	var updated arrayFlowState
+	for name, variable := range variables {
+		if !variable.static || !variable.isArray || variable.fixed || !arrayStaticArrayInitializationProven(file, proc, ctx, variables, name) {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value := updated[name]
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeEmpty = false
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
+func arrayStaticArrayInitializationProven(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, targetName string) bool {
+	targetName = strings.ToLower(cleanIdentifier(targetName))
+	target, ok := variables[targetName]
+	if !ok || !target.static || !target.isArray || target.fixed || target.parameter {
+		return false
+	}
+	if proc.StartLine < 1 || proc.EndLine < proc.StartLine || proc.StartLine > len(file.Lines) {
+		return false
+	}
+
+	type staticReadyGuard struct {
+		name  string
+		index int
+	}
+	guards := make([]staticReadyGuard, 0, 1)
+	start := max(0, proc.StartLine-1)
+	end := min(len(file.Lines), proc.EndLine)
+	for index := start + 1; index < end; index++ {
+		match := arrayStaticReadyGuardRe.FindStringSubmatch(strings.TrimSpace(normalizedCodeLine(file.Lines[index])))
+		if len(match) != 2 {
+			continue
+		}
+		name := strings.ToLower(cleanIdentifier(match[1]))
+		ready, declared := variables[name]
+		if !declared || !ready.static || ready.parameter || ready.isArray || ready.isVariant || ready.isObject || ready.knownScalar {
+			// The readiness object must be a Static UDT-like local. A scalar
+			// Boolean guard or a non-static value does not carry state across
+			// calls and must remain on the ordinary CFG path.
+			continue
+		}
+		guards = append(guards, staticReadyGuard{name: name, index: index})
+	}
+	if len(guards) != 1 {
+		return false
+	}
+	guard := guards[0]
+
+	redimIndex, ok := arrayStaticInitializationBlock(file, guard.index, end, targetName)
+	if !ok {
+		return false
+	}
+	// The target must not be used before the normal-path ReDim. Otherwise the
+	// entry invariant would hide a genuine first-call access before setup.
+	for index := start + 1; index < redimIndex; index++ {
+		if arrayStaticSourceUsesTarget(file.Lines[index], targetName, variables) {
+			return false
+		}
+	}
+	for call := range proc.Calls.All() {
+		if call.Range.StartLine-1 < redimIndex && arrayCallPassesDirectArrayArgument(proc, call, targetName) {
+			return false
+		}
+	}
+
+	// Admit exactly one direct ReDim for this target, and reject Erase or a
+	// whole-array replacement anywhere in the procedure. Indexed writes after
+	// the setup are harmless and are intentionally not filtered here.
+	for index := start + 1; index < end; index++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		if match := arrayRedimRe.FindStringSubmatch(text); len(match) > 0 {
+			usesTarget := false
+			for _, clause := range splitArgs(match[2]) {
+				redim, direct := parseDirectArrayRedimClause(clause)
+				if direct && strings.EqualFold(cleanIdentifier(redim.name), targetName) {
+					usesTarget = true
+					if strings.TrimSpace(match[1]) != "" || index != redimIndex {
+						return false
+					}
+				}
+			}
+			if usesTarget && index != redimIndex {
+				return false
+			}
+		}
+		if match := arrayEraseRe.FindStringSubmatch(text); len(match) == 2 && strings.EqualFold(strings.TrimSpace(match[1]), targetName) {
+			return false
+		}
+		if lhs, _, indexed, assigned := arrayAssignment(text); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), targetName) {
+			return false
+		}
+	}
+
+	initializerFound := false
+	for call := range proc.Calls.All() {
+		line := call.Range.StartLine - 1
+		if line <= guard.index || line >= redimIndex {
+			continue
+		}
+		if call.IsRaiseEvent || call.Resolution.Status == procedureir.ResolutionBuiltinLike {
+			return false
+		}
+		if initializerFound {
+			return false
+		}
+		helper, parameter, resolved := arrayStaticReadyInitializer(file, proc, call, guard.name, ctx)
+		if !resolved || helper.StartByte == proc.StartByte || !arrayStaticHelperSetsReadyFlag(file, helper, parameter) {
+			return false
+		}
+		initializerFound = true
+	}
+	if !initializerFound {
+		return false
+	}
+
+	// Keep the proof tied to the same straight-line pre-ReDim region. The
+	// post-ReDim body may contain the implementation's indexed writes and
+	// loops, but a conditional or loop before allocation would leave a bypass.
+	for index := guard.index + 1; index < redimIndex; index++ {
+		if arrayStaticPreRedimControlFlow(file.Lines[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayStaticInitializationBlock(file parsedFile, guardIndex, end int, targetName string) (redimIndex int, ok bool) {
+	if guardIndex < 0 || guardIndex >= end {
+		return 0, false
+	}
+	ifDepth := 1
+	redimIndex = -1
+	for index := guardIndex + 1; index < end; index++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		lower := strings.ToLower(text)
+		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
+			continue
+		}
+		if lower == "end if" {
+			if ifDepth == 1 {
+				return redimIndex, redimIndex >= 0
+			}
+			ifDepth--
+			continue
+		}
+		if ifDepth == 1 && (lower == "else" || strings.HasPrefix(lower, "elseif ")) {
+			return 0, false
+		}
+		if arrayStaticBlockIfStart(text) {
+			if ifDepth == 1 && redimIndex < 0 {
+				return 0, false
+			}
+			ifDepth++
+			continue
+		}
+		if ifDepth == 1 && redimIndex < 0 && arrayStaticPreRedimControlFlow(file.Lines[index]) {
+			return 0, false
+		}
+		if ifDepth != 1 {
+			continue
+		}
+		match := arrayRedimRe.FindStringSubmatch(text)
+		if len(match) == 0 {
+			continue
+		}
+		for _, clause := range splitArgs(match[2]) {
+			redim, direct := parseDirectArrayRedimClause(clause)
+			if direct && strings.EqualFold(cleanIdentifier(redim.name), targetName) {
+				if strings.TrimSpace(match[1]) != "" || redimIndex >= 0 {
+					return 0, false
+				}
+				redimIndex = index
+			}
+		}
+	}
+	return 0, false
+}
+
+func arrayStaticReadyInitializer(file parsedFile, caller sourceProcedure, call procedureir.CallSite, readyName string, ctx analysisContext) (sourceProcedure, string, bool) {
+	resolution := arrayCallResolution(ctx, call)
+	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
+		return sourceProcedure{}, "", false
+	}
+	want := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].QualifiedName))
+	var helper sourceProcedure
+	found := false
+	for _, candidate := range file.Procedures {
+		if arrayProcedureKey(candidate) != want {
+			continue
+		}
+		if found {
+			return sourceProcedure{}, "", false
+		}
+		helper = candidate
+		found = true
+	}
+	if !found {
+		return sourceProcedure{}, "", false
+	}
+	bindings, ok := arrayCallArgumentBindings(caller, helper, call)
+	if !ok {
+		return sourceProcedure{}, "", false
+	}
+	for _, binding := range bindings {
+		if binding.parameterIndex < 0 || binding.parameterIndex >= helper.Params.Len() || directArrayArgumentName(binding.text) != strings.ToLower(cleanIdentifier(readyName)) {
+			continue
+		}
+		parameter := helper.Params.valueAt(binding.parameterIndex)
+		if parameterIsByRefScalar(parameter) && !arrayKnownScalarType(parameter.Type) && !isObjectType(parameter.Type) {
+			return helper, helper.Params.valueAt(binding.parameterIndex).Name, true
+		}
+	}
+	return sourceProcedure{}, "", false
+}
+
+func arrayStaticHelperSetsReadyFlag(file parsedFile, helper sourceProcedure, parameter string) bool {
+	want := canonicalArrayBoundExpression(parameter + ".isSet")
+	count := 0
+	setLine := -1
+	lastExecutable := -1
+	depth := 0
+	start := max(0, helper.StartLine-1)
+	end := min(len(file.Lines), helper.EndLine)
+	for index := start; index < end; index++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		lower := strings.ToLower(text)
+		if arrayStaticExecutableSourceLine(text) {
+			lastExecutable = index
+		}
+		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
+			continue
+		}
+		if arrayStaticBlockEnd(text) {
+			if depth == 0 {
+				return false
+			}
+			depth--
+			continue
+		}
+		if lhs, rhs, indexed, assigned := arrayAssignment(text); assigned && !indexed && canonicalArrayBoundExpression(lhs) == want {
+			if depth != 0 || !strings.EqualFold(strings.TrimSpace(rhs), "true") {
+				return false
+			}
+			count++
+			setLine = index
+		}
+		if arrayStaticBlockStart(text) {
+			depth++
+		}
+		if strings.HasPrefix(lower, "on error resume next") {
+			return false
+		}
+	}
+	return depth == 0 && count == 1 && setLine == lastExecutable && setLine >= start
+}
+
+func arrayStaticSourceUsesTarget(text, targetName string, variables map[string]arrayVariable) bool {
+	for _, use := range arrayIndexedUsesForSource(text, variables) {
+		if strings.EqualFold(cleanIdentifier(use.name), targetName) && len(use.args) > 0 {
+			return true
+		}
+	}
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+		if len(bound) > 2 && strings.EqualFold(cleanIdentifier(bound[2]), targetName) {
+			return true
+		}
+	}
+	if match := arrayForEachRe.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 && strings.EqualFold(cleanIdentifier(match[1]), targetName) {
+		return true
+	}
+	return false
+}
+
+func arrayStaticExecutableSourceLine(text string) bool {
+	text = strings.TrimSpace(normalizedCodeLine(text))
+	if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") || isProcedureHeaderLine(strings.ToLower(text)) {
+		return false
+	}
+	switch strings.ToLower(text) {
+	case "end sub", "end function", "end property", "else":
+		return false
+	default:
+		return !arrayStaticBlockEnd(text)
+	}
+}
+
+func arrayStaticBlockIfStart(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return (strings.HasPrefix(lower, "if ") || strings.HasPrefix(lower, "elseif ")) && strings.HasSuffix(lower, " then")
+}
+
+func arrayStaticBlockStart(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if arrayStaticBlockIfStart(lower) {
+		return true
+	}
+	for _, prefix := range []string{"for ", "do", "while ", "select ", "with "} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayStaticBlockEnd(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	for _, prefix := range []string{"end if", "end with", "end select", "next", "loop", "wend"} {
+		if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayStaticPreRedimControlFlow(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(normalizedCodeLine(text)))
+	if lower == "" || strings.HasPrefix(lower, "'") || strings.HasPrefix(lower, "#") {
+		return false
+	}
+	if arrayStaticBlockIfStart(lower) {
+		return true
+	}
+	for _, prefix := range []string{"for ", "do", "while ", "select ", "with ", "else", "goto ", "on error ", "exit "} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func applyArrayByRefEntryStates(state arrayFlowState, proc sourceProcedure, variables map[string]arrayVariable, entries map[string]map[int]bool, conditions map[string]map[int]string) arrayFlowState {
