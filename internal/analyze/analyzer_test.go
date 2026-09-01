@@ -6946,6 +6946,45 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesSafeArrayPointerAllocationGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Declare Function VarPtrArray Lib "VBE6" Alias "VarPtr" (ByRef values() As Byte) As Long
+Private Declare Sub CopyMemoryFromPtr Lib "kernel32" Alias "RtlMoveMemory" (ByRef dest As Any, ByVal src As Long, ByVal size As Long)
+
+Private Function SafeArrayLen(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  Dim pSA As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+  If pSA = 0 Then Exit Function
+  SafeArrayLen = UBound(values) - LBound(values) + 1
+  Debug.Print values(0)
+End Function
+
+Private Function MissingDescriptorCheck(ByRef values() As Byte) As Long
+  Dim ptr As Long
+  ptr = VarPtrArray(values)
+  If ptr = 0 Then Exit Function
+  MissingDescriptorCheck = LBound(values)
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 2 || got[0].Procedure != "SafeArrayLen" || got[1].Procedure != "MissingDescriptorCheck" {
+		t.Fatalf("descriptor validation should protect bounds while retaining the possible-empty element warning: %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "may be empty") {
+		t.Fatalf("descriptor validation must not prove a non-empty array: %+v", got[0])
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCompoundStrPtrArrayGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

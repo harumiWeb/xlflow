@@ -213,6 +213,16 @@ where `ub` is that descriptor count minus one. This is the narrow normal-path
 contract for descriptor projections; missing descriptor setup, an unresolved or
 public caller, and arbitrary `ReDim` shapes remain conservative.
 
+A private helper may also prove a dynamic Byte array allocated by the low-level
+`VarPtrArray`/`CopyMemoryFromPtr` descriptor idiom. The recognized normal-path
+sequence obtains the array pointer slot, exits when that slot is null, copies
+the SAFEARRAY pointer into a scalar using `LenB` of that scalar, and exits when
+the copied descriptor pointer is null. The second guard makes later `LBound`
+and `UBound` queries safe; it does not prove that the descriptor contains an
+element, so indexed access remains subject to the possible-empty check. The
+four statements must remain in this structural order; a pointer-slot check
+without descriptor validation or a different memory-copy shape is conservative.
+
 A procedure-local `Static` dynamic array may be carried as allocated at entry
 when the same procedure has exactly one `If Not state.isSet Then` setup block,
 `state` is a Static UDT-like readiness value, a resolved ByRef helper sets the

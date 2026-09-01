@@ -182,6 +182,8 @@ var (
 	arrayIsArrayGuardRe               = regexp.MustCompile(`(?i)^\s*isarray\s*\(\s*(.+)\s*\)\s*$`)
 	arrayByteArrayGuardRe             = regexp.MustCompile(`(?i)^\s*(?:vartypeof|vartype)\s*\(\s*([A-Za-z_]\w*)\s*\)\s*=\s*\(?\s*vbarray\s+or\s+vbbyte\s*\)?\s*$`)
 	arrayStrPtrGuardRe                = regexp.MustCompile(`(?i)^\s*strptr\s*\(\s*([A-Za-z_]\w*)\s*\)\s*(=|<>)\s*0\s*$`)
+	arraySafeArrayZeroExitGuardRe     = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s*=\s*0\s+then\s+exit\s+(?:sub|function|property)\s*$`)
+	arraySafeArrayPointerCopyRe       = regexp.MustCompile(`(?i)^\s*(?:call\s+)?(?:[A-Za-z_]\w*\.)?copymemoryfromptr\s+([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*,\s*lenb\s*\(\s*([A-Za-z_]\w*)\s*\)\s*$`)
 	arrayByteArrayReadRe              = regexp.MustCompile(`(?i)^\s*(?:[A-Za-z_]\w*\.)*read\s*\(\s*-1\s*\)\s*$`)
 	arraySetupGuardRe                 = regexp.MustCompile(`(?i)^\s*if\s+([A-Za-z_]\w*)\s+then\s+exit\s+sub\s*$`)
 	arrayStaticReadyGuardRe           = regexp.MustCompile(`(?i)^\s*if\s+not\s+([A-Za-z_]\w*)\s*\.\s*isset\s+then\s*$`)
@@ -706,7 +708,90 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 	if argument, _, ok := arrayIsArrayGuardCondition(text); ok {
 		state = arrayElementGuardState(state, argument, variables)
 	}
+	if name, ok := arraySafeArrayPointerGuardTarget(file, proc, line, text, variables); ok {
+		if value, known := state[name]; known {
+			value.kind = arrayAllocated
+			value.knownArray = true
+			// A nonzero SAFEARRAY descriptor proves that bounds can be
+			// queried, but it does not prove that the descriptor contains an
+			// element. Retain a possible-empty state so indexed access remains
+			// checked even when the incoming ByRef state had no shape facts.
+			value.mayBeEmpty = true
+			state[name] = value
+		}
+	}
 	return state, findings
+}
+
+// arraySafeArrayPointerGuardTarget recognizes the narrow low-level VBA idiom
+// used to inspect a dynamic Byte-array descriptor without calling LBound or
+// UBound first:
+//
+//	ptr = VarPtrArray(values)
+//	If ptr = 0 Then Exit Function
+//	CopyMemoryFromPtr pSA, ptr, LenB(pSA)
+//	If pSA = 0 Then Exit Function
+//
+// The final guard's normal path has a nonzero SAFEARRAY descriptor, which is
+// enough to make later bounds queries valid. Keep the contract contiguous and
+// structural; a pointer-slot check alone, a different memory-copy shape, or a
+// missing descriptor check must remain conservative.
+func arraySafeArrayPointerGuardTarget(file parsedFile, proc sourceProcedure, line int, text string, variables map[string]arrayVariable) (string, bool) {
+	if line <= proc.StartLine || line > proc.EndLine || line > len(file.Lines) {
+		return "", false
+	}
+	guard := strings.TrimSpace(normalizedCodeLine(text))
+	match := arraySafeArrayZeroExitGuardRe.FindStringSubmatch(guard)
+	if len(match) != 2 {
+		return "", false
+	}
+	descriptorName := strings.ToLower(cleanIdentifier(match[1]))
+	previous := make([]string, 0, 3)
+	for index := line - 2; index >= max(proc.StartLine-1, 0) && len(previous) < 3; index-- {
+		candidate := strings.TrimSpace(normalizedCodeLine(file.Lines[index]))
+		if candidate == "" || strings.HasPrefix(candidate, "'") || strings.HasPrefix(candidate, "#") {
+			continue
+		}
+		previous = append(previous, candidate)
+	}
+	if len(previous) != 3 {
+		return "", false
+	}
+	// The scan above is backwards from the descriptor guard.
+	copyText := previous[0]
+	ptrGuard := previous[1]
+	pointerAssignment := previous[2]
+	copyMatch := arraySafeArrayPointerCopyRe.FindStringSubmatch(copyText)
+	if len(copyMatch) != 4 || !strings.EqualFold(copyMatch[1], descriptorName) || !strings.EqualFold(copyMatch[1], copyMatch[3]) {
+		return "", false
+	}
+	ptrName := strings.ToLower(cleanIdentifier(copyMatch[2]))
+	ptrGuardMatch := arraySafeArrayZeroExitGuardRe.FindStringSubmatch(ptrGuard)
+	if len(ptrGuardMatch) != 2 || !strings.EqualFold(ptrGuardMatch[1], ptrName) {
+		return "", false
+	}
+	lhs, rhs, indexed, assigned := arrayAssignment(pointerAssignment)
+	if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), ptrName) || !strings.EqualFold(arrayCallName(rhs), "varptrarray") {
+		return "", false
+	}
+	open := firstParenOutsideString(rhs)
+	if open < 0 {
+		return "", false
+	}
+	close := matchingParen(rhs, open)
+	if close < 0 || strings.TrimSpace(rhs[close+1:]) != "" {
+		return "", false
+	}
+	arguments := splitArgs(rhs[open+1 : close])
+	if len(arguments) != 1 {
+		return "", false
+	}
+	arrayName := directArrayArgumentName(arguments[0])
+	variable, known := variables[arrayName]
+	if !known || !variable.isArray || !isByteArrayVariable(variable) {
+		return "", false
+	}
+	return arrayName, true
 }
 
 // arrayVBA227FilterForBodyIndexFindings removes only the unallocated/empty
