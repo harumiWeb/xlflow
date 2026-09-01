@@ -154,8 +154,8 @@ func TestCommittedCorpusReviewMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.Reviewed != 1817 || metrics.TP != 741 || metrics.FP != 1076 {
-		t.Fatalf("committed review metrics = %#v, want Reviewed=1817 TP=741 FP=1076", metrics)
+	if metrics.Reviewed != 1819 || metrics.TP != 743 || metrics.FP != 1076 {
+		t.Fatalf("committed review metrics = %#v, want Reviewed=1819 TP=743 FP=1076", metrics)
 	}
 	// This review pass expanded the ledger with confirmed VBA227 false
 	// positives, so the observed precision is lower than the previous floor.
