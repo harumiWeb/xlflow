@@ -987,6 +987,42 @@ End Sub
 	}
 }
 
+func TestRecoveredUnparenthesizedCallWithQualifiedArguments(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Private Sub NDArrayToCollections(ByRef arr() As Variant, ByRef src As Variant, ByRef bounds As Variant, ByVal totalElem As Long, ByRef cDimsPtr As LongPtr)
+End Sub
+
+Public Sub Run()
+    NDArrayToCollections .arrItems, vars.arr(0), bounds _
+                         , totalElem, ptrs.arr(0)
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 || len(doc.Procedures[1].Calls) != 1 {
+		t.Fatalf("recovered call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[1].Calls[0]
+	if !strings.EqualFold(call.Callee.BaseName, "NDArrayToCollections") {
+		t.Fatalf("callee = %+v, want NDArrayToCollections", call.Callee)
+	}
+	if call.Arguments.Count != 5 || len(call.Arguments.ExpressionIDs) != 5 {
+		t.Fatalf("recovered call arguments = %+v, want five arguments", call.Arguments)
+	}
+	want := []string{".arrItems", "vars.arr(0)", "bounds", "totalElem", "ptrs.arr(0)"}
+	for i, text := range want {
+		expressionID := call.Arguments.ExpressionIDs[i]
+		if expressionID == 0 || expressionID > len(doc.Procedures[1].Expressions) {
+			t.Fatalf("argument %d has invalid expression ID %d: %+v", i, expressionID, call.Arguments)
+		}
+		expression := doc.Procedures[1].Expressions[expressionID-1]
+		if expression.Text != text || !expression.Recovered {
+			t.Fatalf("argument %d = %+v, want recovered expression %q", i, expression, text)
+		}
+	}
+}
+
 func TestFunctionAndPropertyGetNamesResolveAsLocalReturnSlots(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Thing.cls", ModuleKind: "class"}, []byte(`Public Function Compute(ByVal input As Long) As Long

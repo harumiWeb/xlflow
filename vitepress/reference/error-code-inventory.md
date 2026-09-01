@@ -939,6 +939,7 @@ Generated from structured error-code literals in `internal/`. Descriptions and r
 - `receiver_diagnostics`
 - `recorded_at`
 - `recover_workbook`
+- `recovered_argument`
 - `recovery_actions`
 - `recovery_behavior`
 - `recovery_check_failed`

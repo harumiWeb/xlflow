@@ -31,6 +31,19 @@ type argumentFact struct {
 	valueRange vbaast.Range
 }
 
+type recoveredCallArgument struct {
+	text       string
+	name       string
+	valueText  string
+	rng        vbaast.Range
+	valueRange vbaast.Range
+}
+
+type recoveredCallSyntax struct {
+	callee    Callee
+	arguments []recoveredCallArgument
+}
+
 type callFact struct {
 	arguments []argumentFact
 }
@@ -454,6 +467,11 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 		target = firstNamedChild(node)
 	}
 	if target == nil {
+		if node.Kind() == "call_statement" {
+			if recoveredCall, ok := recoveredCallFromNode(node, v.builder.source); ok {
+				return v.appendRecoveredCall(procedure, node, recoveredCall, ctx)
+			}
+		}
 		return ctx.callIndex
 	}
 	if target.Kind() == "call_expression" {
@@ -466,6 +484,397 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 		return ctx.callIndex
 	}
 	return v.appendCall(procedure, node, callee, ctx)
+}
+
+func (v *singleVisitor) appendRecoveredCall(procedure *ProcedureIR, node *tree_sitter.Node, recovered recoveredCallSyntax, ctx visitContext) int {
+	facts := make([]argumentFact, 0, len(recovered.arguments))
+	for _, argument := range recovered.arguments {
+		id := len(procedure.Expressions) + 1
+		procedure.Expressions = append(procedure.Expressions, Expression{
+			ID: id, StatementID: ctx.statementID, Kind: ExpressionUnknown,
+			SyntaxKind: "recovered_argument", Text: argument.text, Range: argument.rng,
+			Recovered: true,
+		})
+		if statement := statementByID(procedure, ctx.statementID); statement != nil {
+			statement.ExpressionIDs = append(statement.ExpressionIDs, id)
+		}
+		fact := argumentFact{rng: argument.rng, name: argument.name, valueText: argument.valueText, valueRange: argument.valueRange}
+		facts = append(facts, fact)
+	}
+	procedure.Calls = append(procedure.Calls, CallSite{
+		ID: len(procedure.Calls) + 1, File: v.builder.file, Module: v.builder.moduleName,
+		Caller: ProcedureRef{Name: procedure.Symbol.Name, Kind: procedure.Symbol.Kind, QualifiedName: procedure.Symbol.QualifiedName},
+		Callee: recovered.callee, Arguments: Arguments{Count: len(recovered.arguments), Named: []NamedArgument{}},
+		Range: vbaast.NodeRange(node), StatementID: ctx.statementID,
+		Resolution: CallResolution{Status: ResolutionNotAttempted},
+	})
+	procedureIndex := len(v.document.Procedures) - 1
+	v.callFacts[procedureIndex] = append(v.callFacts[procedureIndex], callFact{arguments: facts})
+	return len(procedure.Calls) - 1
+}
+
+// recoveredCallFromNode handles the narrow tree-sitter recovery shape where a
+// valid unparenthesized call has a call_statement node with no named children.
+// Keeping this lexical fallback at the IR boundary lets all consumers share
+// the recovered call instead of each analyzer inventing its own source parser.
+func recoveredCallFromNode(node *tree_sitter.Node, source []byte) (recoveredCallSyntax, bool) {
+	if node == nil || node.Kind() != "call_statement" || node.NamedChildCount() != 0 {
+		return recoveredCallSyntax{}, false
+	}
+	start, end := int(node.StartByte()), int(node.EndByte())
+	if start < 0 || end <= start || start >= len(source) {
+		return recoveredCallSyntax{}, false
+	}
+	if end > len(source) {
+		end = len(source)
+	}
+	text := string(source[start:end])
+	position := recoveredSkipSpace(text, 0)
+	if recoveredWordAt(text, position, "call") {
+		position = recoveredSkipSpace(text, position+len("call"))
+	}
+	calleeStart := position
+	identifierEnd, ok := recoveredIdentifierAt(text, position)
+	if !ok {
+		return recoveredCallSyntax{}, false
+	}
+	position = identifierEnd
+	for position < len(text) && text[position] == '.' {
+		memberEnd, valid := recoveredIdentifierAt(text, position+1)
+		if !valid {
+			break
+		}
+		position = memberEnd
+	}
+	calleeText := strings.TrimSpace(text[calleeStart:position])
+	if calleeText == "" || strings.EqualFold(calleeText, "let") || strings.EqualFold(calleeText, "set") {
+		return recoveredCallSyntax{}, false
+	}
+	recovered := recoveredCallSyntax{callee: calleeFromRecoveredText(calleeText)}
+	argumentStart := recoveredSkipSpace(text, position)
+	if argumentStart >= len(text) {
+		return recovered, true
+	}
+	argumentEnd := len(text)
+	if text[argumentStart] == '(' {
+		close := recoveredMatchingParen(text, argumentStart)
+		if close < 0 || strings.TrimSpace(recoveredCallCommentlessText(text[close+1:])) != "" {
+			return recoveredCallSyntax{}, false
+		}
+		recovered.arguments = recoveredCallArguments(text, argumentStart+1, close, start, source)
+		return recovered, true
+	}
+	recovered.arguments = recoveredCallArguments(text, argumentStart, argumentEnd, start, source)
+	return recovered, true
+}
+
+func calleeFromRecoveredText(text string) Callee {
+	callee := Callee{Text: text}
+	parts := strings.Split(text, ".")
+	callee.Member = cleanIdentifier(parts[len(parts)-1])
+	callee.BaseName = callee.Member
+	if callee.BaseName == "" {
+		callee.BaseName = cleanIdentifier(lastNamePart(text))
+		callee.Member = callee.BaseName
+	}
+	if len(parts) > 1 {
+		receiver := strings.Join(parts[:len(parts)-1], ".")
+		callee.Receiver = &receiver
+	}
+	return callee
+}
+
+func recoveredCallArguments(text string, start, end, absoluteStart int, source []byte) []recoveredCallArgument {
+	if start >= end {
+		return nil
+	}
+	arguments := make([]recoveredCallArgument, 0, 1)
+	segmentStart := start
+	depth := 0
+	inString := false
+	inComment := false
+	for position := start; position < end; position++ {
+		character := text[position]
+		if inComment {
+			if character == '\n' {
+				inComment = false
+			}
+			continue
+		}
+		if character == '"' {
+			if inString && position+1 < end && text[position+1] == '"' {
+				position++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if !inString && character == '\'' {
+			inComment = true
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch character {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				if argument, ok := parseRecoveredCallArgument(text, segmentStart, position, absoluteStart, source); ok {
+					arguments = append(arguments, argument)
+				}
+				segmentStart = position + 1
+			}
+		}
+	}
+	if argument, ok := parseRecoveredCallArgument(text, segmentStart, end, absoluteStart, source); ok {
+		arguments = append(arguments, argument)
+	}
+	return arguments
+}
+
+func parseRecoveredCallArgument(text string, start, end, absoluteStart int, source []byte) (recoveredCallArgument, bool) {
+	trimmedStart, trimmedEnd := recoveredTrimSpace(text, start, end)
+	if trimmedStart >= trimmedEnd {
+		return recoveredCallArgument{}, false
+	}
+	raw := text[start:end]
+	if separator := recoveredNamedArgumentSeparator(raw); separator >= 0 {
+		name := strings.TrimSpace(raw[:separator])
+		nameEnd, valid := recoveredIdentifierAt(name, 0)
+		if valid && nameEnd == len(name) {
+			valueStart, valueEnd := recoveredTrimSpace(raw, separator+2, len(raw))
+			if valueStart >= valueEnd {
+				return recoveredCallArgument{}, false
+			}
+			valueText := recoveredCallCommentlessText(raw[valueStart:valueEnd])
+			if valueText == "" {
+				return recoveredCallArgument{}, false
+			}
+			valueRange := recoveredSourceRange(source, absoluteStart+start+valueStart, absoluteStart+start+valueEnd)
+			return recoveredCallArgument{
+				text: valueText, name: cleanIdentifier(name), valueText: valueText,
+				rng: valueRange, valueRange: valueRange,
+			}, true
+		}
+	}
+	argumentText := recoveredCallCommentlessText(raw)
+	if argumentText == "" {
+		return recoveredCallArgument{}, false
+	}
+	rng := recoveredSourceRange(source, absoluteStart+trimmedStart, absoluteStart+trimmedEnd)
+	return recoveredCallArgument{text: argumentText, rng: rng, valueRange: rng}, true
+}
+
+func recoveredNamedArgumentSeparator(text string) int {
+	depth := 0
+	inString := false
+	for position := 0; position+1 < len(text); position++ {
+		character := text[position]
+		if character == '"' {
+			if inString && position+1 < len(text) && text[position+1] == '"' {
+				position++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch character {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ':':
+			if depth == 0 && text[position+1] == '=' {
+				return position
+			}
+		}
+	}
+	return -1
+}
+
+func recoveredCallCommentlessText(text string) string {
+	var normalized strings.Builder
+	inString := false
+	for position := 0; position < len(text); position++ {
+		character := text[position]
+		if character == '"' {
+			if inString && position+1 < len(text) && text[position+1] == '"' {
+				normalized.WriteByte(character)
+				position++
+				normalized.WriteByte(text[position])
+				continue
+			}
+			inString = !inString
+			normalized.WriteByte(character)
+			continue
+		}
+		if inString {
+			normalized.WriteByte(character)
+			continue
+		}
+		if character == '\'' {
+			for position < len(text) && text[position] != '\n' {
+				position++
+			}
+			if position < len(text) {
+				normalized.WriteByte(' ')
+			}
+			continue
+		}
+		if character == '_' {
+			next := position + 1
+			for next < len(text) && (text[next] == ' ' || text[next] == '\t') {
+				next++
+			}
+			if next < len(text) && text[next] == '\r' {
+				next++
+			}
+			if next < len(text) && text[next] == '\n' {
+				normalized.WriteByte(' ')
+				position = next
+				continue
+			}
+		}
+		if character == '\r' || character == '\n' {
+			normalized.WriteByte(' ')
+			continue
+		}
+		normalized.WriteByte(character)
+	}
+	return strings.TrimSpace(normalized.String())
+}
+
+func recoveredMatchingParen(text string, open int) int {
+	depth := 0
+	inString := false
+	for position := open; position < len(text); position++ {
+		character := text[position]
+		if character == '"' {
+			if inString && position+1 < len(text) && text[position+1] == '"' {
+				position++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch character {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return position
+			}
+		}
+	}
+	return -1
+}
+
+func recoveredIdentifierAt(text string, start int) (int, bool) {
+	if start < 0 || start >= len(text) || !recoveredIdentifierStart(text[start]) {
+		return 0, false
+	}
+	position := start + 1
+	for position < len(text) && recoveredIdentifierPart(text[position]) {
+		position++
+	}
+	return position, true
+}
+
+func recoveredIdentifierStart(character byte) bool {
+	return character == '_' || character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z'
+}
+
+func recoveredIdentifierPart(character byte) bool {
+	return recoveredIdentifierStart(character) || character >= '0' && character <= '9'
+}
+
+func recoveredWordAt(text string, start int, word string) bool {
+	end := start + len(word)
+	if start < 0 || end > len(text) || !strings.EqualFold(text[start:end], word) {
+		return false
+	}
+	return end == len(text) || !recoveredIdentifierPart(text[end])
+}
+
+func recoveredSkipSpace(text string, start int) int {
+	for start < len(text) {
+		switch text[start] {
+		case ' ', '\t', '\r', '\n':
+			start++
+		default:
+			return start
+		}
+	}
+	return start
+}
+
+func recoveredTrimSpace(text string, start, end int) (int, int) {
+	for start < end {
+		switch text[start] {
+		case ' ', '\t', '\r', '\n':
+			start++
+		default:
+			goto right
+		}
+	}
+right:
+	for end > start {
+		switch text[end-1] {
+		case ' ', '\t', '\r', '\n':
+			end--
+		default:
+			return start, end
+		}
+	}
+	return start, end
+}
+
+func recoveredSourceRange(source []byte, start, end int) vbaast.Range {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if start > len(source) {
+		start = len(source)
+	}
+	if end > len(source) {
+		end = len(source)
+	}
+	lineColumn := func(offset int) (int, int) {
+		line, column := 1, 1
+		for position := 0; position < offset; position++ {
+			if source[position] == '\n' {
+				line++
+				column = 1
+			} else {
+				column++
+			}
+		}
+		return line, column
+	}
+	startLine, startColumn := lineColumn(start)
+	endLine, endColumn := lineColumn(end)
+	return vbaast.Range{
+		StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn,
+		StartByte: start, EndByte: end,
+	}
 }
 
 func (v *singleVisitor) addRaiseEvent(procedure *ProcedureIR, node *tree_sitter.Node, ctx visitContext) {

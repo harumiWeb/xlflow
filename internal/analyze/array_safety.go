@@ -4143,10 +4143,7 @@ func buildArrayParticipantGraph(files []parsedFile, ctx analysisContext) *arrayP
 			}
 		}
 		for call := range proc.Calls.All() {
-			resolution := call.Resolution
-			if ctx.procedureResolver != nil {
-				resolution = ctx.procedureResolver.ResolveCall(call)
-			}
+			resolution := arrayCallResolution(ctx, call)
 			addEdge := func(target string) {
 				if target == "" || target == key {
 					if target == key {
@@ -8087,11 +8084,11 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 						// mutations from an earlier, different helper. An outer
 						// ByRef call whose array argument is a proven allocated
 						// expression is independent of that ordering, however.
-						allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(entry.target, proc, entry.call, recordState, localCtx)
+						allProven, hasExpression := arrayByRefCallHasProvenArrayArguments(file, entry.target, proc, entry.call, recordState, localCtx)
 						record = allProven && (hasExpression || arrayByRefCallIsInnermostNested(entry.call, eligible))
 					}
 					if record {
-						arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, recordState, localCtx)
+						arrayRecordByRefCall(evidence, entry.key, entry.target, proc, entry.call, file, recordState, localCtx)
 					}
 					recordState = applyArrayModuleCallEffects(recordState, file, proc, entry.call, localCtx, variables, moduleDecls)
 					if arrayProcedureLineHasInlineConditional(file, entry.call.Range.StartLine) {
@@ -8178,7 +8175,7 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 				continue
 			}
 			if state, proven := a.arrayByRefCallSourceOrderProof(file, fallbackFacts, localGoSubAllocations, proc, target, call, initial, ctx, variables, constants); proven {
-				arrayRecordByRefCall(evidence, key, target, proc, call, state, ctx)
+				arrayRecordByRefCall(evidence, key, target, proc, call, file, state, ctx)
 			}
 		}
 		return evidence
@@ -8424,13 +8421,66 @@ func arrayCallsAtLine(calls readOnlySpan[procedureir.CallSite], line int) []proc
 }
 
 func arrayPrivateTargetForCall(ctx analysisContext, targets map[string]sourceProcedure, call procedureir.CallSite) (string, sourceProcedure, bool) {
-	resolution := ctx.procedureResolver.ResolveCall(call)
+	resolution := arrayCallResolution(ctx, call)
 	if resolution.Status != procedureir.ResolutionMatched || len(resolution.Candidates) != 1 {
 		return "", sourceProcedure{}, false
 	}
 	key := strings.ToLower(strings.TrimSpace(resolution.Candidates[0].QualifiedName))
 	target, ok := targets[key]
 	return key, target, ok
+}
+
+// arrayCallResolution rechecks the one parser shape that currently loses an
+// unparenthesized call's procedure name when its implicit member argument is
+// written with a leading dot, for example `Consume .values`.  The ordinary
+// resolver remains authoritative; the retry is deliberately limited to a
+// single dotted argument so an unresolved object member is not reinterpreted
+// as a project-local procedure call.
+func arrayCallResolution(ctx analysisContext, call procedureir.CallSite) procedureir.CallResolution {
+	resolution := call.Resolution
+	if ctx.procedureResolver == nil {
+		return resolution
+	}
+	resolution = ctx.procedureResolver.ResolveCall(call)
+	if resolution.Status == procedureir.ResolutionMatched && len(resolution.Candidates) == 1 {
+		return resolution
+	}
+	name := arrayImplicitMemberArgumentCallName(call.Callee.Text)
+	if name == "" || strings.EqualFold(name, call.Callee.BaseName) {
+		return resolution
+	}
+	retried := call
+	retried.Callee.Text = name
+	retried.Callee.BaseName = name
+	retried.Callee.Member = name
+	retried.Callee.Receiver = nil
+	return ctx.procedureResolver.ResolveCall(retried)
+}
+
+func arrayImplicitMemberArgumentCallName(text string) string {
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(text), "call ") {
+		text = strings.TrimSpace(text[len("call "):])
+	}
+	if text == "" || !isIdentifierStart(text[0]) {
+		return ""
+	}
+	end := 1
+	for end < len(text) && isIdentifierPart(text[end]) {
+		end++
+	}
+	rest := strings.TrimSpace(text[end:])
+	if len(rest) < 2 || rest[0] != '.' || !isIdentifierStart(rest[1]) {
+		return ""
+	}
+	memberEnd := 2
+	for memberEnd < len(rest) && isIdentifierPart(rest[memberEnd]) {
+		memberEnd++
+	}
+	if strings.TrimSpace(rest[memberEnd:]) != "" {
+		return ""
+	}
+	return cleanIdentifier(text[:end])
 }
 
 func procedureHasByRefArrayParameter(proc sourceProcedure) bool {
@@ -8442,7 +8492,7 @@ func procedureHasByRefArrayParameter(proc sourceProcedure) bool {
 	return false
 }
 
-func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, targetKey string, target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState, ctx analysisContext) {
+func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, targetKey string, target, caller sourceProcedure, call procedureir.CallSite, file parsedFile, state arrayFlowState, ctx analysisContext) {
 	// A self-recursive ByRef helper preserves the entry array state supplied by
 	// its caller. Treating the recursive edge as an independent unknown entry
 	// would poison the evidence from the allocated external call and keep the
@@ -8468,7 +8518,13 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 		name = directArrayArgumentName(arguments[index])
 		value, known := state[name]
 		allocated := known && value.kind == arrayAllocated && value.knownArray
-		if !allocated && index < len(arguments) {
+		if !allocated && arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index]) {
+			value = arrayValue{kind: arrayAllocated, knownArray: true, origin: arrayOriginLocal}
+			known = true
+			allocated = true
+		}
+		_, _, qualifiedMember := arrayQualifiedMemberParts(arguments[index])
+		if !allocated && !qualifiedMember && index < len(arguments) {
 			// A function returning a dynamic array is a valid ByRef array
 			// argument in VBA.  The identifier-only path above cannot attach
 			// that expression to a caller state entry, so consult the existing
@@ -9345,7 +9401,7 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 		if !parameterIsByRefArray(parameter) || !bound[index] {
 			continue
 		}
-		if directArrayArgumentName(arguments[index]) == "" {
+		if directArrayArgumentName(arguments[index]) == "" && !arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index]) {
 			return nil, false
 		}
 	}
@@ -9421,6 +9477,12 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 			continue
 		}
 		name := directArrayArgumentName(arguments[index])
+		if name == "" {
+			if !arrayQualifiedArgumentProvenAllocated(file, caller, call, arguments[index]) {
+				return nil, false
+			}
+			continue
+		}
 		value, known := state[name]
 		if !known || value.kind != arrayAllocated || !value.knownArray || (!facts.allocationInvariant(name, call.Range.StartLine) && !initiallyAllocated[name]) {
 			return nil, false
@@ -9464,7 +9526,7 @@ func arrayStatementAllocatesName(text, name string, ctx analysisContext) bool {
 	return false
 }
 
-func arrayByRefCallHasProvenArrayArguments(target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState, ctx analysisContext) (bool, bool) {
+func arrayByRefCallHasProvenArrayArguments(file parsedFile, target, caller sourceProcedure, call procedureir.CallSite, state arrayFlowState, ctx analysisContext) (bool, bool) {
 	bindings, ok := arrayCallArgumentBindings(caller, target, call)
 	if !ok {
 		return false, false
@@ -9485,6 +9547,13 @@ func arrayByRefCallHasProvenArrayArguments(target, caller sourceProcedure, call 
 				return false, false
 			}
 			continue
+		}
+		if arrayQualifiedArgumentProvenAllocated(file, caller, call, argument) {
+			foundExpression = true
+			continue
+		}
+		if _, _, qualifiedMember := arrayQualifiedMemberParts(argument); qualifiedMember {
+			return false, false
 		}
 		value, known := arrayExpressionState(argument, state, ctx)
 		if !known || value.kind != arrayAllocated || !value.knownArray {
@@ -9670,11 +9739,25 @@ type arrayCallArgumentBinding struct {
 // identified by their expression IDs, so a positional argument before a named
 // argument is not mistaken for the named formal slot.
 func arrayCallArgumentBindings(caller sourceProcedure, target sourceProcedure, call procedureir.CallSite) ([]arrayCallArgumentBinding, bool) {
-	if call.Arguments.Count == 0 {
+	argumentCount := call.Arguments.Count
+	// Some unparenthesized calls with an implicit member argument currently
+	// expose the expression ID but leave Count at zero.  Prefer the concrete
+	// expression projection when Count is absent; otherwise the ByRef transfer
+	// would silently discard a real actual argument.
+	if argumentCount == 0 {
+		argumentCount = max(len(call.Arguments.ExpressionIDs), len(call.Arguments.Named))
+	}
+	if argumentCount == 0 {
+		if argument, ok := arrayImplicitMemberArgument(call); ok {
+			if target.Params.Len() != 1 {
+				return nil, false
+			}
+			return []arrayCallArgumentBinding{{parameterIndex: 0, text: argument}}, true
+		}
 		return nil, true
 	}
 	if len(call.Arguments.ExpressionIDs) == 0 {
-		if len(call.Arguments.Named) != call.Arguments.Count {
+		if len(call.Arguments.Named) != argumentCount {
 			return nil, false
 		}
 		bindings := make([]arrayCallArgumentBinding, 0, len(call.Arguments.Named))
@@ -9690,7 +9773,7 @@ func arrayCallArgumentBindings(caller sourceProcedure, target sourceProcedure, c
 		return bindings, true
 	}
 	texts := arrayCallArgumentTexts(caller, call)
-	if len(texts) != call.Arguments.Count || len(call.Arguments.ExpressionIDs) != len(texts) {
+	if len(texts) != argumentCount || len(call.Arguments.ExpressionIDs) != len(texts) {
 		return nil, false
 	}
 	namedByExpressionID := make(map[int]int, len(call.Arguments.Named))
@@ -9738,6 +9821,21 @@ func arrayCallArgumentBindings(caller sourceProcedure, target sourceProcedure, c
 		bindings = append(bindings, arrayCallArgumentBinding{parameterIndex: formalIndex, text: text})
 	}
 	return bindings, true
+}
+
+func arrayImplicitMemberArgument(call procedureir.CallSite) (string, bool) {
+	if call.Arguments.Count != 0 || len(call.Arguments.ExpressionIDs) != 0 || len(call.Arguments.Named) != 0 || call.Callee.Receiver == nil {
+		return "", false
+	}
+	procedureName := arrayImplicitMemberArgumentCallName(call.Callee.Text)
+	if procedureName == "" || !strings.EqualFold(procedureName, *call.Callee.Receiver) {
+		return "", false
+	}
+	member := cleanIdentifier(call.Callee.Member)
+	if member == "" {
+		return "", false
+	}
+	return "." + member, true
 }
 
 func arrayCallFormalArguments(caller sourceProcedure, target sourceProcedure, call procedureir.CallSite) ([]string, bool) {
@@ -9791,6 +9889,538 @@ func directArrayArgumentName(text string) string {
 		}
 	}
 	return strings.ToLower(cleanIdentifier(text))
+}
+
+// arrayQualifiedArgumentProvenAllocated carries narrow allocation proofs for a
+// qualified array member passed to a private ByRef array parameter. The
+// ordinary array state is intentionally keyed by local identifiers, so a call
+// such as `Consume holder.values` cannot otherwise reuse a dominating ReDim of
+// the member. The additional proofs are limited to normal-path ReDim,
+// descriptor-backed array setup, and dictionary snapshots whose non-empty
+// range is established by the same caller.
+func arrayQualifiedArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string) bool {
+	want := arrayQualifiedArgumentTarget(file, caller, call.Range.StartLine, argument)
+	if want == "" || caller.Graph == nil {
+		return false
+	}
+	if arrayQualifiedDescriptorArgumentProvenAllocated(file, caller, call, argument) ||
+		arrayQualifiedDictionarySnapshotProvenAllocated(file, caller, call, argument) {
+		return true
+	}
+	for statement := range caller.Statements.All() {
+		line := statement.Range.StartLine
+		dominates := arrayStatementDominatesCall(caller, statement.ID, statement.Range.StartLine, call)
+		redim := arrayQualifiedRedimAllocatesTarget(file, caller, line, statement.Text, want)
+		if line <= caller.StartLine || line >= call.Range.StartLine || !dominates {
+			continue
+		}
+		if redim {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayQualifiedDescriptorArgumentProvenAllocated recognizes the accessor
+// pattern used when a VBA SAFEARRAY descriptor is projected onto a typed array
+// member. The array itself is not visible to the source-level analyzer, but a
+// dominating data pointer and element-count write, followed by a positive
+// count guard, establish the same normal-path contract as ReDim.
+func arrayQualifiedDescriptorArgumentProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string) bool {
+	receiver, member, ok := arrayQualifiedMemberParts(argument)
+	if !ok || !strings.EqualFold(member, "arr") {
+		return false
+	}
+	if receiver == "" {
+		receiver = arrayWithReceiverAtLine(file, caller, call.Range.StartLine)
+	}
+	if receiver == "" {
+		return false
+	}
+	arguments := arrayCallArgumentTexts(caller, call)
+	if len(arguments) < 2 {
+		return false
+	}
+	count := canonicalArrayBoundExpression(arguments[1])
+	if count == "" || !arrayQualifiedDescriptorCountPositive(file, caller, call, arguments[1]) {
+		return false
+	}
+	wantReceiver := canonicalArrayBoundExpression(receiver)
+	wantData := wantReceiver + ".sa.pvdata"
+	wantBounds := wantReceiver + ".sa.rgsabound0.celements"
+	hasData := false
+	hasBounds := false
+	for statement := range caller.Statements.All() {
+		line := statement.Range.StartLine
+		if line <= caller.StartLine || line >= call.Range.StartLine || !arrayStatementDominatesCall(caller, statement.ID, line, call) {
+			continue
+		}
+		text := strings.TrimSpace(statement.Text)
+		if text == "" {
+			text = arrayLogicalSourceLine(file.Lines, line)
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed {
+			continue
+		}
+		target := canonicalArrayBoundExpression(lhs)
+		switch target {
+		case wantData:
+			hasData = strings.TrimSpace(rhs) != ""
+		case wantBounds:
+			hasBounds = canonicalArrayBoundExpression(rhs) == count
+		}
+	}
+	return hasData && hasBounds
+}
+
+// arrayQualifiedDescriptorCountPositive proves that the count used to build a
+// descriptor-backed array is positive on the call path. It understands direct
+// comparison branches and a zero guard whose then arm jumps to a label after
+// the call (the normal-path shape used by parser entry points).
+func arrayQualifiedDescriptorCountPositive(file parsedFile, proc sourceProcedure, call procedureir.CallSite, count string) bool {
+	wantCount := canonicalArrayBoundExpression(count)
+	if wantCount == "" {
+		return false
+	}
+	for guard := range proc.Statements.All() {
+		if guard.Kind != procedureir.StatementIf && guard.Kind != procedureir.StatementElseIf || !arrayStatementDominatesCall(proc, guard.ID, guard.Range.StartLine, call) {
+			continue
+		}
+		condition := guard.Text
+		if guard.Condition != nil && strings.TrimSpace(guard.Condition.Text) != "" {
+			condition = guard.Condition.Text
+		}
+		lhs, operator, literal, ok := arrayQualifiedCountComparison(condition)
+		if !ok || lhs != wantCount {
+			continue
+		}
+		positiveBranch, positive := positiveArrayCountBranch(operator, literal)
+		if !positive {
+			continue
+		}
+		branch, underGuard := arrayQualifiedStatementBranch(proc, call.StatementID, guard.ID)
+		if underGuard && arrayQualifiedBranchMatchesPositive(branch, positiveBranch) {
+			return true
+		}
+		if operator == "=" && literal == "0" && !underGuard && arrayQualifiedZeroGuardSkipsCall(proc, guard, call) && arrayQualifiedCountHasNonNegativeOrigin(file, proc, call, count) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayQualifiedCountComparison(text string) (lhs, operator, literal string, ok bool) {
+	text = strings.TrimSpace(text)
+	if condition, _, hasThen := arrayIfThenParts(text); hasThen {
+		text = condition
+	}
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "if ") {
+		text = strings.TrimSpace(text[len("if "):])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		text = strings.TrimSpace(text[len("elseif "):])
+	}
+	text = arrayQualifiedTrimOuterParens(text)
+	lhs, operator, literal, ok = arrayCountComparison(text)
+	if !ok {
+		return "", "", "", false
+	}
+	lhs = canonicalArrayBoundExpression(arrayQualifiedTrimOuterParens(lhs))
+	return lhs, operator, literal, lhs != ""
+}
+
+func arrayQualifiedTrimOuterParens(text string) string {
+	text = strings.TrimSpace(text)
+	for strings.HasPrefix(text, "(") {
+		close := matchingParen(text, 0)
+		if close != len(text)-1 {
+			break
+		}
+		text = strings.TrimSpace(text[1:close])
+	}
+	return text
+}
+
+func arrayQualifiedStatementBranch(proc sourceProcedure, statementID, ancestorID int) (procedureir.BranchRole, bool) {
+	seen := map[int]bool{}
+	for statementID > 0 && !seen[statementID] {
+		seen[statementID] = true
+		statement, ok := arrayProcedureStatementByID(proc, statementID)
+		if !ok {
+			return "", false
+		}
+		if statement.ID == ancestorID {
+			if statement.Kind == procedureir.StatementIf && statement.SyntaxKind == "single_line_if_statement" {
+				return procedureir.BranchThen, true
+			}
+			return "", false
+		}
+		if statement.ParentID == ancestorID {
+			if statement.Kind == procedureir.StatementElse {
+				return procedureir.BranchElse, true
+			}
+			return procedureir.BranchThen, true
+		}
+		statementID = statement.ParentID
+	}
+	return "", false
+}
+
+func arrayQualifiedBranchMatchesPositive(branch procedureir.BranchRole, positive vbacfg.EdgeKind) bool {
+	switch branch {
+	case procedureir.BranchThen:
+		return positive == vbacfg.EdgeBranchTrue
+	case procedureir.BranchElse:
+		return positive == vbacfg.EdgeBranchFalse
+	default:
+		return false
+	}
+}
+
+func arrayQualifiedZeroGuardSkipsCall(proc sourceProcedure, guard procedureir.Statement, call procedureir.CallSite) bool {
+	thenStatements := make([]procedureir.Statement, 0)
+	for statement := range proc.Statements.All() {
+		if statement.ParentID != guard.ID || statement.Kind == procedureir.StatementElseIf || statement.Kind == procedureir.StatementElse {
+			continue
+		}
+		thenStatements = append(thenStatements, statement)
+	}
+	if len(thenStatements) == 0 {
+		return false
+	}
+	sort.SliceStable(thenStatements, func(i, j int) bool {
+		if thenStatements[i].Range.StartLine != thenStatements[j].Range.StartLine {
+			return thenStatements[i].Range.StartLine < thenStatements[j].Range.StartLine
+		}
+		return thenStatements[i].ID < thenStatements[j].ID
+	})
+	for _, statement := range thenStatements[:len(thenStatements)-1] {
+		if statement.Kind == procedureir.StatementIf || statement.Kind == procedureir.StatementElseIf || statement.Kind == procedureir.StatementElse || statement.Control != nil && statement.Control.Transfer != "" {
+			return false
+		}
+	}
+	return arrayQualifiedStatementLeavesBeforeCall(proc, thenStatements[len(thenStatements)-1], call)
+}
+
+func arrayQualifiedStatementLeavesBeforeCall(proc sourceProcedure, statement procedureir.Statement, call procedureir.CallSite) bool {
+	if statement.Control != nil {
+		switch statement.Control.Transfer {
+		case procedureir.TransferExitSub, procedureir.TransferExitFunction, procedureir.TransferExitProperty, procedureir.TransferTerminate:
+			return true
+		case procedureir.TransferGoto:
+			labelLine, ok := arrayQualifiedLabelLine(proc, statement.Control.Target)
+			return ok && labelLine > call.Range.StartLine
+		}
+	}
+	switch statement.Kind {
+	case procedureir.StatementEnd:
+		return true
+	case procedureir.StatementExit:
+		return arraySourceOrderProcedureExitStatementText(statement.Text)
+	default:
+		return false
+	}
+}
+
+func arrayQualifiedLabelLine(proc sourceProcedure, target string) (int, bool) {
+	target = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(target, ":")))
+	if target == "" {
+		return 0, false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementLabel || !strings.EqualFold(arrayLocalGoSubLabelName(statement), target) {
+			continue
+		}
+		return statement.Range.StartLine, true
+	}
+	return 0, false
+}
+
+func arrayQualifiedCountHasNonNegativeOrigin(file parsedFile, proc sourceProcedure, call procedureir.CallSite, count string) bool {
+	want := canonicalArrayBoundExpression(count)
+	hasAssignment := false
+	hasSafeOrigin := false
+	statements := make([]procedureir.Statement, 0, proc.Statements.Len())
+	for statement := range proc.Statements.All() {
+		statements = append(statements, statement)
+	}
+	sort.SliceStable(statements, func(i, j int) bool {
+		if statements[i].Range.StartLine != statements[j].Range.StartLine {
+			return statements[i].Range.StartLine < statements[j].Range.StartLine
+		}
+		return statements[i].ID < statements[j].ID
+	})
+	for _, statement := range statements {
+		line := statement.Range.StartLine
+		if line <= proc.StartLine || line >= call.Range.StartLine {
+			continue
+		}
+		texts := []string{strings.TrimSpace(statement.Text)}
+		if source := arrayLogicalSourceLine(file.Lines, line); source != "" && source != texts[0] {
+			texts = append(texts, source)
+		}
+		matched := false
+		assignmentSafe := false
+		for _, text := range texts {
+			lhs, rhs, indexed, assigned := arrayAssignment(text)
+			if !assigned || indexed || canonicalArrayBoundExpression(lhs) != want {
+				continue
+			}
+			matched = true
+			canonical := canonicalArrayBoundExpression(rhs)
+			candidateSafe := false
+			switch {
+			case arrayQualifiedNonNegativeCountOrigin(canonical):
+				candidateSafe = true
+			case canonical == want+"*2", canonical == "2*"+want:
+				// A byte count multiplied by two remains non-negative after the
+				// masked or LenB origin has been seen.
+				candidateSafe = hasSafeOrigin
+			case canonical == "0":
+				// The default zero value is also non-negative.
+				candidateSafe = true
+			default:
+				continue
+			}
+			assignmentSafe = assignmentSafe || candidateSafe
+		}
+		if !matched {
+			continue
+		}
+		hasAssignment = true
+		if !assignmentSafe {
+			// An unknown later assignment invalidates an earlier safe origin;
+			// otherwise a count such as `sizeB = -1` could inherit proof from a
+			// preceding LenB assignment.  The source fallback above prevents a
+			// truncated IR expression from hiding a safe full-line assignment.
+			return false
+		}
+		hasSafeOrigin = true
+	}
+	return hasAssignment && hasSafeOrigin
+}
+
+func arrayQualifiedNonNegativeCountOrigin(canonical string) bool {
+	canonical = canonicalArrayBoundExpression(canonical)
+	for strings.HasPrefix(canonical, "clng(") {
+		close := matchingParen(canonical, len("clng"))
+		if close != len(canonical)-1 {
+			break
+		}
+		canonical = canonical[len("clng("):close]
+	}
+	if strings.HasPrefix(canonical, "lenb(") && matchingParen(canonical, len("lenb")) == len(canonical)-1 {
+		return true
+	}
+	for _, mask := range []string{"and&h7fffffff", "and&hffff&", "and&hffff", "and&hff&", "and&hff"} {
+		if strings.HasSuffix(canonical, mask) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayQualifiedDictionarySnapshotProvenAllocated(file parsedFile, caller sourceProcedure, call procedureir.CallSite, argument string) bool {
+	receiver, member, ok := arrayQualifiedMemberParts(argument)
+	if !ok || !strings.EqualFold(member, "arrkeys") && !strings.EqualFold(member, "arritems") {
+		return false
+	}
+	if receiver == "" {
+		receiver = arrayWithReceiverAtLine(file, caller, call.Range.StartLine)
+	}
+	if receiver == "" {
+		return false
+	}
+	arguments := arrayCallArgumentTexts(caller, call)
+	if len(arguments) == 0 || !arrayQualifiedUpperBoundProvenNonNegative(file, caller, call, arguments[len(arguments)-1]) {
+		return false
+	}
+	want := canonicalArrayBoundExpression(receiver + "." + member)
+	for line := max(1, caller.StartLine); line < call.Range.StartLine && line <= len(file.Lines); line++ {
+		source := arrayLogicalSourceLine(file.Lines, line)
+		if source == "" {
+			continue
+		}
+		if _, body, ok := arrayIfThenParts(source); ok {
+			thenBody, elseBody, hasElse := arrayIfThenBodyParts(body)
+			if hasElse && arrayQualifiedSnapshotAssignmentArm(file, caller, line, thenBody, want, member) && arrayQualifiedSnapshotAssignmentArm(file, caller, line, elseBody, want, member) && arrayQualifiedSourceLineDominatesCall(caller, line, call) {
+				return true
+			}
+			continue
+		}
+		if arrayQualifiedSnapshotAssignmentArm(file, caller, line, source, want, member) && arrayQualifiedSourceLineDominatesCall(caller, line, call) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayQualifiedSnapshotAssignmentArm(file parsedFile, caller sourceProcedure, line int, text, want, member string) bool {
+	lhs, rhs, indexed, assigned := arrayAssignment(text)
+	if !assigned || indexed || arrayQualifiedArgumentTarget(file, caller, line, lhs) != want {
+		return false
+	}
+	_, snapshotMember, ok := arrayDictionaryMemberParts(rhs)
+	return ok && strings.EqualFold(snapshotMember, member[len("arr"):])
+}
+
+func arrayQualifiedSourceLineDominatesCall(proc sourceProcedure, line int, call procedureir.CallSite) bool {
+	for statement := range proc.Statements.All() {
+		if statement.Range.StartLine == line && arrayStatementDominatesCall(proc, statement.ID, line, call) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayQualifiedUpperBoundProvenNonNegative(file parsedFile, proc sourceProcedure, call procedureir.CallSite, argument string) bool {
+	want := arrayQualifiedArgumentTarget(file, proc, call.Range.StartLine, argument)
+	if want == "" {
+		return false
+	}
+	for guard := range proc.Statements.All() {
+		if guard.Kind != procedureir.StatementIf && guard.Kind != procedureir.StatementElseIf || !arrayStatementDominatesCall(proc, guard.ID, guard.Range.StartLine, call) {
+			continue
+		}
+		condition := guard.Text
+		if guard.Condition != nil && strings.TrimSpace(guard.Condition.Text) != "" {
+			condition = guard.Condition.Text
+		}
+		lhs, operator, literal, ok := arrayQualifiedCountComparison(condition)
+		if !ok {
+			continue
+		}
+		positiveBranch, positive := positiveArrayCountBranch(operator, literal)
+		if !positive {
+			continue
+		}
+		callBranch, underGuard := arrayQualifiedStatementBranch(proc, call.StatementID, guard.ID)
+		if !underGuard || !arrayQualifiedBranchMatchesPositive(callBranch, positiveBranch) {
+			continue
+		}
+		for statement := range proc.Statements.All() {
+			line := statement.Range.StartLine
+			if line <= proc.StartLine || line >= call.Range.StartLine || !arrayStatementDominatesCall(proc, statement.ID, line, call) {
+				continue
+			}
+			statementBranch, sameBranch := arrayQualifiedStatementBranch(proc, statement.ID, guard.ID)
+			if !sameBranch || statementBranch != callBranch {
+				continue
+			}
+			text := strings.TrimSpace(statement.Text)
+			if text == "" {
+				text = arrayLogicalSourceLine(file.Lines, line)
+			}
+			assignment, rhs, indexed, assigned := arrayAssignment(text)
+			if assigned && !indexed && arrayQualifiedArgumentTarget(file, proc, line, assignment) == want && canonicalArrayBoundExpression(rhs) == lhs {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func arrayQualifiedArgumentTarget(file parsedFile, caller sourceProcedure, line int, argument string) string {
+	receiver, member, ok := arrayQualifiedMemberParts(argument)
+	if !ok {
+		return ""
+	}
+	if receiver == "" {
+		receiver = arrayWithReceiverAtLine(file, caller, line)
+	}
+	if receiver == "" {
+		return ""
+	}
+	return canonicalArrayBoundExpression(receiver + "." + member)
+}
+
+func arrayQualifiedMemberParts(text string) (receiver, member string, ok bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", "", false
+	}
+	dot := strings.LastIndexByte(text, '.')
+	if dot < 0 || dot >= len(text)-1 {
+		return "", "", false
+	}
+	member = cleanIdentifier(strings.TrimSpace(text[dot+1:]))
+	if !arrayEraseNameRe.MatchString(member) {
+		return "", "", false
+	}
+	receiver = strings.TrimSpace(text[:dot])
+	if receiver == "" {
+		if text[0] != '.' {
+			return "", "", false
+		}
+		return "", member, true
+	}
+	for _, part := range strings.Split(receiver, ".") {
+		if !arrayEraseNameRe.MatchString(strings.TrimSpace(part)) {
+			return "", "", false
+		}
+	}
+	return receiver, member, true
+}
+
+func arrayQualifiedRedimAllocatesTarget(file parsedFile, caller sourceProcedure, line int, text, want string) bool {
+	match := arrayRedimRe.FindStringSubmatch(strings.TrimSpace(text))
+	if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+		return false
+	}
+	for _, clause := range splitArgs(match[2]) {
+		clause = strings.TrimSpace(clause)
+		open := firstParenOutsideString(clause)
+		if open <= 0 {
+			continue
+		}
+		close := matchingParen(clause, open)
+		if close < 0 {
+			continue
+		}
+		remainder := strings.TrimSpace(clause[close+1:])
+		if remainder != "" && !arrayRedimTypeSuffixRe.MatchString(remainder) {
+			continue
+		}
+		target := arrayQualifiedArgumentTarget(file, caller, line, strings.TrimSpace(clause[:open]))
+		if target == "" || target != want {
+			continue
+		}
+		dimensions := parseArrayDimensionsWithConstants(clause[open+1:close], arrayOptionBase(file), nil)
+		if arrayDimensionsKnownNonEmpty(dimensions) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayDimensionsKnownNonEmpty(dimensions []arrayDimension) bool {
+	// A plain ReDim that reaches the following statement has established an
+	// allocation. Unknown bounds may make ReDim fail before that continuation,
+	// but they do not make the successfully reached array empty unless the
+	// bounds are provably impossible. Preserve the existing conservative check
+	// for the latter case while allowing runtime bounds such as `0 To .ub`.
+	return len(dimensions) > 0 && !impossibleArrayBounds(dimensions)
+}
+
+func arrayStatementDominatesCall(proc sourceProcedure, statementID, statementLine int, call procedureir.CallSite) bool {
+	if proc.Graph == nil || statementID <= 0 || call.StatementID <= 0 {
+		return false
+	}
+	statementBlock, statementOK := proc.Graph.BlockForStatement(statementID)
+	callBlock, callOK := proc.Graph.BlockForStatement(call.StatementID)
+	if !statementOK || !callOK {
+		return false
+	}
+	if statementBlock.ID == callBlock.ID {
+		return statementLine < call.Range.StartLine
+	}
+	for _, dominator := range proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[callBlock.ID] {
+		if dominator == statementBlock.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func parameterIsByRefArray(parameter parameterInfo) bool {

@@ -7325,6 +7325,222 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesQualifiedMemberArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Holder.cls", `Attribute VB_Name = "Holder"
+Option Explicit
+Public values() As String
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef values() As String)
+  Debug.Print UBound(values)
+End Sub
+
+Private Sub ConsumeConditional(ByRef values() As String)
+  Debug.Print UBound(values)
+End Sub
+
+Public Sub Run()
+  Dim holder As Holder
+  Set holder = New Holder
+  With holder
+    ReDim .values(0 To 1)
+    Consume .values
+  End With
+End Sub
+
+Public Sub RunConditional(ByVal choose As Boolean)
+  Dim holder As Holder
+  Set holder = New Holder
+  With holder
+    If choose Then ReDim .values(0 To 1)
+    ConsumeConditional .values
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsByCode(findings, "VBA227")
+	if len(got) != 1 || got[0].Procedure != "ConsumeConditional" {
+		t.Fatalf("only the conditionally ReDim'd qualified member array should remain unsafe: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesDynamicQualifiedMemberArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Holder.cls", `Attribute VB_Name = "Holder"
+Option Explicit
+Public values() As String
+`)
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef values() As String)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(ByVal upper As Long)
+  Dim holder As Holder
+  Set holder = New Holder
+  With holder
+    ReDim .values(0 To upper)
+    Consume .values
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a successfully reached dynamic ReDim of a qualified member should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227CarriesDescriptorBackedMemberArrayThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type ByteAccessor
+  arr() As Byte
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As Byte, ByVal sizeB As Long)
+  Debug.Print values(0)
+End Sub
+
+Public Sub RunPositive(ByVal text As String)
+  Dim bytes As ByteAccessor
+  Dim sizeB As Long
+  sizeB = LenB(text)
+  bytes.sa.pvData = 1
+  bytes.sa.rgsabound0.cElements = sizeB
+  If sizeB >= 1 Then
+    Consume bytes.arr, sizeB
+  End If
+End Sub
+
+Public Sub RunAfterZeroGuard(ByVal text As String)
+  Dim bytes As ByteAccessor
+  Dim sizeB As Long
+  sizeB = LenB(text)
+  bytes.sa.pvData = 1
+  bytes.sa.rgsabound0.cElements = sizeB
+  If sizeB = 0 Then Exit Sub
+  Consume bytes.arr, sizeB
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a descriptor-backed member with a positive element count should prove the ByRef array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotProveNegativeDescriptorCount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type BoundInfo
+  cElements As Long
+End Type
+
+Private Type SafeArrayInfo
+  pvData As LongPtr
+  rgsabound0 As BoundInfo
+End Type
+
+Private Type ByteAccessor
+  arr() As Byte
+  sa As SafeArrayInfo
+End Type
+
+Private Sub Consume(ByRef values() As Byte, ByVal sizeB As Long)
+  Debug.Print values(0)
+End Sub
+
+Public Sub Run(ByVal text As String)
+  Dim bytes As ByteAccessor
+  Dim sizeB As Long
+  sizeB = -LenB(text)
+  bytes.sa.pvData = 1
+  bytes.sa.rgsabound0.cElements = sizeB
+  If sizeB = 0 Then Exit Sub
+  Consume bytes.arr, sizeB
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a negative descriptor element count must not prove the ByRef array allocated")
+	}
+}
+
+func TestAnalyzerVBA227CarriesQualifiedDictionarySnapshotsThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type SortState
+  arrKeys() As Variant
+  arrItems() As Variant
+  ub As Long
+End Type
+
+Private Sub QuickSortKeys(ByRef arrKeys() As Variant, ByRef arrItems() As Variant, ByVal lb As Long, ByVal ub As Long)
+  If lb >= ub Then Exit Sub
+  Debug.Print arrKeys(lb)
+  Debug.Print arrItems(lb)
+End Sub
+
+Public Sub Run()
+  Dim state As SortState
+  Dim dict As Object
+  Dim lastFound As Long
+  Set dict = CreateObject("Scripting.Dictionary")
+  dict.Add "key", "value"
+  With state
+    lastFound = 0
+    If lastFound < 0 Then
+      Exit Sub
+    Else
+      .ub = lastFound
+      If True Then .arrKeys = dict.Keys() Else .arrKeys = dict.Keys()
+      If True Then .arrItems = dict.Items() Else .arrItems = dict.Items()
+      QuickSortKeys .arrKeys, .arrItems, 0, .ub
+    End If
+  End With
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("qualified Keys/Items snapshots guarded by a nonnegative upper bound should prove the ByRef arrays: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesAllocatedArrayThroughLineContinuationByRefCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
