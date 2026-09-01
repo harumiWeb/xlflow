@@ -709,6 +709,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	state, findings := transfer(state, text)
+	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, proc, line, state, variables, resumeNextBefore)
 	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, resumeNextBefore)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
 		!arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) &&
@@ -1026,6 +1027,86 @@ func arrayVBA227FilterForBodyIndexFindings(findings []Finding, file parsedFile, 
 			for name := range proven {
 				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") ||
 					provenNonEmpty[name] && finding.arrayOperationKey == arrayIndexOperationKey(name, "empty") {
+					remove = true
+					break
+				}
+			}
+		}
+		if !remove {
+			filtered = append(filtered, finding)
+		}
+	}
+	return filtered
+}
+
+// arrayVBA227FilterConditionalBodyIndexFindings removes an unallocated-array
+// observation from a source-line CFG block when the block is inside the true
+// body of a matching positive-length guard. With blocks can keep the If header
+// and its first body statement in one CFG block, so the edge refinement runs
+// after the body has already been visited. The filter is limited to the
+// conditional ByRef allocation contract; unrelated conditions and Else bodies
+// remain conservative.
+func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
+	if line <= 0 || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		return findings
+	}
+	statement := procedureStatementAtLine(proc, line)
+	if statement.ID == 0 {
+		return findings
+	}
+	proven := map[string]bool{}
+	inAlternative := false
+	visited := map[int]bool{}
+	for statement.ParentID != 0 && !visited[statement.ParentID] {
+		visited[statement.ParentID] = true
+		parent := procedureStatementByID(proc, statement.ParentID)
+		if parent.ID == 0 {
+			break
+		}
+		switch parent.Kind {
+		case procedureir.StatementElse:
+			inAlternative = true
+		case procedureir.StatementElseIf:
+			if !inAlternative {
+				if condition, ok := arrayVBA227PositiveScalarConditionSource(parent, variables); ok {
+					lengthName, positive := arrayVBA227PositiveLengthCondition(condition)
+					if !positive {
+						break
+					}
+					for name, value := range state {
+						if value.allocationCountSource != "" && arrayCountExpressionMatches(lengthName, value.allocationCountSource) {
+							proven[name] = true
+						}
+					}
+				}
+			}
+			inAlternative = true
+		case procedureir.StatementIf:
+			if !inAlternative {
+				if condition, ok := arrayVBA227PositiveScalarConditionSource(parent, variables); ok {
+					lengthName, positive := arrayVBA227PositiveLengthCondition(condition)
+					if !positive {
+						break
+					}
+					for name, value := range state {
+						if value.allocationCountSource != "" && arrayCountExpressionMatches(lengthName, value.allocationCountSource) {
+							proven[name] = true
+						}
+					}
+				}
+			}
+		}
+		statement = parent
+	}
+	if len(proven) == 0 {
+		return findings
+	}
+	filtered := findings[:0]
+	for _, finding := range findings {
+		remove := false
+		if finding.Code == "VBA227" {
+			for name := range proven {
+				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") {
 					remove = true
 					break
 				}
@@ -9797,8 +9878,13 @@ func arrayRecordByRefCall(evidence map[string]map[int]arrayByRefEntryEvidence, t
 			}
 		}
 		condition := ""
-		if known && !allocated && value.allocationCountSource != "" {
-			condition = arrayConditionalEntrySource(target, arguments, index, value.allocationCountSource)
+		if known && !allocated {
+			if source, positive := arrayVBA227PositiveLengthCondition(value.conditionalAllocationSource); positive {
+				condition = arrayConditionalEntrySource(target, arguments, index, source)
+			}
+			if condition == "" && value.allocationCountSource != "" {
+				condition = arrayConditionalEntrySource(target, arguments, index, value.allocationCountSource)
+			}
 		}
 		if known && !allocated && condition == "" && arrayByRefCallArrayVacuouslyUnused(target, index, arguments) {
 			// A call may intentionally pass an unallocated optional array to a

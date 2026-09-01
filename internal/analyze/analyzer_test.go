@@ -6742,6 +6742,156 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesConditionalArrayAllocationThroughPrivateByRefCall(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		strategy := strategy
+		t.Run(string(strategy), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Consume(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    Debug.Print payload(0)
+  End If
+End Sub
+
+Private Sub ConsumeMismatch(ByRef payload() As Byte, ByVal payloadLen As Long)
+  If payloadLen > 0 Then
+    Debug.Print payload(0)
+  End If
+End Sub
+
+Private Sub Dispatch(ByVal payloadLen As Long)
+  Dim payload() As Byte
+  If payloadLen > 0 Then
+    ReDim payload(0 To payloadLen - 1)
+  Else
+    Erase payload
+  End If
+  Consume payload, payloadLen
+End Sub
+
+Private Sub DispatchMismatch(ByVal payloadLen As Long)
+  Dim payload() As Byte
+  Dim allocatedLen As Long
+  allocatedLen = payloadLen
+  If allocatedLen > 0 Then
+    ReDim payload(0 To allocatedLen - 1)
+  Else
+    Erase payload
+  End If
+  ConsumeMismatch payload, payloadLen
+End Sub
+
+Public Sub Run()
+  Dispatch 1
+  DispatchMismatch 1
+End Sub
+`)
+
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "Consume" {
+					t.Fatalf("a matching positive-length allocation should cross the private ByRef boundary: %+v", finding)
+				}
+			}
+			foundMismatch := false
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "ConsumeMismatch" {
+					foundMismatch = true
+					break
+				}
+			}
+			if !foundMismatch {
+				t.Fatalf("a different caller-side length condition must remain conservative: %+v", findingsByCode(findings, "VBA227"))
+			}
+		})
+	}
+}
+
+func TestAnalyzerVBA227CarriesConditionalArrayAllocationThroughWithAndSelectCaseByRefCall(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		strategy := strategy
+		t.Run(string(strategy), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", `Option Explicit
+Private Type State
+  marker As Long
+End Type
+
+Private m_State As State
+
+Private Sub ConsumeText(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal fin As Boolean)
+  With m_State
+    If Not fin Then
+      If payloadLen > 0 Then
+        Debug.Print .marker, payload(0)
+      End If
+    End If
+  End With
+End Sub
+
+Private Sub ConsumeBinary(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal fin As Boolean)
+  With m_State
+    If Not fin Then
+      If payloadLen > 0 Then
+        Debug.Print .marker, payload(0)
+      End If
+    End If
+  End With
+End Sub
+
+Private Sub ConsumeContinuation(ByRef payload() As Byte, ByVal payloadLen As Long, ByVal fin As Boolean)
+  With m_State
+    If payloadLen > 0 Then
+      Debug.Print .marker, payload(0)
+    End If
+  End With
+End Sub
+
+Private Sub Dispatch(ByVal opcode As Long, ByVal payloadLen As Long)
+  Dim payload() As Byte
+  If payloadLen > 0 Then
+    ReDim payload(0 To payloadLen - 1)
+  Else
+    Erase payload
+  End If
+			Select Case opcode
+			  Case 1
+			    ConsumeText payload, payloadLen, False
+			  Case 2
+			    ConsumeBinary payload, payloadLen, False
+			  Case 0
+			    ConsumeContinuation payload, payloadLen, True
+			End Select
+End Sub
+
+Public Sub Run()
+  Dispatch 1, 1
+  Dispatch 2, 1
+  Dispatch 0, 1
+End Sub
+`)
+
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "ConsumeText" || finding.Procedure == "ConsumeBinary" || finding.Procedure == "ConsumeContinuation" {
+					t.Fatalf("matching positive-length allocation should cross a Select Case ByRef boundary: %+v", finding)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulUBoundIntoWhileBody(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
