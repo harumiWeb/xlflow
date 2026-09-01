@@ -8512,7 +8512,15 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			}
 			var eligible []arrayByRefCallCandidate
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
-				if filterNestedCalls && ownerStatementID > 0 && call.StatementID != ownerStatementID {
+				// A physical line can own more than one CFG statement, such as
+				// `If Not SendFrameFor(...) Then Exit Function`.  Only the
+				// statement block that owns the call site may contribute entry
+				// evidence; otherwise the nested Exit block re-records the same
+				// call with its pre-call state and poisons the caller contract.
+				if ownerStatementID > 0 && call.StatementID != ownerStatementID {
+					if !filterNestedCalls {
+						continue
+					}
 					owner, ownerOK := baseView.BlockForStatement(call.StatementID)
 					if ownerOK && worklistReachable[owner.ID] {
 						continue
@@ -8566,13 +8574,18 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 			out, _ := a.arrayVBA227Transfer(file, proc, localCtx, variables, in, text, line, constants, nil, nil)
 			out = applyArrayLocalGoSubStatementEffects(out, text, localGoSubAllocations)
 			for _, call := range arrayCallsAtLine(proc.Calls, line) {
-				if filterNestedCalls && ownerStatementID > 0 && call.StatementID != ownerStatementID {
-					// This callback is visiting the container statement's source
-					// range. Nested calls are visited again by their own CFG block
-					// (or by the source-order fallback when that block is recovered),
-					// so applying their post-call effect here would leak one branch
-					// into its siblings.
-					continue
+				if ownerStatementID > 0 && call.StatementID != ownerStatementID {
+					if !filterNestedCalls {
+						continue
+					}
+					owner, ownerOK := baseView.BlockForStatement(call.StatementID)
+					if ownerOK && worklistReachable[owner.ID] {
+						// This callback is visiting the container statement's
+						// source range. Nested calls are visited again by their own
+						// CFG block, so applying their post-call effect here would
+						// leak one branch into its siblings.
+						continue
+					}
 				}
 				out = applyArrayModuleCallEffects(out, file, proc, call, localCtx, variables, moduleDecls)
 				out = applyArrayUnknownModuleCallEffects(out, file, proc, call, localCtx, variables, moduleDecls)

@@ -7044,6 +7044,59 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotDuplicateNestedByRefCallOwnership(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function RawSendFor(ByVal handle As Long, ByRef frame() As Byte) As Boolean
+  Dim totalSent As Long
+  Dim toSend As Long
+  Dim sent As Long
+  toSend = UBound(frame) + 1
+  With m_Connections(handle)
+    Do While totalSent < toSend
+      sent = sock_send(.Socket, frame(totalSent), toSend - totalSent, 0)
+      If sent <= 0 Then Exit Function
+      totalSent = totalSent + sent
+    Loop
+  End With
+  RawSendFor = True
+End Function
+
+Private Function SendFrameFor(ByVal handle As Long, ByRef frame() As Byte) As Boolean
+  If m_TLS Then
+    SendFrameFor = TLSSend(handle, frame)
+  Else
+    SendFrameFor = RawSendFor(handle, frame)
+  End If
+End Function
+
+Private Function BuildFrame() As Byte()
+  Dim frame() As Byte
+  ReDim frame(0 To 5)
+  BuildFrame = frame
+End Function
+
+Public Sub Run()
+  Dim frame() As Byte
+  Dim i As Long
+  Do While i < 1
+    frame = BuildFrame()
+    If Not SendFrameFor(0, frame) Then Exit Sub
+    i = i + 1
+  Loop
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the nested Exit statement must not duplicate its parent ByRef call: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227RecognizesCompoundStrPtrArrayGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
