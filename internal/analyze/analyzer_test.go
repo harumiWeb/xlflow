@@ -6903,6 +6903,173 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulUpperBoundThroughExitGuardToLoopBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Decode(ByRef buf() As Byte, ByVal index As Long)
+  Do
+    If index > UBound(buf) Then Exit Do
+    Debug.Print buf(index)
+    index = index + 1
+  Loop
+End Sub
+
+Public Sub Run(ByRef buf() As Byte)
+  Decode buf, 0
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBound := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Line {
+		case 4:
+			foundBound = true
+		case 5:
+			t.Fatalf("successful UBound in the exit guard should make the following loop access allocated: %+v", finding)
+		}
+	}
+	if !foundBound {
+		t.Fatalf("the UBound query in the exit guard should remain reviewable: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesUBoundLengthIntoPositiveGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) + 1
+  If length > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 4 {
+			foundBounds = true
+		}
+		if finding.Line == 6 {
+			t.Fatalf("a positive guard over UBound-derived length should prove the indexed array non-empty: %+v", finding)
+		}
+	}
+	if !foundBounds {
+		t.Fatalf("the UBound-derived length query must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227CarriesUBoundLengthIntoCopyMemoryGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal source As String)
+  Dim values() As Byte
+  Dim payload(0 To 31) As Byte
+  Dim length As Long
+  If Len(source) > 0 Then
+    values = UnknownByteArray()
+    length = UBound(values) + 1
+  End If
+  If length > 0 Then
+    CopyMemory payload(0), values(0), length
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Line == 8 {
+			foundBounds = true
+		}
+		if finding.Line == 11 {
+			t.Fatalf("a positive UBound-derived length guard should prove CopyMemory's source element: %+v", finding)
+		}
+	}
+	if !foundBounds {
+		t.Fatalf("the UBound query in the guarded conversion path must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryUBoundLengthProofPastErase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) + 1
+  Erase values
+  If length > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Line {
+		case 4:
+			foundBounds = true
+		case 7:
+			t.Fatalf("a fully proven unallocated array access should be owned by VBA249, not duplicated as VBA227: %+v", finding)
+		}
+	}
+	if !foundBounds {
+		t.Fatalf("the UBound query before Erase must remain diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
+func TestAnalyzerVBA227DoesNotCarryUBoundLengthProofPastArrayReplacement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByRef values() As Byte)
+  Dim length As Long
+  length = UBound(values) + 1
+  values = UnknownByteArray()
+  If length > 0 Then
+    Debug.Print values(0)
+  End If
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBounds := false
+	foundIndex := false
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		switch finding.Line {
+		case 4:
+			foundBounds = true
+		case 7:
+			foundIndex = true
+		}
+	}
+	if !foundBounds || !foundIndex {
+		t.Fatalf("an array replacement after the bounds query must keep the later access diagnosed: %+v", findingsByCode(findings, "VBA227"))
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulUBoundIntoWhileBody(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

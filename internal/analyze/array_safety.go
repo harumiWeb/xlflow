@@ -709,6 +709,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		}
 	}
 	state, findings := transfer(state, text)
+	findings = arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings, file, proc, line, variables, resumeNextBefore)
 	findings = arrayVBA227FilterConditionalBodyIndexFindings(findings, proc, line, state, variables, resumeNextBefore)
 	findings = arrayVBA227FilterForBodyIndexFindings(findings, file, proc, line, state, variables, resumeNextBefore)
 	if (arrayVBA227HasSuccessfulBoundsExpression(text) || arrayVBA227HasDictionaryBoundsExpression(text, state)) &&
@@ -1054,7 +1055,9 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, proc sour
 	if statement.ID == 0 {
 		return findings
 	}
+	access := statement
 	proven := map[string]bool{}
+	provenNonEmpty := map[string]bool{}
 	inAlternative := false
 	visited := map[int]bool{}
 	for statement.ParentID != 0 && !visited[statement.ParentID] {
@@ -1074,6 +1077,10 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, proc sour
 							proven[name] = true
 						}
 					}
+					if name, ok := arrayVBA227UBoundLengthArray(proc, &parent, &access, lengthName, variables); ok {
+						proven[name] = true
+						provenNonEmpty[name] = true
+					}
 				}
 			}
 			inAlternative = true
@@ -1085,10 +1092,58 @@ func arrayVBA227FilterConditionalBodyIndexFindings(findings []Finding, proc sour
 							proven[name] = true
 						}
 					}
+					if name, ok := arrayVBA227UBoundLengthArray(proc, &parent, &access, lengthName, variables); ok {
+						proven[name] = true
+						provenNonEmpty[name] = true
+					}
 				}
 			}
 		}
 		statement = parent
+	}
+	if len(proven) == 0 {
+		return findings
+	}
+	filtered := findings[:0]
+	for _, finding := range findings {
+		remove := false
+		if finding.Code == "VBA227" {
+			for name := range proven {
+				if finding.arrayOperationKey == arrayIndexOperationKey(name, "unallocated") ||
+					provenNonEmpty[name] && finding.arrayOperationKey == arrayIndexOperationKey(name, "empty") {
+					remove = true
+					break
+				}
+			}
+		}
+		if !remove {
+			filtered = append(filtered, finding)
+		}
+	}
+	return filtered
+}
+
+// arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings removes the
+// redundant unallocated-array observation on the fallthrough line after a
+// single-line If that evaluates UBound or LBound before terminating its true
+// branch. Reaching the following line means the bound query completed
+// normally, even when the CFG visits the body before applying the guard edge.
+func arrayVBA227FilterSuccessfulBoundsGuardBodyIndexFindings(findings []Finding, file parsedFile, proc sourceProcedure, line int, variables map[string]arrayVariable, resumeNextBefore []bool) []Finding {
+	if line <= 1 || line > len(file.Lines) || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
+		return findings
+	}
+	previous := normalizedCodeLine(file.Lines[line-2])
+	condition, body, ok := arrayIfThenParts(previous)
+	if !ok || body == "" || !arrayVBA227HasBoundsCondition(condition) {
+		return findings
+	}
+	proven := map[string]bool{}
+	for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(condition, -1) {
+		name := strings.ToLower(strings.TrimSpace(bound[2]))
+		variable, known := variables[name]
+		if known && variable.isArray && name != "" {
+			proven[name] = true
+		}
 	}
 	if len(proven) == 0 {
 		return findings
@@ -1597,6 +1652,126 @@ func arrayVBA227PositiveGuardConditionSource(statement procedureir.Statement, va
 	}
 	name := strings.ToLower(cleanIdentifier(lhs))
 	return name, name != ""
+}
+
+func arrayVBA227StatementStartsBefore(left, right procedureir.Statement) bool {
+	if left.Range.StartByte != 0 && right.Range.StartByte != 0 {
+		return left.Range.StartByte < right.Range.StartByte
+	}
+	if left.Range.StartLine != right.Range.StartLine {
+		return left.Range.StartLine < right.Range.StartLine
+	}
+	if left.Range.StartColumn != right.Range.StartColumn {
+		return left.Range.StartColumn < right.Range.StartColumn
+	}
+	return left.ID < right.ID
+}
+
+func arrayVBA227UBoundLengthArray(proc sourceProcedure, guard, access *procedureir.Statement, lengthName string, variables map[string]arrayVariable) (string, bool) {
+	if guard == nil || access == nil || lengthName == "" {
+		return "", false
+	}
+	lengthName = strings.ToLower(cleanIdentifier(lengthName))
+	lengthVariable, knownLength := variables[lengthName]
+	if !knownLength || lengthVariable.isArray || lengthVariable.isVariant || lengthVariable.isObject || lengthVariable.static {
+		return "", false
+	}
+	localScalar := false
+	for declaration := range proc.Declarations.All() {
+		if strings.EqualFold(declaration.Name, lengthName) && declaration.Scope == procedureir.ScopeLocal {
+			localScalar = true
+			break
+		}
+	}
+	if !localScalar {
+		return "", false
+	}
+	var selected procedureir.Statement
+	arrayName := ""
+	for candidate := range proc.Statements.All() {
+		if candidate.Kind != procedureir.StatementAssignment || candidate.Range.StartLine >= guard.Range.StartLine {
+			continue
+		}
+		text := strings.TrimSpace(candidate.Text)
+		if newline := strings.IndexAny(text, "\r\n"); newline >= 0 {
+			text = strings.TrimSpace(text[:newline])
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if !assigned || indexed || !strings.EqualFold(cleanIdentifier(lhs), lengthName) {
+			continue
+		}
+		candidateArray, ok := arrayVBA227UBoundLengthSource(rhs)
+		variable, known := variables[candidateArray]
+		if !ok || !known || !variable.isArray {
+			continue
+		}
+		if selected.ID == 0 || arrayVBA227StatementStartsBefore(selected, candidate) {
+			selected = candidate
+			arrayName = candidateArray
+		}
+	}
+	if selected.ID == 0 || arrayName == "" {
+		return "", false
+	}
+	for statement := range proc.Statements.All() {
+		if statement.ID == selected.ID || !arrayVBA227StatementStartsBefore(statement, *access) {
+			continue
+		}
+		if lhs, _, indexed, assigned := arrayAssignment(strings.TrimSpace(statement.Text)); assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), lengthName) {
+			return "", false
+		}
+		if arrayVBA227StatementStartsBefore(selected, statement) && arrayVBA227StatementMayMutateArray(proc, statement, arrayName) {
+			return "", false
+		}
+	}
+	return arrayName, true
+}
+
+func arrayVBA227StatementMayMutateArray(proc sourceProcedure, statement procedureir.Statement, arrayName string) bool {
+	if arrayVBA227MutatesArray(statement.Text, arrayName) {
+		return true
+	}
+	for _, call := range arrayCallsAtLine(proc.Calls, statement.Range.StartLine) {
+		if call.StatementID != 0 && statement.ID != 0 && call.StatementID != statement.ID {
+			continue
+		}
+		if arrayCallPassesDirectArrayArgument(proc, call, arrayName) {
+			return true
+		}
+	}
+	// Recovered or unresolved call statements may not have a CallSite with
+	// usable argument expression IDs. A whole-array mention is therefore
+	// treated conservatively as a possible ByRef mutation; indexed mentions
+	// remain available to the access itself and do not match this fallback.
+	return arrayVBA227StatementMentionsWholeArray(statement.Text, arrayName)
+}
+
+func arrayVBA227StatementMentionsWholeArray(text, arrayName string) bool {
+	want := strings.ToLower(cleanIdentifier(arrayName))
+	if want == "" {
+		return false
+	}
+	text = maskStringLiterals(gui.StripComment(text))
+	for index := 0; index < len(text); index++ {
+		if !isIdentifierStart(text[index]) || index > 0 && isIdentifierPart(text[index-1]) {
+			continue
+		}
+		start := index
+		index++
+		for index < len(text) && isIdentifierPart(text[index]) {
+			index++
+		}
+		if !strings.EqualFold(text[start:index], want) || start > 0 && (text[start-1] == '.' || text[start-1] == '!') {
+			continue
+		}
+		for index < len(text) && (text[index] == ' ' || text[index] == '\t') {
+			index++
+		}
+		if index >= len(text) || text[index] != '(' {
+			return true
+		}
+	}
+	return false
 }
 
 func arrayVBA227NormalizeScalarCondition(lhs, operator, rhs string, variables map[string]arrayVariable) (string, bool) {
