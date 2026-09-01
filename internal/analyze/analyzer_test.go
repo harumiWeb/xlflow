@@ -6969,6 +6969,66 @@ End Function
 	}
 }
 
+func TestAnalyzerVBA227CarriesAllocationThroughLocalReadyFlag(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CopyAddress(ByVal hasAddress As Boolean)
+  Dim found As Boolean
+  Dim values() As Byte
+  If hasAddress Then
+    ReDim values(0 To 1)
+    found = True
+  End If
+  If found Then
+    Debug.Print values(0)
+  End If
+End Sub
+
+Public Sub Run()
+  CopyAddress True
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("a local ready flag assigned after ReDim should prove the array allocation: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustLocalReadyFlagWithoutAllocation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Public Sub CopyAddress(ByVal hasAddress As Boolean)
+  Dim found As Boolean
+  Dim values() As Byte
+  values = vbNullString
+  If hasAddress Then
+    found = True
+  End If
+  If found Then
+    Debug.Print values(0)
+  End If
+End Sub
+
+Public Sub Run(ByVal hasAddress As Boolean)
+  CopyAddress hasAddress
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a local ready flag without a preceding allocation must remain conservative")
+	}
+}
+
 func TestAnalyzerVBA227RecognizesStrPtrArrayGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

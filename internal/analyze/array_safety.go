@@ -98,6 +98,10 @@ type arrayValue struct {
 	// with the branch that skipped the ReDim and is consumed only by a later
 	// matching true branch.
 	conditionalAllocationSource string
+	// allocationFlagSource records a local Boolean assigned after a successful
+	// ReDim. A later true check of that flag can recover the allocation fact
+	// after control-flow joins such as a discovery loop.
+	allocationFlagSource string
 	// returnNonEmptyArrayParameter is set only on an interprocedural return
 	// summary. It names the callee's ByRef array parameter whose non-empty value
 	// makes the returned array allocation definite.
@@ -409,6 +413,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
 				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, ctx, vba227Variables, moduleDecls)
 				out = applyArrayNotEmptyGuardBranch(out, block.Statement, edge, proc, vba227Variables)
+				out = applyArrayAllocationFlagBranch(out, block.Statement, edge, vba227Variables)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
 				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, vba227Variables)
 				out = applyArrayForBoundState(out, block.Statement, edge, vba227Variables)
@@ -606,6 +611,7 @@ func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx
 		output, findings := a.arrayTransfer(file, proc, ctx, variables, input, source, line, constants, capacityGuards)
 		output = arrayVBA227AttachConditionalReDimState(output, proc, source, line, variables)
 		output = arrayVBA227AttachReturnProvenance(output, source, ctx, variables, constants)
+		output = arrayVBA227AttachAllocationFlagState(file, proc, source, line, input, output, variables)
 		if resumeNextBefore == nil || arrayVBA227ResumeNextBeforeLine(resumeNextBefore, line) {
 			return output, findings
 		}
@@ -1113,6 +1119,116 @@ func arrayVBA227ConditionalReDimGuard(proc sourceProcedure, line int, variables 
 		return arrayVBA227ScalarConditionSource(parent, variables)
 	}
 	return "", false
+}
+
+// arrayVBA227AttachAllocationFlagState records a local ready flag only when
+// the flag assignment is a sibling of a plain ReDim and the incoming state
+// proves that ReDim completed. Keeping the relation on the array value lets
+// it survive joins where the flag itself is not modeled by arrayFlowState.
+func arrayVBA227AttachAllocationFlagState(file parsedFile, proc sourceProcedure, text string, line int, input, output arrayFlowState, variables map[string]arrayVariable) arrayFlowState {
+	if len(output) == 0 || line <= 0 || arrayProcedureHasErrorHandling(proc) {
+		return output
+	}
+	lhs, rhs, indexed, assigned := arrayAssignment(strings.TrimSpace(text))
+	if !assigned || indexed {
+		return output
+	}
+	flag := strings.ToLower(cleanIdentifier(lhs))
+	variable, known := variables[flag]
+	if !known || variable.isArray || variable.isVariant || variable.isObject || !strings.EqualFold(strings.TrimSpace(variable.typ), "Boolean") {
+		return output
+	}
+	updated := output
+	cloned := false
+	for name, value := range output {
+		if value.allocationFlagSource != flag {
+			continue
+		}
+		if !cloned {
+			updated = cloneArrayState(output)
+			cloned = true
+		}
+		value.allocationFlagSource = ""
+		updated[name] = value
+	}
+	if !strings.EqualFold(strings.TrimSpace(rhs), "true") {
+		return updated
+	}
+	target, ok := arrayVBA227AllocationFlagTarget(file, proc, line, flag, variables)
+	if !ok {
+		return updated
+	}
+	value, known := input[target]
+	if !known || value.kind != arrayAllocated || !value.knownArray || value.mayBeEmpty {
+		return updated
+	}
+	targetValue, targetKnown := updated[target]
+	if !targetKnown {
+		return updated
+	}
+	if !cloned {
+		updated = cloneArrayState(output)
+		targetValue = updated[target]
+	}
+	targetValue.allocationFlagSource = flag
+	updated[target] = targetValue
+	return updated
+}
+
+func arrayVBA227AllocationFlagTarget(file parsedFile, proc sourceProcedure, line int, flag string, variables map[string]arrayVariable) (string, bool) {
+	parentID := 0
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementAssignment || statement.Range.StartLine != line {
+			continue
+		}
+		text := strings.TrimSpace(statement.Text)
+		if text == "" && line >= 1 && line <= len(file.Lines) {
+			text = strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		}
+		lhs, rhs, indexed, assigned := arrayAssignment(text)
+		if assigned && !indexed && strings.EqualFold(strings.TrimSpace(rhs), "true") && strings.EqualFold(cleanIdentifier(lhs), flag) {
+			parentID = statement.ParentID
+			break
+		}
+	}
+	if parentID == 0 {
+		return "", false
+	}
+	target := ""
+	for statement := range proc.Statements.All() {
+		if statement.ParentID != parentID || statement.Kind != procedureir.StatementReDim || statement.Range.StartLine >= line {
+			continue
+		}
+		text := strings.TrimSpace(statement.Text)
+		if text == "" && statement.Range.StartLine >= 1 && statement.Range.StartLine <= len(file.Lines) {
+			text = strings.TrimSpace(normalizedCodeLine(file.Lines[statement.Range.StartLine-1]))
+		}
+		if text == "" || !strings.Contains(strings.ToLower(text), "redim") {
+			return "", false
+		}
+		match := arrayRedimRe.FindStringSubmatch(text)
+		if len(match) == 0 || strings.TrimSpace(match[1]) != "" {
+			return "", false
+		}
+		clauses := splitArgs(match[2])
+		if len(clauses) != 1 {
+			return "", false
+		}
+		redim, direct := parseDirectArrayRedimClause(clauses[0])
+		if !direct {
+			return "", false
+		}
+		name := strings.ToLower(cleanIdentifier(redim.name))
+		variable, known := variables[name]
+		if !known || !variable.isArray || variable.fixed || name == "" {
+			return "", false
+		}
+		if target != "" && target != name {
+			return "", false
+		}
+		target = name
+	}
+	return target, target != ""
 }
 
 // arrayVBA227ClearConditionalAllocationGuards forgets a conditional ReDim fact
@@ -3516,6 +3632,58 @@ func applyArrayNotEmptyGuardBranch(state arrayFlowState, statement *procedureir.
 	return updated
 }
 
+// applyArrayAllocationFlagBranch restores the allocation established by a
+// local ready flag on its true branch. The relation is attached to the array
+// at the flag's proven assignment, so unrelated Boolean conditions remain
+// conservative.
+func applyArrayAllocationFlagBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchTrue || statement.Condition == nil {
+		return state
+	}
+	condition := statement.Condition.Text
+	if parsed, _, ok := arrayIfThenParts(condition); ok {
+		condition = parsed
+	}
+	condition = strings.TrimSpace(condition)
+	lower := strings.ToLower(condition)
+	if strings.HasPrefix(lower, "if ") {
+		condition = strings.TrimSpace(condition[len("if "):])
+	} else if strings.HasPrefix(lower, "elseif ") {
+		condition = strings.TrimSpace(condition[len("elseif "):])
+	}
+	if then := arrayTopLevelKeywordIndex(condition, "then"); then >= 0 {
+		condition = strings.TrimSpace(condition[:then])
+	}
+	for len(condition) >= 2 && condition[0] == '(' && condition[len(condition)-1] == ')' {
+		condition = strings.TrimSpace(condition[1 : len(condition)-1])
+	}
+	if !arrayEraseNameRe.MatchString(condition) {
+		return state
+	}
+	flag := strings.ToLower(cleanIdentifier(condition))
+	variable, known := variables[flag]
+	if !known || variable.isArray || variable.isVariant || variable.isObject || !strings.EqualFold(strings.TrimSpace(variable.typ), "Boolean") {
+		return state
+	}
+	var updated arrayFlowState
+	for name, value := range state {
+		if value.allocationFlagSource != flag {
+			continue
+		}
+		if updated == nil {
+			updated = cloneArrayState(state)
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		value.mayBeEmpty = false
+		updated[name] = value
+	}
+	if updated == nil {
+		return state
+	}
+	return updated
+}
+
 // applyArraySafeBoundGuard refines the branch where a helper that returns an
 // upper bound (or -1 after a caught bounds failure) proves that its array is
 // allocated and has a nonnegative upper bound. This is separate from the
@@ -4120,6 +4288,7 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 		preserveShape:                   append([]arrayDimension(nil), left.preserveShape...),
 		allocationCountSource:           left.allocationCountSource,
 		conditionalAllocationSource:     left.conditionalAllocationSource,
+		allocationFlagSource:            left.allocationFlagSource,
 		returnNonEmptyArrayParameter:    left.returnNonEmptyArrayParameter,
 		returnPositiveScalarParameter:   left.returnPositiveScalarParameter,
 		nonEmptySource:                  left.nonEmptySource,
@@ -4142,6 +4311,15 @@ func meetArrayValue(left, right arrayValue) arrayValue {
 			out.conditionalAllocationSource = left.conditionalAllocationSource
 		} else {
 			out.conditionalAllocationSource = ""
+		}
+	}
+	if left.allocationFlagSource != right.allocationFlagSource {
+		if left.allocationFlagSource == "" {
+			out.allocationFlagSource = right.allocationFlagSource
+		} else if right.allocationFlagSource == "" {
+			out.allocationFlagSource = left.allocationFlagSource
+		} else {
+			out.allocationFlagSource = ""
 		}
 	}
 	if left.returnNonEmptyArrayParameter != right.returnNonEmptyArrayParameter {
@@ -4226,7 +4404,7 @@ func arrayStateEqual(left, right arrayFlowState) bool {
 	}
 	for key, l := range left {
 		r, ok := right[key]
-		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
+		if !ok || l.kind != r.kind || l.knownArray != r.knownArray || l.mayBeEmpty != r.mayBeEmpty || l.origin != r.origin || l.allocationProbe != r.allocationProbe || l.safeBoundProbe != r.safeBoundProbe || l.allocationCountSource != r.allocationCountSource || l.conditionalAllocationSource != r.conditionalAllocationSource || l.allocationFlagSource != r.allocationFlagSource || l.returnNonEmptyArrayParameter != r.returnNonEmptyArrayParameter || l.returnPositiveScalarParameter != r.returnPositiveScalarParameter || l.nonEmptySource != r.nonEmptySource || l.returnDescriptorSourceParameter != r.returnDescriptorSourceParameter || l.returnDescriptorStartParameter != r.returnDescriptorStartParameter || l.returnDescriptorLengthParameter != r.returnDescriptorLengthParameter || l.returnDescriptorLowerParameter != r.returnDescriptorLowerParameter || l.boundsProof != r.boundsProof || !arrayDimensionsEqual(l.dimensions, r.dimensions) || !arrayDimensionsEqual(l.preserveShape, r.preserveShape) {
 			return false
 		}
 	}
