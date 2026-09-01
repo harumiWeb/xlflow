@@ -611,6 +611,9 @@ func (a Analyzer) arrayLifecycleLinearFindings(file parsedFile, proc sourceProce
 func (a Analyzer) arrayVBA227Transfer(file parsedFile, proc sourceProcedure, ctx analysisContext, variables map[string]arrayVariable, state arrayFlowState, text string, line int, constants map[string]int, capacityGuards []arrayResumeNextCapacityGuard, resumeNextBefore []bool) (arrayFlowState, []Finding) {
 	state = arrayVBA227ClearLoopBodyBounds(state, line)
 	state = arrayVBA227ClearConditionalAllocationGuards(state, proc, text, line, variables)
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "case ") || arrayBoundCallRe.MatchString(text) {
+		state = arrayVBA227RepeatedSelectCaseBoundsState(file, proc, line, state, variables)
+	}
 	transfer := func(input arrayFlowState, source string) (arrayFlowState, []Finding) {
 		output, findings := a.arrayTransfer(file, proc, ctx, variables, input, source, line, constants, capacityGuards)
 		output = arrayVBA227AttachConditionalReDimState(output, proc, source, line, variables)
@@ -3120,6 +3123,206 @@ func arrayDictionaryReceiverProven(file parsedFile, proc sourceProcedure, line i
 		}
 	}
 	return false
+}
+
+// arrayVBA227RepeatedSelectCaseBoundsState carries a successful bounds query
+// from a Case Else branch into a later Case Else branch that uses the same
+// ByVal scalar selector. The CFG meets the other cases at End Select and
+// therefore loses this correlation even though an unchanged selector makes
+// the two Case Else paths equivalent.
+func arrayVBA227RepeatedSelectCaseBoundsState(file parsedFile, proc sourceProcedure, line int, state arrayFlowState, variables map[string]arrayVariable) arrayFlowState {
+	if state == nil || proc.Graph == nil {
+		return state
+	}
+	current := procedureStatementAtLine(proc, line)
+	currentCase, currentSelect := arrayVBA227EnclosingSelectCase(proc, current)
+	if currentCase.ID == 0 || currentCase.Control == nil || !currentCase.Control.CaseElse || currentSelect.ID == 0 {
+		return state
+	}
+	selectExpression := strings.TrimSpace(selectCaseExpression(currentSelect.Text))
+	selector := strings.ToLower(cleanIdentifier(selectExpression))
+	if selector == "" || !arrayVBA227StableSelectCaseSelector(proc, selectExpression) {
+		return state
+	}
+	previousSelect, previousCase, ok := arrayVBA227PreviousSelectCaseElse(proc, currentSelect, selectExpression)
+	if !ok {
+		return state
+	}
+	proven := arrayVBA227TrailingSelectCaseBounds(file, proc, previousCase, variables)
+	if len(proven) == 0 || arrayVBA227SelectCaseHasAssignment(file, previousCase.Range.StartLine+1, previousCase.Range.EndLine-1, selector) {
+		return state
+	}
+	if !arrayVBA227SelectCaseRegionStable(file, proc, previousSelect.Range.EndLine+1, currentSelect.Range.StartLine-1, selector, proven) ||
+		!arrayVBA227SelectCaseRegionStable(file, proc, currentCase.Range.StartLine+1, line-1, selector, proven) {
+		return state
+	}
+	updated := state
+	cloned := false
+	for name := range proven {
+		value, known := updated[name]
+		variable, variableKnown := variables[name]
+		if !known || !variableKnown || !variable.isArray {
+			continue
+		}
+		if !cloned {
+			updated = cloneArrayState(state)
+			cloned = true
+		}
+		value.kind = arrayAllocated
+		value.knownArray = true
+		updated[name] = value
+	}
+	return updated
+}
+
+func arrayVBA227EnclosingSelectCase(proc sourceProcedure, statement procedureir.Statement) (procedureir.Statement, procedureir.Statement) {
+	for statement.ID != 0 {
+		if statement.Kind == procedureir.StatementCase {
+			parent := procedureStatementByID(proc, statement.ParentID)
+			if parent.Kind == procedureir.StatementSelect {
+				return statement, parent
+			}
+		}
+		statement = procedureStatementByID(proc, statement.ParentID)
+	}
+	return procedureir.Statement{}, procedureir.Statement{}
+}
+
+func arrayVBA227PreviousSelectCaseElse(proc sourceProcedure, current procedureir.Statement, expression string) (procedureir.Statement, procedureir.Statement, bool) {
+	want := canonicalArrayBoundExpression(expression)
+	var previousSelect procedureir.Statement
+	var previousCase procedureir.Statement
+	for statement := range proc.Statements.All() {
+		if statement.Kind != procedureir.StatementSelect || statement.Range.EndLine >= current.Range.StartLine ||
+			canonicalArrayBoundExpression(selectCaseExpression(statement.Text)) != want {
+			continue
+		}
+		var candidate procedureir.Statement
+		for child := range proc.Statements.All() {
+			if child.ParentID == statement.ID && child.Kind == procedureir.StatementCase && child.Control != nil && child.Control.CaseElse {
+				candidate = child
+				break
+			}
+		}
+		if candidate.ID == 0 || previousSelect.ID != 0 && statement.Range.EndLine <= previousSelect.Range.EndLine {
+			continue
+		}
+		previousSelect = statement
+		previousCase = candidate
+	}
+	return previousSelect, previousCase, previousSelect.ID != 0 && previousCase.ID != 0
+}
+
+func arrayVBA227StableSelectCaseSelector(proc sourceProcedure, expression string) bool {
+	trimmed := strings.TrimSpace(expression)
+	if trimmed == "" || !isIdentifierStart(trimmed[0]) {
+		return false
+	}
+	for index := 1; index < len(trimmed); index++ {
+		if !isIdentifierPart(trimmed[index]) {
+			return false
+		}
+	}
+	for parameter := range proc.Params.All() {
+		if !strings.EqualFold(cleanIdentifier(parameter.Name), trimmed) || parameterIsArray(parameter) {
+			continue
+		}
+		return strings.EqualFold(strings.TrimSpace(parameter.Passing), "ByVal")
+	}
+	return false
+}
+
+func arrayVBA227TrailingSelectCaseBounds(file parsedFile, proc sourceProcedure, branch procedureir.Statement, variables map[string]arrayVariable) map[string]bool {
+	proven := map[string]bool{}
+	lastBoundLine := map[string]int{}
+	lastExecutableLine := 0
+	start := max(proc.StartLine, branch.Range.StartLine+1)
+	end := min(proc.EndLine, min(branch.Range.EndLine, len(file.Lines)))
+	for line := start; line <= end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		lower := strings.ToLower(text)
+		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") || lower == "end select" {
+			continue
+		}
+		if !arrayVBA227SelectCaseStraightLine(text) {
+			return nil
+		}
+		lastExecutableLine = line
+		for _, bound := range arrayBoundCallRe.FindAllStringSubmatch(text, -1) {
+			name := strings.ToLower(cleanIdentifier(bound[2]))
+			variable, known := variables[name]
+			if known && variable.isArray {
+				proven[name] = true
+				lastBoundLine[name] = line
+			}
+		}
+	}
+	if lastExecutableLine == 0 || len(proven) == 0 {
+		return nil
+	}
+	for name := range proven {
+		if lastBoundLine[name] != lastExecutableLine {
+			return nil
+		}
+	}
+	return proven
+}
+
+func arrayVBA227SelectCaseHasAssignment(file parsedFile, start, end int, target string) bool {
+	if start > end {
+		return false
+	}
+	start = max(1, start)
+	end = min(end, len(file.Lines))
+	for line := start; line <= end; line++ {
+		text := normalizedCodeLine(file.Lines[line-1])
+		lhs, _, indexed, assigned := arrayAssignment(text)
+		if assigned && !indexed && strings.EqualFold(cleanIdentifier(lhs), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func arrayVBA227SelectCaseRegionStable(file parsedFile, proc sourceProcedure, start, end int, selector string, arrays map[string]bool) bool {
+	if start > end {
+		return true
+	}
+	start = max(1, start)
+	end = min(end, len(file.Lines))
+	for line := start; line <= end; line++ {
+		text := strings.TrimSpace(normalizedCodeLine(file.Lines[line-1]))
+		if text == "" || strings.HasPrefix(text, "'") || strings.HasPrefix(text, "#") {
+			continue
+		}
+		if !arrayVBA227SelectCaseStraightLine(text) || len(arrayCallsAtLine(proc.Calls, line)) > 0 {
+			return false
+		}
+		lhs, _, indexed, assigned := arrayAssignment(text)
+		if assigned && !indexed {
+			name := strings.ToLower(cleanIdentifier(lhs))
+			if name == selector || arrays[name] {
+				return false
+			}
+		}
+		if arrayRedimRe.MatchString(text) || arrayEraseRe.MatchString(text) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayVBA227SelectCaseStraightLine(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	for _, prefix := range []string{
+		"if ", "elseif ", "else", "end if", "for ", "for each ", "next", "do", "loop", "while ", "wend",
+		"select ", "case ", "goto ", "exit ", "on error ", "resume ", "with ", "end with",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return false
+		}
+	}
+	return !strings.HasSuffix(lower, ":")
 }
 
 func arraySelectCaseValueAtLine(file parsedFile, proc sourceProcedure, line int, expression string) string {

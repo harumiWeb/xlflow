@@ -6654,6 +6654,53 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227CarriesSuccessfulBoundsAcrossRepeatedSelectCase(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []arrayCFGStrategy{arrayCFGStrategyLegacy, arrayCFGStrategyCompact} {
+		strategy := strategy
+		t.Run(string(strategy), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeModule(t, dir, "Main.bas", `Option Explicit
+Private Sub Probe(ByVal format As Long, ByVal input As Variant)
+  Dim data() As Byte
+  Dim size As Long
+  Select Case format
+  Case 1
+    size = 1
+  Case Else
+    data = input
+    size = UBound(data) - LBound(data) + 1
+  End Select
+  Select Case format
+  Case 1
+    Debug.Print size
+  Case Else
+    Debug.Print data(LBound(data))
+  End Select
+End Sub
+`)
+
+			findings, err := (Analyzer{RootDir: dir, Config: config.Default(), arrayStrategy: strategy}).Run()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sawEmptyArrayFinding := false
+			for _, finding := range findingsByCode(findings, "VBA227") {
+				if finding.Procedure == "Probe" && finding.Line == 16 && finding.arrayOperationKey == "bound:lbound:data:unallocated" {
+					t.Fatalf("successful bounds in the matching first Case Else should protect the repeated Case Else access: %+v", finding)
+				}
+				if finding.Procedure == "Probe" && finding.Line == 16 && finding.arrayOperationKey == "index:data:empty" {
+					sawEmptyArrayFinding = true
+				}
+			}
+			if !sawEmptyArrayFinding {
+				t.Fatal("the repeated Case Else access must retain the empty-Byte-array warning")
+			}
+		})
+	}
+}
+
 func TestAnalyzerVBA227CarriesSuccessfulUBoundAfterLengthLimitCheckInsideWith(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
