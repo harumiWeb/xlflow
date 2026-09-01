@@ -408,6 +408,7 @@ func (a Analyzer) arrayLifecycleFindingsPreparedWithRuntimeEntryContext(cancelCt
 				out = applyArrayVBA227ConditionalReDimBranch(out, block.Statement, edge, vba227Variables)
 				out = arraySuccessfulConditionState(out, block.Statement, vba227Variables, vba227ResumeNextBefore, proc)
 				out = applyArrayModuleCapacityGuardBranch(out, block.Statement, edge, file, proc, ctx, vba227Variables, moduleDecls)
+				out = applyArrayNotEmptyGuardBranch(out, block.Statement, edge, proc, vba227Variables)
 				out = applyArrayAllocationGuard(out, block.Statement, edge, ctx.arrayAllocationGuards, vba227Variables)
 				out = applyArraySafeBoundGuard(out, block.Statement, edge, ctx.arraySafeBoundGuards, vba227Variables)
 				out = applyArrayForBoundState(out, block.Statement, edge, vba227Variables)
@@ -3498,6 +3499,20 @@ func applyArrayAllocationGuard(state arrayFlowState, statement *procedureir.Stat
 	value.knownArray = true
 	value.mayBeEmpty = false
 	updated[name] = value
+	return updated
+}
+
+// applyArrayNotEmptyGuardBranch recognizes the normal path of VBA's
+// `(Not values) = -1` check. The true path is the unallocated/empty case; the
+// false path proves that a dynamic array has at least one element.
+func applyArrayNotEmptyGuardBranch(state arrayFlowState, statement *procedureir.Statement, edge vbacfg.Edge, proc sourceProcedure, variables map[string]arrayVariable) arrayFlowState {
+	if statement == nil || edge.Kind != vbacfg.EdgeBranchFalse || statement.Condition == nil || arrayProcedureHasErrorHandling(proc) {
+		return state
+	}
+	updated, ok := arrayNonEmptyGuardState(state, statement.Condition.Text, variables)
+	if !ok {
+		return state
+	}
 	return updated
 }
 

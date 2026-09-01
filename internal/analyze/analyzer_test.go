@@ -6925,6 +6925,50 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227RecognizesNotArrayEmptyGuardWithExitFunction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Length(ByRef values() As Byte) As Long
+  If (Not values) = -1 Then
+    Length = 0
+    Exit Function
+  End If
+  Length = UBound(values) - LBound(values) + 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("the false Not-array empty branch should make bounds safe after Exit Function: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227DoesNotTrustNotArrayEmptyGuardWithErrorHandling(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function Length(ByRef values() As Byte) As Long
+  On Error Resume Next
+  If (Not values) = -1 Then
+    Length = 0
+  End If
+  Length = UBound(values) - LBound(values) + 1
+End Function
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) == 0 {
+		t.Fatal("a Not-array empty guard under error handling must remain conservative")
+	}
+}
+
 func TestAnalyzerVBA227RecognizesStrPtrArrayGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
