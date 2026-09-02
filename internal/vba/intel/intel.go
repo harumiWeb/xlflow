@@ -3167,7 +3167,7 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 	head := strings.TrimSpace(text[:sep])
 	argsText := strings.TrimSpace(text[sep+1:])
 	target := callTargetBeforeOpenLike(head)
-	if target == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
+	if target == "" || !isParenlessCallTarget(target) || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
 		return parsedCall{}, false
 	}
 	start := strings.LastIndex(line, target)
@@ -3175,6 +3175,52 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 		start = 0
 	}
 	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: start, End: len(line)}, true
+}
+
+func isParenlessCallTarget(target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" || strings.HasSuffix(target, ".") {
+		return false
+	}
+	parts := splitMemberExpression(target)
+	if len(parts) == 0 {
+		return false
+	}
+	for i, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			// A leading dot is valid inside a With block; empty components in
+			// the middle or at the end are not valid call targets.
+			if i == 0 && strings.HasPrefix(strings.TrimSpace(target), ".") {
+				continue
+			}
+			return false
+		}
+		if open := strings.IndexByte(part, '('); open >= 0 {
+			if !isIdentifier(strings.TrimSpace(part[:open])) {
+				return false
+			}
+			// VBA permits chained default-member/indexing calls such as
+			// dict("k")("1"). Reject anything other than another complete
+			// parenthesized suffix after each closing parenthesis.
+			suffix := strings.TrimSpace(part[open:])
+			for suffix != "" {
+				if suffix[0] != '(' {
+					return false
+				}
+				close := matchingParen(suffix, 0)
+				if close < 0 {
+					return false
+				}
+				suffix = strings.TrimSpace(suffix[close+1:])
+			}
+			continue
+		}
+		if !isIdentifier(part) {
+			return false
+		}
+	}
+	return true
 }
 
 func firstTopLevelWhitespace(text string) int {
