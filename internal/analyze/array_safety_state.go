@@ -82,16 +82,24 @@ func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.C
 		if !caseOK || strings.TrimSpace(selectExpression) == "" {
 			return state
 		}
+		updated := state
+		cloned := false
 		for name, value := range state {
 			if value.allocationCountSource == "" || !arrayCountExpressionMatches(selectExpression, value.allocationCountSource) {
 				continue
 			}
+			if !cloned {
+				updated = cloneArrayState(state)
+				cloned = true
+			}
 			value.kind = arrayAllocated
 			value.knownArray = true
-			value.allocationCountSource = ""
-			state[name] = value
+			// Retain the count witness on the refined branch. A later join with
+			// the sibling path can then preserve the conditional fact without
+			// mutating the sibling's input state.
+			updated[name] = value
 		}
-		return state
+		return updated
 	}
 	if block.Statement.Kind != procedureir.StatementIf && block.Statement.Condition == nil {
 		return state
@@ -106,6 +114,8 @@ func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.C
 	if arrayConditionAndRe.MatchString(condition) {
 		comparisons = arrayConditionAndRe.Split(condition, -1)
 	}
+	updated := state
+	cloned := false
 	for name, value := range state {
 		for _, comparison := range comparisons {
 			lhs, operator, literal, ok := arrayCountComparison(comparison)
@@ -116,14 +126,19 @@ func applyArrayConditionalAllocationBranch(state arrayFlowState, graph *vbacfg.C
 			if !ok || edge.Kind != positiveBranch || value.allocationCountSource == "" || !arrayCountExpressionMatches(lhs, value.allocationCountSource) {
 				continue
 			}
+			if !cloned {
+				updated = cloneArrayState(state)
+				cloned = true
+			}
 			value.kind = arrayAllocated
 			value.knownArray = true
-			value.allocationCountSource = ""
-			state[name] = value
+			// Keep the witness so joins remain conditional rather than turning
+			// the positive branch into an unconditional fact for its siblings.
+			updated[name] = value
 			break
 		}
 	}
-	return state
+	return updated
 }
 
 func selectCaseExpression(text string) string {

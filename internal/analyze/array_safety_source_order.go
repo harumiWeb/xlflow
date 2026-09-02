@@ -20,6 +20,7 @@ type arraySourceOrderFallbackFacts struct {
 	unconditionalTransferLines []int
 	definiteExitLines          []int
 	unknownFlow                bool
+	lineStartBytes             []int
 	parents                    map[int]procedureir.Statement
 	allocations                map[string][]arraySourceOrderAllocation
 	bypassTargetMin            map[int]int
@@ -34,6 +35,7 @@ type arraySourceOrderFallbackFacts struct {
 // of the per-call proof avoids multiplying the recovery cost by call count.
 func buildArraySourceOrderFallbackFacts(file parsedFile, proc sourceProcedure, graph *vbacfg.CFGView, variables map[string]arrayVariable, ctx analysisContext, constants map[string]int) arraySourceOrderFallbackFacts {
 	facts := arraySourceOrderFallbackFacts{
+		lineStartBytes:         arraySourceOrderLineStarts(file.Source),
 		parents:                make(map[int]procedureir.Statement, proc.Statements.Len()),
 		allocations:            map[string][]arraySourceOrderAllocation{},
 		bypassTargetMin:        map[int]int{},
@@ -771,24 +773,27 @@ func arraySourceOrderRemCommentAt(line string, index int) bool {
 	return true
 }
 
-func arraySourceOrderLineStartByte(source []byte, line int) int {
+func arraySourceOrderLineStarts(source []byte) []int {
+	starts := make([]int, 1, 1024)
+	for index, value := range source {
+		if value == '\n' {
+			starts = append(starts, index+1)
+		}
+	}
+	return starts
+}
+
+func arraySourceOrderLineStartByteFrom(starts []int, line int) int {
 	if line <= 1 {
 		return 0
 	}
-	current := 1
-	for index, value := range source {
-		if value != '\n' {
-			continue
-		}
-		current++
-		if current == line {
-			return index + 1
-		}
+	if line > len(starts) {
+		return -1
 	}
-	return -1
+	return starts[line-1]
 }
 
-func arraySourceOrderCallsBySegment(file parsedFile, line int, calls []procedureir.CallSite) ([][]procedureir.CallSite, []procedureir.CallSite) {
+func arraySourceOrderCallsBySegment(file parsedFile, line int, calls []procedureir.CallSite, precomputedLineStarts ...[]int) ([][]procedureir.CallSite, []procedureir.CallSite) {
 	if line < 1 || line > len(file.Lines) {
 		return nil, calls
 	}
@@ -798,7 +803,13 @@ func arraySourceOrderCallsBySegment(file parsedFile, line int, calls []procedure
 	}
 	bySegment := make([][]procedureir.CallSite, len(segments))
 	unassigned := make([]procedureir.CallSite, 0)
-	lineStart := arraySourceOrderLineStartByte(file.Source, line)
+	var lineStarts []int
+	if len(precomputedLineStarts) > 0 {
+		lineStarts = precomputedLineStarts[0]
+	} else {
+		lineStarts = arraySourceOrderLineStarts(file.Source)
+	}
+	lineStart := arraySourceOrderLineStartByteFrom(lineStarts, line)
 	for _, call := range calls {
 		segmentIndex := -1
 		if lineStart >= 0 {
@@ -852,12 +863,18 @@ func (a Analyzer) arrayByRefCallSourceOrderProof(file parsedFile, facts arraySou
 		return nil, false
 	}
 	state := cloneArrayState(initial)
+	lineStarts := facts.lineStartBytes
+	if lineStarts == nil {
+		// Preserve compatibility for focused callers that construct fallback
+		// facts directly instead of using buildArraySourceOrderFallbackFacts.
+		lineStarts = arraySourceOrderLineStarts(file.Source)
+	}
 	// Recovered CFG blocks can coalesce a colon-separated physical line. Apply
 	// each logical segment in source order so Erase or another mutation before a
 	// later call cannot be hidden by passing the whole physical line to transfer.
 	for line := caller.StartLine; line < call.Range.StartLine && line <= len(file.Lines); line++ {
 		segments := splitRangeValueSourceStatementsWithOffsets(arraySourceOrderStripComment(file.Lines[line-1]))
-		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller.Calls, line))
+		callsBySegment, unassignedCalls := arraySourceOrderCallsBySegment(file, line, arrayCallsAtLine(caller.Calls, line), lineStarts)
 		if len(unassignedCalls) > 0 && len(segments) > 1 {
 			// A call without a trustworthy source offset cannot be placed among
 			// colon-separated statements. Continuing would apply its side effect

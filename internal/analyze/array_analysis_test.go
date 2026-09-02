@@ -63,6 +63,17 @@ func TestArrayAnalysisResultConcurrentRead(t *testing.T) {
 	}
 }
 
+func TestArrayStringHelpersRejectStrConvWithoutParentheses(t *testing.T) {
+	if length, ok := arrayStringExpressionKnownLength("StrConv"); ok || length != 0 {
+		t.Fatalf("malformed StrConv expression = (%d, %v), want (0, false)", length, ok)
+	}
+
+	variable := arrayVariable{name: "bytes", typ: "Byte", isArray: true}
+	if value, ok := byteArrayStringAssignment(parsedFile{}, sourceProcedure{}, 1, variable, "StrConv", nil); ok || value.knownArray {
+		t.Fatalf("malformed StrConv byte-array assignment = (%#v, %v), want unknown", value, ok)
+	}
+}
+
 func TestArrayLifecycleProjectionApplicableIncludesIndexedAccess(t *testing.T) {
 	proc := sourceProcedure{Statements: newReadOnlySpan([]procedureir.Statement{{Text: "Debug.Print values(2)"}})}
 	variables := map[string]arrayVariable{"values": {name: "values", isArray: true}}

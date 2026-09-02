@@ -510,6 +510,25 @@ func procedureReturnsArray(proc sourceProcedure) bool {
 		strings.Contains(proc.ReturnType, "()")
 }
 
+func moduleDeclarationForName(moduleDecls map[string]sourceDeclaration, name string) (sourceDeclaration, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return sourceDeclaration{}, false
+	}
+	if declaration, ok := moduleDecls[normalized]; ok {
+		return declaration, true
+	}
+	// Focused callers may provide direct ModuleDeclarations maps with source
+	// casing. Keep that compatibility path while the normal analyzer path uses
+	// the canonical lowercase lookup above.
+	for declaredName, declaration := range moduleDecls {
+		if strings.EqualFold(strings.TrimSpace(declaredName), normalized) {
+			return declaration, true
+		}
+	}
+	return sourceDeclaration{}, false
+}
+
 func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration) bool {
 	if len(moduleDecls) == 0 {
 		return false
@@ -518,10 +537,8 @@ func procedureUsesModuleArray(file parsedFile, proc sourceProcedure, moduleDecls
 		if access.Scope != procedureir.ScopeModule {
 			continue
 		}
-		for name, declaration := range moduleDecls {
-			if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(access.Name)) && declaration.Array && !declaration.Parameter {
-				return true
-			}
+		if declaration, ok := moduleDeclarationForName(moduleDecls, access.Name); ok && declaration.Array && !declaration.Parameter {
+			return true
 		}
 	}
 	for statement := range proc.Statements.All() {
@@ -646,6 +663,8 @@ func ensureArrayKeySet(set map[string]bool) map[string]bool {
 	return set
 }
 
+// buildArrayCandidateIndex preserves the old sorted-key tie breaking while
+// avoiding a project-wide key collection and sort for every uncertain call.
 func buildArrayCandidateIndex(all map[string]sourceProcedure) arrayCandidateIndex {
 	index := arrayCandidateIndex{
 		byName:          make(map[string]string, len(all)),

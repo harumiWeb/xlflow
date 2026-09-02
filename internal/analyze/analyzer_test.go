@@ -15833,6 +15833,58 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227PropagatesClassInitializerArrayToDirectConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeClass(t, dir, "Archive.cls", `Attribute VB_Name = "Archive"
+Option Explicit
+
+Private mBytes() As Byte
+
+Private Sub Class_Initialize()
+    ReDim mBytes(0 To 0)
+End Sub
+
+Public Sub Run()
+    If mBytes(0) = 0 Then Debug.Print "ok"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("class-initialized module array should be safe for a direct consumer: %+v", got)
+	}
+}
+
+func TestAnalyzerVBA227PropagatesFormInitializerArrayToDirectConsumer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFormSidecar(t, dir, "Dialog.bas", `Option Explicit
+Private values() As Long
+
+Private Sub UserForm_Initialize()
+    ReDim values(0 To 1)
+End Sub
+
+Private Sub cmdStart_Click()
+    If values(0) = 0 Then Debug.Print "ok"
+End Sub
+`)
+	cfg := config.Default()
+	cfg.Analyze.DetectArrayLifecycleSafety = true
+	findings, err := (Analyzer{RootDir: dir, Config: cfg}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsByCode(findings, "VBA227"); len(got) != 0 {
+		t.Fatalf("form-initialized module array should be safe for a direct consumer: %+v", got)
+	}
+}
+
 func TestAnalyzerVBA227CarriesConditionalReDimThroughRepeatedScalarGuard(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -767,7 +767,7 @@ func arrayLocalGoSubAllocationSummaries(proc sourceProcedure, graph *vbacfg.CFGV
 }
 
 func arrayLocalGoSubAllocationInvariant(proc sourceProcedure, graph *vbacfg.CFGView, statements []procedureir.Statement, labelIndex, end int, name string, ctx analysisContext, base int, constants map[string]int, moduleArrays map[string]bool) bool {
-	if graph == nil || labelIndex < 0 || labelIndex >= end || end > len(statements) {
+	if graph == nil || labelIndex < 0 || labelIndex >= end || end >= len(statements) {
 		return false
 	}
 	name = strings.ToLower(cleanIdentifier(name))
@@ -1106,7 +1106,10 @@ func inferArrayByRefEntryStates(a Analyzer, files []parsedFile, ctx analysisCont
 		return map[string]map[int]bool{}, map[string]map[int]string{}
 	}
 	moduleAllocationSummaries := ctx.arrayModuleAllocations
-	moduleInitializationStates := arrayModuleInitializationStates(files, moduleAllocationSummaries)
+	moduleInitializationStates := ctx.arrayModuleInitializationStates
+	if moduleInitializationStates == nil {
+		moduleInitializationStates = arrayModuleInitializationStates(files, moduleAllocationSummaries)
+	}
 
 	type callerInfo struct {
 		file        parsedFile

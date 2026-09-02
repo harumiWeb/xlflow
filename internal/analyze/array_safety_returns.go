@@ -210,8 +210,11 @@ func arrayStringExpressionKnownLength(expression string) (int, bool) {
 		return 0, false
 	}
 	open := firstParenOutsideString(expression)
+	if open < 0 {
+		return 0, false
+	}
 	close := matchingParen(expression, open)
-	if open < 0 || close < 0 || strings.TrimSpace(expression[close+1:]) != "" {
+	if close < 0 || strings.TrimSpace(expression[close+1:]) != "" {
 		return 0, false
 	}
 	arguments := splitArgs(expression[open+1 : close])
@@ -295,8 +298,11 @@ func byteArrayStringAssignment(file parsedFile, proc sourceProcedure, line int, 
 	}
 	if strings.EqualFold(arrayCallName(rhs), "strconv") {
 		open := firstParenOutsideString(rhs)
+		if open < 0 {
+			return arrayValue{}, false
+		}
 		close := matchingParen(rhs, open)
-		if open < 0 || close < 0 || strings.TrimSpace(rhs[close+1:]) != "" {
+		if close < 0 || strings.TrimSpace(rhs[close+1:]) != "" {
 			return arrayValue{}, false
 		}
 		arguments := splitArgs(rhs[open+1 : close])

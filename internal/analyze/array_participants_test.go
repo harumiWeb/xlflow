@@ -213,7 +213,7 @@ func TestInferDocumentedArrayReturnSummariesRequiresArrayImplementation(t *testi
 	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); !got["m.asarray"].knownArray {
 		t.Fatalf("documented allocated array return was not recognized: %#v", got)
 	}
-	proc.StartLine = 1
+	file.Procedures[0].StartLine = 1
 	file.Lines[0] = "Public Function AsArray() As Variant"
 	if got := inferDocumentedArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
 		t.Fatalf("undocumented or non-array return was recognized: %#v", got)
@@ -221,20 +221,27 @@ func TestInferDocumentedArrayReturnSummariesRequiresArrayImplementation(t *testi
 }
 
 func TestInferDocumentedNonEmptyArrayReturnSummariesRejectsConditionalAllocation(t *testing.T) {
-	proc := sourceProcedure{Module: "M", Name: "MaybeValues", ProcedureKind: procedureir.ProcedureFunction, StartLine: 2, EndLine: 7}
-	file := parsedFile{
-		Lines: []string{
-			"' @returns Array<Long>",
-			"Private Function MaybeValues(ByVal enabled As Boolean) As Variant",
-			"    Dim values As Variant",
-			"    If enabled Then",
-			"        ReDim values(0 To 1)",
-			"    End If",
-			"    MaybeValues = values",
-			"End Function",
-		},
-		Procedures: []sourceProcedure{proc},
+	source := []byte(`' @returns Array<Long>
+Private Function MaybeValues(ByVal enabled As Boolean) As Variant
+    Dim values As Variant
+    If enabled Then
+        ReDim values(0 To 1)
+    End If
+    MaybeValues = values
+End Function
+`)
+	ir, err := procedureir.BuildSource(procedureir.BuildOptions{
+		Path: "M.bas", ModuleName: "M", ModuleKind: "standard",
+	}, source)
+	if err != nil {
+		t.Fatalf("build source: %v", err)
 	}
+	flow := cfg.BuildDocument(ir)
+	file := parsedFile{
+		Path: "M.bas", Module: "M", ModuleKind: "standard", Source: source,
+		Lines: normalizedSourceLines(string(source)), IR: ir, CFG: flow,
+	}
+	file.Procedures = sourceProceduresFromIRRef(&file.IR, flow)
 	if got := inferDocumentedNonEmptyArrayReturnSummaries([]parsedFile{file}); len(got) != 0 {
 		t.Fatalf("conditional ReDim must not become a universal non-empty return contract: %#v", got)
 	}

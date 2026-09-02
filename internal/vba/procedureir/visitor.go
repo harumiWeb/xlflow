@@ -489,6 +489,12 @@ func (v *singleVisitor) addCall(procedure *ProcedureIR, node *tree_sitter.Node, 
 func (v *singleVisitor) appendRecoveredCall(procedure *ProcedureIR, node *tree_sitter.Node, recovered recoveredCallSyntax, ctx visitContext) int {
 	facts := make([]argumentFact, 0, len(recovered.arguments))
 	for _, argument := range recovered.arguments {
+		if argument.text == "" && argument.name == "" && argument.valueText == "" && argument.rng.EndByte <= argument.rng.StartByte {
+			// Keep an omitted positional argument as a zero ExpressionID so
+			// later argument binding does not shift subsequent values left.
+			facts = append(facts, argumentFact{})
+			continue
+		}
 		id := len(procedure.Expressions) + 1
 		procedure.Expressions = append(procedure.Expressions, Expression{
 			ID: id, StatementID: ctx.statementID, Kind: ExpressionUnknown,
@@ -641,7 +647,7 @@ func recoveredCallArguments(text string, start, end, absoluteStart int, source [
 func parseRecoveredCallArgument(text string, start, end, absoluteStart int, source []byte) (recoveredCallArgument, bool) {
 	trimmedStart, trimmedEnd := recoveredTrimSpace(text, start, end)
 	if trimmedStart >= trimmedEnd {
-		return recoveredCallArgument{}, false
+		return recoveredCallArgument{}, true
 	}
 	raw := text[start:end]
 	if separator := recoveredNamedArgumentSeparator(raw); separator >= 0 {
@@ -665,7 +671,7 @@ func parseRecoveredCallArgument(text string, start, end, absoluteStart int, sour
 	}
 	argumentText := recoveredCallCommentlessText(raw)
 	if argumentText == "" {
-		return recoveredCallArgument{}, false
+		return recoveredCallArgument{}, true
 	}
 	rng := recoveredSourceRange(source, absoluteStart+trimmedStart, absoluteStart+trimmedEnd)
 	return recoveredCallArgument{text: argumentText, rng: rng, valueRange: rng}, true

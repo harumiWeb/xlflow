@@ -598,6 +598,7 @@ func semanticAnalysisCapabilityUncached(ctx analysisContext, file parsedFile, pr
 			fmt.Sprintf("%t", proc.ArrayParticipantReady),
 			semanticProcedureEffectFingerprint(proc.Effects),
 			fmt.Sprintf("%#v", ctx.arrayModuleConfigurations[file.Path]),
+			semanticStableJSON(ctx.arrayModuleInitializationStates[file.Path]),
 		}
 		keys := []string{arrayProcedureKey(proc), strings.ToLower(proc.Name)}
 		if participantKey := ctx.arrayParticipantKeys[arrayProcedureKey(proc)]; participantKey != "" {

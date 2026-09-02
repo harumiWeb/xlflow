@@ -93,8 +93,6 @@ type arrayCandidateIndex struct {
 	byLineAndKind   map[arrayCandidateLineKey]string
 }
 
-// buildArrayCandidateIndex preserves the old sorted-key tie breaking while
-// avoiding a project-wide key collection and sort for every uncertain call.
 type arrayByRefEntryEvidence struct {
 	seen                bool
 	allocated           bool

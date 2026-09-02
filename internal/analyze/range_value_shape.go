@@ -890,34 +890,11 @@ func rangeValueIsRemComment(text string) bool {
 }
 
 func splitRangeValueSourceStatements(text string) []string {
-	var out []string
-	start := 0
-	inString := false
-	depth := 0
-	for index := 0; index < len(text); index++ {
-		switch text[index] {
-		case '"':
-			if inString && index+1 < len(text) && text[index+1] == '"' {
-				index++
-				continue
-			}
-			inString = !inString
-		case '(':
-			if !inString {
-				depth++
-			}
-		case ')':
-			if !inString && depth > 0 {
-				depth--
-			}
-		case ':':
-			if !inString && depth == 0 {
-				out = append(out, strings.TrimSpace(text[start:index]))
-				start = index + 1
-			}
-		}
+	spans := splitRangeValueSourceStatementsWithOffsets(text)
+	out := make([]string, 0, len(spans))
+	for _, span := range spans {
+		out = append(out, span.text)
 	}
-	out = append(out, strings.TrimSpace(text[start:]))
 	return out
 }
 

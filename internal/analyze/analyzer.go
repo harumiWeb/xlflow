@@ -353,6 +353,7 @@ type analysisContext struct {
 	arrayModuleInvalidationCacheWritable bool
 	arraySkipModuleInvalidationEffects   bool
 	arrayModuleConfigurations            map[string]arrayModuleConfigurationState
+	arrayModuleInitializationStates      map[string]map[string]bool
 	arrayModuleEntryStates               arrayModuleEntryStates
 	arrayModuleReadyGuards               arrayModuleReadyGuardStates
 	arrayPrivateTargets                  map[string]sourceProcedure
@@ -2379,6 +2380,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		arrayModuleAllocations:           arrayModuleAllocationSummaries{},
 		arrayModuleInvalidations:         arrayModuleInvalidationSummaries{},
 		arrayModuleConfigurations:        map[string]arrayModuleConfigurationState{},
+		arrayModuleInitializationStates:  map[string]map[string]bool{},
 		arrayModuleEntryStates:           arrayModuleEntryStates{},
 		arrayModuleReadyGuards:           arrayModuleReadyGuardStates{},
 		arrayPrivateTargets:              map[string]sourceProcedure{},
@@ -2474,6 +2476,7 @@ func (a Analyzer) buildContextWithObjectAnalysisPlan(files []parsedFile, objectA
 		ctx.arrayByRefConditionalAllocations = inferArrayByRefConditionalAllocations(files)
 		ctx.arrayByRefLengthAllocations = inferArrayByRefLengthAllocations(files)
 		ctx.arrayModuleAllocations = inferArrayModuleAllocationSummaries(files, ctx, ctx.arrayPrivateTargets, ctx.arrayByRefAllocations)
+		ctx.arrayModuleInitializationStates = arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
 		ctx.arraySkipModuleInvalidationEffects = false
 		ctx.arrayModuleInvalidations = inferArrayModuleInvalidationSummaries(files, ctx)
 		ctx.arrayModuleConfigurations = inferArrayModuleConfigurationStates(files, ctx.arrayModuleAllocations)

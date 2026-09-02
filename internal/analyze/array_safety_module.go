@@ -1844,7 +1844,10 @@ func inferArrayModuleEntryStates(a Analyzer, files []parsedFile, ctx analysisCon
 		return arrayModuleEntryStates{}
 	}
 
-	initializationStates := arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
+	initializationStates := ctx.arrayModuleInitializationStates
+	if initializationStates == nil {
+		initializationStates = arrayModuleInitializationStates(files, ctx.arrayModuleAllocations)
+	}
 	sort.SliceStable(procedures, func(i, j int) bool {
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})

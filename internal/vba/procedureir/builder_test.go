@@ -1023,6 +1023,53 @@ End Sub
 	}
 }
 
+func TestRecoveredUnparenthesizedCallPreservesOmittedArgumentSlots(t *testing.T) {
+	t.Parallel()
+	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Private Sub Target(Optional first As Variant, Optional second As Variant, Optional third As Variant)
+End Sub
+
+Public Sub Run()
+    Target .first, _
+           , third
+End Sub
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Procedures) != 2 || len(doc.Procedures[1].Calls) != 1 {
+		t.Fatalf("recovered call was not captured: %+v", doc.Procedures)
+	}
+	call := doc.Procedures[1].Calls[0]
+	if call.Arguments.Count != 3 || len(call.Arguments.ExpressionIDs) != 3 {
+		t.Fatalf("recovered call arguments = %+v, want three positional slots", call.Arguments)
+	}
+	if call.Arguments.ExpressionIDs[0] == 0 || call.Arguments.ExpressionIDs[1] != 0 || call.Arguments.ExpressionIDs[2] == 0 {
+		t.Fatalf("omitted argument slot was not preserved: %+v", call.Arguments)
+	}
+	for index, want := range []string{".first", "third"} {
+		expressionID := call.Arguments.ExpressionIDs[[]int{0, 2}[index]]
+		expression := doc.Procedures[1].Expressions[expressionID-1]
+		if expression.Text != want || !expression.Recovered {
+			t.Fatalf("recovered argument %d = %+v, want %q", index, expression, want)
+		}
+	}
+}
+
+func TestRecoveredCallArgumentsPreservesEmptyPositionalSegments(t *testing.T) {
+	t.Parallel()
+	source := []byte("first, , third")
+	arguments := recoveredCallArguments(string(source), 0, len(source), 0, source)
+	if len(arguments) != 3 {
+		t.Fatalf("recovered arguments = %#v, want three positional slots", arguments)
+	}
+	if arguments[0].text != "first" || arguments[1].text != "" || arguments[2].text != "third" {
+		t.Fatalf("recovered argument texts = %#v, want first/empty/third", arguments)
+	}
+	if arguments[1].rng.EndByte > arguments[1].rng.StartByte {
+		t.Fatalf("omitted argument received a source range: %#v", arguments[1].rng)
+	}
+}
+
 func TestPrintOutputListPositionsAreNotArguments(t *testing.T) {
 	t.Parallel()
 	doc, err := BuildSource(BuildOptions{Path: "Module1.bas"}, []byte(`Public Sub Run()
