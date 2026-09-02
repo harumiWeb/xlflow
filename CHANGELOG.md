@@ -23,6 +23,9 @@ All notable changes to xlflow will be documented in this file.
   snapshots guarded by `Count`, a successful `UBound(Keys)` query, or a
   source-proven non-empty `CreateLookupDict` member.
 
+- Fixed `VBA227` array-return analysis from treating the false branch of a
+  negative-only count guard such as `count < 0` as proof of a non-empty array.
+
 - Fixed false-positive `VBA227` element findings after documented Variant array
   property returns with a direct non-empty `ReDim`. The summary solver now
   carries the VBE-confirmed Variant allocation only within documented return

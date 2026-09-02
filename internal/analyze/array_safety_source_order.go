@@ -1607,7 +1607,7 @@ func arrayQualifiedDescriptorCountPositive(file parsedFile, proc sourceProcedure
 			continue
 		}
 		branch, underGuard := arrayQualifiedStatementBranch(proc, call.StatementID, guard.ID)
-		if underGuard && arrayQualifiedBranchMatchesPositive(branch, positiveBranch) {
+		if underGuard && arrayQualifiedBranchMatches(branch, positiveBranch) {
 			return true
 		}
 		if operator == "=" && literal == "0" && !underGuard && arrayQualifiedZeroGuardSkipsCall(proc, guard, call) && arrayQualifiedCountHasNonNegativeOrigin(file, proc, call, count) {
@@ -1674,12 +1674,12 @@ func arrayQualifiedStatementBranch(proc sourceProcedure, statementID, ancestorID
 	return "", false
 }
 
-func arrayQualifiedBranchMatchesPositive(branch procedureir.BranchRole, positive vbacfg.EdgeKind) bool {
+func arrayQualifiedBranchMatches(branch procedureir.BranchRole, expected vbacfg.EdgeKind) bool {
 	switch branch {
 	case procedureir.BranchThen:
-		return positive == vbacfg.EdgeBranchTrue
+		return expected == vbacfg.EdgeBranchTrue
 	case procedureir.BranchElse:
-		return positive == vbacfg.EdgeBranchFalse
+		return expected == vbacfg.EdgeBranchFalse
 	default:
 		return false
 	}
@@ -1898,12 +1898,16 @@ func arrayQualifiedUpperBoundProvenNonNegative(file parsedFile, proc sourceProce
 		if !ok {
 			continue
 		}
-		positiveBranch, positive := positiveArrayCountBranch(operator, literal)
-		if !positive {
+		value, err := strconv.Atoi(literal)
+		if err != nil {
+			continue
+		}
+		nonNegativeBranch, nonNegative := safeBoundNonnegativeBranch(operator, value, false)
+		if !nonNegative {
 			continue
 		}
 		callBranch, underGuard := arrayQualifiedStatementBranch(proc, call.StatementID, guard.ID)
-		if !underGuard || !arrayQualifiedBranchMatchesPositive(callBranch, positiveBranch) {
+		if !underGuard || !arrayQualifiedBranchMatches(callBranch, nonNegativeBranch) {
 			continue
 		}
 		for statement := range proc.Statements.All() {

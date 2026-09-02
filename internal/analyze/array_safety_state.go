@@ -201,7 +201,7 @@ func positiveArrayCountBranch(operator, literal string) (vbacfg.EdgeKind, bool) 
 			return vbacfg.EdgeBranchTrue, true
 		}
 	case "<":
-		if value <= 1 {
+		if value == 1 {
 			return vbacfg.EdgeBranchFalse, true
 		}
 	case "<=":

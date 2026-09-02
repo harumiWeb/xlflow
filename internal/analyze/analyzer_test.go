@@ -15998,6 +15998,38 @@ End Sub
 	}
 }
 
+func TestAnalyzerVBA227DoesNotTreatNegativeOnlyCountGuardAsPositive(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeModule(t, dir, "Main.bas", `Option Explicit
+Private Function NegativeOnly(ByVal dataLength As Long) As Byte()
+  Dim data() As Byte
+  If dataLength < 0 Then
+  Else
+    ReDim data(0 To dataLength - 1)
+  End If
+  NegativeOnly = data
+End Function
+
+Public Sub Run()
+  Dim values() As Byte
+  values = NegativeOnly(0)
+  Debug.Print values(0)
+End Sub
+`)
+
+	findings, err := (Analyzer{RootDir: dir, Config: config.Default()}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findingsByCode(findings, "VBA227") {
+		if finding.Procedure == "Run" {
+			return
+		}
+	}
+	t.Fatalf("a count < 0 guard does not prove a non-empty zero-count array: %+v", findingsByCode(findings, "VBA227"))
+}
+
 func TestAnalyzerVBA227KeepsConditionalArrayReturnsConservative(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
