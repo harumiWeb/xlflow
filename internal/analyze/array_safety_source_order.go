@@ -10,6 +10,24 @@ import (
 	"github.com/harumiWeb/xlflow/internal/vba/procedureir"
 )
 
+type arraySourceOrderAllocation struct {
+	line     int
+	parentID int
+}
+
+type arraySourceOrderFallbackFacts struct {
+	conditionalTransferLines   []int
+	unconditionalTransferLines []int
+	definiteExitLines          []int
+	unknownFlow                bool
+	parents                    map[int]procedureir.Statement
+	allocations                map[string][]arraySourceOrderAllocation
+	bypassTargetMin            map[int]int
+	branchGroups               map[int]map[int]bool
+	branchTransferBypass       map[int]map[string]int
+	ambiguousTransferLines     map[int]bool
+}
+
 // buildArraySourceOrderFallbackFacts materializes the source-order facts once
 // per caller. The fallback is only used for recovered CFG boundaries, but a
 // caller can contain many such calls; keeping the statement and CFG scans out
