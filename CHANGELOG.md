@@ -4,6 +4,11 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Updated the `tree-sitter-vba` parser dependency to v0.13.0. Print-family
+  output lists now support trailing `;` / `,` controls and explicit `Write #`
+  statements; call extraction and linting ignore `char_position` nodes while
+  preserving semantic output values and existing diagnostic contracts.
+
 - Removed ineffective `VBA227` inline suppressions from scaffolded `XlflowAssert`,
   `XlflowUI`, and `XlflowDebug` helpers so `xlflow analyze` no longer reports
   `unused_inline_suppression` warnings for new projects or installed helper modules.

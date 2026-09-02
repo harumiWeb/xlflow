@@ -150,8 +150,8 @@ func (v *singleVisitor) visit(node *tree_sitter.Node, ctx visitContext) {
 		v.visitBlock(node, ctx)
 		return
 	}
-	if node.Kind() == "argument_list" && procedure != nil && ctx.callIndex >= 0 {
-		v.visitArgumentList(node, ctx)
+	if isArgumentContainerNode(node) && procedure != nil && ctx.callIndex >= 0 {
+		v.visitArgumentContainer(node, ctx)
 		return
 	}
 	if node.Kind() == "named_argument" && procedure != nil && ctx.callIndex >= 0 {
@@ -936,7 +936,7 @@ func (v *singleVisitor) argumentsForCall(node *tree_sitter.Node) (Arguments, []a
 	if list == nil {
 		for i := uint(0); i < node.NamedChildCount(); i++ {
 			child := node.NamedChild(i)
-			if child != nil && child.Kind() == "argument_list" {
+			if isArgumentContainerNode(child) {
 				list = child
 				break
 			}
@@ -1063,7 +1063,7 @@ func (v *singleVisitor) visitBlock(node *tree_sitter.Node, ctx visitContext) {
 	}
 }
 
-func (v *singleVisitor) visitArgumentList(node *tree_sitter.Node, ctx visitContext) {
+func (v *singleVisitor) visitArgumentContainer(node *tree_sitter.Node, ctx visitContext) {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		if v.builder.err != nil {
 			return

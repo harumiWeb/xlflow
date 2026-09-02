@@ -1133,7 +1133,11 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 }
 
 func isSemanticArgumentNode(node *tree_sitter.Node) bool {
-	return node != nil && node.Kind() != "line_continuation"
+	return node != nil && node.Kind() != "line_continuation" && node.Kind() != "char_position"
+}
+
+func isArgumentContainerNode(node *tree_sitter.Node) bool {
+	return node != nil && (node.Kind() == "argument_list" || node.Kind() == "output_list")
 }
 
 func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {

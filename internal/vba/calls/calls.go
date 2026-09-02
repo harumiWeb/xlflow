@@ -825,7 +825,7 @@ func argumentsFromCallNode(callNode, target *tree_sitter.Node, source []byte) Ar
 		if child == nil || sameNode(child, target) {
 			continue
 		}
-		if child.Kind() == "argument_list" {
+		if isSemanticArgumentNode(child) && (child.Kind() == "argument_list" || child.Kind() == "output_list") {
 			return argumentsFromArgumentList(child, source)
 		}
 	}
@@ -867,7 +867,7 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 	args := Arguments{Named: []NamedArgument{}}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child == nil {
+		if !isSemanticArgumentNode(child) {
 			continue
 		}
 		args.Count++
@@ -876,6 +876,10 @@ func argumentsFromArgumentList(node *tree_sitter.Node, source []byte) Arguments 
 		}
 	}
 	return args
+}
+
+func isSemanticArgumentNode(node *tree_sitter.Node) bool {
+	return node != nil && node.Kind() != "line_continuation" && node.Kind() != "char_position"
 }
 
 func namedArgument(node *tree_sitter.Node, source []byte) NamedArgument {

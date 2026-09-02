@@ -138,3 +138,5 @@
 - LSP の体感性能確認では初回表示だけでなく、巨大ファイルを編集して診断開始後に再編集する経路も実機計測する。`didChange` が旧 snapshot の tree lease を同期取得すると、バックグラウンド解析の終了まで JSON-RPC 受信ループを止めるため、旧 revision が使用中なら差分パースを待たず新 revision を公開する。
 - 巨大モジュールの LSP Full 診断は `analyze` の所要時間だけで推測せず、project-aware realtime 経路を実 VS Code で計測する。式ごとの document/UserForm index 再構築、procedure ごとの helper summary・project constant 正規化、batch と realtime の並列境界差を CPU profile と goroutine stack で確認する。
 - Cross-platform analysis tests that inspect `RunResult().Warnings` should assert the relevant warning code rather than require an empty warning set; Linux may legitimately lack the generated TypeLib manifest and emit `type_db_load_warning`.
+- On Windows, tests that need a path relative to the working directory must create their temporary directory on the working directory's volume; `t.TempDir()` may be on another drive where `filepath.Rel` cannot produce a relative path.
+- Filesystem adapters must keep absolute physical paths for discovery, deduplication, and reads separate from logical source paths used by filters, diagnostics, and public results; preserve the caller's absolute or relative `RootDir` form.

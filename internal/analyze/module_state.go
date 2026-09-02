@@ -326,16 +326,25 @@ func moduleStateResolveField(rootDir string, access procedureir.VariableAccess, 
 	if access.Resolution.Scope == procedureir.ScopeProject && len(access.Resolution.Candidates) == 1 {
 		candidate := access.Resolution.Candidates[0]
 		candidateFile := candidate.File
+		for _, field := range byName[strings.ToLower(strings.TrimSpace(access.Name))] {
+			if moduleStateSameFile(field.File, candidateFile) && field.Line == candidate.Line {
+				return field
+			}
+		}
 		if candidateFile != "" && !filepath.IsAbs(candidateFile) && rootDir != "" {
 			candidateFile = filepath.Join(rootDir, filepath.FromSlash(candidateFile))
-		}
-		for _, field := range byName[strings.ToLower(strings.TrimSpace(access.Name))] {
-			if strings.EqualFold(moduleStatePathKey(field.File), moduleStatePathKey(candidateFile)) && field.Line == candidate.Line {
-				return field
+			for _, field := range byName[strings.ToLower(strings.TrimSpace(access.Name))] {
+				if moduleStateSameFile(field.File, candidateFile) && field.Line == candidate.Line {
+					return field
+				}
 			}
 		}
 	}
 	return moduleStateResolveName(access.Name, procedure, byFileName, byName)
+}
+
+func moduleStateSameFile(left, right string) bool {
+	return strings.EqualFold(moduleStatePathKey(left), moduleStatePathKey(right))
 }
 
 func moduleStateResolveName(name string, procedure moduleStateProcedure, byFileName map[string]*moduleStateField, byName map[string][]*moduleStateField) *moduleStateField {
