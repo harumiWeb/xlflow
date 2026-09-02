@@ -2005,7 +2005,7 @@ func arrayStatementDominatesCall(proc sourceProcedure, statementID, statementLin
 	if statementBlock.ID == callBlock.ID {
 		return statementLine < call.Range.StartLine
 	}
-	for _, dominator := range proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[callBlock.ID] {
+	for _, dominator := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(callBlock.ID) {
 		if dominator == statementBlock.ID {
 			return true
 		}

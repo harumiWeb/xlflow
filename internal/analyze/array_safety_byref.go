@@ -249,7 +249,7 @@ func inferArrayByRefConditionalAllocations(files []parsedFile) arrayByRefConditi
 					continue
 				}
 				guardDominatesRedim := false
-				for _, candidate := range proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[redimBlock.ID] {
+				for _, candidate := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(redimBlock.ID) {
 					if candidate == guardBlock.ID {
 						guardDominatesRedim = true
 						break

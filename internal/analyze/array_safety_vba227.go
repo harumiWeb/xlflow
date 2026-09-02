@@ -627,7 +627,7 @@ func arrayVBA227StatementLineDominates(proc sourceProcedure, line int, target pr
 	if sourceBlock.ID == targetBlock.ID {
 		return source.Range.StartLine < target.Range.StartLine
 	}
-	for _, dominator := range proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[targetBlock.ID] {
+	for _, dominator := range proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(targetBlock.ID) {
 		if dominator == sourceBlock.ID {
 			return true
 		}

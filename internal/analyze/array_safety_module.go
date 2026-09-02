@@ -838,9 +838,6 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 		return arrayProcedureLess(procedures[i].proc, procedures[j].proc)
 	})
 	dominators := arrayProcedureDominators{}
-	for _, procedure := range procedures {
-		dominators[arrayProcedureKey(procedure.proc)] = arrayProcedureNormalExitDominators(procedure.proc)
-	}
 
 	dependents := make(map[string][]int)
 	for index, procedure := range procedures {
@@ -871,7 +868,7 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 			continue
 		}
 		key := arrayProcedureKey(procedure.proc)
-		value := arrayModuleAllocationSummaryForProcedure(procedure.file, procedure.proc, procedure.moduleDecls, targets, summaries, byRefSummaries, ctx, dominators[key])
+		value := arrayModuleAllocationSummaryForProcedure(procedure.file, procedure.proc, procedure.moduleDecls, targets, summaries, byRefSummaries, ctx, dominators)
 		old := arrayModuleAllocationSummaries{key: contributions[key]}
 		fresh := arrayModuleAllocationSummaries{key: value}
 		if arrayModuleAllocationSummariesEqual(old, fresh) {
@@ -894,7 +891,7 @@ func inferArrayModuleAllocationSummaries(files []parsedFile, ctx analysisContext
 	return summaries
 }
 
-func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, targets map[string]sourceProcedure, summaries arrayModuleAllocationSummaries, byRefSummaries arrayByRefAllocationSummaries, ctx analysisContext, dominators map[vbacfg.BlockID]bool) map[string]bool {
+func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProcedure, moduleDecls map[string]sourceDeclaration, targets map[string]sourceProcedure, summaries arrayModuleAllocationSummaries, byRefSummaries arrayByRefAllocationSummaries, ctx analysisContext, dominators arrayProcedureDominators) map[string]bool {
 	moduleArrays := map[string]bool{}
 	for name, declaration := range moduleDecls {
 		if declaration.Array && !declaration.Parameter {
@@ -911,11 +908,20 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 			delete(moduleArrays, name)
 		}
 	}
+	if len(moduleArrays) == 0 {
+		return nil
+	}
+	key := arrayProcedureKey(proc)
+	normalExitDominators, ok := dominators[key]
+	if !ok {
+		normalExitDominators = arrayProcedureNormalExitDominators(proc)
+		dominators[key] = normalExitDominators
+	}
 	idempotentSetupArrays := arrayModuleIdempotentSetupArrays(file, proc, moduleDecls, ctx)
 	allocated := map[string]bool{}
 	addDirectAllocation := func(statementID int, name string) {
 		name = strings.ToLower(cleanIdentifier(name))
-		if !moduleArrays[name] || (!arrayProcedureBlockDominatesNormalExit(proc, statementID, dominators) && !idempotentSetupArrays[name]) {
+		if !moduleArrays[name] || (!arrayProcedureBlockDominatesNormalExit(proc, statementID, normalExitDominators) && !idempotentSetupArrays[name]) {
 			return
 		}
 		allocated[name] = true
@@ -951,7 +957,7 @@ func arrayModuleAllocationSummaryForProcedure(file parsedFile, proc sourceProced
 		if len(calleeArrays) == 0 && len(calleeByRefArrays) == 0 {
 			continue
 		}
-		guaranteed := !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) && arrayProcedureBlockDominatesNormalExit(proc, call.StatementID, dominators)
+		guaranteed := !arrayProcedureLineHasInlineConditional(file, call.Range.StartLine) && arrayProcedureBlockDominatesNormalExit(proc, call.StatementID, normalExitDominators)
 		if !guaranteed && arrayProcedureHasIdempotentSetupGuard(file, proc, call.Range.StartLine, moduleDecls) {
 			guaranteed = true
 		}
@@ -1662,7 +1668,7 @@ func arrayProcedureNormalExitDominators(proc sourceProcedure) map[vbacfg.BlockID
 	if proc.Graph == nil {
 		return nil
 	}
-	dominators := proc.Graph.Dominators(vbacfg.EdgeFilter{NormalOnly: true})[proc.Graph.NormalExit]
+	dominators := proc.Graph.View(vbacfg.EdgeFilter{NormalOnly: true}).DominatorsOf(proc.Graph.NormalExit)
 	result := make(map[vbacfg.BlockID]bool, len(dominators))
 	for _, id := range dominators {
 		result[id] = true
