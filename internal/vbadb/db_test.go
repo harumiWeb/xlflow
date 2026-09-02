@@ -303,6 +303,12 @@ func TestResolveMemberHandlesCollectionDefaultMembersAndFactories(t *testing.T) 
 			t.Fatalf("Application.%s = %+v, %v", name, got, ok)
 		}
 	}
+	for _, name := range []string{"Min", "Max"} {
+		got, ok := db.ResolveMember("Excel.Application", name)
+		if !ok || got.ReturnType != "Double" || len(got.Parameters) != 30 || got.Parameters[0].Optional || !got.Parameters[29].Optional {
+			t.Fatalf("Application.%s = %+v, %v", name, got, ok)
+		}
+	}
 	if got, ok := db.ResolveMember("Excel.Application", "Match"); !ok || len(got.Parameters) != 3 || !got.Parameters[2].Optional {
 		t.Fatalf("Application.Match parameters = %+v, %v", got, ok)
 	}

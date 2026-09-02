@@ -3167,7 +3167,7 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 	head := strings.TrimSpace(text[:sep])
 	argsText := strings.TrimSpace(text[sep+1:])
 	target := callTargetBeforeOpenLike(head)
-	if target == "" || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
+	if target == "" || !isParenlessCallTarget(target) || strings.Contains(argsText, "=") && !strings.Contains(argsText, ":=") {
 		return parsedCall{}, false
 	}
 	start := strings.LastIndex(line, target)
@@ -3175,6 +3175,31 @@ func parenlessCallOnLine(line string) (parsedCall, bool) {
 		start = 0
 	}
 	return parsedCall{Target: target, Arguments: parseArguments(argsText), Line: line, Start: start, End: len(line)}, true
+}
+
+func isParenlessCallTarget(target string) bool {
+	parts := splitMemberExpression(strings.TrimSpace(target))
+	if len(parts) == 0 {
+		return false
+	}
+	for i, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			// A leading dot is valid inside a With block; empty components in
+			// the middle or at the end are not valid call targets.
+			if i == 0 && strings.HasPrefix(strings.TrimSpace(target), ".") {
+				continue
+			}
+			return false
+		}
+		if open := strings.IndexByte(part, '('); open >= 0 {
+			part = strings.TrimSpace(part[:open])
+		}
+		if !isIdentifier(part) {
+			return false
+		}
+	}
+	return true
 }
 
 func firstTopLevelWhitespace(text string) int {

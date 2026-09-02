@@ -4,6 +4,9 @@ All notable changes to xlflow will be documented in this file.
 
 ## Unreleased
 
+- Fixed false-positive VBA diagnostics for `Application.Min`/`Application.Max`
+  and decimal literals in multiline `WorksheetFunction` calls.
+
 - Updated the `tree-sitter-vba` parser dependency to v0.13.0. Print-family
   output lists now support trailing `;` / `,` controls and explicit `Write #`
   statements; call extraction and linting ignore `char_position` nodes while
